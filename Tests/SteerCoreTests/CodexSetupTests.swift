@@ -99,11 +99,21 @@ import Testing
     try JSONSerialization.data(withJSONObject: event).write(to: eventsRoot.appendingPathComponent("event.json"))
     #expect(installer.status(roots: roots, capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .connected)
     try FileManager.default.removeItem(at: eventsRoot.appendingPathComponent("event.json"))
+    let configBeforeMalformed = try String(contentsOf: roots.configURL)
+    try Data((configBeforeMalformed + "broken =\n").utf8).write(to: roots.configURL)
+    #expect(installer.status(roots: roots, capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .malformed("Codex config.toml is not valid enough to verify safely."))
+    try Data(configBeforeMalformed.utf8).write(to: roots.configURL)
     let futureEvent: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "source": CodexSetupRequirements.helperSource, "installation_id": plan.installationID, "received_at": "2099-01-01T00:00:00Z", "captured_at": Date().timeIntervalSince1970 + 3600]
     try JSONSerialization.data(withJSONObject: futureEvent).write(to: eventsRoot.appendingPathComponent("future.json"))
     #expect(installer.status(roots: roots, capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery."))
     let installed = try String(contentsOf: roots.configURL)
     try Data((installed + "user_note = true\n").utf8).write(to: roots.configURL)
+    let rebaselinePlan = CodexSetupPlanner.plan(capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true),
+                                                 config: installed + "user_note = true\n", hooks: try Data(contentsOf: roots.hooksURL),
+                                                 helperPath: roots.helperURL, eventsPath: roots.eventsDirectory)
+    #expect(throws: CodexSetupError.conflict("Existing Steer setup changed after setup; review setup before reconfiguring.")) {
+        _ = try installer.install(rebaselinePlan, roots: roots, helper: helper, capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true))
+    }
     #expect(throws: CodexSetupError.conflict("Codex or Steer's setup files changed after setup; undo made no changes.")) {
         _ = try installer.undo(roots: roots)
     }
@@ -183,13 +193,14 @@ import Testing
     let installer = CodexSetupInstaller()
     _ = try installer.install(plan, roots: roots, helper: helper, capabilities: capabilities)
     try FileManager.default.removeItem(at: roots.helperURL)
-    #expect(installer.status(roots: roots, capabilities: capabilities) == .conflict("Steer's helper is missing; Configure Codex to repair setup."))
+    #expect(installer.status(roots: roots, capabilities: capabilities) == .repairRequired("Steer's helper is missing; Configure Codex to repair setup."))
     let installedConfig = try String(contentsOf: roots.configURL)
     let installedHooks = try Data(contentsOf: roots.hooksURL)
     let repairPlan = CodexSetupPlanner.plan(capabilities: capabilities, config: installedConfig, hooks: installedHooks,
                                             helperPath: roots.helperURL, eventsPath: roots.eventsDirectory)
     #expect(!repairPlan.requiresConfigure)
     _ = try installer.install(repairPlan, roots: roots, helper: helper, capabilities: capabilities)
+    #expect(installer.status(roots: roots, capabilities: capabilities) == .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery."))
     #expect(try installer.undo(roots: roots) == .notConfigured)
     #expect(try String(contentsOf: roots.configURL) == originalConfig)
     #expect(try Data(contentsOf: roots.hooksURL) == originalHooks)

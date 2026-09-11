@@ -261,7 +261,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         switch setupStatus {
         case .connected: return "Codex event delivery connected"
         case .notConfigured: return "Codex detected; Steer is not configured."
-        case .configuredAwaitingRestart(let value), .unavailable(let value), .unsupported(let value), .permissionRequired(let value), .malformed(let value), .conflict(let value): return value
+        case .configuredAwaitingRestart(let value), .unavailable(let value), .unsupported(let value), .permissionRequired(let value), .malformed(let value), .conflict(let value), .repairRequired(let value): return value
         }
     }
 
@@ -290,9 +290,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
 
     var canConfigureSetup: Bool {
         guard let plan = setupPlan, case .ready = plan.status else { return false }
-        if plan.requiresConfigure { return true }
-        if case .conflict = setupStatus { return true }
-        return false
+        switch setupStatus {
+        case .notConfigured, .repairRequired: return true
+        default: return false
+        }
     }
 
     func scanReminders() {

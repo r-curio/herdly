@@ -102,6 +102,7 @@ public enum CodexConnectionStatus: Equatable, Sendable {
     case unavailable(String)
     case unsupported(String)
     case notConfigured
+    case repairRequired(String)
     case connected
     case permissionRequired(String)
     case configuredAwaitingRestart(String)
@@ -161,7 +162,7 @@ public enum CodexSetupPlanner {
         guard capabilities.supported, capabilities.cli || capabilities.desktop else {
             return empty(.unsupported(capabilities.unsupportedReason ?? "No supported Codex runtime was detected."), config: config, hooks: hooks)
         }
-        guard validTOMLShape(config) else {
+        guard isSafeTOML(config) else {
             return empty(.malformed("Codex config.toml is not valid enough to edit safely."), config: config, hooks: hooks)
         }
         guard let parsed = try? JSONSerialization.jsonObject(with: hooks) as? [String: Any] else {
@@ -199,7 +200,7 @@ public enum CodexSetupPlanner {
         "\(shellQuote(helperPath.path)) --events-dir \(shellQuote(eventsPath.path)) --installation-id \(shellQuote(installationID))"
     }
 
-    private static func validTOMLShape(_ value: String) -> Bool {
+    static func isSafeTOML(_ value: String) -> Bool {
         // This is deliberately a small, conservative validator for the fields we
         // edit. Unknown TOML constructs are refused instead of being rewritten.
         var section = ""
@@ -510,7 +511,8 @@ public struct CodexSetupInstaller {
         let currentHooks = try readableData(at: roots.hooksURL) ?? Data("{}".utf8)
         if currentConfig == plan.configChange, currentHooks == plan.hooksChange,
            (try? readableData(at: roots.helperURL)) == helper,
-           let state = try? readState(roots), state.command == plan.helperCommand {
+           let state = try? readState(roots), state.command == plan.helperCommand,
+           state.installedConfig == currentConfig, state.installedHooks == currentHooks {
             return status(roots: roots, capabilities: capabilities)
         }
         let existingState = try? readState(roots)
@@ -518,6 +520,9 @@ public struct CodexSetupInstaller {
             currentConfig == state.installedConfig && currentHooks == state.installedHooks &&
             state.command == plan.helperCommand && state.installationID == plan.installationID &&
             !fileManager.fileExists(atPath: roots.helperURL.path) ? state : nil
+        }
+        if existingState != nil && repairing == nil {
+            throw CodexSetupError.conflict("Existing Steer setup changed after setup; review setup before reconfiguring.")
         }
         guard repairing != nil || (currentConfig == plan.originalConfig && currentHooks == plan.originalHooks) else {
             throw CodexSetupError.conflict("Codex configuration changed after the preview. Review setup again.")
@@ -557,7 +562,7 @@ public struct CodexSetupInstaller {
                                      originalHooksExisted: repairing?.originalHooksExisted ?? (originalHooks != nil),
                                      configAdded: repairing?.configAdded ?? plan.configAdded,
                                      configTableAdded: repairing?.configTableAdded ?? plan.configTableAdded,
-                                     installedAt: repairing?.installedAt ?? Date().timeIntervalSince1970)
+                                     installedAt: Date().timeIntervalSince1970)
             try atomicWrite(try JSONEncoder().encode(state), to: roots.stateURL)
         } catch let error {
             do {
@@ -586,8 +591,14 @@ public struct CodexSetupInstaller {
         guard let configData = try? readableData(at: roots.configURL),
               let config = String(data: configData, encoding: .utf8),
               let hooks = try? readableData(at: roots.hooksURL) else { return .malformed("Steer setup files are missing or unreadable.") }
+        guard CodexSetupPlanner.isSafeTOML(config) else {
+            return .malformed("Codex config.toml is not valid enough to verify safely.")
+        }
         guard fileManager.fileExists(atPath: roots.helperURL.path) else {
-            return .conflict("Steer's helper is missing; Configure Codex to repair setup.")
+            if config == state.installedConfig, hooks == state.installedHooks {
+                return .repairRequired("Steer's helper is missing; Configure Codex to repair setup.")
+            }
+            return .conflict("Steer's helper is missing and Codex setup also changed; review setup before repair.")
         }
         var helperDirectory = ObjCBool(false)
         guard fileManager.fileExists(atPath: roots.helperURL.path, isDirectory: &helperDirectory), !helperDirectory.boolValue,
@@ -660,10 +671,7 @@ public struct CodexSetupInstaller {
 
     private func readableData(at url: URL) throws -> Data? {
         guard fileManager.fileExists(atPath: url.path) else { return nil }
-        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
-              attributes[.type] as? FileAttributeType == .typeRegular,
-              (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) == nil,
-              (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else {
+        guard isRegularFile(at: url) else {
             throw CodexSetupError.conflict("\(url.lastPathComponent) is a directory; it was not changed.")
         }
         guard let handle = try? FileHandle(forReadingFrom: url),
@@ -689,10 +697,18 @@ public struct CodexSetupInstaller {
     }
 
     private func boundedData(at url: URL, maximum: Int) -> Data? {
-        guard let handle = try? FileHandle(forReadingFrom: url),
+        guard isRegularFile(at: url), let handle = try? FileHandle(forReadingFrom: url),
               let data = try? handle.read(upToCount: maximum + 1) else { return nil }
         try? handle.close()
         return data.count <= maximum ? data : nil
+    }
+
+    private func isRegularFile(at url: URL) -> Bool {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) == nil,
+              (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else { return false }
+        return true
     }
 
     private func ensureDirectory(_ url: URL) throws { try fileManager.createDirectory(at: url, withIntermediateDirectories: true) }
