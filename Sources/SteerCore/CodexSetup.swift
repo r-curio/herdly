@@ -487,10 +487,13 @@ public enum CodexSetupError: Error, Equatable, CustomStringConvertible, Localize
 public struct CodexSetupInstaller {
     private let fileManager: FileManager
     private let beforeWrite: ((URL) throws -> Void)?
+    private let beforeCleanup: ((URL) throws -> Void)?
 
-    public init(fileManager: FileManager = .default, beforeWrite: ((URL) throws -> Void)? = nil) {
+    public init(fileManager: FileManager = .default, beforeWrite: ((URL) throws -> Void)? = nil,
+                beforeCleanup: ((URL) throws -> Void)? = nil) {
         self.fileManager = fileManager
         self.beforeWrite = beforeWrite
+        self.beforeCleanup = beforeCleanup
     }
 
     public func install(_ plan: CodexSetupPlan, roots: CodexSetupRoots, helper: Data,
@@ -648,6 +651,8 @@ public struct CodexSetupInstaller {
         guard let originalState = try readableData(at: roots.stateURL) else {
             throw CodexSetupError.conflict("Steer setup state is missing or unreadable; undo made no changes.")
         }
+        let ownedEvents = try ownedEventArtifacts(in: roots.eventsDirectory, installationID: state.installationID)
+        let ownedBackups = try ownedBackupArtifacts(in: roots.helperDirectory.appendingPathComponent("backups", isDirectory: true), state: state)
         do {
             try restore(originalConfig, to: roots.configURL)
             try restore(originalHooks, to: roots.hooksURL)
@@ -658,6 +663,8 @@ public struct CodexSetupInstaller {
             try removeDirectoryIfEmpty(roots.helperDirectory)
         } catch let error {
             do {
+                try restoreArtifacts(ownedEvents)
+                try restoreArtifacts(ownedBackups?.files ?? [])
                 try restore(Data(currentConfig.utf8), to: roots.configURL)
                 try restore(currentHooks, to: roots.hooksURL)
                 try restore(originalHelper, to: roots.helperURL)
@@ -729,6 +736,7 @@ public struct CodexSetupInstaller {
 
     private func removeDirectoryIfEmpty(_ url: URL) throws {
         guard fileManager.fileExists(atPath: url.path) else { return }
+        guard isDirectory(at: url) else { throw CodexSetupError.conflict("Steer cleanup path is not a directory; no cleanup was completed.") }
         guard try fileManager.contentsOfDirectory(atPath: url.path).isEmpty else { return }
         try fileManager.removeItem(at: url)
     }
@@ -779,8 +787,49 @@ public struct CodexSetupInstaller {
         let files = try fileManager.contentsOfDirectory(at: backup, includingPropertiesForKeys: nil)
         guard files.count == expected.count,
               files.allSatisfy({ expected[$0.lastPathComponent] == boundedData(at: $0, maximum: 1_048_576) }) else { return }
+        try beforeCleanup?(backup)
         try fileManager.removeItem(at: backup)
         try removeDirectoryIfEmpty(directory)
+    }
+
+    private func ownedEventArtifacts(in directory: URL, installationID: String) throws -> [OwnedArtifact] {
+        guard fileManager.fileExists(atPath: directory.path) else { return [] }
+        guard isDirectory(at: directory) else { throw CodexSetupError.conflict("Steer's events path is not a directory; no cleanup was completed.") }
+        let files = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        return files.filter { $0.pathExtension == "json" }.compactMap { url in
+            guard let data = boundedData(at: url, maximum: 65536),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["hook_event_name"] as? String != nil,
+                  let session = object["session_id"] as? String, UUID(uuidString: session) != nil,
+                  object["source"] as? String == CodexSetupRequirements.helperSource,
+                  object["installation_id"] as? String == installationID,
+                  object["captured_at"] as? NSNumber != nil else { return nil }
+            return OwnedArtifact(url: url, data: data)
+        }
+    }
+
+    private func ownedBackupArtifacts(in directory: URL, state: InstallState) throws -> BackupSnapshot? {
+        guard let name = state.backupDirectory else { return nil }
+        guard name != ".", name != "..", !name.contains("/") else { throw CodexSetupError.conflict("Steer setup backup identity is invalid; no cleanup was completed.") }
+        let backup = directory.appendingPathComponent(name, isDirectory: true)
+        guard fileManager.fileExists(atPath: backup.path) else { return nil }
+        guard isDirectory(at: backup) else { throw CodexSetupError.conflict("Steer setup backup is not a directory; no cleanup was completed.") }
+        let expected: [String: Data] = [
+            "config.toml": state.originalConfigExisted ? Data(state.originalConfig.utf8) : nil,
+            "hooks.json": state.originalHooksExisted ? state.originalHooks : nil,
+            "SteerHook": state.originalHelperExisted ? Data(base64Encoded: state.helper) : nil
+        ].compactMapValues { $0 }
+        let files = try fileManager.contentsOfDirectory(at: backup, includingPropertiesForKeys: nil)
+        let artifacts = files.compactMap { url -> OwnedArtifact? in
+            guard let expectedData = expected[url.lastPathComponent], let data = boundedData(at: url, maximum: 1_048_576), data == expectedData else { return nil }
+            return OwnedArtifact(url: url, data: data)
+        }
+        guard files.count == expected.count, artifacts.count == expected.count else { return nil }
+        return BackupSnapshot(files: artifacts)
+    }
+
+    private func restoreArtifacts(_ artifacts: [OwnedArtifact]) throws {
+        for artifact in artifacts { try atomicWrite(artifact.data, to: artifact.url) }
     }
 
     private func backup(_ data: Data?, named: String, in directory: URL) throws {
@@ -807,6 +856,15 @@ public struct CodexSetupInstaller {
         if let data { try atomicWrite(data, to: url) }
         else if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
     }
+}
+
+private struct OwnedArtifact {
+    let url: URL
+    let data: Data
+}
+
+private struct BackupSnapshot {
+    let files: [OwnedArtifact]
 }
 
 private struct InstallState: Codable {

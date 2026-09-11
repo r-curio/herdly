@@ -285,3 +285,55 @@ import Testing
     #expect(FileManager.default.fileExists(atPath: roots.helperURL.path))
     #expect(FileManager.default.fileExists(atPath: roots.stateURL.path))
 }
+
+@Test func setupUndoCleanupFailureRestoresOwnedEventsAndBackups() throws {
+    struct Failure: Error {}
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let configRoot = root.appendingPathComponent("codex")
+    let helperRoot = root.appendingPathComponent("Steer")
+    try FileManager.default.createDirectory(at: configRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = "[tui]\n"
+    let hooks = Data("{}".utf8)
+    try Data(config.utf8).write(to: configRoot.appendingPathComponent("config.toml"))
+    try hooks.write(to: configRoot.appendingPathComponent("hooks.json"))
+    let roots = CodexSetupRoots(configDirectory: configRoot, helperDirectory: helperRoot, eventsDirectory: helperRoot.appendingPathComponent("events"))
+    let capabilities = CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true)
+    let plan = CodexSetupPlanner.plan(capabilities: capabilities, config: config, hooks: hooks, helperPath: roots.helperURL, eventsPath: roots.eventsDirectory)
+    _ = try CodexSetupInstaller().install(plan, roots: roots, helper: Data("helper".utf8), capabilities: capabilities)
+
+    let sessionID = UUID().uuidString
+    let ownedEvent = try JSONSerialization.data(withJSONObject: [
+        "hook_event_name": "SessionStart",
+        "session_id": sessionID,
+        "source": CodexSetupRequirements.helperSource,
+        "installation_id": plan.installationID,
+        "received_at": "2026-09-12T00:00:00Z",
+        "captured_at": Date().timeIntervalSince1970
+    ])
+    try FileManager.default.createDirectory(at: roots.eventsDirectory, withIntermediateDirectories: true)
+    let ownedEventURL = roots.eventsDirectory.appendingPathComponent("owned.json")
+    let foreignEventURL = roots.eventsDirectory.appendingPathComponent("foreign.json")
+    try ownedEvent.write(to: ownedEventURL)
+    try Data("keep".utf8).write(to: foreignEventURL)
+    let backupsDirectory = helperRoot.appendingPathComponent("backups")
+    let backup = try #require(FileManager.default.contentsOfDirectory(at: backupsDirectory, includingPropertiesForKeys: nil).first)
+    var eventWasRemovedBeforeFailure = false
+    let failingUndo = CodexSetupInstaller(beforeCleanup: { _ in
+        eventWasRemovedBeforeFailure = !FileManager.default.fileExists(atPath: ownedEventURL.path)
+        throw Failure()
+    })
+
+    #expect(throws: CodexSetupError.failed("Undo was not completed; the installed configuration was restored.")) {
+        _ = try failingUndo.undo(roots: roots)
+    }
+    #expect(eventWasRemovedBeforeFailure)
+    #expect(FileManager.default.fileExists(atPath: ownedEventURL.path))
+    #expect(try Data(contentsOf: ownedEventURL) == ownedEvent)
+    #expect(FileManager.default.fileExists(atPath: foreignEventURL.path))
+    #expect(FileManager.default.fileExists(atPath: backup.path))
+    #expect(try String(contentsOf: backup.appendingPathComponent("config.toml")) == config)
+    #expect(try Data(contentsOf: backup.appendingPathComponent("hooks.json")) == hooks)
+    #expect(FileManager.default.fileExists(atPath: roots.helperURL.path))
+    #expect(FileManager.default.fileExists(atPath: roots.stateURL.path))
+}
