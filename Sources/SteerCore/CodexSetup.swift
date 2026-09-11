@@ -555,11 +555,14 @@ public struct CodexSetupInstaller {
             if plan.hooksChange != plan.originalHooks { try atomicWrite(plan.hooksChange, to: roots.hooksURL) }
             let state = InstallState(helper: helper.base64EncodedString(), command: plan.helperCommand,
                                      installationID: plan.installationID,
+                                     backupDirectory: repairing?.backupDirectory ??
+                                        (fileManager.fileExists(atPath: backupDirectory.path) ? backupDirectory.lastPathComponent : nil),
                                      installedConfig: plan.configChange, installedHooks: plan.hooksChange,
                                      originalConfig: repairing?.originalConfig ?? plan.originalConfig,
                                      originalHooks: repairing?.originalHooks ?? plan.originalHooks,
                                      originalConfigExisted: repairing?.originalConfigExisted ?? (originalConfig != nil),
                                      originalHooksExisted: repairing?.originalHooksExisted ?? (originalHooks != nil),
+                                     originalHelperExisted: repairing?.originalHelperExisted ?? (originalHelper != nil),
                                      configAdded: repairing?.configAdded ?? plan.configAdded,
                                      configTableAdded: repairing?.configTableAdded ?? plan.configTableAdded,
                                      installedAt: Date().timeIntervalSince1970)
@@ -650,13 +653,8 @@ public struct CodexSetupInstaller {
             try restore(originalHooks, to: roots.hooksURL)
             try fileManager.removeItem(at: roots.helperURL)
             try fileManager.removeItem(at: roots.stateURL)
-            if fileManager.fileExists(atPath: roots.eventsDirectory.path) {
-                try fileManager.removeItem(at: roots.eventsDirectory)
-            }
-            let backupsDirectory = roots.helperDirectory.appendingPathComponent("backups", isDirectory: true)
-            if fileManager.fileExists(atPath: backupsDirectory.path) {
-                try fileManager.removeItem(at: backupsDirectory)
-            }
+            try removeOwnedEvents(in: roots.eventsDirectory, installationID: state.installationID)
+            try removeOwnedBackups(in: roots.helperDirectory.appendingPathComponent("backups", isDirectory: true), state: state)
             try removeDirectoryIfEmpty(roots.helperDirectory)
         } catch let error {
             do {
@@ -719,12 +717,70 @@ public struct CodexSetupInstaller {
         return true
     }
 
+    private func isDirectory(at url: URL) -> Bool {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeDirectory,
+              (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) == nil,
+              (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else { return false }
+        return true
+    }
+
     private func ensureDirectory(_ url: URL) throws { try fileManager.createDirectory(at: url, withIntermediateDirectories: true) }
 
     private func removeDirectoryIfEmpty(_ url: URL) throws {
         guard fileManager.fileExists(atPath: url.path) else { return }
         guard try fileManager.contentsOfDirectory(atPath: url.path).isEmpty else { return }
         try fileManager.removeItem(at: url)
+    }
+
+    private func removeOwnedEvents(in directory: URL, installationID: String) throws {
+        guard fileManager.fileExists(atPath: directory.path) else { return }
+        guard isDirectory(at: directory) else { throw CodexSetupError.conflict("Steer's events path is not a directory; no cleanup was completed.") }
+        let files = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        var owned: [(URL, Data)] = []
+        for url in files where url.pathExtension == "json" {
+            guard let data = boundedData(at: url, maximum: 65536),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  object["hook_event_name"] as? String != nil,
+                  let session = object["session_id"] as? String, UUID(uuidString: session) != nil,
+                  object["source"] as? String == CodexSetupRequirements.helperSource,
+                  object["installation_id"] as? String == installationID,
+                  object["captured_at"] as? NSNumber != nil else { continue }
+            owned.append((url, data))
+        }
+        var removed: [(URL, Data)] = []
+        do {
+            for (url, data) in owned {
+                try fileManager.removeItem(at: url)
+                removed.append((url, data))
+            }
+        } catch {
+            do {
+                for (url, data) in removed { try atomicWrite(data, to: url) }
+            } catch let restoreError {
+                throw CodexSetupError.rollbackIncomplete("Undo cleanup failed (\(error)); restoring removed event artifacts also failed (\(restoreError)).")
+            }
+            throw error
+        }
+        try removeDirectoryIfEmpty(directory)
+    }
+
+    private func removeOwnedBackups(in directory: URL, state: InstallState) throws {
+        guard let name = state.backupDirectory else { return }
+        guard name != ".", name != "..", !name.contains("/") else { throw CodexSetupError.conflict("Steer setup backup identity is invalid; no cleanup was completed.") }
+        let backup = directory.appendingPathComponent(name, isDirectory: true)
+        guard fileManager.fileExists(atPath: backup.path) else { return }
+        guard isDirectory(at: backup) else { throw CodexSetupError.conflict("Steer setup backup is not a directory; no cleanup was completed.") }
+        let expected: [String: Data] = [
+            "config.toml": state.originalConfigExisted ? Data(state.originalConfig.utf8) : nil,
+            "hooks.json": state.originalHooksExisted ? state.originalHooks : nil,
+            "SteerHook": state.originalHelperExisted ? Data(base64Encoded: state.helper) : nil
+        ].compactMapValues { $0 }
+        let files = try fileManager.contentsOfDirectory(at: backup, includingPropertiesForKeys: nil)
+        guard files.count == expected.count,
+              files.allSatisfy({ expected[$0.lastPathComponent] == boundedData(at: $0, maximum: 1_048_576) }) else { return }
+        try fileManager.removeItem(at: backup)
+        try removeDirectoryIfEmpty(directory)
     }
 
     private func backup(_ data: Data?, named: String, in directory: URL) throws {
@@ -757,12 +813,14 @@ private struct InstallState: Codable {
     let helper: String
     let command: String
     let installationID: String
+    let backupDirectory: String?
     let installedConfig: String
     let installedHooks: Data
     let originalConfig: String
     let originalHooks: Data
     let originalConfigExisted: Bool
     let originalHooksExisted: Bool
+    let originalHelperExisted: Bool
     let configAdded: Bool
     let configTableAdded: Bool
     let installedAt: TimeInterval

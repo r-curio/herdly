@@ -194,7 +194,12 @@ import Testing
     _ = try installer.install(plan, roots: roots, helper: helper, capabilities: capabilities)
     let sibling = helperRoot.appendingPathComponent("user-owned-note")
     try Data("keep me".utf8).write(to: sibling)
-    try Data("event".utf8).write(to: roots.eventsDirectory.appendingPathComponent("owned.json"))
+    let ownedEvent: [String: Any] = ["source": CodexSetupRequirements.helperSource,
+                                     "installation_id": plan.installationID,
+                                     "hook_event_name": "SessionStart", "session_id": UUID().uuidString,
+                                     "received_at": "2026-01-01T00:00:00Z", "captured_at": 0]
+    try JSONSerialization.data(withJSONObject: ownedEvent).write(to: roots.eventsDirectory.appendingPathComponent("owned.json"))
+    try Data("keep this event directory file".utf8).write(to: roots.eventsDirectory.appendingPathComponent("user-note.txt"))
     #expect(FileManager.default.fileExists(atPath: helperRoot.appendingPathComponent("backups").path))
     try FileManager.default.removeItem(at: roots.helperURL)
     #expect(installer.status(roots: roots, capabilities: capabilities) == .repairRequired("Steer's helper is missing; Configure Codex to repair setup."))
@@ -208,7 +213,9 @@ import Testing
     #expect(try installer.undo(roots: roots) == .notConfigured)
     #expect(try String(contentsOf: roots.configURL) == originalConfig)
     #expect(try Data(contentsOf: roots.hooksURL) == originalHooks)
-    #expect(!FileManager.default.fileExists(atPath: roots.eventsDirectory.path))
+    #expect(FileManager.default.fileExists(atPath: roots.eventsDirectory.path))
+    #expect(!FileManager.default.fileExists(atPath: roots.eventsDirectory.appendingPathComponent("owned.json").path))
+    #expect(FileManager.default.fileExists(atPath: roots.eventsDirectory.appendingPathComponent("user-note.txt").path))
     #expect(!FileManager.default.fileExists(atPath: helperRoot.appendingPathComponent("backups").path))
     #expect(FileManager.default.fileExists(atPath: sibling.path))
     #expect(FileManager.default.fileExists(atPath: helperRoot.path))
