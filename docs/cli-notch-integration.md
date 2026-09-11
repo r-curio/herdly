@@ -12,10 +12,12 @@ CLI PermissionRequest hooks now publish the actual session/turn, command,
 project, action, reason, and expandable tool input to the connected events
 directory. Steer can write one atomic allow-once or deny record for that exact
 request; the helper rejects mismatched, duplicate, late, and timed-out records.
-The 30-second clock starts at helper receipt, including queued requests, and
-the helper's 31-second wait bound is independent of the notch refresh loop.
-Desktop requests intentionally remain native until the desktop transport and
-handoff policy are proven.
+The helper waits up to two seconds for the companion receipt; only then does
+the 30-second clock start, including queued requests. Its 31-second decision
+wait bound is independent of the notch refresh loop. If Ghostty focus is
+focused, unknown, or unavailable, the app writes a no-decision handoff and
+retains Open in Codex. Desktop requests intentionally remain native until the
+desktop transport and handoff policy are proven.
 
 For human navigation testing, run Codex directly in two unsplit Ghostty tabs in the already trusted lab using `/opt/homebrew/bin/codex -m gpt-5.5 -s read-only -a on-request -c 'tui.terminal_title=["session-id"]'`. Connect the lab events directory in Steer if needed, then manually enable Ghostty controls and grant Automation permission if macOS asks. Send distinct no-tools completion prompts, switch to another app, then use each completion's Open in Codex button. Verify the correct tab is selected, and repeat across two windows. No saved Codex hooks, permission policies or terminal settings are modified by this build.
 

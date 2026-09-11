@@ -11,6 +11,9 @@ import Testing
     let expired = ApprovalCoordinator(requestID: id, expiresAt: 130)
     #expect(expired.expire(at: 130) == .noDecision)
     #expect(expired.decide(requestID: id, decision: .deny, at: 130) == nil)
+    let handoff = ApprovalCoordinator(requestID: id, expiresAt: 130)
+    #expect(handoff.decide(requestID: id, decision: .noDecision, at: 101) == .noDecision)
+    #expect(handoff.decide(requestID: id, decision: .allowOnce, at: 101) == nil)
 }
 
 @Test func approvalCoordinatorSerializesConcurrentButtonAndDeadlineWriters() {
@@ -47,4 +50,20 @@ import Testing
     #expect(scan.attentionRequests.first?.expiresAt == 130)
     #expect(scan.attentionRequests.first?.details?.command == "touch MARKER")
     #expect(scan.attentionRequests.first?.details?.reason == "Need permission")
+}
+
+@Test func companionReceiptStartsTheDeadlineForAWaitingHelperRequest() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let request = ApprovalRequest(requestID: UUID(), sessionID: UUID(), turnID: UUID(), details: ApprovalDetails(),
+                                  receivedAt: 0, expiresAt: 0, outcome: .pending)
+    #expect(ApprovalStore.publish(request, in: root))
+    let before = Date().timeIntervalSince1970
+    let scan = ReminderReader.scan(events: root, rollouts: root)
+    let receipt = try JSONDecoder().decode(ApprovalReceiptRecord.self,
+                                           from: Data(contentsOf: ApprovalStore.receiptURL(in: root, id: request.id)))
+    #expect(receipt.receivedAt >= before)
+    #expect(scan.attentionRequests.first?.arrivedAt == receipt.receivedAt)
+    #expect(scan.attentionRequests.first?.expiresAt == receipt.expiresAt)
 }

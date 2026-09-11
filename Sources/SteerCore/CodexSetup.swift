@@ -170,7 +170,11 @@ public enum CodexSetupPlanner {
             return empty(.malformed("Codex hooks.json is not valid JSON and was not changed."), config: config, hooks: hooks)
         }
         let prefix = "\(shellQuote(helperPath.path)) --events-dir \(shellQuote(eventsPath.path)) --installation-id "
-        let installationID = existingInstallationID(in: parsed, prefix: prefix) ?? UUID().uuidString
+        let discoveredInstallations = installationIDs(in: parsed, prefix: prefix)
+        guard discoveredInstallations.count <= 1 else {
+            return empty(.conflict("Multiple Steer hook installations were found; review hooks.json before reconnecting."), config: config, hooks: hooks)
+        }
+        let installationID = discoveredInstallations.first ?? UUID().uuidString
         let command = prefix + shellQuote(installationID)
         guard let merged = mergeHooks(parsed, command: command) else {
             return empty(.malformed("Codex hooks.json has an unsupported hooks shape and was not changed."), config: config, hooks: hooks)
@@ -427,41 +431,47 @@ public enum CodexSetupPlanner {
         for event in CodexSetupRequirements.hookEvents {
             var entries = (hooks[event] as? [[String: Any]]) ?? []
             if hooks[event] != nil && hooks[event] as? [[String: Any]] == nil { return nil }
-            let owned = entries.contains { entry in
-                (entry["hooks"] as? [[String: Any]])?.contains {
-                    $0["type"] as? String == "command" &&
-                    $0["command"] as? String == command &&
-                    ($0["timeout"] as? NSNumber)?.intValue == CodexSetupRequirements.hookTimeout
-                } == true
+            var found = false
+            var normalized: [[String: Any]] = []
+            for var entry in entries {
+                guard let nested = entry["hooks"] as? [[String: Any]] else { return nil }
+                var kept: [[String: Any]] = []
+                for var hook in nested {
+                    if hook["type"] as? String == "command", hook["command"] as? String == command {
+                        guard !found else { continue }
+                        hook["timeout"] = CodexSetupRequirements.hookTimeout
+                        found = true
+                    }
+                    kept.append(hook)
+                }
+                if !kept.isEmpty { entry["hooks"] = kept; normalized.append(entry) }
             }
-            if !owned { entries.append(["hooks": [["type": "command", "command": command, "timeout": CodexSetupRequirements.hookTimeout]]]) }
+            entries = normalized
+            if !found { entries.append(["hooks": [["type": "command", "command": command, "timeout": CodexSetupRequirements.hookTimeout]]]) }
             hooks[event] = entries
         }
         result["hooks"] = hooks
         return result
     }
 
-    private static func existingInstallationID(in source: [String: Any], prefix: String) -> String? {
-        guard let hooks = source["hooks"] as? [String: Any] else { return nil }
-        var common: (command: String, id: String)?
+    private static func installationIDs(in source: [String: Any], prefix: String) -> Set<String> {
+        guard let hooks = source["hooks"] as? [String: Any] else { return [] }
+        var candidates: [(command: String, id: String)] = []
         for event in CodexSetupRequirements.hookEvents {
-            guard let entries = hooks[event] as? [[String: Any]] else { return nil }
-            let candidates = entries.compactMap { entry -> (String, String)? in
-                guard let nested = entry["hooks"] as? [[String: Any]] else { return nil }
+            guard let entries = hooks[event] as? [[String: Any]] else { continue }
+            candidates += entries.flatMap { entry -> [(String, String)] in
+                guard let nested = entry["hooks"] as? [[String: Any]] else { return [] }
                 return nested.compactMap { hook -> (String, String)? in
                     guard hook["type"] as? String == "command",
-                          (hook["timeout"] as? NSNumber)?.intValue == CodexSetupRequirements.hookTimeout,
+                          [CodexSetupRequirements.hookTimeout, 2].contains((hook["timeout"] as? NSNumber)?.intValue ?? 0),
                           let command = hook["command"] as? String,
                           command.hasPrefix(prefix),
                           let id = installationID(in: command, prefix: prefix), UUID(uuidString: id) != nil else { return nil }
                     return (command, id)
-                }.first
+                }
             }
-            guard let candidate = candidates.first else { return nil }
-            if let common, common.command != candidate.0 || common.id != candidate.1 { return nil }
-            common = candidate
         }
-        return common?.id
+        return Set(candidates.map(\.id))
     }
 
     private static func installationID(in command: String, prefix: String) -> String? {

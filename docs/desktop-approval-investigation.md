@@ -42,19 +42,27 @@ None of those live cases ran. Computer-use access to `com.openai.codex` was reje
 
 ## Issue #9 implementation boundary
 
-The helper now publishes one identity-bound approval receipt and waits for an
-atomic decision file. The receipt timestamp is the deadline origin, the helper
-wait has its own 31-second bound, and malformed, late, duplicate, unknown, or
-failed decisions return no decision. The native hook response is emitted only
-for an explicit allow-once or deny. The notch renders only Codex-provided
-fields and offers decision buttons for CLI requests whose rollout identifies a
-CLI session; desktop requests retain only Open in Codex because the desktop
-transport and handoff policy remain unverified.
+The helper now publishes one identity-bound approval request and waits for the
+companion's receipt handshake before starting the 30-second decision deadline.
+The helper first has a separate two-second receipt-connection deadline and then
+an independent 31-second decision wait bound. Bounded regular-file reads,
+malformed, late, duplicate, unknown, or failed decisions all return no
+decision. The native hook response is emitted only for an explicit allow-once
+or deny. The notch renders only Codex-provided fields and offers decision
+buttons for CLI requests whose rollout identifies a CLI session; desktop
+requests retain only Open in Codex because the desktop transport and handoff
+policy remain unverified. Focused/unknown Ghostty or desktop observations hand
+back with no decision.
 
 `swift test` and `SteerHook --self-test` exercise the coordinator, atomic
 identity checks, deadline preservation, and request detail replay. These are
 isolated helper/core checks, not live desktop approval evidence. No desktop
 allow/deny/timeout was run, and no existing hooks or permissions were changed.
+
+Setup migration recognizes the prior Steer command shape with its two-second
+hook timeout, upgrades it in place to the 35-second bounded hook timeout, and
+collapses duplicate copies. Ambiguous multiple Steer installations return an
+explicit conflict instead of adding another handler.
 
 ## Isolated lifecycle experiment prepared
 

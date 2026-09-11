@@ -74,6 +74,19 @@ public struct ApprovalDecisionRecord: Codable, Equatable, Sendable {
     }
 }
 
+public struct ApprovalReceiptRecord: Codable, Equatable, Sendable {
+    public let requestID: UUID
+    public let receivedAt: Double
+    public let expiresAt: Double
+    public init(requestID: UUID, receivedAt: Double, expiresAt: Double = 0) {
+        self.requestID = requestID; self.receivedAt = receivedAt
+        self.expiresAt = expiresAt == 0 ? receivedAt + ApprovalTiming.handoffTimeout : expiresAt
+    }
+    private enum CodingKeys: String, CodingKey {
+        case requestID = "request_id", receivedAt = "received_at", expiresAt = "expires_at"
+    }
+}
+
 /// A single serialized decision/deadline race for one helper invocation.
 public final class ApprovalCoordinator: @unchecked Sendable {
     public let requestID: UUID
@@ -85,7 +98,9 @@ public final class ApprovalCoordinator: @unchecked Sendable {
 
     public func decide(requestID: UUID, decision: ApprovalDecision, at now: Double) -> ApprovalDecision? {
         lock.lock(); defer { lock.unlock() }
-        guard requestID == self.requestID, !finished, decision != .pending, decision != .noDecision, now < expiresAt else { return nil }
+        guard requestID == self.requestID, !finished, decision != .pending else { return nil }
+        if decision == .noDecision { finished = true; return decision }
+        guard now < expiresAt else { return nil }
         finished = true; return decision
     }
 
@@ -99,6 +114,7 @@ public final class ApprovalCoordinator: @unchecked Sendable {
 public enum ApprovalStore {
     public static func requestURL(in directory: URL, id: UUID) -> URL { directory.appendingPathComponent(id.uuidString + ".approval") }
     public static func decisionURL(in directory: URL, id: UUID) -> URL { directory.appendingPathComponent(id.uuidString + ".decision") }
+    public static func receiptURL(in directory: URL, id: UUID) -> URL { directory.appendingPathComponent(id.uuidString + ".receipt") }
 
     /// Creates a request without replacing an existing request for another invocation.
     @discardableResult public static func publish(_ request: ApprovalRequest, in directory: URL) -> Bool {
@@ -107,8 +123,12 @@ public enum ApprovalStore {
 
     /// Writes one decision atomically. A duplicate write fails because the destination is never replaced.
     @discardableResult public static func publish(_ decision: ApprovalDecisionRecord, in directory: URL) -> Bool {
-        guard decision.decision == .allowOnce || decision.decision == .deny else { return false }
+        guard decision.decision == .allowOnce || decision.decision == .deny || decision.decision == .noDecision else { return false }
         return write(try? JSONEncoder().encode(decision), to: decisionURL(in: directory, id: decision.requestID))
+    }
+
+    @discardableResult public static func publish(_ receipt: ApprovalReceiptRecord, in directory: URL) -> Bool {
+        write(try? JSONEncoder().encode(receipt), to: receiptURL(in: directory, id: receipt.requestID))
     }
 
     private static func write(_ data: Data?, to destination: URL) -> Bool {

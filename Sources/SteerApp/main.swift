@@ -51,6 +51,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private var firstCLIScan = true
     private var checkingGhostty = false
     private var nextGhosttyScan: Double = 0
+    private var checkingApprovalFocus = false
+    private var nextApprovalFocusScan: Double = 0
     var visibleReminders: [Reminder] {
         queue.items.compactMap { $0.request }.map {
             Reminder(request_id: $0.id, session_id: $0.session, turn_id: $0.turn, outcome: "no_decision")
@@ -340,10 +342,15 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     func refresh() {
         scanReminders()
         queue.expire(at: Date().timeIntervalSince1970)
+        checkApprovalFocus()
         checkGhosttyFocus()
         // App identity only: no window contents, task titles, or accessibility queries.
         let codexForeground = desktopAdapter.codexForeground()
         desktopForeground = codexForeground == true
+        if codexForeground != false {
+            queue.items.compactMap(\.request).filter { $0.source == .desktop && $0.state == .actionable }
+                .forEach(handBackApproval)
+        }
         var next = attention
         let firstPresentation = next.update(codexForeground: codexForeground, hovering: hovering || panel.isKeyWindow,
                                             now: ProcessInfo.processInfo.systemUptime)
@@ -473,6 +480,46 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         queue.dismiss(.request(request.identity))
         navigationMessage = decision == .allowOnce ? "Approved once." : "Denied."
         refresh()
+    }
+
+    private func handBackApproval(_ request: AttentionRequest) {
+        guard request.state == .actionable else { return }
+        let now = Date().timeIntervalSince1970
+        if !eventsPath.isEmpty {
+            _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision, decidedAt: now),
+                                      in: URL(fileURLWithPath: eventsPath))
+        }
+        let handedBack = AttentionRequest(id: request.id, source: request.source, session: request.session,
+                                          turn: request.turn, arrivedAt: request.arrivedAt, expiresAt: request.expiresAt,
+                                          state: .handedBack, details: request.details)
+        queue.apply(requests: [handedBack], now: now)
+    }
+
+    private func checkApprovalFocus() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard !checkingApprovalFocus, now >= nextApprovalFocusScan else { return }
+        let requests = queue.items.compactMap(\.request).filter { $0.source == .cli && $0.state == .actionable }
+        guard !requests.isEmpty else { return }
+        nextApprovalFocusScan = now + 2
+        guard ghosttyEnabled else {
+            requests.forEach(handBackApproval)
+            return
+        }
+        checkingApprovalFocus = true
+        let live = liveCLI
+        Task { @MainActor in
+            let snapshot = await Task.detached { GhosttyNavigation.snapshot() }.value
+            if let snapshot {
+                for request in requests {
+                    guard let target = GhosttyMatch.target(session: request.session, live: live, snapshot: snapshot),
+                          snapshot.selected != target else { handBackApproval(request); continue }
+                }
+            } else {
+                requests.forEach(handBackApproval)
+            }
+            checkingApprovalFocus = false
+            refresh()
+        }
     }
     func openDesktop(_ session: UUID) {
         guard !openingTask else { return }
