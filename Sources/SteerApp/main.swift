@@ -14,6 +14,13 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var taskID = ""
     @Published var navigationMessage = ""
     @Published var openingTask = false
+    @Published var reminders = ReminderQueue()
+    @Published var reminderPresentation = Attention()
+    @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
+    private var scanning = false
+    private var nextScan: Double = 0
+    var count: Int { reminders.items.count + (attention.pending ? 1 : 0) }
+    var expanded: Bool { attention.expanded || reminderPresentation.expanded }
     var hovering = false
     private var status: NSStatusItem!
     private var panel: NSPanel!
@@ -22,6 +29,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private var activationObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let index = CommandLine.arguments.firstIndex(of: "--reminder-events"), CommandLine.arguments.indices.contains(index + 1) {
+            eventsPath = CommandLine.arguments[index + 1]
+        }
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status.button?.title = "S"
         status.button?.toolTip = "Steer"
@@ -66,7 +76,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
 
     @objc func showControls() {
         if controls == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 380),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 460),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Steer — Prototype"
             window.isReleasedWhenClosed = false
@@ -83,7 +93,46 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         return true
     }
 
+    @objc func connectReminders() {
+        let picker = NSOpenPanel()
+        picker.canChooseFiles = false
+        picker.canChooseDirectories = true
+        picker.allowsMultipleSelection = false
+        picker.message = "Choose the approval lab’s events folder. Steer reads it without changing hooks."
+        guard picker.runModal() == .OK, let url = picker.url else { return }
+        reminders = ReminderQueue()
+        reminderPresentation.dismiss()
+        eventsPath = url.path
+        UserDefaults.standard.set(eventsPath, forKey: "approvalEventsPath")
+        nextScan = 0
+        refresh()
+    }
+
+    func scanReminders() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard !eventsPath.isEmpty, !scanning, now >= nextScan else { return }
+        scanning = true
+        nextScan = now + 2
+        let events = URL(fileURLWithPath: eventsPath)
+        var rollouts = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
+        if let index = CommandLine.arguments.firstIndex(of: "--reminder-rollouts"), CommandLine.arguments.indices.contains(index + 1) {
+            rollouts = URL(fileURLWithPath: CommandLine.arguments[index + 1])
+        }
+        let rolloutRoot = rollouts
+        Task { @MainActor in
+            let scan = await Task.detached { ReminderReader.scan(events: events, rollouts: rolloutRoot) }.value
+            guard eventsPath == events.path else { scanning = false; refresh(); return }
+            let previous = Set(reminders.items.map(\.id))
+            reminders.apply(scan)
+            if reminders.items.isEmpty { reminderPresentation.dismiss() }
+            else if reminders.items.contains(where: { !previous.contains($0.id) }) { reminderPresentation.enqueue() }
+            scanning = false
+            refresh()
+        }
+    }
+
     func refresh() {
+        scanReminders()
         // App identity only: no window contents, task titles, or accessibility queries.
         let codexForeground = NSWorkspace.shared.frontmostApplication?.bundleIdentifier.map { $0 == "com.openai.codex" }
         var next = attention
@@ -93,7 +142,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             attention = next
         }
         if firstPresentation && !muted { NSSound(named: "Glass")?.play() }
-        guard attention.pending && codexForeground != true else {
+        _ = reminderPresentation.update(codexForeground: codexForeground, hovering: hovering || panel.isKeyWindow,
+                                        now: ProcessInfo.processInfo.systemUptime)
+        guard count > 0 && codexForeground != true else {
             panel.orderOut(nil)
             hovering = false
             return
@@ -102,8 +153,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             ?? NSScreen.screens.first(where: { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) })
             ?? NSScreen.main
         guard let screen else { panel.orderOut(nil); return }
-        let width: CGFloat = attention.expanded ? 340 : 210
-        let height: CGFloat = attention.expanded ? 142 : 34
+        let width: CGFloat = expanded ? 380 : 210
+        let height: CGFloat = expanded ? min(380, 100 + CGFloat(reminders.items.count) * 65 + (attention.pending ? 80 : 0)) : 34
         // Keep controls below physical camera housing; top-center on other displays.
         let top = screen.frame.maxY - max(screen.safeAreaInsets.top, 6) - 6
         panel.setFrame(NSRect(x: screen.frame.midX - width / 2, y: top - height,
@@ -146,6 +197,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
     func expand() {
+        reminderPresentation.expand(now: ProcessInfo.processInfo.systemUptime)
         attention.expand(now: ProcessInfo.processInfo.systemUptime)
         refresh()
     }
@@ -158,7 +210,7 @@ struct Controls: View {
             Text("Try your notch companion").font(.title3.bold())
             Text("Send a test, then switch between Codex and Notes. Returning to Codex hides the panel without clearing it.")
                 .font(.callout).foregroundStyle(.secondary)
-            Text(model.attention.pending ? "1 test notification queued" : "No notifications queued")
+            Text("\(model.count) notifications queued")
                 .font(.callout.weight(.medium))
             HStack {
                 Button("Send test", action: model.sendTest).keyboardShortcut(.defaultAction)
@@ -167,6 +219,9 @@ struct Controls: View {
                 Button("Quit", action: model.quit)
             }
             Divider()
+            Button("Connect approval reminders…", action: model.connectReminders)
+            Text(model.eventsPath.isEmpty ? "Approval reminders are not connected." : "\(model.reminders.items.count) reminders · checks every 2 seconds")
+                .font(.caption).foregroundStyle(.secondary)
             Text("Optional task-link check").font(.callout.weight(.medium))
             HStack {
                 TextField("Local Codex task ID", text: $model.taskID)
@@ -180,7 +235,7 @@ struct Controls: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(24)
-        .frame(width: 420, height: 380)
+        .frame(width: 420, height: 460)
     }
 }
 
@@ -191,25 +246,40 @@ struct Notch: View {
             Button(action: model.expand) {
                 HStack(spacing: 9) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.mint)
-                    Text("1 to check").font(.system(size: 13, weight: .semibold))
+                    Text("\(model.count) to check").font(.system(size: 13, weight: .semibold))
                     Spacer()
                     Text("STEER").font(.system(size: 9, weight: .medium)).foregroundStyle(.gray)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("One test notification. Expand details")
-            if model.attention.expanded {
-                Text("Test notification").font(.system(size: 16, weight: .semibold))
-                HStack {
-                    Text("Stays here until you dismiss it.").font(.system(size: 12)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Dismiss", action: model.dismissTest).buttonStyle(.bordered)
+            .accessibilityLabel("\(model.count) notifications. Expand details")
+            if model.expanded {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(model.reminders.items) { item in
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text("Continue in Codex").font(.headline)
+                                    Text("Task \(item.session_id.uuidString.prefix(8))").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Open in Codex") {
+                                    model.taskID = item.session_id.uuidString
+                                    model.openTestTask()
+                                }.disabled(model.openingTask)
+                            }
+                        }
+                        if model.attention.pending {
+                            Text("Test notification").font(.headline)
+                            Button("Dismiss", action: model.dismissTest)
+                        }
+                    }
                 }
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, model.attention.expanded ? 16 : 8)
+        .padding(.vertical, model.expanded ? 16 : 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .foregroundStyle(.white)
         .background(.black.opacity(0.96), in: RoundedRectangle(cornerRadius: 15))
