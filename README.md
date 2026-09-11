@@ -4,7 +4,7 @@ A native macOS companion for Codex desktop and Codex CLI in Ghostty. Keep using 
 
 ## Status
 
-Architecture and product decisions are documented. A read-only desktop capability probe runs; a runnable native test-notification prototype is available; real Codex activity is not connected. Task-link navigation has been manually verified. Desktop app-level visibility and approval handoff still need live implementation proof.
+Architecture and product decisions are documented. The native app replays metadata-only desktop lifecycle records from the isolated hook lab, while preserving Codex's normal runtime. Task-link navigation has been manually verified; attachment to a fresh existing desktop task still requires the permitted human check.
 
 ## MVP
 
@@ -34,6 +34,8 @@ open output/Steer.app
 ```
 
 Click **Send test** in the Steer controls window, then switch away from Codex. The menu-bar shortcut is **S**; reopening the app restores its controls if the shortcut is hidden by a crowded menu bar. See the [prototype walkthrough and limitations](docs/prototype.md).
+
+To replay desktop activity from an isolated event directory, use the [desktop integration runbook](docs/desktop-live-integration.md).
 
 ## Run the existing probe
 

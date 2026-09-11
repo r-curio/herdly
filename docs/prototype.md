@@ -1,6 +1,6 @@
 # Run the desktop prototype
 
-This is a runnable shell for the accepted app-level visibility experiment in #1, not the real-session integration in #4. Requires macOS 14+ and Swift 6. It has one test completion, no Codex hooks, no real task monitoring, no approval buttons, and an optional task-ID field for testing guarded link requests.
+This is a runnable shell for the accepted app-level visibility experiment in #1. Desktop lifecycle replay for #4 is documented separately in [desktop-live-integration.md](desktop-live-integration.md). Requires macOS 14+ and Swift 6. It has one test completion, no Codex hooks, no approval buttons, and an optional task-ID field for testing guarded link requests.
 
 ```sh
 swift test
