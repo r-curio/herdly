@@ -12,7 +12,7 @@ The build script produces an ad-hoc signed local app. It is not notarized or a d
 
 ## Try it
 
-1. Click **Steer** in the macOS menu bar and select **Send test notification**.
+1. Launch Steer and click **Send test** in its controls window. The menu-bar shortcut is **S**; it also offers **Send test notification**. Closing the controls window keeps Steer running; reopening the app shows the controls again.
 2. While Codex is foreground, the notch panel stays hidden. Switch to Notes or another app: the test completion appears below the notch (top-center on other screens).
 3. It expands for three seconds, then becomes **1 to check**. Hovering or keyboard interaction holds the expanded panel open. Click the compact panel to reopen it. Sound plays only on first presentation; **Mute sound** is in the menu.
 4. Return to Codex: the panel hides. Leave again: the item remains, without replaying sound. Click **Dismiss**, in the panel or menu, to clear it.
@@ -26,7 +26,9 @@ Display selection follows the pointer's screen and stays on the current screen w
 
 - `swift test`: one state scenario checks foreground suppression, delayed first presentation, hover retention, collapse without dismissal, app switching, silent restoration, explicit dismissal and a later completion.
 - Release build, plist validation and ad-hoc signature verification pass.
-- The process was observed running after launch. Computer-use inspection timed out; the visual walkthrough above is not recorded as passed.
+- Initial menu-only inspection timed out. Diagnosis found the status item at x=767–820 while the MacBook usable right menu area started at x=848: the physical notch obscured it. A smaller S item reduces space usage; a controls window on launch/reopen provides access regardless of menu-bar crowding.
+- The controls window and its Send test, Dismiss and Quit buttons were verified through computer-use inspection. Full notification/foreground walkthrough remains pending.
+- `output/Steer.app/Contents/MacOS/Steer --smoke-test` verifies that the controls window is visible and the menu is configured, then exits. Quit the normal instance before running this check; it does not prove the menu item is outside the notch.
 - Only native app activation is observed through `NSWorkspace`; no Accessibility queries, Apple Events, task UI inspection, injected commands or Codex configuration changes.
 
 Real Codex lifecycle events remain gated by #2. This prototype does not close the live integration tickets.

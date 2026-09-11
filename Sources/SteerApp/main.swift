@@ -14,17 +14,20 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     var hovering = false
     private var status: NSStatusItem!
     private var panel: NSPanel!
+    private var controls: NSWindow?
     private var timer: Timer?
     private var activationObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        status.button?.title = "Steer"
+        status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        status.button?.title = "S"
+        status.button?.toolTip = "Steer"
         status.button?.setAccessibilityLabel("Steer prototype menu")
         let menu = NSMenu()
         let heading = NSMenuItem(title: "Steer · Prototype", action: nil, keyEquivalent: "")
         menu.addItem(heading)
-        for (title, action) in [("Send test notification", #selector(sendTest)),
+        for (title, action) in [("Show Steer controls", #selector(showControls)),
+                                ("Send test notification", #selector(sendTest)),
                                 ("Dismiss test notification", #selector(dismissTest)),
                                 ("Mute sound", #selector(toggleMute)),
                                 ("Quit Steer", #selector(quit))] {
@@ -49,6 +52,32 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             Task { @MainActor in self?.refresh() }
         }
         refresh()
+        showControls()
+        if CommandLine.arguments.contains("--smoke-test") {
+            precondition(controls?.isVisible == true && controls?.contentView != nil)
+            precondition(status.button?.title == "S" && status.menu?.items.count == 6)
+            print("Steer controls-window smoke check passed.")
+            app.terminate(nil)
+        }
+    }
+
+    @objc func showControls() {
+        if controls == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 230),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "Steer — Prototype"
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: Controls(model: self))
+            window.center()
+            controls = window
+        }
+        controls?.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showControls()
+        return true
     }
 
     func refresh() {
@@ -98,6 +127,29 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     func expand() {
         attention.expand(now: ProcessInfo.processInfo.systemUptime)
         refresh()
+    }
+}
+
+struct Controls: View {
+    @ObservedObject var model: Companion
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Try your notch companion").font(.title3.bold())
+            Text("Send a test, then switch between Codex and Notes. Returning to Codex hides the panel without clearing it.")
+                .font(.callout).foregroundStyle(.secondary)
+            Text(model.attention.pending ? "1 test notification queued" : "No notifications queued")
+                .font(.callout.weight(.medium))
+            HStack {
+                Button("Send test", action: model.sendTest).keyboardShortcut(.defaultAction)
+                Button("Dismiss", action: model.dismissTest).disabled(!model.attention.pending)
+                Spacer()
+                Button("Quit", action: model.quit)
+            }
+            Text("Menu-bar shortcut: S · Closing this window keeps Steer running.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(24)
+        .frame(width: 380, height: 230)
     }
 }
 
