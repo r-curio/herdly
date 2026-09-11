@@ -27,7 +27,7 @@ Display selection follows the pointer's screen and stays on the current screen w
 - `swift test`: one state scenario checks foreground suppression, delayed first presentation, hover retention, collapse without dismissal, app switching, silent restoration, explicit dismissal and a later completion.
 - Release build, plist validation and ad-hoc signature verification pass.
 - Initial menu-only inspection timed out. Diagnosis found the status item at x=767–820 while the MacBook usable right menu area started at x=848: the physical notch obscured it. A smaller S item reduces space usage; a controls window on launch/reopen provides access regardless of menu-bar crowding.
-- The controls window and its Send test, Dismiss and Quit buttons were verified through computer-use inspection. Full notification/foreground walkthrough remains pending.
+- The controls window and its Send test, Dismiss and Quit buttons were verified through computer-use inspection. The subsequent user walkthrough below verifies Codex foreground suppression and dismissal retention.
 - `output/Steer.app/Contents/MacOS/Steer --smoke-test` verifies that the controls window is visible and the menu is configured, then exits. Quit the normal instance before running this check; it does not prove the menu item is outside the notch.
 - Only native app activation is observed through `NSWorkspace`; no Accessibility queries, Apple Events, task UI inspection, injected commands or Codex configuration changes.
 
@@ -45,3 +45,15 @@ Verified through Steer's own accessibility interface and screenshots:
 - After the earlier panel dismissal and a process restart, the controls showed no queued notifications.
 
 The controls were left open with one test queued. Inspection brings Steer's panel into focus, so these observations do not independently measure the three-second timer or prove passive collapse while another app is active. Sound/mute and Codex foreground suppression were not verified by computer use; Codex UI access remains restricted. The state test covers timing separately. A temporary missing-window selection error was resolved by restarting the prototype; its process was still running, so it was not recorded as a crash.
+
+## User-confirmed foreground walkthrough
+
+The user reported **all pass** for these five checks:
+
+1. With a test queued, opening Codex hides the notch.
+2. Switching between Codex tasks keeps it hidden.
+3. Switching to Notes restores `1 to check`.
+4. Repeating the switches twice retains the item without repeating its sound.
+5. Dismissing clears it, and it stays cleared after restarting Steer.
+
+This is user-reported live evidence, separate from computer-use and state tests. It does not cover ambiguous installations, unavailable task links, or an unavailable app-activation signal. Those remaining #1 criteria must not be checked off based on this report. The manual checklist supplied to the user did not cover every issue criterion.
