@@ -65,7 +65,20 @@ alter Codex hooks, permissions, or user configuration. A fresh real desktop turn
 was not triggered here; native UI timing and sound remain separately
 human-observable.
 
-The current native UI demonstration is blocked by the Mac being locked; the
-allowed CUA unlock attempt could not recover the session. Existing Steer-only
-and user-reported desktop evidence above remains valid, but no fresh popup or
-sound observation is claimed for this release check.
+An earlier native UI attempt was blocked by the Mac being locked; the allowed
+CUA unlock attempt could not recover that session. The later walkthrough below
+records the safe Steer-only evidence obtained after the Mac was unlocked.
+
+### Allowed Steer-only CUA walkthrough (2026-09-12)
+
+After the Mac was unlocked, the exact `79081ec` build was launched and its
+controls connected to the existing evidence directory. The controls showed 17
+real desktop completions. **Send test** increased the count to 18; closing the
+controls left the compact `18 to check` notch, which auto-collapsed. Reopening
+the notch expanded the same 18 items and rendered each desktop completion with
+**Open in Codex** and explicit **Dismiss**, alongside the test item.
+
+This proves the branch build's native popup, collapse, retention, reopen, and
+desktop action rendering through Steer only. CUA could not click **Dismiss**
+without destructive-action confirmation. Sound/mute hearing, a fresh CLI turn,
+Ghostty, and Codex UI were not tested and are not claimed here.
