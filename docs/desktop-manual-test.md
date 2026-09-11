@@ -27,11 +27,17 @@ Record each result as **correct task**, **wrong task/app**, **no navigation**, o
 | Link to B from this conversation | User confirmed correct task |
 | B → A / A → B without returning here | Exact sequence not established |
 | Apple Notes → A | User confirmed Codex came forward and showed the task that replied A |
-| Correct running installation | Not run |
+| Existing installation with duplicate installed bundles | User confirmed valid link opened the existing window |
 | Automatic focused-task signal | Unavailable in this diagnostic |
 
 User report: “open the correct tasks.” Both tasks had the source-provided title **Handle Steer task A**; their distinct IDs and A/B replies distinguish them. This is manual evidence of exact-task navigation despite duplicate titles, not independent focus observation. No inference is made about which app installation handled the links.
 
 The user subsequently answered “yes” when asked whether clicking A's URL from Apple Notes brought Codex forward and showed A. External-app jump-back therefore has a successful manual observation on this installation. It does not establish automatic acknowledgment, multi-install routing, or behavior for missing tasks.
 
-Stop if any link targets the wrong task or installation; do not use it for approval handoff. Under the subsequently accepted MVP scope, #1 remains open for native app-activation and unknown-state verification, not selected-task observation. Desktop completions now require explicit dismissal. The [app-server reference](https://learn.chatgpt.com/docs/app-server) documents stored thread reads and loaded thread lists; neither establishes which task the user is viewing.
+Stop if any link targets the wrong task or installation; do not use it for approval handoff. Under the subsequently accepted MVP scope, #1 covers native app activation and safe unverified navigation, not selected-task observation. Its evidence combines the user walkthrough, state tests and the boundary checks below. Desktop completions now require explicit dismissal. The [app-server reference](https://learn.chatgpt.com/docs/app-server) documents stored thread reads and loaded thread lists; neither establishes which task the user is viewing.
+
+## Failure and duplicate-installation results
+
+The user reported that the all-zero nonexistent task link did nothing, and that a valid link opened the existing Codex window with the other installation left closed. This is evidence about the user's current URL-handler behavior, not proof that a native open callback confirms task selection.
+
+The prototype now refuses multiple running Codex instances and missing installation identities. It directs a valid request to the single identified running bundle, rather than relying on the system default URL handler. Native delivery success is reported as unverified task selection; errors and all navigation outcomes leave completion state alone. Invalid ID rejection was verified through computer use with a queued notification still present. Multiple running instances, absent bundle URLs, native errors and accepted nonexistent-task links are covered by injected boundary tests, not by launching additional Codex instances.
