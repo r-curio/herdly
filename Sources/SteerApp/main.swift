@@ -454,8 +454,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         if cliSessions.contains(item.session_id) { openCLI(item.session_id) }
         else { taskID = item.session_id.uuidString; openTestTask() }
     }
-    func openAttentionSession(_ session: UUID) {
-        if cliSessions.contains(session) { openCLI(session) }
+    func openAttentionSession(source: AttentionSource, session: UUID) {
+        if source == .cli { openCLI(session) }
         else { taskID = session.uuidString; openTestTask() }
     }
     func openDesktop(_ session: UUID) {
@@ -598,7 +598,9 @@ struct Notch: View {
             Spacer()
             switch item.kind {
             case .actionableRequest, .handedBackRequest:
-                Button("Open in Codex") { model.openAttentionSession(item.session) }
+                Button("Open in Codex") {
+                    if let request = item.request { model.openAttentionSession(source: request.source, session: request.session) }
+                }
                     .disabled(model.openingTask)
             case .completion:
                 Button("Open in Codex") {

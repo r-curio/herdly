@@ -5,16 +5,18 @@ public struct Reminder: Codable, Equatable, Identifiable, Sendable {
     public let session_id: UUID
     public let turn_id: UUID
     public let outcome: String
+    public let source: AttentionSource?
     public let received_at: String?
     public let captured_at: Double?
     public var id: UUID { request_id }
 
     public init(request_id: UUID, session_id: UUID, turn_id: UUID, outcome: String,
-                received_at: String? = nil, captured_at: Double? = nil) {
+                received_at: String? = nil, captured_at: Double? = nil, source: AttentionSource? = nil) {
         self.request_id = request_id
         self.session_id = session_id
         self.turn_id = turn_id
         self.outcome = outcome
+        self.source = source
         self.received_at = received_at
         self.captured_at = captured_at
     }
@@ -109,7 +111,8 @@ public enum ReminderReader {
                ["pending", "no_decision"].contains(item.outcome) {
                 let arrival = item.captured_at ?? item.received_at.flatMap { ISO8601DateFormatter().date(from: $0)?.timeIntervalSince1970 }
                     ?? ((try? url.resourceValues(forKeys: [.creationDateKey]).creationDate?.timeIntervalSince1970) ?? 0)
-                result.attentionRequests.append(AttentionRequest(id: item.id, session: item.session_id, turn: item.turn_id,
+                result.attentionRequests.append(AttentionRequest(id: item.id, source: item.source ?? .desktop,
+                                                                 session: item.session_id, turn: item.turn_id,
                                                                  arrivedAt: arrival, state: item.outcome == "no_decision" ? .handedBack : .actionable))
                 if item.outcome == "no_decision" { result.reminders.append(item) }
             }
@@ -124,7 +127,7 @@ public enum ReminderReader {
             guard let bytes = bounded(url, limit: 65536) else { return nil }
             return try? JSONDecoder().decode(Hook.self, from: bytes)
         }
-        let sessions = Set(result.reminders.map(\.session_id)).union(hooks.map(\.session_id))
+        let sessions = Set(result.attentionRequests.map(\.session)).union(hooks.map(\.session_id))
         guard !sessions.isEmpty,
               let enumerator = FileManager.default.enumerator(at: rollouts, includingPropertiesForKeys: nil,
                                                                options: [.skipsHiddenFiles]) else { return result }
@@ -179,6 +182,12 @@ public enum ReminderReader {
         result.cliEvents.sort { $0.receivedAt < $1.receivedAt }
         result.cliState = CLIState.replay(result.cliEvents)
         result.liveCLISessions = result.cliState.liveSessions
+        result.attentionRequests = result.attentionRequests.map { request in
+            guard result.cliSessions.contains(request.session), request.source != .cli else { return request }
+            return AttentionRequest(id: request.id, source: .cli, session: request.session, turn: request.turn,
+                                    arrivedAt: request.arrivedAt,
+                                    expiresAt: request.expiresAt, state: request.state)
+        }
         result.cliCompletions.sort { $0.receivedAt < $1.receivedAt }
         return result
     }

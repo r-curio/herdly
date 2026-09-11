@@ -12,21 +12,24 @@ public enum AttentionRequestState: Equatable, Codable, Sendable {
 
 public struct AttentionRequest: Identifiable, Equatable, Sendable {
     public let id: UUID
+    public let source: AttentionSource
     public let session: UUID
     public let turn: UUID
     public let arrivedAt: Double
     public let expiresAt: Double
     public fileprivate(set) var state: AttentionRequestState
+    public var identity: RequestIdentity { RequestIdentity(source: source, request: id) }
 
-    public init(id: UUID, session: UUID, turn: UUID, arrivedAt: Double,
+    public init(id: UUID, source: AttentionSource = .desktop, session: UUID, turn: UUID, arrivedAt: Double,
                 handoffAfter: Double = 30, state: AttentionRequestState = .actionable) {
-        self.init(id: id, session: session, turn: turn, arrivedAt: arrivedAt,
+        self.init(id: id, source: source, session: session, turn: turn, arrivedAt: arrivedAt,
                   expiresAt: arrivedAt + handoffAfter, state: state)
     }
 
-    public init(id: UUID, session: UUID, turn: UUID, arrivedAt: Double,
+    public init(id: UUID, source: AttentionSource = .desktop, session: UUID, turn: UUID, arrivedAt: Double,
                 expiresAt: Double, state: AttentionRequestState = .actionable) {
         self.id = id
+        self.source = source
         self.session = session
         self.turn = turn
         self.arrivedAt = arrivedAt
@@ -39,7 +42,27 @@ public struct AttentionRequest: Identifiable, Equatable, Sendable {
     }
 }
 
+public struct RequestIdentity: Hashable, Codable, Sendable {
+    public let source: AttentionSource
+    public let request: UUID
+    public init(source: AttentionSource, request: UUID) {
+        self.source = source
+        self.request = request
+    }
+}
+
 public struct CompletionIdentity: Hashable, Codable, Sendable {
+    public let source: AttentionSource
+    public let session: UUID
+    public let turn: UUID
+    public init(source: AttentionSource, session: UUID, turn: UUID) {
+        self.source = source
+        self.session = session
+        self.turn = turn
+    }
+}
+
+public struct AttentionTurnIdentity: Hashable, Codable, Sendable {
     public let source: AttentionSource
     public let session: UUID
     public let turn: UUID
@@ -92,7 +115,7 @@ public struct AttentionRunning: Identifiable, Equatable, Sendable {
 }
 
 public enum AttentionItemID: Hashable, Sendable {
-    case request(UUID)
+    case request(RequestIdentity)
     case completion(CompletionIdentity)
     case running(RunningIdentity)
 }
@@ -116,10 +139,10 @@ public struct AttentionItem: Identifiable, Equatable, Sendable {
 
 /// Merges all session activity into one deterministic attention projection.
 public struct AttentionQueue: Sendable {
-    private var requests: [UUID: AttentionRequest] = [:]
+    private var requests: [RequestIdentity: AttentionRequest] = [:]
     private var completions: [CompletionIdentity: AttentionCompletion] = [:]
     private var runningBySession: [SourceSession: AttentionRunning] = [:]
-    private var resolvedTurns: Set<TurnIdentity> = []
+    private var resolvedTurns: Set<AttentionTurnIdentity> = []
     private var acknowledged: Set<CompletionIdentity>
 
     public init(acknowledged: Set<CompletionIdentity> = []) {
@@ -145,27 +168,29 @@ public struct AttentionQueue: Sendable {
         for incoming in incomingCompletions {
             guard completions[incoming.id] == nil, !acknowledged.contains(incoming.id) else { continue }
             completions[incoming.id] = incoming
-            let turn = TurnIdentity(session: incoming.session, turn: incoming.turn)
+            let turn = AttentionTurnIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)
             resolvedTurns.insert(turn)
-            requests = requests.filter { $0.value.session != turn.session || $0.value.turn != turn.turn }
-            runningBySession.removeValue(forKey: SourceSession(source: incoming.source, session: incoming.session))
+            requests = requests.filter { !resolvedTurns.contains(AttentionTurnIdentity(source: $0.value.source, session: $0.value.session, turn: $0.value.turn)) }
+            runningBySession = runningBySession.filter {
+                $0.value.id != RunningIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)
+            }
         }
-        for incoming in incomingRequests where !resolvedTurns.contains(TurnIdentity(session: incoming.session, turn: incoming.turn)) {
-            if var current = requests[incoming.id] {
+        for incoming in incomingRequests where !resolvedTurns.contains(AttentionTurnIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)) {
+            if var current = requests[incoming.identity] {
                 if incoming.arrivedAt < current.arrivedAt {
-                    current = AttentionRequest(id: current.id, session: current.session, turn: current.turn,
+                    current = AttentionRequest(id: current.id, source: current.source, session: current.session, turn: current.turn,
                                                arrivedAt: incoming.arrivedAt, expiresAt: min(current.expiresAt, incoming.expiresAt),
                                                state: current.state)
                 }
                 if incoming.state == .handedBack { current.state = .handedBack }
-                requests[incoming.id] = current
+                requests[incoming.identity] = current
             } else {
-                requests[incoming.id] = incoming
+                requests[incoming.identity] = incoming
             }
         }
         for incoming in incomingRunning {
             let key = SourceSession(source: incoming.source, session: incoming.session)
-            guard !resolvedTurns.contains(TurnIdentity(session: incoming.session, turn: incoming.turn)) else { continue }
+            guard !resolvedTurns.contains(AttentionTurnIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)) else { continue }
             guard runningBySession[key]?.arrivedAt ?? -.infinity < incoming.arrivedAt else { continue }
             runningBySession[key] = incoming
         }
@@ -191,17 +216,18 @@ public struct AttentionQueue: Sendable {
                              arrivedAt: timestamp($0.startedAt))
         }
         runningBySession.removeAll()
-        resolve(scan.completed.union(scan.canceled))
+        resolve(scan.completed.union(scan.canceled), source: .cli)
         apply(requests: scan.attentionRequests,
               completions: desktopCompletions + cliCompletions,
               running: desktopRunning + cliRunning, now: now)
     }
 
-    private mutating func resolve(_ turns: Set<TurnIdentity>) {
-        resolvedTurns.formUnion(turns)
-        requests = requests.filter { !turns.contains(TurnIdentity(session: $0.value.session, turn: $0.value.turn)) }
+    private mutating func resolve(_ turns: Set<TurnIdentity>, source: AttentionSource) {
+        let qualified = Set(turns.map { AttentionTurnIdentity(source: source, session: $0.session, turn: $0.turn) })
+        resolvedTurns.formUnion(qualified)
+        requests = requests.filter { !qualified.contains(AttentionTurnIdentity(source: $0.value.source, session: $0.value.session, turn: $0.value.turn)) }
         runningBySession = runningBySession.filter {
-            !turns.contains(TurnIdentity(session: $0.value.session, turn: $0.value.turn))
+            !qualified.contains(AttentionTurnIdentity(source: $0.value.source, session: $0.value.session, turn: $0.value.turn))
         }
     }
 
@@ -224,7 +250,7 @@ public struct AttentionQueue: Sendable {
 
     private func makeItems() -> [AttentionItem] {
         let requestItems = requests.values.map { request in
-            AttentionItem(id: .request(request.id), kind: request.state == .actionable ? .actionableRequest : .handedBackRequest,
+            AttentionItem(id: .request(request.identity), kind: request.state == .actionable ? .actionableRequest : .handedBackRequest,
                           session: request.session, arrivedAt: request.arrivedAt, request: request,
                           completion: nil, running: nil)
         }
@@ -252,7 +278,7 @@ private struct SourceSession: Hashable, Sendable {
 private extension AttentionItemID {
     var sortKey: String {
         switch self {
-        case let .request(id): return "request:\(id.uuidString)"
+        case let .request(id): return "request:\(id.source.rawValue):\(id.request.uuidString)"
         case let .completion(id): return "completion:\(id.source.rawValue):\(id.session.uuidString):\(id.turn.uuidString)"
         case let .running(id): return "running:\(id.source.rawValue):\(id.session.uuidString):\(id.turn.uuidString)"
         }
