@@ -381,7 +381,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             now: ProcessInfo.processInfo.systemUptime
         )
         completionPresentation = nextCompletionPresentation
-        if firstCompletionPresentation && !muted { NSSound(named: "Glass")?.play() }
+        if CompletionSound.shouldPlay(firstPresentation: firstCompletionPresentation, muted: muted) {
+            NSSound(named: "Glass")?.play()
+        }
         guard DesktopVisibility.isVisible(hasActivity: count > 0, codexForeground: codexForeground) else {
             panel.orderOut(nil)
             hovering = false

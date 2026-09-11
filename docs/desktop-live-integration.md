@@ -64,3 +64,8 @@ restoration, explicit dismissal, and the menu mute control. This patch did not
 alter Codex hooks, permissions, or user configuration. A fresh real desktop turn
 was not triggered here; native UI timing and sound remain separately
 human-observable.
+
+The current native UI demonstration is blocked by the Mac being locked; the
+allowed CUA unlock attempt could not recover the session. Existing Steer-only
+and user-reported desktop evidence above remains valid, but no fresh popup or
+sound observation is claimed for this release check.

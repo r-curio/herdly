@@ -20,3 +20,9 @@ public enum CompletionVisibility {
         }
     }
 }
+
+public enum CompletionSound {
+    public static func shouldPlay(firstPresentation: Bool, muted: Bool) -> Bool {
+        firstPresentation && !muted
+    }
+}
