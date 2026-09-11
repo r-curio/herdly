@@ -34,11 +34,6 @@ public struct DesktopState: Sendable {
 
     public init() {}
 
-    /// Unknown activation keeps the activity visible; only confirmed Codex foreground hides it.
-    public func isVisible(codexForeground: Bool?) -> Bool {
-        codexForeground != true && (!running.isEmpty || !completed.isEmpty)
-    }
-
     public mutating func apply(_ event: DesktopEvent) {
         switch event {
         case let .sessionStarted(session, _):

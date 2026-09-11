@@ -59,3 +59,18 @@ Self-check passed using a temporary fixture project: the generated command runs 
 For the live check, open `output/desktop-hook-lab` as a **local project in the existing Codex desktop app**. Review/trust the recorder through Codex's normal hook-review flow if prompted, then submit: `Reply only STEER-LIFECYCLE-OK. Do not run tools or change files.` If trust is granted after startup, submit that prompt again in the same task. Correlate the captured session ID with that desktop task before declaring lifecycle access proved. No permission test or allow/deny decision is required for this first prompt.
 
 At preparation time the report contained zero events. Allow once, deny, thirty-second no-decision, disconnect and native-resolution correlation are still unverified. They must not be inferred from recorder self-checks or the mere existence of a hooks.json file. Live desktop interaction requires the user because computer-use access to Codex is restricted.
+
+## Subsequent desktop lifecycle evidence
+
+The later clean-run record for session
+`01a08f51-a2fd-74c0-a9e9-d7e8a31c634c` identifies originator `Codex Desktop`,
+source `vscode`, and rollout metadata from the existing desktop runtime. Hooks
+were enabled after SessionStart, then captured UserPromptSubmit
+`8bedf2d3-754c-4c00-8da4-635e14e82fe8` at
+`2026-09-11T07:26:54.343057+00:00` for turn
+`01a08f5c-b815-7f93-9659-e980527dc5cf`, followed by Stop
+`b4baa09c-eb98-4cb9-b75c-9bd2f3405c24` at
+`2026-09-11T07:26:57.252939+00:00`. This proves a real desktop turn
+start/completion through the isolated recorder, but not full SessionStart
+capture, approval handoff, or permanent companion attachment. The redacted
+metadata-only pair is replayable from `docs/evidence/`.

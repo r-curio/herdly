@@ -10,16 +10,16 @@ import Testing
     state.apply(.turnStarted(session: session, turn: turn, receivedAt: "02"))
     #expect(state.running.map(\.session) == [session])
     #expect(state.completed.isEmpty)
-    #expect(state.isVisible(codexForeground: false))
-    #expect(!state.isVisible(codexForeground: true))
-    #expect(state.isVisible(codexForeground: nil))
+    #expect(DesktopVisibility.isVisible(hasActivity: !state.running.isEmpty, codexForeground: false))
+    #expect(!DesktopVisibility.isVisible(hasActivity: !state.running.isEmpty, codexForeground: true))
+    #expect(DesktopVisibility.isVisible(hasActivity: !state.running.isEmpty, codexForeground: nil))
 
     state.apply(.turnCompleted(session: session, turn: turn, receivedAt: "03"))
     #expect(state.running.isEmpty)
     #expect(state.completed.map(\.id) == [TurnIdentity(session: session, turn: turn)])
-    #expect(state.isVisible(codexForeground: false))
-    #expect(!state.isVisible(codexForeground: true))
-    #expect(state.isVisible(codexForeground: nil))
+    #expect(DesktopVisibility.isVisible(hasActivity: !state.completed.isEmpty, codexForeground: false))
+    #expect(!DesktopVisibility.isVisible(hasActivity: !state.completed.isEmpty, codexForeground: true))
+    #expect(DesktopVisibility.isVisible(hasActivity: !state.completed.isEmpty, codexForeground: nil))
 
     state.apply(.sessionEnded(session: session, receivedAt: "04"))
     #expect(state.completed.count == 1)
@@ -47,4 +47,15 @@ import Testing
         .turnCompleted(session: session, turn: turn, receivedAt: "03"),
         .sessionEnded(session: session, receivedAt: "04")
     ])
+}
+
+@Test func checkedDesktopEvidenceReplaysToCompletion() {
+    let fixture = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("docs/evidence")
+    let events = DesktopEventReader.read(from: fixture)
+    let state = DesktopState.replay(events)
+    #expect(events.count == 2)
+    #expect(state.running.isEmpty)
+    #expect(state.completed.count == 1)
 }

@@ -4,10 +4,16 @@ Steer reads the metadata-only event records produced by the isolated desktop
 hook lab. It never writes Codex settings, emits hook output, or starts a second
 Codex runtime. `SessionStart`, `UserPromptSubmit`, `Stop`, and `SessionEnd` are
 replayed through `SteerCore.DesktopEventReader` and `DesktopState`; CLI sessions
-are excluded using their rollout source metadata. The recorded real-session
-evidence in `docs/desktop-approval-investigation.md` includes session
-`01a0916c-337b-70b2-963e-9cf848bd2a48` with SessionStart, UserPromptSubmit, and
-Stop records in `/Users/rmaisog/Documents/ChatGPT/Steer/output/desktop-hook-lab/events`.
+are excluded using their rollout source metadata. The recorded real desktop
+session evidence in `docs/desktop-approval-investigation.md` identifies
+session `01a08f51-a2fd-74c0-a9e9-d7e8a31c634c` as originator `Codex Desktop`,
+source `vscode`. Its hooks were enabled after SessionStart, so the captured
+UserPromptSubmit and Stop records prove a real desktop turn start/completion,
+but do not claim full session-start capture. The original records are capture
+`8bedf2d3-754c-4c00-8da4-635e14e82fe8` at 07:26:54.343057Z and
+`b4baa09c-eb98-4cb9-b75c-9bd2f3405c24` at 07:26:57.252939Z. The original metadata-only records
+are at `/Users/rmaisog/Documents/ChatGPT/Steer/output/desktop-hook-lab/events`;
+the redacted pair in `docs/evidence/` is replayable from a fresh checkout.
 
 ## Build and run
 
@@ -16,6 +22,8 @@ swift test
 sh scripts/build-app.sh
 open output/Steer.app --args --desktop-events "$PWD/output/desktop-hook-lab/events" --reminder-rollouts "$HOME/.codex/sessions"
 ```
+
+Use `--desktop-events "$PWD/docs/evidence"` to replay the checked-in turn.
 
 The `--desktop-events` path is an isolated replay override. The app polls it
 every two seconds off the main actor. Existing completion records restore

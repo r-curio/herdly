@@ -212,7 +212,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         if firstDesktopPresentation && !muted { NSSound(named: "Glass")?.play() }
         if cliPresentation.update(codexForeground: false, hovering: hovering || panel.isKeyWindow,
                                   now: ProcessInfo.processInfo.systemUptime) && !muted { NSSound(named: "Glass")?.play() }
-        guard codexForeground != true, count > 0 else {
+        guard DesktopVisibility.isVisible(hasActivity: count > 0, codexForeground: codexForeground) else {
             panel.orderOut(nil)
             hovering = false
             return
