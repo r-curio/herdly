@@ -1,5 +1,5 @@
 """Offline transport checks. Never imports or invokes a live UI request."""
-from ghostty_navigation import navigate
+from ghostty_navigation import navigate, observe
 from probe_ghostty import session_title
 
 A = '01a09046-5590-7882-adad-6b7f4ec91925'
@@ -73,3 +73,14 @@ assert.deepEqual(commands, []);
 '''
 subprocess.run(['node'], input='const TITLE='+json.dumps(session_title(A))+';\nconst TARGET='+json.dumps(TARGET)+';\n'+SCRIPT+mock, text=True, check=True)
 print('Native script fake-application checks passed; no Apple Events bridge used.')
+
+# A different tab must not acknowledge the originating session.
+assert observe(A, [A, B], lambda _: dict(snapshot, selected=TARGET))['status'] == 'foreground'
+assert observe(B, [A, B], lambda _: dict(snapshot, selected=TARGET))['status'] == 'background'
+assert observe(A, [A, B], lambda _: snapshot)['status'] == 'background'
+assert observe(A, [A, B], lambda _: {'status': 'unknown'})['status'] == 'unknown'
+assert observe(A, [B], lambda _: dict(snapshot, selected=TARGET))['status'] == 'unknown'
+print('Foreground-session observation checks passed.')
+
+assert observe(A, [A, B], lambda _: {'status':'ok', 'windows':WINDOWS})['status'] == 'unknown'
+assert observe(A, [A, B], lambda _: dict(snapshot, selected={}))['status'] == 'unknown'

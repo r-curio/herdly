@@ -103,3 +103,14 @@ The session-title link is demonstrated for this run. The probe still has only a 
 Run `python3 scripts/check_ghostty_navigation.py` for offline transport and native-script checks. The native script runs against a fake dictionary-shaped application in Node, which has no Apple Events bridge. Tests cover selection, background/unverified state, stale or closed targets, duplicate matches, split rejection and transport errors. These checks passed alongside the existing matcher checks.
 
 This issue branch contains the investigation adapter, not the Swift notch application. The adapter has not been installed, connected to Open in Codex, or executed against Ghostty. Live JXA dictionary behavior, native permission handling, cross-window focus, and CLI approvals remain unverified. The prior computer-use restriction remains a genuine live-test blocker; this code is not an alternate route for the agent to bypass it.
+
+
+## Issue #3 acceptance audit
+
+Added read-only `observe` to the adapter. It returns foreground only for the unique session target matching the active window/tab/terminal; another tab or background app does not acknowledge the session. Missing or malformed focus data, ended sessions and transport failures remain unknown. Offline checks passed. This is not live focus proof.
+
+Completed: two normal CLI sessions in same-project unsplit tabs, separately captured lifecycle hooks, human-confirmed distinct session-ID titles.
+
+Outstanding live proof: native inventory IDs, foreground/background focus and navigation across tabs/windows, native Automation permission behavior, and CLI allow/deny/no-decision. The existing trusted isolated lab has a marker-only PermissionRequest helper; its desktop proof must not be substituted for CLI proof. The helper accepts only `touch STEER-APPROVAL-DIRECT-...` commands. No hooks or permission settings were changed during this audit.
+
+Next permitted human-assisted CLI check: in one existing lab session, request exactly `touch STEER-APPROVAL-DIRECT-CLI-ALLOW-1` using an explicit approval request, with no retry without approval. Confirm the helper appears before testing Allow once. Then use fresh DENY and HANDOFF markers in separate turns. Record each outcome and file existence independently. If the CLI refuses to request approval under its current policy, record that as a policy limitation; do not loosen the user's policy automatically.
