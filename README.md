@@ -10,7 +10,7 @@ Architecture and product decisions are documented. The native app replays metada
 
 Desktop MVP visibility: hide the notch while Codex is foreground and show eligible activity while away. Desktop completions remain queued until explicitly dismissed; exact-task focus is deferred.
 
-- Local Codex desktop tasks and Codex CLI running directly in Ghostty, including tabs and split panes.
+- Local Codex desktop tasks and Codex CLI running directly in Ghostty, with exact unsplit tab targeting; split panes remain unavailable.
 - One notch on the active display, with separate working and to-check counts and a prioritized queue.
 - Direct approvals are separately gated by integration proof; until then, desktop approvals stay native. The planned notch flow offers approve once, deny, or return, with a 30-second handoff.
 - Three-second completion notifications, a short sound with mute, and acknowledgments preserved locally.

@@ -59,3 +59,21 @@ macOS denied removal of `.com.apple.containermanagerd.metadata.plist` in the Att
 The user confirmed all three checks in a fresh ordinary `codex` session: automatic session-ID title, no missing-status hook warnings, and completion appearing in Steer. The lab independently captured SessionStart, UserPromptSubmit and Stop for session `01a0916c-337b-70b2-963e-9cf848bd2a48`, turn `01a0916c-5828-7b63-b568-b4d127a048fb` at 17:03 UTC.
 
 Issue #3's scoped feasibility proof is complete: CLI lifecycle/decision evidence, human-tested exact tab/window navigation and direct-return acknowledgment, plus offline conservative failure-case checks. The untouched 30-second CLI timing retest was explicitly waived by the user. This does not claim live tests of every invalid/split topology, general approval-category coverage, a distributed signed release, or merged PRs. Split-pane support remains deferred; first-launch automatic setup is tracked in #5.
+
+## Issue #6 lifecycle wiring — 2026-09-12
+
+The companion now replays CLI lifecycle hooks through `CLIState`: session start
+adds a live session, prompt submission adds one running turn, Stop removes only
+that turn while the completion queue retains its exact session/turn identity,
+and SessionEnd removes the session and all running turns. CLI running rows and
+desktop running rows use the same shared notch counts while desktop and CLI
+identities remain separate. Session-title matching remains exact and rejects
+duplicate, closed, malformed, or split targets.
+
+Checks passed: `swift test` (25 tests), `sh scripts/build-app.sh`, strict
+`codesign --verify --deep --strict`, the controls-window smoke check, and the
+offline Ghostty matcher/navigation checks. A read-only capability probe against
+the installed `/Applications/Ghostty.app` reported version 1.3.1 with no
+native PID/TTY properties. No live Ghostty inventory or pane selection was
+attempted because the existing computer-use restriction blocks that route; the
+native live boundary remains human-verification evidence, not an agent claim.
