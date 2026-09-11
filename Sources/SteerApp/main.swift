@@ -20,18 +20,36 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var cli = CLIQueue(acknowledged: UserDefaults.standard.data(forKey: "cliAcknowledgments")
         .flatMap { try? JSONDecoder().decode(Set<TurnIdentity>.self, from: $0) } ?? [])
     @Published var cliPresentation = Attention()
+    @Published var desktop = DesktopState()
+    @Published var desktopPresentation = Attention()
     @Published var ghosttyEnabled = false
     @Published var desktopForeground = false
+    private let desktopAdapter = DesktopAdapter()
+    private var desktopAcknowledged = UserDefaults.standard.data(forKey: "desktopAcknowledgments")
+        .flatMap { try? JSONDecoder().decode(Set<TurnIdentity>.self, from: $0) } ?? []
+    private var firstDesktopScan = true
     private var cliSessions: Set<UUID> = []
     private var liveCLI: Set<UUID> = []
     private var firstCLIScan = true
     private var checkingGhostty = false
     private var nextGhosttyScan: Double = 0
     var visibleReminders: [Reminder] { reminders.visibleItems(cliSessions: cliSessions, desktopForeground: desktopForeground) }
+    var visibleDesktopCompletions: [DesktopCompletion] {
+        desktop.completed.filter { !desktopAcknowledged.contains($0.id) }
+    }
+    var visibleDesktopRunning: [DesktopRunningTurn] { desktopForeground ? [] : desktop.running }
     private var scanning = false
     private var nextScan: Double = 0
-    var count: Int { visibleReminders.count + cli.groups.count + (attention.pending && !desktopForeground ? 1 : 0) }
-    var expanded: Bool { attention.expanded || reminderPresentation.expanded || cliPresentation.expanded }
+    var count: Int {
+        visibleReminders.count + cli.groups.count + visibleDesktopRunning.count + visibleDesktopCompletions.count
+            + (attention.pending && !desktopForeground ? 1 : 0)
+    }
+    var workingCount: Int { visibleDesktopRunning.count }
+    var toCheckCount: Int {
+        visibleReminders.count + cli.groups.count + visibleDesktopCompletions.count
+            + (attention.pending && !desktopForeground ? 1 : 0)
+    }
+    var expanded: Bool { attention.expanded || reminderPresentation.expanded || cliPresentation.expanded || desktopPresentation.expanded }
     var hovering = false
     private var status: NSStatusItem!
     private var panel: NSPanel!
@@ -40,8 +58,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private var activationObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if let index = CommandLine.arguments.firstIndex(of: "--reminder-events"), CommandLine.arguments.indices.contains(index + 1) {
-            eventsPath = CommandLine.arguments[index + 1]
+        for flag in ["--reminder-events", "--desktop-events"] {
+            if let index = CommandLine.arguments.firstIndex(of: flag), CommandLine.arguments.indices.contains(index + 1) {
+                eventsPath = CommandLine.arguments[index + 1]
+            }
         }
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status.button?.title = "S"
@@ -76,8 +96,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             Task { @MainActor in self?.refresh() }
         }
         refresh()
-        showControls()
         if CommandLine.arguments.contains("--smoke-test") {
+            showControls()
             precondition(controls?.isVisible == true && controls?.contentView != nil)
             precondition(status.button?.title == "S" && status.menu?.items.count == 6)
             print("Steer controls-window smoke check passed.")
@@ -113,9 +133,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         guard picker.runModal() == .OK, let url = picker.url else { return }
         reminders = ReminderQueue()
         cli = CLIQueue(acknowledged: cli.acknowledged)
+        desktop = DesktopState()
         firstCLIScan = true
+        firstDesktopScan = true
         cliPresentation.dismiss()
         reminderPresentation.dismiss()
+        desktopPresentation.dismiss()
         eventsPath = url.path
         UserDefaults.standard.set(eventsPath, forKey: "approvalEventsPath")
         nextScan = 0
@@ -134,7 +157,11 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         }
         let rolloutRoot = rollouts
         Task { @MainActor in
-            let scan = await Task.detached { ReminderReader.scan(events: events, rollouts: rolloutRoot) }.value
+            let result = await Task.detached {
+                (ReminderReader.scan(events: events, rollouts: rolloutRoot), DesktopEventReader.read(from: events))
+            }.value
+            let scan = result.0
+            let desktopEvents = result.1
             guard eventsPath == events.path else { scanning = false; refresh(); return }
             let previous = Set(reminders.items.map(\.id))
             reminders.apply(scan)
@@ -149,6 +176,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             firstCLIScan = false
             if reminders.items.isEmpty { reminderPresentation.dismiss() }
             else if reminders.items.contains(where: { !previous.contains($0.id) }) { reminderPresentation.enqueue() }
+            let priorDesktop = Set(visibleDesktopCompletions.map(\.id))
+            desktop = DesktopState.replay(desktopEvents.filter { !scan.cliSessions.contains($0.session) })
+            if visibleDesktopCompletions.isEmpty { desktopPresentation.dismiss() }
+            else if firstDesktopScan { desktopPresentation = Attention(restored: true) }
+            else if visibleDesktopCompletions.contains(where: { !priorDesktop.contains($0.id) }) { desktopPresentation.enqueue() }
+            firstDesktopScan = false
             scanning = false
             refresh()
         }
@@ -158,7 +191,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         scanReminders()
         checkGhosttyFocus()
         // App identity only: no window contents, task titles, or accessibility queries.
-        let codexForeground = NSWorkspace.shared.frontmostApplication?.bundleIdentifier.map { $0 == "com.openai.codex" }
+        let codexForeground = desktopAdapter.codexForeground()
         desktopForeground = codexForeground == true
         var next = attention
         let firstPresentation = next.update(codexForeground: codexForeground, hovering: hovering || panel.isKeyWindow,
@@ -170,9 +203,16 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         // Use the same visibility as the count and rows, including CLI reminders.
         _ = reminderPresentation.update(codexForeground: visibleReminders.isEmpty, hovering: hovering || panel.isKeyWindow,
                                         now: ProcessInfo.processInfo.systemUptime)
+        var nextDesktopPresentation = desktopPresentation
+        let firstDesktopPresentation = nextDesktopPresentation.update(
+            codexForeground: codexForeground, hovering: hovering || panel.isKeyWindow,
+            now: ProcessInfo.processInfo.systemUptime
+        )
+        desktopPresentation = nextDesktopPresentation
+        if firstDesktopPresentation && !muted { NSSound(named: "Glass")?.play() }
         if cliPresentation.update(codexForeground: false, hovering: hovering || panel.isKeyWindow,
                                   now: ProcessInfo.processInfo.systemUptime) && !muted { NSSound(named: "Glass")?.play() }
-        guard count > 0 else {
+        guard DesktopVisibility.isVisible(hasActivity: count > 0, codexForeground: codexForeground) else {
             panel.orderOut(nil)
             hovering = false
             return
@@ -182,7 +222,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             ?? NSScreen.main
         guard let screen else { panel.orderOut(nil); return }
         let width: CGFloat = expanded ? 380 : 210
-        let height: CGFloat = expanded ? min(380, 150 + CGFloat(visibleReminders.count + cli.groups.count) * 65 + (attention.pending ? 80 : 0)) : 34
+        let rows = visibleReminders.count + cli.groups.count + visibleDesktopRunning.count + visibleDesktopCompletions.count
+        let height: CGFloat = expanded ? min(380, 150 + CGFloat(rows) * 65 + (attention.pending ? 80 : 0)) : 34
         // Keep controls below physical camera housing; top-center on other displays.
         let top = screen.frame.maxY - max(screen.safeAreaInsets.top, 6) - 6
         panel.setFrame(NSRect(x: screen.frame.midX - width / 2, y: top - height,
@@ -211,18 +252,20 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         openingTask = true
         navigationMessage = "Opening link…"
         let id = taskID
-        let installations = NSWorkspace.shared.runningApplications
-            .filter { $0.bundleIdentifier == "com.openai.codex" }
-            .map(\.bundleURL)
         Task { @MainActor in
-            let result = await DesktopNavigation.open(taskID: id, runningAppURLs: installations) { task, installation in
-                _ = try await NSWorkspace.shared.open([task], withApplicationAt: installation,
-                                                     configuration: NSWorkspace.OpenConfiguration())
-            }
+            let result = await desktopAdapter.open(taskID: id)
             navigationMessage = result.rawValue
             openingTask = false
             // Navigation never calls dismissTest or writes the saved completion flag.
         }
+    }
+    func dismissDesktop(_ item: DesktopCompletion) {
+        desktopAcknowledged.insert(item.id)
+        if let bytes = try? JSONEncoder().encode(desktopAcknowledged) {
+            UserDefaults.standard.set(bytes, forKey: "desktopAcknowledgments")
+        }
+        if visibleDesktopCompletions.isEmpty { desktopPresentation.dismiss() }
+        refresh()
     }
     func saveCLI() {
         if let bytes = try? JSONEncoder().encode(cli.acknowledged) { UserDefaults.standard.set(bytes, forKey: "cliAcknowledgments") }
@@ -258,6 +301,17 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         if cliSessions.contains(item.session_id) { openCLI(item.session_id) }
         else { taskID = item.session_id.uuidString; openTestTask() }
     }
+    func openDesktop(_ session: UUID) {
+        guard !openingTask else { return }
+        openingTask = true
+        navigationMessage = "Opening link…"
+        Task { @MainActor in
+            let result = await desktopAdapter.open(taskID: session.uuidString)
+            navigationMessage = result.rawValue
+            openingTask = false
+            refresh()
+        }
+    }
     func checkGhosttyFocus() {
         let now = ProcessInfo.processInfo.systemUptime
         guard ghosttyEnabled, !checkingGhostty, !openingTask, now >= nextGhosttyScan,
@@ -285,6 +339,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     func expand() {
         cliPresentation.expand(now: ProcessInfo.processInfo.systemUptime)
         reminderPresentation.expand(now: ProcessInfo.processInfo.systemUptime)
+        desktopPresentation.expand(now: ProcessInfo.processInfo.systemUptime)
         attention.expand(now: ProcessInfo.processInfo.systemUptime)
         refresh()
     }
@@ -307,7 +362,7 @@ struct Controls: View {
             }
             Divider()
             Button("Connect Codex events…", action: model.connectReminders)
-            Text(model.eventsPath.isEmpty ? "Codex events are not connected." : "\(model.reminders.items.count) reminders · \(model.cli.groups.count) CLI sessions to check")
+            Text(model.eventsPath.isEmpty ? "Codex events are not connected." : "\(model.reminders.items.count) reminders · \(model.visibleDesktopRunning.count) desktop working · \(model.cli.groups.count) CLI sessions to check")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Enable Ghostty controls", isOn: $model.ghosttyEnabled)
             Text("Requires session-ID terminal titles and one session per unsplit tab. Enabling may request macOS Automation access.")
@@ -336,7 +391,8 @@ struct Notch: View {
             Button(action: model.expand) {
                 HStack(spacing: 9) {
                     Image(systemName: "checkmark.circle.fill").foregroundStyle(.mint)
-                    Text("\(model.count) to check").font(.system(size: 13, weight: .semibold))
+                    Text(model.workingCount == 0 ? "\(model.toCheckCount) to check" : "\(model.workingCount) working · \(model.toCheckCount) to check")
+                        .font(.system(size: 13, weight: .semibold))
                     Spacer()
                     Text("STEER").font(.system(size: 9, weight: .medium)).foregroundStyle(.gray)
                 }
@@ -359,6 +415,18 @@ struct Notch: View {
                                 }.disabled(model.openingTask)
                             }
                         }
+                        ForEach(model.visibleDesktopCompletions) { item in
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text("Codex desktop finished").font(.headline)
+                                    Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Open in Codex") { model.openDesktop(item.session) }
+                                    .disabled(model.openingTask)
+                                Button("Dismiss") { model.dismissDesktop(item) }
+                            }
+                        }
                         ForEach(model.cli.groups) { item in
                             HStack {
                                 VStack(alignment: .leading) {
@@ -370,6 +438,17 @@ struct Notch: View {
                                 Button(model.ghosttyEnabled ? "Open in Codex" : "Set up Ghostty") { model.openCLI(item.session) }
                                     .disabled(model.openingTask)
                                 Button("Dismiss") { model.dismissCLI(item) }
+                            }
+                        }
+                        ForEach(model.visibleDesktopRunning) { item in
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text("Codex desktop working").font(.headline)
+                                    Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Open in Codex") { model.openDesktop(item.session) }
+                                    .disabled(model.openingTask)
                             }
                         }
                         if model.needsGhosttySetup {
