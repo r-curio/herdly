@@ -41,3 +41,15 @@ import Testing
     _ = item.update(codexForeground: nil, hovering: false, now: 3)
     #expect(!item.expanded && item.pending)
 }
+
+@Test func laterCompletionPresentsAgainWithoutChangingAcknowledgment() {
+    var item = Attention()
+    item.enqueue()
+    let first = item.update(codexForeground: false, hovering: false, now: 10)
+    #expect(first)
+    item.enqueue()
+    let later = item.update(codexForeground: false, hovering: false, now: 11)
+    #expect(later)
+    _ = item.update(codexForeground: false, hovering: false, now: 14.1)
+    #expect(!item.expanded && item.pending)
+}

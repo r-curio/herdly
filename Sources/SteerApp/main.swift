@@ -35,8 +35,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     }()
     @Published var reminderPresentation = Attention()
     @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
-    @Published var cliPresentation = Attention()
-    @Published var desktopPresentation = Attention()
+    @Published var completionPresentation = Attention()
     @Published var ghosttyEnabled = false
     @Published var ghosttyPermissionVerified = false
     @Published var setupStatus: CodexConnectionStatus = .notConfigured
@@ -45,10 +44,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var setupMessage = ""
     @Published var desktopForeground = false
     private let desktopAdapter = DesktopAdapter()
-    private var firstDesktopScan = true
     private var cliSessions: Set<UUID> = []
     private var liveCLI: Set<UUID> = []
-    private var firstCLIScan = true
+    private var firstCompletionScan = true
     private var checkingGhostty = false
     private var nextGhosttyScan: Double = 0
     var visibleReminders: [Reminder] {
@@ -67,7 +65,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     var toCheckCount: Int {
         orderedAttentionItems.filter { $0.kind != .running }.count + (attention.pending && !desktopForeground ? 1 : 0)
     }
-    var expanded: Bool { attention.expanded || reminderPresentation.expanded || cliPresentation.expanded || desktopPresentation.expanded }
+    var expanded: Bool { attention.expanded || reminderPresentation.expanded || completionPresentation.expanded }
     var hovering = false
     private var status: NSStatusItem!
     private var panel: NSPanel!
@@ -160,11 +158,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         picker.message = "Choose the Codex hook lab’s events folder. Steer reads it without changing hooks."
         guard picker.runModal() == .OK, let url = picker.url else { return }
         queue = AttentionQueue(acknowledged: queue.acknowledgedCompletions)
-        firstCLIScan = true
-        firstDesktopScan = true
-        cliPresentation.dismiss()
+        firstCompletionScan = true
         reminderPresentation.dismiss()
-        desktopPresentation.dismiss()
+        completionPresentation.dismiss()
         eventsPath = url.path
         UserDefaults.standard.set(eventsPath, forKey: "approvalEventsPath")
         nextScan = 0
@@ -322,16 +318,13 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             let current = queue.items
             let newItems = current.filter { !previous.contains($0.id) }
             if newItems.contains(where: { $0.kind == .completion }) {
-                if firstCLIScan { cliPresentation = Attention(restored: true) }
-                else { cliPresentation.enqueue() }
+                if firstCompletionScan { completionPresentation = Attention(restored: true) }
+                else { completionPresentation.enqueue() }
             }
-            firstCLIScan = false
+            firstCompletionScan = false
             if !current.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.dismiss() }
             else if newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.enqueue() }
-            if !current.contains(where: { $0.kind == .completion && $0.completion?.source == .desktop }) { desktopPresentation.dismiss() }
-            else if firstDesktopScan { desktopPresentation = Attention(restored: true) }
-            else if newItems.contains(where: { $0.kind == .completion && $0.completion?.source == .desktop }) { desktopPresentation.enqueue() }
-            firstDesktopScan = false
+            if !current.contains(where: { $0.kind == .completion }) { completionPresentation.dismiss() }
             scanning = false
             refresh()
         }
@@ -353,15 +346,13 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         // Use the same visibility as the count and rows, including CLI reminders.
         _ = reminderPresentation.update(codexForeground: visibleReminders.isEmpty, hovering: hovering || panel.isKeyWindow,
                                         now: ProcessInfo.processInfo.systemUptime)
-        var nextDesktopPresentation = desktopPresentation
-        let firstDesktopPresentation = nextDesktopPresentation.update(
+        var nextCompletionPresentation = completionPresentation
+        let firstCompletionPresentation = nextCompletionPresentation.update(
             codexForeground: codexForeground, hovering: hovering || panel.isKeyWindow,
             now: ProcessInfo.processInfo.systemUptime
         )
-        desktopPresentation = nextDesktopPresentation
-        if firstDesktopPresentation && !muted { NSSound(named: "Glass")?.play() }
-        if cliPresentation.update(codexForeground: false, hovering: hovering || panel.isKeyWindow,
-                                  now: ProcessInfo.processInfo.systemUptime) && !muted { NSSound(named: "Glass")?.play() }
+        completionPresentation = nextCompletionPresentation
+        if firstCompletionPresentation && !muted { NSSound(named: "Glass")?.play() }
         guard DesktopVisibility.isVisible(hasActivity: count > 0, codexForeground: codexForeground) else {
             panel.orderOut(nil)
             hovering = false
@@ -415,7 +406,6 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         let desktop = Set(acknowledgments.filter { $0.source == .desktop }.map { TurnIdentity(session: $0.session, turn: $0.turn) })
         if let bytes = try? JSONEncoder().encode(cli) { UserDefaults.standard.set(bytes, forKey: "cliAcknowledgments") }
         if let bytes = try? JSONEncoder().encode(desktop) { UserDefaults.standard.set(bytes, forKey: "desktopAcknowledgments") }
-        if !queue.items.contains(where: { $0.completion?.source == .cli }) { cliPresentation.dismiss() }
     }
     func dismissAttention(_ item: AttentionCompletion) {
         switch item.source {
@@ -498,9 +488,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
     func expand() {
-        cliPresentation.expand(now: ProcessInfo.processInfo.systemUptime)
         reminderPresentation.expand(now: ProcessInfo.processInfo.systemUptime)
-        desktopPresentation.expand(now: ProcessInfo.processInfo.systemUptime)
+        completionPresentation.expand(now: ProcessInfo.processInfo.systemUptime)
         attention.expand(now: ProcessInfo.processInfo.systemUptime)
         refresh()
     }
