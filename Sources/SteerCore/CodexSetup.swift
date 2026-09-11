@@ -561,8 +561,9 @@ public struct CodexSetupInstaller {
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let event = object["hook_event_name"] as? String, !event.isEmpty,
               let session = object["session_id"] as? String, UUID(uuidString: session) != nil,
-              let received = object["received_at"] as? NSNumber else { return false }
-        return received.doubleValue.isFinite && received.doubleValue >= installedAt
+              let received = object["received_at"] as? String, !received.isEmpty,
+              let captured = object["captured_at"] as? NSNumber else { return false }
+        return captured.doubleValue.isFinite && captured.doubleValue >= installedAt
     }
 
     private func boundedData(at url: URL, maximum: Int) -> Data? {

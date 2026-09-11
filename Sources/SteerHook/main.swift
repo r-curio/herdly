@@ -5,10 +5,12 @@ let arguments = CommandLine.arguments
 func writeEvent(_ object: [String: Any], to directory: URL) -> Bool {
     guard let event = object["hook_event_name"] as? String, !event.isEmpty,
           let session = object["session_id"] as? String, UUID(uuidString: session) != nil else { return false }
+    let now = Date()
     var record: [String: Any] = [
         "hook_event_name": event,
         "session_id": session,
-        "received_at": Date().timeIntervalSince1970
+        "received_at": ISO8601DateFormatter().string(from: now),
+        "captured_at": now.timeIntervalSince1970
     ]
     if let turn = object["turn_id"] as? String { record["turn_id"] = turn }
     guard JSONSerialization.isValidJSONObject(record),
@@ -35,7 +37,8 @@ func selfTest() -> Int32 {
           files.count == 1,
           let data = try? Data(contentsOf: files[0]),
           let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          result["received_at"] as? NSNumber != nil else { return 1 }
+          result["received_at"] as? String != nil,
+          result["captured_at"] as? NSNumber != nil else { return 1 }
     return 0
 }
 

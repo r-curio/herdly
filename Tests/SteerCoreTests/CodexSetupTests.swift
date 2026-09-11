@@ -82,10 +82,10 @@ import Testing
     #expect(try installer.install(plan, roots: roots, helper: helper,
                                   capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery."))
     #expect(((try FileManager.default.attributesOfItem(atPath: roots.helperURL.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o111 != 0)
-    let staleEvent: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "received_at": 0]
+    let staleEvent: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "received_at": "2026-01-01T00:00:00Z", "captured_at": 0]
     try JSONSerialization.data(withJSONObject: staleEvent).write(to: eventsRoot.appendingPathComponent("stale.json"))
     #expect(installer.status(roots: roots, capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery."))
-    let event: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "received_at": Date().timeIntervalSince1970 + 1]
+    let event: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "received_at": "2026-09-12T00:00:00Z", "captured_at": Date().timeIntervalSince1970 + 1]
     try JSONSerialization.data(withJSONObject: event).write(to: eventsRoot.appendingPathComponent("event.json"))
     #expect(installer.status(roots: roots, capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .connected)
     let installed = try String(contentsOf: roots.configURL)
