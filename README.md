@@ -33,7 +33,7 @@ sh scripts/build-app.sh
 open output/Steer.app
 ```
 
-Use **Steer → Send test notification** in the menu bar, then switch away from Codex. See the [prototype walkthrough and limitations](docs/prototype.md).
+Click **Send test** in the Steer controls window, then switch away from Codex. The menu-bar shortcut is **S**; reopening the app restores its controls if the shortcut is hidden by a crowded menu bar. See the [prototype walkthrough and limitations](docs/prototype.md).
 
 ## Run the existing probe
 
