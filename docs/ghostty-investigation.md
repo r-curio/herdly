@@ -87,3 +87,10 @@ codex -m gpt-5.5 -c 'tui.terminal_title=["session-id"]' 'Reply only STEER-TAB-CH
 ```
 
 The model override only avoids the independently observed newer-model/older-CLI incompatibility. It changes neither the saved default model nor the title setting. Expected titles are different shortened UUIDs. Capturing and revalidating the actual native tab/window inventory and navigation still require a permitted interaction route; the current Ghostty computer-use restriction remains. Do not run the prerelease merely for this test. Interactive approval checks remain separate.
+
+
+## Human-assisted title proof — 2026-09-11
+
+The isolated lab recorded SessionStart, UserPromptSubmit and Stop for two CLI sessions at 11:42 UTC: `01a09046-5590-7882-adad-6b7f4ec91925` and `01a09046-56da-7d83-9a38-02e59d7441ec`. The user confirmed that the two unsplit Ghostty tabs show the expected rendered titles `01a09046-5590-7882-adad-6b7f4...` and `01a09046-56da-7d83-9a38-02e59...`. This is hook-file evidence plus human confirmation of displayed titles, not an automated native inventory read.
+
+The session-title link is demonstrated for this run. The probe still has only a pure inventory matcher: live inventory acquisition, selection of the matched tab/window, post-navigation verification and foreground-session observation are not implemented or proved here. The existing Ghostty computer-use restriction blocks agent-driven live navigation testing; alternate UI APIs must not be used to evade it. Interactive CLI approval checks also remain open. Issue #3 is not complete.
