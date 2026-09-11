@@ -36,3 +36,24 @@ import Testing
     restored.apply(ReminderReader.scan(events: root, rollouts: root))
     #expect(restored.items.map(\.id) == [b.id])
 }
+
+
+@Test func cliReminderStaysExpandableWhileDesktopIsForeground() {
+    let cli = UUID(), desktop = UUID()
+    let cliItem = Reminder(request_id: UUID(), session_id: cli, turn_id: UUID(), outcome: "no_decision")
+    let desktopItem = Reminder(request_id: UUID(), session_id: desktop, turn_id: UUID(), outcome: "no_decision")
+    var scan = ReminderScan()
+    scan.reminders = [cliItem, desktopItem]
+    var queue = ReminderQueue()
+    queue.apply(scan)
+    let visible = queue.visibleItems(cliSessions: [cli], desktopForeground: true)
+    #expect(visible == [cliItem])
+    var presentation = Attention(restored: true)
+    presentation.expand(now: 10)
+    _ = presentation.update(codexForeground: visible.isEmpty, hovering: false, now: 10.1)
+    #expect(presentation.expanded)
+    _ = presentation.update(codexForeground: visible.isEmpty, hovering: false, now: 13.1)
+    #expect(!presentation.expanded)
+    #expect(queue.visibleItems(cliSessions: [], desktopForeground: true).isEmpty)
+    #expect(queue.visibleItems(cliSessions: [], desktopForeground: false).count == 2)
+}

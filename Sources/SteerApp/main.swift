@@ -27,7 +27,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private var firstCLIScan = true
     private var checkingGhostty = false
     private var nextGhosttyScan: Double = 0
-    var visibleReminders: [Reminder] { reminders.items.filter { !desktopForeground || cliSessions.contains($0.session_id) } }
+    var visibleReminders: [Reminder] { reminders.visibleItems(cliSessions: cliSessions, desktopForeground: desktopForeground) }
     private var scanning = false
     private var nextScan: Double = 0
     var count: Int { visibleReminders.count + cli.items.count + (attention.pending && !desktopForeground ? 1 : 0) }
@@ -167,7 +167,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             attention = next
         }
         if firstPresentation && !muted { NSSound(named: "Glass")?.play() }
-        _ = reminderPresentation.update(codexForeground: codexForeground, hovering: hovering || panel.isKeyWindow,
+        // Use the same visibility as the count and rows, including CLI reminders.
+        _ = reminderPresentation.update(codexForeground: visibleReminders.isEmpty, hovering: hovering || panel.isKeyWindow,
                                         now: ProcessInfo.processInfo.systemUptime)
         if cliPresentation.update(codexForeground: false, hovering: hovering || panel.isKeyWindow,
                                   now: ProcessInfo.processInfo.systemUptime) && !muted { NSSound(named: "Glass")?.play() }
@@ -181,7 +182,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             ?? NSScreen.main
         guard let screen else { panel.orderOut(nil); return }
         let width: CGFloat = expanded ? 380 : 210
-        let height: CGFloat = expanded ? min(380, 100 + CGFloat(visibleReminders.count + cli.items.count) * 65 + (attention.pending ? 80 : 0)) : 34
+        let height: CGFloat = expanded ? min(380, 150 + CGFloat(visibleReminders.count + cli.items.count) * 65 + (attention.pending ? 80 : 0)) : 34
         // Keep controls below physical camera housing; top-center on other displays.
         let top = screen.frame.maxY - max(screen.safeAreaInsets.top, 6) - 6
         panel.setFrame(NSRect(x: screen.frame.midX - width / 2, y: top - height,
@@ -229,7 +230,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     }
     func dismissCLI(_ id: TurnIdentity) { cli.dismiss(id); saveCLI(); refresh() }
     func openCLI(_ session: UUID) {
-        guard ghosttyEnabled, !openingTask else { return }
+        guard !openingTask else { return }
+        guard ghosttyEnabled else { showControls(); return }
         openingTask = true
         navigationMessage = "Finding the matching Ghostty tab…"
         let live = liveCLI
@@ -243,7 +245,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             refresh()
         }
     }
-    func canOpenReminder(_ item: Reminder) -> Bool { !openingTask && (!cliSessions.contains(item.session_id) || ghosttyEnabled) }
+    func reminderActionTitle(_ item: Reminder) -> String {
+        cliSessions.contains(item.session_id) && !ghosttyEnabled ? "Set up Ghostty" : "Open in Codex"
+    }
+    var needsGhosttySetup: Bool {
+        !ghosttyEnabled && (!cli.items.isEmpty || visibleReminders.contains { cliSessions.contains($0.session_id) })
+    }
     func openReminder(_ item: Reminder) {
         if cliSessions.contains(item.session_id) { openCLI(item.session_id) }
         else { taskID = item.session_id.uuidString; openTestTask() }
@@ -344,9 +351,9 @@ struct Notch: View {
                                     Text("Task \(item.session_id.uuidString.prefix(8))").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Button("Open in Codex") {
+                                Button(model.reminderActionTitle(item)) {
                                     model.openReminder(item)
-                                }.disabled(!model.canOpenReminder(item))
+                                }.disabled(model.openingTask)
                             }
                         }
                         ForEach(model.cli.items) { item in
@@ -356,12 +363,12 @@ struct Notch: View {
                                     Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Button("Open in Codex") { model.openCLI(item.session) }
-                                    .disabled(model.openingTask || !model.ghosttyEnabled)
+                                Button(model.ghosttyEnabled ? "Open in Codex" : "Set up Ghostty") { model.openCLI(item.session) }
+                                    .disabled(model.openingTask)
                                 Button("Dismiss") { model.dismissCLI(item.id) }
                             }
                         }
-                        if !model.cli.items.isEmpty && !model.ghosttyEnabled {
+                        if model.needsGhosttySetup {
                             Text("Enable Ghostty controls in Steer’s controls window to open these sessions.").font(.caption)
                         }
                         if !model.navigationMessage.isEmpty { Text(model.navigationMessage).font(.caption) }

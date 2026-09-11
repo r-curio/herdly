@@ -25,6 +25,9 @@ public struct ReminderQueue: Sendable {
     public private(set) var items: [Reminder] = []
     private var completed: Set<TurnIdentity> = []
     public init() {}
+    public func visibleItems(cliSessions: Set<UUID>, desktopForeground: Bool) -> [Reminder] {
+        items.filter { !desktopForeground || cliSessions.contains($0.session_id) }
+    }
     public mutating func apply(_ scan: ReminderScan) {
         completed.formUnion(scan.completed)
         for item in scan.reminders where item.outcome == "no_decision" && !items.contains(where: { $0.id == item.id }) {
