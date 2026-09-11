@@ -53,3 +53,9 @@ Steer's exact recorder/interpreter also passed ten isolated /bin/zsh -lc replays
 The user explicitly requested removing all OtherApp-related installation files. Removed its five global Codex hook entries atomically, preserving the two unrelated Impeccable handlers and all Steer project hooks. Moved both Latch apps, the installed helper/database/support folder, preferences, application scripts, old Xcode build copies and container Data directories to a recoverable Trash folder. No OtherApp processes or startup entries were found in the inspected locations.
 
 macOS denied removal of `.com.apple.containermanagerd.metadata.plist` in the OtherApp and UI-test runner containers. Those protected metadata files and their container shells remain; ordinary application data was removed without changing permissions or bypassing that denial. New Codex sessions no longer have the broken helper configured; already-running sessions may retain previously loaded hooks. A fresh CLI runtime warning check has not yet run.
+
+## Final clean-run acceptance — 2026-09-12
+
+The user confirmed all three checks in a fresh ordinary `codex` session: automatic session-ID title, no missing-status hook warnings, and completion appearing in Steer. The lab independently captured SessionStart, UserPromptSubmit and Stop for session `01a0916c-337b-70b2-963e-9cf848bd2a48`, turn `01a0916c-5828-7b63-b568-b4d127a048fb` at 17:03 UTC.
+
+Issue #3's scoped feasibility proof is complete: CLI lifecycle/decision evidence, human-tested exact tab/window navigation and direct-return acknowledgment, plus offline conservative failure-case checks. The untouched 30-second CLI timing retest was explicitly waived by the user. This does not claim live tests of every invalid/split topology, general approval-category coverage, a distributed signed release, or merged PRs. Split-pane support remains deferred; first-launch automatic setup is tracked in #5.
