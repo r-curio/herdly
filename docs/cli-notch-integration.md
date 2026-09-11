@@ -100,7 +100,12 @@ terminal/configuration state. Ghostty focus timing remains bounded by the matche
 and controllable-clock regression; a fresh native popup/sound run in Ghostty still
 requires the permitted human route.
 
-The current native CLI demonstration is likewise blocked by the locked Mac and
-failed allowed CUA unlock attempt. Prior Steer-only CLI rows, grouped replies,
+An earlier native CLI demonstration was blocked by the locked Mac and failed
+allowed CUA unlock attempt. Prior Steer-only CLI rows, grouped replies,
 verified navigation, and direct-return acknowledgment remain the available
-evidence; no fresh Ghostty popup or sound observation is claimed here.
+CLI evidence; no fresh Ghostty popup or sound observation is claimed here.
+
+The later allowed CUA walkthrough exercised only the branch's connected desktop
+evidence (17 real desktop completions plus one test item). It did not trigger a
+fresh CLI turn or access Ghostty, so no new CLI-native popup/sound evidence is
+claimed.
