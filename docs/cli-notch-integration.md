@@ -31,3 +31,9 @@ After launching a fresh CLI session with the explicit session-ID title override,
 ## Group repeated completions from one session
 
 The two visually identical rows were different completed turns in the same session. The UI now groups CLI completions by session, shows the number of completed replies, and counts one completion group per session. Dismiss acknowledges only the turns captured in that displayed group; later arrivals remain independent. Approval reminders remain separate. Eight tests passed, including duplicate-event rejection, session grouping, restart persistence and a newer-turn race. The rebuilt app is running. At UI inspection the completion queue was already empty and only the old approval reminder remained, so the multi-reply row itself was verified through the automated test rather than a live two-row fixture.
+
+## Canceled-turn reminder cleanup
+
+The old HANDOFF-1 reminder persisted because its exact turn recorded turn_aborted rather than task_complete. Added separate canceled-turn parsing in the existing bounded rollout reader. Reminder resolution consumes completed or canceled identities, while CLI completion notifications still require task_complete. No session-wide cancellation inference is used.
+
+A disk-level regression failed before the fix and passed afterward: exact-turn cleanup, unrelated session/turn preservation, partial-file retention, restart reconstruction, no resurrection after a later read failure, and no false completion notification. All nine tests passed; release build and strict signature verification passed. The updated running app reads the unchanged real lab records and shows zero reminders and zero queued notifications.

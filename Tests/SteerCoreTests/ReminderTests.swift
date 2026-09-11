@@ -57,3 +57,38 @@ import Testing
     #expect(queue.visibleItems(cliSessions: [], desktopForeground: true).isEmpty)
     #expect(queue.visibleItems(cliSessions: [], desktopForeground: false).count == 2)
 }
+
+@Test func canceledTurnClearsOnlyItsReminderWithoutCreatingCompletion() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = UUID(), turn = UUID(), next = UUID()
+    let canceled = Reminder(request_id: UUID(), session_id: session, turn_id: turn, outcome: "no_decision")
+    let pending = Reminder(request_id: UUID(), session_id: session, turn_id: next, outcome: "no_decision")
+    let other = Reminder(request_id: UUID(), session_id: UUID(), turn_id: turn, outcome: "no_decision")
+    for item in [canceled, pending, other] {
+        try JSONEncoder().encode(item).write(to: root.appendingPathComponent(item.id.uuidString + ".approval"))
+    }
+    let path = root.appendingPathComponent("rollout-" + session.uuidString.lowercased() + ".jsonl")
+    let meta = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session)\",\"source\":\"cli\"}}\n"
+    let abort = "{\"type\":\"event_msg\",\"payload\":{\"type\":\"turn_aborted\",\"turn_id\":\"\(turn)\",\"reason\":\"interrupted\"}}\n"
+    let stop: [String: String] = ["session_id": session.uuidString, "turn_id": turn.uuidString,
+                                "hook_event_name":"Stop", "received_at":"01"]
+    try JSONSerialization.data(withJSONObject: stop).write(to: root.appendingPathComponent("stop.json"))
+    try Data((meta + abort + "{partial").utf8).write(to: path)
+    var queue = ReminderQueue()
+    queue.apply(ReminderReader.scan(events: root, rollouts: root))
+    #expect(queue.items.count == 3)
+    try Data((meta + abort).utf8).write(to: path)
+    let scan = ReminderReader.scan(events: root, rollouts: root)
+    queue.apply(scan)
+    #expect(Set(queue.items.map(\.id)) == [pending.id, other.id])
+    #expect(scan.completed.isEmpty)
+    #expect(scan.cliCompletions.isEmpty)
+    var restarted = ReminderQueue()
+    restarted.apply(scan)
+    #expect(Set(restarted.items.map(\.id)) == [pending.id, other.id])
+    try FileManager.default.removeItem(at: path)
+    queue.apply(ReminderReader.scan(events: root, rollouts: root))
+    #expect(Set(queue.items.map(\.id)) == [pending.id, other.id])
+}
