@@ -1,5 +1,10 @@
 # Direct CLI and Ghostty gate (#3)
 
+## Current scope: tabs only
+
+The user deferred multiple panes within a tab. Issue #3 now targets one Codex session per unsplit tab, across tabs/windows, on the stable runtime. Earlier split-pane test requirements below are historical. Session-to-tab binding remains unresolved; two tabs in one project cannot be distinguished by cwd alone. A prerelease upgrade is not an accepted requirement. See ADR 0004.
+
+
 Checked 2026-09-11. Status: blocked; exact live session-to-pane binding is not proven. [Issue #3](https://github.com/r-curio/steer/issues/3).
 
 ## Installed evidence

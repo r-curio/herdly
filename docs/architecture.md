@@ -31,7 +31,7 @@ This diagram shows the candidate hook route. Desktop hook coverage and observing
 - Session identifies the ongoing conversation, qualified by its local runtime if needed. A project directory or title is not a unique session ID.
 - Turn identifies one unit of Codex work. Finishing a turn does not close the session.
 - Attention item identifies a particular completion or approval request. Acknowledging one completion does not acknowledge future completions.
-- Surface locator identifies a desktop conversation or Ghostty terminal pane. App identity alone cannot prove that the user visited a session.
+- Surface locator identifies a desktop conversation or Ghostty tab. App identity alone cannot prove that the user visited a session.
 - Approval interaction identifies one live helper invocation, bound to its originating session/turn, pending connection, and deadline. Do not route decisions using only a session ID or a command string.
 
 ## Status and approval paths
@@ -67,7 +67,7 @@ Store small snapshots of attention items and completion acknowledgments locally 
 
 1. In disposable CLI and desktop tasks, prove start, completion, permission, allow, deny, and no-decision handoff separately. Include the actual approval types the user encounters; unsupported ones must stay in Codex's native flow.
 2. Kill the companion during a pending request and verify the native approval returns. Exercise deadline/click races and late messages with two simultaneous requests.
-3. Map two Ghostty panes in the same project to their distinct Codex sessions; verify focus detection and navigation across tabs, splits, and windows.
+3. Map two unsplit Ghostty tabs in the same project to their distinct Codex sessions; verify focus detection and navigation across tabs and windows. Split-pane targeting is deferred; reject split or ambiguous targets.
 4. Identify the desktop's selected conversation without changing it. Verify that a different conversation does not acknowledge the completed one.
 5. After handoff, detect a decision made in Codex and clear only the matching item. Restart the companion and prove saved requests do not produce active approval buttons.
 
@@ -76,3 +76,7 @@ These are planned checks, not completed tests. Existing user configuration has n
 ## Product decisions and remaining verification
 
 - Queue ordering, separate working/to-check counts, and one notch on the actively used display are settled in product.md. Completion notifications expand for three seconds and remain open during interaction. Approval deadlines remain independent and are never extended by interaction. Active-display detection and interaction stability need implementation detail and verification.
+
+## Ghostty scope revision
+
+ADR 0004 defers targeting within split tabs. Target the originating unsplit tab/window. This reduces verification cases but does not prove a stable session-to-tab binding on Ghostty 1.3.1.
