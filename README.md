@@ -4,7 +4,7 @@ A native macOS companion for Codex desktop and Codex CLI in Ghostty. Keep using 
 
 ## Status
 
-Architecture and product decisions are documented. A read-only desktop capability probe runs; the macOS app is not implemented. Task-link navigation has been manually verified. Desktop app-level visibility and approval handoff still need live implementation proof.
+Architecture and product decisions are documented. A read-only desktop capability probe runs; a runnable native test-notification prototype is available; real Codex activity is not connected. Task-link navigation has been manually verified. Desktop app-level visibility and approval handoff still need live implementation proof.
 
 ## MVP
 
@@ -24,6 +24,16 @@ Desktop MVP visibility: hide the notch while Codex is foreground and show eligib
 - [Desktop investigation](docs/codex-desktop-investigation.md)
 - [Backlog and dependency index](docs/mvp-backlog.md)
 - [MVP implementation issues](https://github.com/r-curio/steer/issues?q=is%3Aissue+label%3Amvp)
+
+## Run the prototype
+
+```sh
+swift test
+sh scripts/build-app.sh
+open output/Steer.app
+```
+
+Use **Steer → Send test notification** in the menu bar, then switch away from Codex. See the [prototype walkthrough and limitations](docs/prototype.md).
 
 ## Run the existing probe
 
