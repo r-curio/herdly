@@ -11,6 +11,9 @@ final class NotchPanel: NSPanel {
 final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var attention = Attention(restored: UserDefaults.standard.bool(forKey: "testCompletion"))
     @Published var muted = UserDefaults.standard.bool(forKey: "muted")
+    @Published var taskID = ""
+    @Published var navigationMessage = ""
+    @Published var openingTask = false
     var hovering = false
     private var status: NSStatusItem!
     private var panel: NSPanel!
@@ -63,7 +66,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
 
     @objc func showControls() {
         if controls == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 380, height: 230),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 380),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Steer — Prototype"
             window.isReleasedWhenClosed = false
@@ -82,7 +85,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
 
     func refresh() {
         // App identity only: no window contents, task titles, or accessibility queries.
-        let codexForeground = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.openai.codex"
+        let codexForeground = NSWorkspace.shared.frontmostApplication?.bundleIdentifier.map { $0 == "com.openai.codex" }
         var next = attention
         let firstPresentation = next.update(codexForeground: codexForeground, hovering: hovering || panel.isKeyWindow,
                                             now: ProcessInfo.processInfo.systemUptime)
@@ -90,7 +93,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             attention = next
         }
         if firstPresentation && !muted { NSSound(named: "Glass")?.play() }
-        guard attention.pending && !codexForeground else {
+        guard attention.pending && codexForeground != true else {
             panel.orderOut(nil)
             hovering = false
             return
@@ -124,6 +127,24 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         sender.state = muted ? .on : .off
     }
     @objc func quit() { NSApplication.shared.terminate(nil) }
+    func openTestTask() {
+        guard !openingTask else { return }
+        openingTask = true
+        navigationMessage = "Opening link…"
+        let id = taskID
+        let installations = NSWorkspace.shared.runningApplications
+            .filter { $0.bundleIdentifier == "com.openai.codex" }
+            .map(\.bundleURL)
+        Task { @MainActor in
+            let result = await DesktopNavigation.open(taskID: id, runningAppURLs: installations) { task, installation in
+                _ = try await NSWorkspace.shared.open([task], withApplicationAt: installation,
+                                                     configuration: NSWorkspace.OpenConfiguration())
+            }
+            navigationMessage = result.rawValue
+            openingTask = false
+            // Navigation never calls dismissTest or writes the saved completion flag.
+        }
+    }
     func expand() {
         attention.expand(now: ProcessInfo.processInfo.systemUptime)
         refresh()
@@ -145,11 +166,21 @@ struct Controls: View {
                 Spacer()
                 Button("Quit", action: model.quit)
             }
+            Divider()
+            Text("Optional task-link check").font(.callout.weight(.medium))
+            HStack {
+                TextField("Local Codex task ID", text: $model.taskID)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Local Codex task ID")
+                Button("Open task", action: model.openTestTask).disabled(model.openingTask)
+            }
+            Text(model.navigationMessage.isEmpty ? "Opening a task will not dismiss your notification." : model.navigationMessage)
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text("Menu-bar shortcut: S · Closing this window keeps Steer running.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(24)
-        .frame(width: 380, height: 230)
+        .frame(width: 420, height: 380)
     }
 }
 

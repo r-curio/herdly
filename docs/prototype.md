@@ -1,6 +1,6 @@
 # Run the desktop prototype
 
-This is a runnable shell for the accepted app-level visibility experiment in #1, not the real-session integration in #4. Requires macOS 14+ and Swift 6. It has one test completion, no Codex hooks, no real task monitoring, no approval buttons and no task navigation.
+This is a runnable shell for the accepted app-level visibility experiment in #1, not the real-session integration in #4. Requires macOS 14+ and Swift 6. It has one test completion, no Codex hooks, no real task monitoring, no approval buttons, and an optional task-ID field for testing guarded link requests.
 
 ```sh
 swift test
@@ -56,4 +56,12 @@ The user reported **all pass** for these five checks:
 4. Repeating the switches twice retains the item without repeating its sound.
 5. Dismissing clears it, and it stays cleared after restarting Steer.
 
-This is user-reported live evidence, separate from computer-use and state tests. It does not cover ambiguous installations, unavailable task links, or an unavailable app-activation signal. Those remaining #1 criteria must not be checked off based on this report. The manual checklist supplied to the user did not cover every issue criterion.
+This is user-reported live evidence, separate from computer-use and state tests. It does not cover ambiguous installations, unavailable task links, or an unavailable app-activation signal. Those remaining #1 criteria must not be checked off based on this report. The subsequent failure-handling checks below complete the remaining bounded verification.
+
+## Navigation failure boundary
+
+The optional task-ID field validates UUIDs, requires one identifiable running Codex instance, and opens the link against that exact bundle URL. With no identifiable instance it requests that the user open their preferred Codex app; with multiple instances it refuses to guess. If the app exits during opening, a native error is reported. A successful callback says only that the link was sent; it never claims the task was selected or dismisses a notification. A nonexistent task can therefore remain safely unverified even if Codex accepts the URL.
+
+Three Swift tests pass: completion lifecycle, unknown activation retention, and navigation boundaries. The navigation test injects the native opener to verify invalid IDs, no instance, missing bundle identity, multiple instances, exact bundle selection, native error, and successful delivery without verification (including a nonexistent UUID). These are deterministic boundary tests; no second Codex instance was launched for them.
+
+Computer use verified `Enter a valid task ID` while `1 test notification queued` remained visible. The initial capture failed; reconnecting to Steer confirmed the result. The test item was then dismissed. The user's live foreground, app-switch, restart, nonexistent-link and existing-window reports complement these automated checks. Approval behavior and real session events remain #2; this evidence completes the reduced #1 feasibility scope, not the full MVP or production routing guarantees.
