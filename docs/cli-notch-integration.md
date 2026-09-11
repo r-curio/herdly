@@ -77,3 +77,12 @@ the installed `/Applications/Ghostty.app` reported version 1.3.1 with no
 native PID/TTY properties. No live Ghostty inventory or pane selection was
 attempted because the existing computer-use restriction blocks that route; the
 native live boundary remains human-verification evidence, not an agent claim.
+
+The current `a344971` build was also launched and inspected through the
+allowed Steer UI route. Its controls reported Ghostty 1.3.1 available and the
+unchanged real events directory showed `0 reminders · 1 working · 0 sessions
+to check`, proving the live CLI lifecycle row in the companion. Combined with
+the existing human-verified two-tab/cross-window navigation and direct-return
+acknowledgment above, this closes the issue's happy-path evidence boundary.
+CUA still forbids agent access to Ghostty itself; no new tab selection,
+Automation permission change, or user configuration change was made.
