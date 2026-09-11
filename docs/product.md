@@ -72,3 +72,7 @@ The [first desktop investigation](codex-desktop-investigation.md) found private 
 - How to detect the specific focused terminal session or desktop conversation. The agreed experience is a requirement, not yet verified integration capability; the uncertainty fallback is settled above.
 - How to identify the active display and keep panel interaction stable while display focus changes.
 - Validate the proposed module boundaries and transport in [architecture.md](architecture.md) against the required integration checks.
+
+## Selected Ghostty tab binding
+
+Use Codex’s session-ID terminal title as the stable-version mapping candidate (ADR 0005). This changes the visible title while Codex runs. Match only one unsplit tab, reject ambiguity, and preserve normal launching. First verify using a temporary command-line override; no saved user setting has been changed.

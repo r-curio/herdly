@@ -73,3 +73,17 @@ Rechecked upstream HEAD 334c58073ec0ea8a1b34da0c71f969b1affd0959. In `Sources/Op
 A stronger stable-version candidate is Codex's built-in terminal-title setting. Inspection of the exact CLI release source `rust-v0.145.0`, `codex-rs/tui/src/chatwidget/status_surfaces.rs`, confirms TerminalTitleItem::SessionId. However it passes the 36-character session UUID through a 32-character title-part truncation function. Therefore do not describe its output as the complete ID or assume exact full-UUID parsing. A title-based binding must account for the actual rendered value, uniqueness among live sessions, stale/custom titles, and unsupported split tabs. No title configuration was changed and no live title capture was performed.
 
 References: https://github.com/Octane0411/open-vibe-island/blob/334c58073ec0ea8a1b34da0c71f969b1affd0959/Sources/OpenIslandCore/CodexHooks.swift ; https://github.com/Octane0411/open-vibe-island/blob/334c58073ec0ea8a1b34da0c71f969b1affd0959/Sources/OpenIslandApp/TerminalJumpService.swift ; https://github.com/openai/codex/blob/rust-v0.145.0/codex-rs/tui/src/chatwidget/status_surfaces.rs
+
+
+## Session-title mapping implementation
+
+The user selected the session-ID title approach. `session_title` and `tab_for_session` in the probe now implement the exact CLI 0.145.0 truncation (29 UUID characters plus `...`), whole-title equality, unique live-session prefix, unique terminal match and unsplit-tab validation. Tests pass for two distinct tabs, colliding shortened IDs, missing tabs, malformed inventories, duplicate matches and split rejection. No Apple Events are emitted and no live Ghostty inventory has been read.
+
+For the human-assisted test, open two unsplit Ghostty tabs in the same existing isolated lab. In each, run:
+
+```sh
+cd /Users/dev/Steer/output/desktop-hook-lab
+codex -m gpt-5.5 -c 'tui.terminal_title=["session-id"]' 'Reply only STEER-TAB-CHECK. Do not use tools.'
+```
+
+The model override only avoids the independently observed newer-model/older-CLI incompatibility. It changes neither the saved default model nor the title setting. Expected titles are different shortened UUIDs. Capturing and revalidating the actual native tab/window inventory and navigation still require a permitted interaction route; the current Ghostty computer-use restriction remains. Do not run the prerelease merely for this test. Interactive approval checks remain separate.

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import uuid
 import xml.etree.ElementTree as ET
 
 
@@ -26,6 +27,69 @@ def pane_for_tty(tty, terminals):
     if len(matches) != 1 or not isinstance(matches[0].get('id'), str) or not matches[0]['id']:
         return {'status': 'unavailable' if not matches else 'unknown', 'terminal_id': None}
     return {'status': 'matched', 'terminal_id': matches[0]['id']}
+
+
+def session_title(session):
+    # CLI 0.145.0 limits this title item to 29 characters plus three ASCII dots.
+    return str(uuid.UUID(session))[:29] + '...'
+
+
+def tab_for_session(session, live_sessions, windows):
+    """Input must be a fresh, complete native inventory; never match cwd/focus."""
+    unknown = {'status': 'unknown', 'target': None}
+    try:
+        if not isinstance(live_sessions, list) or not isinstance(windows, list):
+            return unknown
+        session = str(uuid.UUID(session))
+        known = {str(uuid.UUID(value)) for value in live_sessions}
+        expected = session_title(session)
+        if session not in known or sum(session_title(value) == expected for value in known) != 1:
+            return unknown
+        candidates = []
+        for window in windows:
+            if not isinstance(window['id'], str) or not window['id']:
+                return unknown
+            for tab in window['tabs']:
+                if not isinstance(tab['id'], str) or not tab['id']:
+                    return unknown
+                terminals = tab['terminals']
+                if not isinstance(terminals, list):
+                    return unknown
+                for terminal in terminals:
+                    if not isinstance(terminal['name'], str) or not isinstance(terminal['id'], str) or not terminal['id']:
+                        return unknown
+                    if terminal['name'] == expected:
+                        candidates.append((window['id'], tab['id'], terminal['id'], len(terminals)))
+        if not candidates:
+            return {'status': 'unavailable', 'target': None}
+        if len(candidates) != 1:
+            return unknown
+        window, tab, terminal, count = candidates[0]
+        if count != 1:
+            return {'status': 'unsupported_split', 'target': None}
+        return {'status': 'matched', 'target': {'window_id': window, 'tab_id': tab, 'terminal_id': terminal}}
+    except (TypeError, ValueError, KeyError, AttributeError):
+        return unknown
+
+
+def check_title_matching():
+    a = '01a08ffb-8606-77b1-af6c-6f63169781a8'
+    b = '01a08ff5-d074-70e1-8e83-6c7e9ae99feb'
+    def tab(name, session):
+        return {'id': name, 'terminals': [{'id':name+'-terminal','name':session_title(session)}]}
+    windows = [{'id':'window-a','tabs':[tab('tab-a',a),tab('tab-b',b)]}]
+    assert session_title(a) == '01a08ffb-8606-77b1-af6c-6f631...'
+    assert tab_for_session(a,[a,b],windows)['target']['tab_id'] == 'tab-a'
+    assert tab_for_session(b,[a,b],windows)['target']['tab_id'] == 'tab-b'
+    assert tab_for_session(a,[a,b],[])['status'] == 'unavailable'
+    assert tab_for_session(a,[a,b],windows+windows)['status'] == 'unknown'
+    assert tab_for_session(a,[a[:-1]+'9',a],windows)['status'] == 'unknown'
+    assert tab_for_session(a,[b],windows)['status'] == 'unknown'
+    windows[0]['tabs'][0]['terminals'].append({'id':'extra','name':'shell'})
+    assert tab_for_session(a,[a,b],windows)['status'] == 'unsupported_split'
+    windows[0]['tabs'][0]['terminals'] = [{'id':'x','name':'project '+session_title(a)}]
+    assert tab_for_session(a,[a,b],windows)['status'] == 'unavailable'
+    assert tab_for_session(a,[a,b],[None])['status'] == 'unknown'
 
 
 def probe(app):
@@ -57,6 +121,7 @@ if __name__ == "__main__":
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
     if args.self_test:
+        check_title_matching()
         assert capabilities(ET.fromstring("<dictionary/>")) == {}
         assert capabilities(ET.fromstring('<dictionary><class name="terminal">'
             '<property name="id"/><responds-to command="focus"/>'
@@ -72,7 +137,7 @@ if __name__ == "__main__":
         assert pane_for_tty('/dev/ttys001', [None])['status'] == 'unknown'
         assert pane_for_tty('/same', panes)['status'] == 'unknown'
         assert pane_for_tty('/dev/ttys001', [{'id':'pane-a','cwd':'/same'}])['status'] == 'unavailable'
-        print("Ghostty dictionary and exact TTY matching checks passed; no live pane queried.")
+        print("Ghostty capability, TTY and session-title tab matching checks passed; no live UI queried.")
     else:
         try:
             print(json.dumps(probe(args.app), indent=2))
