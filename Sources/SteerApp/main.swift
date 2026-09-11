@@ -30,7 +30,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     var visibleReminders: [Reminder] { reminders.visibleItems(cliSessions: cliSessions, desktopForeground: desktopForeground) }
     private var scanning = false
     private var nextScan: Double = 0
-    var count: Int { visibleReminders.count + cli.items.count + (attention.pending && !desktopForeground ? 1 : 0) }
+    var count: Int { visibleReminders.count + cli.groups.count + (attention.pending && !desktopForeground ? 1 : 0) }
     var expanded: Bool { attention.expanded || reminderPresentation.expanded || cliPresentation.expanded }
     var hovering = false
     private var status: NSStatusItem!
@@ -182,7 +182,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             ?? NSScreen.main
         guard let screen else { panel.orderOut(nil); return }
         let width: CGFloat = expanded ? 380 : 210
-        let height: CGFloat = expanded ? min(380, 150 + CGFloat(visibleReminders.count + cli.items.count) * 65 + (attention.pending ? 80 : 0)) : 34
+        let height: CGFloat = expanded ? min(380, 150 + CGFloat(visibleReminders.count + cli.groups.count) * 65 + (attention.pending ? 80 : 0)) : 34
         // Keep controls below physical camera housing; top-center on other displays.
         let top = screen.frame.maxY - max(screen.safeAreaInsets.top, 6) - 6
         panel.setFrame(NSRect(x: screen.frame.midX - width / 2, y: top - height,
@@ -228,7 +228,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         if let bytes = try? JSONEncoder().encode(cli.acknowledged) { UserDefaults.standard.set(bytes, forKey: "cliAcknowledgments") }
         if cli.items.isEmpty { cliPresentation.dismiss() }
     }
-    func dismissCLI(_ id: TurnIdentity) { cli.dismiss(id); saveCLI(); refresh() }
+    func dismissCLI(_ group: CLICompletionGroup) {
+        for item in group.completions { cli.dismiss(item.id) }
+        saveCLI(); refresh()
+    }
     func openCLI(_ session: UUID) {
         guard !openingTask else { return }
         guard ghosttyEnabled else { showControls(); return }
@@ -304,7 +307,7 @@ struct Controls: View {
             }
             Divider()
             Button("Connect Codex events…", action: model.connectReminders)
-            Text(model.eventsPath.isEmpty ? "Codex events are not connected." : "\(model.reminders.items.count) reminders · \(model.cli.items.count) CLI completions")
+            Text(model.eventsPath.isEmpty ? "Codex events are not connected." : "\(model.reminders.items.count) reminders · \(model.cli.groups.count) CLI sessions to check")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Enable Ghostty controls", isOn: $model.ghosttyEnabled)
             Text("Requires session-ID terminal titles and one session per unsplit tab. Enabling may request macOS Automation access.")
@@ -356,16 +359,17 @@ struct Notch: View {
                                 }.disabled(model.openingTask)
                             }
                         }
-                        ForEach(model.cli.items) { item in
+                        ForEach(model.cli.groups) { item in
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text("Codex CLI finished").font(.headline)
                                     Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
+                                    Text(item.completions.count == 1 ? "1 completed reply" : "\(item.completions.count) completed replies").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 Button(model.ghosttyEnabled ? "Open in Codex" : "Set up Ghostty") { model.openCLI(item.session) }
                                     .disabled(model.openingTask)
-                                Button("Dismiss") { model.dismissCLI(item.id) }
+                                Button("Dismiss") { model.dismissCLI(item) }
                             }
                         }
                         if model.needsGhosttySetup {
