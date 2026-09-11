@@ -109,3 +109,23 @@ The later allowed CUA walkthrough exercised only the branch's connected desktop
 evidence (17 real desktop completions plus one test item). It did not trigger a
 fresh CLI turn or access Ghostty, so no new CLI-native popup/sound evidence is
 claimed.
+
+### Fresh CLI completion proof (2026-09-12)
+
+An interactive Codex TUI session `01a0923d-0a94-7de1-aa3a-641a86112456` ran in
+`/Users/rmaisog/Documents/ChatGPT/Steer/output/desktop-hook-lab`. Its rollout was
+`/Users/rmaisog/.codex/sessions/2026/09/12/rollout-2026-09-12T04-51-09-01a0923d-0a94-7de1-aa3a-641a86112456.jsonl`, with `session_meta` source
+`cli` and the lab cwd. Turn `01a0923d-c536-7b73-b750-cd011719d5f0` completed
+with the exact response `STEER-CLI-TUI-COMPLETE`.
+
+The matching hook captures were SessionStart
+`5a07abef-c71b-4865-84b9-871472f2dc1b`, UserPromptSubmit
+`711f297a-ff02-48c6-9f04-0cbbb9a93fea`, Stop
+`4103507e-29c8-4e4b-87a4-d5503b5c7d03`, and SessionEnd
+`9c365965-fd2c-42ee-9bb9-1281953ea5cb`. The exact built app from this branch
+showed 20 notifications; its first row read **Codex CLI finished Session
+01A0923D-0A94** and rendered **Open in Codex** and **Dismiss** controls.
+
+This proves the fresh CLI lifecycle-to-completion path and native row rendering
+through the allowed Steer route. Sound audibility/mute and Ghostty-focused
+suppression remain human-only boundaries and are not proven here.
