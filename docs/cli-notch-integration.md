@@ -86,3 +86,16 @@ the existing human-verified two-tab/cross-window navigation and direct-return
 acknowledgment above, this closes the issue's happy-path evidence boundary.
 CUA still forbids agent access to Ghostty itself; no new tab selection,
 Automation permission change, or user configuration change was made.
+
+## Completion notification demonstration (#8)
+
+The automated CLI replay and queue tests demonstrate exact-session/turn
+completion capture, duplicate-event rejection, later-turn retention, restart
+acknowledgment persistence, and source-aware presentation gating. Existing
+Steer-only evidence above records the live CLI completion rows, grouped replies,
+and verified direct-return acknowledgment.
+
+This patch did not inspect or control Ghostty, request Automation access, or alter
+terminal/configuration state. Ghostty focus timing remains bounded by the matcher
+and controllable-clock regression; a fresh native popup/sound run in Ghostty still
+requires the permitted human route.

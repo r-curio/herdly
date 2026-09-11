@@ -53,3 +53,27 @@ import Testing
     _ = item.update(codexForeground: false, hovering: false, now: 14.1)
     #expect(!item.expanded && item.pending)
 }
+
+@Test func cliPresentationWaitsForVerifiedGhosttyFocus() {
+    #expect(!CompletionVisibility.allows(source: .cli, codexForeground: false, ghosttyFocus: .checking))
+    #expect(!CompletionVisibility.allows(source: .cli, codexForeground: false, ghosttyFocus: .unknown))
+    #expect(!CompletionVisibility.allows(source: .cli, codexForeground: false, ghosttyFocus: .focused))
+    #expect(CompletionVisibility.allows(source: .cli, codexForeground: false, ghosttyFocus: .away))
+    #expect(CompletionVisibility.allows(source: .desktop, codexForeground: nil, ghosttyFocus: .unknown))
+    #expect(!CompletionVisibility.allows(source: .desktop, codexForeground: true, ghosttyFocus: .disabled))
+}
+
+@Test func cliThreeSecondTimerStartsAfterFocusGateOpens() {
+    var presentation = Attention()
+    presentation.enqueue()
+    let blocked = !CompletionVisibility.allows(source: .cli, codexForeground: false, ghosttyFocus: .checking)
+    let blockedResult = presentation.update(codexForeground: blocked, hovering: false, now: 10)
+    #expect(!blockedResult)
+    #expect(!presentation.presented)
+
+    let allowed = CompletionVisibility.allows(source: .cli, codexForeground: false, ghosttyFocus: .away)
+    let shown = presentation.update(codexForeground: !allowed, hovering: false, now: 20)
+    #expect(shown)
+    _ = presentation.update(codexForeground: false, hovering: false, now: 23.1)
+    #expect(!presentation.expanded && presentation.pending)
+}
