@@ -120,12 +120,16 @@ public struct AttentionQueue: Sendable {
     private var completions: [CompletionIdentity: AttentionCompletion] = [:]
     private var runningBySession: [SourceSession: AttentionRunning] = [:]
     private var resolvedTurns: Set<TurnIdentity> = []
+    private var acknowledged: Set<CompletionIdentity>
 
-    public init() {}
+    public init(acknowledged: Set<CompletionIdentity> = []) {
+        self.acknowledged = acknowledged
+    }
 
     public var items: [AttentionItem] { makeItems() }
     public var workingCount: Int { runningBySession.count }
     public var toCheckCount: Int { requests.count + completions.count }
+    public var acknowledgedCompletions: Set<CompletionIdentity> { acknowledged }
 
     public func items(viewing session: UUID) -> [AttentionItem] {
         items.filter { $0.session != session }
@@ -139,7 +143,7 @@ public struct AttentionQueue: Sendable {
                                completions incomingCompletions: [AttentionCompletion] = [],
                                running incomingRunning: [AttentionRunning] = [], now: Double? = nil) {
         for incoming in incomingCompletions {
-            guard completions[incoming.id] == nil else { continue }
+            guard completions[incoming.id] == nil, !acknowledged.contains(incoming.id) else { continue }
             completions[incoming.id] = incoming
             let turn = TurnIdentity(session: incoming.session, turn: incoming.turn)
             resolvedTurns.insert(turn)
@@ -168,6 +172,39 @@ public struct AttentionQueue: Sendable {
         if let now { expire(at: now) }
     }
 
+    public mutating func apply(scan: ReminderScan, desktopEvents: [DesktopEvent], now: Double) {
+        let cliCompletions = scan.cliCompletions.map {
+            AttentionCompletion(source: .cli, session: $0.session, turn: $0.turn,
+                                arrivedAt: timestamp($0.receivedAt))
+        }
+        let desktopState = DesktopState.replay(desktopEvents.filter { !scan.cliSessions.contains($0.session) })
+        let desktopCompletions = desktopState.completed.map {
+            AttentionCompletion(source: .desktop, session: $0.session, turn: $0.turn,
+                                arrivedAt: timestamp($0.receivedAt))
+        }
+        let desktopRunning = desktopState.running.map {
+            AttentionRunning(source: .desktop, session: $0.session, turn: $0.turn,
+                             arrivedAt: timestamp($0.startedAt))
+        }
+        let cliRunning = scan.cliState.running.map {
+            AttentionRunning(source: .cli, session: $0.session, turn: $0.turn,
+                             arrivedAt: timestamp($0.startedAt))
+        }
+        runningBySession.removeAll()
+        resolve(scan.completed.union(scan.canceled))
+        apply(requests: scan.attentionRequests,
+              completions: desktopCompletions + cliCompletions,
+              running: desktopRunning + cliRunning, now: now)
+    }
+
+    private mutating func resolve(_ turns: Set<TurnIdentity>) {
+        resolvedTurns.formUnion(turns)
+        requests = requests.filter { !turns.contains(TurnIdentity(session: $0.value.session, turn: $0.value.turn)) }
+        runningBySession = runningBySession.filter {
+            !turns.contains(TurnIdentity(session: $0.value.session, turn: $0.value.turn))
+        }
+    }
+
     public mutating func expire(at now: Double) {
         for id in requests.keys {
             requests[id]?.expire(at: now)
@@ -177,7 +214,9 @@ public struct AttentionQueue: Sendable {
     public mutating func dismiss(_ id: AttentionItemID) {
         switch id {
         case let .request(id): requests.removeValue(forKey: id)
-        case let .completion(id): completions.removeValue(forKey: id)
+        case let .completion(id):
+            acknowledged.insert(id)
+            completions.removeValue(forKey: id)
         case let .running(id):
             runningBySession.removeValue(forKey: SourceSession(source: id.source, session: id.session))
         }
@@ -218,4 +257,8 @@ private extension AttentionItemID {
         case let .running(id): return "running:\(id.source.rawValue):\(id.session.uuidString):\(id.turn.uuidString)"
         }
     }
+}
+
+private func timestamp(_ value: String) -> Double {
+    ISO8601DateFormatter().date(from: value)?.timeIntervalSince1970 ?? 0
 }

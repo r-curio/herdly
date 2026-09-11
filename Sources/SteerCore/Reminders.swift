@@ -5,22 +5,40 @@ public struct Reminder: Codable, Equatable, Identifiable, Sendable {
     public let session_id: UUID
     public let turn_id: UUID
     public let outcome: String
+    public let received_at: String?
+    public let captured_at: Double?
     public var id: UUID { request_id }
+
+    public init(request_id: UUID, session_id: UUID, turn_id: UUID, outcome: String,
+                received_at: String? = nil, captured_at: Double? = nil) {
+        self.request_id = request_id
+        self.session_id = session_id
+        self.turn_id = turn_id
+        self.outcome = outcome
+        self.received_at = received_at
+        self.captured_at = captured_at
+    }
 }
 
 public struct TurnIdentity: Hashable, Codable, Sendable {
     public let session: UUID
     public let turn: UUID
+    public init(session: UUID, turn: UUID) {
+        self.session = session
+        self.turn = turn
+    }
 }
 
 public struct ReminderScan: Sendable {
     public var reminders: [Reminder] = []
+    public var attentionRequests: [AttentionRequest] = []
     public var completed: Set<TurnIdentity> = []
     public var canceled: Set<TurnIdentity> = []
     public var cliEvents: [CLIEvent] = []
     public var cliCompletions: [CLICompletion] = []
     public var cliSessions: Set<UUID> = []
     public var liveCLISessions: Set<UUID> = []
+    public var cliState = CLIState()
 }
 
 public struct ReminderQueue: Sendable {
@@ -88,7 +106,13 @@ public enum ReminderReader {
         }
         for url in ordered where url.pathExtension == "approval" {
             if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(Reminder.self, from: bytes),
-               item.outcome == "no_decision" { result.reminders.append(item) }
+               ["pending", "no_decision"].contains(item.outcome) {
+                let arrival = item.captured_at ?? item.received_at.flatMap { ISO8601DateFormatter().date(from: $0)?.timeIntervalSince1970 }
+                    ?? ((try? url.resourceValues(forKeys: [.creationDateKey]).creationDate?.timeIntervalSince1970) ?? 0)
+                result.attentionRequests.append(AttentionRequest(id: item.id, session: item.session_id, turn: item.turn_id,
+                                                                 arrivedAt: arrival, state: item.outcome == "no_decision" ? .handedBack : .actionable))
+                if item.outcome == "no_decision" { result.reminders.append(item) }
+            }
         }
         struct Hook: Decodable {
             let hook_event_name: String
@@ -153,7 +177,8 @@ public enum ReminderReader {
             }
         }
         result.cliEvents.sort { $0.receivedAt < $1.receivedAt }
-        result.liveCLISessions = CLIState.replay(result.cliEvents).liveSessions
+        result.cliState = CLIState.replay(result.cliEvents)
+        result.liveCLISessions = result.cliState.liveSessions
         result.cliCompletions.sort { $0.receivedAt < $1.receivedAt }
         return result
     }

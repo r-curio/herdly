@@ -48,3 +48,35 @@ import Testing
     #expect(queue.workingCount == 0)
     #expect(queue.toCheckCount == 1)
 }
+
+@Test func scanPathExpiresActionableReceiptWithoutResettingIt() {
+    let request = AttentionRequest(id: UUID(), session: UUID(), turn: UUID(), arrivedAt: 100, handoffAfter: 30)
+    var scan = ReminderScan()
+    scan.attentionRequests = [request]
+    var queue = AttentionQueue()
+    queue.apply(scan: scan, desktopEvents: [], now: 110)
+    #expect(queue.items.first?.kind == .actionableRequest)
+
+    queue.apply(scan: scan, desktopEvents: [], now: 129)
+    #expect(queue.items.first?.kind == .actionableRequest)
+    queue.apply(scan: scan, desktopEvents: [], now: 130.1)
+    #expect(queue.items.first?.kind == .handedBackRequest)
+    #expect(queue.items.first?.id == .request(request.id))
+    #expect(queue.items.first?.arrivedAt == request.arrivedAt)
+}
+
+@Test func readerPreservesPendingReceiptAsActionableQueueItem() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let item = Reminder(request_id: UUID(), session_id: UUID(), turn_id: UUID(), outcome: "pending",
+                        received_at: "1970-01-01T00:01:40Z", captured_at: 100)
+    try JSONEncoder().encode(item).write(to: root.appendingPathComponent("request.approval"))
+    let scan = ReminderReader.scan(events: root, rollouts: root)
+    #expect(scan.attentionRequests.count == 1)
+    var queue = AttentionQueue()
+    queue.apply(scan: scan, desktopEvents: [], now: 129)
+    #expect(queue.items.first?.kind == .actionableRequest)
+    queue.apply(scan: scan, desktopEvents: [], now: 131)
+    #expect(queue.items.first?.kind == .handedBackRequest)
+}
