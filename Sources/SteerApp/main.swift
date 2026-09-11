@@ -24,14 +24,18 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var taskID = ""
     @Published var navigationMessage = ""
     @Published var openingTask = false
-    @Published var reminders = ReminderQueue()
+    @Published var queue: AttentionQueue = {
+        let decoder = JSONDecoder()
+        let cli = UserDefaults.standard.data(forKey: "cliAcknowledgments")
+            .flatMap { try? decoder.decode(Set<TurnIdentity>.self, from: $0) } ?? []
+        let desktop = UserDefaults.standard.data(forKey: "desktopAcknowledgments")
+            .flatMap { try? decoder.decode(Set<TurnIdentity>.self, from: $0) } ?? []
+        return AttentionQueue(acknowledged: Set((cli.map { CompletionIdentity(source: .cli, session: $0.session, turn: $0.turn) }
+            + desktop.map { CompletionIdentity(source: .desktop, session: $0.session, turn: $0.turn) })))
+    }()
     @Published var reminderPresentation = Attention()
     @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
-    @Published var cli = CLIQueue(acknowledged: UserDefaults.standard.data(forKey: "cliAcknowledgments")
-        .flatMap { try? JSONDecoder().decode(Set<TurnIdentity>.self, from: $0) } ?? [])
-    @Published var cliState = CLIState()
     @Published var cliPresentation = Attention()
-    @Published var desktop = DesktopState()
     @Published var desktopPresentation = Attention()
     @Published var ghosttyEnabled = false
     @Published var ghosttyPermissionVerified = false
@@ -41,30 +45,27 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var setupMessage = ""
     @Published var desktopForeground = false
     private let desktopAdapter = DesktopAdapter()
-    private var desktopAcknowledged = UserDefaults.standard.data(forKey: "desktopAcknowledgments")
-        .flatMap { try? JSONDecoder().decode(Set<TurnIdentity>.self, from: $0) } ?? []
     private var firstDesktopScan = true
     private var cliSessions: Set<UUID> = []
     private var liveCLI: Set<UUID> = []
     private var firstCLIScan = true
     private var checkingGhostty = false
     private var nextGhosttyScan: Double = 0
-    var visibleReminders: [Reminder] { reminders.visibleItems(cliSessions: cliSessions, desktopForeground: desktopForeground) }
-    var visibleDesktopCompletions: [DesktopCompletion] {
-        desktop.completed.filter { !desktopAcknowledged.contains($0.id) }
+    var visibleReminders: [Reminder] {
+        queue.items.compactMap { $0.request }.map {
+            Reminder(request_id: $0.id, session_id: $0.session, turn_id: $0.turn, outcome: "no_decision")
+        }
     }
-    var visibleDesktopRunning: [DesktopRunningTurn] { desktopForeground ? [] : desktop.running }
-    var visibleCLIRunning: [CLIRunningTurn] { cliState.running }
+    var cliItems: [AttentionCompletion] {
+        queue.items.compactMap(\.completion).filter { $0.source == .cli }
+    }
     private var scanning = false
     private var nextScan: Double = 0
-    var count: Int {
-        visibleReminders.count + cli.groups.count + visibleDesktopRunning.count + visibleCLIRunning.count + visibleDesktopCompletions.count
-            + (attention.pending && !desktopForeground ? 1 : 0)
-    }
-    var workingCount: Int { visibleDesktopRunning.count + visibleCLIRunning.count }
+    var orderedAttentionItems: [AttentionItem] { queue.items }
+    var count: Int { orderedAttentionItems.count + (attention.pending && !desktopForeground ? 1 : 0) }
+    var workingCount: Int { orderedAttentionItems.filter { $0.kind == .running }.count }
     var toCheckCount: Int {
-        visibleReminders.count + cli.groups.count + visibleDesktopCompletions.count
-            + (attention.pending && !desktopForeground ? 1 : 0)
+        orderedAttentionItems.filter { $0.kind != .running }.count + (attention.pending && !desktopForeground ? 1 : 0)
     }
     var expanded: Bool { attention.expanded || reminderPresentation.expanded || cliPresentation.expanded || desktopPresentation.expanded }
     var hovering = false
@@ -158,10 +159,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         picker.allowsMultipleSelection = false
         picker.message = "Choose the Codex hook lab’s events folder. Steer reads it without changing hooks."
         guard picker.runModal() == .OK, let url = picker.url else { return }
-        reminders = ReminderQueue()
-        cli = CLIQueue(acknowledged: cli.acknowledged)
-        cliState = CLIState()
-        desktop = DesktopState()
+        queue = AttentionQueue(acknowledged: queue.acknowledgedCompletions)
         firstCLIScan = true
         firstDesktopScan = true
         cliPresentation.dismiss()
@@ -317,25 +315,22 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             let scan = result.0
             let desktopEvents = result.1
             guard eventsPath == events.path else { scanning = false; refresh(); return }
-            let previous = Set(reminders.items.map(\.id))
-            reminders.apply(scan)
-            cliState = CLIState.replay(scan.cliEvents)
             cliSessions = scan.cliSessions
-            liveCLI = cliState.liveSessions
-            let beforeCLI = Set(cli.items.map(\.id))
-            cli.apply(scan.cliCompletions)
-            if !cli.items.isEmpty {
+            liveCLI = scan.cliState.liveSessions
+            let previous = Set(queue.items.map(\.id))
+            queue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970)
+            let current = queue.items
+            let newItems = current.filter { !previous.contains($0.id) }
+            if newItems.contains(where: { $0.kind == .completion }) {
                 if firstCLIScan { cliPresentation = Attention(restored: true) }
-                else if cli.items.contains(where: { !beforeCLI.contains($0.id) }) { cliPresentation.enqueue() }
+                else { cliPresentation.enqueue() }
             }
             firstCLIScan = false
-            if reminders.items.isEmpty { reminderPresentation.dismiss() }
-            else if reminders.items.contains(where: { !previous.contains($0.id) }) { reminderPresentation.enqueue() }
-            let priorDesktop = Set(visibleDesktopCompletions.map(\.id))
-            desktop = DesktopState.replay(desktopEvents.filter { !scan.cliSessions.contains($0.session) })
-            if visibleDesktopCompletions.isEmpty { desktopPresentation.dismiss() }
+            if !current.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.dismiss() }
+            else if newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.enqueue() }
+            if !current.contains(where: { $0.kind == .completion && $0.completion?.source == .desktop }) { desktopPresentation.dismiss() }
             else if firstDesktopScan { desktopPresentation = Attention(restored: true) }
-            else if visibleDesktopCompletions.contains(where: { !priorDesktop.contains($0.id) }) { desktopPresentation.enqueue() }
+            else if newItems.contains(where: { $0.kind == .completion && $0.completion?.source == .desktop }) { desktopPresentation.enqueue() }
             firstDesktopScan = false
             scanning = false
             refresh()
@@ -377,7 +372,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             ?? NSScreen.main
         guard let screen else { panel.orderOut(nil); return }
         let width: CGFloat = expanded ? 380 : 210
-        let rows = visibleReminders.count + cli.groups.count + visibleDesktopRunning.count + visibleCLIRunning.count + visibleDesktopCompletions.count
+        let rows = orderedAttentionItems.count
         let height: CGFloat = expanded ? min(380, 150 + CGFloat(rows) * 65 + (attention.pending ? 80 : 0)) : 34
         // Keep controls below physical camera housing; top-center on other displays.
         let top = screen.frame.maxY - max(screen.safeAreaInsets.top, 6) - 6
@@ -414,21 +409,21 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             // Navigation never calls dismissTest or writes the saved completion flag.
         }
     }
-    func dismissDesktop(_ item: DesktopCompletion) {
-        desktopAcknowledged.insert(item.id)
-        if let bytes = try? JSONEncoder().encode(desktopAcknowledged) {
-            UserDefaults.standard.set(bytes, forKey: "desktopAcknowledgments")
+    func saveCompletions() {
+        let acknowledgments = queue.acknowledgedCompletions
+        let cli = Set(acknowledgments.filter { $0.source == .cli }.map { TurnIdentity(session: $0.session, turn: $0.turn) })
+        let desktop = Set(acknowledgments.filter { $0.source == .desktop }.map { TurnIdentity(session: $0.session, turn: $0.turn) })
+        if let bytes = try? JSONEncoder().encode(cli) { UserDefaults.standard.set(bytes, forKey: "cliAcknowledgments") }
+        if let bytes = try? JSONEncoder().encode(desktop) { UserDefaults.standard.set(bytes, forKey: "desktopAcknowledgments") }
+        if !queue.items.contains(where: { $0.completion?.source == .cli }) { cliPresentation.dismiss() }
+    }
+    func dismissAttention(_ item: AttentionCompletion) {
+        switch item.source {
+        case .desktop:
+            queue.dismiss(.completion(item.id)); saveCompletions(); refresh()
+        case .cli:
+            queue.dismiss(.completion(item.id)); saveCompletions(); refresh()
         }
-        if visibleDesktopCompletions.isEmpty { desktopPresentation.dismiss() }
-        refresh()
-    }
-    func saveCLI() {
-        if let bytes = try? JSONEncoder().encode(cli.acknowledged) { UserDefaults.standard.set(bytes, forKey: "cliAcknowledgments") }
-        if cli.items.isEmpty { cliPresentation.dismiss() }
-    }
-    func dismissCLI(_ group: CLICompletionGroup) {
-        for item in group.completions { cli.dismiss(item.id) }
-        saveCLI(); refresh()
     }
     func openCLI(_ session: UUID) {
         guard !openingTask else { return }
@@ -436,12 +431,15 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         openingTask = true
         navigationMessage = "Finding the matching Ghostty tab…"
         let live = liveCLI
-        let queued = cli.items.filter { $0.session == session }.map(\.id)
+        let queued = cliItems.filter { $0.session == session }.map(\.id)
         Task { @MainActor in
             let result = await Task.detached { GhosttyNavigation.open(session: session, live: live) }.value
             navigationMessage = result.message
             // A verified visit acknowledges only completions already queued for this session.
-            if result.opened { for id in queued { cli.dismiss(id) }; saveCLI() }
+            if result.opened {
+                for id in queued { queue.dismiss(.completion(id)) }
+                saveCompletions()
+            }
             openingTask = false
             refresh()
         }
@@ -450,11 +448,15 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         cliSessions.contains(item.session_id) && !ghosttyEnabled ? "Set up Ghostty" : "Open in Codex"
     }
     var needsGhosttySetup: Bool {
-        !ghosttyEnabled && (!cli.items.isEmpty || visibleReminders.contains { cliSessions.contains($0.session_id) })
+        !ghosttyEnabled && (!cliItems.isEmpty || visibleReminders.contains { cliSessions.contains($0.session_id) })
     }
     func openReminder(_ item: Reminder) {
         if cliSessions.contains(item.session_id) { openCLI(item.session_id) }
         else { taskID = item.session_id.uuidString; openTestTask() }
+    }
+    func openAttentionSession(source: AttentionSource, session: UUID) {
+        if source == .cli { openCLI(session) }
+        else { taskID = session.uuidString; openTestTask() }
     }
     func openDesktop(_ session: UUID) {
         guard !openingTask else { return }
@@ -470,20 +472,22 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     func checkGhosttyFocus() {
         let now = ProcessInfo.processInfo.systemUptime
         guard ghosttyEnabled, !checkingGhostty, !openingTask, now >= nextGhosttyScan,
-              !cli.items.isEmpty else { return }
+              !cliItems.isEmpty else { return }
         checkingGhostty = true
         nextGhosttyScan = now + 2
-        let queued = cli.items
+        let queued = cliItems
         Task { @MainActor in
             let snapshot = await Task.detached { GhosttyNavigation.snapshot() }.value
             if ghosttyEnabled, let snapshot {
                 ghosttyPermissionVerified = true
                 for session in Set(queued.map(\.session)) {
                     if let target = GhosttyMatch.target(session: session, live: liveCLI, snapshot: snapshot), snapshot.selected == target {
-                        for item in queued where item.session == session { cli.dismiss(item.id) }
+                        for item in queued where item.session == session {
+                            queue.dismiss(.completion(CompletionIdentity(source: .cli, session: item.session, turn: item.turn)))
+                        }
                     }
                 }
-                saveCLI()
+                saveCompletions()
             } else if ghosttyEnabled {
                 ghosttyEnabled = false
                 ghosttyPermissionVerified = false
@@ -545,7 +549,7 @@ struct Controls: View {
             if !model.setupMessage.isEmpty { Text(model.setupMessage).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             Divider()
             Button("Connect Codex events…", action: model.connectReminders)
-            Text(model.eventsPath.isEmpty ? "Codex events are not connected." : "\(model.reminders.items.count) reminders · \(model.visibleDesktopRunning.count + model.visibleCLIRunning.count) working · \(model.cli.groups.count) sessions to check")
+            Text(model.eventsPath.isEmpty ? "Codex events are not connected." : "\(model.toCheckCount) to check · \(model.workingCount) working")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Enable Ghostty controls", isOn: $model.ghosttyEnabled)
                 .onChange(of: model.ghosttyEnabled) { _, enabled in
@@ -574,6 +578,47 @@ struct Controls: View {
 
 struct Notch: View {
     @ObservedObject var model: Companion
+
+    @ViewBuilder
+    private func attentionRow(_ item: AttentionItem) -> some View {
+        HStack {
+            VStack(alignment: .leading) {
+                switch item.kind {
+                case .actionableRequest:
+                    Text("Permission needed").font(.headline)
+                case .handedBackRequest:
+                    Text("Continue in Codex").font(.headline)
+                case .completion:
+                    Text(item.completion?.source == .cli ? "Codex CLI finished" : "Codex desktop finished").font(.headline)
+                case .running:
+                    Text(item.running?.source == .cli ? "Codex CLI working" : "Codex desktop working").font(.headline)
+                }
+                Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            switch item.kind {
+            case .actionableRequest, .handedBackRequest:
+                Button("Open in Codex") {
+                    if let request = item.request { model.openAttentionSession(source: request.source, session: request.session) }
+                }
+                    .disabled(model.openingTask)
+            case .completion:
+                Button("Open in Codex") {
+                    if item.completion?.source == .cli { model.openCLI(item.session) }
+                    else { model.openDesktop(item.session) }
+                }.disabled(model.openingTask)
+                Button("Dismiss") {
+                    if let completion = item.completion { model.dismissAttention(completion) }
+                }
+            case .running:
+                Button("Open in Codex") {
+                    if item.running?.source == .cli { model.openCLI(item.session) }
+                    else { model.openDesktop(item.session) }
+                }.disabled(model.openingTask)
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Button(action: model.expand) {
@@ -591,64 +636,8 @@ struct Notch: View {
             if model.expanded {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
-                        ForEach(model.visibleReminders) { item in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text("Continue in Codex").font(.headline)
-                                    Text("Task \(item.session_id.uuidString.prefix(8))").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button(model.reminderActionTitle(item)) {
-                                    model.openReminder(item)
-                                }.disabled(model.openingTask)
-                            }
-                        }
-                        ForEach(model.visibleDesktopCompletions) { item in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text("Codex desktop finished").font(.headline)
-                                    Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button("Open in Codex") { model.openDesktop(item.session) }
-                                    .disabled(model.openingTask)
-                                Button("Dismiss") { model.dismissDesktop(item) }
-                            }
-                        }
-                        ForEach(model.visibleCLIRunning) { item in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text("Codex CLI working").font(.headline)
-                                    Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button(model.ghosttyEnabled ? "Open in Codex" : "Set up Ghostty") { model.openCLI(item.session) }
-                                    .disabled(model.openingTask)
-                            }
-                        }
-                        ForEach(model.cli.groups) { item in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text("Codex CLI finished").font(.headline)
-                                    Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
-                                    Text(item.completions.count == 1 ? "1 completed reply" : "\(item.completions.count) completed replies").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button(model.ghosttyEnabled ? "Open in Codex" : "Set up Ghostty") { model.openCLI(item.session) }
-                                    .disabled(model.openingTask)
-                                Button("Dismiss") { model.dismissCLI(item) }
-                            }
-                        }
-                        ForEach(model.visibleDesktopRunning) { item in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text("Codex desktop working").font(.headline)
-                                    Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button("Open in Codex") { model.openDesktop(item.session) }
-                                    .disabled(model.openingTask)
-                            }
+                        ForEach(model.orderedAttentionItems) { item in
+                            attentionRow(item)
                         }
                         if model.needsGhosttySetup {
                             Text("Enable Ghostty controls in Steer’s controls window to open these sessions.").font(.caption)
