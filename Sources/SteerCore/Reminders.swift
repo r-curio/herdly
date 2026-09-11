@@ -8,7 +8,7 @@ public struct Reminder: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID { request_id }
 }
 
-public struct TurnIdentity: Hashable, Sendable {
+public struct TurnIdentity: Hashable, Codable, Sendable {
     public let session: UUID
     public let turn: UUID
 }
@@ -16,6 +16,9 @@ public struct TurnIdentity: Hashable, Sendable {
 public struct ReminderScan: Sendable {
     public var reminders: [Reminder] = []
     public var completed: Set<TurnIdentity> = []
+    public var cliCompletions: [CLICompletion] = []
+    public var cliSessions: Set<UUID> = []
+    public var liveCLISessions: Set<UUID> = []
 }
 
 public struct ReminderQueue: Sendable {
@@ -73,7 +76,17 @@ public enum ReminderReader {
             if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(Reminder.self, from: bytes),
                item.outcome == "no_decision" { result.reminders.append(item) }
         }
-        let sessions = Set(result.reminders.map(\.session_id))
+        struct Hook: Decodable {
+            let hook_event_name: String
+            let session_id: UUID
+            let turn_id: UUID?
+            let received_at: String
+        }
+        let hooks = ordered.filter { $0.pathExtension == "json" }.compactMap { url -> Hook? in
+            guard let bytes = bounded(url, limit: 65536) else { return nil }
+            return try? JSONDecoder().decode(Hook.self, from: bytes)
+        }
+        let sessions = Set(result.reminders.map(\.session_id)).union(hooks.map(\.session_id))
         guard !sessions.isEmpty,
               let enumerator = FileManager.default.enumerator(at: rollouts, includingPropertiesForKeys: nil,
                                                                options: [.skipsHiddenFiles]) else { return result }
@@ -90,9 +103,27 @@ public enum ReminderReader {
         // ponytail: bounded full rereads every two seconds; use cursors if histories grow.
         for (session, urls) in paths where urls.count == 1 {
             if let bytes = bounded(urls[0], limit: 32 * 1024 * 1024) {
-                result.completed.formUnion(completed(in: bytes, session: session))
+                let finished = completed(in: bytes, session: session)
+                result.completed.formUnion(finished)
+                guard let first = bytes.split(separator: 10).first,
+                      let event = try? JSONSerialization.jsonObject(with: Data(first)) as? [String: Any],
+                      event["type"] as? String == "session_meta",
+                      let meta = event["payload"] as? [String: Any],
+                      (meta["id"] as? String).flatMap(UUID.init(uuidString:)) == session,
+                      meta["source"] as? String == "cli" else { continue }
+                result.cliSessions.insert(session)
+                let sessionHooks = hooks.filter { $0.session_id == session }.sorted { $0.received_at < $1.received_at }
+                if sessionHooks.last(where: { ["SessionStart", "SessionEnd"].contains($0.hook_event_name) })?.hook_event_name == "SessionStart" {
+                    result.liveCLISessions.insert(session)
+                }
+                for hook in sessionHooks where hook.hook_event_name == "Stop" {
+                    if let turn = hook.turn_id, finished.contains(TurnIdentity(session: session, turn: turn)) {
+                        result.cliCompletions.append(CLICompletion(session: session, turn: turn, receivedAt: hook.received_at))
+                    }
+                }
             }
         }
+        result.cliCompletions.sort { $0.receivedAt < $1.receivedAt }
         return result
     }
 }
