@@ -56,9 +56,9 @@ Ran the installed shell CLI with `exec --ephemeral --sandbox read-only` in the e
 
 CLI session 01a08ffb-8606-77b1-af6c-6f63169781a8, turn 01a08ffb-86de-7ea1-85e5-95b6ca2c8a56 produced independently captured SessionStart, UserPromptSubmit, Stop and SessionEnd hooks. Output and stderr are in ignored output/cli-lifecycle.*. This verifies CLI exec lifecycle delivery, not interactive Ghostty behavior or CLI approvals. No hook-trust bypass was used.
 
-### Remaining genuine blockers
+### Earlier blockers (superseded by the tab-only title decision below)
 
-Exact live pane proof needs a runtime exposing the new TTY API and a permitted Ghostty interaction route. The prior computer-use denial still applies; no alternate Apple Events/AX route was used to evade it. Running a prerelease terminal as the user's normal terminal is a product/runtime decision, not permission to silently replace their stable install. The two-session split/tab/window proof and CLI allow/deny/no-decision matrix remain unverified. Issue #3 must stay open and blocked until those checks pass or the user explicitly changes its scope.
+At this stage, exact live pane proof needs a runtime exposing the new TTY API and a permitted Ghostty interaction route. The prior computer-use denial still applies; no alternate Apple Events/AX route was used to evade it. Running a prerelease terminal as the user's normal terminal is a product/runtime decision, not permission to silently replace their stable install. The two-session split/tab/window proof and CLI allow/deny/no-decision matrix remain unverified. Issue #3 must stay open and blocked until those checks pass or the user explicitly changes its scope.
 
 ### Prepared prerelease artifact
 
