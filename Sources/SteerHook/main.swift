@@ -84,8 +84,9 @@ private func boundedRegularData(_ url: URL, limit: Int) -> Data? {
     return bytes
 }
 
-private func receipt(for request: ApprovalRequest, publishedAt: Double, in directory: URL, before deadline: Double) -> ApprovalReceiptRecord? {
-    while Date().timeIntervalSince1970 < deadline {
+private func receipt(for request: ApprovalRequest, publishedAt: Double, in directory: URL) -> ApprovalReceiptRecord? {
+    let deadlineUptime = ProcessInfo.processInfo.systemUptime + ApprovalTiming.connectionTimeout
+    while ProcessInfo.processInfo.systemUptime < deadlineUptime {
         if let bytes = boundedRegularData(ApprovalStore.receiptURL(in: directory, id: request.id), limit: 4096),
            let value = try? JSONDecoder().decode(ApprovalReceiptRecord.self, from: bytes),
            value.requestID == request.id, value.receivedAt.isFinite,
@@ -98,8 +99,10 @@ private func receipt(for request: ApprovalRequest, publishedAt: Double, in direc
 
 private func awaitDecision(for request: ApprovalRequest, in directory: URL, waitBound: Double) -> ApprovalDecision {
     let coordinator = ApprovalCoordinator(requestID: request.id, expiresAt: request.expiresAt)
-    let hardDeadline = min(request.expiresAt + 1, request.receivedAt + waitBound)
-    while Date().timeIntervalSince1970 < hardDeadline {
+    let startedUptime = ProcessInfo.processInfo.systemUptime
+    let hardDeadline = min(startedUptime + ApprovalTiming.handoffTimeout + 1, startedUptime + waitBound)
+    let expiryUptime = startedUptime + ApprovalTiming.handoffTimeout
+    while ProcessInfo.processInfo.systemUptime < hardDeadline {
         let now = Date().timeIntervalSince1970
         if let bytes = boundedRegularData(ApprovalStore.decisionURL(in: directory, id: request.id), limit: 4096),
            let record = try? JSONDecoder().decode(ApprovalDecisionRecord.self, from: bytes),
@@ -108,10 +111,11 @@ private func awaitDecision(for request: ApprovalRequest, in directory: URL, wait
                                              at: record.decidedAt) {
             return decision
         }
-        if let expired = coordinator.expire(at: now) { return expired }
+        if ProcessInfo.processInfo.systemUptime >= expiryUptime,
+           let expired = coordinator.expire(at: request.expiresAt) { return expired }
         Thread.sleep(forTimeInterval: 0.05)
     }
-    return coordinator.expire(at: Date().timeIntervalSince1970) ?? .noDecision
+    return coordinator.expire(at: request.expiresAt) ?? .noDecision
 }
 
 func selfTest() -> Int32 {
@@ -140,11 +144,11 @@ guard object["hook_event_name"] as? String == "PermissionRequest" else {
     _ = writeEvent(object, to: directory, installationID: arguments[installationIndex + 1]); exit(0)
 }
 let receiptStarted = Date().timeIntervalSince1970
+let receiptStartedUptime = ProcessInfo.processInfo.systemUptime
 guard let published = approvalRequest(from: object),
       ApprovalStore.publish(published, in: directory),
-      Date().timeIntervalSince1970 - receiptStarted <= ApprovalTiming.connectionTimeout else { exit(0) }
-guard let companionReceipt = receipt(for: published, publishedAt: receiptStarted, in: directory,
-                                    before: receiptStarted + ApprovalTiming.connectionTimeout) else {
+      ProcessInfo.processInfo.systemUptime - receiptStartedUptime <= ApprovalTiming.connectionTimeout else { exit(0) }
+guard let companionReceipt = receipt(for: published, publishedAt: receiptStarted, in: directory) else {
     update(published, outcome: .noDecision, in: directory)
     exit(0)
 }
