@@ -49,3 +49,18 @@ event shape without claiming permanent attachment or changing Codex
 configuration; reversible connection/setup is tracked separately in #5. A
 fresh real-session UI check still requires the permitted human route described
 there.
+
+## Completion notification demonstration (#8)
+
+The controllable-clock tests cover a completion staying queued while Codex is
+foreground, expanding for three seconds only after an eligible away state,
+retaining the item after collapse, and restoring silently. Queue tests cover
+duplicate lifecycle records, explicit dismissal, and a later turn in the same
+session remaining independent.
+
+The existing Steer-only walkthrough in `docs/prototype.md` records the compact
+popup, expansion, foreground hiding, switching-away retention, restart
+restoration, explicit dismissal, and the menu mute control. This patch did not
+alter Codex hooks, permissions, or user configuration. A fresh real desktop turn
+was not triggered here; native UI timing and sound remain separately
+human-observable.
