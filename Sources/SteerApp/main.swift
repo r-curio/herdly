@@ -339,6 +339,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
 
     func refresh() {
         scanReminders()
+        queue.expire(at: Date().timeIntervalSince1970)
         checkGhosttyFocus()
         // App identity only: no window contents, task titles, or accessibility queries.
         let codexForeground = desktopAdapter.codexForeground()
@@ -457,6 +458,21 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     func openAttentionSession(source: AttentionSource, session: UUID) {
         if source == .cli { openCLI(session) }
         else { taskID = session.uuidString; openTestTask() }
+    }
+
+    func decide(_ request: AttentionRequest, as decision: ApprovalDecision) {
+        guard request.source == .cli, request.state == .actionable,
+              Date().timeIntervalSince1970 < request.expiresAt, !eventsPath.isEmpty else { return }
+        let record = ApprovalDecisionRecord(requestID: request.id, decision: decision,
+                                            decidedAt: Date().timeIntervalSince1970)
+        guard ApprovalStore.publish(record, in: URL(fileURLWithPath: eventsPath)) else {
+            navigationMessage = "This approval was already answered or is no longer available."
+            refresh()
+            return
+        }
+        queue.dismiss(.request(request.identity))
+        navigationMessage = decision == .allowOnce ? "Approved once." : "Denied."
+        refresh()
     }
     func openDesktop(_ session: UUID) {
         guard !openingTask else { return }
@@ -594,10 +610,33 @@ struct Notch: View {
                     Text(item.running?.source == .cli ? "Codex CLI working" : "Codex desktop working").font(.headline)
                 }
                 Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
+                if let details = item.request?.details {
+                    Text("Task: \(details.taskName ?? "Not provided by Codex")").font(.caption)
+                    Text("Project: \(details.project ?? "Not provided by Codex")").font(.caption)
+                    Text("Action: \(details.action ?? "Not provided by Codex")").font(.caption)
+                    Text("Command: \(details.command ?? "Not provided by Codex")").font(.caption).textSelection(.enabled)
+                    Text("Reason: \(details.reason ?? "Not provided by Codex")").font(.caption).textSelection(.enabled)
+                    if let longText = details.longText {
+                        DisclosureGroup("Show full request") {
+                            Text(longText).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }.font(.caption)
+                    }
+                }
             }
             Spacer()
             switch item.kind {
-            case .actionableRequest, .handedBackRequest:
+            case .actionableRequest:
+                if item.request?.source == .cli {
+                    VStack {
+                        Button("Approve once") { if let request = item.request { model.decide(request, as: .allowOnce) } }
+                        Button("Deny") { if let request = item.request { model.decide(request, as: .deny) } }
+                    }
+                }
+                Button("Open in Codex") {
+                    if let request = item.request { model.openAttentionSession(source: request.source, session: request.session) }
+                }.disabled(model.openingTask)
+            case .handedBackRequest:
                 Button("Open in Codex") {
                     if let request = item.request { model.openAttentionSession(source: request.source, session: request.session) }
                 }

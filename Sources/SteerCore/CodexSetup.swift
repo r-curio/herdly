@@ -35,6 +35,7 @@ public struct CodexCapabilities: Equatable, Sendable {
 public enum CodexSetupRequirements {
     public static let hookEvents = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "Stop", "SessionEnd"]
     public static let helperSource = "steer-hook-v1"
+    public static let hookTimeout = Int(ApprovalTiming.helperWaitBound + ApprovalTiming.connectionTimeout + 2)
     public static let minimumCLIVersion = "0.145.0"
     public static let minimumDesktopVersion = "26.901.51231"
     public static let minimumGhosttyVersion = "1.3.1"
@@ -83,7 +84,7 @@ public enum CodexSetupValidator {
                 (entry["hooks"] as? [[String: Any]])?.contains {
                     $0["type"] as? String == "command" &&
                     $0["command"] as? String == command &&
-                    ($0["timeout"] as? NSNumber)?.intValue == 2
+                    ($0["timeout"] as? NSNumber)?.intValue == CodexSetupRequirements.hookTimeout
                 } == true
             }
         }
@@ -430,10 +431,10 @@ public enum CodexSetupPlanner {
                 (entry["hooks"] as? [[String: Any]])?.contains {
                     $0["type"] as? String == "command" &&
                     $0["command"] as? String == command &&
-                    ($0["timeout"] as? NSNumber)?.intValue == 2
+                    ($0["timeout"] as? NSNumber)?.intValue == CodexSetupRequirements.hookTimeout
                 } == true
             }
-            if !owned { entries.append(["hooks": [["type": "command", "command": command, "timeout": 2]]]) }
+            if !owned { entries.append(["hooks": [["type": "command", "command": command, "timeout": CodexSetupRequirements.hookTimeout]]]) }
             hooks[event] = entries
         }
         result["hooks"] = hooks
@@ -449,7 +450,7 @@ public enum CodexSetupPlanner {
                 guard let nested = entry["hooks"] as? [[String: Any]] else { return nil }
                 return nested.compactMap { hook -> (String, String)? in
                     guard hook["type"] as? String == "command",
-                          (hook["timeout"] as? NSNumber)?.intValue == 2,
+                          (hook["timeout"] as? NSNumber)?.intValue == CodexSetupRequirements.hookTimeout,
                           let command = hook["command"] as? String,
                           command.hasPrefix(prefix),
                           let id = installationID(in: command, prefix: prefix), UUID(uuidString: id) != nil else { return nil }
