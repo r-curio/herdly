@@ -20,6 +20,7 @@ Architecture and product decisions are documented. A read-only desktop capabilit
 - [Architecture draft](docs/architecture.md)
 - [Domain glossary](CONTEXT.md)
 - [Desktop investigation](docs/codex-desktop-investigation.md)
+- [Backlog and dependency index](docs/mvp-backlog.md)
 - [MVP implementation issues](https://github.com/r-curio/steer/issues?q=is%3Aissue+label%3Amvp)
 
 ## Run the existing probe
