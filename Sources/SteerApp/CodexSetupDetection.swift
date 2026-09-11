@@ -3,6 +3,12 @@ import Foundation
 import SteerCore
 
 enum CodexSetupDetection {
+    private enum DesktopSelection {
+        case none
+        case selected(URL)
+        case ambiguous
+    }
+
     struct SetupSnapshot: Sendable {
         let capabilities: CodexCapabilities
         let plan: CodexSetupPlan?
@@ -10,13 +16,34 @@ enum CodexSetupDetection {
     }
 
     static func capabilities() -> CodexCapabilities {
-        let desktopURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex")
-            ?? URL(fileURLWithPath: "/Applications/ChatGPT.app")
-        let desktopVersion = Bundle(url: desktopURL)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
-        let desktopInstalled = FileManager.default.fileExists(atPath: desktopURL.path)
-        let desktop = desktopInstalled && atLeast(desktopVersion, CodexSetupRequirements.minimumDesktopVersion)
+        let runningDesktopProcesses = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
+        let runningDesktop = runningDesktopProcesses.compactMap(\.bundleURL)
+        let installedDesktop = [
+            "/Applications/Codex.app", "/Applications/ChatGPT.app",
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Codex.app").path,
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/ChatGPT.app").path,
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex")?.path
+        ].compactMap { $0 }.map(URL.init(fileURLWithPath:)).filter {
+            FileManager.default.fileExists(atPath: $0.path)
+        }.reduce(into: [URL]()) { result, url in
+            if !result.contains(url) { result.append(url) }
+        }
+        let desktopSelection: DesktopSelection
+        if runningDesktopProcesses.count > 1 { desktopSelection = .ambiguous }
+        else if let running = runningDesktop.first { desktopSelection = .selected(running) }
+        else if installedDesktop.count > 1 { desktopSelection = .ambiguous }
+        else if let installed = installedDesktop.first { desktopSelection = .selected(installed) }
+        else { desktopSelection = .none }
+        let desktopURL: URL?
+        switch desktopSelection {
+        case .selected(let url): desktopURL = url
+        case .none, .ambiguous: desktopURL = nil
+        }
+        let desktopVersion = desktopURL.flatMap { Bundle(url: $0)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
+        let desktopInstalled = desktopURL != nil || !runningDesktop.isEmpty || !installedDesktop.isEmpty
+        let desktop = desktopSelectionIsSupported(desktopSelection, version: desktopVersion)
 
-        let cliPath = executable(named: "codex", beside: desktopURL)
+        let cliPath = executable(named: "codex", beside: desktopURL ?? URL(fileURLWithPath: "/Applications/ChatGPT.app"))
         let cliVersion = cliPath.flatMap { version(of: $0) }
         let cliInstalled = cliPath != nil
         let cli = cliInstalled && atLeast(cliVersion, CodexSetupRequirements.minimumCLIVersion)
@@ -27,6 +54,7 @@ enum CodexSetupDetection {
         let ghosttyInstalled = FileManager.default.fileExists(atPath: ghosttyURL.path)
         let ghostty = ghosttyInstalled && atLeast(ghosttyVersion, CodexSetupRequirements.minimumGhosttyVersion)
         var reasons: [String] = []
+        if case .ambiguous = desktopSelection { reasons.append("Multiple Codex desktop instances are installed or running; close extras before setup.") }
         if desktopInstalled && !desktop { reasons.append("Codex desktop \(desktopVersion ?? "version unknown") is older than the tested minimum \(CodexSetupRequirements.minimumDesktopVersion).") }
         if cliInstalled && !cli { reasons.append("Codex CLI \(cliVersion ?? "version unknown") is older than the tested minimum \(CodexSetupRequirements.minimumCLIVersion).") }
         if !desktopInstalled && !cliInstalled { reasons.append("No supported Codex desktop app or CLI was detected.") }
@@ -36,6 +64,11 @@ enum CodexSetupDetection {
                                  desktopVersion: desktopVersion, ghosttyVersion: ghosttyVersion,
                                  cliInstalled: cliInstalled, desktopInstalled: desktopInstalled,
                                  ghosttyInstalled: ghosttyInstalled)
+    }
+
+    private static func desktopSelectionIsSupported(_ selection: DesktopSelection, version: String?) -> Bool {
+        guard case .selected = selection else { return false }
+        return atLeast(version, CodexSetupRequirements.minimumDesktopVersion)
     }
 
     /// Runs a tiny bundled helper check without reading or writing the user's setup.
@@ -71,8 +104,10 @@ enum CodexSetupDetection {
     }
 
     static func boundedRegularData(at url: URL, maximum: Int) -> Data? {
-        var directory = ObjCBool(false)
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &directory), !directory.boolValue,
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil,
+              (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
               let handle = try? FileHandle(forReadingFrom: url),
               let data = try? handle.read(upToCount: maximum + 1) else { return nil }
         try? handle.close()

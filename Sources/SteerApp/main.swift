@@ -288,6 +288,13 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
+    var canConfigureSetup: Bool {
+        guard let plan = setupPlan, case .ready = plan.status else { return false }
+        if plan.requiresConfigure { return true }
+        if case .conflict = setupStatus { return true }
+        return false
+    }
+
     func scanReminders() {
         let now = ProcessInfo.processInfo.systemUptime
         guard !eventsPath.isEmpty, !scanning, now >= nextScan else { return }
@@ -523,7 +530,7 @@ struct Controls: View {
                 }
                 HStack {
                     Button("Review again", action: model.refreshSetup)
-                    Button("Configure Codex", action: model.configureCodex).disabled(!plan.requiresConfigure)
+                    Button("Configure Codex", action: model.configureCodex).disabled(!model.canConfigureSetup)
                     if model.canUndoSetup { Button("Undo setup", action: model.undoCodexSetup) }
                 }
             } else {

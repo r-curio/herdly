@@ -132,6 +132,7 @@ public struct CodexSetupPlan: Sendable {
     public let hooksChange: Data
     public let helperCommand: String
     public let requiresConfigure: Bool
+    public let installationID: String
     let originalConfig: String
     let originalHooks: Data
     let configAdded: Bool
@@ -139,12 +140,14 @@ public struct CodexSetupPlan: Sendable {
 
     public init(status: CodexSetupStatus, configChange: String, hooksChange: Data,
                 helperCommand: String, requiresConfigure: Bool,
-                originalConfig: String, originalHooks: Data, configAdded: Bool, configTableAdded: Bool = false) {
+                originalConfig: String, originalHooks: Data, configAdded: Bool, configTableAdded: Bool = false,
+                installationID: String = "") {
         self.status = status
         self.configChange = configChange
         self.hooksChange = hooksChange
         self.helperCommand = helperCommand
         self.requiresConfigure = requiresConfigure
+        self.installationID = installationID
         self.originalConfig = originalConfig
         self.originalHooks = originalHooks
         self.configAdded = configAdded
@@ -164,7 +167,9 @@ public enum CodexSetupPlanner {
         guard let parsed = try? JSONSerialization.jsonObject(with: hooks) as? [String: Any] else {
             return empty(.malformed("Codex hooks.json is not valid JSON and was not changed."), config: config, hooks: hooks)
         }
-        let command = "\(shellQuote(helperPath.path)) --events-dir \(shellQuote(eventsPath.path))"
+        let prefix = "\(shellQuote(helperPath.path)) --events-dir \(shellQuote(eventsPath.path)) --installation-id "
+        let installationID = existingInstallationID(in: parsed, prefix: prefix) ?? UUID().uuidString
+        let command = prefix + shellQuote(installationID)
         guard let merged = mergeHooks(parsed, command: command) else {
             return empty(.malformed("Codex hooks.json has an unsupported hooks shape and was not changed."), config: config, hooks: hooks)
         }
@@ -177,17 +182,21 @@ public enum CodexSetupPlanner {
         return CodexSetupPlan(status: .ready, configChange: configResult.value, hooksChange: output,
                               helperCommand: command, requiresConfigure: needsConfig || needsHooks,
                               originalConfig: config, originalHooks: hooks, configAdded: configResult.added,
-                              configTableAdded: configResult.tableAdded)
+                              configTableAdded: configResult.tableAdded, installationID: installationID)
     }
 
     private static func empty(_ status: CodexSetupStatus, config: String, hooks: Data) -> CodexSetupPlan {
         CodexSetupPlan(status: status, configChange: config, hooksChange: hooks, helperCommand: "",
                        requiresConfigure: false, originalConfig: config, originalHooks: hooks, configAdded: false,
-                       configTableAdded: false)
+                       configTableAdded: false, installationID: "")
     }
 
     private static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    static func command(helperPath: URL, eventsPath: URL, installationID: String) -> String {
+        "\(shellQuote(helperPath.path)) --events-dir \(shellQuote(eventsPath.path)) --installation-id \(shellQuote(installationID))"
     }
 
     private static func validTOMLShape(_ value: String) -> Bool {
@@ -301,7 +310,7 @@ public enum CodexSetupPlanner {
         var index = contents.startIndex
         while index < contents.endIndex {
             let character = contents[index]
-            if character == "\n" || character == "\r" || character == quote { return false }
+            if character == quote || character.asciiValue.map({ ($0 < 0x20 && $0 != 0x09) || $0 == 0x7f }) == true { return false }
             if quote == "\"" && character == "\\" {
                 index = contents.index(after: index)
                 guard index < contents.endIndex else { return false }
@@ -429,6 +438,35 @@ public enum CodexSetupPlanner {
         result["hooks"] = hooks
         return result
     }
+
+    private static func existingInstallationID(in source: [String: Any], prefix: String) -> String? {
+        guard let hooks = source["hooks"] as? [String: Any] else { return nil }
+        var common: (command: String, id: String)?
+        for event in CodexSetupRequirements.hookEvents {
+            guard let entries = hooks[event] as? [[String: Any]] else { return nil }
+            let candidates = entries.compactMap { entry -> (String, String)? in
+                guard let nested = entry["hooks"] as? [[String: Any]] else { return nil }
+                return nested.compactMap { hook -> (String, String)? in
+                    guard hook["type"] as? String == "command",
+                          (hook["timeout"] as? NSNumber)?.intValue == 2,
+                          let command = hook["command"] as? String,
+                          command.hasPrefix(prefix),
+                          let id = installationID(in: command, prefix: prefix), UUID(uuidString: id) != nil else { return nil }
+                    return (command, id)
+                }.first
+            }
+            guard let candidate = candidates.first else { return nil }
+            if let common, common.command != candidate.0 || common.id != candidate.1 { return nil }
+            common = candidate
+        }
+        return common?.id
+    }
+
+    private static func installationID(in command: String, prefix: String) -> String? {
+        let suffix = command.dropFirst(prefix.count)
+        guard suffix.first == "'", suffix.last == "'" else { return nil }
+        return String(suffix.dropFirst().dropLast())
+    }
 }
 
 public enum CodexSetupError: Error, Equatable, CustomStringConvertible, LocalizedError {
@@ -475,7 +513,13 @@ public struct CodexSetupInstaller {
            let state = try? readState(roots), state.command == plan.helperCommand {
             return status(roots: roots, capabilities: capabilities)
         }
-        guard currentConfig == plan.originalConfig, currentHooks == plan.originalHooks else {
+        let existingState = try? readState(roots)
+        let repairing = existingState.flatMap { state in
+            currentConfig == state.installedConfig && currentHooks == state.installedHooks &&
+            state.command == plan.helperCommand && state.installationID == plan.installationID &&
+            !fileManager.fileExists(atPath: roots.helperURL.path) ? state : nil
+        }
+        guard repairing != nil || (currentConfig == plan.originalConfig && currentHooks == plan.originalHooks) else {
             throw CodexSetupError.conflict("Codex configuration changed after the preview. Review setup again.")
         }
         if let existing = try? readableData(at: roots.helperURL) {
@@ -505,11 +549,15 @@ public struct CodexSetupInstaller {
             if plan.configChange != plan.originalConfig { try atomicWrite(Data(plan.configChange.utf8), to: roots.configURL) }
             if plan.hooksChange != plan.originalHooks { try atomicWrite(plan.hooksChange, to: roots.hooksURL) }
             let state = InstallState(helper: helper.base64EncodedString(), command: plan.helperCommand,
+                                     installationID: plan.installationID,
                                      installedConfig: plan.configChange, installedHooks: plan.hooksChange,
-                                     originalConfig: plan.originalConfig, originalHooks: plan.originalHooks,
-                                     originalConfigExisted: originalConfig != nil, originalHooksExisted: originalHooks != nil,
-                                     configAdded: plan.configAdded, configTableAdded: plan.configTableAdded,
-                                     installedAt: Date().timeIntervalSince1970)
+                                     originalConfig: repairing?.originalConfig ?? plan.originalConfig,
+                                     originalHooks: repairing?.originalHooks ?? plan.originalHooks,
+                                     originalConfigExisted: repairing?.originalConfigExisted ?? (originalConfig != nil),
+                                     originalHooksExisted: repairing?.originalHooksExisted ?? (originalHooks != nil),
+                                     configAdded: repairing?.configAdded ?? plan.configAdded,
+                                     configTableAdded: repairing?.configTableAdded ?? plan.configTableAdded,
+                                     installedAt: repairing?.installedAt ?? Date().timeIntervalSince1970)
             try atomicWrite(try JSONEncoder().encode(state), to: roots.stateURL)
         } catch let error {
             do {
@@ -530,10 +578,17 @@ public struct CodexSetupInstaller {
         }
         guard fileManager.fileExists(atPath: roots.stateURL.path) else { return .notConfigured }
         guard let state = try? readState(roots) else { return .conflict("Steer setup state is unreadable; review setup before changing Codex files.") }
+        guard UUID(uuidString: state.installationID) != nil,
+              state.command == CodexSetupPlanner.command(helperPath: roots.helperURL, eventsPath: roots.eventsDirectory,
+                                                         installationID: state.installationID) else {
+            return .conflict("Steer setup state has an invalid installation identity; review setup before changing Codex files.")
+        }
         guard let configData = try? readableData(at: roots.configURL),
               let config = String(data: configData, encoding: .utf8),
               let hooks = try? readableData(at: roots.hooksURL) else { return .malformed("Steer setup files are missing or unreadable.") }
-        guard fileManager.fileExists(atPath: roots.helperURL.path) else { return .notConfigured }
+        guard fileManager.fileExists(atPath: roots.helperURL.path) else {
+            return .conflict("Steer's helper is missing; Configure Codex to repair setup.")
+        }
         var helperDirectory = ObjCBool(false)
         guard fileManager.fileExists(atPath: roots.helperURL.path, isDirectory: &helperDirectory), !helperDirectory.boolValue,
               let helper = try? readableData(at: roots.helperURL) else {
@@ -555,7 +610,7 @@ public struct CodexSetupInstaller {
         guard let files = try? fileManager.contentsOfDirectory(at: roots.eventsDirectory, includingPropertiesForKeys: nil) else {
             return .permissionRequired("Steer's events directory is not readable. Grant access or choose Configure Codex again.")
         }
-        guard files.contains(where: { validMetadataEvent($0, installedAt: state.installedAt) }) else {
+        guard files.contains(where: { validMetadataEvent($0, installedAt: state.installedAt, installationID: state.installationID) }) else {
             return .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery.")
         }
         return .connected
@@ -605,8 +660,10 @@ public struct CodexSetupInstaller {
 
     private func readableData(at url: URL) throws -> Data? {
         guard fileManager.fileExists(atPath: url.path) else { return nil }
-        var isDirectory = ObjCBool(false)
-        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) == nil,
+              (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else {
             throw CodexSetupError.conflict("\(url.lastPathComponent) is a directory; it was not changed.")
         }
         guard let handle = try? FileHandle(forReadingFrom: url),
@@ -617,13 +674,14 @@ public struct CodexSetupInstaller {
         return data
     }
 
-    private func validMetadataEvent(_ url: URL, installedAt: TimeInterval) -> Bool {
+    private func validMetadataEvent(_ url: URL, installedAt: TimeInterval, installationID: String) -> Bool {
         guard url.pathExtension == "json", let data = boundedData(at: url, maximum: 65536),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let event = object["hook_event_name"] as? String, !event.isEmpty,
               let session = object["session_id"] as? String, UUID(uuidString: session) != nil,
               let received = object["received_at"] as? String, !received.isEmpty,
               object["source"] as? String == CodexSetupRequirements.helperSource,
+              object["installation_id"] as? String == installationID,
               let captured = object["captured_at"] as? NSNumber else { return false }
         let now = Date().timeIntervalSince1970
         return captured.doubleValue.isFinite && captured.doubleValue >= installedAt &&
@@ -668,6 +726,7 @@ public struct CodexSetupInstaller {
 private struct InstallState: Codable {
     let helper: String
     let command: String
+    let installationID: String
     let installedConfig: String
     let installedHooks: Data
     let originalConfig: String
