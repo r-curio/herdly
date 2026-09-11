@@ -16,6 +16,7 @@ public struct TurnIdentity: Hashable, Codable, Sendable {
 public struct ReminderScan: Sendable {
     public var reminders: [Reminder] = []
     public var completed: Set<TurnIdentity> = []
+    public var canceled: Set<TurnIdentity> = []
     public var cliCompletions: [CLICompletion] = []
     public var cliSessions: Set<UUID> = []
     public var liveCLISessions: Set<UUID> = []
@@ -23,17 +24,18 @@ public struct ReminderScan: Sendable {
 
 public struct ReminderQueue: Sendable {
     public private(set) var items: [Reminder] = []
-    private var completed: Set<TurnIdentity> = []
+    private var resolved: Set<TurnIdentity> = []
     public init() {}
     public func visibleItems(cliSessions: Set<UUID>, desktopForeground: Bool) -> [Reminder] {
         items.filter { !desktopForeground || cliSessions.contains($0.session_id) }
     }
     public mutating func apply(_ scan: ReminderScan) {
-        completed.formUnion(scan.completed)
+        resolved.formUnion(scan.completed)
+        resolved.formUnion(scan.canceled)
         for item in scan.reminders where item.outcome == "no_decision" && !items.contains(where: { $0.id == item.id }) {
             items.append(item)
         }
-        items.removeAll { completed.contains(TurnIdentity(session: $0.session_id, turn: $0.turn_id)) }
+        items.removeAll { resolved.contains(TurnIdentity(session: $0.session_id, turn: $0.turn_id)) }
     }
 }
 
@@ -46,24 +48,32 @@ public enum ReminderReader {
     }
 
     public static func completed(in data: Data, session: UUID) -> Set<TurnIdentity> {
-        guard data.last == 10, data.count <= 32 * 1024 * 1024 else { return [] }
-        var result: Set<TurnIdentity> = []
+        outcomes(in: data, session: session).completed
+    }
+
+    private static func outcomes(in data: Data, session: UUID) -> (completed: Set<TurnIdentity>, canceled: Set<TurnIdentity>) {
+        guard data.last == 10, data.count <= 32 * 1024 * 1024 else { return ([], []) }
+        var completed: Set<TurnIdentity> = []
+        var canceled: Set<TurnIdentity> = []
         for (index, line) in data.split(separator: 10, omittingEmptySubsequences: false).dropLast().enumerated() {
             guard line.count <= 1024 * 1024,
                   let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
-                  let payload = event["payload"] as? [String: Any] else { return [] }
+                  let payload = event["payload"] as? [String: Any] else { return ([], []) }
             if index == 0 {
                 guard event["type"] as? String == "session_meta",
-                      let id = payload["id"] as? String, UUID(uuidString: id) == session else { return [] }
+                      let id = payload["id"] as? String, UUID(uuidString: id) == session else { return ([], []) }
                 if let explicit = payload["session_id"],
-                   (explicit as? String).flatMap(UUID.init(uuidString:)) != session { return [] }
-            } else if event["type"] as? String == "session_meta" { return [] }
-            if event["type"] as? String == "event_msg", payload["type"] as? String == "task_complete" {
-                guard let id = payload["turn_id"] as? String, let turn = UUID(uuidString: id) else { return [] }
-                result.insert(TurnIdentity(session: session, turn: turn))
+                   (explicit as? String).flatMap(UUID.init(uuidString:)) != session { return ([], []) }
+            } else if event["type"] as? String == "session_meta" { return ([], []) }
+            if event["type"] as? String == "event_msg", let kind = payload["type"] as? String,
+               ["task_complete", "turn_aborted"].contains(kind) {
+                guard let id = payload["turn_id"] as? String, let turn = UUID(uuidString: id) else { return ([], []) }
+                let identity = TurnIdentity(session: session, turn: turn)
+                if kind == "task_complete" { completed.insert(identity) }
+                else { canceled.insert(identity) }
             }
         }
-        return result
+        return (completed, canceled)
     }
 
     public static func scan(events: URL, rollouts: URL) -> ReminderScan {
@@ -106,8 +116,10 @@ public enum ReminderReader {
         // ponytail: bounded full rereads every two seconds; use cursors if histories grow.
         for (session, urls) in paths where urls.count == 1 {
             if let bytes = bounded(urls[0], limit: 32 * 1024 * 1024) {
-                let finished = completed(in: bytes, session: session)
+                let terminal = outcomes(in: bytes, session: session)
+                let finished = terminal.completed
                 result.completed.formUnion(finished)
+                result.canceled.formUnion(terminal.canceled)
                 guard let first = bytes.split(separator: 10).first,
                       let event = try? JSONSerialization.jsonObject(with: Data(first)) as? [String: Any],
                       event["type"] as? String == "session_meta",
