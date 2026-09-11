@@ -71,3 +71,17 @@ To resume this gate, use a permitted test environment and two disposable local c
 Human navigation alone will not solve the integration: a standalone companion still needs a supported or explicitly evaluated focus observation mechanism. The Codex app's built-in task tools are not evidence of an API available to Steer. No private IPC adapter or acknowledgment heuristic has been adopted.
 
 The next bounded exercise is the [manual jump-back test](desktop-manual-test.md). It collects user observations of navigation only; no focus watcher is running. Do not ask the user to switch tasks while claiming an unimplemented observer is measuring those switches.
+
+## Focus feasibility conclusion after manual navigation
+
+The user confirmed both task links and external jump-back from Apple Notes in the [manual evidence](desktop-manual-test.md). Those later results supersede the earlier untested navigation status above. Exact installation routing and automatic selected-task observation remain unverified.
+
+A further review of the official [hook event catalog](https://learn.chatgpt.com/docs/hooks) and [app-server API](https://learn.chatgpt.com/docs/app-server), plus a fresh schema probe of desktop engine 0.153.4, did not establish an external selected-task signal. Hook events describe execution lifecycle; loaded threads and stored thread reads are not selected-task observations. Private read-state source strings do not establish a usable supported subscription.
+
+Exact-task focus is therefore blocked by an unverified integration contract, not by another manual clicking test. Do not build an observer that substitutes running state, latest activity, task title, or a successful URL launch for focus. Do not treat a generated-schema check as proof that no private capability can exist.
+
+### Proposed scope adjustment — awaiting user decision
+
+For desktop MVP, consider app-level visibility: hide the notch while Codex is foreground and show it while away when attention items exist. Keep completions queued until explicit dismissal; foregrounding Codex never marks all tasks read. A future verified selected-task signal can restore the original task-specific behavior. Native app activation is the candidate implementation, not live-tested in this investigation.
+
+Tradeoff: while viewing task B, the notch would also hide task A's notification. This changes the agreed product requirement and has not been accepted or implemented. Under the existing unknown-focus rule, direct desktop approvals remain native unless a separate accepted policy and safe approval integration are established. This adjustment alone does not complete #2 or unblock direct approvals.
