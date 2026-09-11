@@ -67,6 +67,24 @@ approval and the marker stayed absent after cancellation. `Bash` is now a
 supported, self-tested alias; this diagnosis is not live handoff evidence, and
 desktop approval remains unverified.
 
+### Real CLI conservative-handoff retest
+
+The subsequent isolated retest used the installed Codex CLI with session
+`01a09248-ce66-7823-8e80-5043df76f11e`, turn
+`01a09249-2e6e-7613-a414-cd556a328af2`, and the real Bash command
+`touch /tmp/steer-approval-lab/TIMEOUT_MARKER-2`. The hook published request
+`FBF4D0AD-AF2B-4652-9819-798AD02E1717` with the real project, action, command,
+and long request details. The running exact-branch app wrote the companion
+receipt at `received_at=1789160668.896307` with a 30-second expiry, then wrote
+`no_decision` at `1789160668.944046` because the PTY was not a verified Ghostty
+pane and the required observation was unavailable. The helper returned the
+request to Codex's native approval UI; after native cancellation the marker
+remained absent.
+
+This proves real Bash ingestion, companion receipt, conservative unknown-focus
+handback, and no accidental allow. It does not prove Ghostty allow/deny,
+30-second timeout, or desktop decision transport.
+
 Setup migration recognizes the prior Steer command shape with its two-second
 hook timeout, upgrades it in place to the 35-second bounded hook timeout, and
 collapses duplicate copies. Ambiguous multiple Steer installations return an
