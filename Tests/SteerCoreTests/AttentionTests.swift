@@ -77,3 +77,17 @@ import Testing
     _ = presentation.update(codexForeground: false, hovering: false, now: 23.1)
     #expect(!presentation.expanded && presentation.pending)
 }
+
+@Test func mutedCompletionDoesNotSignalSoundAndReopeningDoesNotReplay() {
+    var presentation = Attention()
+    presentation.enqueue()
+    let first = presentation.update(codexForeground: false, hovering: false, now: 10)
+    #expect(!CompletionSound.shouldPlay(firstPresentation: first, muted: true))
+    #expect(CompletionSound.shouldPlay(firstPresentation: first, muted: false))
+
+    presentation.expand(now: 11)
+    let reopened = presentation.update(codexForeground: false, hovering: false, now: 12)
+    #expect(!CompletionSound.shouldPlay(firstPresentation: reopened, muted: false))
+    let switched = presentation.update(codexForeground: true, hovering: false, now: 13)
+    #expect(!CompletionSound.shouldPlay(firstPresentation: switched, muted: false))
+}

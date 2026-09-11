@@ -99,3 +99,8 @@ This patch did not inspect or control Ghostty, request Automation access, or alt
 terminal/configuration state. Ghostty focus timing remains bounded by the matcher
 and controllable-clock regression; a fresh native popup/sound run in Ghostty still
 requires the permitted human route.
+
+The current native CLI demonstration is likewise blocked by the locked Mac and
+failed allowed CUA unlock attempt. Prior Steer-only CLI rows, grouped replies,
+verified navigation, and direct-return acknowledgment remain the available
+evidence; no fresh Ghostty popup or sound observation is claimed here.
