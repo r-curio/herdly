@@ -79,3 +79,6 @@ The [first desktop investigation](codex-desktop-investigation.md) found private 
 - Verify native desktop app-activation observation and exact Ghostty pane identity. Exact desktop conversation focus is deferred, not an MVP gate.
 - How to identify the active display and keep panel interaction stable while display focus changes.
 - Validate the proposed module boundaries and transport in [architecture.md](architecture.md) against the required integration checks.
+
+
+CLI lab completions now enter the shared notch after matching session/turn completion evidence. Ghostty navigation is opt-in per app launch during this investigation; uncertain targeting retains the notification. See [CLI integration](cli-notch-integration.md).

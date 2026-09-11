@@ -82,3 +82,6 @@ These are planned checks, not completed tests. Existing user configuration has n
 SteerCore ReminderReader reads no_decision approval records and matching session rollout completion records. Companion polls off the main actor every two seconds, with only one scan in flight, and applies results to ReminderQueue. The queue merges observed requests, removes only completed session/turn identities, and retains items on read failure. Completed identities prevent resurrection during the process lifetime; restart reconstructs state from metadata and rollout records. Missing metadata on restart cannot restore an item. No Python runtime or Accessibility access is used.
 
 Reads are capped at 4,096 event-directory entries, 50,000 rollout-directory entries, 32 MiB per rollout and 1 MiB per record. Duplicate rollout candidates and malformed/partial data retain reminders. Full scans are a deliberate prototype limit; incremental cursors are needed for large histories. Titles are not captured by approval metadata, so the prototype displays a shortened task ID.
+
+
+The issue #3 integration extends the existing reader and queue with CLI source classification and completion-specific acknowledgments. Native Ghostty navigation lives inside the app, with its pure matcher in SteerCore. See [implementation and verification boundaries](cli-notch-integration.md).
