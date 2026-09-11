@@ -37,7 +37,7 @@ private func jsonText(_ value: Any?) -> String? {
 
 private func supportedPermission(_ object: [String: Any]) -> Bool {
     let kind = (object["permission_type"] as? String ?? object["kind"] as? String ?? object["tool_name"] as? String)?.lowercased()
-    if let kind { return ["command", "exec_command", "file", "permission", "apply_patch"].contains(kind) }
+    if let kind { return ["bash", "command", "exec_command", "file", "permission", "apply_patch"].contains(kind) }
     return (object["tool_input"] as? [String: Any])?["command"] is String
 }
 
@@ -127,7 +127,11 @@ func selfTest() -> Int32 {
           let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil), files.count == 1 else { return 1 }
     let request = ApprovalRequest(requestID: UUID(), sessionID: session, turnID: turn,
                                   details: ApprovalDetails(command: "touch marker"), receivedAt: 100)
+    let bashPayload: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": session.uuidString,
+                                      "turn_id": turn.uuidString, "tool_name": "Bash",
+                                      "tool_input": ["command": "touch marker"]]
     guard ApprovalStore.publish(request, in: directory),
+          approvalRequest(from: bashPayload) != nil,
           ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .allowOnce, decidedAt: 101), in: directory),
           ApprovalCoordinator(requestID: request.id, expiresAt: 130).decide(requestID: request.id, decision: .allowOnce, at: 101) == .allowOnce else { return 1 }
     return 0

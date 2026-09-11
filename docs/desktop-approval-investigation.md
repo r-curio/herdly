@@ -59,6 +59,14 @@ identity checks, deadline preservation, and request detail replay. These are
 isolated helper/core checks, not live desktop approval evidence. No desktop
 allow/deny/timeout was run, and no existing hooks or permissions were changed.
 
+The first isolated run with the installed Codex CLI 0.145.0 also exposed a
+payload-coverage failure: a harmless `touch` request arrived as
+`PermissionRequest` with `tool_name: Bash`, which the pre-fix helper rejected
+before publishing a request. It therefore fell through to Codex's native
+approval and the marker stayed absent after cancellation. `Bash` is now a
+supported, self-tested alias; this diagnosis is not live handoff evidence, and
+desktop approval remains unverified.
+
 Setup migration recognizes the prior Steer command shape with its two-second
 hook timeout, upgrades it in place to the 35-second bounded hook timeout, and
 collapses duplicate copies. Ambiguous multiple Steer installations return an
