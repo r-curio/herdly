@@ -39,6 +39,20 @@ import Testing
         eventsPath: URL(fileURLWithPath: "/tmp/events"))
     #expect(malformed.status == .malformed("Codex config.toml is not valid enough to edit safely."))
 
+    for config in ["broken =", "x = [not valid TOML]", "[tui]\na = 1\n[tui]\nb = 2\n"] {
+        let malformed = CodexSetupPlanner.plan(
+            capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true),
+            config: config, hooks: Data("{}".utf8), helperPath: URL(fileURLWithPath: "/tmp/helper"),
+            eventsPath: URL(fileURLWithPath: "/tmp/events"))
+        #expect(malformed.status == .malformed("Codex config.toml is not valid enough to edit safely."))
+    }
+
+    let duplicateKey = CodexSetupPlanner.plan(
+        capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true),
+        config: "[projects.\"/tmp/a\"]\nname = \"a\"\nname = \"b\"\n", hooks: Data("{}".utf8),
+        helperPath: URL(fileURLWithPath: "/tmp/helper"), eventsPath: URL(fileURLWithPath: "/tmp/events"))
+    #expect(duplicateKey.status == .malformed("Codex config.toml is not valid enough to edit safely."))
+
     let unbalanced = CodexSetupPlanner.plan(
         capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true),
         config: "[tui]\nterminal_title = [\"session-id\"\n",
@@ -68,7 +82,10 @@ import Testing
     #expect(try installer.install(plan, roots: roots, helper: helper,
                                   capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery."))
     #expect(((try FileManager.default.attributesOfItem(atPath: roots.helperURL.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o111 != 0)
-    let event: [String: String] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "received_at": "1"]
+    let staleEvent: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "received_at": 0]
+    try JSONSerialization.data(withJSONObject: staleEvent).write(to: eventsRoot.appendingPathComponent("stale.json"))
+    #expect(installer.status(roots: roots, capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery."))
+    let event: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "received_at": Date().timeIntervalSince1970 + 1]
     try JSONSerialization.data(withJSONObject: event).write(to: eventsRoot.appendingPathComponent("event.json"))
     #expect(installer.status(roots: roots, capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .connected)
     let installed = try String(contentsOf: roots.configURL)
@@ -78,7 +95,7 @@ import Testing
     }
     #expect(try String(contentsOf: roots.configURL) == installed + "user_note = true\n")
     try Data(installed.utf8).write(to: roots.configURL)
-    #expect(try installer.undo(roots: roots) == .installed)
+    #expect(try installer.undo(roots: roots) == .notConfigured)
     #expect(try String(contentsOf: roots.configURL) == "[tui]\nfont_size = 14\n")
     let restoredHooks = try JSONSerialization.jsonObject(with: Data(contentsOf: roots.hooksURL)) as! [String: Any]
     let stop = (restoredHooks["hooks"] as! [String: Any])["Stop"] as! [[String: Any]]

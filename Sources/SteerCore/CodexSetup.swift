@@ -5,6 +5,9 @@ public struct CodexCapabilities: Equatable, Sendable {
     public let desktop: Bool
     public let ghostty: Bool
     public let supported: Bool
+    public let cliInstalled: Bool
+    public let desktopInstalled: Bool
+    public let ghosttyInstalled: Bool
     public let unsupportedReason: String?
     public let cliVersion: String?
     public let desktopVersion: String?
@@ -12,11 +15,16 @@ public struct CodexCapabilities: Equatable, Sendable {
 
     public init(cli: Bool, desktop: Bool, ghostty: Bool, supported: Bool,
                 unsupportedReason: String? = nil, cliVersion: String? = nil,
-                desktopVersion: String? = nil, ghosttyVersion: String? = nil) {
+                desktopVersion: String? = nil, ghosttyVersion: String? = nil,
+                cliInstalled: Bool = false, desktopInstalled: Bool = false,
+                ghosttyInstalled: Bool = false) {
         self.cli = cli
         self.desktop = desktop
         self.ghostty = ghostty
         self.supported = supported
+        self.cliInstalled = cliInstalled
+        self.desktopInstalled = desktopInstalled
+        self.ghosttyInstalled = ghosttyInstalled
         self.unsupportedReason = unsupportedReason
         self.cliVersion = cliVersion
         self.desktopVersion = desktopVersion
@@ -35,7 +43,7 @@ public enum CodexSetupValidator {
     public static func hasSessionTitle(in config: String) -> Bool {
         var section = ""
         for line in config.split(separator: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = stripComment(String(line)).trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
                 section = String(trimmed.dropFirst().dropLast())
                 continue
@@ -49,13 +57,32 @@ public enum CodexSetupValidator {
         return false
     }
 
+    private static func stripComment(_ value: String) -> String {
+        var quote: Character?
+        var escaped = false
+        for index in value.indices {
+            let character = value[index]
+            if character == "\\" && quote == "\"" { escaped.toggle(); continue }
+            if (character == "\"" || character == "'") && !escaped {
+                quote = quote == character ? nil : (quote == nil ? character : quote)
+            }
+            if character == "#" && quote == nil { return String(value[..<index]) }
+            escaped = false
+        }
+        return value
+    }
+
     public static func hasRequiredHooks(_ data: Data, command: String) -> Bool {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let hooks = object["hooks"] as? [String: Any] else { return false }
         return CodexSetupRequirements.hookEvents.allSatisfy { event in
             guard let entries = hooks[event] as? [[String: Any]] else { return false }
             return entries.contains { entry in
-                (entry["hooks"] as? [[String: Any]])?.contains { $0["type"] as? String == "command" && $0["command"] as? String == command } == true
+                (entry["hooks"] as? [[String: Any]])?.contains {
+                    $0["type"] as? String == "command" &&
+                    $0["command"] as? String == command &&
+                    ($0["timeout"] as? NSNumber)?.intValue == 2
+                } == true
             }
         }
     }
@@ -72,7 +99,7 @@ public enum CodexSetupStatus: Equatable, Sendable {
 public enum CodexConnectionStatus: Equatable, Sendable {
     case unavailable(String)
     case unsupported(String)
-    case installed
+    case notConfigured
     case connected
     case permissionRequired(String)
     case configuredAwaitingRestart(String)
@@ -162,37 +189,150 @@ public enum CodexSetupPlanner {
     }
 
     private static func validTOMLShape(_ value: String) -> Bool {
-        var quote = false
-        var escaped = false
-        var brackets = 0
-        for line in value.split(separator: "\n", omittingEmptySubsequences: false) {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+        // This is deliberately a small, conservative validator for the fields we
+        // edit. Unknown TOML constructs are refused instead of being rewritten.
+        var section = ""
+        var seenSections = Set<String>()
+        var seenKeysBySection = [String: Set<String>]()
+        var pending = ""
+        for rawLine in value.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let line = pending.isEmpty ? rawLine : pending + rawLine.trimmingCharacters(in: .whitespaces)
+            let trimmed = stripComment(line).trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-            if trimmed.hasPrefix("[") {
-                guard trimmed.hasSuffix("]") else { return false }
-            } else if !trimmed.contains("=") && brackets == 0 {
-                return false
+            if !pending.isEmpty || trimmed.contains("=") {
+                guard let equals = findUnquoted(trimmed, character: "=") else { return false }
+                let key = trimmed[..<equals].trimmingCharacters(in: .whitespaces)
+                guard !key.isEmpty, validKey(key) else { return false }
+                let valueStart = trimmed.index(after: equals)
+                let rawValue = stripComment(String(trimmed[valueStart...])).trimmingCharacters(in: .whitespaces)
+                guard !rawValue.isEmpty else { return false }
+                if !valueIsComplete(rawValue) {
+                    pending = line
+                    continue
+                }
+                guard validValue(rawValue) else { return false }
+                var keys = seenKeysBySection[section, default: []]
+                guard keys.insert(key).inserted else { return false }
+                seenKeysBySection[section] = keys
+                pending = ""
+                continue
             }
-            for character in trimmed {
-                if character == "\\" && quote { escaped.toggle(); continue }
-                if character == "\"" && !escaped { quote.toggle() }
-                escaped = false
-                if !quote && character == "[" { brackets += 1 }
-                if !quote && character == "]" {
-                    brackets -= 1
-                    if brackets < 0 { return false }
+            guard trimmed.hasPrefix("[") && trimmed.hasSuffix("]"),
+                  !trimmed.hasPrefix("[[") && !trimmed.hasSuffix("]]"),
+                  trimmed.count > 2 else { return false }
+            let header = String(trimmed.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
+            guard !header.isEmpty, validHeader(header), seenSections.insert(header).inserted else { return false }
+            section = header
+        }
+        return pending.isEmpty
+    }
+
+    private static func findUnquoted(_ value: String, character: Character) -> String.Index? {
+        var quote: Character?
+        var escaped = false
+        for index in value.indices {
+            let characterAtIndex = value[index]
+            if characterAtIndex == "\\" && quote == "\"" { escaped.toggle(); continue }
+            if (characterAtIndex == "\"" || characterAtIndex == "'") && !escaped {
+                quote = quote == characterAtIndex ? nil : (quote == nil ? characterAtIndex : quote)
+            }
+            if characterAtIndex == character && quote == nil { return index }
+            escaped = false
+        }
+        return nil
+    }
+
+    private static func stripComment(_ value: String) -> String {
+        var quote: Character?
+        var escaped = false
+        for index in value.indices {
+            let character = value[index]
+            if character == "\\" && quote == "\"" { escaped.toggle(); continue }
+            if (character == "\"" || character == "'") && !escaped {
+                quote = quote == character ? nil : (quote == nil ? character : quote)
+            }
+            if character == "#" && quote == nil { return String(value[..<index]) }
+            escaped = false
+        }
+        return value
+    }
+
+    private static func validKey(_ key: String) -> Bool {
+        key.split(separator: ".", omittingEmptySubsequences: false).allSatisfy {
+            !$0.isEmpty && $0.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" || $0 == "\"" || $0 == "'" || $0 == " " }
+        }
+    }
+
+    private static func validHeader(_ header: String) -> Bool {
+        var quote: Character?
+        var escaped = false
+        for character in header {
+            if character == "\\" && quote == "\"" { escaped.toggle(); continue }
+            if (character == "\"" || character == "'") && !escaped {
+                quote = quote == character ? nil : (quote == nil ? character : quote)
+            }
+            escaped = false
+        }
+        return quote == nil && !header.contains("[") && !header.contains("]")
+    }
+
+    private static func valueIsComplete(_ value: String) -> Bool {
+        var quote: Character?
+        var escaped = false
+        var depth = 0
+        for character in value {
+            if character == "\\" && quote == "\"" { escaped.toggle(); continue }
+            if (character == "\"" || character == "'") && !escaped {
+                quote = quote == character ? nil : (quote == nil ? character : quote)
+            }
+            if quote == nil {
+                if character == "[" { depth += 1 }
+                if character == "]" { depth -= 1 }
+                if depth < 0 { return false }
+            }
+            escaped = false
+        }
+        return quote == nil && depth == 0
+    }
+
+    private static func validValue(_ value: String) -> Bool {
+        guard valueIsComplete(value) else { return false }
+        if (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
+            return value.count >= 2
+        }
+        if value.hasPrefix("[") && value.hasSuffix("]") {
+            let body = String(value.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
+            if body.isEmpty { return true }
+            return splitArray(body).allSatisfy(validValue)
+        }
+        if value == "true" || value == "false" { return true }
+        return value.range(of: #"^[+-]?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$"#, options: .regularExpression) != nil
+    }
+
+    private static func splitArray(_ body: String) -> [String] {
+        var result: [String] = [], start = body.startIndex, depth = 0, quote: Character?, escaped = false
+        for index in body.indices {
+            let character = body[index]
+            if character == "\\" && quote == "\"" { escaped.toggle(); continue }
+            if (character == "\"" || character == "'") && !escaped { quote = quote == character ? nil : (quote == nil ? character : quote) }
+            if quote == nil {
+                if character == "[" { depth += 1 }
+                if character == "]" { depth -= 1 }
+                if character == "," && depth == 0 {
+                    result.append(String(body[start..<index]).trimmingCharacters(in: .whitespaces)); start = body.index(after: index)
                 }
             }
+            escaped = false
         }
-        // ponytail: delimiter-only TOML validation; use a full parser if setup edits broaden.
-        return !quote && brackets == 0
+        result.append(String(body[start...]).trimmingCharacters(in: .whitespaces))
+        return result
     }
 
     private static func configWithSessionTitle(_ config: String) -> (value: String, added: Bool, tableAdded: Bool)? {
         let lines = config.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         var section = ""
         for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let trimmed = stripComment(line).trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") { section = String(trimmed.dropFirst().dropLast()); continue }
             let key = trimmed.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces)
             let qualified = key == "tui.terminal_title"
@@ -203,14 +343,14 @@ public enum CodexSetupPlanner {
             if value == "[\"session-id\"]" { return (config, false, false) }
             return nil
         }
-        guard let tui = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces) == "[tui]" }) else {
+        guard let tui = lines.firstIndex(where: { stripComment($0).trimmingCharacters(in: .whitespaces) == "[tui]" }) else {
             var next = config
             if !next.isEmpty && !next.hasSuffix("\n") { next += "\n" }
             next += (next.isEmpty ? "[tui]\n" : "\n[tui]\n") + "terminal_title = [\"session-id\"]\n"
             return (next, true, true)
         }
         var nextTable = lines[(tui + 1)...].firstIndex { line in
-            let value = line.trimmingCharacters(in: .whitespaces)
+            let value = stripComment(line).trimmingCharacters(in: .whitespaces)
             return value.hasPrefix("[") && value.hasSuffix("]")
         } ?? lines.count
         while nextTable > tui + 1 && lines[nextTable - 1].trimmingCharacters(in: .whitespaces).isEmpty { nextTable -= 1 }
@@ -228,9 +368,13 @@ public enum CodexSetupPlanner {
             var entries = (hooks[event] as? [[String: Any]]) ?? []
             if hooks[event] != nil && hooks[event] as? [[String: Any]] == nil { return nil }
             let owned = entries.contains { entry in
-                (entry["hooks"] as? [[String: Any]])?.contains { $0["type"] as? String == "command" && $0["command"] as? String == command } == true
+                (entry["hooks"] as? [[String: Any]])?.contains {
+                    $0["type"] as? String == "command" &&
+                    $0["command"] as? String == command &&
+                    ($0["timeout"] as? NSNumber)?.intValue == 2
+                } == true
             }
-            if !owned { entries.append(["hooks": [["type": "command", "command": command]]]) }
+            if !owned { entries.append(["hooks": [["type": "command", "command": command, "timeout": 2]]]) }
             hooks[event] = entries
         }
         result["hooks"] = hooks
@@ -315,7 +459,8 @@ public struct CodexSetupInstaller {
                                      installedConfig: plan.configChange, installedHooks: plan.hooksChange,
                                      originalConfig: plan.originalConfig, originalHooks: plan.originalHooks,
                                      originalConfigExisted: originalConfig != nil, originalHooksExisted: originalHooks != nil,
-                                     configAdded: plan.configAdded, configTableAdded: plan.configTableAdded)
+                                     configAdded: plan.configAdded, configTableAdded: plan.configTableAdded,
+                                     installedAt: Date().timeIntervalSince1970)
             try atomicWrite(try JSONEncoder().encode(state), to: roots.stateURL)
         } catch let error {
             do {
@@ -334,11 +479,11 @@ public struct CodexSetupInstaller {
         guard capabilities.supported, capabilities.cli || capabilities.desktop else {
             return .unsupported(capabilities.unsupportedReason ?? "No supported Codex runtime was detected.")
         }
-        guard fileManager.fileExists(atPath: roots.stateURL.path) else { return .installed }
+        guard fileManager.fileExists(atPath: roots.stateURL.path) else { return .notConfigured }
         guard let state = try? readState(roots) else { return .conflict("Steer setup state is unreadable; review setup before changing Codex files.") }
         guard let configData = try? Data(contentsOf: roots.configURL), let config = String(data: configData, encoding: .utf8),
               let hooks = try? Data(contentsOf: roots.hooksURL) else { return .malformed("Steer setup files are missing or unreadable.") }
-        guard fileManager.fileExists(atPath: roots.helperURL.path) else { return .installed }
+        guard fileManager.fileExists(atPath: roots.helperURL.path) else { return .notConfigured }
         var helperDirectory = ObjCBool(false)
         guard fileManager.fileExists(atPath: roots.helperURL.path, isDirectory: &helperDirectory), !helperDirectory.boolValue,
               let helper = try? Data(contentsOf: roots.helperURL) else {
@@ -360,7 +505,7 @@ public struct CodexSetupInstaller {
         guard let files = try? fileManager.contentsOfDirectory(at: roots.eventsDirectory, includingPropertiesForKeys: nil) else {
             return .permissionRequired("Steer's events directory is not readable. Grant access or choose Configure Codex again.")
         }
-        guard files.contains(where: validMetadataEvent) else {
+        guard files.contains(where: { validMetadataEvent($0, installedAt: state.installedAt) }) else {
             return .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery.")
         }
         return .connected
@@ -395,7 +540,7 @@ public struct CodexSetupInstaller {
             }
             throw CodexSetupError.failed("Undo was not completed; the installed configuration was restored.")
         }
-        return .installed
+        return .notConfigured
     }
 
     private func readState(_ roots: CodexSetupRoots) throws -> InstallState {
@@ -411,13 +556,20 @@ public struct CodexSetupInstaller {
         return data
     }
 
-    private func validMetadataEvent(_ url: URL) -> Bool {
-        guard url.pathExtension == "json", let data = try? Data(contentsOf: url), data.count <= 65536,
+    private func validMetadataEvent(_ url: URL, installedAt: TimeInterval) -> Bool {
+        guard url.pathExtension == "json", let data = boundedData(at: url, maximum: 65536),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let event = object["hook_event_name"] as? String, !event.isEmpty,
               let session = object["session_id"] as? String, UUID(uuidString: session) != nil,
-              let received = object["received_at"] as? String, !received.isEmpty else { return false }
-        return true
+              let received = object["received_at"] as? NSNumber else { return false }
+        return received.doubleValue.isFinite && received.doubleValue >= installedAt
+    }
+
+    private func boundedData(at url: URL, maximum: Int) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: url),
+              let data = try? handle.read(upToCount: maximum + 1) else { return nil }
+        try? handle.close()
+        return data.count <= maximum ? data : nil
     }
 
     private func ensureDirectory(_ url: URL) throws { try fileManager.createDirectory(at: url, withIntermediateDirectories: true) }
@@ -459,4 +611,5 @@ private struct InstallState: Codable {
     let originalHooksExisted: Bool
     let configAdded: Bool
     let configTableAdded: Bool
+    let installedAt: TimeInterval
 }
