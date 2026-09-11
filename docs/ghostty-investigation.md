@@ -94,3 +94,12 @@ The model override only avoids the independently observed newer-model/older-CLI 
 The isolated lab recorded SessionStart, UserPromptSubmit and Stop for two CLI sessions at 11:42 UTC: `01a09046-5590-7882-adad-6b7f4ec91925` and `01a09046-56da-7d83-9a38-02e59d7441ec`. The user confirmed that the two unsplit Ghostty tabs show the expected rendered titles `01a09046-5590-7882-adad-6b7f4...` and `01a09046-56da-7d83-9a38-02e59...`. This is hook-file evidence plus human confirmation of displayed titles, not an automated native inventory read.
 
 The session-title link is demonstrated for this run. The probe still has only a pure inventory matcher: live inventory acquisition, selection of the matched tab/window, post-navigation verification and foreground-session observation are not implemented or proved here. The existing Ghostty computer-use restriction blocks agent-driven live navigation testing; alternate UI APIs must not be used to evade it. Interactive CLI approval checks also remain open. Issue #3 is not complete.
+
+
+## Navigation adapter — offline implementation
+
+`scripts/ghostty_navigation.py` now reuses the session-title matcher to obtain a target from a fresh native inventory. Its JXA adapter rechecks unique title, unsplit structure and all three IDs before activating the window and selecting the tab. A second snapshot must match both the original target and foreground selection before returning `opened`. Failure returns unknown; there are no terminal input or approval commands. The caller must supply current live session IDs and invoke off the UI thread. Each script process has a five-second timeout.
+
+Run `python3 scripts/check_ghostty_navigation.py` for offline transport and native-script checks. The native script runs against a fake dictionary-shaped application in Node, which has no Apple Events bridge. Tests cover selection, background/unverified state, stale or closed targets, duplicate matches, split rejection and transport errors. These checks passed alongside the existing matcher checks.
+
+This issue branch contains the investigation adapter, not the Swift notch application. The adapter has not been installed, connected to Open in Codex, or executed against Ghostty. Live JXA dictionary behavior, native permission handling, cross-window focus, and CLI approvals remain unverified. The prior computer-use restriction remains a genuine live-test blocker; this code is not an alternate route for the agent to bypass it.
