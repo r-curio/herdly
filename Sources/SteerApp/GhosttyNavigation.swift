@@ -29,13 +29,24 @@ enum GhosttyNavigation {
         guard let data = request(["action": "snapshot"]) else { return nil }
         return try? JSONDecoder().decode(GhosttySnapshot.self, from: data)
     }
-    static func open(session: UUID, live: Set<UUID>) -> Bool {
-        guard let before = snapshot(), let target = GhosttyMatch.target(session: session, live: live, snapshot: before),
-              let bytes = try? JSONEncoder().encode(target),
+    static func open(session: UUID, live: Set<UUID>) -> (opened: Bool, message: String) {
+        guard let before = snapshot() else {
+            return (false, "Could not read Ghostty’s tabs. Check Automation access and that Ghostty is running.")
+        }
+        guard let target = GhosttyMatch.target(session: session, live: live, snapshot: before) else {
+            return (false, "No unique live, unsplit tab matches \(GhosttyMatch.title(session)). Keep that session open with its session-ID title enabled.")
+        }
+        guard let bytes = try? JSONEncoder().encode(target),
               let object = try? JSONSerialization.jsonObject(with: bytes),
               let response = request(["action": "select", "title": GhosttyMatch.title(session), "target": object]),
               let value = try? JSONSerialization.jsonObject(with: response) as? [String: Any],
-              value["status"] as? String == "ok", let after = snapshot() else { return false }
-        return after.selected == target && GhosttyMatch.target(session: session, live: live, snapshot: after) == target
+              value["status"] as? String == "ok" else {
+            return (false, "Found the tab, but selection failed or its identity changed. The reminder is retained.")
+        }
+        guard let after = snapshot(), after.selected == target,
+              GhosttyMatch.target(session: session, live: live, snapshot: after) == target else {
+            return (false, "Sent the tab selection, but could not verify the foreground tab. The reminder is retained.")
+        }
+        return (true, "Opened the matching Ghostty tab.")
     }
 }
