@@ -1,5 +1,10 @@
 # Codex companion behavior
 
+## Current handed-back reminder behavior
+
+Keep Continue in Codex after no-decision handoff, with only Open in Codex. Remove reminders on structured completion of their exact session and turn; other turns remain queued. Presence does not prove approval is still pending. Accessibility cleanup is deferred. This supersedes older permission-still-needed wording below. The current integration reads the isolated approval lab; it does not install general hooks.
+
+
 ## Platform
 
 Build a fresh native macOS app with SwiftUI and AppKit. Keep session and queue rules separate from the platform interface. Other operating systems are outside the initial scope; see [the platform decision](adr/0003-use-native-macos-ui.md).
