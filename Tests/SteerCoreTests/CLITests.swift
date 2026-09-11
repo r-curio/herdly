@@ -2,6 +2,29 @@ import Foundation
 import Testing
 @testable import SteerCore
 
+@Test func cliLifecycleKeepsSessionStartTurnCompletionAndEndDistinct() {
+    let session = UUID(), turn = UUID()
+    var state = CLIState()
+    state.apply(.sessionStarted(session: session, receivedAt: "01"))
+    #expect(state.liveSessions == [session])
+    #expect(state.running.isEmpty)
+
+    state.apply(.turnStarted(session: session, turn: turn, receivedAt: "02"))
+    #expect(state.liveSessions == [session])
+    #expect(state.running == [CLIRunningTurn(session: session, turn: turn, startedAt: "02")])
+
+    state.apply(.turnCompleted(session: session, turn: turn, receivedAt: "03"))
+    #expect(state.liveSessions == [session])
+    #expect(state.running.isEmpty)
+
+    state.apply(.sessionEnded(session: session, receivedAt: "04"))
+    #expect(state.liveSessions.isEmpty)
+    #expect(state.endedSessions == [session])
+    state.apply(.turnStarted(session: session, turn: UUID(), receivedAt: "05"))
+    #expect(state.liveSessions.isEmpty)
+    #expect(state.running.isEmpty)
+}
+
 @Test func cliEventsQueueOnlyVerifiedCLITurns() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -27,6 +50,9 @@ import Testing
     #expect(Set(scan.cliCompletions.map(\.session)) == [a, b])
     #expect(scan.cliCompletions.count == 2)
     #expect(scan.liveCLISessions == [a, b])
+    let cliState = CLIState.replay(scan.cliEvents)
+    #expect(cliState.liveSessions == [a, b])
+    #expect(cliState.running.isEmpty)
     var queue = CLIQueue()
     queue.apply(scan.cliCompletions)
     let first = try #require(queue.items.first(where: { $0.session == a }))
@@ -40,6 +66,7 @@ import Testing
     restored.apply(scan.cliCompletions)
     #expect(restored.items.count == 2) // A later completion is not dismissed with the earlier one.
     #expect(scan.liveCLISessions == [a])
+    #expect(CLIState.replay(scan.cliEvents).endedSessions == [b])
 }
 
 @Test func ghosttyMatchesExactUniqueUnsplitSession() throws {
@@ -59,6 +86,22 @@ import Testing
     #expect(GhosttyMatch.target(session:a, live:[a,collision], snapshot:valid) == nil)
     let split: [String: Any] = ["id":"a", "terminals":[["id":"p", "name":GhosttyMatch.title(a)], ["id":"p2", "name":"shell"]]]
     #expect(GhosttyMatch.target(session:a, live:[a], snapshot:try snapshot([split])) == nil)
+}
+
+@Test func ghosttyKeepsSameProjectSessionsDistinctAcrossWindows() throws {
+    let a = UUID(uuidString: "01a09046-5590-7882-adad-6b7f4ec91925")!
+    let b = UUID(uuidString: "01a09046-56da-7d83-9a38-02e59d7441ec")!
+    let data: [String: Any] = [
+        "status": "ok",
+        "windows": [
+            ["id": "window-a", "tabs": [["id": "tab-a", "terminals": [["id": "pane-a", "name": GhosttyMatch.title(a)]]]]],
+            ["id": "window-b", "tabs": [["id": "tab-b", "terminals": [["id": "pane-b", "name": GhosttyMatch.title(b)]]]]]
+        ],
+        "selected": NSNull()
+    ]
+    let snapshot = try JSONDecoder().decode(GhosttySnapshot.self, from: JSONSerialization.data(withJSONObject: data))
+    #expect(GhosttyMatch.target(session: a, live: [a, b], snapshot: snapshot) == GhosttyTarget(window_id: "window-a", tab_id: "tab-a", terminal_id: "pane-a"))
+    #expect(GhosttyMatch.target(session: b, live: [a, b], snapshot: snapshot) == GhosttyTarget(window_id: "window-b", tab_id: "tab-b", terminal_id: "pane-b"))
 }
 
 
