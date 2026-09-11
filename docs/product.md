@@ -16,11 +16,13 @@ The user's reference to ChatGPT desktop means its Codex work, not regular ChatGP
 
 ## Agreed visibility behavior
 
-While the user works outside the relevant Codex session and Codex is working, show a compact status indicator in the notch. Expand it when Codex finishes or needs input. Hide that session's notch notification when the user returns to that specific session.
+For the desktop MVP, hide the notch whenever the Codex desktop app is foreground. When the user is in another app, show the notch if there is running activity or an attention item. This applies even when the user is viewing a different Codex conversation: viewing B also hides A's notification. Exact desktop conversation focus is deferred.
 
-Focus is session-specific: using terminal tab B does not hide activity from Codex in tab A, and viewing another conversation in the Codex desktop app does not hide activity from the originating conversation. Bringing the hosting application to the foreground alone does not count as returning. Other sessions can keep the shared notch visible.
+Hiding changes presentation only. Keep desktop completions queued until explicitly dismissed, including after Open in Codex, manual navigation, or foreground/background changes. No app activation or navigation result marks a completion read.
 
-If the companion cannot reliably identify the focused session, retain the relevant notification without marking it acknowledged and leave approvals in Codex's normal flow. If a notch approval is already pending when focus becomes uncertain, hand it back without approving or denying it. The notch then offers only Open in Codex for that request.
+Ghostty support retains its separate exact-pane requirement: using terminal pane B does not acknowledge activity from pane A. The desktop foreground rule hides the shared notch while Codex desktop is active; it does not clear Ghostty items either.
+
+If app activation or the required Ghostty pane identity is unknown, retain queue items without acknowledgment and leave approvals in Codex's normal flow. Unknown desktop activation retains the indicator rather than guessing it was viewed. Release any pending approval interaction with no decision on uncertainty; only Open in Codex remains. App-level visibility alone does not establish safe direct desktop approval support.
 
 Present one shared notch on the display the user is actively using. On a display without a physical notch, use a compact top-center panel. Do not duplicate the queue across displays. The exact active-display selection rule and behavior while the user is interacting with the panel still need to be defined and verified.
 
@@ -34,9 +36,9 @@ Queue priority is: actionable notch approvals, requests handed back to Codex tha
 
 ## Agreed approval experience
 
-Include direct approval and denial from the notch in the first version. Each approval request also offers an Open in Codex action so the user can return to the originating session and read more context before deciding.
+Direct approval and denial remain a separately gated feature: keep desktop approvals native until the approval transport and an applicable handoff policy are verified. The app-level visibility change does not enable approval buttons. Each approval request also offers an Open in Codex action so the user can return to the originating session and read more context before deciding.
 
-An unanswered notch approval hands back to Codex after 30 seconds. Before handoff, offer Approve once, Deny, and Open in Codex. After handoff, continue indicating that permission is needed but offer only Open in Codex; the user then decides in Codex. Returning to the originating Codex session hands the decision back immediately. A timeout or handoff never approves the action automatically.
+An unanswered notch approval hands back to Codex after 30 seconds. Before handoff, offer Approve once, Deny, and Open in Codex. After handoff, continue indicating that permission is needed but offer only Open in Codex; the user then decides in Codex. For any future verified desktop approval interaction, foregrounding Codex must hand the decision back immediately; Ghostty uses return to the originating pane. This handoff does not dismiss completion notifications. A timeout or handoff never approves the action automatically.
 
 Approve once applies only to the current request. Persistent permission settings remain in Codex; the notch does not offer always-allow rules.
 
@@ -46,13 +48,13 @@ The companion preserves the user's existing Codex approval settings and does not
 
 ## Agreed completion experience
 
-When Codex finishes while the user is outside that session, expand the notch for three seconds, then collapse it. Keep it open while the user is interacting with it. This completion display timer is separate from the 30-second approval handoff deadline; interaction must not extend an approval deadline. Keep the completion in the attention queue until the user opens the originating session or explicitly dismisses it. Collapsing the notch does not acknowledge or remove the completion.
+For desktop completions, present the notification while outside the Codex app; for Ghostty, while outside the originating pane. Expand for three seconds, then collapse it. Keep it open while the user is interacting with it. This completion display timer is separate from the 30-second approval handoff deadline; interaction must not extend an approval deadline. Keep desktop completions in the attention queue until explicitly dismissed. Ghostty completions may also be acknowledged by a verified visit to their originating pane. Collapsing the notch does not acknowledge or remove the completion.
 
 Play a short completion sound when that notification first appears. Provide a mute control. Reopening the queue does not replay the sound. The specific sound is not yet selected.
 
 Preserve unacknowledged completions locally across companion restarts. Revalidate pending approval state before offering any active approval controls; never restore an old button as an actionable request solely from saved data. Completion presentation must respect the agreed priority of approval requests.
 
-The companion runs quietly in the background even while the notch is hidden. Acknowledgment must also work when the user navigates directly to the originating Codex session without opening the notch. Observe the exact focused session after completion and store acknowledgment for that completion rather than permanently for the entire session. Focus is a proxy for visiting a result, not proof that the user read its contents. The technical mechanism for exact session identification still requires verification.
+The companion runs quietly in the background even while the notch is hidden. For desktop, completion acknowledgment requires explicit dismissal; observing a visit is outside this MVP. Store dismissal per completion, not permanently for the session. A completion received while Codex is foreground remains queued for presentation when away. Once presented, foreground/background changes must not replay its sound. Ghostty's verified per-pane acknowledgment remains a separate integration requirement.
 
 If the companion was fully quit when the user visited the result, that visit may not be recoverable. Restored notifications must not be described as authoritatively unread without a verified Codex read-status signal. Retain uncertain completions without replaying their sound and let the user open or dismiss them. Fully quitting the companion stops its background observation.
 
@@ -62,13 +64,13 @@ Codex's documented PermissionRequest hook runs before the normal approval prompt
 
 This is an integration finding, not a selected transport. Desktop app and CLI behavior still require separate verification.
 
-The documented app-server thread/read method retrieves conversation data; it is not a user-view receipt. No authoritative user-view notification was established in the reviewed app-server reference. Exact desktop conversation and Ghostty pane focus detection still requires technical verification. Source: https://learn.chatgpt.com/docs/app-server (checked 2026-09-11).
+The documented app-server thread/read method retrieves conversation data; it is not a user-view receipt. No authoritative user-view notification was established in the reviewed app-server reference. Exact desktop focus is deferred; Ghostty pane focus still requires technical verification. Source: https://learn.chatgpt.com/docs/app-server (checked 2026-09-11).
 
-The [first desktop investigation](codex-desktop-investigation.md) found private conversation-level read-state events in the installed app and confirmed lifecycle/approval protocol definitions with a runnable probe. Live focus, exact navigation, and approval handoff remain unverified; the computer-use tool blocked access to Codex's interface.
+The [first desktop investigation](codex-desktop-investigation.md) found private conversation-level read-state events in the installed app and confirmed lifecycle/approval protocol definitions with a runnable probe. The user subsequently verified task-link navigation from Codex and Apple Notes. App-level visibility still needs live implementation verification, and approval handoff remains unverified; computer-use access to Codex was blocked.
 
 ## Open decisions
 
 - The technical mechanism for releasing a pending companion interaction and restoring normal approval behavior, including timeout and approval races.
-- How to detect the specific focused terminal session or desktop conversation. The agreed experience is a requirement, not yet verified integration capability; the uncertainty fallback is settled above.
+- Verify native desktop app-activation observation and exact Ghostty pane identity. Exact desktop conversation focus is deferred, not an MVP gate.
 - How to identify the active display and keep panel interaction stable while display focus changes.
 - Validate the proposed module boundaries and transport in [architecture.md](architecture.md) against the required integration checks.

@@ -4,13 +4,15 @@ A native macOS companion for Codex desktop and Codex CLI in Ghostty. Keep using 
 
 ## Status
 
-Architecture and product decisions are documented. A read-only desktop capability probe runs; the macOS app is not implemented, and live desktop focus, navigation, and approval handoff remain unverified.
+Architecture and product decisions are documented. A read-only desktop capability probe runs; the macOS app is not implemented. Task-link navigation has been manually verified. Desktop app-level visibility and approval handoff still need live implementation proof.
 
 ## MVP
 
+Desktop MVP visibility: hide the notch while Codex is foreground and show eligible activity while away. Desktop completions remain queued until explicitly dismissed; exact-task focus is deferred.
+
 - Local Codex desktop tasks and Codex CLI running directly in Ghostty, including tabs and split panes.
 - One notch on the active display, with separate working and to-check counts and a prioritized queue.
-- Approve once, deny, or return to Codex; unanswered requests hand back after 30 seconds from arrival.
+- Direct approvals are separately gated by integration proof; until then, desktop approvals stay native. The planned notch flow offers approve once, deny, or return, with a 30-second handoff.
 - Three-second completion notifications, a short sound with mute, and acknowledgments preserved locally.
 - Codex remains usable if Steer is unavailable. Unknown focus keeps notifications and leaves approvals in Codex.
 
