@@ -133,3 +133,8 @@ Session `01a09134-ade6-7fd1-bc6a-cd35b1fa3e5a`, turn `01a09134-e4a4-7f61-97af-6e
 ## CLI deny verified — 2026-09-12
 
 In the isolated lab, session `01a09139-df77-7610-b181-6933c455fa3f`, turn `01a0913a-06c7-7453-88d9-45a5932de93a`, request `49441eff-fccb-45b3-bdab-9da913715bee` recorded deny after 2.419 seconds. The user-visible CLI explicitly reported “PermissionRequest hook denied approval” and did not retry. The DENY-1 marker is absent; the matching Stop event was captured. This verifies that the CLI consumed the hook denial despite the separate missing-status warnings. It does not resolve those warnings or complete the no-decision/navigation checks.
+
+
+## CLI manual no-decision handoff verified
+
+Request `43fbe99e-ad28-4ca4-be2f-aaa9c8f420d1`, turn `01a0913a-ece1-7861-9403-071c1a7835f8` in session `01a09139-df77-7610-b181-6933c455fa3f` returned no_decision after 10.3859 seconds. The user confirmed clicking Open in Codex and subsequently seeing the CLI native approval prompt. At inspection, the HANDOFF-1 marker was absent and the tool call remained pending. This verifies manual handoff without automatic execution; it is not the 30-second timeout test or proof of exact Ghostty navigation.
