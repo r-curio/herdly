@@ -17,6 +17,7 @@ public struct ReminderScan: Sendable {
     public var reminders: [Reminder] = []
     public var completed: Set<TurnIdentity> = []
     public var canceled: Set<TurnIdentity> = []
+    public var cliEvents: [CLIEvent] = []
     public var cliCompletions: [CLICompletion] = []
     public var cliSessions: Set<UUID> = []
     public var liveCLISessions: Set<UUID> = []
@@ -128,16 +129,31 @@ public enum ReminderReader {
                       meta["source"] as? String == "cli" else { continue }
                 result.cliSessions.insert(session)
                 let sessionHooks = hooks.filter { $0.session_id == session }.sorted { $0.received_at < $1.received_at }
-                if sessionHooks.last(where: { ["SessionStart", "SessionEnd"].contains($0.hook_event_name) })?.hook_event_name == "SessionStart" {
-                    result.liveCLISessions.insert(session)
-                }
-                for hook in sessionHooks where hook.hook_event_name == "Stop" {
-                    if let turn = hook.turn_id, finished.contains(TurnIdentity(session: session, turn: turn)) {
-                        result.cliCompletions.append(CLICompletion(session: session, turn: turn, receivedAt: hook.received_at))
+                for hook in sessionHooks {
+                    switch hook.hook_event_name {
+                    case "SessionStart":
+                        result.cliEvents.append(.sessionStarted(session: session, receivedAt: hook.received_at))
+                    case "UserPromptSubmit":
+                        if let turn = hook.turn_id {
+                            result.cliEvents.append(.turnStarted(session: session, turn: turn, receivedAt: hook.received_at))
+                        }
+                    case "Stop":
+                        if let turn = hook.turn_id {
+                            result.cliEvents.append(.turnCompleted(session: session, turn: turn, receivedAt: hook.received_at))
+                            if finished.contains(TurnIdentity(session: session, turn: turn)) {
+                                result.cliCompletions.append(CLICompletion(session: session, turn: turn, receivedAt: hook.received_at))
+                            }
+                        }
+                    case "SessionEnd":
+                        result.cliEvents.append(.sessionEnded(session: session, receivedAt: hook.received_at))
+                    default:
+                        break
                     }
                 }
             }
         }
+        result.cliEvents.sort { $0.receivedAt < $1.receivedAt }
+        result.liveCLISessions = CLIState.replay(result.cliEvents).liveSessions
         result.cliCompletions.sort { $0.receivedAt < $1.receivedAt }
         return result
     }
