@@ -12,7 +12,7 @@ Desktop MVP visibility: hide the notch while Codex is foreground and show eligib
 
 - Local Codex desktop tasks and Codex CLI running directly in Ghostty, with exact unsplit tab targeting; split panes remain unavailable.
 - One notch on the active display, with separate working and to-check counts and a prioritized queue.
-- Direct approvals are separately gated by integration proof; until then, desktop approvals stay native. The planned notch flow offers approve once, deny, or return, with a 30-second handoff.
+- Direct CLI approvals use one receipt-bound allow-once or deny decision with a 30-second handoff; desktop approvals stay native until their transport and handoff policy are proven.
 - Three-second completion notifications, a short sound with mute, and acknowledgments preserved locally.
 - Codex remains usable if Steer is unavailable. Unknown focus keeps notifications and leaves approvals in Codex.
 

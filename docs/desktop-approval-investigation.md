@@ -40,6 +40,22 @@ Run explicit allow once, deny, no decision after 30 seconds from companion recei
 
 None of those live cases ran. Computer-use access to `com.openai.codex` was rejected for safety reasons; additionally, the existing-runtime event/approval attachment is not proven. The schema checks do not resolve either blocker. No simulator result is presented as approval handoff evidence. #4 and #9 remain blocked.
 
+## Issue #9 implementation boundary
+
+The helper now publishes one identity-bound approval receipt and waits for an
+atomic decision file. The receipt timestamp is the deadline origin, the helper
+wait has its own 31-second bound, and malformed, late, duplicate, unknown, or
+failed decisions return no decision. The native hook response is emitted only
+for an explicit allow-once or deny. The notch renders only Codex-provided
+fields and offers decision buttons for CLI requests whose rollout identifies a
+CLI session; desktop requests retain only Open in Codex because the desktop
+transport and handoff policy remain unverified.
+
+`swift test` and `SteerHook --self-test` exercise the coordinator, atomic
+identity checks, deadline preservation, and request detail replay. These are
+isolated helper/core checks, not live desktop approval evidence. No desktop
+allow/deny/timeout was run, and no existing hooks or permissions were changed.
+
 ## Isolated lifecycle experiment prepared
 
 The official [hook discovery and review documentation](https://learn.chatgpt.com/docs/hooks) supports project-local `.codex/hooks.json`, requires project trust and review of non-managed hook definitions, and merges hooks from other active sources. No trust bypass is used. Existing user/system hooks may still apply; this is isolation of Steer's test configuration, not an empty global configuration.
