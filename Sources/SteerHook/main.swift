@@ -41,7 +41,7 @@ private func supportedPermission(_ object: [String: Any]) -> Bool {
     return (object["tool_input"] as? [String: Any])?["command"] is String
 }
 
-private func approvalRequest(from object: [String: Any], now: Double) -> ApprovalRequest? {
+private func approvalRequest(from object: [String: Any]) -> ApprovalRequest? {
     guard supportedPermission(object), let sessionValue = object["session_id"] as? String,
           let session = UUID(uuidString: sessionValue), let turnValue = object["turn_id"] as? String,
           let turn = UUID(uuidString: turnValue) else { return nil }
@@ -52,7 +52,8 @@ private func approvalRequest(from object: [String: Any], now: Double) -> Approva
                                   command: object["command"] as? String ?? input?["command"] as? String,
                                   reason: object["reason"] as? String,
                                   longText: jsonText(input ?? object["tool_input"]))
-    return ApprovalRequest(requestID: UUID(), sessionID: session, turnID: turn, details: details, receivedAt: now)
+    return ApprovalRequest(requestID: UUID(), sessionID: session, turnID: turn, details: details,
+                           receivedAt: 0, expiresAt: 0, outcome: .pending)
 }
 
 private func update(_ request: ApprovalRequest, outcome: ApprovalDecision, in directory: URL) {
@@ -72,12 +73,35 @@ private func decisionOutput(_ decision: ApprovalDecision) -> Data? {
     return try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
 }
 
+private func boundedRegularData(_ url: URL, limit: Int) -> Data? {
+    guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+          attributes[.type] as? FileAttributeType == .typeRegular,
+          (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil,
+          (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+          let file = try? FileHandle(forReadingFrom: url) else { return nil }
+    defer { try? file.close() }
+    guard let bytes = try? file.read(upToCount: limit + 1), bytes.count <= limit else { return nil }
+    return bytes
+}
+
+private func receipt(for request: ApprovalRequest, publishedAt: Double, in directory: URL, before deadline: Double) -> ApprovalReceiptRecord? {
+    while Date().timeIntervalSince1970 < deadline {
+        if let bytes = boundedRegularData(ApprovalStore.receiptURL(in: directory, id: request.id), limit: 4096),
+           let value = try? JSONDecoder().decode(ApprovalReceiptRecord.self, from: bytes),
+           value.requestID == request.id, value.receivedAt.isFinite,
+           value.receivedAt >= publishedAt, value.receivedAt <= Date().timeIntervalSince1970,
+           abs(value.expiresAt - (value.receivedAt + ApprovalTiming.handoffTimeout)) < 0.001 { return value }
+        Thread.sleep(forTimeInterval: 0.02)
+    }
+    return nil
+}
+
 private func awaitDecision(for request: ApprovalRequest, in directory: URL, waitBound: Double) -> ApprovalDecision {
     let coordinator = ApprovalCoordinator(requestID: request.id, expiresAt: request.expiresAt)
     let hardDeadline = min(request.expiresAt + 1, request.receivedAt + waitBound)
     while Date().timeIntervalSince1970 < hardDeadline {
         let now = Date().timeIntervalSince1970
-        if let bytes = try? Data(contentsOf: ApprovalStore.decisionURL(in: directory, id: request.id)),
+        if let bytes = boundedRegularData(ApprovalStore.decisionURL(in: directory, id: request.id), limit: 4096),
            let record = try? JSONDecoder().decode(ApprovalDecisionRecord.self, from: bytes),
            record.decidedAt >= request.receivedAt, record.decidedAt <= now,
            let decision = coordinator.decide(requestID: record.requestID, decision: record.decision,
@@ -116,9 +140,17 @@ guard object["hook_event_name"] as? String == "PermissionRequest" else {
     _ = writeEvent(object, to: directory, installationID: arguments[installationIndex + 1]); exit(0)
 }
 let receiptStarted = Date().timeIntervalSince1970
-guard let request = approvalRequest(from: object, now: receiptStarted),
-      ApprovalStore.publish(request, in: directory),
+guard let published = approvalRequest(from: object),
+      ApprovalStore.publish(published, in: directory),
       Date().timeIntervalSince1970 - receiptStarted <= ApprovalTiming.connectionTimeout else { exit(0) }
+guard let companionReceipt = receipt(for: published, publishedAt: receiptStarted, in: directory,
+                                    before: receiptStarted + ApprovalTiming.connectionTimeout) else {
+    update(published, outcome: .noDecision, in: directory)
+    exit(0)
+}
+let request = ApprovalRequest(requestID: published.id, sessionID: published.sessionID, turnID: published.turnID,
+                              details: published.details, receivedAt: companionReceipt.receivedAt,
+                              expiresAt: companionReceipt.expiresAt, outcome: .pending)
 let decision = awaitDecision(for: request, in: directory, waitBound: ApprovalTiming.helperWaitBound)
 update(request, outcome: decision, in: directory)
 if let output = decisionOutput(decision) { FileHandle.standardOutput.write(output) }

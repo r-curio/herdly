@@ -229,6 +229,35 @@ import Testing
     #expect(plan.configChange == "[tui]\nfont_size = 14\nterminal_title = [\"session-id\"]\n[network]\nproxy = \"none\"\n")
 }
 
+@Test func setupMigratesLegacySteerTimeoutWithoutAddingDuplicateHandlers() throws {
+    let helper = URL(fileURLWithPath: "/tmp/steer/SteerHook")
+    let events = URL(fileURLWithPath: "/tmp/steer/events")
+    let id = UUID().uuidString
+    let command = CodexSetupPlanner.command(helperPath: helper, eventsPath: events, installationID: id)
+    let hooks: [String: Any] = ["hooks": Dictionary(uniqueKeysWithValues: CodexSetupRequirements.hookEvents.map { event in
+        (event, [["hooks": [["type": "command", "command": command, "timeout": 2]]]])
+    })]
+    let data = try JSONSerialization.data(withJSONObject: hooks)
+    let plan = CodexSetupPlanner.plan(capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true),
+                                      config: "[tui]\nterminal_title = [\"session-id\"]\n", hooks: data,
+                                      helperPath: helper, eventsPath: events)
+    #expect(plan.installationID == id)
+    #expect(plan.requiresConfigure)
+    guard let root = try JSONSerialization.jsonObject(with: plan.hooksChange) as? [String: Any],
+          let migrated = root["hooks"] as? [String: Any] else {
+        Issue.record("migrated hooks were not valid JSON")
+        return
+    }
+    for event in CodexSetupRequirements.hookEvents {
+        guard let entries = migrated[event] as? [[String: Any]], let nested = entries.first?["hooks"] as? [[String: Any]] else {
+            Issue.record("missing migrated hooks for \(event)")
+            continue
+        }
+        #expect(nested.count == 1)
+        #expect((nested.first?["timeout"] as? NSNumber)?.intValue == CodexSetupRequirements.hookTimeout)
+    }
+}
+
 @Test func setupInstallRollbackRestoresAfterInjectedWriteFailure() throws {
     struct Failure: Error {}
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

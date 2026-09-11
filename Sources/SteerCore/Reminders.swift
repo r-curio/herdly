@@ -124,8 +124,19 @@ public enum ReminderReader {
             if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(ApprovalRequest.self, from: bytes),
                [.pending, .noDecision].contains(item.outcome) {
                 let source = AttentionSource.desktop
+                let receipt: ApprovalReceiptRecord? = {
+                    guard item.outcome == .pending, item.receivedAt == 0 else { return nil }
+                    let receiptURL = ApprovalStore.receiptURL(in: events, id: item.id)
+                    if let receiptBytes = bounded(receiptURL, limit: 4096),
+                       let existing = try? JSONDecoder().decode(ApprovalReceiptRecord.self, from: receiptBytes) { return existing }
+                    let now = Date().timeIntervalSince1970
+                    let created = ApprovalReceiptRecord(requestID: item.id, receivedAt: now)
+                    return ApprovalStore.publish(created, in: events) ? created : nil
+                }()
+                let receivedAt = receipt?.receivedAt ?? item.receivedAt
+                let expiresAt = receipt?.expiresAt ?? item.expiresAt
                 result.attentionRequests.append(AttentionRequest(id: item.id, source: source, session: item.sessionID, turn: item.turnID,
-                                                                 arrivedAt: item.receivedAt, expiresAt: item.expiresAt,
+                                                                 arrivedAt: receivedAt, expiresAt: expiresAt,
                                                                  state: item.outcome == .noDecision ? .handedBack : .actionable,
                                                                  details: item.details))
                 if item.outcome == .noDecision {
