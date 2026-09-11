@@ -34,9 +34,11 @@ public struct CodexCapabilities: Equatable, Sendable {
 
 public enum CodexSetupRequirements {
     public static let hookEvents = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "Stop", "SessionEnd"]
+    public static let helperSource = "steer-hook-v1"
     public static let minimumCLIVersion = "0.145.0"
     public static let minimumDesktopVersion = "26.901.51231"
     public static let minimumGhosttyVersion = "1.3.1"
+    public static let metadataClockSkew: TimeInterval = 300
 }
 
 public enum CodexSetupValidator {
@@ -258,22 +260,69 @@ public enum CodexSetupPlanner {
     }
 
     private static func validKey(_ key: String) -> Bool {
-        key.split(separator: ".", omittingEmptySubsequences: false).allSatisfy {
-            !$0.isEmpty && $0.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" || $0 == "\"" || $0 == "'" || $0 == " " }
+        var segments: [String] = []
+        var segment = ""
+        var activeQuote: Character?
+        var escaped = false
+        for character in key {
+            if activeQuote != nil {
+                segment.append(character)
+                if character == "\\" && activeQuote == "\"" { escaped.toggle(); continue }
+                if character == activeQuote && !escaped { activeQuote = nil }
+                escaped = false
+            } else if character == "\"" || character == "'" {
+                guard segment.isEmpty else { return false }
+                activeQuote = character
+                segment.append(character)
+            } else if character == "." {
+                guard validKeySegment(segment) else { return false }
+                segments.append(segment)
+                segment = ""
+            } else {
+                segment.append(character)
+            }
         }
+        guard activeQuote == nil, validKeySegment(segment) else { return false }
+        segments.append(segment)
+        return !segments.isEmpty
+    }
+
+    private static func validKeySegment(_ segment: String) -> Bool {
+        guard let first = segment.first else { return false }
+        if first == "\"" || first == "'" {
+            return validQuotedString(segment)
+        }
+        return segment.allSatisfy { $0.isASCII && ($0.isNumber || $0.isLetter || $0 == "_" || $0 == "-") }
+    }
+
+    private static func validQuotedString(_ value: String) -> Bool {
+        guard let quote = value.first, (quote == "\"" || quote == "'"), value.last == quote, value.count >= 2 else { return false }
+        let contents = Array(value.dropFirst().dropLast())
+        var index = contents.startIndex
+        while index < contents.endIndex {
+            let character = contents[index]
+            if character == "\n" || character == "\r" || character == quote { return false }
+            if quote == "\"" && character == "\\" {
+                index = contents.index(after: index)
+                guard index < contents.endIndex else { return false }
+                let escaped = contents[index]
+                if escaped == "u" {
+                    for _ in 0..<4 {
+                        index = contents.index(after: index)
+                        guard index < contents.endIndex,
+                              String(contents[index]).rangeOfCharacter(from: CharacterSet(charactersIn: "0123456789abcdefABCDEF")) != nil else { return false }
+                    }
+                } else {
+                    guard "bfnrt\\\"".contains(escaped) else { return false }
+                }
+            }
+            index = contents.index(after: index)
+        }
+        return true
     }
 
     private static func validHeader(_ header: String) -> Bool {
-        var quote: Character?
-        var escaped = false
-        for character in header {
-            if character == "\\" && quote == "\"" { escaped.toggle(); continue }
-            if (character == "\"" || character == "'") && !escaped {
-                quote = quote == character ? nil : (quote == nil ? character : quote)
-            }
-            escaped = false
-        }
-        return quote == nil && !header.contains("[") && !header.contains("]")
+        validKey(header)
     }
 
     private static func valueIsComplete(_ value: String) -> Bool {
@@ -298,7 +347,7 @@ public enum CodexSetupPlanner {
     private static func validValue(_ value: String) -> Bool {
         guard valueIsComplete(value) else { return false }
         if (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
-            return value.count >= 2
+            return validQuotedString(value)
         }
         if value.hasPrefix("[") && value.hasSuffix("]") {
             let body = String(value.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
@@ -422,14 +471,14 @@ public struct CodexSetupInstaller {
         } else { currentConfig = "" }
         let currentHooks = try readableData(at: roots.hooksURL) ?? Data("{}".utf8)
         if currentConfig == plan.configChange, currentHooks == plan.hooksChange,
-           (try? Data(contentsOf: roots.helperURL)) == helper,
+           (try? readableData(at: roots.helperURL)) == helper,
            let state = try? readState(roots), state.command == plan.helperCommand {
             return status(roots: roots, capabilities: capabilities)
         }
         guard currentConfig == plan.originalConfig, currentHooks == plan.originalHooks else {
             throw CodexSetupError.conflict("Codex configuration changed after the preview. Review setup again.")
         }
-        if let existing = try? Data(contentsOf: roots.helperURL), existing != helper {
+        if let existing = try? readableData(at: roots.helperURL) {
             guard let state = try? readState(roots), state.helper == existing.base64EncodedString() else {
                 throw CodexSetupError.conflict("A different file already exists at Steer's helper path.")
             }
@@ -437,14 +486,14 @@ public struct CodexSetupInstaller {
         if fileManager.fileExists(atPath: roots.helperURL.path) {
             var directory = ObjCBool(false)
             guard fileManager.fileExists(atPath: roots.helperURL.path, isDirectory: &directory), !directory.boolValue,
-                  (try? Data(contentsOf: roots.helperURL)) != nil else {
+                  (try? readableData(at: roots.helperURL)) != nil else {
                 throw CodexSetupError.conflict("Steer's helper path is a directory or unreadable; it was not changed.")
             }
         }
         let backupDirectory = roots.helperDirectory.appendingPathComponent("backups").appendingPathComponent(UUID().uuidString)
         let originalConfig = try readableData(at: roots.configURL)
         let originalHooks = try readableData(at: roots.hooksURL)
-        let originalHelper = try? Data(contentsOf: roots.helperURL)
+        let originalHelper = try? readableData(at: roots.helperURL)
         do {
             if plan.configChange != plan.originalConfig { try backup(originalConfig, named: "config.toml", in: backupDirectory) }
             if plan.hooksChange != plan.originalHooks { try backup(originalHooks, named: "hooks.json", in: backupDirectory) }
@@ -481,12 +530,13 @@ public struct CodexSetupInstaller {
         }
         guard fileManager.fileExists(atPath: roots.stateURL.path) else { return .notConfigured }
         guard let state = try? readState(roots) else { return .conflict("Steer setup state is unreadable; review setup before changing Codex files.") }
-        guard let configData = try? Data(contentsOf: roots.configURL), let config = String(data: configData, encoding: .utf8),
-              let hooks = try? Data(contentsOf: roots.hooksURL) else { return .malformed("Steer setup files are missing or unreadable.") }
+        guard let configData = try? readableData(at: roots.configURL),
+              let config = String(data: configData, encoding: .utf8),
+              let hooks = try? readableData(at: roots.hooksURL) else { return .malformed("Steer setup files are missing or unreadable.") }
         guard fileManager.fileExists(atPath: roots.helperURL.path) else { return .notConfigured }
         var helperDirectory = ObjCBool(false)
         guard fileManager.fileExists(atPath: roots.helperURL.path, isDirectory: &helperDirectory), !helperDirectory.boolValue,
-              let helper = try? Data(contentsOf: roots.helperURL) else {
+              let helper = try? readableData(at: roots.helperURL) else {
             return .conflict("Steer's helper path is a directory or unreadable.")
         }
         guard (try? JSONSerialization.jsonObject(with: hooks) as? [String: Any]) != nil else {
@@ -513,9 +563,12 @@ public struct CodexSetupInstaller {
 
     public func undo(roots: CodexSetupRoots) throws -> CodexConnectionStatus {
         let state = try readState(roots)
-        let currentConfig = try String(contentsOf: roots.configURL)
-        let currentHooks = try Data(contentsOf: roots.hooksURL)
-        let currentHelper = try Data(contentsOf: roots.helperURL)
+        guard let currentConfigData = try readableData(at: roots.configURL),
+              let currentConfig = String(data: currentConfigData, encoding: .utf8),
+              let currentHooks = try readableData(at: roots.hooksURL),
+              let currentHelper = try readableData(at: roots.helperURL) else {
+            throw CodexSetupError.conflict("Codex or Steer's setup files are missing or unreadable; undo made no changes.")
+        }
         guard currentConfig == state.installedConfig, currentHooks == state.installedHooks,
               currentHelper == Data(base64Encoded: state.helper) else {
             throw CodexSetupError.conflict("Codex or Steer's setup files changed after setup; undo made no changes.")
@@ -523,7 +576,9 @@ public struct CodexSetupInstaller {
         let originalConfig = state.originalConfigExisted ? Data(state.originalConfig.utf8) : nil
         let originalHooks = state.originalHooksExisted ? state.originalHooks : nil
         let originalHelper = Data(base64Encoded: state.helper)
-        let originalState = try Data(contentsOf: roots.stateURL)
+        guard let originalState = try readableData(at: roots.stateURL) else {
+            throw CodexSetupError.conflict("Steer setup state is missing or unreadable; undo made no changes.")
+        }
         do {
             try restore(originalConfig, to: roots.configURL)
             try restore(originalHooks, to: roots.hooksURL)
@@ -544,15 +599,21 @@ public struct CodexSetupInstaller {
     }
 
     private func readState(_ roots: CodexSetupRoots) throws -> InstallState {
-        guard let data = try? Data(contentsOf: roots.stateURL) else { throw CodexSetupError.failed("Steer setup is not installed.") }
+        guard let data = try readableData(at: roots.stateURL) else { throw CodexSetupError.failed("Steer setup is not installed.") }
         return try JSONDecoder().decode(InstallState.self, from: data)
     }
 
     private func readableData(at url: URL) throws -> Data? {
         guard fileManager.fileExists(atPath: url.path) else { return nil }
-        guard let data = try? Data(contentsOf: url) else {
+        var isDirectory = ObjCBool(false)
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+            throw CodexSetupError.conflict("\(url.lastPathComponent) is a directory; it was not changed.")
+        }
+        guard let handle = try? FileHandle(forReadingFrom: url),
+              let data = try? handle.read(upToCount: 1_048_577), data.count <= 1_048_576 else {
             throw CodexSetupError.conflict("Codex configuration could not be read; it was not changed.")
         }
+        try? handle.close()
         return data
     }
 
@@ -562,8 +623,11 @@ public struct CodexSetupInstaller {
               let event = object["hook_event_name"] as? String, !event.isEmpty,
               let session = object["session_id"] as? String, UUID(uuidString: session) != nil,
               let received = object["received_at"] as? String, !received.isEmpty,
+              object["source"] as? String == CodexSetupRequirements.helperSource,
               let captured = object["captured_at"] as? NSNumber else { return false }
-        return captured.doubleValue.isFinite && captured.doubleValue >= installedAt
+        let now = Date().timeIntervalSince1970
+        return captured.doubleValue.isFinite && captured.doubleValue >= installedAt &&
+            captured.doubleValue <= now + CodexSetupRequirements.metadataClockSkew
     }
 
     private func boundedData(at url: URL, maximum: Int) -> Data? {

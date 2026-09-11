@@ -2,6 +2,16 @@ import AppKit
 import SwiftUI
 import SteerCore
 
+private enum SetupInstallResult: Sendable {
+    case success(CodexConnectionStatus)
+    case failure(String)
+}
+
+private enum SetupUndoResult: Sendable {
+    case success(CodexConnectionStatus)
+    case failure(String)
+}
+
 @MainActor
 final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -61,7 +71,6 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private var controls: NSWindow?
     private var timer: Timer?
     private var activationObserver: NSObjectProtocol?
-    private let setupInstaller = CodexSetupInstaller()
     private var setupRoots: CodexSetupRoots {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let helper = home.appendingPathComponent("Library/Application Support/Steer", isDirectory: true)
@@ -164,50 +173,34 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     func refreshSetup() {
         let roots = setupRoots
         Task { @MainActor [weak self] in
-            let capabilities = await Task.detached { CodexSetupDetection.capabilities() }.value
+            let snapshot = await Task.detached {
+                let capabilities = CodexSetupDetection.capabilities()
+                return CodexSetupDetection.setupSnapshot(roots: roots, capabilities: capabilities)
+            }.value
             guard let self else { return }
-            self.applySetup(capabilities: capabilities, roots: roots)
+            self.setupCapabilities = snapshot.capabilities
+            self.setupPlan = snapshot.plan
+            self.setupStatus = snapshot.status
         }
-    }
-
-    private func applySetup(capabilities: CodexCapabilities, roots: CodexSetupRoots) {
-        setupCapabilities = capabilities
-        let manager = FileManager.default
-        let config: String
-        if manager.fileExists(atPath: roots.configURL.path) {
-            guard let value = try? String(contentsOf: roots.configURL, encoding: .utf8) else {
-                setupPlan = nil
-                setupStatus = .malformed("Codex config.toml is unreadable; Steer will not change it.")
-                return
-            }
-            config = value
-        } else { config = "" }
-        let hooks: Data
-        if manager.fileExists(atPath: roots.hooksURL.path) {
-            guard let value = try? Data(contentsOf: roots.hooksURL) else {
-                setupPlan = nil
-                setupStatus = .malformed("Codex hooks.json is unreadable; Steer will not change it.")
-                return
-            }
-            hooks = value
-        } else { hooks = Data("{}".utf8) }
-        setupPlan = CodexSetupPlanner.plan(capabilities: capabilities, config: config, hooks: hooks,
-                                           helperPath: roots.helperURL, eventsPath: roots.eventsDirectory)
-        setupStatus = setupInstaller.status(roots: roots, capabilities: capabilities)
     }
 
     func configureCodex() {
         let roots = setupRoots
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let capabilities = await Task.detached { CodexSetupDetection.capabilities() }.value
-            self.applySetup(capabilities: capabilities, roots: roots)
+            let snapshot = await Task.detached {
+                let capabilities = CodexSetupDetection.capabilities()
+                return CodexSetupDetection.setupSnapshot(roots: roots, capabilities: capabilities)
+            }.value
+            self.setupCapabilities = snapshot.capabilities
+            self.setupPlan = snapshot.plan
+            self.setupStatus = snapshot.status
             guard let plan = self.setupPlan, case .ready = plan.status else {
                 self.setupMessage = "Steer cannot configure Codex until the setup preview is ready."
                 return
             }
             let helperURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/SteerHook")
-            guard let helper = try? Data(contentsOf: helperURL) else {
+            guard let helper = CodexSetupDetection.boundedRegularData(at: helperURL, maximum: 1_048_576) else {
                 self.setupMessage = "The bundled Steer helper is unavailable. Reinstall Steer and try again."
                 return
             }
@@ -216,38 +209,57 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                 self.setupMessage = "The bundled Steer helper failed its self-test. Reinstall Steer and try again."
                 return
             }
-            do {
-                let status = try self.setupInstaller.install(plan, roots: roots, helper: helper,
-                                                              capabilities: capabilities)
-                self.setupStatus = status
-                switch status {
-                case .connected, .configuredAwaitingRestart, .permissionRequired:
-                    self.eventsPath = roots.eventsDirectory.path
-                    UserDefaults.standard.set(self.eventsPath, forKey: "approvalEventsPath")
-                default: break
+            let result = await Task.detached {
+                do {
+                    return SetupInstallResult.success(
+                        try CodexSetupInstaller().install(plan, roots: roots, helper: helper,
+                                                          capabilities: snapshot.capabilities))
+                } catch {
+                    return SetupInstallResult.failure(error.localizedDescription)
                 }
-                self.setupMessage = self.setupStatusText + " Restart new Codex sessions to load settings; Steer did not restart existing sessions. Review Codex's hook-trust prompt. Ghostty Automation permission is not verified; enable Ghostty controls to let macOS prompt."
-            } catch {
-                self.setupMessage = error.localizedDescription
+            }.value
+            guard case .success(let status) = result else {
+                if case .failure(let message) = result { self.setupMessage = message }
+                self.refreshSetup()
+                return
+            }
+            self.setupStatus = status
+            switch status {
+            case .connected, .configuredAwaitingRestart, .permissionRequired:
+                self.eventsPath = roots.eventsDirectory.path
+                UserDefaults.standard.set(self.eventsPath, forKey: "approvalEventsPath")
+            default: break
+            }
+            self.setupMessage = self.setupStatusText + " Restart new Codex sessions to load settings; Steer did not restart existing sessions. Review Codex's hook-trust prompt. Ghostty Automation permission is not verified; enable Ghostty controls to let macOS prompt."
+        }
+    }
+
+    func undoCodexSetup() {
+        let roots = setupRoots
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await Task.detached {
+                do { return SetupUndoResult.success(try CodexSetupInstaller().undo(roots: roots)) }
+                catch { return SetupUndoResult.failure(error.localizedDescription) }
+            }.value
+            switch result {
+            case .success(let status):
+                self.setupStatus = status
+                if self.eventsPath == roots.eventsDirectory.path {
+                    self.eventsPath = ""
+                    UserDefaults.standard.removeObject(forKey: "approvalEventsPath")
+                }
+                self.setupMessage = "Disconnected. Existing Codex approval and sandbox settings were left unchanged."
+            case .failure(let message):
+                self.setupMessage = message
                 self.refreshSetup()
             }
         }
     }
 
-    func undoCodexSetup() {
-        do {
-            setupStatus = try setupInstaller.undo(roots: setupRoots)
-            if eventsPath == setupRoots.eventsDirectory.path { eventsPath = ""; UserDefaults.standard.removeObject(forKey: "approvalEventsPath") }
-            setupMessage = "Disconnected. Existing Codex approval and sandbox settings were left unchanged."
-        } catch {
-            setupMessage = error.localizedDescription
-            refreshSetup()
-        }
-    }
-
     var setupStatusText: String {
         switch setupStatus {
-        case .connected: return "Connected"
+        case .connected: return "Codex event delivery connected"
         case .notConfigured: return "Codex detected; Steer is not configured."
         case .configuredAwaitingRestart(let value), .unavailable(let value), .unsupported(let value), .permissionRequired(let value), .malformed(let value), .conflict(let value): return value
         }

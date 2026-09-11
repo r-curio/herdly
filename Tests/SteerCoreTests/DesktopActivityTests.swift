@@ -58,6 +58,7 @@ import Testing
         var value: [String: Any] = [
             "hook_event_name": event,
             "session_id": session.uuidString,
+            "source": CodexSetupRequirements.helperSource,
             "received_at": "2026-09-12T00:00:0\(name)Z",
             "captured_at": 1_800_000_000.0
         ]

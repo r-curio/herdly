@@ -9,6 +9,7 @@ func writeEvent(_ object: [String: Any], to directory: URL) -> Bool {
     var record: [String: Any] = [
         "hook_event_name": event,
         "session_id": session,
+        "source": "steer-hook-v1",
         "received_at": ISO8601DateFormatter().string(from: now),
         "captured_at": now.timeIntervalSince1970
     ]
@@ -37,6 +38,7 @@ func selfTest() -> Int32 {
           files.count == 1,
           let data = try? Data(contentsOf: files[0]),
           let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          result["source"] as? String == "steer-hook-v1",
           result["received_at"] as? String != nil,
           result["captured_at"] as? NSNumber != nil else { return 1 }
     return 0

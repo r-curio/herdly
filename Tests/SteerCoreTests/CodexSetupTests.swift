@@ -39,7 +39,8 @@ import Testing
         eventsPath: URL(fileURLWithPath: "/tmp/events"))
     #expect(malformed.status == .malformed("Codex config.toml is not valid enough to edit safely."))
 
-    for config in ["broken =", "x = [not valid TOML]", "[tui]\na = 1\n[tui]\nb = 2\n"] {
+    for config in ["broken =", "x = [not valid TOML]", "[tui]\na = 1\n[tui]\nb = 2\n",
+                   "foo bar = 1\n", "[foo bar]\na = 1\n", "name = \"bad\\q\"\n"] {
         let malformed = CodexSetupPlanner.plan(
             capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true),
             config: config, hooks: Data("{}".utf8), helperPath: URL(fileURLWithPath: "/tmp/helper"),
@@ -82,12 +83,16 @@ import Testing
     #expect(try installer.install(plan, roots: roots, helper: helper,
                                   capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery."))
     #expect(((try FileManager.default.attributesOfItem(atPath: roots.helperURL.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) & 0o111 != 0)
-    let staleEvent: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "received_at": "2026-01-01T00:00:00Z", "captured_at": 0]
+    let staleEvent: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "source": CodexSetupRequirements.helperSource, "received_at": "2026-01-01T00:00:00Z", "captured_at": 0]
     try JSONSerialization.data(withJSONObject: staleEvent).write(to: eventsRoot.appendingPathComponent("stale.json"))
     #expect(installer.status(roots: roots, capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery."))
-    let event: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "received_at": "2026-09-12T00:00:00Z", "captured_at": Date().timeIntervalSince1970 + 1]
+    let event: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "source": CodexSetupRequirements.helperSource, "received_at": "2026-09-12T00:00:00Z", "captured_at": Date().timeIntervalSince1970 + 1]
     try JSONSerialization.data(withJSONObject: event).write(to: eventsRoot.appendingPathComponent("event.json"))
     #expect(installer.status(roots: roots, capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .connected)
+    try FileManager.default.removeItem(at: eventsRoot.appendingPathComponent("event.json"))
+    let futureEvent: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "source": CodexSetupRequirements.helperSource, "received_at": "2099-01-01T00:00:00Z", "captured_at": Date().timeIntervalSince1970 + 3600]
+    try JSONSerialization.data(withJSONObject: futureEvent).write(to: eventsRoot.appendingPathComponent("future.json"))
+    #expect(installer.status(roots: roots, capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)) == .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery."))
     let installed = try String(contentsOf: roots.configURL)
     try Data((installed + "user_note = true\n").utf8).write(to: roots.configURL)
     #expect(throws: CodexSetupError.conflict("Codex or Steer's setup files changed after setup; undo made no changes.")) {
@@ -122,6 +127,32 @@ import Testing
     }
     #expect(try String(contentsOf: roots.configURL) == "changed = true\n")
     #expect(!FileManager.default.fileExists(atPath: roots.helperURL.path))
+}
+
+@Test func setupInstallRejectsAnIdenticalUnownedHelper() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let configRoot = root.appendingPathComponent("codex")
+    let helperRoot = root.appendingPathComponent("Steer")
+    try FileManager.default.createDirectory(at: configRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = "[tui]\n"
+    let hooks = Data("{}".utf8)
+    let helper = Data("same-bytes-but-unowned".utf8)
+    try Data(config.utf8).write(to: configRoot.appendingPathComponent("config.toml"))
+    try hooks.write(to: configRoot.appendingPathComponent("hooks.json"))
+    try FileManager.default.createDirectory(at: helperRoot, withIntermediateDirectories: true)
+    try helper.write(to: helperRoot.appendingPathComponent("SteerHook"))
+    let roots = CodexSetupRoots(configDirectory: configRoot, helperDirectory: helperRoot,
+                                eventsDirectory: helperRoot.appendingPathComponent("events"))
+    let capabilities = CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true)
+    let plan = CodexSetupPlanner.plan(capabilities: capabilities, config: config, hooks: hooks,
+                                      helperPath: roots.helperURL, eventsPath: roots.eventsDirectory)
+    #expect(throws: CodexSetupError.conflict("A different file already exists at Steer's helper path.")) {
+        _ = try CodexSetupInstaller().install(plan, roots: roots, helper: helper, capabilities: capabilities)
+    }
+    #expect(try String(contentsOf: roots.configURL) == config)
+    #expect(try Data(contentsOf: roots.hooksURL) == hooks)
+    #expect(!FileManager.default.fileExists(atPath: roots.stateURL.path))
 }
 
 @Test func setupPreviewReopensTuiAfterALaterSection() {
