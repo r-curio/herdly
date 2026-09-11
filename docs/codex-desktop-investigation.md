@@ -49,3 +49,23 @@ The computer-use tool then rejected access to com.openai.codex for safety reason
 Keep desktop observation behind its own integration boundary. It must report unknown when it cannot reliably identify a session, allowing the already-agreed indicator/native-approval fallback. Keep saved acknowledgments independent of the private desktop read-state format. Do not start a second app server and call its loaded threads the desktop's current conversations.
 
 Before shipping desktop support, obtain a permitted live verification path and demonstrate exact conversation selection, verified deep-link return, and independently safe approval handoff. Capability metadata and source inspection do not satisfy those acceptance checks.
+
+## Ticket #1 execution: 2026-09-11
+
+Status: blocked, not completed. [Issue #1](https://github.com/r-curio/steer/issues/1).
+
+`python3 scripts/probe_desktop_process.py` now identifies main processes using their executable path and bundle metadata. It reports a unique running installation only when exactly one matches; zero or multiple matches are unknown. It never infers conversation focus. The live read-only result was `/Applications/ChatGPT.app`, version `26.901.51231`. Process IDs are transient and are not saved as surface identities.
+
+Both probe self-checks and the installed desktop schema probe passed. The process parser covers spaces in paths, helper exclusion, malformed lines and multiple installations. This verifies discovery, not app navigation.
+
+| Required proof | Result |
+| --- | --- |
+| Identify actual running bundle despite duplicate installation | Read-only process probe passed |
+| Select A and B independently, including two windows | Blocked by computer-use access restriction |
+| Return to A while B is selected | Not executed; static route evidence only |
+| Background/uncertain focus does not acknowledge A | Required behavior; no live observer yet |
+| Per-completion acknowledgment rather than conversation unread flag | Not established by installed public protocol |
+
+To resume this gate, use a permitted test environment and two disposable local conversations A and B. Record their IDs, installed app version, selected window/conversation before and after each switch, and the observer result. Complete A, visit B, then visit A; only the last visit may acknowledge A's completion. Repeat with the app backgrounded and with the target closed or unavailable. Open A's deep link against the identified running bundle and independently verify A is selected. A successful URL-open call alone is not a pass.
+
+Human navigation alone will not solve the integration: a standalone companion still needs a supported or explicitly evaluated focus observation mechanism. The Codex app's built-in task tools are not evidence of an API available to Steer. No private IPC adapter or acknowledgment heuristic has been adopted.
