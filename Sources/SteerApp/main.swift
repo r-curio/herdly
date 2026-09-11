@@ -237,10 +237,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         let live = liveCLI
         let queued = cli.items.filter { $0.session == session }.map(\.id)
         Task { @MainActor in
-            let opened = await Task.detached { GhosttyNavigation.open(session: session, live: live) }.value
-            navigationMessage = opened ? "Opened the matching Ghostty tab." : "Could not verify the matching tab. Check its session-ID title and Automation permission."
+            let result = await Task.detached { GhosttyNavigation.open(session: session, live: live) }.value
+            navigationMessage = result.message
             // A verified visit acknowledges only completions already queued for this session.
-            if opened { for id in queued { cli.dismiss(id) }; saveCLI() }
+            if result.opened { for id in queued { cli.dismiss(id) }; saveCLI() }
             openingTask = false
             refresh()
         }
