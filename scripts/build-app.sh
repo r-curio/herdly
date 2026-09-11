@@ -6,8 +6,10 @@ bin_dir=$(swift build -c release --show-bin-path)
 app_dir="$PWD/output/Steer.app"
 mkdir -p "$app_dir/Contents/MacOS"
 mkdir -p "$app_dir/Contents/Resources"
+mkdir -p "$app_dir/Contents/Helpers"
 cp Sources/SteerApp/Resources/Ghostty.js "$app_dir/Contents/Resources/"
 cp "$bin_dir/Steer" "$app_dir/Contents/MacOS/Steer"
+cp "$bin_dir/SteerHook" "$app_dir/Contents/Helpers/SteerHook"
 cat > "$app_dir/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
