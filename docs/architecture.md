@@ -13,7 +13,7 @@ flowchart LR
     A --> S[Session and attention state]
     S --> N[Notch UI]
     N -->|Decision| A
-    F[Focus and navigation integration] -->|Focused session or unknown| A
+    F[Activation and navigation integration] -->|Desktop app activation or CLI pane focus| A
     N -->|Open in Codex| F
     S --> P[Local saved acknowledgments]
 ```
@@ -42,13 +42,13 @@ For a permission request, the helper connects to the companion with a short conn
 
 The helper accepts only one terminal outcome: allow once, deny, or hand back with no decision. It arbitrates user action, deadline, disconnect, and handoff on one serialized path. A late button click is rejected rather than sent to a newer request. The app reports delivery state honestly; successful local delivery is not proof that Codex executed the requested action.
 
-When the originating session is focused, hand back immediately and remove the notch's decision controls. If the companion is absent or crashes, return no decision so Codex can continue its own approval flow. Never convert a connection error or timeout into approval. Do not synthesize terminal keystrokes to approve requests.
+For any future verified desktop approval flow, foregrounding Codex hands back immediately; Ghostty uses originating-pane focus. Remove the decision controls without dismissing completions. Desktop approvals stay native until their integration and handoff policy are established. If the companion is absent or crashes, return no decision so Codex can continue its own approval flow. Never convert a connection error or timeout into approval. Do not synthesize terminal keystrokes to approve requests.
 
 After handoff, the queue can show Open in Codex while waiting for resolution evidence. Determining resolution through installed-runtime events remains a verification requirement; do not keep claiming a request is pending indefinitely without evidence.
 
 ## Focus and persistence
 
-Treat focus as one of: this session, another session, or unknown. Unknown must not be silently treated as proof of acknowledgment. Use native app-activation information and targeted queries for the supported host, not broad continuous screen capture.
+Desktop visibility uses Codex foreground, another app foreground, or unknown. Native app-activation observation is the candidate source; no selected-conversation query is required for the desktop MVP. Hide the shared notch while Codex is foreground; show eligible activity while away, retaining the indicator on unknown activation. Queue state is independent: only explicit dismissal acknowledges desktop completions. Ghostty still uses this pane, another pane, or unknown. No activation, navigation success, or unknown state acknowledges desktop completions.
 
 Agreed fallback: when focus cannot be identified reliably, retain the notification and let Codex handle approvals normally. Release any current hook wait with no decision, remove its decision controls, and reject later attempts to answer that interaction. A later successful focus probe does not reactivate the handed-back request.
 
@@ -57,10 +57,10 @@ Store small snapshots of attention items and completion acknowledgments locally 
 ## Evidence checked on 2026-09-11
 
 - Installed Ghostty is 1.3.1. Its local scripting dictionary includes stable terminal IDs, focused terminal, selected tab, and focus. The [official AppleScript reference](https://ghostty.org/docs/features/applescript) documents these APIs. Mapping a Codex session to the exact pane still needs a live test, especially for two panes in the same directory.
-- The desktop bundle at /Applications/ChatGPT.app identifies as com.openai.codex, version 26.901.51231, and registers the codex URL scheme. Its bundled CLI reports 0.153.4; the shell CLI reports 0.145.0. Multiple installed bundles share that identity, so resolve the running process's bundle path rather than choosing by ID alone. The installed deep-link handler recognizes threads, but live return to a specific conversation remains unverified.
+- The desktop bundle at /Applications/ChatGPT.app identifies as com.openai.codex, version 26.901.51231, and registers the codex URL scheme. Its bundled CLI reports 0.153.4; the shell CLI reports 0.145.0. Multiple installed bundles share that identity, so resolve the running process's bundle path rather than choosing by ID alone. The user verified task-link return from Codex and Apple Notes; exact installation routing remains unverified.
 - The desktop's local scripting dictionary has generic window/tab APIs; these are not evidence of a stable focused Codex conversation identifier.
 - [Codex hooks](https://learn.chatgpt.com/docs/hooks) document synchronous PermissionRequest decisions and no-decision fallback. Background hooks cannot approve. This establishes the candidate contract, not installed-version parity or coverage of every approval type.
-- [App-server](https://learn.chatgpt.com/docs/app-server) documents request-resolution notifications and local transports. Attaching to the existing runtime, ownership of requests, hook coverage, and exact desktop focus remain unverified. thread/read fetches data rather than proving user acknowledgment.
+- [App-server](https://learn.chatgpt.com/docs/app-server) documents request-resolution notifications and local transports. Attaching to the existing runtime, ownership of requests, hook coverage, and app-activation observation remain unverified. Exact desktop task focus is deferred. thread/read fetches data rather than proving user acknowledgment.
 - The first desktop probe confirms these protocol definitions in the installed bundled CLI. Source inspection additionally found private conversation-level read-state broadcasts, not a verified external focus or per-completion acknowledgment API. See the [investigation](codex-desktop-investigation.md) for evidence and the live UI access limitation.
 
 ## Required integration checks before committing to transport
@@ -68,7 +68,7 @@ Store small snapshots of attention items and completion acknowledgments locally 
 1. In disposable CLI and desktop tasks, prove start, completion, permission, allow, deny, and no-decision handoff separately. Include the actual approval types the user encounters; unsupported ones must stay in Codex's native flow.
 2. Kill the companion during a pending request and verify the native approval returns. Exercise deadline/click races and late messages with two simultaneous requests.
 3. Map two unsplit Ghostty tabs in the same project to their distinct Codex sessions; verify focus detection and navigation across tabs and windows. Split-pane targeting is deferred; reject split or ambiguous targets.
-4. Identify the desktop's selected conversation without changing it. Verify that a different conversation does not acknowledge the completed one.
+4. Verify desktop foreground/background visibility using native app activation, including activation while a popup is expanded. Neither task navigation nor foregrounding acknowledges completions; only explicit dismissal does. Test queued completions received while foreground and prevent repeat sound on subsequent switches. Exact desktop conversation focus is deferred.
 5. After handoff, detect a decision made in Codex and clear only the matching item. Restart the companion and prove saved requests do not produce active approval buttons.
 
 These are planned checks, not completed tests. Existing user configuration has not been changed.
@@ -76,6 +76,15 @@ These are planned checks, not completed tests. Existing user configuration has n
 ## Product decisions and remaining verification
 
 - Queue ordering, separate working/to-check counts, and one notch on the actively used display are settled in product.md. Completion notifications expand for three seconds and remain open during interaction. Approval deadlines remain independent and are never extended by interaction. Active-display detection and interaction stability need implementation detail and verification.
+
+## Reminder queue integration — 2026-09-11
+
+SteerCore ReminderReader reads no_decision approval records and matching session rollout completion records. Companion polls off the main actor every two seconds, with only one scan in flight, and applies results to ReminderQueue. The queue merges observed requests, removes only completed session/turn identities, and retains items on read failure. Completed identities prevent resurrection during the process lifetime; restart reconstructs state from metadata and rollout records. Missing metadata on restart cannot restore an item. No Python runtime or Accessibility access is used.
+
+Reads are capped at 4,096 event-directory entries, 50,000 rollout-directory entries, 32 MiB per rollout and 1 MiB per record. Duplicate rollout candidates and malformed/partial data retain reminders. Full scans are a deliberate prototype limit; incremental cursors are needed for large histories. Titles are not captured by approval metadata, so the prototype displays a shortened task ID.
+
+
+The issue #3 integration extends the existing reader and queue with CLI source classification and completion-specific acknowledgments. Native Ghostty navigation lives inside the app, with its pure matcher in SteerCore. See [implementation and verification boundaries](cli-notch-integration.md).
 
 ## Ghostty scope revision
 
