@@ -10,10 +10,16 @@ import Testing
     state.apply(.turnStarted(session: session, turn: turn, receivedAt: "02"))
     #expect(state.running.map(\.session) == [session])
     #expect(state.completed.isEmpty)
+    #expect(state.isVisible(codexForeground: false))
+    #expect(!state.isVisible(codexForeground: true))
+    #expect(state.isVisible(codexForeground: nil))
 
     state.apply(.turnCompleted(session: session, turn: turn, receivedAt: "03"))
     #expect(state.running.isEmpty)
     #expect(state.completed.map(\.id) == [TurnIdentity(session: session, turn: turn)])
+    #expect(state.isVisible(codexForeground: false))
+    #expect(!state.isVisible(codexForeground: true))
+    #expect(state.isVisible(codexForeground: nil))
 
     state.apply(.sessionEnded(session: session, receivedAt: "04"))
     #expect(state.completed.count == 1)

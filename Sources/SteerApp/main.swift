@@ -96,8 +96,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             Task { @MainActor in self?.refresh() }
         }
         refresh()
-        showControls()
         if CommandLine.arguments.contains("--smoke-test") {
+            showControls()
             precondition(controls?.isVisible == true && controls?.contentView != nil)
             precondition(status.button?.title == "S" && status.menu?.items.count == 6)
             print("Steer controls-window smoke check passed.")
@@ -212,7 +212,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         if firstDesktopPresentation && !muted { NSSound(named: "Glass")?.play() }
         if cliPresentation.update(codexForeground: false, hovering: hovering || panel.isKeyWindow,
                                   now: ProcessInfo.processInfo.systemUptime) && !muted { NSSound(named: "Glass")?.play() }
-        guard count > 0 else {
+        guard codexForeground != true, count > 0 else {
             panel.orderOut(nil)
             hovering = false
             return
@@ -415,22 +415,11 @@ struct Notch: View {
                                 }.disabled(model.openingTask)
                             }
                         }
-                        ForEach(model.visibleDesktopRunning) { item in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text("Codex desktop working").font(.headline)
-                                    Text("Session (item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button("Open in Codex") { model.openDesktop(item.session) }
-                                    .disabled(model.openingTask)
-                            }
-                        }
                         ForEach(model.visibleDesktopCompletions) { item in
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text("Codex desktop finished").font(.headline)
-                                    Text("Session (item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
+                                    Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 Button("Open in Codex") { model.openDesktop(item.session) }
@@ -449,6 +438,17 @@ struct Notch: View {
                                 Button(model.ghosttyEnabled ? "Open in Codex" : "Set up Ghostty") { model.openCLI(item.session) }
                                     .disabled(model.openingTask)
                                 Button("Dismiss") { model.dismissCLI(item) }
+                            }
+                        }
+                        ForEach(model.visibleDesktopRunning) { item in
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text("Codex desktop working").font(.headline)
+                                    Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Open in Codex") { model.openDesktop(item.session) }
+                                    .disabled(model.openingTask)
                             }
                         }
                         if model.needsGhosttySetup {
