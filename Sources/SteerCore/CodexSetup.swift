@@ -650,6 +650,14 @@ public struct CodexSetupInstaller {
             try restore(originalHooks, to: roots.hooksURL)
             try fileManager.removeItem(at: roots.helperURL)
             try fileManager.removeItem(at: roots.stateURL)
+            if fileManager.fileExists(atPath: roots.eventsDirectory.path) {
+                try fileManager.removeItem(at: roots.eventsDirectory)
+            }
+            let backupsDirectory = roots.helperDirectory.appendingPathComponent("backups", isDirectory: true)
+            if fileManager.fileExists(atPath: backupsDirectory.path) {
+                try fileManager.removeItem(at: backupsDirectory)
+            }
+            try removeDirectoryIfEmpty(roots.helperDirectory)
         } catch let error {
             do {
                 try restore(Data(currentConfig.utf8), to: roots.configURL)
@@ -712,6 +720,12 @@ public struct CodexSetupInstaller {
     }
 
     private func ensureDirectory(_ url: URL) throws { try fileManager.createDirectory(at: url, withIntermediateDirectories: true) }
+
+    private func removeDirectoryIfEmpty(_ url: URL) throws {
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        guard try fileManager.contentsOfDirectory(atPath: url.path).isEmpty else { return }
+        try fileManager.removeItem(at: url)
+    }
 
     private func backup(_ data: Data?, named: String, in directory: URL) throws {
         guard let data else { return }

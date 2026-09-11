@@ -192,6 +192,10 @@ import Testing
                                       helperPath: roots.helperURL, eventsPath: roots.eventsDirectory)
     let installer = CodexSetupInstaller()
     _ = try installer.install(plan, roots: roots, helper: helper, capabilities: capabilities)
+    let sibling = helperRoot.appendingPathComponent("user-owned-note")
+    try Data("keep me".utf8).write(to: sibling)
+    try Data("event".utf8).write(to: roots.eventsDirectory.appendingPathComponent("owned.json"))
+    #expect(FileManager.default.fileExists(atPath: helperRoot.appendingPathComponent("backups").path))
     try FileManager.default.removeItem(at: roots.helperURL)
     #expect(installer.status(roots: roots, capabilities: capabilities) == .repairRequired("Steer's helper is missing; Configure Codex to repair setup."))
     let installedConfig = try String(contentsOf: roots.configURL)
@@ -204,6 +208,10 @@ import Testing
     #expect(try installer.undo(roots: roots) == .notConfigured)
     #expect(try String(contentsOf: roots.configURL) == originalConfig)
     #expect(try Data(contentsOf: roots.hooksURL) == originalHooks)
+    #expect(!FileManager.default.fileExists(atPath: roots.eventsDirectory.path))
+    #expect(!FileManager.default.fileExists(atPath: helperRoot.appendingPathComponent("backups").path))
+    #expect(FileManager.default.fileExists(atPath: sibling.path))
+    #expect(FileManager.default.fileExists(atPath: helperRoot.path))
 }
 
 @Test func setupPreviewReopensTuiAfterALaterSection() {
