@@ -39,3 +39,23 @@ Use disposable existing-desktop work with isolated test configuration and a perm
 Run explicit allow once, deny, no decision after 30 seconds from companion receipt, Open in Codex, manual return, unknown focus, disconnect and helper failure. Also run two requests within one session and submit a late reply to the first: it must not answer the second. Verify a native prompt appears when the original policies require one, and that answering it clears only that pending request. Record unsupported categories as native-only. Repeat for the shell CLI independently in #3.
 
 None of those live cases ran. Computer-use access to `com.openai.codex` was rejected for safety reasons; additionally, the existing-runtime event/approval attachment is not proven. The schema checks do not resolve either blocker. No simulator result is presented as approval handoff evidence. #4 and #9 remain blocked.
+
+## Isolated lifecycle experiment prepared
+
+The official [hook discovery and review documentation](https://learn.chatgpt.com/docs/hooks) supports project-local `.codex/hooks.json`, requires project trust and review of non-managed hook definitions, and merges hooks from other active sources. No trust bypass is used. Existing user/system hooks may still apply; this is isolation of Steer's test configuration, not an empty global configuration.
+
+```sh
+python3 scripts/desktop_hook_lab.py --self-test
+python3 scripts/desktop_hook_lab.py --prepare output/desktop-hook-lab
+python3 scripts/desktop_hook_lab.py --report output/desktop-hook-lab
+```
+
+Preparation requires a new directory and refuses to overwrite one. It creates a separate Git project with only its own hook configuration. The generated command uses absolute, shell-quoted interpreter and recorder paths. Normal Steer tasks and user-level Codex configuration are unchanged.
+
+The recorder accepts events only for the disposable project or its subdirectories. It records event name, receipt time, correlation IDs, permission mode and field names. It does not store prompt, transcript or tool-input contents. Records use separate unique files to avoid concurrent append collisions. All capture paths produce no stdout decision; errors also return no decision. PermissionRequest is observed only when Codex's existing policy requests permission. The two-second hook timeout bounds this initial recorder, not the eventual thirty-second approval design.
+
+Self-check passed using a temporary fixture project: the generated command runs with spaces in paths, writes no stdout/stderr, retains correlation IDs, excludes private content, rejects outside-project events and handles malformed/oversized input without changing approval behavior. Those fixtures are not desktop integration evidence.
+
+For the live check, open `output/desktop-hook-lab` as a **local project in the existing Codex desktop app**. Review/trust the recorder through Codex's normal hook-review flow if prompted, then submit: `Reply only STEER-LIFECYCLE-OK. Do not run tools or change files.` If trust is granted after startup, submit that prompt again in the same task. Correlate the captured session ID with that desktop task before declaring lifecycle access proved. No permission test or allow/deny decision is required for this first prompt.
+
+At preparation time the report contained zero events. Allow once, deny, thirty-second no-decision, disconnect and native-resolution correlation are still unverified. They must not be inferred from recorder self-checks or the mere existence of a hooks.json file. Live desktop interaction requires the user because computer-use access to Codex is restricted.
