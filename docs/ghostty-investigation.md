@@ -138,3 +138,10 @@ In the isolated lab, session `01a09139-df77-7610-b181-6933c455fa3f`, turn `01a09
 ## CLI manual no-decision handoff verified
 
 Request `43fbe99e-ad28-4ca4-be2f-aaa9c8f420d1`, turn `01a0913a-ece1-7861-9403-071c1a7835f8` in session `01a09139-df77-7610-b181-6933c455fa3f` returned no_decision after 10.3859 seconds. The user confirmed clicking Open in Codex and subsequently seeing the CLI native approval prompt. At inspection, the HANDOFF-1 marker was absent and the tool call remained pending. This verifies manual handoff without automatic execution; it is not the 30-second timeout test or proof of exact Ghostty navigation.
+
+
+## User acceptance of timeout — 2026-09-12
+
+The user explicitly requested trusting the untouched 30-second timeout rather than repeating that live test. Treat the behavior as user-accepted with the live timing check waived, not as an instrumented CLI timeout result. The measured 10.3859-second run remains manual Open in Codex handoff evidence.
+
+Reran the navigation transport, native-script fake-application, foreground observation, capability and matching checks: all passed. No live Ghostty UI was queried or selected. The existing computer-use restriction still prevents agent-driven live navigation proof. The adapter is not wired into the Swift notch application, and the CLI missing-status hook warnings remain unresolved. Neither waived timeout timing nor offline navigation checks establish that issue #3 is complete.
