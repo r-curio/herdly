@@ -32,3 +32,16 @@ Display selection follows the pointer's screen and stays on the current screen w
 - Only native app activation is observed through `NSWorkspace`; no Accessibility queries, Apple Events, task UI inspection, injected commands or Codex configuration changes.
 
 Real Codex lifecycle events remain gated by #2. This prototype does not close the live integration tickets.
+
+## Computer-use walkthrough
+
+Verified through Steer's own accessibility interface and screenshots:
+
+- Send test changed the controls from no notifications to one queued item.
+- Closing the controls left a compact `1 to check` panel.
+- Clicking the compact panel displayed the test details and Dismiss button.
+- Dismiss in the controls changed the queue to empty and disabled Dismiss.
+- Sending another test, quitting through the UI and reopening restored one queued item.
+- After the earlier panel dismissal and a process restart, the controls showed no queued notifications.
+
+The controls were left open with one test queued. Inspection brings Steer's panel into focus, so these observations do not independently measure the three-second timer or prove passive collapse while another app is active. Sound/mute and Codex foreground suppression were not verified by computer use; Codex UI access remains restricted. The state test covers timing separately. A temporary missing-window selection error was resolved by restarting the prototype; its process was still running, so it was not recorded as a crash.
