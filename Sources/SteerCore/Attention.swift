@@ -16,10 +16,10 @@ public struct Attention {
         expanded = false
     }
 
-    /// Returns true exactly once when a new item becomes visible.
-    public mutating func update(codexForeground: Bool, hovering: Bool, now: Double) -> Bool {
+    /// Returns true exactly once when a new item becomes visible. Nil activation retains the item.
+    public mutating func update(codexForeground: Bool?, hovering: Bool, now: Double) -> Bool {
         guard pending else { return false }
-        if codexForeground {
+        if codexForeground == true {
             expanded = false
             return false
         }

@@ -20,6 +20,8 @@ import Testing
     #expect(!item.expanded && item.pending)
     let afterReturning = item.update(codexForeground: false, hovering: false, now: 22)
     #expect(!afterReturning)
+    _ = item.update(codexForeground: nil, hovering: false, now: 23)
+    #expect(item.pending && item.presented)
     var restored = Attention(restored: item.pending)
     let afterRestart = restored.update(codexForeground: false, hovering: false, now: 30)
     #expect(!afterRestart)
@@ -29,4 +31,13 @@ import Testing
     restored.enqueue()
     let nextCompletion = restored.update(codexForeground: false, hovering: false, now: 40)
     #expect(nextCompletion)
+}
+
+@Test func unknownActivationKeepsNewCompletionAvailable() {
+    var item = Attention()
+    item.enqueue()
+    let shown = item.update(codexForeground: nil, hovering: false, now: 0)
+    #expect(shown && item.pending)
+    _ = item.update(codexForeground: nil, hovering: false, now: 3)
+    #expect(!item.expanded && item.pending)
 }
