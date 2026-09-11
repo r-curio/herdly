@@ -33,4 +33,3 @@ python3 scripts/probe_codex_desktop.py --app /Applications/ChatGPT.app
 ```
 
 The probe only inspects bundle metadata and generated protocol definitions. It does not install hooks, change settings, or connect to conversations. Pass the actual installed desktop bundle path when different.
-
