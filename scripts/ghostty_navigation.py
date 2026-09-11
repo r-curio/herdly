@@ -53,6 +53,26 @@ def native_request(request):
     return json.loads(result.stdout)
 
 
+def observe(session, live_sessions, request=native_request):
+    """Acknowledge only a fresh, uniquely matched, foreground session."""
+    try:
+        snapshot = request({'action': 'snapshot'})
+        if snapshot.get('status') != 'ok' or 'selected' not in snapshot:
+            return {'status': 'unknown', 'target': None}
+        selected = snapshot['selected']
+        if selected is not None and (not isinstance(selected, dict) or
+                set(selected) != {'window_id', 'tab_id', 'terminal_id'} or
+                any(not isinstance(value, str) or not value for value in selected.values())):
+            return {'status': 'unknown', 'target': None}
+        match = tab_for_session(session, live_sessions, snapshot.get('windows'))
+        if match['status'] != 'matched':
+            return match
+        return {'status': 'foreground' if snapshot.get('selected') == match['target']
+                else 'background', 'target': match['target']}
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError):
+        return {'status': 'unknown', 'target': None}
+
+
 def navigate(session, live_sessions, request=native_request):
     """Fresh match -> native revalidation/selection -> fresh verified match.
 
