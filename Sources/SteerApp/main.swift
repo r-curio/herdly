@@ -2,6 +2,16 @@ import AppKit
 import SwiftUI
 import SteerCore
 
+private enum SetupInstallResult: Sendable {
+    case success(CodexConnectionStatus)
+    case failure(String)
+}
+
+private enum SetupUndoResult: Sendable {
+    case success(CodexConnectionStatus)
+    case failure(String)
+}
+
 @MainActor
 final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -23,6 +33,11 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var desktop = DesktopState()
     @Published var desktopPresentation = Attention()
     @Published var ghosttyEnabled = false
+    @Published var ghosttyPermissionVerified = false
+    @Published var setupStatus: CodexConnectionStatus = .notConfigured
+    @Published var setupCapabilities = CodexCapabilities(cli: false, desktop: false, ghostty: false, supported: false)
+    @Published var setupPlan: CodexSetupPlan?
+    @Published var setupMessage = ""
     @Published var desktopForeground = false
     private let desktopAdapter = DesktopAdapter()
     private var desktopAcknowledged = UserDefaults.standard.data(forKey: "desktopAcknowledgments")
@@ -56,6 +71,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private var controls: NSWindow?
     private var timer: Timer?
     private var activationObserver: NSObjectProtocol?
+    private var setupRoots: CodexSetupRoots {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let helper = home.appendingPathComponent("Library/Application Support/Steer", isDirectory: true)
+        return CodexSetupRoots(configDirectory: home.appendingPathComponent(".codex", isDirectory: true),
+                               helperDirectory: helper, eventsDirectory: helper.appendingPathComponent("events", isDirectory: true))
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         for flag in ["--reminder-events", "--desktop-events"] {
@@ -96,6 +117,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             Task { @MainActor in self?.refresh() }
         }
         refresh()
+        refreshSetup()
+        // A first/unconfigured launch should explain setup immediately. Once state
+        // exists, refresh can keep the normal quiet launch behavior.
+        if !FileManager.default.fileExists(atPath: setupRoots.stateURL.path) { showControls() }
         if CommandLine.arguments.contains("--smoke-test") {
             showControls()
             precondition(controls?.isVisible == true && controls?.contentView != nil)
@@ -107,7 +132,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
 
     @objc func showControls() {
         if controls == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 570),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 700),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Steer — Prototype"
             window.isReleasedWhenClosed = false
@@ -143,6 +168,132 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         UserDefaults.standard.set(eventsPath, forKey: "approvalEventsPath")
         nextScan = 0
         refresh()
+    }
+
+    func refreshSetup() {
+        let roots = setupRoots
+        Task { @MainActor [weak self] in
+            let snapshot = await Task.detached {
+                let capabilities = CodexSetupDetection.capabilities()
+                return CodexSetupDetection.setupSnapshot(roots: roots, capabilities: capabilities)
+            }.value
+            guard let self else { return }
+            self.setupCapabilities = snapshot.capabilities
+            self.setupPlan = snapshot.plan
+            self.setupStatus = snapshot.status
+        }
+    }
+
+    func configureCodex() {
+        let roots = setupRoots
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let snapshot = await Task.detached {
+                let capabilities = CodexSetupDetection.capabilities()
+                return CodexSetupDetection.setupSnapshot(roots: roots, capabilities: capabilities)
+            }.value
+            self.setupCapabilities = snapshot.capabilities
+            self.setupPlan = snapshot.plan
+            self.setupStatus = snapshot.status
+            guard let plan = self.setupPlan, case .ready = plan.status else {
+                self.setupMessage = "Steer cannot configure Codex until the setup preview is ready."
+                return
+            }
+            let helperURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/SteerHook")
+            guard let helper = CodexSetupDetection.boundedRegularData(at: helperURL, maximum: 1_048_576) else {
+                self.setupMessage = "The bundled Steer helper is unavailable. Reinstall Steer and try again."
+                return
+            }
+            let helperIsValid = await Task.detached { CodexSetupDetection.validateHelper(helperURL) }.value
+            guard helperIsValid else {
+                self.setupMessage = "The bundled Steer helper failed its self-test. Reinstall Steer and try again."
+                return
+            }
+            let result = await Task.detached {
+                do {
+                    return SetupInstallResult.success(
+                        try CodexSetupInstaller().install(plan, roots: roots, helper: helper,
+                                                          capabilities: snapshot.capabilities))
+                } catch {
+                    return SetupInstallResult.failure(error.localizedDescription)
+                }
+            }.value
+            guard case .success(let status) = result else {
+                if case .failure(let message) = result { self.setupMessage = message }
+                self.refreshSetup()
+                return
+            }
+            self.setupStatus = status
+            switch status {
+            case .connected, .configuredAwaitingRestart, .permissionRequired:
+                self.eventsPath = roots.eventsDirectory.path
+                UserDefaults.standard.set(self.eventsPath, forKey: "approvalEventsPath")
+            default: break
+            }
+            self.setupMessage = self.setupStatusText + " Restart new Codex sessions to load settings; Steer did not restart existing sessions. Review Codex's hook-trust prompt. Ghostty Automation permission is not verified; enable Ghostty controls to let macOS prompt."
+        }
+    }
+
+    func undoCodexSetup() {
+        let roots = setupRoots
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await Task.detached {
+                do { return SetupUndoResult.success(try CodexSetupInstaller().undo(roots: roots)) }
+                catch { return SetupUndoResult.failure(error.localizedDescription) }
+            }.value
+            switch result {
+            case .success(let status):
+                self.setupStatus = status
+                if self.eventsPath == roots.eventsDirectory.path {
+                    self.eventsPath = ""
+                    UserDefaults.standard.removeObject(forKey: "approvalEventsPath")
+                }
+                self.setupMessage = "Disconnected. Existing Codex approval and sandbox settings were left unchanged."
+            case .failure(let message):
+                self.setupMessage = message
+                self.refreshSetup()
+            }
+        }
+    }
+
+    var setupStatusText: String {
+        switch setupStatus {
+        case .connected: return "Codex event delivery connected"
+        case .notConfigured: return "Codex detected; Steer is not configured."
+        case .configuredAwaitingRestart(let value), .unavailable(let value), .unsupported(let value), .permissionRequired(let value), .malformed(let value), .conflict(let value), .repairRequired(let value): return value
+        }
+    }
+
+    var setupSurfaceStatusText: [String] {
+        func text(_ name: String, installed: Bool, supported: Bool, version: String?, minimum: String) -> String {
+            guard installed else { return "\(name): unavailable" }
+            guard supported else { return "\(name) \(version ?? "version unknown"): unsupported; requires ≥ \(minimum)" }
+            return "\(name) \(version ?? "version unknown"): available"
+        }
+        return [
+            text("Codex CLI", installed: setupCapabilities.cliInstalled, supported: setupCapabilities.cli,
+                 version: setupCapabilities.cliVersion, minimum: CodexSetupRequirements.minimumCLIVersion),
+            text("Codex desktop", installed: setupCapabilities.desktopInstalled, supported: setupCapabilities.desktop,
+                 version: setupCapabilities.desktopVersion, minimum: CodexSetupRequirements.minimumDesktopVersion),
+            text("Ghostty", installed: setupCapabilities.ghosttyInstalled, supported: setupCapabilities.ghostty,
+                 version: setupCapabilities.ghosttyVersion, minimum: CodexSetupRequirements.minimumGhosttyVersion)
+        ]
+    }
+
+    var canUndoSetup: Bool {
+        switch setupStatus {
+        case .connected, .configuredAwaitingRestart, .permissionRequired: return true
+        default: return false
+        }
+    }
+
+    var canConfigureSetup: Bool {
+        guard let plan = setupPlan, case .ready = plan.status else { return false }
+        switch setupStatus {
+        case .notConfigured, .repairRequired: return true
+        default: return false
+        }
     }
 
     func scanReminders() {
@@ -322,6 +473,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         Task { @MainActor in
             let snapshot = await Task.detached { GhosttyNavigation.snapshot() }.value
             if ghosttyEnabled, let snapshot {
+                ghosttyPermissionVerified = true
                 for session in Set(queued.map(\.session)) {
                     if let target = GhosttyMatch.target(session: session, live: liveCLI, snapshot: snapshot), snapshot.selected == target {
                         for item in queued where item.session == session { cli.dismiss(item.id) }
@@ -361,11 +513,39 @@ struct Controls: View {
                 Button("Quit", action: model.quit)
             }
             Divider()
+            Text("Codex setup").font(.callout.weight(.medium))
+            Text(model.setupStatusText).font(.caption).foregroundStyle(.secondary)
+            ForEach(model.setupSurfaceStatusText, id: \.self) { status in
+                Text(status).font(.caption).foregroundStyle(.secondary)
+            }
+            if let plan = model.setupPlan, case .ready = plan.status {
+                Text(plan.requiresConfigure ? "Preview: add session-ID terminal titles and Steer-owned lifecycle hooks. Existing hooks and approval settings remain unchanged." : "The required Steer entries are already configured.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                if plan.requiresConfigure {
+                    DisclosureGroup("Show exact configuration preview") {
+                        let hooks = String(data: plan.hooksChange, encoding: .utf8) ?? "(unreadable)"
+                        Text("config.toml\n\(plan.configChange)\n\nhooks.json\n\(hooks)\n\nhelper command\n\(plan.helperCommand)")
+                            .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                HStack {
+                    Button("Review again", action: model.refreshSetup)
+                    Button("Configure Codex", action: model.configureCodex).disabled(!model.canConfigureSetup)
+                    if model.canUndoSetup { Button("Undo setup", action: model.undoCodexSetup) }
+                }
+            } else {
+                Button("Check Codex setup", action: model.refreshSetup)
+            }
+            if !model.setupMessage.isEmpty { Text(model.setupMessage).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            Divider()
             Button("Connect Codex events…", action: model.connectReminders)
             Text(model.eventsPath.isEmpty ? "Codex events are not connected." : "\(model.reminders.items.count) reminders · \(model.visibleDesktopRunning.count) desktop working · \(model.cli.groups.count) CLI sessions to check")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Enable Ghostty controls", isOn: $model.ghosttyEnabled)
             Text("Requires session-ID terminal titles and one session per unsplit tab. Enabling may request macOS Automation access.")
+                .font(.caption).foregroundStyle(.secondary)
+            Text(model.ghosttyPermissionVerified ? "Ghostty Automation permission: verified by navigation probe." : "Ghostty Automation permission: not verified; enable controls to let macOS prompt.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("Optional task-link check").font(.callout.weight(.medium))
             HStack {
@@ -380,7 +560,7 @@ struct Controls: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(24)
-        .frame(width: 460, height: 570)
+        .frame(width: 460, height: 700)
     }
 }
 
