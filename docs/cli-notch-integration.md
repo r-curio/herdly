@@ -41,3 +41,9 @@ A disk-level regression failed before the fix and passed afterward: exact-turn c
 ## Human-verified direct-return acknowledgment
 
 The user explicitly confirmed that returning manually to the originating Ghostty tab clears its completion from Steer, without clicking the notch Open action. Combined with prior user-confirmed two-tab and cross-window navigation, this establishes the tested happy-path navigation and focus behavior. Native error-state behavior and CLI missing-status hook warnings remain separate unresolved checks.
+
+## Missing-status warning root cause
+
+Global ~/.codex/hooks.json registers an AttentionRouter helper for SessionStart, UserPromptSubmit, PermissionRequest, Stop and SessionEnd, separate from Steer's project hooks. The installed helper fails codesign verification (resources required by its signature are absent). Its read-only --help invocation terminates with signal 9 and no output. This reproduces a process exit without a normal status code; Codex 0.145.0's command runner obtains output.status.code(), which is absent for signal termination. This explains the corresponding warnings alongside successful Steer captures/decisions.
+
+Steer's exact recorder/interpreter also passed ten isolated /bin/zsh -lc replays (all exit 0, no output, maximum 0.103 seconds), in addition to prior direct recorder replays. A proposed config removing only the five AttentionRouter entries was prepared under /tmp; the real config was not changed. Removing those hooks would disconnect the other app's Codex integration, so that choice is pending the user's approval. Impeccable hooks and Steer's project hooks are preserved.
