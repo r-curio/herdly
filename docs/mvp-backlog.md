@@ -6,7 +6,7 @@ Start with desktop verification (#1 and #2), as requested. Ghostty verification 
 
 | Ticket | Type | Blocked by |
 | --- | --- | --- |
-| [#1 Prove Codex desktop conversation focus and exact jump-back](https://github.com/r-curio/steer/issues/1) | HITL | None |
+| [#1 Prove Codex desktop app visibility and exact jump-back](https://github.com/r-curio/steer/issues/1) | HITL | None |
 | [#2 Prove desktop lifecycle events and safe approval handoff](https://github.com/r-curio/steer/issues/2) | HITL | None |
 | [#3 Prove local Codex CLI tracking and exact Ghostty pane targeting](https://github.com/r-curio/steer/issues/3) | HITL | None |
 | [#4 Show a live desktop task in a native macOS companion](https://github.com/r-curio/steer/issues/4) | AFK | [#1](https://github.com/r-curio/steer/issues/1), [#2](https://github.com/r-curio/steer/issues/2) |
@@ -19,6 +19,8 @@ Start with desktop verification (#1 and #2), as requested. Ghostty verification 
 | [#11 Restore activity and acknowledgments safely after restart](https://github.com/r-curio/steer/issues/11) | AFK | [#8](https://github.com/r-curio/steer/issues/8), [#10](https://github.com/r-curio/steer/issues/10) |
 | [#12 Keep the notch usable across displays and keyboard interaction](https://github.com/r-curio/steer/issues/12) | AFK | [#8](https://github.com/r-curio/steer/issues/8), [#9](https://github.com/r-curio/steer/issues/9) |
 | [#13 Package and verify the first installable macOS MVP](https://github.com/r-curio/steer/issues/13) | HITL | [#5](https://github.com/r-curio/steer/issues/5), [#10](https://github.com/r-curio/steer/issues/10), [#11](https://github.com/r-curio/steer/issues/11), [#12](https://github.com/r-curio/steer/issues/12) |
+
+Desktop MVP scope: hide the shared notch while Codex desktop is foreground; keep desktop completions until explicitly dismissed. Exact desktop task focus is deferred. Ghostty retains its pane-specific requirements. Direct approvals remain gated by their own integration proof.
 
 ## Delivery sequence
 

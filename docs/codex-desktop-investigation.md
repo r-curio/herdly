@@ -50,7 +50,7 @@ Keep desktop observation behind its own integration boundary. It must report unk
 
 Before shipping desktop support, obtain a permitted live verification path and demonstrate exact conversation selection, verified deep-link return, and independently safe approval handoff. Capability metadata and source inspection do not satisfy those acceptance checks.
 
-## Ticket #1 execution: 2026-09-11
+## Original ticket #1 execution: 2026-09-11 (superseded scope)
 
 Status: blocked, not completed. [Issue #1](https://github.com/r-curio/steer/issues/1).
 
@@ -80,8 +80,8 @@ A further review of the official [hook event catalog](https://learn.chatgpt.com/
 
 Exact-task focus is therefore blocked by an unverified integration contract, not by another manual clicking test. Do not build an observer that substitutes running state, latest activity, task title, or a successful URL launch for focus. Do not treat a generated-schema check as proof that no private capability can exist.
 
-### Proposed scope adjustment — awaiting user decision
+### Accepted scope adjustment — desktop MVP
 
-For desktop MVP, consider app-level visibility: hide the notch while Codex is foreground and show it while away when attention items exist. Keep completions queued until explicit dismissal; foregrounding Codex never marks all tasks read. A future verified selected-task signal can restore the original task-specific behavior. Native app activation is the candidate implementation, not live-tested in this investigation.
+The user accepted app-level visibility for desktop MVP: hide the notch while Codex is foreground and show it while away when attention items exist. Keep completions queued until explicit dismissal; foregrounding Codex never marks all tasks read. A future verified selected-task signal can restore the original task-specific behavior. Native app activation is the candidate implementation, not live-tested in this investigation.
 
-Tradeoff: while viewing task B, the notch would also hide task A's notification. This changes the agreed product requirement and has not been accepted or implemented. Under the existing unknown-focus rule, direct desktop approvals remain native unless a separate accepted policy and safe approval integration are established. This adjustment alone does not complete #2 or unblock direct approvals.
+Tradeoff: while viewing task B, the notch would also hide task A's notification. This replaces the earlier exact-task desktop focus requirement. Product code and live app-activation verification are still pending; exact-task focus no longer blocks the desktop MVP. Under the existing unknown-focus rule, direct desktop approvals remain native unless a separate accepted policy and safe approval integration are established. This adjustment alone does not complete #2 or unblock direct approvals.
