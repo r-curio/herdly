@@ -10,7 +10,7 @@ Support the Codex desktop app and Codex CLI running directly in Ghostty first. A
 
 Monitor only Codex sessions running locally on the user's Mac in the first version. Remote Codex sessions, including sessions reached through SSH, are outside the initial scope. No remote session connection layer is required.
 
-The user uses Ghostty tabs/windows and split panes. Session focus detection and Open in Codex must target the individual pane within the appropriate tab and window. Exact targeting remains a capability to verify, not an assumed implementation guarantee.
+For the initial Ghostty scope, support one Codex session in an unsplit tab and return to that exact tab in its window. Multiple panes within a tab are deferred. Split tabs are unsupported for exact targeting and must return unavailable rather than selecting an arbitrary pane. Stable Ghostty remains the baseline; a prerelease is not required merely to support splits. Session-to-tab binding still needs verification, including two tabs in the same project. See ADR 0004.
 
 The user's reference to ChatGPT desktop means its Codex work, not regular ChatGPT conversations. The installed /Applications/ChatGPT.app bundle identifies as com.openai.codex; scope remains Codex only. Available runtime integration points still require verification rather than assuming all desktop hosts expose the same capabilities.
 
