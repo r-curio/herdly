@@ -60,3 +60,23 @@ import Testing
     let split: [String: Any] = ["id":"a", "terminals":[["id":"p", "name":GhosttyMatch.title(a)], ["id":"p2", "name":"shell"]]]
     #expect(GhosttyMatch.target(session:a, live:[a], snapshot:try snapshot([split])) == nil)
 }
+
+
+@Test func completedRepliesGroupBySessionWithoutLosingTurnAcknowledgments() {
+    let a = UUID(), b = UUID()
+    let first = CLICompletion(session: a, turn: UUID(), receivedAt: "01")
+    let second = CLICompletion(session: a, turn: UUID(), receivedAt: "02")
+    let other = CLICompletion(session: b, turn: UUID(), receivedAt: "03")
+    var queue = CLIQueue()
+    queue.apply([first, second, other, first])
+    #expect(queue.groups.map(\.session) == [a, b])
+    #expect(queue.groups[0].completions.count == 2)
+    let displayed = queue.groups[0]
+    let newer = CLICompletion(session: a, turn: UUID(), receivedAt: "04")
+    queue.apply([newer])
+    for item in displayed.completions { queue.dismiss(item.id) }
+    #expect(queue.items == [other, newer])
+    var restored = CLIQueue(acknowledged: queue.acknowledged)
+    restored.apply([first, second, other, newer])
+    #expect(restored.items == [other, newer])
+}
