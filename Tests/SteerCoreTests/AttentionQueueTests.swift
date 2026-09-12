@@ -79,7 +79,7 @@ import Testing
     var scan = ReminderScan()
     scan.attentionRequests = [request]
     var queue = AttentionQueue()
-    queue.receipt([request], now: 100)
+    queue.recordReceipts([request], now: 100)
     queue.apply(scan: scan, desktopEvents: [], now: 110)
     #expect(queue.items.first?.kind == .actionableRequest)
 
@@ -110,7 +110,7 @@ import Testing
     #expect(restarted.items.first?.kind == .handedBackRequest)
     // The same request receipted by this process keeps its controls until its own deadline.
     var queue = AttentionQueue()
-    queue.receipt(scan.attentionRequests, now: 100)
+    queue.recordReceipts(scan.attentionRequests, now: 100)
     queue.apply(scan: scan, desktopEvents: [], now: 129)
     #expect(queue.items.first?.kind == .actionableRequest)
     queue.apply(scan: scan, desktopEvents: [], now: 131)

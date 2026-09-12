@@ -14,6 +14,12 @@ public struct AttentionSnapshot: Codable, Equatable, Sendable {
         self.completions = completions
         self.acknowledged = acknowledged
     }
+
+    /// The pre-snapshot acknowledgment lists, migrated once when no snapshot file exists yet.
+    public init(legacyCLI: Set<TurnIdentity>, legacyDesktop: Set<TurnIdentity>) {
+        self.init(acknowledged: Set(legacyCLI.map { CompletionIdentity(source: .cli, session: $0.session, turn: $0.turn) }
+            + legacyDesktop.map { CompletionIdentity(source: .desktop, session: $0.session, turn: $0.turn) }))
+    }
 }
 
 /// Atomic, bounded snapshot persistence under Steer's own support directory. It never writes into
@@ -21,11 +27,21 @@ public struct AttentionSnapshot: Codable, Equatable, Sendable {
 public enum AttentionSnapshotStore {
     public static let limit = 4 * 1024 * 1024
 
+    /// The previous snapshot is kept beside the current one, so a save interrupted after the
+    /// rename, or a corrupted file, falls back to the last good state instead of losing dismissals.
+    public static func backupURL(for file: URL) -> URL {
+        file.deletingLastPathComponent().appendingPathComponent(file.lastPathComponent + ".previous")
+    }
+
     public static func load(from file: URL) -> AttentionSnapshot {
+        decode(file) ?? decode(backupURL(for: file)) ?? AttentionSnapshot()
+    }
+
+    private static func decode(_ file: URL) -> AttentionSnapshot? {
         guard let bytes = SafeFile.read(file, limit: limit),
               let snapshot = try? JSONDecoder().decode(AttentionSnapshot.self, from: bytes),
               snapshot.version == AttentionSnapshot.currentVersion,
-              snapshot.completions.allSatisfy({ $0.arrivedAt.isFinite }) else { return AttentionSnapshot() }
+              snapshot.completions.allSatisfy({ $0.arrivedAt.isFinite }) else { return nil }
         return snapshot
     }
 
@@ -39,8 +55,14 @@ public enum AttentionSnapshotStore {
               (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil,
               isReplaceable(file) else { return false }
         let temporary = directory.appendingPathComponent("." + file.lastPathComponent + ".steer-" + UUID().uuidString)
+        let backup = backupURL(for: file)
         do {
             try data.write(to: temporary, options: [.atomic])
+            // Keep the last good snapshot only if it is valid; a corrupt one must not shadow the new save.
+            if decode(file) != nil {
+                if FileManager.default.fileExists(atPath: backup.path) { try FileManager.default.removeItem(at: backup) }
+                try FileManager.default.copyItem(at: file, to: backup)
+            }
             _ = try FileManager.default.replaceItemAt(file, withItemAt: temporary)
             return true
         } catch {

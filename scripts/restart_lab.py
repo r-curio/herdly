@@ -192,20 +192,32 @@ def main():
     check(c_items.get(request_id, {}).get("state") == "handedBack" and c["released_unverified_requests"] == [],
           "C: request stays handed back; nothing re-released", failures)
 
+    # Make sure there is at least one dismissal to lose: turn1 acknowledged as Dismiss would persist it.
+    snapshot = json.loads(lab.snapshot.read_text())
+    snapshot["acknowledged"].append({"source": "desktop", "session": desktop_session, "turn": turn1})
+    snapshot["completions"] = [c for c in snapshot["completions"] if c["turn"].lower() != turn1]
+    write_json(lab.snapshot, snapshot)
+    pre = lab.reported_run("C2-dismissal-before-corruption", "turn1 dismissed; saves a good snapshot and its backup")
+    check([i["turn"] for i in pre["items"] if i["kind"] == "completion"] == [turn2], "C2: dismissed turn1 stays cleared", failures)
     lab.snapshot.write_bytes(b'{"version":1,"completions":[{"source":"desktop"')  # interrupted save
     (root / ".attention-snapshot.json.steer-partial").write_bytes(b"\x00\xff garbage")
     d = lab.reported_run("D-corrupt-snapshot", "truncated snapshot plus a leftover temporary file")
     d_items = {i.get("turn"): i for i in d["items"] if i["kind"] == "completion"}
-    check(set(d_items) == {turn1, turn2}, "D: startup proceeds; completions rebuilt from evidence", failures)
+    check(set(d_items) == {turn2}, "D: startup proceeds; undismissed completion rebuilt, dismissed one still cleared", failures)
     check(d["snapshot_on_disk"].get("valid_json") is True, "D: corrupt snapshot replaced by a valid one", failures)
+    check(d["acknowledged_count"] == pre["acknowledged_count"], "D: acknowledgments survived via the previous good snapshot", failures)
 
     snapshot = json.loads(lab.snapshot.read_text())
-    snapshot["acknowledged"] = [{"source": "desktop", "session": desktop_session, "turn": turn2}]
-    snapshot["completions"] = [c for c in snapshot["completions"] if c["turn"] != turn2]
+    snapshot["acknowledged"].append({"source": "desktop", "session": desktop_session, "turn": turn2})
+    snapshot["completions"] = []
     write_json(lab.snapshot, snapshot)
-    e = lab.reported_run("E-saved-dismissal", "turn2 dismissed (as Dismiss persists it) before restart")
+    turn3 = str(uuid.uuid4())
+    hook(lab.events, "UserPromptSubmit", desktop_session, turn3)
+    hook(lab.events, "Stop", desktop_session, turn3)
+    e = lab.reported_run("E-saved-dismissal-later-turn", "turn2 dismissed too; a later turn3 arrived while quit")
     e_turns = [i["turn"] for i in e["items"] if i["kind"] == "completion"]
-    check(e_turns == [turn1], "E: dismissed completion stays cleared; the other remains", failures)
+    check(e_turns == [turn3], "E: both dismissed completions stay cleared; the later turn is eligible", failures)
+    check(all(i["uncertain"] for i in e["items"] if i["kind"] == "completion"), "E: the turn that arrived while quit is uncertain", failures)
 
     check(tree_digest(lab.rollouts) == rollouts_before, "rollouts (Codex data stand-in) never modified", failures)
     for run in lab.runs:
@@ -213,7 +225,7 @@ def main():
             check(run["exit_code"] == 0 and run["startup_seconds"] < 30, f"{run['run']}: ordinary startup and exit", failures)
 
     evidence = {"recorded_at": now_iso(), "app": str(Path(options.app).resolve()), "lab": str(root),
-                "identities": {"desktop_session": desktop_session, "turn1": turn1, "turn2": turn2,
+                "identities": {"desktop_session": desktop_session, "turn1": turn1, "turn2": turn2, "turn3": turn3,
                                "cli_session": cli_session, "cli_turn": cli_turn, "request_id": request_id},
                 "runs": lab.runs, "failures": failures}
     if options.out:

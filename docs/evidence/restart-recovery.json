@@ -2,15 +2,16 @@
   "app": "/Users/dev/Steer/output/Steer.app",
   "failures": [],
   "identities": {
-    "cli_session": "55ba9a1d-2e61-4a41-82a9-679592e21fc3",
-    "cli_turn": "edc3c3b0-a563-4826-9516-6bf28ff2a538",
-    "desktop_session": "228e5c27-5d1f-40cc-82be-943043e495a9",
-    "request_id": "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9",
-    "turn1": "eb547174-df33-463b-adea-3b18c8d61308",
-    "turn2": "55454f45-3c66-4225-8892-456e54b71fb7"
+    "cli_session": "2b1bdefb-6a5f-4c57-b66f-7ac5ed58c37d",
+    "cli_turn": "48f2cb29-b6e3-45b1-823f-1554be1e7559",
+    "desktop_session": "99137f07-35cd-4656-9063-1b698ced30bb",
+    "request_id": "c0ecd36a-a2b2-48a7-add5-a72fae5c3a58",
+    "turn1": "cfecd471-e5a5-4512-8ead-03281d3a2cae",
+    "turn2": "962b3e88-f7b0-49ff-9dc7-a3de98035e04",
+    "turn3": "bbae6a62-a8cd-46e0-b749-6aef47002917"
   },
-  "lab": "/var/folders/xx/tmp/T/steer-restart-lab-ofdclell",
-  "recorded_at": "2026-09-12T05:55:07.670025+00:00",
+  "lab": "/var/folders/xx/tmp/T/steer-restart-lab-vw0etvxi",
+  "recorded_at": "2026-09-12T06:02:39.830656+00:00",
   "runs": [
     {
       "acknowledged_count": 34,
@@ -23,34 +24,34 @@
       "items": [
         {
           "kind": "handedBackRequest",
-          "request": "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9",
-          "session": "55ba9a1d-2e61-4a41-82a9-679592e21fc3",
+          "request": "c0ecd36a-a2b2-48a7-add5-a72fae5c3a58",
+          "session": "2b1bdefb-6a5f-4c57-b66f-7ac5ed58c37d",
           "state": "handedBack"
         },
         {
           "kind": "completion",
-          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "session": "99137f07-35cd-4656-9063-1b698ced30bb",
           "source": "desktop",
-          "turn": "eb547174-df33-463b-adea-3b18c8d61308",
+          "turn": "cfecd471-e5a5-4512-8ead-03281d3a2cae",
           "uncertain": true
         }
       ],
       "note": "fresh start over prior evidence and a saved receipt",
       "released_unverified_requests": [
-        "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9"
+        "c0ecd36a-a2b2-48a7-add5-a72fae5c3a58"
       ],
       "run": "A-restart-with-saved-receipt",
-      "snapshot": "/var/folders/xx/tmp/T/steer-restart-lab-ofdclell/attention-snapshot.json",
+      "snapshot": "/var/folders/xx/tmp/T/steer-restart-lab-vw0etvxi/attention-snapshot.json",
       "snapshot_on_disk": {
         "acknowledged": 34,
         "bytes": 4086,
         "completions": [
-          "eb547174-df33-463b-adea-3b18c8d61308"
+          "cfecd471-e5a5-4512-8ead-03281d3a2cae"
         ],
         "exists": true,
         "valid_json": true
       },
-      "startup_seconds": 0.24,
+      "startup_seconds": 0.58,
       "to_check_count": 2,
       "working_count": 0
     },
@@ -63,8 +64,8 @@
         "acknowledged": 34,
         "bytes": 4247,
         "completions": [
-          "eb547174-df33-463b-adea-3b18c8d61308",
-          "55454f45-3c66-4225-8892-456e54b71fb7"
+          "cfecd471-e5a5-4512-8ead-03281d3a2cae",
+          "962b3e88-f7b0-49ff-9dc7-a3de98035e04"
         ],
         "exists": true,
         "valid_json": true
@@ -81,45 +82,45 @@
       "items": [
         {
           "kind": "handedBackRequest",
-          "request": "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9",
-          "session": "55ba9a1d-2e61-4a41-82a9-679592e21fc3",
+          "request": "c0ecd36a-a2b2-48a7-add5-a72fae5c3a58",
+          "session": "2b1bdefb-6a5f-4c57-b66f-7ac5ed58c37d",
           "state": "handedBack"
         },
         {
           "kind": "completion",
-          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "session": "99137f07-35cd-4656-9063-1b698ced30bb",
           "source": "desktop",
-          "turn": "eb547174-df33-463b-adea-3b18c8d61308",
+          "turn": "cfecd471-e5a5-4512-8ead-03281d3a2cae",
           "uncertain": true
         },
         {
           "kind": "completion",
-          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "session": "99137f07-35cd-4656-9063-1b698ced30bb",
           "source": "desktop",
-          "turn": "55454f45-3c66-4225-8892-456e54b71fb7",
+          "turn": "962b3e88-f7b0-49ff-9dc7-a3de98035e04",
           "uncertain": true
         }
       ],
       "note": "restart after SIGKILL",
       "released_unverified_requests": [],
       "run": "C-restart-after-crash",
-      "snapshot": "/var/folders/xx/tmp/T/steer-restart-lab-ofdclell/attention-snapshot.json",
+      "snapshot": "/var/folders/xx/tmp/T/steer-restart-lab-vw0etvxi/attention-snapshot.json",
       "snapshot_on_disk": {
         "acknowledged": 34,
         "bytes": 4246,
         "completions": [
-          "eb547174-df33-463b-adea-3b18c8d61308",
-          "55454f45-3c66-4225-8892-456e54b71fb7"
+          "cfecd471-e5a5-4512-8ead-03281d3a2cae",
+          "962b3e88-f7b0-49ff-9dc7-a3de98035e04"
         ],
         "exists": true,
         "valid_json": true
       },
-      "startup_seconds": 0.24,
+      "startup_seconds": 0.2,
       "to_check_count": 3,
       "working_count": 0
     },
     {
-      "acknowledged_count": 0,
+      "acknowledged_count": 35,
       "completion_presentation": {
         "expanded": false,
         "pending": true,
@@ -129,45 +130,77 @@
       "items": [
         {
           "kind": "handedBackRequest",
-          "request": "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9",
-          "session": "55ba9a1d-2e61-4a41-82a9-679592e21fc3",
+          "request": "c0ecd36a-a2b2-48a7-add5-a72fae5c3a58",
+          "session": "2b1bdefb-6a5f-4c57-b66f-7ac5ed58c37d",
           "state": "handedBack"
         },
         {
           "kind": "completion",
-          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "session": "99137f07-35cd-4656-9063-1b698ced30bb",
           "source": "desktop",
-          "turn": "eb547174-df33-463b-adea-3b18c8d61308",
+          "turn": "962b3e88-f7b0-49ff-9dc7-a3de98035e04",
           "uncertain": true
+        }
+      ],
+      "note": "turn1 dismissed; saves a good snapshot and its backup",
+      "released_unverified_requests": [],
+      "run": "C2-dismissal-before-corruption",
+      "snapshot": "/var/folders/xx/tmp/T/steer-restart-lab-vw0etvxi/attention-snapshot.json",
+      "snapshot_on_disk": {
+        "acknowledged": 35,
+        "bytes": 4202,
+        "completions": [
+          "962b3e88-f7b0-49ff-9dc7-a3de98035e04"
+        ],
+        "exists": true,
+        "valid_json": true
+      },
+      "startup_seconds": 0.2,
+      "to_check_count": 2,
+      "working_count": 0
+    },
+    {
+      "acknowledged_count": 35,
+      "completion_presentation": {
+        "expanded": false,
+        "pending": true,
+        "presented": true
+      },
+      "exit_code": 0,
+      "items": [
+        {
+          "kind": "handedBackRequest",
+          "request": "c0ecd36a-a2b2-48a7-add5-a72fae5c3a58",
+          "session": "2b1bdefb-6a5f-4c57-b66f-7ac5ed58c37d",
+          "state": "handedBack"
         },
         {
           "kind": "completion",
-          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "session": "99137f07-35cd-4656-9063-1b698ced30bb",
           "source": "desktop",
-          "turn": "55454f45-3c66-4225-8892-456e54b71fb7",
+          "turn": "962b3e88-f7b0-49ff-9dc7-a3de98035e04",
           "uncertain": true
         }
       ],
       "note": "truncated snapshot plus a leftover temporary file",
       "released_unverified_requests": [],
       "run": "D-corrupt-snapshot",
-      "snapshot": "/var/folders/xx/tmp/T/steer-restart-lab-ofdclell/attention-snapshot.json",
+      "snapshot": "/var/folders/xx/tmp/T/steer-restart-lab-vw0etvxi/attention-snapshot.json",
       "snapshot_on_disk": {
-        "acknowledged": 0,
-        "bytes": 367,
+        "acknowledged": 35,
+        "bytes": 4202,
         "completions": [
-          "eb547174-df33-463b-adea-3b18c8d61308",
-          "55454f45-3c66-4225-8892-456e54b71fb7"
+          "962b3e88-f7b0-49ff-9dc7-a3de98035e04"
         ],
         "exists": true,
         "valid_json": true
       },
-      "startup_seconds": 0.18,
-      "to_check_count": 3,
+      "startup_seconds": 0.2,
+      "to_check_count": 2,
       "working_count": 0
     },
     {
-      "acknowledged_count": 1,
+      "acknowledged_count": 36,
       "completion_presentation": {
         "expanded": false,
         "pending": true,
@@ -177,32 +210,32 @@
       "items": [
         {
           "kind": "handedBackRequest",
-          "request": "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9",
-          "session": "55ba9a1d-2e61-4a41-82a9-679592e21fc3",
+          "request": "c0ecd36a-a2b2-48a7-add5-a72fae5c3a58",
+          "session": "2b1bdefb-6a5f-4c57-b66f-7ac5ed58c37d",
           "state": "handedBack"
         },
         {
           "kind": "completion",
-          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "session": "99137f07-35cd-4656-9063-1b698ced30bb",
           "source": "desktop",
-          "turn": "eb547174-df33-463b-adea-3b18c8d61308",
+          "turn": "bbae6a62-a8cd-46e0-b749-6aef47002917",
           "uncertain": true
         }
       ],
-      "note": "turn2 dismissed (as Dismiss persists it) before restart",
+      "note": "turn2 dismissed too; a later turn3 arrived while quit",
       "released_unverified_requests": [],
-      "run": "E-saved-dismissal",
-      "snapshot": "/var/folders/xx/tmp/T/steer-restart-lab-ofdclell/attention-snapshot.json",
+      "run": "E-saved-dismissal-later-turn",
+      "snapshot": "/var/folders/xx/tmp/T/steer-restart-lab-vw0etvxi/attention-snapshot.json",
       "snapshot_on_disk": {
-        "acknowledged": 1,
-        "bytes": 322,
+        "acknowledged": 36,
+        "bytes": 4318,
         "completions": [
-          "eb547174-df33-463b-adea-3b18c8d61308"
+          "bbae6a62-a8cd-46e0-b749-6aef47002917"
         ],
         "exists": true,
         "valid_json": true
       },
-      "startup_seconds": 0.24,
+      "startup_seconds": 0.18,
       "to_check_count": 2,
       "working_count": 0
     }
