@@ -49,3 +49,36 @@ event shape without claiming permanent attachment or changing Codex
 configuration; reversible connection/setup is tracked separately in #5. A
 fresh real-session UI check still requires the permitted human route described
 there.
+
+## Completion notification demonstration (#8)
+
+The controllable-clock tests cover a completion staying queued while Codex is
+foreground, expanding for three seconds only after an eligible away state,
+retaining the item after collapse, and restoring silently. Queue tests cover
+duplicate lifecycle records, explicit dismissal, and a later turn in the same
+session remaining independent.
+
+The existing Steer-only walkthrough in `docs/prototype.md` records the compact
+popup, expansion, foreground hiding, switching-away retention, restart
+restoration, explicit dismissal, and the menu mute control. This patch did not
+alter Codex hooks, permissions, or user configuration. A fresh real desktop turn
+was not triggered here; native UI timing and sound remain separately
+human-observable.
+
+An earlier native UI attempt was blocked by the Mac being locked; the allowed
+CUA unlock attempt could not recover that session. The later walkthrough below
+records the safe Steer-only evidence obtained after the Mac was unlocked.
+
+### Allowed Steer-only CUA walkthrough (2026-09-12)
+
+After the Mac was unlocked, the exact `79081ec` build was launched and its
+controls connected to the existing evidence directory. The controls showed 17
+real desktop completions. **Send test** increased the count to 18; closing the
+controls left the compact `18 to check` notch, which auto-collapsed. Reopening
+the notch expanded the same 18 items and rendered each desktop completion with
+**Open in Codex** and explicit **Dismiss**, alongside the test item.
+
+This proves the branch build's native popup, collapse, retention, reopen, and
+desktop action rendering through Steer only. CUA could not click **Dismiss**
+without destructive-action confirmation. Sound/mute hearing, a fresh CLI turn,
+Ghostty, and Codex UI were not tested and are not claimed here.
