@@ -502,12 +502,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
 
     func decide(_ request: AttentionRequest, as decision: ApprovalDecision) {
         // Re-read the queue's current copy: a request handed back since the row rendered must not be answered.
-        guard let current = queue.items.compactMap(\.request).first(where: { $0.identity == request.identity }),
-              ApprovalDecisionPolicy.accepts(current, decision: decision, now: Date().timeIntervalSince1970),
-              !eventsPath.isEmpty else {
-            navigationMessage = "This request was handed back to Codex; answer it there."
-            refresh()
-            return
+        guard !eventsPath.isEmpty else { navigationMessage = "Codex events are not connected."; refresh(); return }
+        guard let current = queue.items.compactMap(\.request).first(where: { $0.identity == request.identity }) else {
+            navigationMessage = "This request is no longer in the queue."; refresh(); return
+        }
+        guard ApprovalDecisionPolicy.accepts(current, decision: decision, now: Date().timeIntervalSince1970) else {
+            navigationMessage = "This request was handed back to Codex; answer it there."; refresh(); return
         }
         let record = ApprovalDecisionRecord(requestID: request.id, decision: decision,
                                             decidedAt: Date().timeIntervalSince1970)
@@ -525,8 +525,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         guard request.state == .actionable else { return }
         let now = Date().timeIntervalSince1970
         if !eventsPath.isEmpty {
-            _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision, decidedAt: now),
-                                      in: URL(fileURLWithPath: eventsPath))
+            let events = URL(fileURLWithPath: eventsPath)
+            let released = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision, decidedAt: now), in: events)
+            if !released && ApprovalDecisions.existing(for: request.id, in: events) == nil {
+                // The helper still waits for its own deadline; the row loses its controls regardless.
+                navigationMessage = "Steer could not write the handoff record; Codex will show its own prompt within 30 seconds."
+            }
         }
         let handedBack = AttentionRequest(id: request.id, source: request.source, session: request.session,
                                           turn: request.turn, arrivedAt: request.arrivedAt, expiresAt: request.expiresAt,

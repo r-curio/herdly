@@ -145,13 +145,14 @@ public enum ReminderReader {
                 // decides the state. A helper-written `no_decision` outcome is authoritative on its own.
                 let decided = item.outcome == .pending ? ApprovalDecisions.existing(for: item.id, in: events) : nil
                 if decided?.decision.isUserDecision == true { continue }
-                let receivedAt = receipt?.receivedAt ?? item.receivedAt
-                let expiresAt = receipt?.expiresAt ?? item.expiresAt
-                let actionable = item.outcome == .pending && receipt != nil && decided == nil
+                // A request that never got a receipt has no arrival time of its own; its file's creation
+                // time stands in so ordering, session-end and rollout matching never treat it as ancient.
                 let published = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate?.timeIntervalSince1970) ?? 0
+                let receivedAt = receipt?.receivedAt ?? (item.receivedAt > 0 ? item.receivedAt : published)
+                let expiresAt = receipt?.expiresAt ?? (item.expiresAt > 0 ? item.expiresAt : receivedAt + ApprovalTiming.handoffTimeout)
+                let actionable = item.outcome == .pending && receipt != nil && decided == nil
                 probes[item.sessionID, default: []].append(ApprovalResolutionProbe(requestID: item.id, turn: item.turnID,
-                                                                                    command: item.details.command,
-                                                                                    notBefore: receivedAt > 0 ? receivedAt : published))
+                                                                                    command: item.details.command, notBefore: receivedAt))
                 result.attentionRequests.append(AttentionRequest(id: item.id, source: source, session: item.sessionID, turn: item.turnID,
                                                                  arrivedAt: receivedAt, expiresAt: expiresAt,
                                                                  state: actionable ? .actionable : .handedBack,
@@ -165,7 +166,7 @@ public enum ReminderReader {
                 }
             } else if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(Reminder.self, from: bytes),
                       ["pending", "no_decision"].contains(item.outcome) {
-                let arrival = item.captured_at ?? item.received_at.flatMap { ISO8601DateFormatter().date(from: $0)?.timeIntervalSince1970 }
+                let arrival = item.captured_at ?? item.received_at.flatMap(RolloutTimestamp.parse)
                     ?? ((try? url.resourceValues(forKeys: [.creationDateKey]).creationDate?.timeIntervalSince1970) ?? 0)
                 result.attentionRequests.append(AttentionRequest(id: item.id, source: item.source ?? .desktop,
                                                                  session: item.session_id, turn: item.turn_id,

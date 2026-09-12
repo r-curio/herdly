@@ -130,7 +130,7 @@ private let t0 = RolloutTimestamp.parse("2026-09-12T04:23:07.000Z")!
                                                  probes: [probe(turn: turn, command: "touch MARKER", notBefore: 0)]).isEmpty)
 }
 
-@Test func malformedAndPartialLinesAreSkippedAndOutputTextIsNotTrusted() {
+@Test func malformedAndPartialLinesAreSkippedAndUnrecognizedWrappersAreNotEvidence() {
     let session = UUID(), turn = UUID()
     let text = meta(session)
         + "{not json\n"
@@ -142,8 +142,12 @@ private let t0 = RolloutTimestamp.parse("2026-09-12T04:23:07.000Z")!
         probe(turn: turn, command: "cat notes", notBefore: t0),
         probe(turn: turn, command: "touch LATER", notBefore: t0)
     ])
-    #expect(found.count == 1)
-    #expect(found.first?.kind == .unclassified) // an output exists, so the prompt is no longer pending
+    #expect(found.isEmpty) // arbitrary output text is never evidence; the partial line is ignored
+    let failed = output(turn: turn, call: "c1", kind: "rejected", at: "2026-09-12T04:23:09.000Z")
+        .replacingOccurrences(of: "Rejected(", with: "Other(")
+    let unclassified = ApprovalResolutionReader.resolutions(in: Data((meta(session) + execCall(turn: turn, call: "c1", command: "cat notes", at: "2026-09-12T04:23:07.000Z") + failed).utf8),
+                                                            session: session, probes: [probe(turn: turn, command: "cat notes", notBefore: t0)])
+    #expect(unclassified.first?.kind == .unclassified) // a runtime failure wrapper without a rejection
 }
 
 @Test func interruptedOutputCountsAsResolution() {
@@ -168,6 +172,35 @@ private let t0 = RolloutTimestamp.parse("2026-09-12T04:23:07.000Z")!
     let found = ApprovalResolutionReader.resolutions(in: finished, session: session, probes: [a, b])
     #expect(Set(found.map(\.requestID)) == [a.requestID, b.requestID])
     #expect(found.allSatisfy { $0.kind == .interrupted && $0.callID == "multi" })
+}
+
+@Test func identicalCommandsInOneScriptEachAnswerOneRequest() {
+    let session = UUID(), turn = UUID()
+    let script = "await tools.exec_command({cmd: \\\"touch TWIN\\\"}); await tools.exec_command({cmd: \\\"touch TWIN\\\"});"
+    let call = "{\"timestamp\":\"2026-09-12T04:23:07.000Z\",\"type\":\"response_item\",\"payload\":{\"type\":\"custom_tool_call\",\"name\":\"exec\",\"call_id\":\"multi\",\"input\":\"\(script)\",\"internal_chat_message_metadata_passthrough\":{\"turn_id\":\"\(turn)\"}}}\n"
+    let first = probe(turn: turn, command: "touch TWIN", notBefore: t0 + 0.2)
+    let second = probe(turn: turn, command: "touch TWIN", notBefore: t0 + 0.3)
+    let third = probe(turn: turn, command: "touch TWIN", notBefore: t0 + 0.4)
+    let data = Data((meta(session) + call + output(turn: turn, call: "multi", kind: "completed", at: "2026-09-12T04:24:30.000Z")).utf8)
+    let found = ApprovalResolutionReader.resolutions(in: data, session: session, probes: [third, second, first])
+    #expect(Set(found.map(\.requestID)) == [first.requestID, second.requestID]) // two slots, three requests
+}
+
+@Test func abandonedRequestArrivesAtItsFileTimeNotAtZero() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let request = ApprovalRequest(requestID: UUID(), sessionID: UUID(), turnID: UUID(), details: ApprovalDetails(),
+                                  receivedAt: 0, expiresAt: 0, outcome: .noDecision)
+    #expect(ApprovalStore.publish(request, in: root))
+    let scan = ReminderReader.scan(events: root, rollouts: root)
+    let arrived = try #require(scan.attentionRequests.first?.arrivedAt)
+    #expect(abs(arrived - Date().timeIntervalSince1970) < 60)
+    var ended = scan
+    ended.sessionEnds = [request.sessionID: arrived - 3600] // an old SessionEnd for a resumed session
+    var queue = AttentionQueue()
+    queue.apply(scan: ended, desktopEvents: [], now: arrived + 1)
+    #expect(queue.items.count == 1)
 }
 
 @Test func legacyFunctionCallShapeIsMatchedByCommandArguments() {
