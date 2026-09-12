@@ -12,7 +12,7 @@ CLI PermissionRequest hooks now publish the actual session/turn, command,
 project, action, reason, and expandable tool input to the connected events
 directory. Steer can write one atomic allow-once or deny record for that exact
 request; the helper rejects mismatched, duplicate, late, and timed-out records.
-The helper waits up to two seconds for the companion receipt; only then does
+The helper waits up to five seconds for the companion receipt; only then does
 the 30-second clock start, including queued requests. Its 31-second decision
 wait bound is independent of the notch refresh loop. If Ghostty focus is
 focused, unknown, or unavailable, the app writes a no-decision handoff and

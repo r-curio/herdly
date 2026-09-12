@@ -108,3 +108,12 @@ import Testing
     queue.apply(scan: scan, desktopEvents: [], now: 131)
     #expect(queue.items.first?.kind == .handedBackRequest)
 }
+
+@Test func aDecidedRequestIsNotResurrectedByALaterScan() {
+    let request = AttentionRequest(id: UUID(), source: .cli, session: UUID(), turn: UUID(), arrivedAt: 1)
+    var queue = AttentionQueue()
+    queue.apply(requests: [request])
+    queue.dismiss(.request(request.identity))
+    queue.apply(requests: [request])
+    #expect(queue.items.isEmpty)
+}

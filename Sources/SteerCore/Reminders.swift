@@ -124,20 +124,26 @@ public enum ReminderReader {
             if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(ApprovalRequest.self, from: bytes),
                [.pending, .noDecision].contains(item.outcome) {
                 let source = AttentionSource.desktop
+                var abandoned = false
                 let receipt: ApprovalReceiptRecord? = {
                     guard item.outcome == .pending, item.receivedAt == 0 else { return nil }
                     let receiptURL = ApprovalStore.receiptURL(in: events, id: item.id)
                     if let receiptBytes = bounded(receiptURL, limit: 4096),
                        let existing = try? JSONDecoder().decode(ApprovalReceiptRecord.self, from: receiptBytes) { return existing }
-                    let now = Date().timeIntervalSince1970
-                    let created = ApprovalReceiptRecord(requestID: item.id, receivedAt: now)
+                    // The helper stops waiting for a receipt after the connection timeout. A request first
+                    // seen later than that has no live helper, so never offer controls or write a receipt.
+                    let published = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    let now = Date()
+                    guard now.timeIntervalSince(published) <= ApprovalTiming.connectionTimeout else { abandoned = true; return nil }
+                    let created = ApprovalReceiptRecord(requestID: item.id, receivedAt: now.timeIntervalSince1970)
                     return ApprovalStore.publish(created, in: events) ? created : nil
                 }()
                 let receivedAt = receipt?.receivedAt ?? item.receivedAt
                 let expiresAt = receipt?.expiresAt ?? item.expiresAt
+                let actionable = item.outcome == .pending && !abandoned && receipt != nil
                 result.attentionRequests.append(AttentionRequest(id: item.id, source: source, session: item.sessionID, turn: item.turnID,
                                                                  arrivedAt: receivedAt, expiresAt: expiresAt,
-                                                                 state: item.outcome == .noDecision ? .handedBack : .actionable,
+                                                                 state: actionable ? .actionable : .handedBack,
                                                                  details: item.details))
                 if item.outcome == .noDecision {
                     result.reminders.append(Reminder(request_id: item.id, session_id: item.sessionID, turn_id: item.turnID,

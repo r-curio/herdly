@@ -44,8 +44,11 @@ None of those live cases ran. Computer-use access to `com.openai.codex` was reje
 
 The helper now publishes one identity-bound approval request and waits for the
 companion's receipt handshake before starting the 30-second decision deadline.
-The helper first has a separate two-second receipt-connection deadline and then
-an independent 31-second decision wait bound. Bounded regular-file reads,
+The helper first has a separate five-second receipt-connection deadline, which
+outlasts one two-second companion scan plus scan time, and then an independent
+31-second decision wait bound. A pending request first seen after that
+connection deadline has no live helper: the reader writes no receipt and hands
+it back without controls. Bounded regular-file reads,
 malformed, late, duplicate, unknown, or failed decisions all return no
 decision. The native hook response is emitted only for an explicit allow-once
 or deny. The notch renders only Codex-provided fields and offers decision
@@ -57,7 +60,10 @@ hand back with no decision; a check in flight waits for its snapshot. This
 policy lives in `ApprovalHandoff` and the payload mapping in
 `ApprovalRequestParser`, both in SteerCore with unit tests covering request
 identity, unsupported approval types, and receipt-deadline preservation across
-rescans.
+rescans. Only `tool_name: Bash`, the shape proven in the isolated lab, is
+intercepted; every other approval type stays in Codex's native flow. A decided
+request is remembered by the queue so a scan during the helper's file rewrite
+cannot resurrect it.
 
 `swift test` and `SteerHook --self-test` exercise the coordinator, atomic
 identity checks, deadline preservation, and request detail replay. These are
@@ -90,8 +96,9 @@ This proves real Bash ingestion, companion receipt, conservative unknown-focus
 handback, and no accidental allow. It does not prove Ghostty allow/deny,
 30-second timeout, or desktop decision transport.
 
-Setup migration recognizes the prior Steer command shape with its two-second
-hook timeout, upgrades it in place to the 35-second bounded hook timeout, and
+Setup migration recognizes the prior Steer command shape with its two-second or
+35-second hook timeout, upgrades it in place to the 38-second bounded hook
+timeout, and
 collapses duplicate copies. Ambiguous multiple Steer installations return an
 explicit conflict instead of adding another handler.
 

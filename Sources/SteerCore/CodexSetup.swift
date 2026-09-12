@@ -36,6 +36,8 @@ public enum CodexSetupRequirements {
     public static let hookEvents = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "Stop", "SessionEnd"]
     public static let helperSource = "steer-hook-v1"
     public static let hookTimeout = Int(ApprovalTiming.helperWaitBound + ApprovalTiming.connectionTimeout + 2)
+    /// Timeouts written by earlier Steer builds; setup upgrades them in place instead of adding a handler.
+    public static let legacyHookTimeouts = [2, 35]
     public static let minimumCLIVersion = "0.145.0"
     public static let minimumDesktopVersion = "26.901.51231"
     public static let minimumGhosttyVersion = "1.3.1"
@@ -463,7 +465,8 @@ public enum CodexSetupPlanner {
                 guard let nested = entry["hooks"] as? [[String: Any]] else { return [] }
                 return nested.compactMap { hook -> (String, String)? in
                     guard hook["type"] as? String == "command",
-                          [CodexSetupRequirements.hookTimeout, 2].contains((hook["timeout"] as? NSNumber)?.intValue ?? 0),
+                          ([CodexSetupRequirements.hookTimeout] + CodexSetupRequirements.legacyHookTimeouts)
+                              .contains((hook["timeout"] as? NSNumber)?.intValue ?? 0),
                           let command = hook["command"] as? String,
                           command.hasPrefix(prefix),
                           let id = installationID(in: command, prefix: prefix), UUID(uuidString: id) != nil else { return nil }

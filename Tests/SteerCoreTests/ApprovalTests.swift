@@ -107,7 +107,9 @@ import Testing
     let badSession: [String: Any] = ["session_id": "nope", "turn_id": turn, "tool_name": "Bash", "tool_input": ["command": "ls"]]
     #expect(ApprovalRequestParser.request(from: badSession) == nil)
     let untyped: [String: Any] = ["session_id": session, "turn_id": turn, "tool_input": ["command": "ls"]]
-    #expect(ApprovalRequestParser.request(from: untyped) != nil)
+    #expect(ApprovalRequestParser.request(from: untyped) == nil)
+    let patch: [String: Any] = ["session_id": session, "turn_id": turn, "tool_name": "apply_patch", "tool_input": ["patch": "x"]]
+    #expect(ApprovalRequestParser.request(from: patch) == nil)
 }
 
 @Test func desktopRequestsHandBackImmediatelyAndCLIRequestsNeedVerifiedAwayFocus() {
@@ -119,4 +121,33 @@ import Testing
     #expect(ApprovalHandoff.mustHandBack(source: .cli, paneFocus: .disabled))
     #expect(ApprovalHandoff.mustHandBack(source: .cli, paneFocus: .focused))
     #expect(ApprovalHandoff.mustHandBack(source: .cli, paneFocus: .unknown))
+}
+
+@Test func onlyDesktopRequestsReleaseOnReceipt() {
+    #expect(ApprovalHandoff.releasesOnReceipt(source: .desktop))
+    #expect(!ApprovalHandoff.releasesOnReceipt(source: .cli))
+}
+
+@Test func receiptDeadlineOutlastsOneCompanionScanInterval() {
+    #expect(ApprovalTiming.connectionTimeout > ApprovalTiming.scanInterval + 1)
+    #expect(Double(CodexSetupRequirements.hookTimeout) >= ApprovalTiming.connectionTimeout + ApprovalTiming.helperWaitBound + 1)
+}
+
+@Test func abandonedRequestIsHandedBackWithoutAReceipt() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let request = ApprovalRequest(requestID: UUID(), sessionID: UUID(), turnID: UUID(), details: ApprovalDetails(),
+                                  receivedAt: 0, expiresAt: 0, outcome: .pending)
+    #expect(ApprovalStore.publish(request, in: root))
+    let stale = Date(timeIntervalSinceNow: -(ApprovalTiming.connectionTimeout + 5))
+    try FileManager.default.setAttributes([.modificationDate: stale], ofItemAtPath: ApprovalStore.requestURL(in: root, id: request.id).path)
+    let scan = ReminderReader.scan(events: root, rollouts: root)
+    #expect(scan.attentionRequests.first?.state == .handedBack)
+    #expect(!FileManager.default.fileExists(atPath: ApprovalStore.receiptURL(in: root, id: request.id).path))
+}
+
+@Test func onlyAllowOnceAndDenyAreUserDecisions() {
+    #expect(ApprovalDecision.allowOnce.isUserDecision && ApprovalDecision.deny.isUserDecision)
+    #expect(!ApprovalDecision.pending.isUserDecision && !ApprovalDecision.noDecision.isUserDecision)
 }

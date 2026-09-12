@@ -2,7 +2,10 @@ import Foundation
 
 public enum ApprovalTiming {
     public static let handoffTimeout: TimeInterval = 30
-    public static let connectionTimeout: TimeInterval = 2
+    /// The companion scans the events directory on this cadence; a receipt can only follow a scan.
+    public static let scanInterval: TimeInterval = 2
+    /// Covers one full scan interval plus scan time before the helper gives up on the companion.
+    public static let connectionTimeout: TimeInterval = 5
     public static let helperWaitBound: TimeInterval = 31
 }
 
@@ -11,6 +14,9 @@ public enum ApprovalDecision: String, Codable, Sendable {
     case allowOnce = "allow"
     case deny
     case noDecision = "no_decision"
+
+    /// Only an explicit user answer may reach Codex as a hook decision.
+    public var isUserDecision: Bool { self == .allowOnce || self == .deny }
 }
 
 /// Details supplied by Codex. Nil fields are intentionally not filled in by Steer.
@@ -123,7 +129,7 @@ public enum ApprovalStore {
 
     /// Writes one decision atomically. A duplicate write fails because the destination is never replaced.
     @discardableResult public static func publish(_ decision: ApprovalDecisionRecord, in directory: URL) -> Bool {
-        guard decision.decision == .allowOnce || decision.decision == .deny || decision.decision == .noDecision else { return false }
+        guard decision.decision.isUserDecision || decision.decision == .noDecision else { return false }
         return write(try? JSONEncoder().encode(decision), to: decisionURL(in: directory, id: decision.requestID))
     }
 
