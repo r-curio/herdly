@@ -2,10 +2,16 @@ import Foundation
 
 /// Rollout line timestamps (`2026-09-12T04:23:07.201Z`), with or without fractional seconds.
 public enum RolloutTimestamp {
+    // ISO8601DateFormatter is documented thread-safe; shared instances avoid two allocations per rollout line.
+    nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    nonisolated(unsafe) private static let whole = ISO8601DateFormatter()
+
     public static func parse(_ value: String) -> Double? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return (fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value))?.timeIntervalSince1970
+        (fractional.date(from: value) ?? whole.date(from: value))?.timeIntervalSince1970
     }
 }
 
@@ -29,7 +35,7 @@ public enum ApprovalResolutionKind: String, Codable, Equatable, Sendable {
     case rejected
     /// The user interrupted the turn while the prompt was open.
     case interrupted
-    /// A terminal output exists but its wording is not one Steer recognizes; the prompt is no longer pending.
+    /// The runtime reported a failure wrapper without a rejection; the prompt is no longer pending.
     case unclassified
 }
 
@@ -54,10 +60,12 @@ public struct ApprovalResolution: Codable, Equatable, Sendable {
 /// companion receipt; each call answers one request. Malformed or partial lines are skipped, which
 /// can only delay evidence, never invent it.
 public enum ApprovalResolutionReader {
-    private struct Call { let id: String; let turn: UUID; let command: String; let at: Double }
+    /// `slot` distinguishes repeated identical commands inside one exec script.
+    private struct Call { let id: String; let slot: Int; let turn: UUID; let command: String; let at: Double }
+    private struct CallSlot: Hashable { let id: String; let slot: Int }
     private struct FollowUp { let id: String; let turn: UUID; let cell: String; let at: Double }
     private struct Output { let text: String; let at: Double }
-    private enum Terminal { case running(cell: String?), resolved(ApprovalResolutionKind) }
+    private enum Terminal { case running(cell: String?), resolved(ApprovalResolutionKind), unrecognized }
 
     public static func resolutions(in data: Data, session: UUID, probes: [ApprovalResolutionProbe]) -> [ApprovalResolution] {
         guard !probes.isEmpty, data.count <= 32 * 1024 * 1024 else { return [] }
@@ -89,25 +97,29 @@ public enum ApprovalResolutionReader {
             let name = payload["name"] as? String ?? ""
             if kind == "custom_tool_call", name == "exec", let input = payload["input"] as? String {
                 // One exec script can await several commands; each is registered under the same call.
-                for command in commands(inJavaScript: input) { calls.append(Call(id: callID, turn: turn, command: command, at: at)) }
+                for (slot, command) in commands(inJavaScript: input).enumerated() {
+                    calls.append(Call(id: callID, slot: slot, turn: turn, command: command, at: at))
+                }
             } else if kind == "function_call", let arguments = (payload["arguments"] as? String).flatMap(jsonObject) {
                 if ["wait", "write_stdin"].contains(name), let cell = cellID(arguments["cell_id"]) {
                     followUps.append(FollowUp(id: callID, turn: turn, cell: cell, at: at))
                 } else if let command = command(inArguments: arguments) {
-                    calls.append(Call(id: callID, turn: turn, command: command, at: at))
+                    calls.append(Call(id: callID, slot: 0, turn: turn, command: command, at: at))
                 }
             }
         }
-        calls.sort { $0.at == $1.at ? $0.id < $1.id : $0.at < $1.at }
+        calls.sort { $0.at == $1.at ? ($0.id, $0.slot) < ($1.id, $1.slot) : $0.at < $1.at }
         followUps.sort { $0.at == $1.at ? $0.id < $1.id : $0.at < $1.at }
-        var consumed: Set<String> = []
+        var consumed: Set<CallSlot> = []
         var found: [ApprovalResolution] = []
         for probe in probes.sorted(by: { $0.notBefore == $1.notBefore ? $0.requestID.uuidString < $1.requestID.uuidString : $0.notBefore < $1.notBefore }) {
             guard let command = probe.command else { continue }
-            for call in calls where call.turn == probe.turn && call.command == command && !consumed.contains(call.id + "\u{0}" + command) {
+            for call in calls where call.turn == probe.turn && call.command == command && !consumed.contains(CallSlot(id: call.id, slot: call.slot)) {
+                // The receipt precedes any output of the matched call, so an output recorded before it belongs
+                // to an earlier invocation of the same command.
                 guard let (terminalCall, output, kind) = terminal(for: call, outputs: outputs, followUps: followUps),
-                      output.at >= probe.notBefore - 1 else { continue }
-                consumed.insert(call.id + "\u{0}" + command)
+                      output.at >= probe.notBefore else { continue }
+                consumed.insert(CallSlot(id: call.id, slot: call.slot))
                 found.append(ApprovalResolution(requestID: probe.requestID, kind: kind, callID: terminalCall, observedAt: output.at))
                 break
             }
@@ -120,6 +132,7 @@ public enum ApprovalResolutionReader {
         guard let output = outputs[call.id] else { return nil }
         switch classify(output.text) {
         case let .resolved(kind): return (call.id, output, kind)
+        case .unrecognized: return nil
         case let .running(cell):
             guard let cell else { return nil }
             var latest: (String, Output, ApprovalResolutionKind)?
@@ -127,7 +140,7 @@ public enum ApprovalResolutionReader {
                 guard let later = outputs[follow.id] else { continue }
                 switch classify(later.text) {
                 case let .resolved(kind): latest = (follow.id, later, kind)
-                case .running: latest = nil
+                case .running, .unrecognized: latest = nil
                 }
             }
             return latest
@@ -135,7 +148,8 @@ public enum ApprovalResolutionReader {
     }
 
     /// Classification keys on the runtime's own wrapper text at the start of the output, never on
-    /// command output, which can contain any wording.
+    /// command output, which can contain any wording. A wrapper Steer does not recognize is not
+    /// evidence: a future "still waiting" shape must not clear a pending request.
     private static func classify(_ text: String) -> Terminal {
         let head = text.prefix(200)
         if head.hasPrefix("Script running") {
@@ -147,7 +161,7 @@ public enum ApprovalResolutionReader {
         if head.hasPrefix("Script failed") || head.hasPrefix("exec_command failed") || head.hasPrefix("Script error") {
             return .resolved(text.contains("Rejected(") ? .rejected : .unclassified)
         }
-        return .resolved(.unclassified)
+        return .unrecognized
     }
 
     private static func outputText(_ value: Any?) -> String? {

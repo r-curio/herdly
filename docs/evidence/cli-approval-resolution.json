@@ -1,7 +1,7 @@
 {
   "recorded": "2026-09-12",
   "codex_cli": "codex-cli 0.145.0",
-  "helper": "SteerHook release build from branch codex/10-approval-reconciliation (443bc76)",
+  "helper": "SteerHook release build from branch codex/10-approval-reconciliation (7c7f645)",
   "native_answers": "keystrokes into the lab TUI's own approval prompt after Steer handed back; never a Steer decision",
   "isolation": "lab project hooks.json swapped per run and restored; --dangerously-bypass-hook-trust per invocation; no global hooks, policies or settings changed",
   "cli_cases": [

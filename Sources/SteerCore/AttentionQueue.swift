@@ -267,8 +267,7 @@ public struct AttentionQueue: Sendable {
     public mutating func dismiss(_ id: AttentionItemID) {
         switch id {
         case let .request(id):
-            decidedRequests.insert(id)
-            requests.removeValue(forKey: id)
+            resolve(requests: [id])
         case let .completion(id):
             acknowledged.insert(id)
             completions.removeValue(forKey: id)
@@ -315,5 +314,5 @@ private extension AttentionItemID {
 }
 
 private func timestamp(_ value: String) -> Double {
-    ISO8601DateFormatter().date(from: value)?.timeIntervalSince1970 ?? 0
+    RolloutTimestamp.parse(value) ?? 0
 }
