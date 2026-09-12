@@ -49,10 +49,15 @@ an independent 31-second decision wait bound. Bounded regular-file reads,
 malformed, late, duplicate, unknown, or failed decisions all return no
 decision. The native hook response is emitted only for an explicit allow-once
 or deny. The notch renders only Codex-provided fields and offers decision
-buttons for CLI requests whose rollout identifies a CLI session; desktop
-requests retain only Open in Codex because the desktop transport and handoff
-policy remain unverified. Focused/unknown Ghostty or desktop observations hand
-back with no decision.
+buttons for CLI requests whose rollout identifies a CLI session. Desktop
+requests hand back immediately with no decision, regardless of foreground
+state, because the desktop transport and handoff policy remain unverified;
+they then retain only Open in Codex. Focused or unknown Ghostty observations
+hand back with no decision; a check in flight waits for its snapshot. This
+policy lives in `ApprovalHandoff` and the payload mapping in
+`ApprovalRequestParser`, both in SteerCore with unit tests covering request
+identity, unsupported approval types, and receipt-deadline preservation across
+rescans.
 
 `swift test` and `SteerHook --self-test` exercise the coordinator, atomic
 identity checks, deadline preservation, and request detail replay. These are

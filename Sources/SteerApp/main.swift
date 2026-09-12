@@ -351,10 +351,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         // App identity only: no window contents, task titles, or accessibility queries.
         let codexForeground = desktopAdapter.codexForeground()
         desktopForeground = codexForeground == true
-        if codexForeground != false {
-            queue.items.compactMap(\.request).filter { $0.source == .desktop && $0.state == .actionable }
-                .forEach(handBackApproval)
-        }
+        // Desktop decision transport is unproven: release every desktop request at once.
+        queue.items.compactMap(\.request)
+            .filter { $0.state == .actionable && ApprovalHandoff.mustHandBack(source: $0.source, paneFocus: .unknown) }
+            .forEach(handBackApproval)
         var next = attention
         let firstPresentation = next.update(codexForeground: codexForeground, hovering: hovering || panel.isKeyWindow,
                                             now: ProcessInfo.processInfo.systemUptime)
@@ -523,20 +523,21 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         guard !requests.isEmpty else { return }
         nextApprovalFocusScan = now + 2
         guard ghosttyEnabled else {
-            requests.forEach(handBackApproval)
+            requests.filter { ApprovalHandoff.mustHandBack(source: $0.source, paneFocus: .disabled) }.forEach(handBackApproval)
             return
         }
         checkingApprovalFocus = true
         let live = liveCLI
         Task { @MainActor in
             let snapshot = await Task.detached { GhosttyNavigation.snapshot() }.value
-            if let snapshot {
-                for request in requests {
-                    guard let target = GhosttyMatch.target(session: request.session, live: live, snapshot: snapshot),
-                          snapshot.selected != target else { handBackApproval(request); continue }
+            for request in requests {
+                let focus: CompletionFocus
+                if let snapshot, let target = GhosttyMatch.target(session: request.session, live: live, snapshot: snapshot) {
+                    focus = snapshot.selected == target ? .focused : .away
+                } else {
+                    focus = .unknown
                 }
-            } else {
-                requests.forEach(handBackApproval)
+                if ApprovalHandoff.mustHandBack(source: request.source, paneFocus: focus) { handBackApproval(request) }
             }
             checkingApprovalFocus = false
             refresh()

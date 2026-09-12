@@ -67,3 +67,56 @@ import Testing
     #expect(scan.attentionRequests.first?.arrivedAt == receipt.receivedAt)
     #expect(scan.attentionRequests.first?.expiresAt == receipt.expiresAt)
 }
+
+@Test func rescanningKeepsTheOriginalReceiptDeadline() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let request = ApprovalRequest(requestID: UUID(), sessionID: UUID(), turnID: UUID(), details: ApprovalDetails(),
+                                  receivedAt: 0, expiresAt: 0, outcome: .pending)
+    #expect(ApprovalStore.publish(request, in: root))
+    let first = ReminderReader.scan(events: root, rollouts: root).attentionRequests.first
+    Thread.sleep(forTimeInterval: 0.05)
+    let second = ReminderReader.scan(events: root, rollouts: root).attentionRequests.first
+    #expect(first?.arrivedAt == second?.arrivedAt)
+    #expect(first?.expiresAt == second?.expiresAt)
+}
+
+@Test func permissionPayloadBindsSessionTurnAndProvidedDetailsOnly() throws {
+    let session = UUID(), turn = UUID()
+    let payload: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": session.uuidString,
+                                  "turn_id": turn.uuidString, "tool_name": "Bash", "cwd": "/tmp/lab",
+                                  "tool_input": ["command": "touch MARKER"]]
+    let request = try #require(ApprovalRequestParser.request(from: payload))
+    #expect(request.sessionID == session && request.turnID == turn)
+    #expect(request.outcome == .pending && request.receivedAt == 0 && request.expiresAt == 0)
+    #expect(request.details.command == "touch MARKER")
+    #expect(request.details.project == "/tmp/lab")
+    #expect(request.details.action == "Bash")
+    #expect(request.details.taskName == nil && request.details.reason == nil)
+    #expect(request.details.longText?.contains("touch MARKER") == true)
+    #expect(ApprovalRequestParser.request(from: payload) != request) // a fresh identity per invocation
+}
+
+@Test func unsupportedOrIncompletePermissionPayloadsStayInCodexFlow() {
+    let session = UUID().uuidString, turn = UUID().uuidString
+    let mcp: [String: Any] = ["session_id": session, "turn_id": turn, "tool_name": "mcp_tool", "tool_input": ["x": 1]]
+    #expect(ApprovalRequestParser.request(from: mcp) == nil)
+    let noTurn: [String: Any] = ["session_id": session, "tool_name": "Bash", "tool_input": ["command": "ls"]]
+    #expect(ApprovalRequestParser.request(from: noTurn) == nil)
+    let badSession: [String: Any] = ["session_id": "nope", "turn_id": turn, "tool_name": "Bash", "tool_input": ["command": "ls"]]
+    #expect(ApprovalRequestParser.request(from: badSession) == nil)
+    let untyped: [String: Any] = ["session_id": session, "turn_id": turn, "tool_input": ["command": "ls"]]
+    #expect(ApprovalRequestParser.request(from: untyped) != nil)
+}
+
+@Test func desktopRequestsHandBackImmediatelyAndCLIRequestsNeedVerifiedAwayFocus() {
+    for focus in [CompletionFocus.disabled, .checking, .away, .focused, .unknown] {
+        #expect(ApprovalHandoff.mustHandBack(source: .desktop, paneFocus: focus))
+    }
+    #expect(!ApprovalHandoff.mustHandBack(source: .cli, paneFocus: .away))
+    #expect(!ApprovalHandoff.mustHandBack(source: .cli, paneFocus: .checking))
+    #expect(ApprovalHandoff.mustHandBack(source: .cli, paneFocus: .disabled))
+    #expect(ApprovalHandoff.mustHandBack(source: .cli, paneFocus: .focused))
+    #expect(ApprovalHandoff.mustHandBack(source: .cli, paneFocus: .unknown))
+}

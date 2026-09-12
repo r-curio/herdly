@@ -28,34 +28,6 @@ func writeEvent(_ object: [String: Any], to directory: URL, installationID: Stri
     }
 }
 
-private func jsonText(_ value: Any?) -> String? {
-    guard let value else { return nil }
-    if let value = value as? String { return value }
-    guard JSONSerialization.isValidJSONObject(value), let bytes = try? JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys]) else { return nil }
-    return String(data: bytes, encoding: .utf8)
-}
-
-private func supportedPermission(_ object: [String: Any]) -> Bool {
-    let kind = (object["permission_type"] as? String ?? object["kind"] as? String ?? object["tool_name"] as? String)?.lowercased()
-    if let kind { return ["bash", "command", "exec_command", "file", "permission", "apply_patch"].contains(kind) }
-    return (object["tool_input"] as? [String: Any])?["command"] is String
-}
-
-private func approvalRequest(from object: [String: Any]) -> ApprovalRequest? {
-    guard supportedPermission(object), let sessionValue = object["session_id"] as? String,
-          let session = UUID(uuidString: sessionValue), let turnValue = object["turn_id"] as? String,
-          let turn = UUID(uuidString: turnValue) else { return nil }
-    let input = object["tool_input"] as? [String: Any]
-    let details = ApprovalDetails(taskName: object["task_name"] as? String ?? object["title"] as? String,
-                                  project: object["project"] as? String ?? object["cwd"] as? String,
-                                  action: object["action"] as? String ?? object["tool_name"] as? String ?? object["kind"] as? String,
-                                  command: object["command"] as? String ?? input?["command"] as? String,
-                                  reason: object["reason"] as? String,
-                                  longText: jsonText(input ?? object["tool_input"]))
-    return ApprovalRequest(requestID: UUID(), sessionID: session, turnID: turn, details: details,
-                           receivedAt: 0, expiresAt: 0, outcome: .pending)
-}
-
 private func update(_ request: ApprovalRequest, outcome: ApprovalDecision, in directory: URL) {
     let terminal = ApprovalRequest(requestID: request.requestID, sessionID: request.sessionID, turnID: request.turnID,
                                    details: request.details, receivedAt: request.receivedAt,
@@ -131,7 +103,7 @@ func selfTest() -> Int32 {
                                       "turn_id": turn.uuidString, "tool_name": "Bash",
                                       "tool_input": ["command": "touch marker"]]
     guard ApprovalStore.publish(request, in: directory),
-          approvalRequest(from: bashPayload) != nil,
+          ApprovalRequestParser.request(from: bashPayload) != nil,
           ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .allowOnce, decidedAt: 101), in: directory),
           ApprovalCoordinator(requestID: request.id, expiresAt: 130).decide(requestID: request.id, decision: .allowOnce, at: 101) == .allowOnce else { return 1 }
     return 0
@@ -149,7 +121,7 @@ guard object["hook_event_name"] as? String == "PermissionRequest" else {
 }
 let receiptStarted = Date().timeIntervalSince1970
 let receiptStartedUptime = ProcessInfo.processInfo.systemUptime
-guard let published = approvalRequest(from: object),
+guard let published = ApprovalRequestParser.request(from: object),
       ApprovalStore.publish(published, in: directory),
       ProcessInfo.processInfo.systemUptime - receiptStartedUptime <= ApprovalTiming.connectionTimeout else { exit(0) }
 guard let companionReceipt = receipt(for: published, publishedAt: receiptStarted, in: directory) else {
