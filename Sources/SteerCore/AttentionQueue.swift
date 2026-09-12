@@ -77,18 +77,22 @@ public struct AttentionTurnIdentity: Hashable, Codable, Sendable {
     }
 }
 
-public struct AttentionCompletion: Identifiable, Equatable, Sendable {
+public struct AttentionCompletion: Identifiable, Equatable, Codable, Sendable {
     public let source: AttentionSource
     public let session: UUID
     public let turn: UUID
     public let arrivedAt: Double
+    /// True when the user may have viewed this result while the companion was not observing
+    /// (it was queued or arrived while fully quit). Such an item is retained without a sound.
+    public let uncertain: Bool
     public var id: CompletionIdentity { CompletionIdentity(source: source, session: session, turn: turn) }
 
-    public init(source: AttentionSource, session: UUID, turn: UUID, arrivedAt: Double) {
+    public init(source: AttentionSource, session: UUID, turn: UUID, arrivedAt: Double, uncertain: Bool = false) {
         self.source = source
         self.session = session
         self.turn = turn
         self.arrivedAt = arrivedAt
+        self.uncertain = uncertain
     }
 }
 
@@ -148,10 +152,29 @@ public struct AttentionQueue: Sendable {
     private var runningBySession: [SourceSession: AttentionRunning] = [:]
     private var resolvedTurns: Set<AttentionTurnIdentity> = []
     private var decidedRequests: Set<RequestIdentity> = []
+    /// Requests whose companion receipt this process issued: the only verified live interactions.
+    private var liveReceipts: Set<RequestIdentity> = []
     private var acknowledged: Set<CompletionIdentity>
 
     public init(acknowledged: Set<CompletionIdentity> = []) {
         self.acknowledged = acknowledged
+    }
+
+    /// Restores completions as uncertain: a visit while the companion was quit cannot be verified.
+    /// Requests and running work are not restored; current evidence must reproduce them.
+    public init(snapshot: AttentionSnapshot) {
+        acknowledged = snapshot.acknowledged
+        for saved in snapshot.completions where !acknowledged.contains(saved.id) {
+            completions[saved.id] = AttentionCompletion(source: saved.source, session: saved.session, turn: saved.turn,
+                                                        arrivedAt: saved.arrivedAt, uncertain: true)
+        }
+    }
+
+    public var snapshot: AttentionSnapshot {
+        let ordered = completions.values.sorted { (a: AttentionCompletion, b: AttentionCompletion) in
+            a.arrivedAt != b.arrivedAt ? a.arrivedAt < b.arrivedAt : AttentionItemID.completion(a.id).sortKey < AttentionItemID.completion(b.id).sortKey
+        }
+        return AttentionSnapshot(completions: ordered, acknowledged: acknowledged)
     }
 
     public var items: [AttentionItem] { makeItems() }
@@ -207,15 +230,35 @@ public struct AttentionQueue: Sendable {
         if let now { expire(at: now) }
     }
 
-    public mutating func apply(scan: ReminderScan, desktopEvents: [DesktopEvent], now: Double) {
+    /// Records the receipts this process issued; only these may show decision controls.
+    public mutating func receipt(_ receipted: [AttentionRequest], now: Double) {
+        liveReceipts.formUnion(receipted.map(\.identity))
+        apply(requests: receipted, now: now)
+    }
+
+    /// Applies current evidence. A `restoring` scan (the first after launch) marks completions it
+    /// discovers as uncertain. Returns requests the reader found actionable on disk without a receipt
+    /// from this process; they enter as handed back and the caller releases them to Codex.
+    @discardableResult
+    public mutating func apply(scan: ReminderScan, desktopEvents: [DesktopEvent], now: Double,
+                               restoring: Bool = false) -> [AttentionRequest] {
         let cliCompletions = scan.cliCompletions.map {
             AttentionCompletion(source: .cli, session: $0.session, turn: $0.turn,
-                                arrivedAt: timestamp($0.receivedAt))
+                                arrivedAt: timestamp($0.receivedAt), uncertain: restoring)
         }
         let desktopState = DesktopState.replay(desktopEvents.filter { !scan.cliSessions.contains($0.session) })
         let desktopCompletions = desktopState.completed.map {
             AttentionCompletion(source: .desktop, session: $0.session, turn: $0.turn,
-                                arrivedAt: timestamp($0.receivedAt))
+                                arrivedAt: timestamp($0.receivedAt), uncertain: restoring)
+        }
+        var released: [AttentionRequest] = []
+        let requests = scan.attentionRequests.map { request -> AttentionRequest in
+            guard request.state == .actionable, !liveReceipts.contains(request.identity) else { return request }
+            let handedBack = AttentionRequest(id: request.id, source: request.source, session: request.session,
+                                              turn: request.turn, arrivedAt: request.arrivedAt, expiresAt: request.expiresAt,
+                                              state: .handedBack, details: request.details)
+            if !decidedRequests.contains(request.identity), self.requests[request.identity] == nil { released.append(handedBack) }
+            return handedBack
         }
         let desktopRunning = desktopState.running.map {
             AttentionRunning(source: .desktop, session: $0.session, turn: $0.turn,
@@ -227,18 +270,19 @@ public struct AttentionQueue: Sendable {
         }
         runningBySession.removeAll()
         resolve(scan.completed.union(scan.canceled), source: .cli)
-        let bySource = Dictionary(scan.attentionRequests.map { ($0.id, $0.source) }, uniquingKeysWith: { first, _ in first })
+        let bySource = Dictionary(requests.map { ($0.id, $0.source) }, uniquingKeysWith: { first, _ in first })
         resolve(requests: scan.resolvedRequests.compactMap { resolution in
-            (bySource[resolution.requestID] ?? requests.values.first { $0.id == resolution.requestID }?.source)
+            (bySource[resolution.requestID] ?? self.requests.values.first { $0.id == resolution.requestID }?.source)
                 .map { RequestIdentity(source: $0, request: resolution.requestID) }
         })
-        apply(requests: scan.attentionRequests,
+        apply(requests: requests,
               completions: desktopCompletions + cliCompletions,
               running: desktopRunning + cliRunning, now: now)
-        resolve(requests: requests.values.filter { request in
+        resolve(requests: self.requests.values.filter { request in
             guard let ended = scan.sessionEnds[request.session] else { return false }
             return ended >= request.arrivedAt
         }.map(\.identity))
+        return released.filter { self.requests[$0.identity] != nil }
     }
 
     private mutating func resolve(_ turns: Set<TurnIdentity>, source: AttentionSource) {

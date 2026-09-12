@@ -30,18 +30,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var taskID = ""
     @Published var navigationMessage = ""
     @Published var openingTask = false
-    @Published var queue: AttentionQueue = {
-        let decoder = JSONDecoder()
-        let cli = UserDefaults.standard.data(forKey: "cliAcknowledgments")
-            .flatMap { try? decoder.decode(Set<TurnIdentity>.self, from: $0) } ?? []
-        let desktop = UserDefaults.standard.data(forKey: "desktopAcknowledgments")
-            .flatMap { try? decoder.decode(Set<TurnIdentity>.self, from: $0) } ?? []
-        return AttentionQueue(acknowledged: Set((cli.map { CompletionIdentity(source: .cli, session: $0.session, turn: $0.turn) }
-            + desktop.map { CompletionIdentity(source: .desktop, session: $0.session, turn: $0.turn) })))
-    }()
+    @Published var queue = AttentionQueue(snapshot: Companion.launchSnapshot)
     @Published var reminderPresentation = Attention()
     @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
-    @Published var completionPresentation = Attention()
+    /// Restored completions never replay their sound or popup.
+    @Published var completionPresentation = Attention(restored: !Companion.launchSnapshot.completions.isEmpty)
+    private var savedSnapshot = Companion.launchSnapshot
     @Published var ghosttyEnabled = false
     @Published var ghosttyPermissionVerified = false
     @Published var setupStatus: CodexConnectionStatus = .notConfigured
@@ -87,6 +81,31 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         let helper = home.appendingPathComponent("Library/Application Support/Steer", isDirectory: true)
         return CodexSetupRoots(configDirectory: home.appendingPathComponent(".codex", isDirectory: true),
                                helperDirectory: helper, eventsDirectory: helper.appendingPathComponent("events", isDirectory: true))
+    }
+
+    /// Steer's own support directory, never Codex's. `--attention-snapshot` isolates lab runs.
+    nonisolated static var snapshotURL: URL {
+        if let index = CommandLine.arguments.firstIndex(of: "--attention-snapshot"), CommandLine.arguments.indices.contains(index + 1) {
+            return URL(fileURLWithPath: CommandLine.arguments[index + 1])
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Steer/attention-snapshot.json")
+    }
+
+    nonisolated static let launchSnapshot = restoredSnapshot()
+
+    /// The saved snapshot, or the pre-snapshot acknowledgment lists from UserDefaults when none exists yet.
+    /// An unreadable or invalid snapshot loads as empty; startup never depends on it.
+    nonisolated private static func restoredSnapshot() -> AttentionSnapshot {
+        let snapshot = AttentionSnapshotStore.load(from: snapshotURL)
+        guard snapshot == AttentionSnapshot(), !FileManager.default.fileExists(atPath: snapshotURL.path) else { return snapshot }
+        let decoder = JSONDecoder()
+        let cli = UserDefaults.standard.data(forKey: "cliAcknowledgments")
+            .flatMap { try? decoder.decode(Set<TurnIdentity>.self, from: $0) } ?? []
+        let desktop = UserDefaults.standard.data(forKey: "desktopAcknowledgments")
+            .flatMap { try? decoder.decode(Set<TurnIdentity>.self, from: $0) } ?? []
+        return AttentionSnapshot(acknowledged: Set(cli.map { CompletionIdentity(source: .cli, session: $0.session, turn: $0.turn) }
+            + desktop.map { CompletionIdentity(source: .desktop, session: $0.session, turn: $0.turn) }))
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -324,11 +343,18 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             cliSessions = scan.cliSessions
             liveCLI = scan.cliState.liveSessions
             let previous = Set(queue.items.map(\.id))
-            queue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970)
+            // The first scan after launch restores: its completions are uncertain, and a receipt found on
+            // disk is not a verified live interaction. Such requests are released to Codex at once.
+            let unverified = queue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970,
+                                         restoring: firstCompletionScan)
+            for request in unverified {
+                _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision,
+                                                                 decidedAt: Date().timeIntervalSince1970), in: events)
+            }
             // Companion receipt: the deadline starts here, including for requests queued behind others.
             let receipted = ApprovalReceipts.issue(scan.awaitingReceipt, in: events, cliSessions: scan.cliSessions,
                                                    now: Date().timeIntervalSince1970)
-            if !receipted.isEmpty { queue.apply(requests: receipted, now: Date().timeIntervalSince1970) }
+            if !receipted.isEmpty { queue.receipt(receipted, now: Date().timeIntervalSince1970) }
             let current = queue.items
             let newItems = current.filter { !previous.contains($0.id) }
             if newItems.contains(where: { $0.kind == .completion }) {
@@ -342,9 +368,38 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             if !current.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.dismiss() }
             else if newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.enqueue() }
             if !current.contains(where: { $0.kind == .completion }) { completionPresentation.dismiss() }
+            saveCompletions()
             scanning = false
             refresh()
+            writeRestartReportIfRequested(unverified: unverified)
         }
+    }
+
+    /// `--restart-report <path>`: after the first scan, record what a restart produced and quit.
+    /// Used by the restart lab; it reads nothing beyond the queue this process already holds.
+    private func writeRestartReportIfRequested(unverified: [AttentionRequest]) {
+        guard let index = CommandLine.arguments.firstIndex(of: "--restart-report"),
+              CommandLine.arguments.indices.contains(index + 1) else { return }
+        let report: [String: Any] = [
+            "snapshot": Companion.snapshotURL.path,
+            "working_count": workingCount,
+            "to_check_count": toCheckCount,
+            "items": queue.items.map { item -> [String: Any] in
+                var row: [String: Any] = ["kind": "\(item.kind)", "session": item.session.uuidString]
+                if let completion = item.completion { row["turn"] = completion.turn.uuidString; row["uncertain"] = completion.uncertain
+                                                     row["source"] = completion.source.rawValue }
+                if let request = item.request { row["request"] = request.id.uuidString; row["state"] = "\(request.state)" }
+                return row
+            },
+            "released_unverified_requests": unverified.map { $0.id.uuidString },
+            "completion_presentation": ["pending": completionPresentation.pending, "presented": completionPresentation.presented,
+                                        "expanded": completionPresentation.expanded],
+            "acknowledged_count": queue.acknowledgedCompletions.count
+        ]
+        if let bytes = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
+            try? bytes.write(to: URL(fileURLWithPath: CommandLine.arguments[index + 1]))
+        }
+        app.terminate(nil)
     }
 
     func refresh() {
@@ -443,12 +498,11 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             // Navigation never calls dismissTest or writes the saved completion flag.
         }
     }
+    /// Persists unacknowledged completions and acknowledgments atomically whenever they change.
     func saveCompletions() {
-        let acknowledgments = queue.acknowledgedCompletions
-        let cli = Set(acknowledgments.filter { $0.source == .cli }.map { TurnIdentity(session: $0.session, turn: $0.turn) })
-        let desktop = Set(acknowledgments.filter { $0.source == .desktop }.map { TurnIdentity(session: $0.session, turn: $0.turn) })
-        if let bytes = try? JSONEncoder().encode(cli) { UserDefaults.standard.set(bytes, forKey: "cliAcknowledgments") }
-        if let bytes = try? JSONEncoder().encode(desktop) { UserDefaults.standard.set(bytes, forKey: "desktopAcknowledgments") }
+        let snapshot = queue.snapshot
+        guard snapshot != savedSnapshot else { return }
+        if AttentionSnapshotStore.save(snapshot, to: Companion.snapshotURL) { savedSnapshot = snapshot }
     }
     func dismissAttention(_ item: AttentionCompletion) {
         switch item.source {
@@ -712,6 +766,10 @@ struct Notch: View {
                         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 case .completion:
                     Text(item.completion?.source == .cli ? "Codex CLI finished" : "Codex desktop finished").font(.headline)
+                    if item.completion?.uncertain == true {
+                        Text("Queued before Steer last started. You may already have seen this result; Steer cannot verify it.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }
                 case .running:
                     Text(item.running?.source == .cli ? "Codex CLI working" : "Codex desktop working").font(.headline)
                 }

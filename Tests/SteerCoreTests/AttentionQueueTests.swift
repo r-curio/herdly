@@ -79,6 +79,7 @@ import Testing
     var scan = ReminderScan()
     scan.attentionRequests = [request]
     var queue = AttentionQueue()
+    queue.receipt([request], now: 100)
     queue.apply(scan: scan, desktopEvents: [], now: 110)
     #expect(queue.items.first?.kind == .actionableRequest)
 
@@ -90,7 +91,7 @@ import Testing
     #expect(queue.items.first?.arrivedAt == request.arrivedAt)
 }
 
-@Test func readerPreservesPendingReceiptAsActionableQueueItem() throws {
+@Test func readerReportsPendingReceiptButOnlyALiveReceiptKeepsItActionable() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -102,7 +103,14 @@ import Testing
     let scan = ReminderReader.scan(events: root, rollouts: root)
     #expect(scan.attentionRequests.count == 1)
     #expect(scan.attentionRequests.first?.source == .cli)
+    #expect(scan.attentionRequests.first?.state == .actionable)
+    // Found on disk after a restart: no receipt from this process, so no controls.
+    var restarted = AttentionQueue()
+    restarted.apply(scan: scan, desktopEvents: [], now: 129)
+    #expect(restarted.items.first?.kind == .handedBackRequest)
+    // The same request receipted by this process keeps its controls until its own deadline.
     var queue = AttentionQueue()
+    queue.receipt(scan.attentionRequests, now: 100)
     queue.apply(scan: scan, desktopEvents: [], now: 129)
     #expect(queue.items.first?.kind == .actionableRequest)
     queue.apply(scan: scan, desktopEvents: [], now: 131)
