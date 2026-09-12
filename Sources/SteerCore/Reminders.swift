@@ -48,6 +48,8 @@ public struct TurnIdentity: Hashable, Codable, Sendable {
 public struct ReminderScan: Sendable {
     public var reminders: [Reminder] = []
     public var attentionRequests: [AttentionRequest] = []
+    /// Fresh pending requests with no companion receipt yet; the app issues receipts for them.
+    public var awaitingReceipt: [ApprovalRequest] = []
     public var completed: Set<TurnIdentity> = []
     public var canceled: Set<TurnIdentity> = []
     public var cliEvents: [CLIEvent] = []
@@ -124,23 +126,19 @@ public enum ReminderReader {
             if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(ApprovalRequest.self, from: bytes),
                [.pending, .noDecision].contains(item.outcome) {
                 let source = AttentionSource.desktop
-                var abandoned = false
-                let receipt: ApprovalReceiptRecord? = {
-                    guard item.outcome == .pending, item.receivedAt == 0 else { return nil }
-                    let receiptURL = ApprovalStore.receiptURL(in: events, id: item.id)
-                    if let receiptBytes = bounded(receiptURL, limit: 4096),
-                       let existing = try? JSONDecoder().decode(ApprovalReceiptRecord.self, from: receiptBytes) { return existing }
+                let receipt = ApprovalReceipts.existing(for: item.id, in: events)
+                if item.outcome == .pending, item.receivedAt == 0, receipt == nil {
                     // The helper stops waiting for a receipt after the connection timeout. A request first
-                    // seen later than that has no live helper, so never offer controls or write a receipt.
+                    // seen later than that has no live helper, so it is handed back without controls.
                     let published = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                    let now = Date()
-                    guard now.timeIntervalSince(published) <= ApprovalTiming.connectionTimeout else { abandoned = true; return nil }
-                    let created = ApprovalReceiptRecord(requestID: item.id, receivedAt: now.timeIntervalSince1970)
-                    return ApprovalStore.publish(created, in: events) ? created : nil
-                }()
+                    if Date().timeIntervalSince(published) <= ApprovalTiming.connectionTimeout {
+                        result.awaitingReceipt.append(item)
+                        continue
+                    }
+                }
                 let receivedAt = receipt?.receivedAt ?? item.receivedAt
                 let expiresAt = receipt?.expiresAt ?? item.expiresAt
-                let actionable = item.outcome == .pending && !abandoned && receipt != nil
+                let actionable = item.outcome == .pending && receipt != nil
                 result.attentionRequests.append(AttentionRequest(id: item.id, source: source, session: item.sessionID, turn: item.turnID,
                                                                  arrivedAt: receivedAt, expiresAt: expiresAt,
                                                                  state: actionable ? .actionable : .handedBack,

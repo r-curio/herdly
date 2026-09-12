@@ -325,6 +325,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             liveCLI = scan.cliState.liveSessions
             let previous = Set(queue.items.map(\.id))
             queue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970)
+            // Companion receipt: the deadline starts here, including for requests queued behind others.
+            let receipted = ApprovalReceipts.issue(scan.awaitingReceipt, in: events, cliSessions: scan.cliSessions,
+                                                   now: Date().timeIntervalSince1970)
+            if !receipted.isEmpty { queue.apply(requests: receipted, now: Date().timeIntervalSince1970) }
             let current = queue.items
             let newItems = current.filter { !previous.contains($0.id) }
             if newItems.contains(where: { $0.kind == .completion }) {
