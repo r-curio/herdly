@@ -54,6 +54,8 @@ Agreed fallback: when focus cannot be identified reliably, retain the notificati
 
 Store small snapshots of attention items and completion acknowledgments locally with atomic replacement. A saved request cannot recreate a live approval connection. On restart, restore uncertain completions silently and revalidate request state before showing any active controls. Save only the metadata needed for the product; a full transcript store is unnecessary.
 
+Implemented for issue #11 ([restart recovery](restart-recovery.md)): `AttentionSnapshotStore` keeps undismissed completions and acknowledgments in Steer's own support directory; requests and running work are rebuilt from evidence on every scan. Completions held by the first scan after launch are marked uncertain and never replay a sound. Decision controls require a receipt issued by the running process; a receipt found on disk is released to Codex with no decision at once.
+
 ## Evidence checked on 2026-09-11
 
 - Installed Ghostty is 1.3.1. Its local scripting dictionary includes stable terminal IDs, focused terminal, selected tab, and focus. The [official AppleScript reference](https://ghostty.org/docs/features/applescript) documents these APIs. Mapping a Codex session to the exact pane still needs a live test, especially for two panes in the same directory.

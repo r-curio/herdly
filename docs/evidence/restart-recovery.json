@@ -1,0 +1,210 @@
+{
+  "app": "/Users/rmaisog/Documents/ChatGPT/Steer/output/Steer.app",
+  "failures": [],
+  "identities": {
+    "cli_session": "55ba9a1d-2e61-4a41-82a9-679592e21fc3",
+    "cli_turn": "edc3c3b0-a563-4826-9516-6bf28ff2a538",
+    "desktop_session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+    "request_id": "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9",
+    "turn1": "eb547174-df33-463b-adea-3b18c8d61308",
+    "turn2": "55454f45-3c66-4225-8892-456e54b71fb7"
+  },
+  "lab": "/var/folders/3m/qfwkt2ys1p7gx5bmcm7nsn7w0000gq/T/steer-restart-lab-ofdclell",
+  "recorded_at": "2026-09-12T05:55:07.670025+00:00",
+  "runs": [
+    {
+      "acknowledged_count": 34,
+      "completion_presentation": {
+        "expanded": false,
+        "pending": true,
+        "presented": true
+      },
+      "exit_code": 0,
+      "items": [
+        {
+          "kind": "handedBackRequest",
+          "request": "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9",
+          "session": "55ba9a1d-2e61-4a41-82a9-679592e21fc3",
+          "state": "handedBack"
+        },
+        {
+          "kind": "completion",
+          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "source": "desktop",
+          "turn": "eb547174-df33-463b-adea-3b18c8d61308",
+          "uncertain": true
+        }
+      ],
+      "note": "fresh start over prior evidence and a saved receipt",
+      "released_unverified_requests": [
+        "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9"
+      ],
+      "run": "A-restart-with-saved-receipt",
+      "snapshot": "/var/folders/3m/qfwkt2ys1p7gx5bmcm7nsn7w0000gq/T/steer-restart-lab-ofdclell/attention-snapshot.json",
+      "snapshot_on_disk": {
+        "acknowledged": 34,
+        "bytes": 4086,
+        "completions": [
+          "eb547174-df33-463b-adea-3b18c8d61308"
+        ],
+        "exists": true,
+        "valid_json": true
+      },
+      "startup_seconds": 0.24,
+      "to_check_count": 2,
+      "working_count": 0
+    },
+    {
+      "exit_code": -9,
+      "note": "SIGKILLed 8 s after launch, 4.5 s after a live completion arrived",
+      "run": "B-crash",
+      "signal": "SIGKILL",
+      "snapshot_on_disk": {
+        "acknowledged": 34,
+        "bytes": 4247,
+        "completions": [
+          "eb547174-df33-463b-adea-3b18c8d61308",
+          "55454f45-3c66-4225-8892-456e54b71fb7"
+        ],
+        "exists": true,
+        "valid_json": true
+      }
+    },
+    {
+      "acknowledged_count": 34,
+      "completion_presentation": {
+        "expanded": false,
+        "pending": true,
+        "presented": true
+      },
+      "exit_code": 0,
+      "items": [
+        {
+          "kind": "handedBackRequest",
+          "request": "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9",
+          "session": "55ba9a1d-2e61-4a41-82a9-679592e21fc3",
+          "state": "handedBack"
+        },
+        {
+          "kind": "completion",
+          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "source": "desktop",
+          "turn": "eb547174-df33-463b-adea-3b18c8d61308",
+          "uncertain": true
+        },
+        {
+          "kind": "completion",
+          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "source": "desktop",
+          "turn": "55454f45-3c66-4225-8892-456e54b71fb7",
+          "uncertain": true
+        }
+      ],
+      "note": "restart after SIGKILL",
+      "released_unverified_requests": [],
+      "run": "C-restart-after-crash",
+      "snapshot": "/var/folders/3m/qfwkt2ys1p7gx5bmcm7nsn7w0000gq/T/steer-restart-lab-ofdclell/attention-snapshot.json",
+      "snapshot_on_disk": {
+        "acknowledged": 34,
+        "bytes": 4246,
+        "completions": [
+          "eb547174-df33-463b-adea-3b18c8d61308",
+          "55454f45-3c66-4225-8892-456e54b71fb7"
+        ],
+        "exists": true,
+        "valid_json": true
+      },
+      "startup_seconds": 0.24,
+      "to_check_count": 3,
+      "working_count": 0
+    },
+    {
+      "acknowledged_count": 0,
+      "completion_presentation": {
+        "expanded": false,
+        "pending": true,
+        "presented": true
+      },
+      "exit_code": 0,
+      "items": [
+        {
+          "kind": "handedBackRequest",
+          "request": "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9",
+          "session": "55ba9a1d-2e61-4a41-82a9-679592e21fc3",
+          "state": "handedBack"
+        },
+        {
+          "kind": "completion",
+          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "source": "desktop",
+          "turn": "eb547174-df33-463b-adea-3b18c8d61308",
+          "uncertain": true
+        },
+        {
+          "kind": "completion",
+          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "source": "desktop",
+          "turn": "55454f45-3c66-4225-8892-456e54b71fb7",
+          "uncertain": true
+        }
+      ],
+      "note": "truncated snapshot plus a leftover temporary file",
+      "released_unverified_requests": [],
+      "run": "D-corrupt-snapshot",
+      "snapshot": "/var/folders/3m/qfwkt2ys1p7gx5bmcm7nsn7w0000gq/T/steer-restart-lab-ofdclell/attention-snapshot.json",
+      "snapshot_on_disk": {
+        "acknowledged": 0,
+        "bytes": 367,
+        "completions": [
+          "eb547174-df33-463b-adea-3b18c8d61308",
+          "55454f45-3c66-4225-8892-456e54b71fb7"
+        ],
+        "exists": true,
+        "valid_json": true
+      },
+      "startup_seconds": 0.18,
+      "to_check_count": 3,
+      "working_count": 0
+    },
+    {
+      "acknowledged_count": 1,
+      "completion_presentation": {
+        "expanded": false,
+        "pending": true,
+        "presented": true
+      },
+      "exit_code": 0,
+      "items": [
+        {
+          "kind": "handedBackRequest",
+          "request": "1bd3cbe1-2e9b-472d-8cd6-4ccba97149c9",
+          "session": "55ba9a1d-2e61-4a41-82a9-679592e21fc3",
+          "state": "handedBack"
+        },
+        {
+          "kind": "completion",
+          "session": "228e5c27-5d1f-40cc-82be-943043e495a9",
+          "source": "desktop",
+          "turn": "eb547174-df33-463b-adea-3b18c8d61308",
+          "uncertain": true
+        }
+      ],
+      "note": "turn2 dismissed (as Dismiss persists it) before restart",
+      "released_unverified_requests": [],
+      "run": "E-saved-dismissal",
+      "snapshot": "/var/folders/3m/qfwkt2ys1p7gx5bmcm7nsn7w0000gq/T/steer-restart-lab-ofdclell/attention-snapshot.json",
+      "snapshot_on_disk": {
+        "acknowledged": 1,
+        "bytes": 322,
+        "completions": [
+          "eb547174-df33-463b-adea-3b18c8d61308"
+        ],
+        "exists": true,
+        "valid_json": true
+      },
+      "startup_seconds": 0.24,
+      "to_check_count": 2,
+      "working_count": 0
+    }
+  ]
+}
