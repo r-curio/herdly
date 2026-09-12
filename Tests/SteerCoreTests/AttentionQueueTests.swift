@@ -49,6 +49,17 @@ import Testing
     #expect(queue.toCheckCount == 1)
 }
 
+@Test func dismissingOneCompletionKeepsALaterTurnInTheSameSession() {
+    let session = UUID()
+    let first = AttentionCompletion(source: .desktop, session: session, turn: UUID(), arrivedAt: 1)
+    let later = AttentionCompletion(source: .desktop, session: session, turn: UUID(), arrivedAt: 2)
+    var queue = AttentionQueue()
+    queue.apply(completions: [first, later, first])
+    queue.dismiss(.completion(first.id))
+    queue.apply(completions: [first, later])
+    #expect(queue.items.map(\.id) == [.completion(later.id)])
+}
+
 @Test func resolutionIsQualifiedBySource() {
     let session = UUID(), turn = UUID()
     let requestID = UUID()
