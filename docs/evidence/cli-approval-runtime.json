@@ -1,0 +1,55 @@
+{
+  "recorded": "2026-09-12",
+  "codex_cli": "0.145.0",
+  "helper": "SteerHook from commit c946923 release build",
+  "decision_writer": "scripts/cli-approval-lab/companion_standin.py (stand-in for the notch button)",
+  "runs": [
+    {
+      "case": "allow",
+      "request_id": "C573AE97-87FA-4473-BCB8-D3F5BAAAEEFD",
+      "session_id": "01A093DA-7E9D-7CB2-8E3D-5763296C22AD",
+      "turn_id": "01A093DA-BACD-7110-8F1B-0A0868564CD8",
+      "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER9-ALLOW-1",
+      "action": "Bash",
+      "companion_received_at": 1789186987.3343732,
+      "expires_at": 1789187017.3343732,
+      "decision": {
+        "request_id": "C573AE97-87FA-4473-BCB8-D3F5BAAAEEFD",
+        "decision": "allow",
+        "decided_at": 1789186988.84272
+      },
+      "helper_outcome": "allow",
+      "outcome_written_seconds_after_receipt": 1.529
+    },
+    {
+      "case": "deny",
+      "request_id": "23FA9F74-09B2-4E06-8774-73B9B3DE038B",
+      "session_id": "01A093DB-1A89-7CB2-A6DA-4CBCAD14938A",
+      "turn_id": "01A093DB-56A8-7483-9091-9C978F56404F",
+      "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER9-DENY-1",
+      "action": "Bash",
+      "companion_received_at": 1789187027.483413,
+      "expires_at": 1789187057.483413,
+      "decision": {
+        "request_id": "23FA9F74-09B2-4E06-8774-73B9B3DE038B",
+        "decision": "deny",
+        "decided_at": 1789187028.992429
+      },
+      "helper_outcome": "deny",
+      "outcome_written_seconds_after_receipt": 1.52
+    },
+    {
+      "case": "timeout",
+      "request_id": "E5474BA4-77EE-4A35-9935-C8EF74CBA2FC",
+      "session_id": "01A093DC-C19E-7B43-8A59-1974F6B68A34",
+      "turn_id": "01A093DC-FAF2-7C22-A50C-58A881A63EBC",
+      "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER9-TIMEOUT-1",
+      "action": "Bash",
+      "companion_received_at": 1789187135.1233659,
+      "expires_at": 1789187165.1233659,
+      "decision": null,
+      "helper_outcome": "no_decision",
+      "outcome_written_seconds_after_receipt": 30.031
+    }
+  ]
+}
