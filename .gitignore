@@ -8,3 +8,5 @@ output/
 .env
 .env.*
 !.env.example
+scripts/cli-approval-lab/events-*/
+scripts/cli-approval-lab/runs/

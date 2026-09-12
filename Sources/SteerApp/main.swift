@@ -492,9 +492,23 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         else { taskID = session.uuidString; openTestTask() }
     }
 
+    /// Open in Codex releases the pending interaction at once: the user decides in Codex's own prompt.
+    func openApprovalInCodex(_ request: AttentionRequest) {
+        if let current = queue.items.compactMap(\.request).first(where: { $0.identity == request.identity }) {
+            handBackApproval(current)
+        }
+        openAttentionSession(source: request.source, session: request.session)
+    }
+
     func decide(_ request: AttentionRequest, as decision: ApprovalDecision) {
-        guard request.source == .cli, request.state == .actionable,
-              Date().timeIntervalSince1970 < request.expiresAt, !eventsPath.isEmpty else { return }
+        // Re-read the queue's current copy: a request handed back since the row rendered must not be answered.
+        guard !eventsPath.isEmpty else { navigationMessage = "Codex events are not connected."; refresh(); return }
+        guard let current = queue.items.compactMap(\.request).first(where: { $0.identity == request.identity }) else {
+            navigationMessage = "This request is no longer in the queue."; refresh(); return
+        }
+        guard ApprovalDecisionPolicy.accepts(current, decision: decision, now: Date().timeIntervalSince1970) else {
+            navigationMessage = "This request was handed back to Codex; answer it there."; refresh(); return
+        }
         let record = ApprovalDecisionRecord(requestID: request.id, decision: decision,
                                             decidedAt: Date().timeIntervalSince1970)
         guard ApprovalStore.publish(record, in: URL(fileURLWithPath: eventsPath)) else {
@@ -511,8 +525,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         guard request.state == .actionable else { return }
         let now = Date().timeIntervalSince1970
         if !eventsPath.isEmpty {
-            _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision, decidedAt: now),
-                                      in: URL(fileURLWithPath: eventsPath))
+            let events = URL(fileURLWithPath: eventsPath)
+            let released = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision, decidedAt: now), in: events)
+            if !released && ApprovalDecisions.existing(for: request.id, in: events) == nil {
+                // The helper still waits for its own deadline; the row loses its controls regardless.
+                navigationMessage = "Steer could not write the handoff record; Codex will show its own prompt within 30 seconds."
+            }
         }
         let handedBack = AttentionRequest(id: request.id, source: request.source, session: request.session,
                                           turn: request.turn, arrivedAt: request.arrivedAt, expiresAt: request.expiresAt,
@@ -690,6 +708,8 @@ struct Notch: View {
                     Text("Permission needed").font(.headline)
                 case .handedBackRequest:
                     Text("Continue in Codex").font(.headline)
+                    Text("Handed back with no decision. Steer has not seen an answer yet; this clears when Codex records one, the turn ends, or the session ends.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 case .completion:
                     Text(item.completion?.source == .cli ? "Codex CLI finished" : "Codex desktop finished").font(.headline)
                 case .running:
@@ -720,7 +740,7 @@ struct Notch: View {
                     }
                 }
                 Button("Open in Codex") {
-                    if let request = item.request { model.openAttentionSession(source: request.source, session: request.session) }
+                    if let request = item.request { model.openApprovalInCodex(request) }
                 }.disabled(model.openingTask)
             case .handedBackRequest:
                 Button("Open in Codex") {
