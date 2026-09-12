@@ -50,6 +50,10 @@ public struct ReminderScan: Sendable {
     public var attentionRequests: [AttentionRequest] = []
     /// Fresh pending requests with no companion receipt yet; the app issues receipts for them.
     public var awaitingReceipt: [ApprovalRequest] = []
+    /// Native resolutions read from session rollouts for handed-back requests.
+    public var resolvedRequests: [ApprovalResolution] = []
+    /// Latest SessionEnd hook time per session; a request received before it cannot still be pending.
+    public var sessionEnds: [UUID: Double] = [:]
     public var completed: Set<TurnIdentity> = []
     public var canceled: Set<TurnIdentity> = []
     public var cliEvents: [CLIEvent] = []
@@ -122,6 +126,7 @@ public enum ReminderReader {
             let b = (try? $1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
             return a == b ? $0.lastPathComponent < $1.lastPathComponent : a < b
         }
+        var probes: [UUID: [ApprovalResolutionProbe]] = [:]
         for url in ordered where url.pathExtension == "approval" {
             if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(ApprovalRequest.self, from: bytes),
                [.pending, .noDecision].contains(item.outcome) {
@@ -136,9 +141,18 @@ public enum ReminderReader {
                         continue
                     }
                 }
-                let receivedAt = receipt?.receivedAt ?? item.receivedAt
-                let expiresAt = receipt?.expiresAt ?? item.expiresAt
-                let actionable = item.outcome == .pending && receipt != nil
+                // Restart revalidation: while the helper still reports `pending`, a saved decision record
+                // decides the state. A helper-written `no_decision` outcome is authoritative on its own.
+                let decided = item.outcome == .pending ? ApprovalDecisions.existing(for: item.id, in: events) : nil
+                if decided?.decision.isUserDecision == true { continue }
+                // A request that never got a receipt has no arrival time of its own; its file's creation
+                // time stands in so ordering, session-end and rollout matching never treat it as ancient.
+                let published = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate?.timeIntervalSince1970) ?? 0
+                let receivedAt = receipt?.receivedAt ?? (item.receivedAt > 0 ? item.receivedAt : published)
+                let expiresAt = receipt?.expiresAt ?? (item.expiresAt > 0 ? item.expiresAt : receivedAt + ApprovalTiming.handoffTimeout)
+                let actionable = item.outcome == .pending && receipt != nil && decided == nil
+                probes[item.sessionID, default: []].append(ApprovalResolutionProbe(requestID: item.id, turn: item.turnID,
+                                                                                    command: item.details.command, notBefore: receivedAt))
                 result.attentionRequests.append(AttentionRequest(id: item.id, source: source, session: item.sessionID, turn: item.turnID,
                                                                  arrivedAt: receivedAt, expiresAt: expiresAt,
                                                                  state: actionable ? .actionable : .handedBack,
@@ -152,7 +166,7 @@ public enum ReminderReader {
                 }
             } else if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(Reminder.self, from: bytes),
                       ["pending", "no_decision"].contains(item.outcome) {
-                let arrival = item.captured_at ?? item.received_at.flatMap { ISO8601DateFormatter().date(from: $0)?.timeIntervalSince1970 }
+                let arrival = item.captured_at ?? item.received_at.flatMap(RolloutTimestamp.parse)
                     ?? ((try? url.resourceValues(forKeys: [.creationDateKey]).creationDate?.timeIntervalSince1970) ?? 0)
                 result.attentionRequests.append(AttentionRequest(id: item.id, source: item.source ?? .desktop,
                                                                  session: item.session_id, turn: item.turn_id,
@@ -172,6 +186,10 @@ public enum ReminderReader {
         let hooks = ordered.filter { $0.pathExtension == "json" }.compactMap { url -> Hook? in
             guard let bytes = bounded(url, limit: 65536) else { return nil }
             return try? JSONDecoder().decode(Hook.self, from: bytes)
+        }
+        for hook in hooks where hook.hook_event_name == "SessionEnd" {
+            guard let ended = RolloutTimestamp.parse(hook.received_at) else { continue }
+            result.sessionEnds[hook.session_id] = max(result.sessionEnds[hook.session_id] ?? 0, ended)
         }
         let sessions = Set(result.attentionRequests.map(\.session)).union(hooks.map(\.session_id))
         guard !sessions.isEmpty,
@@ -194,6 +212,9 @@ public enum ReminderReader {
                 let finished = terminal.completed
                 result.completed.formUnion(finished)
                 result.canceled.formUnion(terminal.canceled)
+                if let sessionProbes = probes[session] {
+                    result.resolvedRequests += ApprovalResolutionReader.resolutions(in: bytes, session: session, probes: sessionProbes)
+                }
                 guard let first = bytes.split(separator: 10).first,
                       let event = try? JSONSerialization.jsonObject(with: Data(first)) as? [String: Any],
                       event["type"] as? String == "session_meta",

@@ -28,3 +28,6 @@ The ordered collection of Codex activity presented in the shared notch, with app
 
 **Acknowledged completion**:
 A particular completion cleared by explicit dismissal; for a supported CLI surface, also by a verified visit after completion. Desktop app visibility never acknowledges a completion. This does not mean every result in the session has been read.
+
+**Resolution evidence**:
+A recorded sign that a handed-back approval request is no longer pending in Codex: Codex's recorded answer to that exact request, the end of that exact turn, or the end of its session. A prompt that merely disappeared is not evidence.
