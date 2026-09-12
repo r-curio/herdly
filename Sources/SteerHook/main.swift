@@ -36,60 +36,6 @@ private func update(_ request: ApprovalRequest, outcome: ApprovalDecision, in di
     try? data.write(to: ApprovalStore.requestURL(in: directory, id: request.id), options: .atomic)
 }
 
-private func decisionOutput(_ decision: ApprovalDecision) -> Data? {
-    guard decision.isUserDecision else { return nil }
-    let value: [String: Any] = ["hookSpecificOutput": [
-        "hookEventName": "PermissionRequest",
-        "decision": ["behavior": decision == .allowOnce ? "allow" : "deny"]
-    ]]
-    return try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
-}
-
-private func boundedRegularData(_ url: URL, limit: Int) -> Data? {
-    guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-          attributes[.type] as? FileAttributeType == .typeRegular,
-          (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil,
-          (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
-          let file = try? FileHandle(forReadingFrom: url) else { return nil }
-    defer { try? file.close() }
-    guard let bytes = try? file.read(upToCount: limit + 1), bytes.count <= limit else { return nil }
-    return bytes
-}
-
-private func receipt(for request: ApprovalRequest, publishedAt: Double, in directory: URL) -> ApprovalReceiptRecord? {
-    let deadlineUptime = ProcessInfo.processInfo.systemUptime + ApprovalTiming.connectionTimeout
-    while ProcessInfo.processInfo.systemUptime < deadlineUptime {
-        if let bytes = boundedRegularData(ApprovalStore.receiptURL(in: directory, id: request.id), limit: 4096),
-           let value = try? JSONDecoder().decode(ApprovalReceiptRecord.self, from: bytes),
-           value.requestID == request.id, value.receivedAt.isFinite,
-           value.receivedAt >= publishedAt, value.receivedAt <= Date().timeIntervalSince1970,
-           abs(value.expiresAt - (value.receivedAt + ApprovalTiming.handoffTimeout)) < 0.001 { return value }
-        Thread.sleep(forTimeInterval: 0.02)
-    }
-    return nil
-}
-
-private func awaitDecision(for request: ApprovalRequest, in directory: URL, waitBound: Double) -> ApprovalDecision {
-    let coordinator = ApprovalCoordinator(requestID: request.id, expiresAt: request.expiresAt)
-    let startedUptime = ProcessInfo.processInfo.systemUptime
-    let hardDeadline = min(startedUptime + ApprovalTiming.handoffTimeout + 1, startedUptime + waitBound)
-    let expiryUptime = startedUptime + ApprovalTiming.handoffTimeout
-    while ProcessInfo.processInfo.systemUptime < hardDeadline {
-        let now = Date().timeIntervalSince1970
-        if let bytes = boundedRegularData(ApprovalStore.decisionURL(in: directory, id: request.id), limit: 4096),
-           let record = try? JSONDecoder().decode(ApprovalDecisionRecord.self, from: bytes),
-           record.decidedAt >= request.receivedAt, record.decidedAt <= now,
-           let decision = coordinator.decide(requestID: record.requestID, decision: record.decision,
-                                             at: record.decidedAt) {
-            return decision
-        }
-        if ProcessInfo.processInfo.systemUptime >= expiryUptime,
-           let expired = coordinator.expire(at: request.expiresAt) { return expired }
-        Thread.sleep(forTimeInterval: 0.05)
-    }
-    return coordinator.expire(at: request.expiresAt) ?? .noDecision
-}
-
 func selfTest() -> Int32 {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-hook-self-test-" + UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -124,13 +70,13 @@ let receiptStartedUptime = ProcessInfo.processInfo.systemUptime
 guard let published = ApprovalRequestParser.request(from: object),
       ApprovalStore.publish(published, in: directory),
       ProcessInfo.processInfo.systemUptime - receiptStartedUptime <= ApprovalTiming.connectionTimeout else { exit(0) }
-guard let companionReceipt = receipt(for: published, publishedAt: receiptStarted, in: directory) else {
+guard let companionReceipt = ApprovalHelper.awaitReceipt(for: published, publishedAt: receiptStarted, in: directory) else {
     update(published, outcome: .noDecision, in: directory)
     exit(0)
 }
 let request = ApprovalRequest(requestID: published.id, sessionID: published.sessionID, turnID: published.turnID,
                               details: published.details, receivedAt: companionReceipt.receivedAt,
                               expiresAt: companionReceipt.expiresAt, outcome: .pending)
-let decision = awaitDecision(for: request, in: directory, waitBound: ApprovalTiming.helperWaitBound)
+let decision = ApprovalHelper.awaitDecision(for: request, in: directory)
 update(request, outcome: decision, in: directory)
-if let output = decisionOutput(decision) { FileHandle.standardOutput.write(output) }
+if let output = ApprovalHelper.hookOutput(for: decision) { FileHandle.standardOutput.write(output) }

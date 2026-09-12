@@ -59,13 +59,17 @@ import Testing
     let request = ApprovalRequest(requestID: UUID(), sessionID: UUID(), turnID: UUID(), details: ApprovalDetails(),
                                   receivedAt: 0, expiresAt: 0, outcome: .pending)
     #expect(ApprovalStore.publish(request, in: root))
-    let before = Date().timeIntervalSince1970
     let scan = ReminderReader.scan(events: root, rollouts: root)
+    #expect(scan.attentionRequests.isEmpty) // no controls before the companion has receipted it
+    #expect(scan.awaitingReceipt.map(\.id) == [request.id])
+    let issued = ApprovalReceipts.issue(scan.awaitingReceipt, in: root, cliSessions: [request.sessionID], now: 500)
     let receipt = try JSONDecoder().decode(ApprovalReceiptRecord.self,
                                            from: Data(contentsOf: ApprovalStore.receiptURL(in: root, id: request.id)))
-    #expect(receipt.receivedAt >= before)
-    #expect(scan.attentionRequests.first?.arrivedAt == receipt.receivedAt)
-    #expect(scan.attentionRequests.first?.expiresAt == receipt.expiresAt)
+    #expect(receipt.receivedAt == 500 && receipt.expiresAt == 530)
+    #expect(issued.first?.source == .cli && issued.first?.state == .actionable)
+    #expect(issued.first?.arrivedAt == 500 && issued.first?.expiresAt == 530)
+    let rescanned = ReminderReader.scan(events: root, rollouts: root).attentionRequests.first
+    #expect(rescanned?.arrivedAt == 500 && rescanned?.expiresAt == 530)
 }
 
 @Test func rescanningKeepsTheOriginalReceiptDeadline() throws {
@@ -75,11 +79,13 @@ import Testing
     let request = ApprovalRequest(requestID: UUID(), sessionID: UUID(), turnID: UUID(), details: ApprovalDetails(),
                                   receivedAt: 0, expiresAt: 0, outcome: .pending)
     #expect(ApprovalStore.publish(request, in: root))
-    let first = ReminderReader.scan(events: root, rollouts: root).attentionRequests.first
-    Thread.sleep(forTimeInterval: 0.05)
+    let first = ApprovalReceipts.issue(ReminderReader.scan(events: root, rollouts: root).awaitingReceipt,
+                                       in: root, cliSessions: [], now: 100).first
+    let again = ApprovalReceipts.issue([request], in: root, cliSessions: [], now: 200).first
+    #expect(again?.arrivedAt == 100 && again?.expiresAt == 130) // a second issue never replaces the receipt
     let second = ReminderReader.scan(events: root, rollouts: root).attentionRequests.first
-    #expect(first?.arrivedAt == second?.arrivedAt)
-    #expect(first?.expiresAt == second?.expiresAt)
+    #expect(first?.arrivedAt == second?.arrivedAt && first?.expiresAt == second?.expiresAt)
+    #expect(ReminderReader.scan(events: root, rollouts: root).awaitingReceipt.isEmpty)
 }
 
 @Test func permissionPayloadBindsSessionTurnAndProvidedDetailsOnly() throws {
