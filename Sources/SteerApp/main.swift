@@ -55,6 +55,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private var firstCompletionScan = true
     private var checkingGhostty = false
     private var nextGhosttyScan: Double = 0
+    private var checkingApprovalFocus = false
+    private var nextApprovalFocusScan: Double = 0
     private var ghosttyFocusState: GhosttyFocusState = .disabled
     private var ghosttyUnavailable = false
     var visibleReminders: [Reminder] {
@@ -323,6 +325,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             liveCLI = scan.cliState.liveSessions
             let previous = Set(queue.items.map(\.id))
             queue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970)
+            // Companion receipt: the deadline starts here, including for requests queued behind others.
+            let receipted = ApprovalReceipts.issue(scan.awaitingReceipt, in: events, cliSessions: scan.cliSessions,
+                                                   now: Date().timeIntervalSince1970)
+            if !receipted.isEmpty { queue.apply(requests: receipted, now: Date().timeIntervalSince1970) }
             let current = queue.items
             let newItems = current.filter { !previous.contains($0.id) }
             if newItems.contains(where: { $0.kind == .completion }) {
@@ -343,10 +349,16 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
 
     func refresh() {
         scanReminders()
+        queue.expire(at: Date().timeIntervalSince1970)
+        checkApprovalFocus()
         checkGhosttyFocus()
         // App identity only: no window contents, task titles, or accessibility queries.
         let codexForeground = desktopAdapter.codexForeground()
         desktopForeground = codexForeground == true
+        // Desktop decision transport is unproven: release every desktop request at once.
+        queue.items.compactMap(\.request)
+            .filter { $0.state == .actionable && ApprovalHandoff.releasesOnReceipt(source: $0.source) }
+            .forEach(handBackApproval)
         var next = attention
         let firstPresentation = next.update(codexForeground: codexForeground, hovering: hovering || panel.isKeyWindow,
                                             now: ProcessInfo.processInfo.systemUptime)
@@ -478,6 +490,62 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     func openAttentionSession(source: AttentionSource, session: UUID) {
         if source == .cli { openCLI(session) }
         else { taskID = session.uuidString; openTestTask() }
+    }
+
+    func decide(_ request: AttentionRequest, as decision: ApprovalDecision) {
+        guard request.source == .cli, request.state == .actionable,
+              Date().timeIntervalSince1970 < request.expiresAt, !eventsPath.isEmpty else { return }
+        let record = ApprovalDecisionRecord(requestID: request.id, decision: decision,
+                                            decidedAt: Date().timeIntervalSince1970)
+        guard ApprovalStore.publish(record, in: URL(fileURLWithPath: eventsPath)) else {
+            navigationMessage = "This approval was already answered or is no longer available."
+            refresh()
+            return
+        }
+        queue.dismiss(.request(request.identity))
+        navigationMessage = decision == .allowOnce ? "Approved once." : "Denied."
+        refresh()
+    }
+
+    private func handBackApproval(_ request: AttentionRequest) {
+        guard request.state == .actionable else { return }
+        let now = Date().timeIntervalSince1970
+        if !eventsPath.isEmpty {
+            _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision, decidedAt: now),
+                                      in: URL(fileURLWithPath: eventsPath))
+        }
+        let handedBack = AttentionRequest(id: request.id, source: request.source, session: request.session,
+                                          turn: request.turn, arrivedAt: request.arrivedAt, expiresAt: request.expiresAt,
+                                          state: .handedBack, details: request.details)
+        queue.apply(requests: [handedBack], now: now)
+    }
+
+    private func checkApprovalFocus() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard !checkingApprovalFocus, now >= nextApprovalFocusScan else { return }
+        let requests = queue.items.compactMap(\.request).filter { $0.source == .cli && $0.state == .actionable }
+        guard !requests.isEmpty else { return }
+        nextApprovalFocusScan = now + 2
+        guard ghosttyEnabled else {
+            requests.filter { ApprovalHandoff.mustHandBack(source: $0.source, paneFocus: .disabled) }.forEach(handBackApproval)
+            return
+        }
+        checkingApprovalFocus = true
+        let live = liveCLI
+        Task { @MainActor in
+            let snapshot = await Task.detached { GhosttyNavigation.snapshot() }.value
+            for request in requests {
+                let focus: CompletionFocus
+                if let snapshot, let target = GhosttyMatch.target(session: request.session, live: live, snapshot: snapshot) {
+                    focus = snapshot.selected == target ? .focused : .away
+                } else {
+                    focus = .unknown
+                }
+                if ApprovalHandoff.mustHandBack(source: request.source, paneFocus: focus) { handBackApproval(request) }
+            }
+            checkingApprovalFocus = false
+            refresh()
+        }
     }
     func openDesktop(_ session: UUID) {
         guard !openingTask else { return }
@@ -628,10 +696,33 @@ struct Notch: View {
                     Text(item.running?.source == .cli ? "Codex CLI working" : "Codex desktop working").font(.headline)
                 }
                 Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
+                if let details = item.request?.details {
+                    Text("Task: \(details.taskName ?? "Not provided by Codex")").font(.caption)
+                    Text("Project: \(details.project ?? "Not provided by Codex")").font(.caption)
+                    Text("Action: \(details.action ?? "Not provided by Codex")").font(.caption)
+                    Text("Command: \(details.command ?? "Not provided by Codex")").font(.caption).textSelection(.enabled)
+                    Text("Reason: \(details.reason ?? "Not provided by Codex")").font(.caption).textSelection(.enabled)
+                    if let longText = details.longText {
+                        DisclosureGroup("Show full request") {
+                            Text(longText).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }.font(.caption)
+                    }
+                }
             }
             Spacer()
             switch item.kind {
-            case .actionableRequest, .handedBackRequest:
+            case .actionableRequest:
+                if item.request?.source == .cli {
+                    VStack {
+                        Button("Approve once") { if let request = item.request { model.decide(request, as: .allowOnce) } }
+                        Button("Deny") { if let request = item.request { model.decide(request, as: .deny) } }
+                    }
+                }
+                Button("Open in Codex") {
+                    if let request = item.request { model.openAttentionSession(source: request.source, session: request.session) }
+                }.disabled(model.openingTask)
+            case .handedBackRequest:
                 Button("Open in Codex") {
                     if let request = item.request { model.openAttentionSession(source: request.source, session: request.session) }
                 }

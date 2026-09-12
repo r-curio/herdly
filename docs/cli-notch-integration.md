@@ -8,6 +8,17 @@ The app packages the native JXA adapter and includes the Automation usage descri
 
 Build: `sh scripts/build-app.sh`. Tests: `swift test` (six tests), including real file-reader/queue reconstruction and title matching. Native navigation remains unverified in Ghostty because the agent's computer-use restriction still applies. This is a lab integration, not installation of global hooks or proof that sessions outside the connected lab are monitored.
 
+CLI PermissionRequest hooks now publish the actual session/turn, command,
+project, action, reason, and expandable tool input to the connected events
+directory. Steer can write one atomic allow-once or deny record for that exact
+request; the helper rejects mismatched, duplicate, late, and timed-out records.
+The helper waits up to five seconds for the companion receipt; only then does
+the 30-second clock start, including queued requests. Its 31-second decision
+wait bound is independent of the notch refresh loop. If Ghostty focus is
+focused, unknown, or unavailable, the app writes a no-decision handoff and
+retains Open in Codex. Desktop requests hand back immediately so Codex keeps its
+native prompt until the desktop transport and handoff policy are proven.
+
 For human navigation testing, run Codex directly in two unsplit Ghostty tabs in the already trusted lab using `/opt/homebrew/bin/codex -m gpt-5.5 -s read-only -a on-request -c 'tui.terminal_title=["session-id"]'`. Connect the lab events directory in Steer if needed, then manually enable Ghostty controls and grant Automation permission if macOS asks. Send distinct no-tools completion prompts, switch to another app, then use each completion's Open in Codex button. Verify the correct tab is selected, and repeat across two windows. No saved Codex hooks, permission policies or terminal settings are modified by this build.
 
 ## Live Steer UI proof
