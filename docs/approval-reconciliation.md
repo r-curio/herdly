@@ -38,8 +38,8 @@ Records: `docs/evidence/cli-approval-resolution.json`, produced by `scripts/cli-
 | native-deny | helper deadline | esc | no marker, `turn_aborted` | interrupted, from the `wait` follow-up output |
 | companion-killed | stand-in SIGKILLed 3 s after receipt; helper handed back 30 s after receipt | y | marker created, `task_complete` | executed |
 | open-in-codex | no-decision record 2 s after receipt (what Open in Codex writes) | esc | native prompt appeared at once; no marker; `turn_aborted` | interrupted |
-| parallel (two requests, one turn) | no-decision records 2 s after each receipt | y for B, driver cancel for A | B created; turn aborted | both requests resolved from the one multi-command exec call |
-| parallel-both-allowed | same | y, y | both created, `task_complete` | both executed from the same call |
+| parallel (two requests, one turn) | no-decision records 2 s after each receipt | y for B; the driver then missed A's queued prompt and cancelled at its wait limit | B created; `turn_aborted` | both requests interrupted, from the one multi-command exec call's output |
+| parallel-both-allowed | same | y, then y for the queued second prompt | both created, `task_complete` | both executed, from the same call's output |
 
 In every case the reader left no request in the queue and cleared nothing else. The stand-in's decision writes never reached Codex in these runs; every answer was native.
 

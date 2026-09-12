@@ -1,0 +1,493 @@
+{
+  "recorded": "2026-09-12",
+  "codex_cli": "codex-cli 0.145.0",
+  "helper": "SteerHook release build from branch codex/10-approval-reconciliation (443bc76)",
+  "native_answers": "keystrokes into the lab TUI's own approval prompt after Steer handed back; never a Steer decision",
+  "isolation": "lab project hooks.json swapped per run and restored; --dangerously-bypass-hook-trust per invocation; no global hooks, policies or settings changed",
+  "cli_cases": [
+    {
+      "case": "companion-killed",
+      "marker": "/Users/dev/Steer/output/desktop-hook-lab/STEER10-KILL-1",
+      "marker_exists": true,
+      "requests": [
+        {
+          "request_id": "B36B7D7F-14D2-4538-BBEF-30A2F5EFB4F8",
+          "session_id": "01A093F9-E82A-7C00-9509-5E2AAD14686C",
+          "turn_id": "01A093FA-2239-73D0-962F-EB24549E39CB",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-KILL-1",
+          "action": "Bash",
+          "companion_received_at": 1789189042.8647768,
+          "expires_at": 1789189072.8647768,
+          "companion_decision_record": null,
+          "helper_outcome": "no_decision",
+          "helper_outcome_written_at": null,
+          "reader_resolution": {
+            "call_id": "call_z3TLShkPZAMRAoaLCfMLB8vq",
+            "kind": "executed",
+            "observed_at": 1789189075.245,
+            "request_id": "B36B7D7F-14D2-4538-BBEF-30A2F5EFB4F8"
+          }
+        }
+      ],
+      "driver_timeline": [
+        {
+          "t": 1789189038.6467571,
+          "event": "prompt_sent"
+        },
+        {
+          "t": 1789189043.709661,
+          "event": "receipt_seen",
+          "request": "B36B7D7F-14D2-4538-BBEF-30A2F5EFB4F8"
+        },
+        {
+          "t": 1789189046.778031,
+          "event": "standin_killed",
+          "pid": 76131
+        },
+        {
+          "t": 1789189073.524458,
+          "event": "handed_back",
+          "request": "B36B7D7F-14D2-4538-BBEF-30A2F5EFB4F8",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-KILL-1"
+        },
+        {
+          "t": 1789189075.1597528,
+          "event": "native_answer",
+          "key": "y",
+          "meaning": "Yes, proceed"
+        },
+        {
+          "t": 1789189082.528686,
+          "event": "turn_done"
+        }
+      ],
+      "completed_turns": [
+        "01A093F9-E82A-7C00-9509-5E2AAD14686C/01A093FA-2239-73D0-962F-EB24549E39CB"
+      ],
+      "canceled_turns": [],
+      "queue_requests_remaining_after_scan": []
+    },
+    {
+      "case": "native-allow",
+      "marker": "/Users/dev/Steer/output/desktop-hook-lab/STEER10-NATIVE-ALLOW-1",
+      "marker_exists": true,
+      "requests": [
+        {
+          "request_id": "90328B3E-5B64-4959-B61E-17A906025E7B",
+          "session_id": "01A093F8-F9F9-7F73-A309-60AC5CB385FB",
+          "turn_id": "01A093F9-3039-7643-802A-ADA5A4EB7879",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-NATIVE-ALLOW-1",
+          "action": "Bash",
+          "companion_received_at": 1789188982.265376,
+          "expires_at": 1789189012.265376,
+          "companion_decision_record": null,
+          "helper_outcome": "no_decision",
+          "helper_outcome_written_at": null,
+          "reader_resolution": {
+            "call_id": "call_LTW2Q9g3VztwSfgfxb8a7Xop",
+            "kind": "executed",
+            "observed_at": 1789189015.088,
+            "request_id": "90328B3E-5B64-4959-B61E-17A906025E7B"
+          }
+        }
+      ],
+      "driver_timeline": [
+        {
+          "t": 1789188976.694887,
+          "event": "prompt_sent"
+        },
+        {
+          "t": 1789188982.7861829,
+          "event": "receipt_seen",
+          "request": "90328B3E-5B64-4959-B61E-17A906025E7B"
+        },
+        {
+          "t": 1789189012.328531,
+          "event": "handed_back",
+          "request": "90328B3E-5B64-4959-B61E-17A906025E7B",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-NATIVE-ALLOW-1"
+        },
+        {
+          "t": 1789189015.0098848,
+          "event": "native_answer",
+          "key": "y",
+          "meaning": "Yes, proceed"
+        },
+        {
+          "t": 1789189022.334938,
+          "event": "turn_done"
+        }
+      ],
+      "completed_turns": [
+        "01A093F8-F9F9-7F73-A309-60AC5CB385FB/01A093F9-3039-7643-802A-ADA5A4EB7879"
+      ],
+      "canceled_turns": [],
+      "queue_requests_remaining_after_scan": []
+    },
+    {
+      "case": "native-deny",
+      "marker": "/Users/dev/Steer/output/desktop-hook-lab/STEER10-NATIVE-DENY-1",
+      "marker_exists": false,
+      "requests": [
+        {
+          "request_id": "F8E3B815-9510-432C-B8F4-431489EE4C40",
+          "session_id": "01A093F7-51E7-7673-91AD-4007F6C85AA4",
+          "turn_id": "01A093F7-8D95-7F13-9FF3-D00807FE52F2",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-NATIVE-DENY-1",
+          "action": "Bash",
+          "companion_received_at": 1789188877.501875,
+          "expires_at": 1789188907.501875,
+          "companion_decision_record": null,
+          "helper_outcome": "no_decision",
+          "helper_outcome_written_at": null,
+          "reader_resolution": {
+            "call_id": "call_gsez37j9Kd11zA567c4n7z1O",
+            "kind": "interrupted",
+            "observed_at": 1789188910.202,
+            "request_id": "F8E3B815-9510-432C-B8F4-431489EE4C40"
+          }
+        }
+      ],
+      "driver_timeline": [
+        {
+          "t": 1789188869.52337,
+          "event": "prompt_sent"
+        },
+        {
+          "t": 1789188877.6699562,
+          "event": "receipt_seen",
+          "request": "F8E3B815-9510-432C-B8F4-431489EE4C40"
+        },
+        {
+          "t": 1789188908.56096,
+          "event": "handed_back",
+          "request": "F8E3B815-9510-432C-B8F4-431489EE4C40",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-NATIVE-DENY-1"
+        },
+        {
+          "t": 1789188910.201623,
+          "event": "native_answer",
+          "key": "esc",
+          "meaning": "No, and tell Codex what to do differently"
+        },
+        {
+          "t": 1789188911.897748,
+          "event": "feedback_submitted_empty"
+        },
+        {
+          "t": 1789188960.405455,
+          "event": "wait_elapsed"
+        }
+      ],
+      "completed_turns": [],
+      "canceled_turns": [
+        "01A093F7-51E7-7673-91AD-4007F6C85AA4/01A093F7-8D95-7F13-9FF3-D00807FE52F2"
+      ],
+      "queue_requests_remaining_after_scan": []
+    },
+    {
+      "case": "open-in-codex",
+      "marker": "/Users/dev/Steer/output/desktop-hook-lab/STEER10-OPEN-1",
+      "marker_exists": false,
+      "requests": [
+        {
+          "request_id": "0ED21CB6-17D1-490D-8BC0-549B758F0DAB",
+          "session_id": "01A093FA-D151-7C72-BB10-983F314CB424",
+          "turn_id": "01A093FB-0D76-70C1-81A0-EA6A62D50481",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-OPEN-1",
+          "action": "Bash",
+          "companion_received_at": 1789189106.16608,
+          "expires_at": 1789189136.16608,
+          "companion_decision_record": {
+            "request_id": "0ED21CB6-17D1-490D-8BC0-549B758F0DAB",
+            "decision": "no_decision",
+            "decided_at": 1789189108.179509
+          },
+          "helper_outcome": "no_decision",
+          "helper_outcome_written_at": null,
+          "reader_resolution": {
+            "call_id": "call_tyNjfSluc2DN2LZlFSLQrely",
+            "kind": "interrupted",
+            "observed_at": 1789189110.68,
+            "request_id": "0ED21CB6-17D1-490D-8BC0-549B758F0DAB"
+          }
+        }
+      ],
+      "driver_timeline": [
+        {
+          "t": 1789189098.8679628,
+          "event": "prompt_sent"
+        },
+        {
+          "t": 1789189106.996465,
+          "event": "receipt_seen",
+          "request": "0ED21CB6-17D1-490D-8BC0-549B758F0DAB"
+        },
+        {
+          "t": 1789189109.036685,
+          "event": "handed_back",
+          "request": "0ED21CB6-17D1-490D-8BC0-549B758F0DAB",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-OPEN-1"
+        },
+        {
+          "t": 1789189110.679418,
+          "event": "native_answer",
+          "key": "esc",
+          "meaning": "No, and tell Codex what to do differently"
+        },
+        {
+          "t": 1789189112.366165,
+          "event": "feedback_submitted_empty"
+        },
+        {
+          "t": 1789189159.747275,
+          "event": "wait_elapsed"
+        }
+      ],
+      "completed_turns": [],
+      "canceled_turns": [
+        "01A093FA-D151-7C72-BB10-983F314CB424/01A093FB-0D76-70C1-81A0-EA6A62D50481"
+      ],
+      "queue_requests_remaining_after_scan": []
+    },
+    {
+      "case": "parallel-both-allowed",
+      "marker": "/Users/dev/Steer/output/desktop-hook-lab/STEER10-PARALLEL3",
+      "marker_exists": false,
+      "requests": [
+        {
+          "request_id": "7A212E71-4460-48A2-AEF9-E73D2D22804F",
+          "session_id": "01A09400-B7D6-7E92-A7A4-9C4819046173",
+          "turn_id": "01A09400-F85A-7102-8CF7-AC2568A8A3FF",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-PARALLEL3-B",
+          "action": "Bash",
+          "companion_received_at": 1789189495.891477,
+          "expires_at": 1789189525.891477,
+          "companion_decision_record": {
+            "request_id": "7A212E71-4460-48A2-AEF9-E73D2D22804F",
+            "decision": "no_decision",
+            "decided_at": 1789189497.895273
+          },
+          "helper_outcome": "no_decision",
+          "helper_outcome_written_at": null,
+          "reader_resolution": {
+            "call_id": "call_M2iwaL0JmY5IcZUpYbJVnky1",
+            "kind": "executed",
+            "observed_at": 1789189515.303,
+            "request_id": "7A212E71-4460-48A2-AEF9-E73D2D22804F"
+          }
+        },
+        {
+          "request_id": "F6991CF4-238B-4D85-9AA9-01E5B40CB49D",
+          "session_id": "01A09400-B7D6-7E92-A7A4-9C4819046173",
+          "turn_id": "01A09400-F85A-7102-8CF7-AC2568A8A3FF",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-PARALLEL3-A",
+          "action": "Bash",
+          "companion_received_at": 1789189497.897262,
+          "expires_at": 1789189527.897262,
+          "companion_decision_record": {
+            "request_id": "F6991CF4-238B-4D85-9AA9-01E5B40CB49D",
+            "decision": "no_decision",
+            "decided_at": 1789189499.904881
+          },
+          "helper_outcome": "no_decision",
+          "helper_outcome_written_at": null,
+          "reader_resolution": {
+            "call_id": "call_M2iwaL0JmY5IcZUpYbJVnky1",
+            "kind": "executed",
+            "observed_at": 1789189515.303,
+            "request_id": "F6991CF4-238B-4D85-9AA9-01E5B40CB49D"
+          }
+        }
+      ],
+      "driver_timeline": [
+        {
+          "t": 1789189486.679313,
+          "event": "prompt_sent"
+        },
+        {
+          "t": 1789189496.8984451,
+          "event": "receipt_seen",
+          "request": "7A212E71-4460-48A2-AEF9-E73D2D22804F"
+        },
+        {
+          "t": 1789189497.9033349,
+          "event": "receipt_seen",
+          "request": "F6991CF4-238B-4D85-9AA9-01E5B40CB49D"
+        },
+        {
+          "t": 1789189498.925969,
+          "event": "handed_back",
+          "request": "7A212E71-4460-48A2-AEF9-E73D2D22804F",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-PARALLEL3-B"
+        },
+        {
+          "t": 1789189500.123281,
+          "event": "handed_back",
+          "request": "F6991CF4-238B-4D85-9AA9-01E5B40CB49D",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-PARALLEL3-A"
+        },
+        {
+          "t": 1789189501.7817652,
+          "event": "native_answer",
+          "key": "y",
+          "meaning": "Yes, proceed"
+        },
+        {
+          "t": 1789189511.684789,
+          "event": "native_answer",
+          "key": "y",
+          "meaning": "Yes, proceed"
+        },
+        {
+          "t": 1789189520.9605172,
+          "event": "turn_done"
+        }
+      ],
+      "completed_turns": [
+        "01A09400-B7D6-7E92-A7A4-9C4819046173/01A09400-F85A-7102-8CF7-AC2568A8A3FF"
+      ],
+      "canceled_turns": [],
+      "queue_requests_remaining_after_scan": []
+    },
+    {
+      "case": "parallel",
+      "marker": "/Users/dev/Steer/output/desktop-hook-lab/STEER10-PARALLEL",
+      "marker_exists": false,
+      "requests": [
+        {
+          "request_id": "466B9965-1FEE-4A33-9E62-9635281760FA",
+          "session_id": "01A093FB-FF0F-7950-AC9F-6A12A213032A",
+          "turn_id": "01A093FC-4177-76C1-93F1-9A46E50FAB75",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-PARALLEL-B",
+          "action": "Bash",
+          "companion_received_at": 1789189185.3875608,
+          "expires_at": 1789189215.3875608,
+          "companion_decision_record": {
+            "request_id": "466B9965-1FEE-4A33-9E62-9635281760FA",
+            "decision": "no_decision",
+            "decided_at": 1789189187.393245
+          },
+          "helper_outcome": "no_decision",
+          "helper_outcome_written_at": null,
+          "reader_resolution": {
+            "call_id": "call_KrBQRWUBDFtvjNLeKIHmL0iJ",
+            "kind": "interrupted",
+            "observed_at": 1789189268.148,
+            "request_id": "466B9965-1FEE-4A33-9E62-9635281760FA"
+          }
+        },
+        {
+          "request_id": "63BCFC1E-BDB0-4277-82FB-752AC9B6450A",
+          "session_id": "01A093FB-FF0F-7950-AC9F-6A12A213032A",
+          "turn_id": "01A093FC-4177-76C1-93F1-9A46E50FAB75",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-PARALLEL-A",
+          "action": "Bash",
+          "companion_received_at": 1789189187.395298,
+          "expires_at": 1789189217.395298,
+          "companion_decision_record": {
+            "request_id": "63BCFC1E-BDB0-4277-82FB-752AC9B6450A",
+            "decision": "no_decision",
+            "decided_at": 1789189189.406705
+          },
+          "helper_outcome": "no_decision",
+          "helper_outcome_written_at": null,
+          "reader_resolution": {
+            "call_id": "call_KrBQRWUBDFtvjNLeKIHmL0iJ",
+            "kind": "interrupted",
+            "observed_at": 1789189268.148,
+            "request_id": "63BCFC1E-BDB0-4277-82FB-752AC9B6450A"
+          }
+        }
+      ],
+      "driver_timeline": [
+        {
+          "t": 1789189177.717429,
+          "event": "prompt_sent"
+        },
+        {
+          "t": 1789189185.882006,
+          "event": "receipt_seen",
+          "request": "466B9965-1FEE-4A33-9E62-9635281760FA"
+        },
+        {
+          "t": 1789189187.956424,
+          "event": "handed_back",
+          "request": "466B9965-1FEE-4A33-9E62-9635281760FA",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-PARALLEL-B"
+        },
+        {
+          "t": 1789189187.9564512,
+          "event": "receipt_seen",
+          "request": "63BCFC1E-BDB0-4277-82FB-752AC9B6450A"
+        },
+        {
+          "t": 1789189190.063033,
+          "event": "handed_back",
+          "request": "63BCFC1E-BDB0-4277-82FB-752AC9B6450A",
+          "command": "touch /Users/dev/Steer/output/desktop-hook-lab/STEER10-PARALLEL-A"
+        },
+        {
+          "t": 1789189191.698207,
+          "event": "native_answer",
+          "key": "y",
+          "meaning": "Yes, proceed"
+        },
+        {
+          "t": 1789189268.146946,
+          "event": "wait_elapsed"
+        }
+      ],
+      "completed_turns": [],
+      "canceled_turns": [
+        "01A093FB-FF0F-7950-AC9F-6A12A213032A/01A093FC-4177-76C1-93F1-9A46E50FAB75"
+      ],
+      "queue_requests_remaining_after_scan": []
+    }
+  ],
+  "helper_race": {
+    "simultaneous": {
+      "a_request_id": "387B69A7-908C-4F7F-8E60-27E7FFF6BBEE",
+      "a_helper_stdout": "{\"hookSpecificOutput\":{\"decision\":{\"behavior\":\"deny\"},\"hookEventName\":\"PermissionRequest\"}}",
+      "a_outcome": "deny",
+      "b_request_id": "8A14A9E8-EA1F-4B8B-9442-7598A19451EC",
+      "b_helper_stdout": "{\"hookSpecificOutput\":{\"decision\":{\"behavior\":\"allow\"},\"hookEventName\":\"PermissionRequest\"}}",
+      "b_outcome": "allow",
+      "same_session": "590e5bc5-02d1-4d55-b9e2-78ebf3ef938a",
+      "same_turn": "d38c8f90-ae04-43de-bc0b-733d74ff9ab9"
+    },
+    "deadline-before": {
+      "request_id": "53BD04B4-B80F-46F1-8059-C47037B2605B",
+      "received_at": 1789188887.636915,
+      "decision_written_at": 1789188914.644563,
+      "decision_after_receipt_seconds": 27.008,
+      "helper_stdout": "{\"hookSpecificOutput\":{\"decision\":{\"behavior\":\"allow\"},\"hookEventName\":\"PermissionRequest\"}}",
+      "helper_seconds": 27.101,
+      "approval_outcome": "allow"
+    },
+    "deadline-after": {
+      "request_id": "C1D3382A-B87E-4FE9-BA82-6E39F2B59027",
+      "received_at": 1789188887.638776,
+      "decision_written_at": 1789188918.63998,
+      "decision_after_receipt_seconds": 31.001,
+      "helper_stdout": "",
+      "helper_seconds": 30.089,
+      "approval_outcome": "no_decision"
+    },
+    "disconnect": {
+      "old_request_id": "90A1EDCE-3563-4BB5-AE4F-DA428D7A31C7",
+      "old_helper_stdout": "",
+      "old_outcome": "no_decision",
+      "old_handed_back_after_seconds": 30.014,
+      "late_allow_for_old_request_accepted_by_store": true,
+      "old_decision_record": {
+        "request_id": "90A1EDCE-3563-4BB5-AE4F-DA428D7A31C7",
+        "decision": "allow",
+        "decided_at": 1789188917.729727
+      },
+      "new_request_id": "3370E063-BBC5-4C1E-9CD9-4E05D65FE20C",
+      "new_helper_stdout": "{\"hookSpecificOutput\":{\"decision\":{\"behavior\":\"deny\"},\"hookEventName\":\"PermissionRequest\"}}",
+      "new_outcome": "deny"
+    }
+  }
+}
