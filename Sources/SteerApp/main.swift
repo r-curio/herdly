@@ -495,7 +495,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         guard ghosttyEnabled, !checkingGhostty, !openingTask, now >= nextGhosttyScan,
               !cliItems.isEmpty else { return }
         checkingGhostty = true
-        ghosttyFocusState = .checking
+        // Keep the last verified snapshot while a re-check is in flight. Resetting to
+        // `.checking` every poll collapsed an already presented CLI popup early.
+        if case .known = ghosttyFocusState {} else { ghosttyFocusState = .checking }
         nextGhosttyScan = now + 2
         let queued = cliItems
         Task { @MainActor in
