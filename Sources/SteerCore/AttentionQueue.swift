@@ -147,6 +147,7 @@ public struct AttentionQueue: Sendable {
     private var completions: [CompletionIdentity: AttentionCompletion] = [:]
     private var runningBySession: [SourceSession: AttentionRunning] = [:]
     private var resolvedTurns: Set<AttentionTurnIdentity> = []
+    private var decidedRequests: Set<RequestIdentity> = []
     private var acknowledged: Set<CompletionIdentity>
 
     public init(acknowledged: Set<CompletionIdentity> = []) {
@@ -179,7 +180,8 @@ public struct AttentionQueue: Sendable {
                 $0.value.id != RunningIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)
             }
         }
-        for incoming in incomingRequests where !resolvedTurns.contains(AttentionTurnIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)) {
+        for incoming in incomingRequests where !decidedRequests.contains(incoming.identity)
+            && !resolvedTurns.contains(AttentionTurnIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)) {
             if var current = requests[incoming.identity] {
                 if incoming.arrivedAt < current.arrivedAt {
                     current = AttentionRequest(id: current.id, source: current.source, session: current.session, turn: current.turn,
@@ -247,7 +249,9 @@ public struct AttentionQueue: Sendable {
 
     public mutating func dismiss(_ id: AttentionItemID) {
         switch id {
-        case let .request(id): requests.removeValue(forKey: id)
+        case let .request(id):
+            decidedRequests.insert(id)
+            requests.removeValue(forKey: id)
         case let .completion(id):
             acknowledged.insert(id)
             completions.removeValue(forKey: id)

@@ -353,7 +353,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         desktopForeground = codexForeground == true
         // Desktop decision transport is unproven: release every desktop request at once.
         queue.items.compactMap(\.request)
-            .filter { $0.state == .actionable && ApprovalHandoff.mustHandBack(source: $0.source, paneFocus: .unknown) }
+            .filter { $0.state == .actionable && ApprovalHandoff.releasesOnReceipt(source: $0.source) }
             .forEach(handBackApproval)
         var next = attention
         let firstPresentation = next.update(codexForeground: codexForeground, hovering: hovering || panel.isKeyWindow,

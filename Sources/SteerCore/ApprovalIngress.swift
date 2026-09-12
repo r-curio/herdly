@@ -3,7 +3,8 @@ import Foundation
 /// Turns a Codex PermissionRequest hook payload into one identity-bound request.
 /// Only fields Codex supplied are carried; nothing is invented for missing context.
 public enum ApprovalRequestParser {
-    static let supportedKinds: Set<String> = ["bash", "command", "exec_command", "file", "permission", "apply_patch"]
+    /// Only the payload shape proven in the isolated CLI lab (`tool_name: Bash`). Anything else stays native.
+    static let supportedKinds: Set<String> = ["bash"]
 
     public static func request(from object: [String: Any]) -> ApprovalRequest? {
         guard isSupported(object), let sessionValue = object["session_id"] as? String,
@@ -22,9 +23,8 @@ public enum ApprovalRequestParser {
 
     /// Uncovered approval types return false so they stay in Codex's normal flow.
     static func isSupported(_ object: [String: Any]) -> Bool {
-        let kind = (object["permission_type"] as? String ?? object["kind"] as? String ?? object["tool_name"] as? String)?.lowercased()
-        if let kind { return supportedKinds.contains(kind) }
-        return (object["tool_input"] as? [String: Any])?["command"] is String
+        guard let kind = (object["tool_name"] as? String)?.lowercased() else { return false }
+        return supportedKinds.contains(kind)
     }
 
     private static func jsonText(_ value: Any?) -> String? {
@@ -38,6 +38,9 @@ public enum ApprovalRequestParser {
 
 /// Decides when an actionable request must be released to Codex with no decision.
 public enum ApprovalHandoff {
+    /// Desktop requests are released as soon as the companion sees them; CLI requests wait for focus evidence.
+    public static func releasesOnReceipt(source: AttentionSource) -> Bool { source == .desktop }
+
     /// Desktop requests always hand back: their decision transport and handoff policy are
     /// unproven, so Codex keeps its native prompt. CLI requests stay actionable only while
     /// the originating Ghostty pane is verified away; a check in flight waits for its result.

@@ -229,13 +229,14 @@ import Testing
     #expect(plan.configChange == "[tui]\nfont_size = 14\nterminal_title = [\"session-id\"]\n[network]\nproxy = \"none\"\n")
 }
 
-@Test func setupMigratesLegacySteerTimeoutWithoutAddingDuplicateHandlers() throws {
+@Test(arguments: CodexSetupRequirements.legacyHookTimeouts)
+func setupMigratesLegacySteerTimeoutWithoutAddingDuplicateHandlers(legacyTimeout: Int) throws {
     let helper = URL(fileURLWithPath: "/tmp/steer/SteerHook")
     let events = URL(fileURLWithPath: "/tmp/steer/events")
     let id = UUID().uuidString
     let command = CodexSetupPlanner.command(helperPath: helper, eventsPath: events, installationID: id)
     let hooks: [String: Any] = ["hooks": Dictionary(uniqueKeysWithValues: CodexSetupRequirements.hookEvents.map { event in
-        (event, [["hooks": [["type": "command", "command": command, "timeout": 2]]]])
+        (event, [["hooks": [["type": "command", "command": command, "timeout": legacyTimeout]]]])
     })]
     let data = try JSONSerialization.data(withJSONObject: hooks)
     let plan = CodexSetupPlanner.plan(capabilities: CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true),

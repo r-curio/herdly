@@ -37,7 +37,7 @@ private func update(_ request: ApprovalRequest, outcome: ApprovalDecision, in di
 }
 
 private func decisionOutput(_ decision: ApprovalDecision) -> Data? {
-    guard decision == .allowOnce || decision == .deny else { return nil }
+    guard decision.isUserDecision else { return nil }
     let value: [String: Any] = ["hookSpecificOutput": [
         "hookEventName": "PermissionRequest",
         "decision": ["behavior": decision == .allowOnce ? "allow" : "deny"]
