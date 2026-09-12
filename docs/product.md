@@ -2,7 +2,7 @@
 
 ## Current handed-back reminder behavior
 
-Keep Continue in Codex after no-decision handoff, with only Open in Codex. Remove reminders on structured completion of their exact session and turn; other turns remain queued. Presence does not prove approval is still pending. Accessibility cleanup is deferred. This supersedes older permission-still-needed wording below. The current integration reads the isolated approval lab; it does not install general hooks.
+Keep Continue in Codex after no-decision handoff, with only Open in Codex. Remove a reminder on evidence that its exact request was resolved: Codex's recorded output for that turn and command (allowed, rejected, or interrupted), structured completion or cancellation of its exact session and turn, or the end of its session. Other turns and other requests remain queued. Presence does not prove approval is still pending, and the row says so: it was handed back with no decision and Steer has not seen an answer yet. Open in Codex on an actionable CLI request hands back at once so Codex's own prompt appears immediately. Accessibility cleanup is deferred. This supersedes older permission-still-needed wording below. See [approval reconciliation](approval-reconciliation.md).
 
 
 ## Platform

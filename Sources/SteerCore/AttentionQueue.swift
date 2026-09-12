@@ -227,9 +227,18 @@ public struct AttentionQueue: Sendable {
         }
         runningBySession.removeAll()
         resolve(scan.completed.union(scan.canceled), source: .cli)
+        let bySource = Dictionary(scan.attentionRequests.map { ($0.id, $0.source) }, uniquingKeysWith: { first, _ in first })
+        resolve(requests: scan.resolvedRequests.compactMap { resolution in
+            (bySource[resolution.requestID] ?? requests.values.first { $0.id == resolution.requestID }?.source)
+                .map { RequestIdentity(source: $0, request: resolution.requestID) }
+        })
         apply(requests: scan.attentionRequests,
               completions: desktopCompletions + cliCompletions,
               running: desktopRunning + cliRunning, now: now)
+        resolve(requests: requests.values.filter { request in
+            guard let ended = scan.sessionEnds[request.session] else { return false }
+            return ended >= request.arrivedAt
+        }.map(\.identity))
     }
 
     private mutating func resolve(_ turns: Set<TurnIdentity>, source: AttentionSource) {
@@ -238,6 +247,14 @@ public struct AttentionQueue: Sendable {
         requests = requests.filter { !qualified.contains(AttentionTurnIdentity(source: $0.value.source, session: $0.value.session, turn: $0.value.turn)) }
         runningBySession = runningBySession.filter {
             !qualified.contains(AttentionTurnIdentity(source: $0.value.source, session: $0.value.session, turn: $0.value.turn))
+        }
+    }
+
+    /// Clears exactly these requests on resolution evidence and prevents a later scan from reviving them.
+    public mutating func resolve(requests identities: [RequestIdentity]) {
+        for identity in identities {
+            decidedRequests.insert(identity)
+            requests.removeValue(forKey: identity)
         }
     }
 

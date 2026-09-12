@@ -44,7 +44,7 @@ The helper accepts only one terminal outcome: allow once, deny, or hand back wit
 
 For any future verified desktop approval flow, foregrounding Codex hands back immediately; Ghostty uses originating-pane focus. Remove the decision controls without dismissing completions. Desktop approvals stay native until their integration and handoff policy are established. If the companion is absent or crashes, return no decision so Codex can continue its own approval flow. Never convert a connection error or timeout into approval. Do not synthesize terminal keystrokes to approve requests.
 
-After handoff, the queue can show Open in Codex while waiting for resolution evidence. Determining resolution through installed-runtime events remains a verification requirement; do not keep claiming a request is pending indefinitely without evidence.
+After handoff, the queue can show Open in Codex while waiting for resolution evidence. Resolution is read from the session rollout: the exec call in the exact turn with the exact command whose terminal output was recorded after the companion receipt, plus turn completion, cancellation, or session end. This was verified against the installed CLI runtime for issue #10 ([approval reconciliation](approval-reconciliation.md)); desktop native answers remain unverified. The row never claims a request is still pending without evidence.
 
 ## Focus and persistence
 
@@ -71,7 +71,7 @@ Store small snapshots of attention items and completion acknowledgments locally 
 4. Verify desktop foreground/background visibility using native app activation, including activation while a popup is expanded. Neither task navigation nor foregrounding acknowledges completions; only explicit dismissal does. Test queued completions received while foreground and prevent repeat sound on subsequent switches. Exact desktop conversation focus is deferred.
 5. After handoff, detect a decision made in Codex and clear only the matching item. Restart the companion and prove saved requests do not produce active approval buttons.
 
-These are planned checks, not completed tests. Existing user configuration has not been changed.
+Check 5 is recorded for the CLI in [approval reconciliation](approval-reconciliation.md); the remaining desktop checks are still planned. Existing user configuration has not been changed.
 
 ## Product decisions and remaining verification
 

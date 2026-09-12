@@ -21,3 +21,11 @@ public enum ApprovalReceipts {
         }
     }
 }
+
+/// Decision records written by the companion (allow once, deny, or a no-decision handoff).
+public enum ApprovalDecisions {
+    public static func existing(for id: UUID, in directory: URL) -> ApprovalDecisionRecord? {
+        guard let bytes = SafeFile.read(ApprovalStore.decisionURL(in: directory, id: id), limit: 4096) else { return nil }
+        return try? JSONDecoder().decode(ApprovalDecisionRecord.self, from: bytes)
+    }
+}
