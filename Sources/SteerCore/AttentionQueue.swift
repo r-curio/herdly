@@ -17,17 +17,20 @@ public struct AttentionRequest: Identifiable, Equatable, Sendable {
     public let turn: UUID
     public let arrivedAt: Double
     public let expiresAt: Double
+    public let details: ApprovalDetails?
     public fileprivate(set) var state: AttentionRequestState
     public var identity: RequestIdentity { RequestIdentity(source: source, request: id) }
 
     public init(id: UUID, source: AttentionSource = .desktop, session: UUID, turn: UUID, arrivedAt: Double,
-                handoffAfter: Double = 30, state: AttentionRequestState = .actionable) {
+                handoffAfter: Double = ApprovalTiming.handoffTimeout, state: AttentionRequestState = .actionable,
+                details: ApprovalDetails? = nil) {
         self.init(id: id, source: source, session: session, turn: turn, arrivedAt: arrivedAt,
-                  expiresAt: arrivedAt + handoffAfter, state: state)
+                  expiresAt: arrivedAt + handoffAfter, state: state, details: details)
     }
 
     public init(id: UUID, source: AttentionSource = .desktop, session: UUID, turn: UUID, arrivedAt: Double,
-                expiresAt: Double, state: AttentionRequestState = .actionable) {
+                expiresAt: Double, state: AttentionRequestState = .actionable,
+                details: ApprovalDetails? = nil) {
         self.id = id
         self.source = source
         self.session = session
@@ -35,6 +38,7 @@ public struct AttentionRequest: Identifiable, Equatable, Sendable {
         self.arrivedAt = arrivedAt
         self.expiresAt = expiresAt
         self.state = state
+        self.details = details
     }
 
     fileprivate mutating func expire(at now: Double) {
@@ -143,6 +147,7 @@ public struct AttentionQueue: Sendable {
     private var completions: [CompletionIdentity: AttentionCompletion] = [:]
     private var runningBySession: [SourceSession: AttentionRunning] = [:]
     private var resolvedTurns: Set<AttentionTurnIdentity> = []
+    private var decidedRequests: Set<RequestIdentity> = []
     private var acknowledged: Set<CompletionIdentity>
 
     public init(acknowledged: Set<CompletionIdentity> = []) {
@@ -175,14 +180,19 @@ public struct AttentionQueue: Sendable {
                 $0.value.id != RunningIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)
             }
         }
-        for incoming in incomingRequests where !resolvedTurns.contains(AttentionTurnIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)) {
+        for incoming in incomingRequests where !decidedRequests.contains(incoming.identity)
+            && !resolvedTurns.contains(AttentionTurnIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)) {
             if var current = requests[incoming.identity] {
                 if incoming.arrivedAt < current.arrivedAt {
                     current = AttentionRequest(id: current.id, source: current.source, session: current.session, turn: current.turn,
                                                arrivedAt: incoming.arrivedAt, expiresAt: min(current.expiresAt, incoming.expiresAt),
-                                               state: current.state)
+                                               state: current.state, details: current.details ?? incoming.details)
                 }
                 if incoming.state == .handedBack { current.state = .handedBack }
+                if current.details == nil { current = AttentionRequest(id: current.id, source: current.source, session: current.session,
+                                                                        turn: current.turn, arrivedAt: current.arrivedAt,
+                                                                        expiresAt: current.expiresAt, state: current.state,
+                                                                        details: incoming.details) }
                 requests[incoming.identity] = current
             } else {
                 requests[incoming.identity] = incoming
@@ -239,7 +249,9 @@ public struct AttentionQueue: Sendable {
 
     public mutating func dismiss(_ id: AttentionItemID) {
         switch id {
-        case let .request(id): requests.removeValue(forKey: id)
+        case let .request(id):
+            decidedRequests.insert(id)
+            requests.removeValue(forKey: id)
         case let .completion(id):
             acknowledged.insert(id)
             completions.removeValue(forKey: id)

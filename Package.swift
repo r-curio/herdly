@@ -9,7 +9,7 @@ let package = Package(
     targets: [
         .target(name: "SteerCore"),
         .executableTarget(name: "SteerApp", dependencies: ["SteerCore"], exclude: ["Resources"]),
-        .executableTarget(name: "SteerHook"),
+        .executableTarget(name: "SteerHook", dependencies: ["SteerCore"]),
         .testTarget(name: "SteerCoreTests", dependencies: ["SteerCore"])
     ]
 )

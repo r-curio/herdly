@@ -40,6 +40,68 @@ Run explicit allow once, deny, no decision after 30 seconds from companion recei
 
 None of those live cases ran. Computer-use access to `com.openai.codex` was rejected for safety reasons; additionally, the existing-runtime event/approval attachment is not proven. The schema checks do not resolve either blocker. No simulator result is presented as approval handoff evidence. #4 and #9 remain blocked.
 
+## Issue #9 implementation boundary
+
+The helper now publishes one identity-bound approval request and waits for the
+companion's receipt handshake before starting the 30-second decision deadline.
+The helper first has a separate five-second receipt-connection deadline, which
+outlasts one two-second companion scan plus scan time, and then an independent
+31-second decision wait bound. A pending request first seen after that
+connection deadline has no live helper: the reader writes no receipt and hands
+it back without controls. Bounded regular-file reads,
+malformed, late, duplicate, unknown, or failed decisions all return no
+decision. The native hook response is emitted only for an explicit allow-once
+or deny. The notch renders only Codex-provided fields and offers decision
+buttons for CLI requests whose rollout identifies a CLI session. Desktop
+requests hand back immediately with no decision, regardless of foreground
+state, because the desktop transport and handoff policy remain unverified;
+they then retain only Open in Codex. Focused or unknown Ghostty observations
+hand back with no decision; a check in flight waits for its snapshot. This
+policy lives in `ApprovalHandoff` and the payload mapping in
+`ApprovalRequestParser`, both in SteerCore with unit tests covering request
+identity, unsupported approval types, and receipt-deadline preservation across
+rescans. Only `tool_name: Bash`, the shape proven in the isolated lab, is
+intercepted; every other approval type stays in Codex's native flow. A decided
+request is remembered by the queue so a scan during the helper's file rewrite
+cannot resurrect it.
+
+`swift test` and `SteerHook --self-test` exercise the coordinator, atomic
+identity checks, deadline preservation, and request detail replay. These are
+isolated helper/core checks, not live desktop approval evidence. No desktop
+allow/deny/timeout was run, and no existing hooks or permissions were changed.
+
+The first isolated run with the installed Codex CLI 0.145.0 also exposed a
+payload-coverage failure: a harmless `touch` request arrived as
+`PermissionRequest` with `tool_name: Bash`, which the pre-fix helper rejected
+before publishing a request. It therefore fell through to Codex's native
+approval and the marker stayed absent after cancellation. `Bash` is now a
+supported, self-tested alias; this diagnosis is not live handoff evidence, and
+desktop approval remains unverified.
+
+### Real CLI conservative-handoff retest
+
+The subsequent isolated retest used the installed Codex CLI with session
+`01a09248-ce66-7823-8e80-5043df76f11e`, turn
+`01a09249-2e6e-7613-a414-cd556a328af2`, and the real Bash command
+`touch /tmp/steer-approval-lab/TIMEOUT_MARKER-2`. The hook published request
+`FBF4D0AD-AF2B-4652-9819-798AD02E1717` with the real project, action, command,
+and long request details. The running exact-branch app wrote the companion
+receipt at `received_at=1789160668.896307` with a 30-second expiry, then wrote
+`no_decision` at `1789160668.944046` because the PTY was not a verified Ghostty
+pane and the required observation was unavailable. The helper returned the
+request to Codex's native approval UI; after native cancellation the marker
+remained absent.
+
+This proves real Bash ingestion, companion receipt, conservative unknown-focus
+handback, and no accidental allow. It does not prove Ghostty allow/deny,
+30-second timeout, or desktop decision transport.
+
+Setup migration recognizes the prior Steer command shape with its two-second or
+35-second hook timeout, upgrades it in place to the 38-second bounded hook
+timeout, and
+collapses duplicate copies. Ambiguous multiple Steer installations return an
+explicit conflict instead of adding another handler.
+
 ## Isolated lifecycle experiment prepared
 
 The official [hook discovery and review documentation](https://learn.chatgpt.com/docs/hooks) supports project-local `.codex/hooks.json`, requires project trust and review of non-managed hook definitions, and merges hooks from other active sources. No trust bypass is used. Existing user/system hooks may still apply; this is isolation of Steer's test configuration, not an empty global configuration.
@@ -74,3 +136,47 @@ were enabled after SessionStart, then captured UserPromptSubmit
 start/completion through the isolated recorder, but not full SessionStart
 capture, approval handoff, or permanent companion attachment. The redacted
 metadata-only pair is replayable from `docs/evidence/`.
+
+### Isolated CLI runtime evidence: allow, deny, 30-second timeout (2026-09-12)
+
+Three real interactive Codex CLI 0.145.0 sessions ran in the trusted
+`output/desktop-hook-lab` project through a pseudo-terminal driver
+(`scripts/cli-approval-lab/tui_run.py`) with `-s read-only -a on-request`.
+For each run the lab's `.codex/hooks.json` was swapped to a single
+PermissionRequest hook pointing at this branch's release `SteerHook`, with a
+scratch events directory, and restored afterwards; hook trust was bypassed per
+invocation with `--dangerously-bypass-hook-trust`, so no persisted trust hash,
+global hook, permission policy, or sandbox setting changed. `codex exec` cannot
+be used for this: it forces the approval policy to never and rejects escalation.
+
+The companion's receipt and decision writes came from
+`scripts/cli-approval-lab/companion_standin.py`, a stand-in for the notch
+button that writes the same JSON shapes as `ApprovalStore`. Decisions were
+therefore not produced by a click in the running app. Each request carried the
+real session, turn, project, `Bash` action, exact command, and the tool input
+as expandable text. All three sessions correlate to `source: cli` rollouts in
+`~/.codex/sessions/2026/09/12/`. Records are in
+`docs/evidence/cli-approval-runtime.json`.
+
+- Allow: request `C573AE97-87FA-4473-BCB8-D3F5BAAAEEFD`, session
+  `01A093DA-7E9D-7CB2-8E3D-5763296C22AD`, turn
+  `01A093DA-BACD-7110-8F1B-0A0868564CD8`. Decision written 1.5 s after
+  receipt; helper outcome `allow`; Codex ran the exact `touch` and
+  `STEER9-ALLOW-1` exists; rollout shows `task_complete`.
+- Deny: request `23FA9F74-09B2-4E06-8774-73B9B3DE038B`, session
+  `01A093DB-1A89-7CB2-A6DA-4CBCAD14938A`, turn
+  `01A093DB-56A8-7483-9091-9C978F56404F`. Helper outcome `deny`; the CLI
+  displayed "PermissionRequest hook denied approval"; `STEER9-DENY-1` is
+  absent; rollout shows `task_complete`.
+- Timeout: request `E5474BA4-77EE-4A35-9935-C8EF74CBA2FC`, session
+  `01A093DC-C19E-7B43-8A59-1974F6B68A34`, turn
+  `01A093DC-FAF2-7C22-A50C-58A881A63EBC`. No decision was written; the helper
+  rewrote the request as `no_decision` 30.03 s after receipt and emitted no hook
+  output; Codex then presented its native approval prompt. The driver's Ctrl-C
+  cancelled that prompt ("You canceled the request"), the model retried inside
+  the read-only sandbox, and `STEER9-TIMEOUT-1` is absent; rollout shows
+  `turn_aborted`. Nothing was approved by the timeout.
+
+Desktop runtime evidence remains unavailable: issue #2 found no supported
+attachment to desktop approval transport, and computer use of the Codex desktop
+app is prohibited. Desktop requests hand back immediately by policy.

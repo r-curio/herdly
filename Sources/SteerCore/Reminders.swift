@@ -8,10 +8,18 @@ public struct Reminder: Codable, Equatable, Identifiable, Sendable {
     public let source: AttentionSource?
     public let received_at: String?
     public let captured_at: Double?
+    public let task_name: String?
+    public let project: String?
+    public let action: String?
+    public let command: String?
+    public let reason: String?
+    public let long_text: String?
     public var id: UUID { request_id }
 
     public init(request_id: UUID, session_id: UUID, turn_id: UUID, outcome: String,
-                received_at: String? = nil, captured_at: Double? = nil, source: AttentionSource? = nil) {
+                received_at: String? = nil, captured_at: Double? = nil, source: AttentionSource? = nil,
+                task_name: String? = nil, project: String? = nil, action: String? = nil,
+                command: String? = nil, reason: String? = nil, long_text: String? = nil) {
         self.request_id = request_id
         self.session_id = session_id
         self.turn_id = turn_id
@@ -19,6 +27,12 @@ public struct Reminder: Codable, Equatable, Identifiable, Sendable {
         self.source = source
         self.received_at = received_at
         self.captured_at = captured_at
+        self.task_name = task_name
+        self.project = project
+        self.action = action
+        self.command = command
+        self.reason = reason
+        self.long_text = long_text
     }
 }
 
@@ -34,6 +48,8 @@ public struct TurnIdentity: Hashable, Codable, Sendable {
 public struct ReminderScan: Sendable {
     public var reminders: [Reminder] = []
     public var attentionRequests: [AttentionRequest] = []
+    /// Fresh pending requests with no companion receipt yet; the app issues receipts for them.
+    public var awaitingReceipt: [ApprovalRequest] = []
     public var completed: Set<TurnIdentity> = []
     public var canceled: Set<TurnIdentity> = []
     public var cliEvents: [CLIEvent] = []
@@ -107,13 +123,43 @@ public enum ReminderReader {
             return a == b ? $0.lastPathComponent < $1.lastPathComponent : a < b
         }
         for url in ordered where url.pathExtension == "approval" {
-            if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(Reminder.self, from: bytes),
-               ["pending", "no_decision"].contains(item.outcome) {
+            if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(ApprovalRequest.self, from: bytes),
+               [.pending, .noDecision].contains(item.outcome) {
+                let source = AttentionSource.desktop
+                let receipt = ApprovalReceipts.existing(for: item.id, in: events)
+                if item.outcome == .pending, item.receivedAt == 0, receipt == nil {
+                    // The helper stops waiting for a receipt after the connection timeout. A request first
+                    // seen later than that has no live helper, so it is handed back without controls.
+                    let published = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                    if Date().timeIntervalSince(published) <= ApprovalTiming.connectionTimeout {
+                        result.awaitingReceipt.append(item)
+                        continue
+                    }
+                }
+                let receivedAt = receipt?.receivedAt ?? item.receivedAt
+                let expiresAt = receipt?.expiresAt ?? item.expiresAt
+                let actionable = item.outcome == .pending && receipt != nil
+                result.attentionRequests.append(AttentionRequest(id: item.id, source: source, session: item.sessionID, turn: item.turnID,
+                                                                 arrivedAt: receivedAt, expiresAt: expiresAt,
+                                                                 state: actionable ? .actionable : .handedBack,
+                                                                 details: item.details))
+                if item.outcome == .noDecision {
+                    result.reminders.append(Reminder(request_id: item.id, session_id: item.sessionID, turn_id: item.turnID,
+                                                     outcome: item.outcome.rawValue, captured_at: item.receivedAt, source: source,
+                                                     task_name: item.details.taskName, project: item.details.project,
+                                                     action: item.details.action, command: item.details.command,
+                                                     reason: item.details.reason, long_text: item.details.longText))
+                }
+            } else if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(Reminder.self, from: bytes),
+                      ["pending", "no_decision"].contains(item.outcome) {
                 let arrival = item.captured_at ?? item.received_at.flatMap { ISO8601DateFormatter().date(from: $0)?.timeIntervalSince1970 }
                     ?? ((try? url.resourceValues(forKeys: [.creationDateKey]).creationDate?.timeIntervalSince1970) ?? 0)
                 result.attentionRequests.append(AttentionRequest(id: item.id, source: item.source ?? .desktop,
                                                                  session: item.session_id, turn: item.turn_id,
-                                                                 arrivedAt: arrival, state: item.outcome == "no_decision" ? .handedBack : .actionable))
+                                                                 arrivedAt: arrival, state: item.outcome == "no_decision" ? .handedBack : .actionable,
+                                                                 details: ApprovalDetails(taskName: item.task_name, project: item.project,
+                                                                                          action: item.action, command: item.command,
+                                                                                          reason: item.reason, longText: item.long_text)))
                 if item.outcome == "no_decision" { result.reminders.append(item) }
             }
         }
@@ -186,7 +232,7 @@ public enum ReminderReader {
             guard result.cliSessions.contains(request.session), request.source != .cli else { return request }
             return AttentionRequest(id: request.id, source: .cli, session: request.session, turn: request.turn,
                                     arrivedAt: request.arrivedAt,
-                                    expiresAt: request.expiresAt, state: request.state)
+                                    expiresAt: request.expiresAt, state: request.state, details: request.details)
         }
         result.cliCompletions.sort { $0.receivedAt < $1.receivedAt }
         return result
