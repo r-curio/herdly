@@ -73,8 +73,30 @@ private func temporaryDirectory() throws -> URL {
     let second = AttentionSnapshot(acknowledged: [first.completions[0].id])
     #expect(AttentionSnapshotStore.save(second, to: file))
     #expect(AttentionSnapshotStore.load(from: file) == second)
-    let leftovers = try FileManager.default.contentsOfDirectory(atPath: root.path).filter { $0 != "attention.json" }
-    #expect(leftovers == [".attention.json.steer-partial"]) // the store never deletes files it did not write
+    let leftovers = try FileManager.default.contentsOfDirectory(atPath: root.path).filter { $0 != "attention.json" }.sorted()
+    #expect(leftovers == [".attention.json.steer-partial", "attention.json.previous"]) // the store never deletes files it did not write
+}
+
+@Test func corruptSnapshotFallsBackToThePreviousGoodOneSoDismissalsSurvive() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("attention.json")
+    let dismissed = CompletionIdentity(source: .desktop, session: UUID(), turn: UUID())
+    #expect(AttentionSnapshotStore.save(AttentionSnapshot(acknowledged: [dismissed]), to: file))
+    #expect(AttentionSnapshotStore.save(AttentionSnapshot(acknowledged: [dismissed]), to: file)) // creates the backup
+    try Data("{\"version\":1,\"completions\":[{".utf8).write(to: file) // a save interrupted mid-write
+    #expect(AttentionSnapshotStore.load(from: file).acknowledged == [dismissed])
+    // A later save must not preserve the corrupt file as the backup.
+    #expect(AttentionSnapshotStore.save(AttentionSnapshot(acknowledged: [dismissed]), to: file))
+    #expect(AttentionSnapshotStore.load(from: AttentionSnapshotStore.backupURL(for: file)).acknowledged == [dismissed])
+}
+
+@Test func legacyAcknowledgmentListsMigrateIntoASnapshot() {
+    let cli = TurnIdentity(session: UUID(), turn: UUID()), desktop = TurnIdentity(session: UUID(), turn: UUID())
+    let snapshot = AttentionSnapshot(legacyCLI: [cli], legacyDesktop: [desktop])
+    #expect(snapshot.acknowledged == [CompletionIdentity(source: .cli, session: cli.session, turn: cli.turn),
+                                      CompletionIdentity(source: .desktop, session: desktop.session, turn: desktop.turn)])
+    #expect(snapshot.completions.isEmpty)
 }
 
 @Test func snapshotNeverContainsRunningWorkOrRequests() {
@@ -119,20 +141,23 @@ private func temporaryDirectory() throws -> URL {
     #expect(after.snapshot.acknowledged.contains(older.id) && after.snapshot.acknowledged.contains(dismissed.id))
 }
 
-@Test func completionsFirstSeenByARestoringScanAreUncertainButLiveOnesAreNot() {
-    let session = UUID(), turn = UUID()
+@Test func completionsThatArrivedBeforeObservationAreUncertainEvenWhenMatchedLater() {
+    let session = UUID()
+    let beforeLaunch = CLICompletion(session: session, turn: UUID(), receivedAt: "1970-01-01T00:00:10Z")
+    let afterLaunch = CLICompletion(session: session, turn: UUID(), receivedAt: "1970-01-01T00:00:40Z")
+    var queue = AttentionQueue(observingSince: 30)
+    queue.apply(scan: ReminderScan(), desktopEvents: [], now: 31) // first scan finds nothing yet
+    // Rollout evidence for the earlier completion only matched on a later scan: still uncertain, still silent.
     var scan = ReminderScan()
-    scan.cliCompletions = [CLICompletion(session: session, turn: turn, receivedAt: "1970-01-01T00:00:10Z")]
-    var queue = AttentionQueue()
-    queue.apply(scan: scan, desktopEvents: [], now: 20, restoring: true)
-    #expect(queue.items.compactMap(\.completion).map(\.uncertain) == [true])
+    scan.cliCompletions = [beforeLaunch, afterLaunch]
+    queue.apply(scan: scan, desktopEvents: [], now: 41)
+    let completions = queue.items.compactMap(\.completion)
+    #expect(completions.map(\.turn) == [beforeLaunch.turn, afterLaunch.turn])
+    #expect(completions.map(\.uncertain) == [true, false])
 
-    var live = AttentionQueue()
-    live.apply(scan: scan, desktopEvents: [], now: 20)
-    #expect(live.items.compactMap(\.completion).map(\.uncertain) == [false])
-    // A restoring scan cannot downgrade a completion the process already observed live.
-    live.apply(scan: scan, desktopEvents: [], now: 21, restoring: true)
-    #expect(live.items.compactMap(\.completion).map(\.uncertain) == [false])
+    var unbounded = AttentionQueue()
+    unbounded.apply(scan: scan, desktopEvents: [], now: 41)
+    #expect(unbounded.items.compactMap(\.completion).map(\.uncertain) == [false, false])
 }
 
 // MARK: Requests after restart
@@ -154,7 +179,7 @@ private func temporaryDirectory() throws -> URL {
 @Test func receiptIssuedByThisProcessKeepsTheRequestActionableUntilItsDeadline() {
     let request = AttentionRequest(id: UUID(), source: .cli, session: UUID(), turn: UUID(), arrivedAt: 100, handoffAfter: 30)
     var queue = AttentionQueue()
-    queue.receipt([request], now: 100)
+    queue.recordReceipts([request], now: 100)
     #expect(queue.items.first?.kind == .actionableRequest)
     var scan = ReminderScan()
     scan.attentionRequests = [request]
@@ -169,8 +194,8 @@ private func temporaryDirectory() throws -> URL {
     let session = UUID(), turn = UUID()
     let events: [DesktopEvent] = [.turnStarted(session: session, turn: turn, receivedAt: "01"),
                                   .sessionEnded(session: session, receivedAt: "02")]
-    var queue = AttentionQueue(snapshot: AttentionSnapshot())
-    queue.apply(scan: ReminderScan(), desktopEvents: events, now: 10, restoring: true)
+    var queue = AttentionQueue(snapshot: AttentionSnapshot(), observingSince: 5)
+    queue.apply(scan: ReminderScan(), desktopEvents: events, now: 10)
     #expect(queue.workingCount == 0)
     let stillRunning: [DesktopEvent] = [.turnStarted(session: session, turn: turn, receivedAt: "01")]
     queue.apply(scan: ReminderScan(), desktopEvents: stillRunning, now: 11)

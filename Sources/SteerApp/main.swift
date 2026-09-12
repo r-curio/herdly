@@ -30,11 +30,11 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var taskID = ""
     @Published var navigationMessage = ""
     @Published var openingTask = false
-    @Published var queue = AttentionQueue(snapshot: Companion.launchSnapshot)
+    private static let launchedAt = Date().timeIntervalSince1970
+    @Published var queue = AttentionQueue(snapshot: Companion.launchSnapshot, observingSince: Companion.launchedAt)
     @Published var reminderPresentation = Attention()
     @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
-    /// Restored completions never replay their sound or popup.
-    @Published var completionPresentation = Attention(restored: !Companion.launchSnapshot.completions.isEmpty)
+    @Published var completionPresentation = Attention()
     private var savedSnapshot = Companion.launchSnapshot
     @Published var ghosttyEnabled = false
     @Published var ghosttyPermissionVerified = false
@@ -46,7 +46,6 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private let desktopAdapter = DesktopAdapter()
     private var cliSessions: Set<UUID> = []
     private var liveCLI: Set<UUID> = []
-    private var firstCompletionScan = true
     private var checkingGhostty = false
     private var nextGhosttyScan: Double = 0
     private var checkingApprovalFocus = false
@@ -83,11 +82,14 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                                helperDirectory: helper, eventsDirectory: helper.appendingPathComponent("events", isDirectory: true))
     }
 
+    nonisolated static func argumentValue(for flag: String) -> String? {
+        guard let index = CommandLine.arguments.firstIndex(of: flag), CommandLine.arguments.indices.contains(index + 1) else { return nil }
+        return CommandLine.arguments[index + 1]
+    }
+
     /// Steer's own support directory, never Codex's. `--attention-snapshot` isolates lab runs.
     nonisolated static var snapshotURL: URL {
-        if let index = CommandLine.arguments.firstIndex(of: "--attention-snapshot"), CommandLine.arguments.indices.contains(index + 1) {
-            return URL(fileURLWithPath: CommandLine.arguments[index + 1])
-        }
+        if let path = argumentValue(for: "--attention-snapshot") { return URL(fileURLWithPath: path) }
         return FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Steer/attention-snapshot.json")
     }
@@ -104,15 +106,19 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             .flatMap { try? decoder.decode(Set<TurnIdentity>.self, from: $0) } ?? []
         let desktop = UserDefaults.standard.data(forKey: "desktopAcknowledgments")
             .flatMap { try? decoder.decode(Set<TurnIdentity>.self, from: $0) } ?? []
-        return AttentionSnapshot(acknowledged: Set(cli.map { CompletionIdentity(source: .cli, session: $0.session, turn: $0.turn) }
-            + desktop.map { CompletionIdentity(source: .desktop, session: $0.session, turn: $0.turn) }))
+        return AttentionSnapshot(legacyCLI: cli, legacyDesktop: desktop)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         for flag in ["--reminder-events", "--desktop-events"] {
-            if let index = CommandLine.arguments.firstIndex(of: flag), CommandLine.arguments.indices.contains(index + 1) {
-                eventsPath = CommandLine.arguments[index + 1]
-            }
+            if let path = Companion.argumentValue(for: flag) { eventsPath = path }
+        }
+        // Restored completions never replay their sound or popup.
+        if queue.items.contains(where: { $0.kind == .completion }) { completionPresentation = Attention(restored: true) }
+        // Checkpoint what was restored: the store keeps the current valid file as the fallback for the next
+        // save, and rewrites a corrupt file from that fallback. A missing snapshot is not created here.
+        if FileManager.default.fileExists(atPath: Companion.snapshotURL.path) {
+            AttentionSnapshotStore.save(Companion.launchSnapshot, to: Companion.snapshotURL)
         }
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status.button?.title = "S"
@@ -186,10 +192,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         picker.allowsMultipleSelection = false
         picker.message = "Choose the Codex hook lab’s events folder. Steer reads it without changing hooks."
         guard picker.runModal() == .OK, let url = picker.url else { return }
-        queue = AttentionQueue(acknowledged: queue.acknowledgedCompletions)
-        firstCompletionScan = true
+        // Requests and running work belong to the old folder; undismissed completions are kept, now uncertain.
+        queue = AttentionQueue(snapshot: queue.snapshot, observingSince: Date().timeIntervalSince1970)
         reminderPresentation.dismiss()
-        completionPresentation.dismiss()
+        completionPresentation = Attention(restored: queue.items.contains { $0.kind == .completion })
         eventsPath = url.path
         UserDefaults.standard.set(eventsPath, forKey: "approvalEventsPath")
         nextScan = 0
@@ -328,11 +334,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         scanning = true
         nextScan = now + 2
         let events = URL(fileURLWithPath: eventsPath)
-        var rollouts = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
-        if let index = CommandLine.arguments.firstIndex(of: "--reminder-rollouts"), CommandLine.arguments.indices.contains(index + 1) {
-            rollouts = URL(fileURLWithPath: CommandLine.arguments[index + 1])
-        }
-        let rolloutRoot = rollouts
+        let rolloutRoot = Companion.argumentValue(for: "--reminder-rollouts").map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
         Task { @MainActor in
             let result = await Task.detached {
                 (ReminderReader.scan(events: events, rollouts: rolloutRoot), DesktopEventReader.read(from: events))
@@ -343,43 +346,37 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             cliSessions = scan.cliSessions
             liveCLI = scan.cliState.liveSessions
             let previous = Set(queue.items.map(\.id))
-            // The first scan after launch restores: its completions are uncertain, and a receipt found on
-            // disk is not a verified live interaction. Such requests are released to Codex at once.
-            let unverified = queue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970,
-                                         restoring: firstCompletionScan)
-            for request in unverified {
+            // A receipt found on disk is not a verified live interaction: such a request enters handed
+            // back and, when a real helper receipt exists, a no-decision record releases it to Codex at once.
+            let unverified = queue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970)
+            for request in unverified where ApprovalReceipts.existing(for: request.id, in: events) != nil {
                 _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision,
                                                                  decidedAt: Date().timeIntervalSince1970), in: events)
             }
             // Companion receipt: the deadline starts here, including for requests queued behind others.
             let receipted = ApprovalReceipts.issue(scan.awaitingReceipt, in: events, cliSessions: scan.cliSessions,
                                                    now: Date().timeIntervalSince1970)
-            if !receipted.isEmpty { queue.receipt(receipted, now: Date().timeIntervalSince1970) }
+            if !receipted.isEmpty { queue.recordReceipts(receipted, now: Date().timeIntervalSince1970) }
             let current = queue.items
             let newItems = current.filter { !previous.contains($0.id) }
-            if newItems.contains(where: { $0.kind == .completion }) {
-                if firstCompletionScan { completionPresentation = Attention(restored: true) }
-                else { completionPresentation.enqueue() }
-                if ghosttyEnabled && newItems.contains(where: { $0.completion?.source == .cli }) {
-                    nextGhosttyScan = 0
-                }
-            }
-            firstCompletionScan = false
+            let newCompletions = newItems.compactMap(\.completion)
+            if newCompletions.contains(where: { !$0.uncertain }) { completionPresentation.enqueue() }
+            else if !newCompletions.isEmpty, !completionPresentation.pending { completionPresentation = Attention(restored: true) }
+            if ghosttyEnabled && newCompletions.contains(where: { $0.source == .cli }) { nextGhosttyScan = 0 }
             if !current.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.dismiss() }
             else if newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.enqueue() }
             if !current.contains(where: { $0.kind == .completion }) { completionPresentation.dismiss() }
             saveCompletions()
             scanning = false
             refresh()
-            writeRestartReportIfRequested(unverified: unverified)
+            writeRestartReportAndQuitIfRequested(unverified: unverified)
         }
     }
 
-    /// `--restart-report <path>`: after the first scan, record what a restart produced and quit.
+    /// `--restart-report <path>`: after the first scan, record what a restart produced, then quit.
     /// Used by the restart lab; it reads nothing beyond the queue this process already holds.
-    private func writeRestartReportIfRequested(unverified: [AttentionRequest]) {
-        guard let index = CommandLine.arguments.firstIndex(of: "--restart-report"),
-              CommandLine.arguments.indices.contains(index + 1) else { return }
+    private func writeRestartReportAndQuitIfRequested(unverified: [AttentionRequest]) {
+        guard let path = Companion.argumentValue(for: "--restart-report") else { return }
         let report: [String: Any] = [
             "snapshot": Companion.snapshotURL.path,
             "working_count": workingCount,
@@ -397,7 +394,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             "acknowledged_count": queue.acknowledgedCompletions.count
         ]
         if let bytes = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
-            try? bytes.write(to: URL(fileURLWithPath: CommandLine.arguments[index + 1]))
+            try? bytes.write(to: URL(fileURLWithPath: path))
         }
         app.terminate(nil)
     }

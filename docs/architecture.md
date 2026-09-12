@@ -22,8 +22,8 @@ This diagram shows the candidate hook route. Desktop hook coverage and observing
 
 | Part | Owns | Does not own |
 | --- | --- | --- |
-| Core | Session activity, attention items, acknowledgments, deterministic event transitions | AppKit, sockets, process launch, permission transport |
-| macOS app | Notch, sound, focus observation, navigation, local storage, integration coordination | Starting or supervising the user's Codex sessions |
+| Core | Session activity, attention items, acknowledgments, deterministic event transitions, bounded record formats and their safe file access | AppKit, sockets, process launch, permission transport |
+| macOS app | Notch, sound, focus observation, navigation, storage locations, integration coordination | Starting or supervising the user's Codex sessions |
 | Hook helper | Decode Codex input, deliver bounded messages, arbitrate one permission response, emit Codex-compatible output | UI, conversation history, persistent permission rules |
 
 ## Model the identities separately
