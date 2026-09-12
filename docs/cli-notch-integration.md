@@ -16,8 +16,8 @@ The helper waits up to two seconds for the companion receipt; only then does
 the 30-second clock start, including queued requests. Its 31-second decision
 wait bound is independent of the notch refresh loop. If Ghostty focus is
 focused, unknown, or unavailable, the app writes a no-decision handoff and
-retains Open in Codex. Desktop requests intentionally remain native until the
-desktop transport and handoff policy are proven.
+retains Open in Codex. Desktop requests hand back immediately so Codex keeps its
+native prompt until the desktop transport and handoff policy are proven.
 
 For human navigation testing, run Codex directly in two unsplit Ghostty tabs in the already trusted lab using `/opt/homebrew/bin/codex -m gpt-5.5 -s read-only -a on-request -c 'tui.terminal_title=["session-id"]'`. Connect the lab events directory in Steer if needed, then manually enable Ghostty controls and grant Automation permission if macOS asks. Send distinct no-tools completion prompts, switch to another app, then use each completion's Open in Codex button. Verify the correct tab is selected, and repeat across two windows. No saved Codex hooks, permission policies or terminal settings are modified by this build.
 
