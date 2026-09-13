@@ -4,8 +4,11 @@ import SteerCore
 /// The only AppKit boundary needed by the desktop MVP: app activation and deep-link delivery.
 @MainActor
 final class DesktopAdapter {
+    /// `--assume-codex-away` is a lab override for placement probes on a machine where Codex is
+    /// foreground; it changes nothing unless passed.
     func codexForeground() -> Bool? {
-        NSWorkspace.shared.frontmostApplication?.bundleIdentifier.map { $0 == "com.openai.codex" }
+        if CommandLine.arguments.contains("--assume-codex-away") { return false }
+        return NSWorkspace.shared.frontmostApplication?.bundleIdentifier.map { $0 == "com.openai.codex" }
     }
 
     func runningInstallations() -> [URL?] {
