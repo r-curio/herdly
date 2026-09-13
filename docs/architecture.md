@@ -22,8 +22,8 @@ This diagram shows the candidate hook route. Desktop hook coverage and observing
 
 | Part | Owns | Does not own |
 | --- | --- | --- |
-| Core | Session activity, attention items, acknowledgments, deterministic event transitions | AppKit, sockets, process launch, permission transport |
-| macOS app | Notch, sound, focus observation, navigation, local storage, integration coordination | Starting or supervising the user's Codex sessions |
+| Core | Session activity, attention items, acknowledgments, deterministic event transitions, bounded record formats and their safe file access | AppKit, sockets, process launch, permission transport |
+| macOS app | Notch, sound, focus observation, navigation, storage locations, integration coordination | Starting or supervising the user's Codex sessions |
 | Hook helper | Decode Codex input, deliver bounded messages, arbitrate one permission response, emit Codex-compatible output | UI, conversation history, persistent permission rules |
 
 ## Model the identities separately
@@ -53,6 +53,8 @@ Desktop visibility uses Codex foreground, another app foreground, or unknown. Na
 Agreed fallback: when focus cannot be identified reliably, retain the notification and let Codex handle approvals normally. Release any current hook wait with no decision, remove its decision controls, and reject later attempts to answer that interaction. A later successful focus probe does not reactivate the handed-back request.
 
 Store small snapshots of attention items and completion acknowledgments locally with atomic replacement. A saved request cannot recreate a live approval connection. On restart, restore uncertain completions silently and revalidate request state before showing any active controls. Save only the metadata needed for the product; a full transcript store is unnecessary.
+
+Implemented for issue #11 ([restart recovery](restart-recovery.md)): `AttentionSnapshotStore` keeps undismissed completions and acknowledgments in Steer's own support directory; requests and running work are rebuilt from evidence on every scan. Completions held by the first scan after launch are marked uncertain and never replay a sound. Decision controls require a receipt issued by the running process; a receipt found on disk is released to Codex with no decision at once.
 
 ## Evidence checked on 2026-09-11
 
