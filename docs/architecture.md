@@ -77,7 +77,7 @@ Check 5 is recorded for the CLI in [approval reconciliation](approval-reconcilia
 
 ## Product decisions and remaining verification
 
-- Queue ordering, separate working/to-check counts, and one notch on the actively used display are settled in product.md. Completion notifications expand for three seconds and remain open during interaction. Approval deadlines remain independent and are never extended by interaction. Active-display detection and interaction stability need implementation detail and verification.
+- Queue ordering, separate working/to-check counts, and one notch on the actively used display are settled in product.md. Completion notifications expand for three seconds and remain open during interaction. Approval deadlines remain independent and are never extended by interaction. Active-display selection and interaction freezing are pure rules in `NotchPlacement.swift` (issue #12, [notch placement](notch-placement.md)): the app supplies attached displays, the pointer, the current display, and whether the user is interacting; the core returns the display and frame. Screen-parameter changes only re-run placement.
 
 ## Reminder queue integration — 2026-09-11
 

@@ -39,6 +39,12 @@ public struct Attention {
         collapseAt = now + 3
     }
 
+    /// Collapses the popup without acknowledging it; the item stays queued and can expand again.
+    public mutating func collapse() {
+        expanded = false
+        collapseAt = 0
+    }
+
     public mutating func dismiss() {
         pending = false
         expanded = false
