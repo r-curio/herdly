@@ -2,7 +2,7 @@
 
 ## Current handed-back reminder behavior
 
-Keep Continue in Codex after no-decision handoff, with only Open in Codex. Remove a reminder on evidence that its exact request was resolved: Codex's recorded output for that turn and command (allowed, rejected, or interrupted), structured completion or cancellation of its exact session and turn, or the end of its session. Other turns and other requests remain queued. Presence does not prove approval is still pending, and the row says so: it was handed back with no decision and Steer has not seen an answer yet. Open in Codex on an actionable CLI request hands back at once so Codex's own prompt appears immediately. Accessibility cleanup is deferred. This supersedes older permission-still-needed wording below. See [approval reconciliation](approval-reconciliation.md).
+Keep Continue in Codex after no-decision handoff, with only Open in Codex. Remove a reminder on evidence that its exact request was resolved: Codex's recorded output for that turn and command (allowed, rejected, or interrupted), structured completion or cancellation of its exact session and turn, or the end of its session. Other turns and other requests remain queued. Presence does not prove approval is still pending, and the row says so: it was handed back with no decision and Steer has not seen an answer yet. Open in Codex on an actionable CLI request hands back at once so Codex's own prompt appears immediately. Accessibility labels and keyboard interaction are covered by [notch placement](notch-placement.md). This supersedes older permission-still-needed wording below. See [approval reconciliation](approval-reconciliation.md).
 
 
 ## Platform
@@ -29,7 +29,7 @@ Ghostty support retains its separate exact-pane requirement: using terminal pane
 
 If app activation or the required Ghostty pane identity is unknown, retain queue items without acknowledgment and leave approvals in Codex's normal flow. Unknown desktop activation retains the indicator rather than guessing it was viewed. Release any pending approval interaction with no decision on uncertainty; only Open in Codex remains. App-level visibility alone does not establish safe direct desktop approval support.
 
-Present one shared notch on the display the user is actively using. On a display without a physical notch, use a compact top-center panel. Do not duplicate the queue across displays. The exact active-display selection rule and behavior while the user is interacting with the panel still need to be defined and verified.
+Present one shared notch on the display the user is actively using. On a display without a physical notch, use a compact top-center panel. Do not duplicate the queue across displays. The active display is the one under the pointer; while the user is interacting with the panel (pointer over it or keyboard focus in it) placement stays on the panel's current display, and a display that disconnects is never chosen. Display changes and interaction never change the queue, replay a notification, or extend an approval deadline. See [notch placement and keyboard interaction](notch-placement.md).
 
 ## Agreed queue experience
 
@@ -77,7 +77,7 @@ The [first desktop investigation](codex-desktop-investigation.md) found private 
 
 - The technical mechanism for releasing a pending companion interaction and restoring normal approval behavior, including timeout and approval races.
 - Verify native desktop app-activation observation and exact Ghostty pane identity. Exact desktop conversation focus is deferred, not an MVP gate.
-- How to identify the active display and keep panel interaction stable while display focus changes.
+- Multi-display, Spaces, and full-screen behavior are implemented under the documented rule; the operator walkthrough in [notch placement](notch-placement.md) is still to be recorded on a second display.
 - Validate the proposed module boundaries and transport in [architecture.md](architecture.md) against the required integration checks.
 
 
