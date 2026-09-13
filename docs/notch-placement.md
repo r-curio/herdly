@@ -4,13 +4,13 @@ Status: implemented and checked in the built app on a single built-in notch disp
 
 ## One panel, one queue
 
-Steer creates exactly one `NotchPanel` and one `AttentionQueue`. Every display change re-runs placement of that same panel; nothing is duplicated per display, and no queue state is keyed by display. The panel joins all Spaces and is a full-screen auxiliary window at status-bar level, so it appears over full-screen apps and on every Space without being copied.
+Steer creates exactly one `NotchPanel` and one `AttentionQueue`. Every display change re-runs placement of that same panel; nothing is duplicated per display, and no queue state is keyed by display. The panel is configured to join all Spaces as a full-screen auxiliary window at status-bar level; the probe records those flags, and whether it actually appears over full-screen apps and on every Space is walkthrough step 7, not yet verified live.
 
 ## Active-display rule
 
 `NotchDisplaySelection.choose(displays:pointer:current:interacting:)` decides where the panel goes on every refresh (five times a second and on app activation or screen-parameter changes):
 
-1. **Interacting → freeze.** While the pointer is over the panel or the panel has keyboard focus, keep the display the panel is already on. Controls never move away mid-click or mid-Tab.
+1. **Interacting → freeze.** While the pointer is over the panel or the panel has keyboard focus, keep the display the panel is already on. Controls never move to another display mid-click or mid-Tab; expanding or collapsing still resizes the panel in place. The app confirms the hover flag against the real pointer location, so a panel re-placed out from under the pointer does not stay frozen.
 2. **Otherwise the display under the pointer.** This is the display the user is actively using.
 3. **Pointer on no display → keep the current display.**
 4. **No current display → the first attached display.**
@@ -28,7 +28,7 @@ A display that has disconnected is never chosen, even while interacting: the rul
 ## Keyboard and accessibility
 
 - **Automatic notifications never take input.** Presentation uses `orderFrontRegardless`, which shows the panel without making it key; the panel is a non-activating panel, so Steer itself never activates. The probe below records `is_key_after_presentation: false` with the panel visible.
-- **Deliberate focus.** Clicking a control or Tabbing into the panel gives it key status without activating Steer. Tab and Shift-Tab move between the header button, Approve once, Deny, Open in Codex, Dismiss, and Show full request; the expanded list is a focus section. Buttons use the standard bordered style so macOS draws its focus ring; the plain-style header button draws its own visible ring while focused.
+- **Deliberate focus.** Clicking the panel gives it key status without activating Steer; Tab from another app cannot reach a non-activating panel of another process, so keyboard-only entry needs a hotkey, which is deferred. Once the panel is key, Tab and Shift-Tab move between the header button, Approve once, Deny, Open in Codex, Dismiss, and Show full request; the expanded list is a focus section. Buttons use the standard bordered style so macOS draws its focus ring; the plain-style header button draws its own visible ring while focused.
 - **Escape.** `NotchPanel.cancelOperation` collapses every presentation (`Attention.collapse()`, which never dismisses) and, if the panel was key, orders it out and re-activates the frontmost app so keyboard input returns to it. The next refresh shows the collapsed panel again.
 - **Labels.** Each row is an accessibility container labeled with its kind and subject (task name when Codex provided one, otherwise the shortened session ID). Every button's label names its action and subject, for example "Approve once: deploy, session 01a0916c-337b". The header reads the working and to-check counts and says whether the queue is expanded.
 - **Long details.** Task, project, action, command, and reason wrap in full with no line limit; the full request stays behind Show full request. A shortened command is never presented as the complete action.
@@ -55,7 +55,7 @@ A display that has disconnected is never chosen, even while interacting: the rul
 Not performed by the agent: it needs a second display, Mission Control, and the keyboard, which are outside the permitted automation. Run it with Steer connected to an isolated lab as in [restart recovery](restart-recovery.md) and record each line as pass, fail, or uncertain.
 
 1. **Two displays.** Attach an external monitor. Send a test notification. Move the pointer between displays: the panel follows the pointer and appears exactly once, below the housing on the built-in display and top-center on the external one.
-2. **Freeze during interaction.** Expand the panel on the external display, hover over a button, and move the pointer's display by dragging past the edge while staying over the panel: it does not jump. Tab into the panel from the built-in display and move the pointer to the other display: it stays put until focus leaves.
+2. **Freeze during interaction.** Expand the panel on the external display, hover over a button, and move the pointer's display by dragging past the edge while staying over the panel: it does not jump. Click the panel on the built-in display so it has keyboard focus, then move the pointer to the other display: it stays put until Escape returns focus.
 3. **Disconnect and reconnect.** With the panel on the external display, unplug it. The panel appears once on the built-in display with the same queue and no new sound. Reconnect: the panel follows the pointer again; nothing is duplicated or replayed.
 4. **Deadline independence.** Trigger a CLI approval in the lab, hover over the panel, and keep the pointer there past 30 s: the row changes to Continue in Codex on time while the popup stays open.
 5. **Keyboard.** With another app active, wait for a completion: the other app keeps keyboard focus. Click the panel, press Tab repeatedly: the focus ring moves through the controls and is visible on each. Press Escape: the panel collapses and typing goes to the previous app.
@@ -65,6 +65,7 @@ Not performed by the agent: it needs a second display, Mission Control, and the 
 ## Boundaries
 
 - "Actively using" means the display under the pointer. Keyboard-only users on a multi-display setup get the pointer's display; a rule based on the key window's display is deferred until it is needed.
-- Escape is the only keyboard collapse; there is no global hotkey to open the panel.
+- Escape is the only keyboard collapse; there is no global hotkey to open or focus the panel, so keyboard-only users must click it once.
+- `--assume-codex-away` and `--placement-probe` are lab flags compiled into the app like `--restart-report`; they change nothing unless passed.
 - Focus rings depend on macOS Full Keyboard Access for Tab to reach buttons, as in any macOS app.
 - The probe proves geometry and key status on this machine; it cannot attach or detach a display.

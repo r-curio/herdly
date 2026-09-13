@@ -77,15 +77,18 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     var expanded: Bool { attention.expanded || reminderPresentation.expanded || completionPresentation.expanded }
     var hovering = false
     private var status: NSStatusItem!
-    private var panel: NSPanel!
+    private var panel: NotchPanel!
     private var controls: NSWindow?
     private var timer: Timer?
     private var activationObserver: NSObjectProtocol?
     private var screenObserver: NSObjectProtocol?
     /// The display the panel was last placed on; placement freezes here while the user interacts.
     private var currentDisplayID: UInt32?
+    /// SwiftUI's hover flag can go stale when the panel is re-placed out from under the pointer
+    /// (a display disconnect, for example), so it is confirmed against the actual pointer location.
     private var panelInteraction: Bool {
-        NotchInteraction.isActive(pointerInside: hovering, keyboardFocus: panel.isKeyWindow)
+        let pointerInside = hovering && panel.isVisible && panel.frame.contains(NSEvent.mouseLocation)
+        return NotchInteraction.isActive(pointerInside: pointerInside, keyboardFocus: panel.isKeyWindow)
     }
     private var setupRoots: CodexSetupRoots {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -158,7 +161,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = NSHostingView(rootView: Notch(model: self))
-        (panel as? NotchPanel)?.onEscape = { [weak self] in self?.collapse() }
+        panel.onEscape = { [weak self] in self?.collapse() }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in self?.refresh() } }
@@ -198,9 +201,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         let report: [String: Any] = [
             "displays": displays.map { ["id": Int($0.id), "frame": rect($0.frame), "top_inset": Double($0.topInset), "physical_notch": $0.hasPhysicalNotch] },
             "pointer": ["x": pointer.x, "y": pointer.y],
-            "chosen_display": chosen.map { Int($0.id) } as Any,
-            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false)) } as Any,
-            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false)) } as Any,
+            "chosen_display": chosen.map { Int($0.id) } ?? NSNull(),
+            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false)) } ?? NSNull(),
+            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false)) } ?? NSNull(),
             "panel_frame": rect(panel.frame),
             "codex_foreground": desktopForeground,
             "panel": ["level": panel.level.rawValue, "nonactivating": panel.styleMask.contains(.nonactivatingPanel),
@@ -829,10 +832,11 @@ struct Notch: View {
         }
     }
 
+    private func sessionLabel(_ item: AttentionItem) -> String { "Session \(item.session.uuidString.prefix(13))" }
+
     private func rowSubject(_ item: AttentionItem) -> String {
-        let session = "session \(item.session.uuidString.prefix(13))"
-        guard let task = item.request?.details?.taskName, !task.isEmpty else { return session }
-        return "\(task), \(session)"
+        guard let task = item.request?.details?.taskName, !task.isEmpty else { return sessionLabel(item) }
+        return "\(task), \(sessionLabel(item))"
     }
 
     @ViewBuilder
@@ -852,7 +856,7 @@ struct Notch: View {
                 case .actionableRequest, .running:
                     EmptyView()
                 }
-                Text("Session \(item.session.uuidString.prefix(13))").font(.caption).foregroundStyle(.secondary)
+                Text(sessionLabel(item)).font(.caption).foregroundStyle(.secondary)
                 if let details = item.request?.details {
                     // Long commands and reasons wrap in full; nothing is truncated with an ellipsis.
                     Group {
@@ -947,7 +951,7 @@ struct Notch: View {
                             Text("Test notification").font(.headline)
                             Button("Dismiss", action: model.dismissTest).accessibilityLabel("Dismiss test notification")
                         }
-                        Text("Tab moves between controls; Escape returns to your app.")
+                        Text("Click to give the panel keyboard focus; Tab moves between controls; Escape returns to your app.")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
