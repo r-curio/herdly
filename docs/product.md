@@ -1,5 +1,7 @@
 # Codex companion behavior
 
+<!-- impeccable:product-schema 1 -->
+
 ## Current handed-back reminder behavior
 
 Keep Continue in Codex after no-decision handoff, with only Open in Codex. Remove a reminder on evidence that its exact request was resolved: Codex's recorded output for that turn and command (allowed, rejected, or interrupted), structured completion or cancellation of its exact session and turn, or the end of its session. Other turns and other requests remain queued. Presence does not prove approval is still pending, and the row says so: it was handed back with no decision and Steer has not seen an answer yet. Open in Codex on an actionable CLI request hands back at once so Codex's own prompt appears immediately. Accessibility labels and keyboard interaction are covered by [notch placement](notch-placement.md). This supersedes older permission-still-needed wording below. See [approval reconciliation](approval-reconciliation.md).
@@ -7,7 +9,67 @@ Keep Continue in Codex after no-decision handoff, with only Open in Codex. Remov
 
 ## Platform
 
-Build a fresh native macOS app with SwiftUI and AppKit. Keep session and queue rules separate from the platform interface. Other operating systems are outside the initial scope; see [the platform decision](adr/0003-use-native-macos-ui.md).
+macos
+
+Steer is a native macOS app rendering the macOS design language (SwiftUI content inside AppKit panels and windows). Design tooling that only recognizes web, iOS, or Android must not treat this project as web; when guidance is needed, adapt Apple's macOS Human Interface Guidelines, not iOS. See [the platform decision](adr/0003-use-native-macos-ui.md).
+
+## Users
+
+The primary user is the project owner: a developer who runs several Codex sessions at once in the Codex desktop app and in Codex CLI inside Ghostty, and who works in other applications while those sessions run. The job is to know, at a glance and without leaving the current app, which sessions are working, which need an answer, and which have finished, and to get back to the exact session when they choose to.
+
+Other Mac developers with the same setup are a secondary audience once the MVP is proven. Future work should not yet assume unfamiliar users, marketing, or a public first-run flow.
+
+## Product Purpose
+
+Steer keeps the user aware of Codex work while they use other applications. It shows activity and requests for attention in a compact notch panel and lets the user return to the originating session. It exists because Codex's own surfaces only inform the user while they are looking at them.
+
+Success is that the user keeps using Codex exactly as before, never misses an approval or completion while away, and never has Steer approve, dismiss, or mark anything read on their behalf without evidence.
+
+## Positioning
+
+Steer is a safe, exact companion. It never approves automatically, never claims a result was read without a verified signal, and returns the user to the exact session or Ghostty tab rather than to an app. Trustworthiness outranks feature breadth. A general agent dashboard, Codex's own notifications, or Notification Center could not truthfully make the same claim about handoff, acknowledgment, and exact targeting.
+
+## Operating Context
+
+- macOS 14 or later on a Mac, typically with a built-in notch display, sometimes with a second display.
+- Codex desktop app (installed bundle identifies as com.openai.codex) and Codex CLI running directly in Ghostty, one session per unsplit tab.
+- Steer runs as a background menu-bar app (LSUIElement) with a status item, a controls window, and the notch panel. It observes native app activation, Steer-owned Codex lifecycle hooks, and Ghostty tab titles carrying Codex's session ID.
+- Verification rituals: `swift test`, the ad-hoc build script, isolated hook labs and probe scripts under `scripts/`, and human walkthroughs recorded as evidence. Agreed behavior in this file is authoritative; a draft integration is not a proven capability.
+
+## Capabilities and Constraints
+
+Build a fresh native macOS app with SwiftUI and AppKit. Keep session and queue rules (SteerCore) separate from the platform interface (SteerApp). Other operating systems are outside the initial scope.
+
+Confirmed capabilities and rules are detailed in the sections below and in the [domain glossary](../CONTEXT.md): one shared notch on the active display, separate working and to-check counts, a prioritized attention queue, 30-second approval handoff, three-second completion popups with a mutable sound, local persistence across restarts, and exact return to a desktop task or unsplit Ghostty tab.
+
+Terminology is fixed by the glossary: companion, Codex surface, notch, Codex session, approval request, Open in Codex, attention queue, acknowledged completion, uncertain completion, resolution evidence.
+
+Undecided product facts: the completion sound; a global hotkey for keyboard-only entry to the panel; exact desktop conversation focus; Ghostty split panes; the items listed under Open decisions below.
+
+## Brand Commitments
+
+- The name is Steer and is final.
+- No icon, logo, wordmark, or completion sound exists yet. Future work must produce them rather than assume assets.
+- Distribution is a personal ad-hoc signed build from `scripts/build-app.sh`. No App Store, notarization, or public download is planned.
+
+## Evidence on Hand
+
+- Recorded runtime evidence in `docs/evidence/`: CLI approval runtime and resolution, desktop turn start and completion, a desktop user-input question and its answer, notch placement, restart recovery.
+- Human-verified walkthroughs recorded in [prototype.md](prototype.md), [notch-placement.md](notch-placement.md), and the investigation documents.
+- Automated coverage: the SteerCore test suite (97 tests at the time of writing).
+- No testimonials, customers, benchmarks, or screenshots for external audiences exist. Future work must not fabricate them.
+
+## Product Principles
+
+1. Preserve the Codex workflow: Codex stays fully usable when Steer is closed, and Steer never alters the user's real hook or permission configuration to test itself.
+2. Fail closed: a timeout, error, or uncertainty never approves, never dismisses, and never marks anything read.
+3. Say only what is known: the interface distinguishes verified state from uncertain state and never invents a missing reason, name, or read status.
+4. Exact or unavailable: return the user to the precise session or tab, or say it is unavailable, never to an arbitrary target.
+5. Attention, not control: the queue orders what the user sees; it never serializes or supervises Codex execution.
+
+## Accessibility & Inclusion
+
+Keyboard and VoiceOver operation of the notch panel are in scope: every row and button carries a label naming its action and subject, Tab moves through controls once the panel is key, Escape collapses without dismissing, and long commands read in full. Keyboard-only entry currently requires one click; a global hotkey is deferred. Placement follows the pointer's display.
 
 ## Initial supported surfaces
 
