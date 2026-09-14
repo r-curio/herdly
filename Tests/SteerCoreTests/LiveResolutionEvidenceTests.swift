@@ -26,7 +26,10 @@ import Testing
                                                     "call_id": $0.callID, "observed_at": $0.observedAt] },
         "completed_turns": scan.completed.map { "\($0.session)/\($0.turn)" },
         "canceled_turns": scan.canceled.map { "\($0.session)/\($0.turn)" },
-        "remaining_queue_requests": queue.items.compactMap(\.request).map { $0.id.uuidString }
+        "remaining_queue_requests": queue.items.compactMap(\.request).map { $0.id.uuidString },
+        "pending_questions": scan.questions.map { ["session": $0.session.uuidString, "turn": $0.turn.uuidString, "call_id": $0.callID,
+                                                  "source": $0.source.rawValue, "asked_at": $0.arrivedAt, "questions": $0.prompts.count] },
+        "answered_questions": scan.answeredQuestions.map { "\($0.session)/\($0.callID)" }
     ]
     let bytes = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
     if let path = environment["STEER_LIVE_REPORT"] { try bytes.write(to: URL(fileURLWithPath: path)) }

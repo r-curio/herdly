@@ -1,0 +1,73 @@
+{
+  "description": "A request_user_input question posed by Codex desktop, answered 65 s later, recorded verbatim from the session rollout with option descriptions, cwd and the final message redacted. Lines are in file order; the session_meta line keeps only the fields Steer reads.",
+  "recorded": "2026-09-14",
+  "desktop_app": "26.901.51231",
+  "cli_version": "0.153.4",
+  "source": "vscode",
+  "session": "01a09d9b-7642-7b51-bcce-9b66cfe5361f",
+  "turn": "01a09db7-0c51-7f33-9ebc-4e44f91df22c",
+  "call_id": "call_BBi3pKrgBPoTRHpFrnDAB2Kh",
+  "asked_at": "2026-09-14T02:20:36.895Z",
+  "answered_at": "2026-09-14T02:21:41.908Z",
+  "lines": [
+    {
+      "timestamp": "2026-09-14T01:50:28.293Z",
+      "type": "session_meta",
+      "payload": {
+        "id": "01a09d9b-7642-7b51-bcce-9b66cfe5361f",
+        "session_id": "01a09d9b-7642-7b51-bcce-9b66cfe5361f",
+        "timestamp": "2026-09-14T01:50:06.581Z",
+        "cwd": "[redacted]",
+        "originator": "Codex Desktop",
+        "cli_version": "0.153.4",
+        "source": "vscode"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T02:20:14.383Z",
+      "type": "event_msg",
+      "payload": {
+        "type": "task_started",
+        "turn_id": "01a09db7-0c51-7f33-9ebc-4e44f91df22c"
+      }
+    },
+    {
+      "timestamp": "2026-09-14T02:20:36.895Z",
+      "type": "response_item",
+      "payload": {
+        "type": "function_call",
+        "id": "fc_013438a75003fbef016aa759ee68ec87d0a7738037ede62aa2",
+        "name": "request_user_input",
+        "arguments": "{\"questions\":[{\"id\":\"list_shape\",\"header\":\"List shape\",\"question\":\"Should the list allow nested levels?\",\"options\":[{\"label\":\"Nested levels (Recommended)\",\"description\":\"[redacted]\"},{\"label\":\"One level only\",\"description\":\"[redacted]\"}]},{\"id\":\"release_scope\",\"header\":\"First release\",\"question\":\"Should the first release include export?\",\"options\":[{\"label\":\"View only (Recommended)\",\"description\":\"[redacted]\"},{\"label\":\"Include export\",\"description\":\"[redacted]\"}]}]}",
+        "call_id": "call_BBi3pKrgBPoTRHpFrnDAB2Kh",
+        "internal_chat_message_metadata_passthrough": {
+          "turn_id": "01a09db7-0c51-7f33-9ebc-4e44f91df22c",
+          "create_time": 1789352425.335372
+        }
+      }
+    },
+    {
+      "timestamp": "2026-09-14T02:21:41.908Z",
+      "type": "response_item",
+      "payload": {
+        "type": "function_call_output",
+        "id": "fco_01a09db8-6294-7133-bc35-826dcc7848ab",
+        "call_id": "call_BBi3pKrgBPoTRHpFrnDAB2Kh",
+        "output": "{\"answers\":{\"release_scope\":{\"answers\":[\"View only (Recommended)\"]},\"list_shape\":{\"answers\":[\"Nested levels (Recommended)\"]}}}",
+        "internal_chat_message_metadata_passthrough": {
+          "turn_id": "01a09db7-0c51-7f33-9ebc-4e44f91df22c",
+          "create_time": 1789352501.908014
+        }
+      }
+    },
+    {
+      "timestamp": "2026-09-14T02:23:00.135Z",
+      "type": "event_msg",
+      "payload": {
+        "type": "task_complete",
+        "turn_id": "01a09db7-0c51-7f33-9ebc-4e44f91df22c",
+        "last_agent_message": "[redacted]"
+      }
+    }
+  ]
+}

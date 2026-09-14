@@ -22,6 +22,7 @@ Desktop MVP visibility: hide the notch while Codex is foreground and show eligib
 - [Architecture draft](docs/architecture.md)
 - [Domain glossary](CONTEXT.md)
 - [Desktop investigation](docs/codex-desktop-investigation.md)
+- [User-input requests](docs/user-input-requests.md)
 - [Backlog and dependency index](docs/mvp-backlog.md)
 - [MVP implementation issues](https://github.com/r-curio/steer/issues?q=is%3Aissue+label%3Amvp)
 
