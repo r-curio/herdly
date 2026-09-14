@@ -125,3 +125,91 @@ import Testing
     queue.apply(requests: [request])
     #expect(queue.items.isEmpty)
 }
+
+// MARK: - Questions (Codex's request_user_input)
+
+private func question(_ session: UUID = UUID(), turn: UUID = UUID(), source: AttentionSource = .desktop,
+                      call: String = "call_1", at: Double = 10) -> AttentionQuestion {
+    AttentionQuestion(source: source, session: session, turn: turn, callID: call, arrivedAt: at,
+                      prompts: [QuestionPrompt(header: "List shape", question: "Which shape?", options: ["A", "B"])])
+}
+
+@Test func questionRanksAfterActionableRequestsAndAheadOfHandedBackOnes() {
+    let session = UUID()
+    let actionable = AttentionRequest(id: UUID(), session: session, turn: UUID(), arrivedAt: 1, handoffAfter: 30)
+    let handedBack = AttentionRequest(id: UUID(), session: session, turn: UUID(), arrivedAt: 1, state: .handedBack)
+    let completion = AttentionCompletion(source: .desktop, session: UUID(), turn: UUID(), arrivedAt: 1)
+    let running = AttentionRunning(source: .desktop, session: UUID(), turn: UUID(), arrivedAt: 1)
+    let asked = question(UUID(), at: 1)
+    var queue = AttentionQueue()
+    queue.apply(requests: [actionable, handedBack], completions: [completion], running: [running], now: 1)
+    queue.apply(questions: [asked, asked])
+    #expect(queue.items.map(\.kind) == [.actionableRequest, .question, .handedBackRequest, .completion, .running])
+    #expect(queue.toCheckCount == 4)
+    #expect(queue.items[1].question == asked)
+}
+
+@Test func questionClearsOnAnswerTurnEndOrSessionEndButNotBeforeArrival() {
+    let session = UUID(), turn = UUID()
+    func scanned(_ configure: (inout ReminderScan) -> Void) -> AttentionQueue {
+        var queue = AttentionQueue()
+        var scan = ReminderScan()
+        scan.questions = [question(session, turn: turn, at: 10)]
+        queue.apply(scan: scan, desktopEvents: [], now: 10)
+        #expect(queue.items.map(\.kind) == [.question])
+        configure(&scan)
+        queue.apply(scan: scan, desktopEvents: [], now: 11)
+        return queue
+    }
+    #expect(scanned { $0.questions = []; $0.answeredQuestions = [QuestionIdentity(source: .desktop, session: session, callID: "call_1")] }.items.isEmpty)
+    #expect(scanned { $0.completed = [TurnIdentity(session: session, turn: turn)] }.items.isEmpty)
+    #expect(scanned { $0.canceled = [TurnIdentity(session: session, turn: turn)] }.items.isEmpty)
+    #expect(scanned { $0.sessionEnds[session] = 12 }.items.isEmpty)
+    #expect(scanned { $0.sessionEnds[session] = 9 }.items.map(\.kind) == [.question])
+    // A desktop Stop hook (a completion for the turn) also clears it and the completion stays.
+    var queue = AttentionQueue()
+    queue.apply(questions: [question(session, turn: turn)])
+    queue.apply(completions: [AttentionCompletion(source: .desktop, session: session, turn: turn, arrivedAt: 20)])
+    #expect(queue.items.map(\.kind) == [.completion])
+}
+
+@Test func dismissedOrAnsweredQuestionIsNotRevivedAndAnEndedTurnRejectsALateOne() {
+    let session = UUID(), turn = UUID()
+    let asked = question(session, turn: turn)
+    var queue = AttentionQueue()
+    queue.apply(questions: [asked])
+    queue.dismiss(.question(asked.id))
+    queue.apply(questions: [asked])
+    #expect(queue.items.isEmpty)
+    var scan = ReminderScan()
+    scan.completed = [TurnIdentity(session: session, turn: turn)]
+    scan.questions = [question(session, turn: turn, call: "call_2")]
+    queue.apply(scan: scan, desktopEvents: [], now: 1)
+    #expect(queue.items.isEmpty)
+}
+
+@Test func questionsAreRebuiltFromEvidenceNotRestoredFromTheSnapshot() {
+    let asked = question()
+    var queue = AttentionQueue()
+    queue.apply(questions: [asked])
+    var restored = AttentionQueue(snapshot: queue.snapshot)
+    #expect(restored.items.isEmpty)
+    var scan = ReminderScan()
+    scan.questions = [asked]
+    restored.apply(scan: scan, desktopEvents: [], now: 1)
+    #expect(restored.items.map(\.id) == [.question(asked.id)])
+}
+
+@Test func runningRowIsWithheldWhileItsSessionWaitsOnAQuestion() {
+    let session = UUID(), turn = UUID()
+    let running = AttentionRunning(source: .desktop, session: session, turn: turn, arrivedAt: 1)
+    let other = AttentionRunning(source: .cli, session: session, turn: turn, arrivedAt: 1)
+    var queue = AttentionQueue()
+    queue.apply(running: [running, other])
+    queue.apply(questions: [question(session, turn: turn, at: 2)])
+    #expect(queue.items.map(\.kind) == [.question, .running])
+    #expect(queue.items[1].running?.source == .cli)
+    #expect(queue.workingCount == 2)
+    queue.dismiss(.question(QuestionIdentity(source: .desktop, session: session, callID: "call_1")))
+    #expect(queue.items.filter { $0.kind == .running }.count == 2)
+}

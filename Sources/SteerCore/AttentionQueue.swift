@@ -129,12 +129,16 @@ public struct AttentionRunning: Identifiable, Equatable, Sendable {
 
 public enum AttentionItemID: Hashable, Sendable {
     case request(RequestIdentity)
+    case question(QuestionIdentity)
     case completion(CompletionIdentity)
     case running(RunningIdentity)
 }
 
+/// Declaration order is queue priority. A question outranks a handed-back request: Codex is blocked
+/// on it and the user has not seen it yet, while a handed-back request was already surfaced once.
 public enum AttentionItemKind: Int, Equatable, Sendable {
     case actionableRequest
+    case question
     case handedBackRequest
     case completion
     case running
@@ -148,6 +152,7 @@ public struct AttentionItem: Identifiable, Equatable, Sendable {
     public let request: AttentionRequest?
     public let completion: AttentionCompletion?
     public let running: AttentionRunning?
+    public let question: AttentionQuestion?
 }
 
 /// Merges all session activity into one deterministic attention projection.
@@ -155,6 +160,11 @@ public struct AttentionQueue: Sendable {
     private var requests: [RequestIdentity: AttentionRequest] = [:]
     private var completions: [CompletionIdentity: AttentionCompletion] = [:]
     private var runningBySession: [SourceSession: AttentionRunning] = [:]
+    private var questions: [QuestionIdentity: AttentionQuestion] = [:]
+    /// Questions cleared by evidence or dismissal; a scan that cannot read the rollout must not revive them.
+    private var answeredQuestions: Set<QuestionIdentity> = []
+    /// Turns the rollout recorded as complete or aborted; a question for one is never (re)admitted.
+    private var endedTurns: Set<TurnIdentity> = []
     private var resolvedTurns: Set<AttentionTurnIdentity> = []
     private var decidedRequests: Set<RequestIdentity> = []
     /// Requests whose companion receipt this process issued: the only verified live interactions.
@@ -189,7 +199,7 @@ public struct AttentionQueue: Sendable {
 
     public var items: [AttentionItem] { makeItems() }
     public var workingCount: Int { runningBySession.count }
-    public var toCheckCount: Int { requests.count + completions.count }
+    public var toCheckCount: Int { requests.count + questions.count + completions.count }
     public var acknowledgedCompletions: Set<CompletionIdentity> { acknowledged }
 
     public func items(viewing session: UUID) -> [AttentionItem] {
@@ -209,6 +219,7 @@ public struct AttentionQueue: Sendable {
             let turn = AttentionTurnIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)
             resolvedTurns.insert(turn)
             requests = requests.filter { !resolvedTurns.contains(AttentionTurnIdentity(source: $0.value.source, session: $0.value.session, turn: $0.value.turn)) }
+            questions = questions.filter { !resolvedTurns.contains(AttentionTurnIdentity(source: $0.value.source, session: $0.value.session, turn: $0.value.turn)) }
             runningBySession = runningBySession.filter {
                 $0.value.id != RunningIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)
             }
@@ -238,6 +249,37 @@ public struct AttentionQueue: Sendable {
             runningBySession[key] = incoming
         }
         if let now { expire(at: now) }
+    }
+
+    /// Adds pending questions. One already answered, dismissed, or belonging to an ended turn stays
+    /// out; a repeat keeps the earliest arrival and the first readable text.
+    public mutating func apply(questions incoming: [AttentionQuestion]) {
+        for question in incoming where !answeredQuestions.contains(question.id)
+            && !endedTurns.contains(TurnIdentity(session: question.session, turn: question.turn))
+            && !resolvedTurns.contains(AttentionTurnIdentity(source: question.source, session: question.session, turn: question.turn)) {
+            guard let current = questions[question.id] else { questions[question.id] = question; continue }
+            if question.arrivedAt < current.arrivedAt || (current.prompts.isEmpty && !question.prompts.isEmpty) {
+                questions[question.id] = AttentionQuestion(source: current.source, session: current.session, turn: current.turn,
+                                                           callID: current.callID, arrivedAt: min(current.arrivedAt, question.arrivedAt),
+                                                           prompts: current.prompts.isEmpty ? question.prompts : current.prompts)
+            }
+        }
+    }
+
+    /// Clears exactly these questions on an answer, dismissal, or session end, for good.
+    public mutating func resolve(questions identities: [QuestionIdentity]) {
+        for identity in identities {
+            answeredQuestions.insert(identity)
+            questions.removeValue(forKey: identity)
+        }
+    }
+
+    /// A turn that ended in the rollout resolves its questions whichever surface posed them; the
+    /// source on a question is only a navigation label.
+    private mutating func resolve(endedTurns turns: Set<TurnIdentity>) {
+        guard !turns.isEmpty else { return }
+        endedTurns.formUnion(turns)
+        questions = questions.filter { !turns.contains(TurnIdentity(session: $0.value.session, turn: $0.value.turn)) }
     }
 
     /// Records the receipts this process issued; only these may show decision controls.
@@ -276,6 +318,8 @@ public struct AttentionQueue: Sendable {
                              arrivedAt: timestamp($0.startedAt))
         }
         runningBySession.removeAll()
+        resolve(questions: Array(scan.answeredQuestions))
+        resolve(endedTurns: scan.completed.union(scan.canceled))
         resolve(scan.completed.union(scan.canceled), source: .cli)
         let bySource = Dictionary(requests.map { ($0.id, $0.source) }, uniquingKeysWith: { first, _ in first })
         resolve(requests: scan.resolvedRequests.compactMap { resolution in
@@ -289,6 +333,11 @@ public struct AttentionQueue: Sendable {
             guard let ended = scan.sessionEnds[request.session] else { return false }
             return ended >= request.arrivedAt
         }.map(\.identity))
+        apply(questions: scan.questions)
+        resolve(questions: self.questions.values.filter { question in
+            guard let ended = scan.sessionEnds[question.session] else { return false }
+            return ended >= question.arrivedAt
+        }.map(\.id))
         return released.filter { self.requests[$0.identity] != nil }
     }
 
@@ -319,6 +368,8 @@ public struct AttentionQueue: Sendable {
         switch id {
         case let .request(id):
             resolve(requests: [id])
+        case let .question(id):
+            resolve(questions: [id])
         case let .completion(id):
             acknowledged.insert(id)
             completions.removeValue(forKey: id)
@@ -331,17 +382,23 @@ public struct AttentionQueue: Sendable {
         let requestItems = requests.values.map { request in
             AttentionItem(id: .request(request.identity), kind: request.state == .actionable ? .actionableRequest : .handedBackRequest,
                           session: request.session, arrivedAt: request.arrivedAt, request: request,
-                          completion: nil, running: nil)
+                          completion: nil, running: nil, question: nil)
+        }
+        let questionItems = questions.values.map { question in
+            AttentionItem(id: .question(question.id), kind: .question, session: question.session,
+                          arrivedAt: question.arrivedAt, request: nil, completion: nil, running: nil, question: question)
         }
         let completionItems = completions.values.map { completion in
             AttentionItem(id: .completion(completion.id), kind: .completion, session: completion.session,
-                          arrivedAt: completion.arrivedAt, request: nil, completion: completion, running: nil)
+                          arrivedAt: completion.arrivedAt, request: nil, completion: completion, running: nil, question: nil)
         }
-        let runningItems = runningBySession.values.map { active in
+        // A session waiting on an answer is blocked, not working: its running row is withheld.
+        let waiting = Set(questions.values.map { SourceSession(source: $0.source, session: $0.session) })
+        let runningItems = runningBySession.filter { !waiting.contains($0.key) }.values.map { active in
             AttentionItem(id: .running(active.id), kind: .running, session: active.session,
-                          arrivedAt: active.arrivedAt, request: nil, completion: nil, running: active)
+                          arrivedAt: active.arrivedAt, request: nil, completion: nil, running: active, question: nil)
         }
-        return (requestItems + completionItems + runningItems).sorted {
+        return (requestItems + questionItems + completionItems + runningItems).sorted {
             if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
             if $0.arrivedAt != $1.arrivedAt { return $0.arrivedAt < $1.arrivedAt }
             return $0.id.sortKey < $1.id.sortKey
@@ -358,6 +415,7 @@ private extension AttentionItemID {
     var sortKey: String {
         switch self {
         case let .request(id): return "request:\(id.source.rawValue):\(id.request.uuidString)"
+        case let .question(id): return "question:\(id.source.rawValue):\(id.session.uuidString):\(id.callID)"
         case let .completion(id): return "completion:\(id.source.rawValue):\(id.session.uuidString):\(id.turn.uuidString)"
         case let .running(id): return "running:\(id.source.rawValue):\(id.session.uuidString):\(id.turn.uuidString)"
         }

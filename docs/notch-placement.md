@@ -2,6 +2,8 @@
 
 Status: implemented and checked in the built app on a single built-in notch display. Agreed behavior is in [product.md](product.md); the pure rules live in `Sources/SteerCore/NotchPlacement.swift`. The two-display and display-disconnect cases are covered by focused tests and by the operator walkthrough below, which has not yet been recorded on a second display.
 
+Revision (hover-expand notch): the panel is one black shape with concave ears at its top corners. On a display with a camera housing the collapsed strip is the housing row itself: exactly the housing height, anchored to the top edge of the screen, with a 64-point wing left of the housing for one sprite per session (at most three, in priority order, each in a color that stays with the session, stepping while that session works) and a 60-point wing right of it for a "+N" mark for further sessions and the to-check count; the name is read in the open queue, not the strip (`NotchPlacement.strip`); on any other display the strip is inline with the menu bar row that is actually showing there (as tall as the bar, anchored to the top edge, centered where the bar is empty), or 40 points tall at the top edge when that display has no menu bar (a full-screen app, or an auto-hidden bar); the menu bar height comes from the window server's menu bar window on that display (`NotchDisplay.shownMenuBarHeight`), not from `visibleFrame`, which reserves the strip whether or not the bar is showing. The collapsed strip shows the sprite, the top-priority item's name, and the to-check badge (`StripSummary`). Hover expands it (`HoverHold` keeps it open for 0.3 s after the pointer leaves); a new completion or request opens only its own card for three seconds (`Spotlight`), and the open panel is exactly as tall as its measured content, capped at 380 points. Older statements below about a margin below the housing, a 210-point collapsed width, click-to-expand, or whole-queue popups are superseded by this revision; the display-selection, freeze-while-interacting, Escape, and accessibility-label rules stand.
+
 ## One panel, one queue
 
 Steer creates exactly one `NotchPanel` and one `AttentionQueue`. Every display change re-runs placement of that same panel; nothing is duplicated per display, and no queue state is keyed by display. The panel is configured to join all Spaces as a full-screen auxiliary window at status-bar level; the probe records those flags, and whether it actually appears over full-screen apps and on every Space is walkthrough step 7, not yet verified live.
@@ -37,7 +39,19 @@ A display that has disconnected is never chosen, even while interacting: the rul
 
 `swift test` (97 tests). New in `Tests/SteerCoreTests/NotchPlacementTests.swift`: pointer display chosen when idle; placement frozen on the current display while interacting; a disconnected current display falling back even while interacting; pointer off every display keeping the current display, then the first, then nil with no displays; collapsed frame below the physical housing and centered; the compact top-center panel on a non-notch display; the expanded height cap; pointer or keyboard focus counting as interaction; interaction holding a completion open without extending the approval deadline; and Escape collapsing without dismissing.
 
-## Placement probe (2026-09-13)
+## Hidden menu bar (2026-09-14)
+
+Reported on an external 3440 × 1440 display with Chrome in full screen: the strip floated 30 pt below the top edge, over Chrome's tab bar, with its ears fused to nothing. `visibleFrame` still reserved the menu bar strip although no menu bar was showing. Fixed by reading the menu bar height from the window server's menu bar windows (owner Window Server at the main-menu level, on screen), which exist only on displays currently showing a bar. First checked live with the strip fused under the bar; the user then asked for it inline with the bar, so the strip is now the menu bar row itself on an external display, as it is the housing row on the built-in one. `displayWithoutAShownMenuBarPutsTheStripAtTheTopEdge` and `shownMenuBarHeightComesFromTheMenuBarWindowOnThatDisplay` cover the rule.
+
+## Key status at launch (2026-09-14)
+
+Launching the app (Finder, `open`, a login item) activates it and AppKit makes the panel key, which counted as keyboard interaction: placement froze, the spotlight never closed, and the tucked strip never tucked. `NotchPanel.hasDeliberateKeyboardFocus` now counts key status only after the user has clicked in the panel (`clickedForKey`, cleared when the panel resigns key). Escape and the collapse path are unchanged.
+
+## Tucked strip on a full-screen display (2026-09-14)
+
+Follow-up to the report above: even at the top edge the strip covered the tab row of a full-screen browser. On an external monitor that shows no menu bar the strip now rests entirely above the screen edge (`NotchTuck`), like the hidden menu bar, and slides in (the usual 0.18 s ease-out) while the pointer is within 3 pt of the top edge or over the panel, while the panel has keyboard focus, or while the panel is open, so a new completion, request, or question still shows itself for its three-second spotlight and then tucks away. External monitors with a menu bar and the built-in display (notch or not) are unchanged; `NotchDisplay.isBuiltIn` comes from `CGDisplayIsBuiltin`. `stripTucksAboveAFullScreenDisplayUntilThePointerTouchesTheTopEdgeOrThePanelOpens` covers the rule.
+
+
 
 `Steer --placement-probe <path>` enqueues an in-memory test item, refreshes once, records the attached displays, the chosen display, the frames the rules would use, the panel's actual frame and key status, and quits. `--assume-codex-away` is a lab override for a machine where Codex desktop is foreground; `--attention-snapshot` isolates the snapshot. Nothing is written to UserDefaults or Codex configuration. Result: [evidence/notch-placement.json](evidence/notch-placement.json).
 
