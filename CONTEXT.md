@@ -23,6 +23,9 @@ The name Codex desktop gives a Codex session and shows in its sidebar. The compa
 **Weekly limit**:
 Codex's own figure for how much of its weekly usage window is used, read from the newest session rollout. The companion shows it on the strip while the window has not reset and never estimates it itself.
 
+**Discovered session**:
+A Codex session the companion shows as working before it has observed any of that session's own activity, because Codex's own record shows an unfinished turn and its surface is still alive. Discovery adds only a working indication; it never creates a completion, request, question, or sound.
+
 **Approval request**:
 A request from Codex for the user's permission to perform an action. Before handoff, the user can approve it once, deny it, or return to Codex for more context.
 

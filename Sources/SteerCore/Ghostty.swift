@@ -40,6 +40,14 @@ public struct GhosttyInventory: Equatable, Sendable {
 
 public enum GhosttyMatch {
     public static func title(_ session: UUID) -> String { String(session.uuidString.lowercased().prefix(29)) + "..." }
+    /// The sessions among `candidates` whose session-ID title is on some Ghostty terminal right
+    /// now. Presence only: it says nothing about which tab is selected or whether it is unsplit.
+    public static func sessions(in snapshot: GhosttySnapshot, among candidates: Set<UUID>) -> Set<UUID> {
+        guard snapshot.status == "ok" else { return [] }
+        let names = Set(snapshot.windows.flatMap { $0.tabs.flatMap { $0.terminals.map(\.name) } })
+        return candidates.filter { names.contains(title($0)) }
+    }
+
     public static func target(session: UUID, live: Set<UUID>, snapshot: GhosttySnapshot) -> GhosttyTarget? {
         guard snapshot.status == "ok", live.contains(session),
               live.filter({ title($0) == title(session) }).count == 1 else { return nil }
