@@ -56,6 +56,9 @@ public struct ReminderScan: Sendable {
     public var sessionEnds: [UUID: Double] = [:]
     public var completed: Set<TurnIdentity> = []
     public var canceled: Set<TurnIdentity> = []
+    /// User-input calls still waiting for an answer, and those the rollout shows answered.
+    public var questions: [AttentionQuestion] = []
+    public var answeredQuestions: Set<QuestionIdentity> = []
     public var cliEvents: [CLIEvent] = []
     public var cliCompletions: [CLICompletion] = []
     public var cliSessions: Set<UUID> = []
@@ -89,32 +92,67 @@ public enum ReminderReader {
     }
 
     public static func completed(in data: Data, session: UUID) -> Set<TurnIdentity> {
-        outcomes(in: data, session: session).completed
+        evidence(in: data, session: session).completed
     }
 
-    private static func outcomes(in data: Data, session: UUID) -> (completed: Set<TurnIdentity>, canceled: Set<TurnIdentity>) {
-        guard data.last == 10, data.count <= 32 * 1024 * 1024 else { return ([], []) }
-        var completed: Set<TurnIdentity> = []
-        var canceled: Set<TurnIdentity> = []
+    /// Everything one pass over a session rollout tells the queue: ended turns and the user-input
+    /// calls Codex posed, split into those still without an output and those answered.
+    public struct RolloutEvidence: Equatable, Sendable {
+        public var completed: Set<TurnIdentity> = []
+        public var canceled: Set<TurnIdentity> = []
+        public var pendingQuestions: [AttentionQuestion] = []
+        public var answeredQuestions: Set<QuestionIdentity> = []
+        public init() {}
+    }
+
+    static let userInputTool = "request_user_input"
+    static let maximumCallID = 256
+
+    /// Fails closed as a whole: any line that cannot be read yields empty evidence, which the queue
+    /// treats as "nothing new this scan", never as resolution or as a new question.
+    public static func evidence(in data: Data, session: UUID) -> RolloutEvidence {
+        guard data.last == 10, data.count <= 32 * 1024 * 1024 else { return RolloutEvidence() }
+        var result = RolloutEvidence()
+        var calls: [String: AttentionQuestion] = [:]
+        var outputs: Set<String> = []
         for (index, line) in data.split(separator: 10, omittingEmptySubsequences: false).dropLast().enumerated() {
             guard line.count <= 1024 * 1024,
                   let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
-                  let payload = event["payload"] as? [String: Any] else { return ([], []) }
+                  let payload = event["payload"] as? [String: Any] else { return RolloutEvidence() }
             if index == 0 {
                 guard event["type"] as? String == "session_meta",
-                      let id = payload["id"] as? String, UUID(uuidString: id) == session else { return ([], []) }
+                      let id = payload["id"] as? String, UUID(uuidString: id) == session else { return RolloutEvidence() }
                 if let explicit = payload["session_id"],
-                   (explicit as? String).flatMap(UUID.init(uuidString:)) != session { return ([], []) }
-            } else if event["type"] as? String == "session_meta" { return ([], []) }
-            if event["type"] as? String == "event_msg", let kind = payload["type"] as? String,
-               ["task_complete", "turn_aborted"].contains(kind) {
-                guard let id = payload["turn_id"] as? String, let turn = UUID(uuidString: id) else { return ([], []) }
+                   (explicit as? String).flatMap(UUID.init(uuidString:)) != session { return RolloutEvidence() }
+            } else if event["type"] as? String == "session_meta" { return RolloutEvidence() }
+            let type = event["type"] as? String
+            let kind = payload["type"] as? String
+            if type == "event_msg", let kind, ["task_complete", "turn_aborted"].contains(kind) {
+                guard let id = payload["turn_id"] as? String, let turn = UUID(uuidString: id) else { return RolloutEvidence() }
                 let identity = TurnIdentity(session: session, turn: turn)
-                if kind == "task_complete" { completed.insert(identity) }
-                else { canceled.insert(identity) }
+                if kind == "task_complete" { result.completed.insert(identity) }
+                else { result.canceled.insert(identity) }
+            } else if type == "response_item", kind == "function_call_output" {
+                if let callID = payload["call_id"] as? String { outputs.insert(callID) }
+            } else if type == "response_item", kind == "function_call", payload["name"] as? String == userInputTool {
+                // The call is the evidence Codex is blocked; without an id, turn and time it can be
+                // neither cleared nor opened, so it is not recorded. Unreadable text is still a question.
+                guard let callID = payload["call_id"] as? String, !callID.isEmpty, callID.utf8.count <= maximumCallID,
+                      let turn = ((payload["internal_chat_message_metadata_passthrough"] as? [String: Any])?["turn_id"] as? String)
+                        .flatMap(UUID.init(uuidString:)),
+                      let at = (event["timestamp"] as? String).flatMap(RolloutTimestamp.parse),
+                      calls[callID] == nil else { continue }
+                let prompts = (payload["arguments"] as? String).flatMap(QuestionPrompt.parse(arguments:)) ?? []
+                calls[callID] = AttentionQuestion(source: .desktop, session: session, turn: turn, callID: callID,
+                                                  arrivedAt: at, prompts: prompts)
             }
         }
-        return (completed, canceled)
+        for (callID, question) in calls {
+            if outputs.contains(callID) { result.answeredQuestions.insert(question.id) }
+            else { result.pendingQuestions.append(question) }
+        }
+        result.pendingQuestions.sort { $0.arrivedAt == $1.arrivedAt ? $0.callID < $1.callID : $0.arrivedAt < $1.arrivedAt }
+        return result
     }
 
     public static func scan(events: URL, rollouts: URL) -> ReminderScan {
@@ -208,10 +246,12 @@ public enum ReminderReader {
         // ponytail: bounded full rereads every two seconds; use cursors if histories grow.
         for (session, urls) in paths where urls.count == 1 {
             if let bytes = bounded(urls[0], limit: 32 * 1024 * 1024) {
-                let terminal = outcomes(in: bytes, session: session)
+                let terminal = evidence(in: bytes, session: session)
                 let finished = terminal.completed
                 result.completed.formUnion(finished)
                 result.canceled.formUnion(terminal.canceled)
+                result.questions += terminal.pendingQuestions
+                result.answeredQuestions.formUnion(terminal.answeredQuestions)
                 if let sessionProbes = probes[session] {
                     result.resolvedRequests += ApprovalResolutionReader.resolutions(in: bytes, session: session, probes: sessionProbes)
                 }
@@ -255,6 +295,10 @@ public enum ReminderReader {
                                     arrivedAt: request.arrivedAt,
                                     expiresAt: request.expiresAt, state: request.state, details: request.details)
         }
+        result.questions = result.questions.map { result.cliSessions.contains($0.session) ? $0.with(source: .cli) : $0 }
+        result.answeredQuestions = Set(result.answeredQuestions.map {
+            result.cliSessions.contains($0.session) ? QuestionIdentity(source: .cli, session: $0.session, callID: $0.callID) : $0
+        })
         result.cliCompletions.sort { $0.receivedAt < $1.receivedAt }
         return result
     }
