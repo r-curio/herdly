@@ -240,6 +240,16 @@ final class AppServerDaemonClient {
         }
     }
 
+    /// Sends one JSON-RPC request the user asked for and reports what the daemon made of it:
+    /// accepted, or refused with its own message. A write that never left reports as refused too.
+    /// Nothing here retries; one call is one request.
+    func call(_ method: String, params: [String: Any], onResult: @escaping (Bool, String?) -> Void) {
+        guard isConnected else { onResult(false, "the daemon is not connected"); return }
+        request(method, params: params) { result, error in
+            if let error { onResult(false, error["message"] as? String) } else { onResult(result != nil, nil) }
+        }
+    }
+
     /// Asks for the loaded-thread list on the next tick, e.g. when a question appears for a thread
     /// Steer has not subscribed to yet.
     func pollThreadsSoon() {

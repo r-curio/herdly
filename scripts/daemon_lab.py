@@ -33,6 +33,8 @@ from pathlib import Path
 THREAD = "01a09d9b-7642-7b51-bcce-9b66cfe5361f"
 TURN = "01a09db7-0c51-7f33-9ebc-4e44f91df22c"
 ITEM = "call_daemonlab_1"
+# A second, finished turn in the same session: its completion card carries the reply field.
+DONE_TURN = "01a09dc4-1f22-7aa4-8c31-5b71a0c24d10"
 
 
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -178,12 +180,21 @@ def now_iso():
 
 def seed_pending_question(events, rollouts):
     """A CLI session whose rollout holds the same call the fake daemon will push, still unanswered,
-    so the queue shows the question and the report can say which path its card would use."""
-    record = {"hook_event_name": "UserPromptSubmit", "session_id": THREAD, "turn_id": TURN, "received_at": now_iso(),
-              "source": "daemon-lab", "installation_id": str(uuid.uuid4())}
-    (events / f"{uuid.uuid4()}.json").write_text(json.dumps(record) + "\n")
+    so the queue shows the question and the report can say which path its card would use. An earlier
+    turn of the same session finished, so the queue also holds a completion whose card offers the
+    reply field; the report says where that field would send, and the lab sends nothing."""
+    def hook(name, turn):
+        record = {"hook_event_name": name, "session_id": THREAD, "turn_id": turn, "received_at": now_iso(),
+                  "source": "daemon-lab", "installation_id": str(uuid.uuid4())}
+        (events / f"{uuid.uuid4()}.json").write_text(json.dumps(record) + "\n")
+
+    hook("UserPromptSubmit", DONE_TURN)
+    hook("Stop", DONE_TURN)
+    hook("UserPromptSubmit", TURN)
     lines = [
         {"timestamp": now_iso(), "type": "session_meta", "payload": {"id": THREAD, "source": "cli"}},
+        {"timestamp": now_iso(), "type": "event_msg", "payload": {"type": "task_started", "turn_id": DONE_TURN}},
+        {"timestamp": now_iso(), "type": "event_msg", "payload": {"type": "task_complete", "turn_id": DONE_TURN}},
         {"timestamp": now_iso(), "type": "event_msg", "payload": {"type": "task_started", "turn_id": TURN}},
         {"timestamp": now_iso(), "type": "response_item",
          "payload": {"type": "function_call", "name": "request_user_input", "call_id": ITEM,
@@ -244,6 +255,11 @@ def main():
         "private_received_request": [r.get("item_id") for r in private.get("pending_requests", [])] == [ITEM],
         "private_question_ids": [q["id"] for r in private.get("pending_requests", []) for q in r["questions"]] == ["shape", "name"],
         "private_card_uses_daemon": [r.get("route", "").startswith("daemon(") for r in private.get("pending_requests", [])] == [True],
+        # The completion card's reply field targets the loaded thread, and only it.
+        "private_reply_targets_the_thread": private.get("completion_reply_targets") == [f"{THREAD}: daemon(thread: {THREAD.upper()})"],
+        # With no daemon there is no reply path at all, and the card says so.
+        "no_socket_reply_unavailable": (results["runs"]["no-socket"]["report"] or {}).get("completion_reply_targets")
+        == [f"{THREAD}: unavailable(SteerCore.SessionReplyPolicy.Rejection.noDaemon)"],
         "shared_card_falls_back": any("ghosttyRelay" in r for r in (results["runs"]["shared-socket"]["report"] or {}).get("question_routes", [])),
         "nothing_answered": results["runs"]["private-socket"]["answer_written_by_steer"] is None,
         "upgraded_to_websocket": (results["runs"]["private-socket"]["daemon_log"] or [{}])[0].get("upgrade", {}).get("upgrade", "").lower() == "websocket",
