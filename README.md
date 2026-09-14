@@ -4,7 +4,7 @@ A native macOS companion for Codex desktop and Codex CLI in Ghostty. Keep using 
 
 ## Status
 
-Architecture and product decisions are documented. The native app replays metadata-only desktop lifecycle records from the isolated hook lab, while preserving Codex's normal runtime. Task-link navigation has been manually verified; attachment to a fresh existing desktop task still requires the permitted human check.
+All MVP feature tickets are merged. A reproducible, checksummed development build is produced by `scripts/package-app.sh` and by CI; it is ad-hoc signed and labelled `unsigned-dev` until the maintainer signs and notarizes it with a Developer ID identity. The integrated live acceptance pass on the packaged app is still to be run by the operator; see [MVP acceptance](docs/mvp-acceptance.md) for what is proven and what is not.
 
 ## MVP
 
@@ -23,16 +23,21 @@ Desktop MVP visibility: hide the notch while Codex is foreground and show eligib
 - [Domain glossary](CONTEXT.md)
 - [Desktop investigation](docs/codex-desktop-investigation.md)
 - [User-input requests](docs/user-input-requests.md)
+- [Install, permissions, and removal](docs/install.md)
+- [MVP acceptance record and operator checklist](docs/mvp-acceptance.md)
 - [Backlog and dependency index](docs/mvp-backlog.md)
 - [MVP implementation issues](https://github.com/r-curio/steer/issues?q=is%3Aissue+label%3Amvp)
 
-## Run the prototype
+## Build and install
 
 ```sh
 swift test
-sh scripts/build-app.sh
-open output/Steer.app
+sh scripts/package-app.sh    # output/dist/Steer-<version>+<build>-<label>.zip, .sha256, manifest
 ```
+
+`sh scripts/build-app.sh && open output/Steer.app` is the shorter development loop. Installation, the permissions macOS asks for, supported versions, and a clean uninstall are in [docs/install.md](docs/install.md).
+
+## Run the prototype controls
 
 Click **Send test** in the Steer controls window, then switch away from Codex. The menu-bar shortcut is **S**; reopening the app restores its controls if the shortcut is hidden by a crowded menu bar. See the [prototype walkthrough and limitations](docs/prototype.md).
 

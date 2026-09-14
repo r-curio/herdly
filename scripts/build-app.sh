@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+# Marketing version and build number; scripts/package-app.sh derives the build number from git.
+STEER_VERSION="${STEER_VERSION:-0.1.0}"
+STEER_BUILD="${STEER_BUILD:-1}"
 swift build -c release
 bin_dir=$(swift build -c release --show-bin-path)
 app_dir="$PWD/output/Steer.app"
@@ -10,7 +13,7 @@ mkdir -p "$app_dir/Contents/Helpers"
 cp Sources/SteerApp/Resources/Ghostty.js "$app_dir/Contents/Resources/"
 cp "$bin_dir/Steer" "$app_dir/Contents/MacOS/Steer"
 cp "$bin_dir/SteerHook" "$app_dir/Contents/Helpers/SteerHook"
-cat > "$app_dir/Contents/Info.plist" <<'PLIST'
+cat > "$app_dir/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -18,8 +21,8 @@ cat > "$app_dir/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Steer</string>
 <key>CFBundleExecutable</key><string>Steer</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>${STEER_VERSION}</string>
+<key>CFBundleVersion</key><string>${STEER_BUILD}</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>NSAppleEventsUsageDescription</key><string>Steer selects the Ghostty tab for your Codex session when you enable Ghostty controls.</string>
 <key>LSUIElement</key><true/>
