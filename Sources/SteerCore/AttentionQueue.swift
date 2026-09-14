@@ -312,7 +312,9 @@ public struct AttentionQueue: Sendable {
             if !decidedRequests.contains(request.identity), self.requests[request.identity] == nil { released.append(handedBack) }
             return handedBack
         }
-        let desktopRunning = desktopState.running.map {
+        // The rollout's own turn end outranks a missing Stop hook for a desktop-labelled session too.
+        let rolloutEnded = scan.completed.union(scan.canceled)
+        let desktopRunning = desktopState.running.filter { !rolloutEnded.contains($0.id) }.map {
             AttentionRunning(source: .desktop, session: $0.session, turn: $0.turn,
                              arrivedAt: timestamp($0.startedAt))
         }

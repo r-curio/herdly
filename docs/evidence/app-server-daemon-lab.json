@@ -13,7 +13,7 @@
     "upgraded_to_websocket": true
   },
   "passed": true,
-  "recorded": "2026-09-14T08:17:37.681490+00:00",
+  "recorded": "2026-09-14T08:19:29.081699+00:00",
   "runs": {
     "no-socket": {
       "exit": 0,
@@ -23,8 +23,8 @@
         "question_routes": [
           "call_daemonlab_1: ghosttyRelay"
         ],
-        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-0z08n8k9/missing.sock",
-        "status": "Codex daemon: not running (no socket at /var/folders/xx/tmp/T/steer-daemon-lab-0z08n8k9/missing.sock).",
+        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-ey3n_rbr/missing.sock",
+        "status": "Codex daemon: not running (no socket at /var/folders/xx/tmp/T/steer-daemon-lab-ey3n_rbr/missing.sock).",
         "subscribed": []
       },
       "stderr": ""
@@ -189,15 +189,15 @@
               }
             ],
             "request_id": "number(900)",
-            "route": "daemon(SteerCore.AppServerQuestionRequest(requestID: SteerCore.AppServerRequestID.number(900), thread: 01A09D9B-7642-7B51-BCCE-9B66CFE5361F, turn: Optional(01A09DB7-0C51-7F33-9EBC-4E44F91DF22C), itemID: \"call_daemonlab_1\", questions: [SteerCore.AppServerQuestion(id: \"shape\", header: Optional(\"Shape\"), question: Optional(\"Which?\"), options: Optional([\"A\", \"B\"]), isOther: false, isSecret: false), SteerCore.AppServerQuestion(id: \"name\", header: Optional(\"Name\"), question: Optional(\"Call it?\"), options: nil, isOther: false, isSecret: false)], receivedAt: 1789373858.3532438))",
+            "route": "daemon(SteerCore.AppServerQuestionRequest(requestID: SteerCore.AppServerRequestID.number(900), thread: 01A09D9B-7642-7B51-BCCE-9B66CFE5361F, turn: Optional(01A09DB7-0C51-7F33-9EBC-4E44F91DF22C), itemID: \"call_daemonlab_1\", questions: [SteerCore.AppServerQuestion(id: \"shape\", header: Optional(\"Shape\"), question: Optional(\"Which?\"), options: Optional([\"A\", \"B\"]), isOther: false, isSecret: false), SteerCore.AppServerQuestion(id: \"name\", header: Optional(\"Name\"), question: Optional(\"Call it?\"), options: nil, isOther: false, isSecret: false)], receivedAt: 1789373969.7493958))",
             "thread": "01a09d9b-7642-7b51-bcce-9b66cfe5361f",
             "turn": "01a09db7-0c51-7f33-9ebc-4e44f91df22c"
           }
         ],
         "question_routes": [
-          "call_daemonlab_1: daemon(SteerCore.AppServerQuestionRequest(requestID: SteerCore.AppServerRequestID.number(900), thread: 01A09D9B-7642-7B51-BCCE-9B66CFE5361F, turn: Optional(01A09DB7-0C51-7F33-9EBC-4E44F91DF22C), itemID: \"call_daemonlab_1\", questions: [SteerCore.AppServerQuestion(id: \"shape\", header: Optional(\"Shape\"), question: Optional(\"Which?\"), options: Optional([\"A\", \"B\"]), isOther: false, isSecret: false), SteerCore.AppServerQuestion(id: \"name\", header: Optional(\"Name\"), question: Optional(\"Call it?\"), options: nil, isOther: false, isSecret: false)], receivedAt: 1789373858.3532438))"
+          "call_daemonlab_1: daemon(SteerCore.AppServerQuestionRequest(requestID: SteerCore.AppServerRequestID.number(900), thread: 01A09D9B-7642-7B51-BCCE-9B66CFE5361F, turn: Optional(01A09DB7-0C51-7F33-9EBC-4E44F91DF22C), itemID: \"call_daemonlab_1\", questions: [SteerCore.AppServerQuestion(id: \"shape\", header: Optional(\"Shape\"), question: Optional(\"Which?\"), options: Optional([\"A\", \"B\"]), isOther: false, isSecret: false), SteerCore.AppServerQuestion(id: \"name\", header: Optional(\"Name\"), question: Optional(\"Call it?\"), options: nil, isOther: false, isSecret: false)], receivedAt: 1789373969.7493958))"
         ],
-        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-0z08n8k9/d.sock",
+        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-ey3n_rbr/d.sock",
         "status": "Codex daemon: connected; 1 thread subscribed.",
         "subscribed": [
           "01a09d9b-7642-7b51-bcce-9b66cfe5361f"
@@ -218,8 +218,8 @@
         "question_routes": [
           "call_daemonlab_1: ghosttyRelay"
         ],
-        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-0z08n8k9/shared.sock",
-        "status": "Codex daemon: refusing /var/folders/xx/tmp/T/steer-daemon-lab-0z08n8k9/shared.sock; it is readable by other users.",
+        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-ey3n_rbr/shared.sock",
+        "status": "Codex daemon: refusing /var/folders/xx/tmp/T/steer-daemon-lab-ey3n_rbr/shared.sock; it is readable by other users.",
         "subscribed": []
       },
       "stderr": ""

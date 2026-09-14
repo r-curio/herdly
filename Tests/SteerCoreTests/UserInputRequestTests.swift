@@ -377,3 +377,21 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     let ended = ReminderReader.scan(events: events, rollouts: rollouts)
     #expect(ended.cliState.running.isEmpty && ended.cliState.liveSessions == [session])
 }
+
+@Test func aDesktopLabelledTurnTheRolloutAbortedIsNotShownRunning() throws {
+    let session = UUID(), turn = UUID()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-question-\(UUID().uuidString)")
+    let events = root.appendingPathComponent("events"), rollouts = root.appendingPathComponent("sessions")
+    try FileManager.default.createDirectory(at: events, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: rollouts, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let hook = "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"\(session)\",\"turn_id\":\"\(turn)\",\"received_at\":\"2026-09-14T02:20:14Z\"}"
+    try hook.write(to: events.appendingPathComponent("\(UUID().uuidString).json"), atomically: true, encoding: .utf8)
+    let rollout = rollouts.appendingPathComponent("rollout-2026-09-14T02-20-00-\(session.uuidString.lowercased()).jsonl")
+    let aborted = "{\"timestamp\":\"2026-09-14T02:21:00.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"turn_aborted\",\"turn_id\":\"\(turn)\"}}\n"
+    try (meta(session, source: "vscode") + aborted).write(to: rollout, atomically: true, encoding: .utf8)
+    var queue = AttentionQueue()
+    let scan = ReminderReader.scan(events: events, rollouts: rollouts)
+    _ = queue.apply(scan: scan, desktopEvents: DesktopEventReader.read(from: events), now: RolloutTimestamp.parse("2026-09-14T02:22:00Z")!)
+    #expect(queue.workingCount == 0)
+}
