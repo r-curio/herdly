@@ -25,6 +25,19 @@ public struct GhosttySnapshot: Decodable, Sendable {
         Set(windows.flatMap { $0.tabs.flatMap { $0.terminals.map(\.name) } })
     }
 }
+/// Ghostty's terminal titles as of one inventory, with when it was taken (Unix seconds). Passed
+/// into every reminder scan: a session-id title proves a CLI session, and its later absence is the
+/// end of that session's surface.
+public struct GhosttyInventory: Equatable, Sendable {
+    public let titles: Set<String>
+    public let takenAt: Double
+
+    public init(titles: Set<String>, takenAt: Double) {
+        self.titles = titles
+        self.takenAt = takenAt
+    }
+}
+
 public enum GhosttyMatch {
     public static func title(_ session: UUID) -> String { String(session.uuidString.lowercased().prefix(29)) + "..." }
     public static func target(session: UUID, live: Set<UUID>, snapshot: GhosttySnapshot) -> GhosttyTarget? {

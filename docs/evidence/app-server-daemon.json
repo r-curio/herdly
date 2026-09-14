@@ -158,10 +158,7 @@
   },
   "socket_authentication_observed": "No token, pairing or credential is involved for the local control socket: the daemon creates it under ~/.codex/app-server-control (directory mode 0700, owned by the user). Remote control is a separate, opt-in websocket enrollment (`enable-remote-control`) that Steer never uses. Binary strings mention NetworkUnixSocketPermission and remote-control pairing only.",
   "still_unproven": [
-    "that a daemon is (or can be made) part of this user's workflow: starting one needs the managed standalone install (`curl -fsSL https://chatgpt.com/codex/install.sh | sh`), a second Codex distribution beside the Homebrew CLI",
-    "that the CLI TUI attaches to the daemon when one is running, and that a second subscribed client receives item/tool/requestUserInput for the TUI's thread and may answer it",
-    "that thread/resume on a loaded thread rejoins without side effects, and whether a request already pending when Steer subscribes is delivered",
-    "that itemId equals the rollout call_id",
-    "that the desktop app ever attaches to the daemon (today it runs its own stdio app-server)"
-  ]
+    "see app-server-daemon-live.json"
+  ],
+  "superseded_by": "docs/evidence/app-server-daemon-live.json: the same day the user installed the managed standalone package (0.154.0); the daemon then started and the live proof was recorded there."
 }

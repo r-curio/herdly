@@ -64,6 +64,9 @@ public struct ReminderScan: Sendable {
     public var cliSessions: Set<UUID> = []
     public var liveCLISessions: Set<UUID> = []
     public var cliState = CLIState()
+    /// Sessions whose session-id title was in this scan's Ghostty inventory. The app remembers them
+    /// across scans so a session stays CLI, and can end, after its tab is gone.
+    public var titledCLISessions: Set<UUID> = []
 }
 
 public struct ReminderQueue: Sendable {
@@ -210,11 +213,19 @@ public enum ReminderReader {
         return evidence(in: bytes, session: session)
     }
 
-    /// `cliTitles` are the terminal titles Ghostty currently shows. A session is a CLI session when
-    /// its rollout header says `source: cli`, or when its session-id title is one of those titles:
-    /// a TUI attached to Codex's app-server daemon is recorded as `vscode`, the desktop's value, so
+    /// `ghostty` is Ghostty's current terminal-title inventory and `knownCLISessions` the sessions an
+    /// earlier inventory already proved. A session is a CLI session when its rollout header says
+    /// `source: cli`, when its session-id title is in the inventory, or when it was proved before: a
+    /// TUI attached to Codex's app-server daemon is recorded as `vscode`, the desktop's value, so
     /// the header alone no longer tells the surfaces apart (CLI 0.154.0, issue #42).
-    public static func scan(events: URL, rollouts: URL, cliTitles: Set<String> = []) -> ReminderScan {
+    ///
+    /// A title-proved session whose title is absent from a later inventory has lost its surface.
+    /// The daemon keeps the thread loaded and fires no SessionEnd, so Steer dates a session end at
+    /// the inventory itself. Only for sessions proved by title: a `source: cli` session in another
+    /// terminal is never in Ghostty and still ends by its own hook.
+    public static func scan(events: URL, rollouts: URL, ghostty: GhosttyInventory? = nil,
+                            knownCLISessions: Set<UUID> = []) -> ReminderScan {
+        let cliTitles = ghostty?.titles ?? []
         var result = ReminderScan()
         guard let files = try? FileManager.default.contentsOfDirectory(at: events, includingPropertiesForKeys: [.creationDateKey]),
               files.count <= 4096 else { return result }
@@ -340,8 +351,15 @@ public enum ReminderReader {
                       event["type"] as? String == "session_meta",
                       let meta = event["payload"] as? [String: Any],
                       (meta["id"] as? String).flatMap(UUID.init(uuidString:)) == session,
-                      meta["source"] as? String == "cli" || cliTitles.contains(GhosttyMatch.title(session)) else { continue }
+                      meta["source"] as? String == "cli" || cliTitles.contains(GhosttyMatch.title(session))
+                        || knownCLISessions.contains(session) else { continue }
                 result.cliSessions.insert(session)
+                if cliTitles.contains(GhosttyMatch.title(session)) { result.titledCLISessions.insert(session) }
+                else if let ghostty, knownCLISessions.contains(session), result.sessionEnds[session] == nil {
+                    // The tab is gone: the session's surface ended at this inventory.
+                    result.sessionEnds[session] = ghostty.takenAt
+                    result.cliEvents.append(.sessionEnded(session: session, receivedAt: RolloutTimestamp.format(ghostty.takenAt)))
+                }
                 let sessionHooks = hooks.filter { $0.session_id == session }.sorted { $0.received_at < $1.received_at }
                 for hook in sessionHooks {
                     switch hook.hook_event_name {
