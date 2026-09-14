@@ -65,6 +65,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     /// returns every question as plain pending and nothing is ever re-sent.
     @Published var answerProgress: [QuestionIdentity: QuestionAnswerProgress] = [:]
     private var answering = false
+    /// Steer's own bookkeeping of the one reply each completion card sent. Memory only, and a card
+    /// that has sent one never sends another.
+    @Published var replyProgress: [CompletionIdentity: SessionReplyProgress] = [:]
+    private var replying = false
+    /// Sessions Codex recorded as ended; a completion for one has nothing left to reply to.
+    @Published var endedSessions: Set<UUID> = []
     /// The second client on Codex's app-server daemon socket, when one exists. Inert otherwise.
     private let daemonClient = AppServerDaemonClient(socketPath: Companion.daemonSocketPath)
     /// The daemon's pending question requests on the current connection, and the ones Steer answered.
@@ -611,6 +617,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                                            sessionEnds: scan.sessionEnds)
             let discovered = SessionDiscovery.running(candidates, liveness: liveness)
             let discoveredCLI = Set(discovered.filter { $0.source == .cli }.map(\.session))
+            endedSessions = Set(scan.sessionEnds.keys)
             cliSessions = scan.cliSessions.union(discoveredCLI)
             liveCLI = scan.cliState.liveSessions.union(discoveredCLI)
             knownCLISessions.formUnion(scan.titledCLISessions)
@@ -672,6 +679,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             "connected": daemonClient.isConnected,
             "subscribed": daemonClient.subscribed.sorted(),
             "question_routes": queue.items.compactMap(\.question).map { "\($0.callID): \(route(for: $0))" },
+            // Where each completion card's reply field would send, without sending anything.
+            "completion_reply_targets": queue.items.compactMap(\.completion)
+                .map { "\($0.session.uuidString.lowercased()): \(replyTarget(for: $0))" },
             "pending_requests": daemonBook.pendingRequests.map { request -> [String: Any] in
                 ["thread": request.thread.uuidString.lowercased(), "turn": request.turn?.uuidString.lowercased() ?? "",
                  "item_id": request.itemID, "request_id": "\(request.requestID)",
@@ -720,6 +730,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         scanReminders()
         queue.expire(at: Date().timeIntervalSince1970)
         pruneAnswerProgress()
+        pruneReplyProgress()
         if previewMode == nil {
             // A waiting question on a thread Steer has not subscribed to yet: ask for the list now.
             if daemonClient.isConnected,
@@ -1092,6 +1103,77 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             answering = false
             refresh()
         }
+    }
+
+    /// What Steer can see right now about reaching a finished session: the daemon's own loaded
+    /// threads, the sessions Codex recorded as ended, and the sessions already working again.
+    var replyAvailability: SessionReplyAvailability {
+        let working = Set(queue.items.filter { $0.kind == .running }.map(\.session))
+        guard previewMode == nil else {
+            // The preview has no daemon; it renders the field as a reachable session would.
+            return SessionReplyAvailability(daemonConnected: true,
+                                            daemonThreads: Set(queue.items.compactMap { $0.completion?.session }),
+                                            endedSessions: endedSessions, workingSessions: working)
+        }
+        return SessionReplyAvailability(daemonConnected: daemonClient.isConnected, daemonThreads: daemonClient.loadedThreads,
+                                        endedSessions: endedSessions, workingSessions: working)
+    }
+
+    /// Where this completion's reply would go, or why the field is disabled.
+    func replyTarget(for completion: AttentionCompletion) -> SessionReplyTarget {
+        SessionReplyRouting.target(for: completion, availability: replyAvailability)
+    }
+
+    /// This card's reply so far; a fresh, ready record when the user has sent nothing.
+    func reply(for completion: AttentionCompletion) -> SessionReplyProgress {
+        replyProgress[completion.id] ?? SessionReplyProgress(completion: completion.id)
+    }
+
+    /// One Send on a completion card. The reply starts a new turn on that exact thread through the
+    /// daemon, after re-reading the queue and the target as they are right now. Sending does not
+    /// acknowledge the completion, and a card that has sent one reply never sends another.
+    func sendReply(to completion: AttentionCompletion, text: String) {
+        guard !replying else { return }
+        let current = queue.items.compactMap(\.completion).first { $0.id == completion.id }
+        let plan = SessionReplySending.prepare(completion: current, availability: replyAvailability,
+                                               progress: reply(for: completion), text: text)
+        switch plan.outcome {
+        case let .refused(rejection):
+            navigationMessage = SessionReplyPolicy.message(for: rejection)
+            refresh()
+        case let .sending(next):
+            guard previewMode == nil, let params = plan.params else { return }
+            replying = true
+            replyProgress[completion.id] = next
+            navigationMessage = "Sending your reply to Codex's daemon…"
+            refresh()
+            daemonClient.call(SessionReplyRequest.method, params: params) { [weak self] accepted, error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.replying = false
+                    let progress = self.reply(for: completion)
+                    let reason = "Codex's daemon did not take the reply\(error.map { " (\($0))" } ?? ""). "
+                        + "Steer will not retry; reply in Codex."
+                    self.replyProgress[completion.id] = accepted
+                        ? progress.recordingSent(at: Date().timeIntervalSince1970)
+                        : progress.recordingFailure(reason)
+                    self.navigationMessage = accepted ? "Reply sent to Codex's daemon." : "Could not send the reply to Codex's daemon."
+                    self.refresh()
+                }
+            }
+        }
+    }
+
+    /// Keeps a card's reply only while its completion is queued, and lets a sent one reach its final
+    /// state: confirmed by the session working again, or unconfirmed once the window passes.
+    private func pruneReplyProgress() {
+        guard !replyProgress.isEmpty else { return }
+        let queued = Set(queue.items.compactMap { $0.completion?.id })
+        let working = Set(queue.items.filter { $0.kind == .running }.map(\.session))
+        let now = Date().timeIntervalSince1970
+        let next = replyProgress.filter { queued.contains($0.key) }
+            .mapValues { $0.observing(sessionWorking: working.contains($0.completion.session), at: now) }
+        if next != replyProgress { replyProgress = next }
     }
 
     /// Drops progress for questions no longer waiting and turns an unconfirmed send into its final state.
