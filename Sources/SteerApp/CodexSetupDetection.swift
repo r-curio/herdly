@@ -79,8 +79,8 @@ enum CodexSetupDetection {
 
     static func setupSnapshot(roots: CodexSetupRoots, capabilities: CodexCapabilities) -> SetupSnapshot {
         let manager = FileManager.default
-        let configData = boundedRegularData(at: roots.configURL, maximum: 1_048_576)
-        let hooksData = boundedRegularData(at: roots.hooksURL, maximum: 1_048_576)
+        let configData = boundedRegularData(at: roots.configURL, maximum: CodexSetupLimits.maximumFileSize)
+        let hooksData = boundedRegularData(at: roots.hooksURL, maximum: CodexSetupLimits.maximumFileSize)
         let configExists = manager.fileExists(atPath: roots.configURL.path)
         let hooksExist = manager.fileExists(atPath: roots.hooksURL.path)
         let config = configData.flatMap { String(data: $0, encoding: .utf8) }
@@ -90,7 +90,7 @@ enum CodexSetupDetection {
         } else {
             plan = CodexSetupPlanner.plan(capabilities: capabilities, config: config ?? "",
                                           hooks: hooksData ?? Data("{}".utf8), helperPath: roots.helperURL,
-                                          eventsPath: roots.eventsDirectory)
+                                          eventsPath: roots.eventsDirectory, hooksPath: roots.hooksURL)
         }
         let status: CodexConnectionStatus
         if configExists && config == nil {
@@ -145,7 +145,8 @@ enum CodexSetupDetection {
             process.terminate()
             return nil
         }
-        guard let data = try? output.fileHandleForReading.read(upToCount: 64 * 1024) else { return nil }
+        // A process that prints nothing (the helper self-test) is still a completed run.
+        let data = (try? output.fileHandleForReading.read(upToCount: 64 * 1024)) ?? Data()
         return (process.terminationStatus, data)
     }
 
