@@ -419,14 +419,15 @@ struct Notch: View {
     }
 
     /// The daemon card's status sentence: which path, and where the answer stands.
-    private func daemonStatus(_ question: AttentionQuestion, request: AppServerQuestionRequest?, progress: QuestionAnswerProgress) -> String {
+    private func daemonStatus(_ question: AttentionQuestion, request: AppServerQuestionRequest?, progress: QuestionAnswerProgress) -> String? {
         let total = request?.questions.count ?? question.questionCount
         switch progress.phase {
         case .ready:
+            // Nothing sent yet: the controls speak for themselves. The path is named once something is.
             if progress.questionIndex > 0, progress.questionIndex < total {
                 return "Answer kept. Question \(progress.questionIndex + 1) of \(total); the whole call is sent after the last one."
             }
-            return "Answers go to Codex through its app-server daemon, exactly as chosen."
+            return nil
         case .sending: return "Sending to Codex's daemon…"
         case .sent: return "Answered through Codex's daemon. Waiting for Codex to record it."
         case .unconfirmed: return "Answered through Codex's daemon, but Codex has not recorded an answer. Check Codex; Steer will not resend."
@@ -450,7 +451,8 @@ struct Notch: View {
             if case let .continueInCodex(reason) = QuestionAnswerProgress.offer(question, at: index) { return reason }
             if question.source == .cli, !model.showsOptionControls(for: question) { return "\(noDaemon); enable Ghostty controls to answer from here, or answer in Codex." }
             if index > 0, let previous = progress.picks[index - 1] { return "Sent \(previous + 1) as a key to the Ghostty tab. Codex should now show question \(index + 1)." }
-            return question.source == .cli ? "\(noDaemon); an option goes to the Ghostty tab as its key." : "\(noDaemon); a pick opens Codex, choose it there."
+            // Nothing sent yet: no sentence. The path is named once something is.
+            return nil
         case .sending:
             return "Sending the key to the Ghostty tab…"
         case .sent:
@@ -490,14 +492,16 @@ struct Notch: View {
                     }
                 }
             }
-            Text(daemonStatus(question, request: request, progress: progress))
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+            if let status = daemonStatus(question, request: request, progress: progress) {
+                Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+            }
         } else if route == .daemonAnswered {
             if let first = question.prompts.first {
                 prompt(first, index: 0, of: total, tone: spriteColor(for: question.session), pick: progress.picks[0], typed: progress.texts[0])
             }
-            Text(daemonStatus(question, request: nil, progress: progress))
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+            if let status = daemonStatus(question, request: nil, progress: progress) {
+                Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+            }
         } else if question.prompts.isEmpty {
             Text("Codex asked a question Steer could not read; answer it in Codex.")
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
