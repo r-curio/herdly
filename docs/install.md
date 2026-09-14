@@ -68,7 +68,7 @@ The script refuses to notarize with anything other than a Developer ID Applicati
 Connecting is explicit and previewed. In the controls window, review the setup preview, then click **Configure Codex**. Steer then:
 
 - copies `Contents/Helpers/SteerHook` from the bundle to `~/Library/Application Support/Steer/SteerHook` (mode 755) after running its self-test, and records the install in `~/Library/Application Support/Steer/install.json`;
-- adds to `~/.codex/hooks.json` one command hook per event for `SessionStart`, `UserPromptSubmit`, `PermissionRequest`, `Stop` and `SessionEnd`, each running that helper with `--events-dir ~/Library/Application Support/Steer/events --installation-id <uuid>`;
+- adds to `~/.codex/hooks.json` one command hook per event for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop` and `SessionEnd`, each running that helper with `--events-dir ~/Library/Application Support/Steer/events --installation-id <uuid>`;
 - adds to `~/.codex/config.toml` exactly three kinds of line: `hooks = true` under `[features]`, `terminal_title = ["session-id"]` under `[tui]`, and one `trusted_hash = "sha256:…"` per installed handler under `[hooks.state."<hooks.json path>:<event>:<group>:<handler>"]`;
 - backs up the original `config.toml`, `hooks.json` and any previous helper under `~/Library/Application Support/Steer/backups/<uuid>/`.
 

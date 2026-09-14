@@ -103,6 +103,8 @@ Queue priority is: actionable notch approvals, question requests waiting for the
 
 A session already working when the companion launches, or before its first hook event arrives, is shown as working from its rollout when there is liveness evidence for it: the desktop app running for a desktop session, its tab in Ghostty or a Codex CLI process for a CLI session, and no session end recorded since the turn began. Discovery only ever adds a running row; a completion, request, question, or sound still needs its own evidence. See [session discovery](session-discovery.md).
 
+A working row shows the latest readable `PreToolUse` action until its matching `PostToolUse`, then the last submitted prompt. Shell commands are always labelled as shortened in the row and remain available in full behind the row's disclosure. Missing or malformed tool data adds no action. Tool activity changes presentation only: it never changes attention priority, acknowledgment, or an approval deadline. Actions are not restored across a companion restart; a new tool event must arrive first. The installed payload shapes are recorded in [tool activity evidence](evidence/tool-activity.json).
+
 ## Agreed approval experience
 
 Direct approval and denial remain a separately gated feature: keep desktop approvals native until the approval transport and an applicable handoff policy are verified. The app-level visibility change does not enable approval buttons. Each approval request also offers an Open in Codex action so the user can return to the originating session and read more context before deciding.

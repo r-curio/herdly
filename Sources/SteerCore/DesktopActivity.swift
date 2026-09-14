@@ -3,14 +3,54 @@ import Foundation
 public enum DesktopEvent: Equatable, Sendable {
     case sessionStarted(session: UUID, receivedAt: String)
     case turnStarted(session: UUID, turn: UUID, receivedAt: String)
+    case promptSubmitted(session: UUID, turn: UUID, prompt: String?, receivedAt: String)
+    case toolStarted(session: UUID, turn: UUID, useID: String, action: ToolAction?, capturedAt: Double)
+    case toolCompleted(session: UUID, turn: UUID, useID: String, capturedAt: Double)
     case turnCompleted(session: UUID, turn: UUID, receivedAt: String)
     case sessionEnded(session: UUID, receivedAt: String)
 
     public var session: UUID {
         switch self {
         case let .sessionStarted(session, _), let .turnStarted(session, _, _),
-             let .turnCompleted(session, _, _), let .sessionEnded(session, _): return session
+             let .promptSubmitted(session, _, _, _), let .toolStarted(session, _, _, _, _),
+             let .toolCompleted(session, _, _, _), let .turnCompleted(session, _, _),
+             let .sessionEnded(session, _): return session
         }
+    }
+}
+
+public struct ToolAction: Equatable, Sendable {
+    public let rowText: String
+    public let fullText: String
+
+    public init?(name: String, input: [String: String]) {
+        let lower = name.lowercased()
+        if ["bash", "shell", "exec_command"].contains(lower), let command = Self.text(input["command"] ?? input["cmd"]) {
+            fullText = command
+            rowText = "running `\(Self.short(command, limit: 64))…`"
+        } else if ["edit", "write", "multiedit"].contains(lower), let path = Self.text(input["file_path"] ?? input["path"]) {
+            fullText = path
+            rowText = "editing \(URL(fileURLWithPath: path).lastPathComponent)"
+        } else if ["read", "readfile"].contains(lower), let path = Self.text(input["file_path"] ?? input["path"]) {
+            fullText = path
+            rowText = "reading \(URL(fileURLWithPath: path).lastPathComponent)"
+        } else if ["glob", "grep", "search"].contains(lower) {
+            fullText = [input["pattern"], input["path"]].compactMap(Self.text).joined(separator: " in ")
+            guard !fullText.isEmpty else { return nil }
+            rowText = "reading files"
+        } else {
+            return nil
+        }
+    }
+
+    private static func text(_ value: String?) -> String? {
+        guard let value else { return nil }
+        return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : value
+    }
+
+    private static func short(_ value: String, limit: Int) -> String {
+        let oneLine = value.split(whereSeparator: \Character.isNewline).first.map(String.init) ?? value
+        return String(oneLine.prefix(limit))
     }
 }
 
@@ -18,7 +58,13 @@ public struct DesktopRunningTurn: Equatable, Identifiable, Sendable {
     public let session: UUID
     public let turn: UUID
     public let startedAt: String
+    public fileprivate(set) var prompt: String? = nil
+    public fileprivate(set) var action: ToolAction? = nil
+    fileprivate var toolUseID: String? = nil
     public var id: TurnIdentity { TurnIdentity(session: session, turn: turn) }
+    public var rowText: String? { action?.rowText ?? QuestionPrompt.display(prompt, limit: 160) }
+    public var fullAction: String? { action?.fullText }
+    public var fullPrompt: String? { prompt }
 }
 
 public struct DesktopCompletion: Equatable, Identifiable, Sendable {
@@ -41,6 +87,18 @@ public struct DesktopState: Sendable {
         case let .turnStarted(session, turn, receivedAt):
             running.removeAll { $0.session == session }
             running.append(DesktopRunningTurn(session: session, turn: turn, startedAt: receivedAt))
+        case let .promptSubmitted(session, turn, prompt, receivedAt):
+            running.removeAll { $0.session == session }
+            running.append(DesktopRunningTurn(session: session, turn: turn, startedAt: receivedAt, prompt: prompt))
+        case let .toolStarted(session, turn, useID, action, _):
+            guard let index = running.firstIndex(where: { $0.session == session && $0.turn == turn }) else { return }
+            running[index].toolUseID = useID
+            running[index].action = action
+        case let .toolCompleted(session, turn, useID, _):
+            guard let index = running.firstIndex(where: { $0.session == session && $0.turn == turn }),
+                  running[index].toolUseID == useID else { return }
+            running[index].toolUseID = nil
+            running[index].action = nil
         case let .turnCompleted(session, turn, receivedAt):
             running.removeAll { $0.id == TurnIdentity(session: session, turn: turn) }
             guard !completed.contains(where: { $0.id == TurnIdentity(session: session, turn: turn) }) else { return }
@@ -50,19 +108,33 @@ public struct DesktopState: Sendable {
         }
     }
 
-    public static func replay(_ events: [DesktopEvent]) -> DesktopState {
+    public static func replay(_ events: [DesktopEvent], toolEventsSince: Double = -.infinity) -> DesktopState {
         var state = DesktopState()
-        events.forEach { state.apply($0) }
+        events.forEach { event in
+            switch event {
+            case let .toolStarted(_, _, _, _, capturedAt), let .toolCompleted(_, _, _, capturedAt):
+                if capturedAt >= toolEventsSince { state.apply(event) }
+            default: state.apply(event)
+            }
+        }
         return state
     }
 }
 
 public enum DesktopEventReader {
+    /// A hook input is capped at 64 KiB; normalized metadata and JSON escaping can make its record larger.
+    public static let maximumRecordSize = 128 * 1024
+
     private struct Record: Decodable {
         let hook_event_name: String
         let session_id: UUID
         let turn_id: UUID?
         let received_at: String
+        let captured_at: Double?
+        let prompt: String?
+        let tool_name: String?
+        let tool_use_id: String?
+        let tool_input: [String: String]?
     }
 
     private static func bounded(_ url: URL, limit: Int) -> Data? {
@@ -77,12 +149,15 @@ public enum DesktopEventReader {
               files.count <= 4096 else { return [] }
         return files.filter { $0.pathExtension == "json" }
             .compactMap { url -> (Record, String)? in
-                guard let data = bounded(url, limit: 64 * 1024),
+                guard let data = bounded(url, limit: maximumRecordSize),
                       let record = try? JSONDecoder().decode(Record.self, from: data) else { return nil }
                 return (record, url.lastPathComponent)
             }
             .sorted {
-                $0.0.received_at == $1.0.received_at ? $0.1 < $1.1 : $0.0.received_at < $1.0.received_at
+                let left = $0.0.captured_at ?? RolloutTimestamp.parse($0.0.received_at)
+                let right = $1.0.captured_at ?? RolloutTimestamp.parse($1.0.received_at)
+                if let left, let right, left != right { return left < right }
+                return $0.0.received_at == $1.0.received_at ? $0.1 < $1.1 : $0.0.received_at < $1.0.received_at
             }
             .compactMap { source in
                 let record = source.0
@@ -90,7 +165,16 @@ public enum DesktopEventReader {
                 case "SessionStart": return .sessionStarted(session: record.session_id, receivedAt: record.received_at)
                 case "UserPromptSubmit":
                     guard let turn = record.turn_id else { return nil }
-                    return .turnStarted(session: record.session_id, turn: turn, receivedAt: record.received_at)
+                    return .promptSubmitted(session: record.session_id, turn: turn, prompt: record.prompt, receivedAt: record.received_at)
+                case "PreToolUse":
+                    guard let turn = record.turn_id, let name = record.tool_name, let useID = record.tool_use_id else { return nil }
+                    return .toolStarted(session: record.session_id, turn: turn, useID: useID,
+                                        action: ToolAction(name: name, input: record.tool_input ?? [:]),
+                                        capturedAt: record.captured_at ?? RolloutTimestamp.parse(record.received_at) ?? 0)
+                case "PostToolUse":
+                    guard let turn = record.turn_id, let useID = record.tool_use_id else { return nil }
+                    return .toolCompleted(session: record.session_id, turn: turn, useID: useID,
+                                          capturedAt: record.captured_at ?? RolloutTimestamp.parse(record.received_at) ?? 0)
                 case "Stop":
                     guard let turn = record.turn_id else { return nil }
                     return .turnCompleted(session: record.session_id, turn: turn, receivedAt: record.received_at)
