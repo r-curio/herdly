@@ -10,3 +10,12 @@ output/
 !.env.example
 scripts/cli-approval-lab/events-*/
 scripts/cli-approval-lab/runs/
+# Local agent tooling and skill caches
+.agents/
+.claude/
+.codex/
+.github/agents/
+.github/hooks/
+.github/skills/
+.impeccable/
+skills-lock.json
