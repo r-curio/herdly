@@ -11,7 +11,7 @@ Architecture and product decisions are documented. The native app replays metada
 Desktop MVP visibility: hide the notch while Codex is foreground and show eligible activity while away. Desktop completions remain queued until explicitly dismissed; exact-task focus is deferred.
 
 - Local Codex desktop tasks and Codex CLI running directly in Ghostty, with exact unsplit tab targeting; split panes remain unavailable.
-- One notch on the active display, fused under the camera housing: a sprite that steps while Codex works, the current task name, a to-check badge, and a prioritized queue on hover.
+- One notch on the active display, fused under the camera housing: a sprite per session that steps while Codex works, a to-check badge, Codex's weekly usage limit, and a prioritized queue on hover.
 - Direct CLI approvals use one receipt-bound allow-once or deny decision with a 30-second handoff; desktop approvals stay native until their transport and handoff policy are proven.
 - Three-second completion notifications, a short sound with mute, and acknowledgments preserved locally.
 - Codex remains usable if Steer is unavailable. Unknown focus keeps notifications and leaves approvals in Codex.
