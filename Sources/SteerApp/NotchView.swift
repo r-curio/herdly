@@ -186,6 +186,40 @@ struct NotchButton: View {
     }
 }
 
+/// One line of text the user types into a card and sends: a typed answer to a Codex question, or a
+/// reply to a finished session. Return in the field and the button do the same thing, and an empty
+/// or all-space draft sends nothing. Escape collapses the panel from the field without dismissing
+/// anything. The caller owns the text and decides what sending means.
+struct DraftField: View {
+    let placeholder: String
+    @Binding var text: String
+    let sendTitle: String
+    /// Names the subject session in both labels, for keyboard and VoiceOver use.
+    let fieldLabel: String
+    let sendLabel: String
+    var hint: String?
+    let onEscape: () -> Void
+    let send: () -> Void
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .onSubmit { if enabled { send() } }
+                .onExitCommand(perform: onEscape)
+                .accessibilityLabel(fieldLabel)
+                .accessibilityHint(hint ?? "")
+            NotchButton(title: sendTitle, action: send)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel(sendLabel)
+        }
+    }
+}
+
 /// One answer option: its digit in the session's colour, the label in ink. The option the user
 /// chose fills with that colour and reads in black, the way a pressed control inverts; the colour
 /// says which session's question this is, the fill says what was chosen. Focus ring as elsewhere.
@@ -404,19 +438,14 @@ struct Notch: View {
                 }
                 if question.takesText {
                     let key = "\(callID):\(index)"
-                    HStack(spacing: 6) {
-                        TextField(question.isOther ? "Or type another answer" : "Type your answer", text: draft(key))
-                            .textFieldStyle(.plain)
-                            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
-                            .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .disabled(!enabled)
-                            .onSubmit { choose(.text(drafts[key] ?? "")); drafts[key] = nil }
-                            .accessibilityLabel("Typed answer for \(subject)")
-                        NotchButton(title: index + 1 < total ? "Next" : "Send") { choose(.text(drafts[key] ?? "")); drafts[key] = nil }
-                            .disabled(!enabled || (drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            .accessibilityLabel("Send typed answer for \(subject)")
+                    DraftField(placeholder: question.isOther ? "Or type another answer" : "Type your answer",
+                               text: draft(key), sendTitle: index + 1 < total ? "Next" : "Send",
+                               fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
+                               onEscape: model.collapse) {
+                        choose(.text(drafts[key] ?? ""))
+                        drafts[key] = nil
                     }
+                    .disabled(!enabled)
                 }
             }
         }
@@ -537,6 +566,47 @@ struct Notch: View {
         }
     }
 
+    /// The completion card's own sentence about the reply the user sent from it. Every phase says
+    /// what Steer did and nothing more; a reply the daemon took is never called an answer Codex has.
+    private func replyStatus(_ progress: SessionReplyProgress, target: SessionReplyTarget) -> String? {
+        switch progress.phase {
+        case .ready:
+            if case let .unavailable(reason) = target { return SessionReplyPolicy.message(for: reason) }
+            return nil
+        case .sending:
+            return "Sending your reply to Codex's daemon…"
+        case let .sent(text, _):
+            return "Sent “\(text)”. Waiting for Codex to record the turn."
+        case let .working(text):
+            return "Sent “\(text)”. Codex started a turn; this session is working again."
+        case let .unconfirmed(text, _):
+            return "Sent “\(text)”, but Codex has not started a turn. Check Codex; Steer will not resend."
+        case let .failed(reason):
+            return reason
+        }
+    }
+
+    /// One follow-up prompt for a finished session, sent to that session and no other. The field is
+    /// disabled whenever Steer cannot reach the session or has already sent this card's one reply;
+    /// the sentence below says which. Sending never acknowledges the completion.
+    @ViewBuilder
+    private func replyBody(_ completion: AttentionCompletion, subject: String) -> some View {
+        let progress = model.reply(for: completion)
+        let target = model.replyTarget(for: completion)
+        let key = "reply:\(completion.session.uuidString):\(completion.turn.uuidString)"
+        DraftField(placeholder: "Reply to this session", text: draft(key), sendTitle: "Send",
+                   fieldLabel: "Reply to \(subject)", sendLabel: "Send reply to \(subject)",
+                   hint: "Sends a follow-up prompt to this session.", onEscape: model.collapse) {
+            // The typed text is cleared only once the send is under way; a refusal keeps it to edit.
+            model.sendReply(to: completion, text: drafts[key] ?? "")
+            if model.reply(for: completion).phase != .ready { drafts[key] = nil }
+        }
+        .disabled(!target.isReachable || progress.phase != .ready)
+        if let status = replyStatus(progress, target: target) {
+            Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
     @ViewBuilder
     private func attentionRow(_ item: AttentionItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -561,6 +631,7 @@ struct Notch: View {
                     Text("Queued before Steer last started. You may already have seen this result; Steer cannot verify it.")
                         .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
                 }
+                if let completion = item.completion { replyBody(completion, subject: rowSubject(item)) }
             case .question:
                 if let question = item.question { questionBody(question, subject: rowSubject(item)) }
             case .actionableRequest, .running:
