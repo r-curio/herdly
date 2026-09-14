@@ -18,9 +18,28 @@ final class NotchPanel: NSPanel {
     /// presentation uses orderFrontRegardless, which never makes the panel key.
     override var canBecomeKey: Bool { true }
     var onEscape: (() -> Void)?
+    /// True once the user has clicked in the panel; launch or app activation can also make the
+    /// panel key, and that must not count as the user interacting with it.
+    private(set) var clickedForKey = false
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown || event.type == .rightMouseDown { clickedForKey = true }
+        super.sendEvent(event)
+    }
+
+    override func resignKey() {
+        clickedForKey = false
+        super.resignKey()
+    }
+
+    /// Keyboard focus the user asked for by clicking, as opposed to key status handed over at launch.
+    var hasDeliberateKeyboardFocus: Bool { isKeyWindow && clickedForKey }
 
     /// Escape collapses the panel and returns keyboard input to the app the user was using.
     override func cancelOperation(_ sender: Any?) { onEscape?() }
+
+    /// AppKit pulls a frame back on screen; the tucked strip rests entirely above the screen edge.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }
 
 @MainActor
@@ -41,9 +60,28 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var reminderPresentation = Attention()
     @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
     @Published var completionPresentation = Attention()
+    @Published var questionPresentation = Attention()
     private var savedSnapshot = Companion.launchSnapshot
     @Published var ghosttyEnabled = false
     @Published var ghosttyPermissionVerified = false
+    /// Read the Codex desktop app's own unread flags to acknowledge desktop completions it has
+    /// cleared. Private format; on by default, off with one switch when a desktop update breaks it.
+    @Published var desktopReadStateEnabled = UserDefaults.standard.object(forKey: "desktopReadStateEnabled") as? Bool ?? true
+    @Published var desktopReadStateMessage = "Desktop read state: not checked yet."
+    /// Codex's own thread names by session, refreshed every scan; unknown sessions keep their identifier.
+    @Published var threadNames: [UUID: String] = [:]
+    /// `--thread-names <path>` points lab runs at a copy instead of the live Codex index.
+    nonisolated static var threadNamesURL: URL {
+        if let path = argumentValue(for: "--thread-names") { return URL(fileURLWithPath: path) }
+        return ThreadNameReader.defaultURL(codexHome: FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex", isDirectory: true))
+    }
+    /// `--desktop-read-state <path>` points lab runs at a copy instead of the live Codex file.
+    nonisolated static var desktopReadStateURL: URL {
+        if let path = argumentValue(for: "--desktop-read-state") { return URL(fileURLWithPath: path) }
+        return DesktopReadStateReader.defaultURL(codexHome: FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex", isDirectory: true))
+    }
     @Published var setupStatus: CodexConnectionStatus = .notConfigured
     @Published var setupCapabilities = CodexCapabilities(cli: false, desktop: false, ghostty: false, supported: false)
     @Published var setupPlan: CodexSetupPlan?
@@ -74,8 +112,30 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     var toCheckCount: Int {
         orderedAttentionItems.filter { $0.kind != .running }.count + (attention.pending && !desktopForeground ? 1 : 0)
     }
-    var expanded: Bool { attention.expanded || reminderPresentation.expanded || completionPresentation.expanded }
+    /// Presentation state the notch view renders. `showAll` is hover or keyboard focus: the whole
+    /// queue. `spotlightItem` is the one new item a completion or request opened the panel for.
+    @Published var expanded = false
+    @Published var showAll = false
+    @Published var spotlightItem: AttentionItemID?
+    @Published var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    /// Natural height of the open panel's content, reported by the view after layout.
+    var contentHeight: CGFloat = 0
+    /// How the strip splits around the housing on the current display; the view lays out by it.
+    @Published var stripLayout = StripLayout(leading: 140, gap: 0, trailing: 60, height: NotchPlacement.collapsedHeight)
     var hovering = false
+    private var hoverHold = HoverHold()
+    private var hoverHeld = false
+    /// After Escape, hover does not reopen the panel until the pointer has left it.
+    private var hoverSuppressed = false
+    private var spotlight = Spotlight()
+    private var manualOpen = false
+    private var latestNewRequest: AttentionItemID?
+    private var latestNewCompletion: AttentionItemID?
+    private var latestNewQuestion: AttentionItemID?
+    private var targetFrame: CGRect = .zero
+    /// `--preview-queue <collapsed|spotlight|expanded>` seeds in-memory sample items for screenshots.
+    /// It never scans Codex events, never saves, and never releases approvals.
+    let previewMode = Companion.argumentValue(for: "--preview-queue")
     private var status: NSStatusItem!
     private var panel: NotchPanel!
     private var controls: NSWindow?
@@ -86,9 +146,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private var currentDisplayID: UInt32?
     /// SwiftUI's hover flag can go stale when the panel is re-placed out from under the pointer
     /// (a display disconnect, for example), so it is confirmed against the actual pointer location.
-    private var panelInteraction: Bool {
-        let pointerInside = hovering && panel.isVisible && panel.frame.contains(NSEvent.mouseLocation)
-        return NotchInteraction.isActive(pointerInside: pointerInside, keyboardFocus: panel.isKeyWindow)
+    private var pointerInsidePanel: Bool {
+        hovering && panel.isVisible && panel.frame.contains(NSEvent.mouseLocation)
     }
     private var setupRoots: CodexSetupRoots {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -156,7 +215,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         panel = NotchPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // No window shadow: its rim would outline the panel and break the fusion with the menu bar.
+        panel.hasShadow = false
         panel.level = .statusBar
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -172,11 +232,15 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in Task { @MainActor in self?.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion } }
+        if let mode = previewMode { seedPreview(mode) }
         refresh()
         refreshSetup()
         // A first/unconfigured launch should explain setup immediately. Once state
         // exists, refresh can keep the normal quiet launch behavior.
-        if !FileManager.default.fileExists(atPath: setupRoots.stateURL.path) { showControls() }
+        if previewMode == nil, !FileManager.default.fileExists(atPath: setupRoots.stateURL.path) { showControls() }
         if CommandLine.arguments.contains("--smoke-test") {
             showControls()
             precondition(controls?.isVisible == true && controls?.contentView != nil)
@@ -185,6 +249,25 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             app.terminate(nil)
         }
         writePlacementProbeAndQuitIfRequested()
+        printSetupProbeAndQuitIfRequested()
+    }
+
+    /// `--setup-probe`: print the Codex setup status and plan this build computes, then quit.
+    /// It reads the same files the controls window reads and changes nothing.
+    private func printSetupProbeAndQuitIfRequested() {
+        guard CommandLine.arguments.contains("--setup-probe") else { return }
+        let roots = setupRoots
+        let capabilities = CodexSetupDetection.capabilities()
+        let snapshot = CodexSetupDetection.setupSnapshot(roots: roots, capabilities: capabilities)
+        print("status: \(snapshot.status)")
+        print("capabilities: cli=\(capabilities.cli) desktop=\(capabilities.desktop) ghostty=\(capabilities.ghostty) supported=\(capabilities.supported)")
+        if let plan = snapshot.plan {
+            print("plan: \(plan.status) requiresConfigure=\(plan.requiresConfigure)")
+            print("config change adds hooks flag: \(CodexSetupValidator.hasHooksEnabled(in: plan.configChange))")
+        } else {
+            print("plan: nil (config or hooks unreadable)")
+        }
+        app.terminate(nil)
     }
 
     /// `--placement-probe <path>`: record the attached displays, the active-display choice, and the
@@ -217,11 +300,41 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         app.terminate(nil)
     }
 
-    /// AppKit screens as the placement rules see them. The top safe-area inset is the camera housing.
+    /// AppKit screens as the placement rules see them. The top safe-area inset is the camera housing;
+    /// the menu bar height is that of the bar actually showing on the screen, zero under a
+    /// full-screen app or an auto-hidden bar (`visibleFrame` reserves the strip either way).
     nonisolated static func attachedDisplays() -> [NotchDisplay] {
-        NSScreen.screens.compactMap { screen in
+        let menuBars = shownMenuBars()
+        return NSScreen.screens.compactMap { screen in
             guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
-            return NotchDisplay(id: number.uint32Value, frame: screen.frame, topInset: screen.safeAreaInsets.top)
+            var housing: CGFloat = 0
+            if let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea {
+                housing = max(0, screen.frame.width - left.width - right.width)
+            }
+            let menuBar = NotchDisplay.shownMenuBarHeight(on: screen.frame, menuBars: menuBars)
+            return NotchDisplay(id: number.uint32Value, frame: screen.frame, topInset: screen.safeAreaInsets.top,
+                                housingWidth: housing, menuBarHeight: menuBar,
+                                isBuiltIn: CGDisplayIsBuiltin(number.uint32Value) != 0)
+        }
+    }
+
+    /// The menu bar windows the window server has on screen, in AppKit global coordinates. The
+    /// window server draws one per display that is showing a menu bar, at the main-menu window
+    /// level; a display under a full-screen app has none. Owner and level are readable without
+    /// Screen Recording permission; window names are not, so they are not used.
+    nonisolated static func shownMenuBars() -> [CGRect] {
+        guard let primaryHeight = NSScreen.screens.first?.frame.height,
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]
+        else { return [] }
+        let menuLevel = Int(CGWindowLevelForKey(.mainMenuWindow))
+        return windows.compactMap { window in
+            guard window[kCGWindowOwnerName as String] as? String == "Window Server",
+                  window[kCGWindowLayer as String] as? Int == menuLevel,
+                  let bounds = window[kCGWindowBounds as String] as? [String: Any],
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+            else { return nil }
+            // Core Graphics measures from the top-left of the primary display; AppKit from its bottom-left.
+            return CGRect(x: rect.minX, y: primaryHeight - rect.maxY, width: rect.width, height: rect.height)
         }
     }
 
@@ -254,6 +367,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         // Requests and running work belong to the old folder; undismissed completions are kept, now uncertain.
         queue = AttentionQueue(snapshot: queue.snapshot, observingSince: Date().timeIntervalSince1970)
         reminderPresentation.dismiss()
+        questionPresentation.dismiss()
         completionPresentation = Attention(restored: queue.items.contains { $0.kind == .completion })
         eventsPath = url.path
         UserDefaults.standard.set(eventsPath, forKey: "approvalEventsPath")
@@ -272,7 +386,36 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             self.setupCapabilities = snapshot.capabilities
             self.setupPlan = snapshot.plan
             self.setupStatus = snapshot.status
+            self.adoptInstalledEventsFolder(roots)
+            // Until Codex is delivering events, the controls window is the only way to finish setup,
+            // so a launch that finds setup incomplete shows it without waiting for a reopen.
+            if !self.shownControlsForSetup, self.previewMode == nil {
+                self.shownControlsForSetup = true
+                if case .connected = snapshot.status {} else { self.showControls() }
+            }
         }
+    }
+    private var shownControlsForSetup = false
+
+    /// A connected install delivers to Steer's own events folder; watch it even if an earlier lab
+    /// folder was chosen or a previous Configure attempt ended before recording the path.
+    private func adoptInstalledEventsFolder(_ roots: CodexSetupRoots) {
+        guard previewMode == nil, Companion.argumentValue(for: "--reminder-events") == nil,
+              Companion.argumentValue(for: "--desktop-events") == nil else { return }
+        switch setupStatus {
+        case .connected, .configuredAwaitingRestart, .permissionRequired: break
+        default: return
+        }
+        let installed = roots.eventsDirectory.path
+        guard eventsPath != installed else { return }
+        queue = AttentionQueue(snapshot: queue.snapshot, observingSince: Date().timeIntervalSince1970)
+        reminderPresentation.dismiss()
+        questionPresentation.dismiss()
+        completionPresentation = Attention(restored: queue.items.contains { $0.kind == .completion })
+        eventsPath = installed
+        UserDefaults.standard.set(installed, forKey: "approvalEventsPath")
+        nextScan = 0
+        refresh()
     }
 
     func configureCodex() {
@@ -291,7 +434,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                 return
             }
             let helperURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/SteerHook")
-            guard let helper = CodexSetupDetection.boundedRegularData(at: helperURL, maximum: 1_048_576) else {
+            guard let helper = CodexSetupDetection.boundedRegularData(at: helperURL, maximum: CodexSetupLimits.maximumFileSize) else {
                 self.setupMessage = "The bundled Steer helper is unavailable. Reinstall Steer and try again."
                 return
             }
@@ -389,25 +532,31 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
 
     func scanReminders() {
         let now = ProcessInfo.processInfo.systemUptime
-        guard !eventsPath.isEmpty, !scanning, now >= nextScan else { return }
+        guard previewMode == nil, !eventsPath.isEmpty, !scanning, now >= nextScan else { return }
         scanning = true
         nextScan = now + 2
         let events = URL(fileURLWithPath: eventsPath)
         let rolloutRoot = Companion.argumentValue(for: "--reminder-rollouts").map { URL(fileURLWithPath: $0) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
+        let readStateURL = desktopReadStateEnabled ? Companion.desktopReadStateURL : nil
+        let namesURL = Companion.threadNamesURL
         Task { @MainActor in
             let result = await Task.detached {
-                (ReminderReader.scan(events: events, rollouts: rolloutRoot), DesktopEventReader.read(from: events))
+                (ReminderReader.scan(events: events, rollouts: rolloutRoot), DesktopEventReader.read(from: events),
+                 readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:])
             }.value
             let scan = result.0
             let desktopEvents = result.1
+            let readState = result.2
             guard eventsPath == events.path else { scanning = false; refresh(); return }
+            if threadNames != result.3 { threadNames = result.3 }
             cliSessions = scan.cliSessions
             liveCLI = scan.cliState.liveSessions
             let previous = Set(queue.items.map(\.id))
             // A receipt found on disk is not a verified live interaction: such a request enters handed
             // back and, when a real helper receipt exists, a no-decision record releases it to Codex at once.
             let unverified = queue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970)
+            applyDesktopReadState(readState, enabled: readStateURL != nil)
             for request in unverified where ApprovalReceipts.existing(for: request.id, in: events) != nil {
                 _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision,
                                                                  decidedAt: Date().timeIntervalSince1970), in: events)
@@ -419,12 +568,26 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             let current = queue.items
             let newItems = current.filter { !previous.contains($0.id) }
             let newCompletions = newItems.compactMap(\.completion)
+            if let newest = newItems.filter({ $0.completion?.uncertain == false }).max(by: { $0.arrivedAt < $1.arrivedAt }) {
+                latestNewCompletion = newest.id
+            }
+            if let newest = newItems.filter({ $0.kind == .actionableRequest || $0.kind == .handedBackRequest })
+                .max(by: { $0.arrivedAt < $1.arrivedAt }) {
+                latestNewRequest = newest.id
+            }
+            let newQuestions = newItems.filter { $0.kind == .question }
+            if let newest = newQuestions.max(by: { $0.arrivedAt < $1.arrivedAt }) { latestNewQuestion = newest.id }
             if newCompletions.contains(where: { !$0.uncertain }) { completionPresentation.enqueue() }
             else if !newCompletions.isEmpty, !completionPresentation.pending { completionPresentation = Attention(restored: true) }
             if ghosttyEnabled && newCompletions.contains(where: { $0.source == .cli }) { nextGhosttyScan = 0 }
             if !current.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.dismiss() }
             else if newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.enqueue() }
             if !current.contains(where: { $0.kind == .completion }) { completionPresentation.dismiss() }
+            // A question posed before this launch is shown but does not pop or chime: the user may
+            // already be looking at it, and Steer was not observing when it arrived.
+            if !current.contains(where: { $0.kind == .question }) { questionPresentation.dismiss() }
+            else if newQuestions.contains(where: { $0.arrivedAt >= Companion.launchedAt }) { questionPresentation.enqueue() }
+            else if !newQuestions.isEmpty, !questionPresentation.pending { questionPresentation = Attention(restored: true) }
             saveCompletions()
             scanning = false
             refresh()
@@ -445,6 +608,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                 if let completion = item.completion { row["turn"] = completion.turn.uuidString; row["uncertain"] = completion.uncertain
                                                      row["source"] = completion.source.rawValue }
                 if let request = item.request { row["request"] = request.id.uuidString; row["state"] = "\(request.state)" }
+                if let question = item.question { row["call_id"] = question.callID; row["turn"] = question.turn.uuidString
+                                                  row["source"] = question.source.rawValue }
                 return row
             },
             "released_unverified_requests": unverified.map { $0.id.uuidString },
@@ -464,13 +629,21 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         checkApprovalFocus()
         checkGhosttyFocus()
         // App identity only: no window contents, task titles, or accessibility queries.
-        let codexForeground = desktopAdapter.codexForeground()
+        // Preview screenshots ignore app activation; every real run keeps the foreground rule.
+        let codexForeground = previewMode == nil ? desktopAdapter.codexForeground() : false
         desktopForeground = codexForeground == true
         // Desktop decision transport is unproven: release every desktop request at once.
-        queue.items.compactMap(\.request)
-            .filter { $0.state == .actionable && ApprovalHandoff.releasesOnReceipt(source: $0.source) }
-            .forEach(handBackApproval)
-        let interacting = panelInteraction
+        if previewMode == nil {
+            queue.items.compactMap(\.request)
+                .filter { $0.state == .actionable && ApprovalHandoff.releasesOnReceipt(source: $0.source) }
+                .forEach(handBackApproval)
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        let pointerInside = pointerInsidePanel
+        if !pointerInside { hoverSuppressed = false }
+        hoverHeld = hoverHold.update(pointerInside: pointerInside && !hoverSuppressed, now: now)
+        let interacting = NotchInteraction.isActive(pointerInside: hoverHeld, keyboardFocus: panel.hasDeliberateKeyboardFocus)
+        if !interacting { manualOpen = false }
         var next = attention
         let firstPresentation = next.update(codexForeground: codexForeground, hovering: interacting,
                                             now: ProcessInfo.processInfo.systemUptime)
@@ -479,8 +652,14 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         }
         if firstPresentation && !muted { NSSound(named: "Glass")?.play() }
         // Use the same visibility as the count and rows, including CLI reminders.
-        _ = reminderPresentation.update(codexForeground: visibleReminders.isEmpty, hovering: interacting,
-                                        now: ProcessInfo.processInfo.systemUptime)
+        let firstReminderPresentation = reminderPresentation.update(codexForeground: visibleReminders.isEmpty, hovering: interacting,
+                                                                    now: ProcessInfo.processInfo.systemUptime)
+        if firstReminderPresentation {
+            let requests = queue.items.filter { $0.kind == .actionableRequest || $0.kind == .handedBackRequest }
+            if let id = latestNewRequest, requests.contains(where: { $0.id == id }) { spotlight.present(id, now: now) }
+            else if let newest = requests.max(by: { $0.arrivedAt < $1.arrivedAt }) { spotlight.present(newest.id, now: now) }
+            latestNewRequest = nil
+        }
         var nextCompletionPresentation = completionPresentation
         let ghosttyFocus: CompletionFocus
         switch ghosttyFocusState {
@@ -505,12 +684,44 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             now: ProcessInfo.processInfo.systemUptime
         )
         completionPresentation = nextCompletionPresentation
-        if CompletionSound.shouldPlay(firstPresentation: firstCompletionPresentation, muted: muted) {
+        if firstCompletionPresentation {
+            let completions = queue.items.filter { $0.completion?.uncertain == false }
+            if let id = latestNewCompletion, completions.contains(where: { $0.id == id }) { spotlight.present(id, now: now) }
+            else if let newest = completions.max(by: { $0.arrivedAt < $1.arrivedAt }) { spotlight.present(newest.id, now: now) }
+            latestNewCompletion = nil
+        }
+        // A question pops under the same away-from-Codex rule as a completion; Ghostty focus is
+        // not consulted because the question stays pending until Codex records the answer.
+        let canPresentQuestion = queue.items.contains { item in
+            guard let question = item.question else { return false }
+            return CompletionVisibility.allows(source: question.source, codexForeground: codexForeground, ghosttyFocus: .disabled)
+        }
+        let firstQuestionPresentation = questionPresentation.update(codexForeground: canPresentQuestion ? codexForeground : true,
+                                                                    hovering: interacting, now: ProcessInfo.processInfo.systemUptime)
+        if firstQuestionPresentation {
+            let questions = queue.items.filter { $0.kind == .question }
+            if let id = latestNewQuestion, questions.contains(where: { $0.id == id }) { spotlight.present(id, now: now) }
+            else if let newest = questions.max(by: { $0.arrivedAt < $1.arrivedAt }) { spotlight.present(newest.id, now: now) }
+            latestNewQuestion = nil
+        }
+        if let mode = previewMode, mode == "spotlight", let id = previewSpotlight { spotlight.present(id, now: now) }
+        spotlightItem = spotlight.update(interacting: interacting, now: now)
+        switch previewMode {
+        case "expanded": showAll = true
+        case "collapsed", "spotlight": showAll = false
+        default: showAll = interacting || manualOpen
+        }
+        expanded = showAll || spotlightItem != nil || attention.expanded
+        // Sound follows the card opening: the frame below is set in the same pass, so the chime
+        // lands as the card lands. Muted, restored, and foreground cases never reach here.
+        if CompletionSound.shouldPlay(firstPresentation: firstCompletionPresentation || firstQuestionPresentation, muted: muted) {
             NSSound(named: "Glass")?.play()
         }
         guard DesktopVisibility.isVisible(hasActivity: count > 0, codexForeground: codexForeground) else {
             panel.orderOut(nil)
             hovering = false
+            targetFrame = .zero
+            contentHeight = 0
             currentDisplayID = nil
             return
         }
@@ -520,9 +731,30 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                                                          current: currentDisplayID, interacting: interacting && panel.isVisible)
         else { panel.orderOut(nil); currentDisplayID = nil; return }
         currentDisplayID = display.id
-        let frame = NotchPlacement.frame(on: display, expanded: expanded, rows: orderedAttentionItems.count,
-                                         extraRows: attention.pending)
-        if panel.frame != frame { panel.setFrame(frame, display: true) }
+        let layout = NotchPlacement.strip(on: display, expanded: expanded)
+        if stripLayout != layout { stripLayout = layout }
+        let rows = showAll ? orderedAttentionItems.count : (spotlightItem == nil ? 0 : 1)
+        var frame = contentHeight > 0
+            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight)
+            : NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
+                                   extraRows: attention.pending && (showAll || spotlightItem == nil))
+        // With no menu bar and no housing the strip rests above the screen edge and slides in for
+        // the pointer at the top edge or an open panel, so it does not cover a full-screen app.
+        if NotchTuck.isTucked(display: display, pointer: NSEvent.mouseLocation, interacting: interacting, open: expanded) {
+            frame = NotchTuck.tuckedFrame(frame)
+        }
+        if targetFrame != frame {
+            targetFrame = frame
+            if reduceMotion || !panel.isVisible {
+                panel.setFrame(frame, display: true)
+            } else {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.18
+                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    panel.animator().setFrame(frame, display: true)
+                }
+            }
+        }
         // Never makes the panel key: an automatic notification does not take input from the user's app.
         if !panel.isVisible { panel.orderFrontRegardless() }
     }
@@ -532,6 +764,11 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         attention.collapse()
         reminderPresentation.collapse()
         completionPresentation.collapse()
+        questionPresentation.collapse()
+        spotlight.clear()
+        manualOpen = false
+        hoverSuppressed = true
+        hoverHold = HoverHold()
         if panel.isKeyWindow {
             panel.orderOut(nil)
             NSWorkspace.shared.frontmostApplication?.activate()
@@ -567,8 +804,28 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             // Navigation never calls dismissTest or writes the saved completion flag.
         }
     }
+    /// Acknowledges desktop completions the Codex desktop app itself no longer flags as unread.
+    /// Only ever removes items; a missing or unparsable file changes nothing and says so.
+    private func applyDesktopReadState(_ snapshot: DesktopReadStateSnapshot?, enabled: Bool) {
+        guard enabled else { desktopReadStateMessage = "Desktop read state: off. Desktop completions clear only by dismissal."; return }
+        guard let snapshot else {
+            desktopReadStateMessage = "Desktop read state: unavailable (\(Companion.desktopReadStateURL.lastPathComponent) missing or in an unexpected format). Desktop completions clear only by dismissal."
+            return
+        }
+        let queued = queue.items.compactMap(\.completion)
+        let acknowledged = DesktopReadAcknowledgment.acknowledged(queued, snapshot: snapshot)
+        for id in acknowledged { queue.dismiss(.completion(id)) }
+        let written = Date(timeIntervalSince1970: snapshot.modifiedAt).formatted(date: .omitted, time: .standard)
+        let tested = CodexSetupRequirements.minimumDesktopVersion
+        let version = setupCapabilities.desktopVersion ?? "unknown"
+        desktopReadStateMessage = "Desktop read state: file written \(written), \(snapshot.unread.count) unread threads"
+            + (acknowledged.isEmpty ? "." : ", cleared \(acknowledged.count) completion\(acknowledged.count == 1 ? "" : "s") this scan.")
+            + (version == tested ? "" : " Format tested with desktop \(tested); installed \(version).")
+    }
+
     /// Persists unacknowledged completions and acknowledgments atomically whenever they change.
     func saveCompletions() {
+        guard previewMode == nil else { return }
         let snapshot = queue.snapshot
         guard snapshot != savedSnapshot else { return }
         if AttentionSnapshotStore.save(snapshot, to: Companion.snapshotURL) { savedSnapshot = snapshot }
@@ -580,6 +837,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         case .cli:
             queue.dismiss(.completion(item.id)); saveCompletions(); refresh()
         }
+    }
+    /// Dismissal is in memory only: a question still pending in the rollout returns after a restart.
+    func dismissQuestion(_ question: AttentionQuestion) {
+        queue.dismiss(.question(question.id)); refresh()
     }
     func openCLI(_ session: UUID) {
         guard !openingTask else { return }
@@ -665,7 +926,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         let now = ProcessInfo.processInfo.systemUptime
         guard !checkingApprovalFocus, now >= nextApprovalFocusScan else { return }
         let requests = queue.items.compactMap(\.request).filter { $0.source == .cli && $0.state == .actionable }
-        guard !requests.isEmpty else { return }
+        guard previewMode == nil, !requests.isEmpty else { return }
         nextApprovalFocusScan = now + 2
         guard ghosttyEnabled else {
             requests.filter { ApprovalHandoff.mustHandBack(source: $0.source, paneFocus: .disabled) }.forEach(handBackApproval)
@@ -733,13 +994,49 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             refresh()
         }
     }
+    /// Opens the whole queue from the strip (a click or VoiceOver activation); it stays open while
+    /// the panel has the pointer or keyboard focus.
     func expand() {
-        reminderPresentation.expand(now: ProcessInfo.processInfo.systemUptime)
-        completionPresentation.expand(now: ProcessInfo.processInfo.systemUptime)
+        manualOpen = true
         attention.expand(now: ProcessInfo.processInfo.systemUptime)
         refresh()
     }
 
+    private var previewSpotlight: AttentionItemID?
+
+    private func seedPreview(_ mode: String) {
+        eventsPath = ""
+        let now = Date().timeIntervalSince1970
+        let working = UUID(uuidString: "01A0916C-337B-4E2A-9D11-0000000000A1")!
+        let finished = UUID(uuidString: "7C2F5D10-88AA-4B7E-8E0B-0000000000B2")!
+        let asking = UUID(uuidString: "3E9D1B44-51C3-4F0A-9A77-0000000000C3")!
+        let details = ApprovalDetails(taskName: "fix auth bug", project: "steer", action: "Run command",
+                                      command: "swift test --filter AuthTests", reason: "Verify the token refresh fix before committing.")
+        let request = AttentionRequest(id: UUID(), source: .cli, session: asking, turn: UUID(), arrivedAt: now - 5, details: details)
+        let completion = AttentionCompletion(source: .desktop, session: finished, turn: UUID(), arrivedAt: now - 2)
+        let running = AttentionRunning(source: .cli, session: working, turn: UUID(), arrivedAt: now - 60)
+        let question = AttentionQuestion(source: .desktop, session: finished, turn: UUID(), callID: "call_preview", arrivedAt: now - 3,
+                                         prompts: [QuestionPrompt(header: "Nested choices",
+                                                                  question: "Should different variant paths support different levels of choices?",
+                                                                  options: ["Flexible paths (Recommended)", "Same levels throughout"]),
+                                                   QuestionPrompt(header: "First release",
+                                                                  question: "Should the first release also support checkout?",
+                                                                  options: ["Stock lookup only (Recommended)", "Include checkout"])])
+        queue.recordReceipts([request], now: now)
+        queue.apply(completions: [completion], running: [running], now: now)
+        queue.apply(questions: [question])
+        completionPresentation = Attention(restored: true)
+        reminderPresentation = Attention(restored: true)
+        questionPresentation = Attention(restored: true)
+        previewSpotlight = .completion(completion.id)
+        _ = mode
+    }
+
+    func desktopReadStateChanged(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: "desktopReadStateEnabled")
+        if !enabled { desktopReadStateMessage = "Desktop read state: off. Desktop completions clear only by dismissal." }
+        nextScan = 0
+    }
     func ghosttyChanged(_ enabled: Bool) {
         if !enabled && ghosttyUnavailable { return }
         ghosttyUnavailable = false
@@ -802,6 +1099,14 @@ struct Controls: View {
                 .font(.caption).foregroundStyle(.secondary)
             Text(model.ghosttyPermissionVerified ? "Ghostty Automation permission: verified by navigation probe." : "Ghostty Automation permission: not verified; enable controls to let macOS prompt.")
                 .font(.caption).foregroundStyle(.secondary)
+            Toggle("Clear desktop completions Codex marks read", isOn: $model.desktopReadStateEnabled)
+                .onChange(of: model.desktopReadStateEnabled) { _, enabled in
+                    model.desktopReadStateChanged(enabled)
+                }
+            Text("Reads the desktop app's own unread flags from its private state file. A thread counts as read only after it was open in a focused Codex window. Turn off if a Codex update changes the format.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(model.desktopReadStateMessage)
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text("Optional task-link check").font(.callout.weight(.medium))
             HStack {
                 TextField("Local Codex task ID", text: $model.taskID)
@@ -815,159 +1120,7 @@ struct Controls: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(24)
-        .frame(width: 460, height: 700)
-    }
-}
-
-struct Notch: View {
-    @ObservedObject var model: Companion
-    @FocusState private var headerFocused: Bool
-
-    private func rowTitle(_ item: AttentionItem) -> String {
-        switch item.kind {
-        case .actionableRequest: return "Permission needed"
-        case .handedBackRequest: return "Continue in Codex"
-        case .completion: return item.completion?.source == .cli ? "Codex CLI finished" : "Codex desktop finished"
-        case .running: return item.running?.source == .cli ? "Codex CLI working" : "Codex desktop working"
-        }
-    }
-
-    private func sessionLabel(_ item: AttentionItem) -> String { "Session \(item.session.uuidString.prefix(13))" }
-
-    private func rowSubject(_ item: AttentionItem) -> String {
-        guard let task = item.request?.details?.taskName, !task.isEmpty else { return sessionLabel(item) }
-        return "\(task), \(sessionLabel(item))"
-    }
-
-    @ViewBuilder
-    private func attentionRow(_ item: AttentionItem) -> some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading) {
-                Text(rowTitle(item)).font(.headline).accessibilityAddTraits(.isHeader)
-                switch item.kind {
-                case .handedBackRequest:
-                    Text("Handed back with no decision. Steer has not seen an answer yet; this clears when Codex records one, the turn ends, or the session ends.")
-                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                case .completion:
-                    if item.completion?.uncertain == true {
-                        Text("Queued before Steer last started. You may already have seen this result; Steer cannot verify it.")
-                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    }
-                case .actionableRequest, .running:
-                    EmptyView()
-                }
-                Text(sessionLabel(item)).font(.caption).foregroundStyle(.secondary)
-                if let details = item.request?.details {
-                    // Long commands and reasons wrap in full; nothing is truncated with an ellipsis.
-                    Group {
-                        Text("Task: \(details.taskName ?? "Not provided by Codex")")
-                        Text("Project: \(details.project ?? "Not provided by Codex")")
-                        Text("Action: \(details.action ?? "Not provided by Codex")")
-                        Text("Command: \(details.command ?? "Not provided by Codex")").textSelection(.enabled)
-                        Text("Reason: \(details.reason ?? "Not provided by Codex")").textSelection(.enabled)
-                    }
-                    .font(.caption).lineLimit(nil).fixedSize(horizontal: false, vertical: true)
-                    if let longText = details.longText {
-                        DisclosureGroup("Show full request") {
-                            Text(longText).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }.font(.caption).accessibilityLabel("Show full request for \(rowSubject(item))")
-                    }
-                }
-            }
-            .accessibilityElement(children: .combine)
-            Spacer()
-            VStack(alignment: .trailing, spacing: 6) {
-                switch item.kind {
-                case .actionableRequest:
-                    if item.request?.source == .cli {
-                        Button("Approve once") { if let request = item.request { model.decide(request, as: .allowOnce) } }
-                            .accessibilityLabel("Approve once: \(rowSubject(item))")
-                        Button("Deny") { if let request = item.request { model.decide(request, as: .deny) } }
-                            .accessibilityLabel("Deny: \(rowSubject(item))")
-                    }
-                    Button("Open in Codex") {
-                        if let request = item.request { model.openApprovalInCodex(request) }
-                    }.disabled(model.openingTask)
-                        .accessibilityLabel("Open in Codex: \(rowSubject(item))")
-                        .accessibilityHint("Hands this request back to Codex's own prompt.")
-                case .handedBackRequest:
-                    Button("Open in Codex") {
-                        if let request = item.request { model.openAttentionSession(source: request.source, session: request.session) }
-                    }.disabled(model.openingTask)
-                        .accessibilityLabel("Open in Codex: \(rowSubject(item))")
-                case .completion:
-                    Button("Open in Codex") {
-                        if item.completion?.source == .cli { model.openCLI(item.session) }
-                        else { model.openDesktop(item.session) }
-                    }.disabled(model.openingTask)
-                        .accessibilityLabel("Open in Codex: \(rowSubject(item))")
-                    Button("Dismiss") {
-                        if let completion = item.completion { model.dismissAttention(completion) }
-                    }
-                    .accessibilityLabel("Dismiss completion: \(rowSubject(item))")
-                case .running:
-                    Button("Open in Codex") {
-                        if item.running?.source == .cli { model.openCLI(item.session) }
-                        else { model.openDesktop(item.session) }
-                    }.disabled(model.openingTask)
-                        .accessibilityLabel("Open in Codex: \(rowSubject(item))")
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(rowTitle(item)), \(rowSubject(item))")
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Button(action: model.expand) {
-                HStack(spacing: 9) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.mint)
-                    Text(model.workingCount == 0 ? "\(model.toCheckCount) to check" : "\(model.workingCount) working · \(model.toCheckCount) to check")
-                        .font(.system(size: 13, weight: .semibold))
-                    Spacer()
-                    Text("STEER").font(.system(size: 9, weight: .medium)).foregroundStyle(.gray)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focused($headerFocused)
-            // The plain style draws no focus ring of its own; keyboard focus stays visible here.
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.white.opacity(headerFocused ? 0.9 : 0), lineWidth: 2).padding(-4))
-            .accessibilityLabel(model.workingCount == 0 ? "\(model.toCheckCount) to check" : "\(model.workingCount) working, \(model.toCheckCount) to check")
-            .accessibilityHint(model.expanded ? "Steer attention queue is expanded." : "Expands the Steer attention queue.")
-            if model.expanded {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(model.orderedAttentionItems) { item in
-                            attentionRow(item)
-                        }
-                        if model.needsGhosttySetup {
-                            Text("Enable Ghostty controls in Steer’s controls window to open these sessions.").font(.caption)
-                        }
-                        if !model.navigationMessage.isEmpty { Text(model.navigationMessage).font(.caption) }
-                        if model.attention.pending && !model.desktopForeground {
-                            Text("Test notification").font(.headline)
-                            Button("Dismiss", action: model.dismissTest).accessibilityLabel("Dismiss test notification")
-                        }
-                        Text("Click to give the panel keyboard focus; Tab moves between controls; Escape returns to your app.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                .focusSection()
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Steer notch")
-        .padding(.horizontal, 14)
-        .padding(.vertical, model.expanded ? 16 : 8)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .foregroundStyle(.white)
-        .background(.black.opacity(0.96), in: RoundedRectangle(cornerRadius: 15))
-        .overlay(RoundedRectangle(cornerRadius: 15).stroke(.white.opacity(0.12)))
-        .preferredColorScheme(.dark)
-        .onHover { model.hovering = $0 }
+        .frame(width: 460, height: 800)
     }
 }
 

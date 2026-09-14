@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public struct CodexCapabilities: Equatable, Sendable {
     public let cli: Bool
@@ -32,6 +33,12 @@ public struct CodexCapabilities: Equatable, Sendable {
     }
 }
 
+/// Largest file Steer will read or verify during setup: Codex config, hooks, the bundled helper, and
+/// its own install record (which embeds the helper). Anything larger is treated as unreadable.
+public enum CodexSetupLimits {
+    public static let maximumFileSize = 20 * 1024 * 1024
+}
+
 public enum CodexSetupRequirements {
     public static let hookEvents = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "Stop", "SessionEnd"]
     public static let helperSource = "steer-hook-v1"
@@ -46,6 +53,17 @@ public enum CodexSetupRequirements {
 
 public enum CodexSetupValidator {
     public static func hasSessionTitle(in config: String) -> Bool {
+        configValue(in: config, table: "tui", key: "terminal_title") == "[\"session-id\"]"
+    }
+
+    /// Codex runs hooks only when `features.hooks` is enabled; without it every Steer hook is ignored.
+    public static func hasHooksEnabled(in config: String) -> Bool {
+        configValue(in: config, table: "features", key: "hooks") == "true"
+    }
+
+    /// The first value written for `table.key`, either as `key` inside `[table]` or as the dotted
+    /// `table.key` at the top level; nil when the config does not set it.
+    static func configValue(in config: String, table: String, key: String) -> String? {
         var section = ""
         for line in config.split(separator: "\n") {
             let trimmed = stripComment(String(line)).trimmingCharacters(in: .whitespaces)
@@ -53,13 +71,12 @@ public enum CodexSetupValidator {
                 section = String(trimmed.dropFirst().dropLast())
                 continue
             }
-            let key = trimmed.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces)
-            guard key == "tui.terminal_title" || (key == "terminal_title" && section == "tui") else { continue }
-            let value = trimmed.split(separator: "=", maxSplits: 1).dropFirst().first?
-                .split(separator: "#", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces)
-            return value == "[\"session-id\"]"
+            let name = trimmed.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces)
+            guard name == "\(table).\(key)" || (name == key && section == table) else { continue }
+            return trimmed.split(separator: "=", maxSplits: 1).dropFirst().first?
+                .split(separator: "#", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces) ?? ""
         }
-        return false
+        return nil
     }
 
     private static func stripComment(_ value: String) -> String {
@@ -113,6 +130,73 @@ public enum CodexConnectionStatus: Equatable, Sendable {
     case conflict(String)
 }
 
+/// Codex runs a non-managed hook only after its exact definition is trusted. Trust is recorded in
+/// config.toml as `[hooks.state."<hooks.json path>:<event>:<group>:<handler>"] trusted_hash = "sha256:…"`,
+/// where the hash covers the normalized handler. This mirrors codex-rs (hooks/src/engine/discovery.rs
+/// `hook_hash` and config/src/fingerprint.rs `version_for_toml`, identical in CLI 0.145.0 and 0.153.4):
+/// SHA-256 of the canonical, key-sorted, compact JSON of the identity. Steer records trust only for
+/// the handlers it installs, which the user approved in the configuration preview.
+public enum CodexHookTrust {
+    public struct Entry: Equatable, Codable, Sendable {
+        public let table: String
+        public let hash: String
+        public init(table: String, hash: String) { self.table = table; self.hash = hash }
+    }
+
+    static let eventLabels = ["SessionStart": "session_start", "UserPromptSubmit": "user_prompt_submit",
+                              "PermissionRequest": "permission_request", "Stop": "stop", "SessionEnd": "session_end"]
+
+    public static func hash(event: String, command: String, timeout: Int) -> String? {
+        guard let label = eventLabels[event] else { return nil }
+        // Codex normalizes before hashing: SessionEnd is clamped to 1…3 s, everything else to ≥ 1 s.
+        let normalizedTimeout = event == "SessionEnd" ? min(max(timeout, 1), 3) : max(timeout, 1)
+        let handler: [String: Any] = ["type": "command", "command": command, "timeout": normalizedTimeout, "async": false]
+        let identity: [String: Any] = ["event_name": label, "hooks": [handler]]
+        guard let data = try? JSONSerialization.data(withJSONObject: identity, options: [.sortedKeys, .withoutEscapingSlashes]) else { return nil }
+        return "sha256:" + SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Config table name for one handler, escaped as a TOML basic string.
+    public static func table(hooksPath: String, event: String, group: Int, handler: Int) -> String? {
+        guard let label = eventLabels[event] else { return nil }
+        let key = "\(hooksPath):\(label):\(group):\(handler)"
+        let escaped = key.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        return "hooks.state.\"\(escaped)\""
+    }
+
+    /// One entry per Steer handler present in `hooks`, keyed by its position the way Codex keys it.
+    public static func entries(hooksPath: String, hooks: Data, command: String) -> [Entry] {
+        guard let object = try? JSONSerialization.jsonObject(with: hooks) as? [String: Any],
+              let events = object["hooks"] as? [String: Any] else { return [] }
+        var result: [Entry] = []
+        for event in CodexSetupRequirements.hookEvents {
+            guard let groups = events[event] as? [[String: Any]] else { continue }
+            for (groupIndex, group) in groups.enumerated() {
+                guard let handlers = group["hooks"] as? [[String: Any]] else { continue }
+                for (handlerIndex, handler) in handlers.enumerated()
+                where handler["type"] as? String == "command" && handler["command"] as? String == command {
+                    let timeout = (handler["timeout"] as? NSNumber)?.intValue ?? 600
+                    guard let table = table(hooksPath: hooksPath, event: event, group: groupIndex, handler: handlerIndex),
+                          let hash = hash(event: event, command: command, timeout: timeout) else { continue }
+                    result.append(Entry(table: table, hash: hash))
+                }
+            }
+        }
+        return result
+    }
+}
+
+/// What Steer wrote for one trust entry, so undo can put back exactly what was there before.
+public struct TrustRecord: Equatable, Codable, Sendable {
+    public let table: String
+    public let hash: String
+    /// A value that already sat under this key before Steer wrote its own; restored on undo.
+    public let previous: String?
+    public init(table: String, hash: String, previous: String?) {
+        self.table = table; self.hash = hash; self.previous = previous
+    }
+}
+
 public struct CodexSetupRoots: Equatable, Sendable {
     public let configDirectory: URL
     public let helperDirectory: URL
@@ -141,11 +225,23 @@ public struct CodexSetupPlan: Sendable {
     let originalHooks: Data
     let configAdded: Bool
     let configTableAdded: Bool
+    /// What this plan adds to config.toml, per line, so undo can remove exactly that and nothing else.
+    let titleAdded: Bool
+    let titleTableAdded: Bool
+    let hooksFlagAdded: Bool
+    let hooksTableAdded: Bool
+    let trustRecords: [TrustRecord]
 
     public init(status: CodexSetupStatus, configChange: String, hooksChange: Data,
                 helperCommand: String, requiresConfigure: Bool,
                 originalConfig: String, originalHooks: Data, configAdded: Bool, configTableAdded: Bool = false,
-                installationID: String = "") {
+                installationID: String = "", titleAdded: Bool? = nil, titleTableAdded: Bool? = nil,
+                hooksFlagAdded: Bool = false, hooksTableAdded: Bool = false, trustRecords: [TrustRecord] = []) {
+        self.trustRecords = trustRecords
+        self.titleAdded = titleAdded ?? configAdded
+        self.titleTableAdded = titleTableAdded ?? configTableAdded
+        self.hooksFlagAdded = hooksFlagAdded
+        self.hooksTableAdded = hooksTableAdded
         self.status = status
         self.configChange = configChange
         self.hooksChange = hooksChange
@@ -161,7 +257,7 @@ public struct CodexSetupPlan: Sendable {
 
 public enum CodexSetupPlanner {
     public static func plan(capabilities: CodexCapabilities, config: String, hooks: Data,
-                            helperPath: URL, eventsPath: URL) -> CodexSetupPlan {
+                            helperPath: URL, eventsPath: URL, hooksPath: URL? = nil) -> CodexSetupPlan {
         guard capabilities.supported, capabilities.cli || capabilities.desktop else {
             return empty(.unsupported(capabilities.unsupportedReason ?? "No supported Codex runtime was detected."), config: config, hooks: hooks)
         }
@@ -181,16 +277,32 @@ public enum CodexSetupPlanner {
         guard let merged = mergeHooks(parsed, command: command) else {
             return empty(.malformed("Codex hooks.json has an unsupported hooks shape and was not changed."), config: config, hooks: hooks)
         }
-        guard let configResult = configWithSessionTitle(config) else {
+        guard let titled = configWithSessionTitle(config) else {
             return empty(.conflict("Codex already has a different tui.terminal_title setting."), config: config, hooks: hooks)
         }
+        guard let hooked = configWithHooksEnabled(titled.value) else {
+            return empty(.conflict("Codex has hooks disabled (features.hooks = false); enable them in config.toml before connecting Steer."), config: config, hooks: hooks)
+        }
         let output = (try? JSONSerialization.data(withJSONObject: merged, options: [.prettyPrinted, .sortedKeys])) ?? hooks
+        // Record Codex's trust for exactly the handlers this plan installs; the preview shows every line.
+        var trusted = hooked.value
+        var trustRecords: [TrustRecord] = []
+        if let hooksPath {
+            for entry in CodexHookTrust.entries(hooksPath: hooksPath.path, hooks: output, command: command) {
+                let written = configSetting(trusted, table: entry.table, key: "trusted_hash", value: "\"\(entry.hash)\"")
+                trusted = written.value
+                trustRecords.append(TrustRecord(table: entry.table, hash: entry.hash, previous: written.previous))
+            }
+        }
+        let configResult = (value: trusted, added: titled.added || hooked.added, tableAdded: titled.tableAdded || hooked.tableAdded)
         let needsConfig = configResult.value != config
         let needsHooks = output != hooks
         return CodexSetupPlan(status: .ready, configChange: configResult.value, hooksChange: output,
                               helperCommand: command, requiresConfigure: needsConfig || needsHooks,
                               originalConfig: config, originalHooks: hooks, configAdded: configResult.added,
-                              configTableAdded: configResult.tableAdded, installationID: installationID)
+                              configTableAdded: configResult.tableAdded, installationID: installationID,
+                              titleAdded: titled.added, titleTableAdded: titled.tableAdded,
+                              hooksFlagAdded: hooked.added, hooksTableAdded: hooked.tableAdded, trustRecords: trustRecords)
     }
 
     private static func empty(_ status: CodexSetupStatus, config: String, hooks: Data) -> CodexSetupPlan {
@@ -394,36 +506,110 @@ public enum CodexSetupPlanner {
         return result
     }
 
-    private static func configWithSessionTitle(_ config: String) -> (value: String, added: Bool, tableAdded: Bool)? {
-        let lines = config.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        var section = ""
-        for line in lines {
-            let trimmed = stripComment(line).trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") { section = String(trimmed.dropFirst().dropLast()); continue }
-            let key = trimmed.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces)
-            let qualified = key == "tui.terminal_title"
-            let local = key == "terminal_title" && section == "tui"
-            guard qualified || local else { continue }
-            let value = trimmed.split(separator: "=", maxSplits: 1).dropFirst().first?
-                .split(separator: "#", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces) ?? ""
-            if value == "[\"session-id\"]" { return (config, false, false) }
-            return nil
+    /// Like `configEnsuring`, but a different existing value is replaced rather than refused; the
+    /// replaced value is returned so undo can restore it. Used only for Steer's own trust entries.
+    static func configSetting(_ config: String, table: String, key: String, value: String) -> (value: String, previous: String?) {
+        if let existing = CodexSetupValidator.configValue(in: config, table: table, key: key) {
+            if existing == value { return (config, nil) }
+            let removed = configRemoving(config, table: table, key: key, value: existing, removeTable: false)
+            return (configEnsuring(removed, table: table, key: key, value: value)?.value ?? config, existing)
         }
-        guard let tui = lines.firstIndex(where: { stripComment($0).trimmingCharacters(in: .whitespaces) == "[tui]" }) else {
+        return (configEnsuring(config, table: table, key: key, value: value)?.value ?? config, nil)
+    }
+
+    /// Removes `key = value` from `[table]` when it still holds exactly that value, leaving every
+    /// other line as it is. With `removeTable`, a table left with nothing but blank lines and
+    /// comments loses its header too. A line the user already changed or removed is left alone.
+    static func configRemoving(_ config: String, table: String, key: String, value: String, removeTable: Bool) -> String {
+        guard CodexSetupValidator.configValue(in: config, table: table, key: key) == value else { return config }
+        var lines = config.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var section = ""
+        var headerIndex: Int?
+        var removed = false
+        for (index, line) in lines.enumerated() {
+            let trimmed = stripComment(line).trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
+                section = String(trimmed.dropFirst().dropLast())
+                if section == table { headerIndex = index }
+                continue
+            }
+            let name = trimmed.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces)
+            guard name == "\(table).\(key)" || (name == key && section == table) else { continue }
+            lines.remove(at: index)
+            removed = true
+            break
+        }
+        guard removed else { return config }
+        if removeTable, let header = headerIndex {
+            var end = header + 1
+            while end < lines.count {
+                let trimmed = stripComment(lines[end]).trimmingCharacters(in: .whitespaces)
+                if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") { break }
+                end += 1
+            }
+            let body = lines[(header + 1)..<end]
+            if body.allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty || $0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }) {
+                lines.removeSubrange(header..<end)
+                while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty, lines.count > 1,
+                      lines[lines.count - 2].trimmingCharacters(in: .whitespaces).isEmpty { lines.removeLast() }
+            }
+        }
+        let joined = lines.joined(separator: "\n")
+        if joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "" }
+        return joined.hasSuffix("\n") ? joined : joined + "\n"
+    }
+
+    /// Removes every hook entry whose command is Steer's, keeping all other hooks in place.
+    static func removingHooks(_ source: [String: Any], command: String) -> [String: Any] {
+        var result = source
+        guard var hooks = source["hooks"] as? [String: Any] else { return source }
+        for event in CodexSetupRequirements.hookEvents {
+            guard let entries = hooks[event] as? [[String: Any]] else { continue }
+            var kept: [[String: Any]] = []
+            for var entry in entries {
+                guard let nested = entry["hooks"] as? [[String: Any]] else { kept.append(entry); continue }
+                let remaining = nested.filter { !($0["type"] as? String == "command" && $0["command"] as? String == command) }
+                if remaining.count == nested.count { kept.append(entry); continue }
+                if !remaining.isEmpty { entry["hooks"] = remaining; kept.append(entry) }
+            }
+            if kept.isEmpty { hooks.removeValue(forKey: event) } else { hooks[event] = kept }
+        }
+        if hooks.isEmpty { result.removeValue(forKey: "hooks") } else { result["hooks"] = hooks }
+        return result
+    }
+
+    private static func configWithSessionTitle(_ config: String) -> (value: String, added: Bool, tableAdded: Bool)? {
+        configEnsuring(config, table: "tui", key: "terminal_title", value: "[\"session-id\"]")
+    }
+
+    private static func configWithHooksEnabled(_ config: String) -> (value: String, added: Bool, tableAdded: Bool)? {
+        configEnsuring(config, table: "features", key: "hooks", value: "true")
+    }
+
+    /// Returns the config with `key = value` present in `[table]`: unchanged when it already holds
+    /// that value, nil when it holds a different one (the user's setting is never overwritten),
+    /// otherwise with the line inserted at the end of the existing table or in a new table appended
+    /// at the end of the file.
+    private static func configEnsuring(_ config: String, table: String, key: String, value: String) -> (value: String, added: Bool, tableAdded: Bool)? {
+        if let existing = CodexSetupValidator.configValue(in: config, table: table, key: key) {
+            return existing == value ? (config, false, false) : nil
+        }
+        let lines = config.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        guard let header = lines.firstIndex(where: { stripComment($0).trimmingCharacters(in: .whitespaces) == "[\(table)]" }) else {
             var next = config
             if !next.isEmpty && !next.hasSuffix("\n") { next += "\n" }
-            next += (next.isEmpty ? "[tui]\n" : "\n[tui]\n") + "terminal_title = [\"session-id\"]\n"
+            next += (next.isEmpty ? "[\(table)]\n" : "\n[\(table)]\n") + "\(key) = \(value)\n"
             return (next, true, true)
         }
-        var nextTable = lines[(tui + 1)...].firstIndex { line in
-            let value = stripComment(line).trimmingCharacters(in: .whitespaces)
-            return value.hasPrefix("[") && value.hasSuffix("]")
+        var nextTable = lines[(header + 1)...].firstIndex { line in
+            let trimmed = stripComment(line).trimmingCharacters(in: .whitespaces)
+            return trimmed.hasPrefix("[") && trimmed.hasSuffix("]")
         } ?? lines.count
-        while nextTable > tui + 1 && lines[nextTable - 1].trimmingCharacters(in: .whitespaces).isEmpty { nextTable -= 1 }
+        while nextTable > header + 1 && lines[nextTable - 1].trimmingCharacters(in: .whitespaces).isEmpty { nextTable -= 1 }
         var updated = lines
-        updated.insert("terminal_title = [\"session-id\"]", at: nextTable)
-        let value = updated.joined(separator: "\n")
-        return (value.hasSuffix("\n") ? value : value + "\n", true, false)
+        updated.insert("\(key) = \(value)", at: nextTable)
+        let joined = updated.joined(separator: "\n")
+        return (joined.hasSuffix("\n") ? joined : joined + "\n", true, false)
     }
 
     private static func mergeHooks(_ source: [String: Any], command: String) -> [String: Any]? {
@@ -528,21 +714,19 @@ public struct CodexSetupInstaller {
         let currentHooks = try readableData(at: roots.hooksURL) ?? Data("{}".utf8)
         if currentConfig == plan.configChange, currentHooks == plan.hooksChange,
            (try? readableData(at: roots.helperURL)) == helper,
-           let state = try? readState(roots), state.command == plan.helperCommand,
-           state.installedConfig == currentConfig, state.installedHooks == currentHooks {
+           let state = try? readState(roots), state.command == plan.helperCommand {
             return status(roots: roots, capabilities: capabilities)
         }
-        let existingState = try? readState(roots)
-        let repairing = existingState.flatMap { state in
-            currentConfig == state.installedConfig && currentHooks == state.installedHooks &&
-            state.command == plan.helperCommand && state.installationID == plan.installationID &&
-            !fileManager.fileExists(atPath: roots.helperURL.path) ? state : nil
-        }
-        if existingState != nil && repairing == nil {
-            throw CodexSetupError.conflict("Existing Steer setup changed after setup; review setup before reconfiguring.")
-        }
-        guard repairing != nil || (currentConfig == plan.originalConfig && currentHooks == plan.originalHooks) else {
+        // The preview must describe the files as they are now; anything else is a race.
+        guard currentConfig == plan.originalConfig, currentHooks == plan.originalHooks else {
             throw CodexSetupError.conflict("Codex configuration changed after the preview. Review setup again.")
+        }
+        // An existing install is re-baselined on the current files. Codex rewrites config.toml on
+        // its own (settings, hook trust), so the files are never required to equal what Steer last
+        // wrote; what is kept from the earlier record is the user's original files and which lines
+        // Steer added, so undo still removes only Steer's own contribution.
+        let repairing = (try? readState(roots)).flatMap { state in
+            state.command == plan.helperCommand && state.installationID == plan.installationID ? state : nil
         }
         if let existing = try? readableData(at: roots.helperURL) {
             guard let state = try? readState(roots), state.helper == existing.base64EncodedString() else {
@@ -580,9 +764,20 @@ public struct CodexSetupInstaller {
                                      originalConfigExisted: repairing?.originalConfigExisted ?? (originalConfig != nil),
                                      originalHooksExisted: repairing?.originalHooksExisted ?? (originalHooks != nil),
                                      originalHelperExisted: repairing?.originalHelperExisted ?? (originalHelper != nil),
-                                     configAdded: repairing?.configAdded ?? plan.configAdded,
-                                     configTableAdded: repairing?.configTableAdded ?? plan.configTableAdded,
-                                     installedAt: Date().timeIntervalSince1970)
+                                     configAdded: (repairing?.configAdded ?? false) || plan.configAdded,
+                                     configTableAdded: (repairing?.configTableAdded ?? false) || plan.configTableAdded,
+                                     installedAt: Date().timeIntervalSince1970,
+                                     titleAdded: (repairing?.titleAdded ?? repairing?.configAdded ?? false) || plan.titleAdded,
+                                     titleTableAdded: (repairing?.titleTableAdded ?? repairing?.configTableAdded ?? false) || plan.titleTableAdded,
+                                     hooksFlagAdded: (repairing?.hooksFlagAdded ?? false) || plan.hooksFlagAdded,
+                                     hooksTableAdded: (repairing?.hooksTableAdded ?? false) || plan.hooksTableAdded,
+                                     trustRecords: plan.trustRecords.map { record in
+                                         // A value Steer itself wrote earlier is never "previous"; keep the first record's.
+                                         if let earlier = repairing?.trustRecords?.first(where: { $0.table == record.table }) {
+                                             return TrustRecord(table: record.table, hash: record.hash, previous: earlier.previous)
+                                         }
+                                         return record
+                                     })
             try atomicWrite(try JSONEncoder().encode(state), to: roots.stateURL)
         } catch let error {
             do {
@@ -615,10 +810,10 @@ public struct CodexSetupInstaller {
             return .malformed("Codex config.toml is not valid enough to verify safely.")
         }
         guard fileManager.fileExists(atPath: roots.helperURL.path) else {
-            if config == state.installedConfig, hooks == state.installedHooks {
+            if CodexSetupValidator.hasRequiredHooks(hooks, command: state.command) {
                 return .repairRequired("Steer's helper is missing; Configure Codex to repair setup.")
             }
-            return .conflict("Steer's helper is missing and Codex setup also changed; review setup before repair.")
+            return .conflict("Steer's helper is missing and its Codex hooks are gone; review setup before repair.")
         }
         var helperDirectory = ObjCBool(false)
         guard fileManager.fileExists(atPath: roots.helperURL.path, isDirectory: &helperDirectory), !helperDirectory.boolValue,
@@ -628,21 +823,33 @@ public struct CodexSetupInstaller {
         guard (try? JSONSerialization.jsonObject(with: hooks) as? [String: Any]) != nil else {
             return .malformed("Codex hooks.json is not valid JSON.")
         }
-        guard CodexSetupValidator.hasSessionTitle(in: config),
-              CodexSetupValidator.hasRequiredHooks(hooks, command: state.command),
-              helper == Data(base64Encoded: state.helper),
+        guard helper == Data(base64Encoded: state.helper),
               let permissions = (try? fileManager.attributesOfItem(atPath: roots.helperURL.path)[.posixPermissions] as? NSNumber)?.intValue,
               permissions & 0o111 != 0 else {
-            return .conflict("Steer setup is present but differs from its installed values.")
+            return .conflict("Steer's helper differs from the one it installed; review setup before repair.")
+        }
+        // Steer owns only its lines and hook entries; the rest of Codex's files may change freely.
+        guard CodexSetupValidator.hasRequiredHooks(hooks, command: state.command) else {
+            return .repairRequired("Steer's Codex hook entries are missing; Configure Codex to repair setup.")
+        }
+        guard CodexSetupValidator.hasSessionTitle(in: config) else {
+            return .repairRequired("Codex's session-ID terminal title is missing; Configure Codex to repair setup.")
+        }
+        guard CodexSetupValidator.hasHooksEnabled(in: config) else {
+            return .repairRequired("Codex hooks are not enabled in config.toml; Configure Codex to repair setup.")
+        }
+        let trustEntries = CodexHookTrust.entries(hooksPath: roots.hooksURL.path, hooks: hooks, command: state.command)
+        guard trustEntries.allSatisfy({ CodexSetupValidator.configValue(in: config, table: $0.table, key: "trusted_hash") == "\"\($0.hash)\"" }) else {
+            return .repairRequired("Codex has not recorded trust for Steer's hooks; Configure Codex to repair setup.")
         }
         guard fileManager.fileExists(atPath: roots.eventsDirectory.path) else {
-            return .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery.")
+            return .configuredAwaitingRestart("Configured; start a new Codex session to verify delivery. Existing sessions keep running without Steer's hooks.")
         }
         guard let files = try? fileManager.contentsOfDirectory(at: roots.eventsDirectory, includingPropertiesForKeys: nil) else {
             return .permissionRequired("Steer's events directory is not readable. Grant access or choose Configure Codex again.")
         }
         guard files.contains(where: { validMetadataEvent($0, installedAt: state.installedAt, installationID: state.installationID) }) else {
-            return .configuredAwaitingRestart("Configured; restart a Codex session and complete Codex's hook-trust review to verify delivery.")
+            return .configuredAwaitingRestart("Configured; start a new Codex session to verify delivery. Existing sessions keep running without Steer's hooks.")
         }
         return .connected
     }
@@ -651,16 +858,48 @@ public struct CodexSetupInstaller {
         let state = try readState(roots)
         guard let currentConfigData = try readableData(at: roots.configURL),
               let currentConfig = String(data: currentConfigData, encoding: .utf8),
-              let currentHooks = try readableData(at: roots.hooksURL),
-              let currentHelper = try readableData(at: roots.helperURL) else {
-            throw CodexSetupError.conflict("Codex or Steer's setup files are missing or unreadable; undo made no changes.")
+              let currentHooks = try readableData(at: roots.hooksURL) else {
+            throw CodexSetupError.conflict("Codex's configuration files are missing or unreadable; undo made no changes.")
         }
-        guard currentConfig == state.installedConfig, currentHooks == state.installedHooks,
-              currentHelper == Data(base64Encoded: state.helper) else {
-            throw CodexSetupError.conflict("Codex or Steer's setup files changed after setup; undo made no changes.")
+        let currentHelper = try readableData(at: roots.helperURL)
+        guard currentHelper == nil || currentHelper == Data(base64Encoded: state.helper) else {
+            throw CodexSetupError.conflict("A different file sits at Steer's helper path; undo made no changes.")
         }
-        let originalConfig = state.originalConfigExisted ? Data(state.originalConfig.utf8) : nil
-        let originalHooks = state.originalHooksExisted ? state.originalHooks : nil
+        // Files still exactly as installed go back to the user's originals byte for byte. Files
+        // Codex or the user changed since lose only the lines and hook entries Steer added.
+        let originalConfig: Data?
+        if currentConfig == state.installedConfig {
+            originalConfig = state.originalConfigExisted ? Data(state.originalConfig.utf8) : nil
+        } else {
+            var reduced = currentConfig
+            if state.titleAdded ?? state.configAdded {
+                reduced = CodexSetupPlanner.configRemoving(reduced, table: "tui", key: "terminal_title", value: "[\"session-id\"]",
+                                                           removeTable: state.titleTableAdded ?? state.configTableAdded)
+            }
+            if state.hooksFlagAdded ?? false {
+                reduced = CodexSetupPlanner.configRemoving(reduced, table: "features", key: "hooks", value: "true",
+                                                           removeTable: state.hooksTableAdded ?? false)
+            }
+            for record in state.trustRecords ?? [] {
+                if let previous = record.previous {
+                    reduced = CodexSetupPlanner.configSetting(reduced, table: record.table, key: "trusted_hash", value: previous).value
+                } else {
+                    reduced = CodexSetupPlanner.configRemoving(reduced, table: record.table, key: "trusted_hash",
+                                                               value: "\"\(record.hash)\"", removeTable: true)
+                }
+            }
+            originalConfig = Data(reduced.utf8)
+        }
+        let originalHooks: Data?
+        if currentHooks == state.installedHooks {
+            originalHooks = state.originalHooksExisted ? state.originalHooks : nil
+        } else {
+            guard let parsed = try? JSONSerialization.jsonObject(with: currentHooks) as? [String: Any] else {
+                throw CodexSetupError.conflict("Codex hooks.json is not valid JSON; undo made no changes.")
+            }
+            let reduced = CodexSetupPlanner.removingHooks(parsed, command: state.command)
+            originalHooks = try JSONSerialization.data(withJSONObject: reduced, options: [.prettyPrinted, .sortedKeys])
+        }
         let originalHelper = Data(base64Encoded: state.helper)
         guard let originalState = try readableData(at: roots.stateURL) else {
             throw CodexSetupError.conflict("Steer setup state is missing or unreadable; undo made no changes.")
@@ -670,7 +909,7 @@ public struct CodexSetupInstaller {
         do {
             try restore(originalConfig, to: roots.configURL)
             try restore(originalHooks, to: roots.hooksURL)
-            try fileManager.removeItem(at: roots.helperURL)
+            if fileManager.fileExists(atPath: roots.helperURL.path) { try fileManager.removeItem(at: roots.helperURL) }
             try fileManager.removeItem(at: roots.stateURL)
             try removeOwnedEvents(in: roots.eventsDirectory, installationID: state.installationID)
             try removeOwnedBackups(in: roots.helperDirectory.appendingPathComponent("backups", isDirectory: true), state: state)
@@ -702,7 +941,7 @@ public struct CodexSetupInstaller {
             throw CodexSetupError.conflict("\(url.lastPathComponent) is a directory; it was not changed.")
         }
         guard let handle = try? FileHandle(forReadingFrom: url),
-              let data = try? handle.read(upToCount: 1_048_577), data.count <= 1_048_576 else {
+              let data = try? handle.read(upToCount: CodexSetupLimits.maximumFileSize + 1), data.count <= CodexSetupLimits.maximumFileSize else {
             throw CodexSetupError.conflict("Codex configuration could not be read; it was not changed.")
         }
         try? handle.close()
@@ -800,7 +1039,7 @@ public struct CodexSetupInstaller {
         ].compactMapValues { $0 }
         let files = try fileManager.contentsOfDirectory(at: backup, includingPropertiesForKeys: nil)
         guard files.count == expected.count,
-              files.allSatisfy({ expected[$0.lastPathComponent] == boundedData(at: $0, maximum: 1_048_576) }) else { return }
+              files.allSatisfy({ expected[$0.lastPathComponent] == boundedData(at: $0, maximum: CodexSetupLimits.maximumFileSize) }) else { return }
         try beforeCleanup?(backup)
         try fileManager.removeItem(at: backup)
         try removeDirectoryIfEmpty(directory)
@@ -835,7 +1074,7 @@ public struct CodexSetupInstaller {
         ].compactMapValues { $0 }
         let files = try fileManager.contentsOfDirectory(at: backup, includingPropertiesForKeys: nil)
         let artifacts = files.compactMap { url -> OwnedArtifact? in
-            guard let expectedData = expected[url.lastPathComponent], let data = boundedData(at: url, maximum: 1_048_576), data == expectedData else { return nil }
+            guard let expectedData = expected[url.lastPathComponent], let data = boundedData(at: url, maximum: CodexSetupLimits.maximumFileSize), data == expectedData else { return nil }
             return OwnedArtifact(url: url, data: data)
         }
         guard files.count == expected.count, artifacts.count == expected.count else { return nil }
@@ -896,4 +1135,9 @@ private struct InstallState: Codable {
     let configAdded: Bool
     let configTableAdded: Bool
     let installedAt: TimeInterval
+    var titleAdded: Bool?
+    var titleTableAdded: Bool?
+    var hooksFlagAdded: Bool?
+    var hooksTableAdded: Bool?
+    var trustRecords: [TrustRecord]?
 }

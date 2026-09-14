@@ -85,3 +85,55 @@ Exact-task focus is therefore blocked by an unverified integration contract, not
 The user accepted app-level visibility for desktop MVP: hide the notch while Codex is foreground and show it while away when attention items exist. Keep completions queued until explicit dismissal; foregrounding Codex never marks all tasks read. A future verified selected-task signal can restore the original task-specific behavior. Native app activation is the candidate implementation, not live-tested in this investigation.
 
 Tradeoff: while viewing task B, the notch would also hide task A's notification. This replaces the earlier exact-task desktop focus requirement. Product code and live app-activation verification are still pending; exact-task focus no longer blocks the desktop MVP. Under the existing unknown-focus rule, direct desktop approvals remain native unless a separate accepted policy and safe approval integration are established. This adjustment alone does not complete #2 or unblock direct approvals.
+
+## Read-state mechanism in the installed desktop app: 2026-09-14
+
+Read-only inspection of `/Applications/ChatGPT.app` (bundle `com.openai.codex`, the running installation) by extracting `Contents/Resources/app.asar` into a scratch directory. No app code was copied into the product and no IPC connection was attempted. Build-specific files: `webview/assets/app-initial-cadb12d4a15e.js` (renderer), `webview/assets/local-conversation-thread-40db5af470f5.js` (conversation view), `.vite/build/window-all-closed-KNH8jchn.js` (main-process state store).
+
+### What "unread" means to the desktop app
+
+Unread is a per-thread boolean, `hasUnreadTurn`, not a per-turn or per-message receipt. It is set to true in four places:
+
+1. `turn/completed` when `shouldMarkUnread` is true. That is true unless the turn's notification decision is `DONT_NOTIFY` (heartbeat turns with empty output, automations with `failed_runs_only` policy) or the turn completed inside an active goal continuation that the app is still streaming as owner. Note that a turn completed while the user is looking at the thread still sets the flag; the view then clears it immediately (below).
+2. `item/permissions/requestApproval`, `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` and `item/tool/requestUserInput` when the request arrives.
+3. A plan-implementation request after a turn completes with an incomplete plan.
+4. Manual "Mark as unread" from the sidebar context menu, and an import path that marks imported threads unread.
+
+An `unreadMessageCount` per thread is kept alongside it. Completing a turn with `DONT_NOTIFY` subtracts that turn's messages, and the flag drops back to false only if the thread had no unread turn before and the count reaches zero.
+
+### What clears it
+
+Only `markConversationAsRead(conversationId)`, reached from:
+
+- The conversation thread view. On mount and on every reactive change it runs a watcher (`$4o` in this build) that requires the Electron window to be focused (`electron-window-focus-changed` → focus atom). While focused and the thread is selected, it calls mark-read whenever the thread is unread, or when the last request, last turn id, last turn status, or a new turn-completed event for this exact thread changes. So the rule is: window focused AND this thread is the selected view AND (a turn completed or a request arrived) → read. A background window never clears anything; switching back to the window re-runs the watcher and clears the selected thread.
+- Clicking a sidebar row for a thread with `hasUnreadTurn`.
+- The sidebar context menu ("Mark as read") and a bulk mark-read action (up to 8 at a time).
+- Cache eviction on archive or delete, which clears the persisted flag.
+
+Read state therefore claims only "the selected thread was visible in a focused window after its latest completion or request". It does not know whether the user scrolled to or read the result, and it does not identify which completed turn was read.
+
+### Where it is stored and how it propagates
+
+- Persisted set: `~/.codex/.codex-global-state.json`, key `electron-persisted-atom-state` → `unread-thread-ids-by-host-v1`, shaped `{ "<hostId>": ["<threadId>", …] }` with host `local` for the local app server. A thread is unread if and only if its id is in the array. The renderer writes it through `setThreadHasUnreadTurn` whenever the in-memory flag changes.
+- The main process persists that key debounced by 500 ms, writing a temp file then renaming over `.codex-global-state.json` and again over `.codex-global-state.json.bak` (atomic replace, so a reader never sees a partial file). On this machine the file is about 1.8 MB and holds many unrelated keys.
+- Cross-window sync: the changing window broadcasts `thread-read-state-changed { hostId, conversationId, hasUnreadTurn }` over the app's private IPC (`~/.codex/ipc/ipc.sock`); other windows apply it without re-broadcasting. This is an internal Electron IPC protocol, not an app-server method, and is versioned per message (`thread-read-state-changed` is at version 2 in this build).
+- Not in the app server: `~/.codex/state_5.sqlite` `threads` has no read column, and the generated app-server schema has no read-state notification. The desktop's own app-server session is the only client that could know, and it keeps the state in the renderer.
+
+### Consequences for Steer
+
+- A supported subscription still does not exist. The only externally observable artifact is the persisted JSON key, which is private, build-specific, debounced, and rewritten as one large file.
+- If Steer ever reads it, the honest interpretation is: "thread X was viewed in a focused Codex window after its most recent completion or request at or before file time T". That is a thread-level fact, not per-completion acknowledgment. Steer could use it conservatively only as evidence to acknowledge a completion whose turn completed before the thread left the unread set and while no newer turn or request has since arrived, with the flag's absence never treated as "unread". Removal by archive or delete also clears the flag, so absence must not be read as viewed either; a thread never in the set at all is indistinguishable from one read long ago.
+- The mechanism matches the glossary: it can only ever downgrade an uncertain completion to acknowledged, never the reverse, and it must fail closed when the file is missing, unreadable, over the size bound, or lacks the key.
+- Adopting it means depending on a private format that can change with any desktop release. If pursued, gate it on the tested desktop version, verify live with two disposable threads (complete A, view B, view A; only the last step may drop A from the set), and keep the dismissal path independent.
+
+### Hook events and Open Vibe Island comparison: 2026-09-14
+
+Hook events in the installed binaries (CLI 0.145.0 and desktop engine 0.153.4): PreToolUse, PermissionRequest, PostToolUse, PreCompact, PostCompact, SessionStart, SessionEnd, UserPromptSubmit, SubagentStart, SubagentStop, Stop, Interrupt. None fires on viewing, focusing, or marking a thread read. Hooks describe execution, not attention.
+
+Open Vibe Island (github.com/Octane0411/open-vibe-island, commit 334c580, 2026-09-03) was read for comparison. It does not detect read state at all and never touches the desktop app's unread set:
+
+- Completion is a session phase set by the Stop hook or by `turn/completed` from its own app-server client. The completion card auto-dismisses on a timer, and the row simply stays in its list until the session ends or the Codex desktop process exits. There is no per-completion acknowledgment and no "read" concept.
+- Its only attention check happens at presentation time: before showing a completion, it asks whether the session's terminal is already frontmost (Ghostty focused terminal id, Terminal tty, iTerm session via AppleScript). If so it suppresses the popup. For the Codex desktop app it returns false, so desktop completions always present.
+- Desktop-app sessions are discovered by connecting a second app-server client and listing threads; visibility is "desktop app is running and thread not ended". That is the approach this project already rejected as not proving which task the user is viewing.
+
+Steer's uncertain-completion and explicit-dismissal model is therefore already stricter than Open Vibe Island's. The desktop unread set described above remains the only source that could add a verified visit signal for desktop threads. It was adopted the same day; see [desktop read state](desktop-read-state.md).

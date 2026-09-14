@@ -1,5 +1,7 @@
 # Codex companion behavior
 
+<!-- impeccable:product-schema 1 -->
+
 ## Current handed-back reminder behavior
 
 Keep Continue in Codex after no-decision handoff, with only Open in Codex. Remove a reminder on evidence that its exact request was resolved: Codex's recorded output for that turn and command (allowed, rejected, or interrupted), structured completion or cancellation of its exact session and turn, or the end of its session. Other turns and other requests remain queued. Presence does not prove approval is still pending, and the row says so: it was handed back with no decision and Steer has not seen an answer yet. Open in Codex on an actionable CLI request hands back at once so Codex's own prompt appears immediately. Accessibility labels and keyboard interaction are covered by [notch placement](notch-placement.md). This supersedes older permission-still-needed wording below. See [approval reconciliation](approval-reconciliation.md).
@@ -7,7 +9,67 @@ Keep Continue in Codex after no-decision handoff, with only Open in Codex. Remov
 
 ## Platform
 
-Build a fresh native macOS app with SwiftUI and AppKit. Keep session and queue rules separate from the platform interface. Other operating systems are outside the initial scope; see [the platform decision](adr/0003-use-native-macos-ui.md).
+macos
+
+Steer is a native macOS app rendering the macOS design language (SwiftUI content inside AppKit panels and windows). Design tooling that only recognizes web, iOS, or Android must not treat this project as web; when guidance is needed, adapt Apple's macOS Human Interface Guidelines, not iOS. See [the platform decision](adr/0003-use-native-macos-ui.md).
+
+## Users
+
+The primary user is the project owner: a developer who runs several Codex sessions at once in the Codex desktop app and in Codex CLI inside Ghostty, and who works in other applications while those sessions run. The job is to know, at a glance and without leaving the current app, which sessions are working, which need an answer, and which have finished, and to get back to the exact session when they choose to.
+
+Other Mac developers with the same setup are a secondary audience once the MVP is proven. Future work should not yet assume unfamiliar users, marketing, or a public first-run flow.
+
+## Product Purpose
+
+Steer keeps the user aware of Codex work while they use other applications. It shows activity and requests for attention in a compact notch panel and lets the user return to the originating session. It exists because Codex's own surfaces only inform the user while they are looking at them.
+
+Success is that the user keeps using Codex exactly as before, never misses an approval or completion while away, and never has Steer approve, dismiss, or mark anything read on their behalf without evidence.
+
+## Positioning
+
+Steer is a safe, exact companion. It never approves automatically, never claims a result was read without a verified signal, and returns the user to the exact session or Ghostty tab rather than to an app. Trustworthiness outranks feature breadth. A general agent dashboard, Codex's own notifications, or Notification Center could not truthfully make the same claim about handoff, acknowledgment, and exact targeting.
+
+## Operating Context
+
+- macOS 14 or later on a Mac, typically with a built-in notch display, sometimes with a second display.
+- Codex desktop app (installed bundle identifies as com.openai.codex) and Codex CLI running directly in Ghostty, one session per unsplit tab.
+- Steer runs as a background menu-bar app (LSUIElement) with a status item, a controls window, and the notch panel. It observes native app activation, Steer-owned Codex lifecycle hooks, and Ghostty tab titles carrying Codex's session ID.
+- Verification rituals: `swift test`, the ad-hoc build script, isolated hook labs and probe scripts under `scripts/`, and human walkthroughs recorded as evidence. Agreed behavior in this file is authoritative; a draft integration is not a proven capability.
+
+## Capabilities and Constraints
+
+Build a fresh native macOS app with SwiftUI and AppKit. Keep session and queue rules (SteerCore) separate from the platform interface (SteerApp). Other operating systems are outside the initial scope.
+
+Confirmed capabilities and rules are detailed in the sections below and in the [domain glossary](../CONTEXT.md): one shared notch on the active display, separate working and to-check counts, a prioritized attention queue, 30-second approval handoff, three-second completion popups with a mutable sound, local persistence across restarts, and exact return to a desktop task or unsplit Ghostty tab.
+
+Terminology is fixed by the glossary: companion, Codex surface, notch, Codex session, approval request, Open in Codex, attention queue, acknowledged completion, uncertain completion, resolution evidence.
+
+Undecided product facts: the completion sound; a global hotkey for keyboard-only entry to the panel; exact desktop conversation focus; Ghostty split panes; the items listed under Open decisions below.
+
+## Brand Commitments
+
+- The name is Steer and is final.
+- No icon, logo, wordmark, or completion sound exists yet. Future work must produce them rather than assume assets.
+- Distribution is a personal ad-hoc signed build from `scripts/build-app.sh`. No App Store, notarization, or public download is planned.
+
+## Evidence on Hand
+
+- Recorded runtime evidence in `docs/evidence/`: CLI approval runtime and resolution, desktop turn start and completion, a desktop user-input question and its answer, notch placement, restart recovery.
+- Human-verified walkthroughs recorded in [prototype.md](prototype.md), [notch-placement.md](notch-placement.md), and the investigation documents.
+- Automated coverage: the SteerCore test suite (97 tests at the time of writing).
+- No testimonials, customers, benchmarks, or screenshots for external audiences exist. Future work must not fabricate them.
+
+## Product Principles
+
+1. Preserve the Codex workflow: Codex stays fully usable when Steer is closed, and Steer never alters the user's real hook or permission configuration to test itself.
+2. Fail closed: a timeout, error, or uncertainty never approves, never dismisses, and never marks anything read.
+3. Say only what is known: the interface distinguishes verified state from uncertain state and never invents a missing reason, name, or read status.
+4. Exact or unavailable: return the user to the precise session or tab, or say it is unavailable, never to an arbitrary target.
+5. Attention, not control: the queue orders what the user sees; it never serializes or supervises Codex execution.
+
+## Accessibility & Inclusion
+
+Keyboard and VoiceOver operation of the notch panel are in scope: every row and button carries a label naming its action and subject, Tab moves through controls once the panel is key, Escape collapses without dismissing, and long commands read in full. Keyboard-only entry currently requires one click; a global hotkey is deferred. Placement follows the pointer's display.
 
 ## Initial supported surfaces
 
@@ -33,11 +95,11 @@ Present one shared notch on the display the user is actively using. On a display
 
 ## Agreed queue experience
 
-Use one shared notch for multiple Codex sessions. Its compact state shows separate counts, such as "3 working · 2 to check". Working counts tasks currently working; to check counts pending approval requests, including requests handed back to Codex, and unacknowledged completions. Clicking expands the queue with approval requests ahead of other activity. This is a queue for the user's attention; it does not serialize Codex execution.
+Use one shared notch for multiple Codex sessions. Its compact state is a black strip fused to the bottom of the menu bar, a little wider than the camera housing, showing three readings on one line: a green pixel sprite that steps while any session is working and stands still otherwise, the task name of the top-priority item (Codex's task name when it provided one, otherwise the shortened session identifier), and a badge counting items to check, hidden at zero. To check counts pending approval requests, including requests handed back to Codex, and unacknowledged completions. Hovering the strip expands the queue with approval requests ahead of other activity, and it collapses shortly after the pointer leaves; clicking gives the panel keyboard focus and keeps it open while focused. This is a queue for the user's attention; it does not serialize Codex execution.
 
 Each approval request has its own 30-second handoff timer starting when the companion receives the request, including while it waits behind other requests. Opening the queue or reaching the request does not restart or extend its timer. Expired requests retain only Open in Codex while permission is still needed.
 
-Queue priority is: actionable notch approvals, requests handed back to Codex that still need an answer, unacknowledged completions, then running tasks. Within each group, order by original arrival time, oldest first. Expiration moves a request into the handed-back group without restarting its timer.
+Queue priority is: actionable notch approvals, question requests waiting for the user's answer, requests handed back to Codex that still need an answer, unacknowledged completions, then running tasks. Within each group, order by original arrival time, oldest first. Expiration moves a request into the handed-back group without restarting its timer.
 
 ## Agreed approval experience
 
@@ -51,15 +113,21 @@ Approval cards show the task name, project, requested command or action, and Cod
 
 The companion preserves the user's existing Codex approval settings and does not introduce approval requests for actions Codex already permits.
 
+## Agreed question experience
+
+When Codex asks the user a question (its request-user-input panel, in the desktop app or CLI), show a "Codex needs an answer" item while the user is away from that Codex surface. The card shows what Codex's own panel shows: the first question's header, its position when there are several ("1 of 2"), the question text, and the numbered option labels; the remaining questions open on request. Option descriptions and the free-text field stay in Codex, and shortened text says so. Offer Open in Codex and Dismiss; the companion never answers for the user.
+
+A fresh question opens its own card for three seconds with the completion sound, under the same rules as a completion; a question already waiting when the companion started is listed without a sound. The item clears on resolution evidence: Codex's recorded answer to that call, the end of its turn, or the end of its session. Dismissal is not remembered across restarts, so an unanswered question returns. While a session waits on a question it is not shown as working. Source: [user-input requests](user-input-requests.md).
+
 ## Agreed completion experience
 
-For desktop completions, present the notification while outside the Codex app; for Ghostty, while outside the originating pane. Expand for three seconds, then collapse it. Keep it open while the user is interacting with it. This completion display timer is separate from the 30-second approval handoff deadline; interaction must not extend an approval deadline. Keep desktop completions in the attention queue until explicitly dismissed. Ghostty completions may also be acknowledged by a verified visit to their originating pane. Collapsing the notch does not acknowledge or remove the completion.
+For desktop completions, present the notification while outside the Codex app; for Ghostty, while outside the originating pane. Expand the panel to that completion's card alone for three seconds, then collapse it; a new approval request opens its own card the same way. Hovering shows the whole queue instead. Keep a card open while the user is interacting with it. This completion display timer is separate from the 30-second approval handoff deadline; interaction must not extend an approval deadline. Keep desktop completions in the attention queue until explicitly dismissed. Ghostty completions may also be acknowledged by a verified visit to their originating pane. Collapsing the notch does not acknowledge or remove the completion.
 
-Play a short completion sound when that notification first appears. Provide a mute control. Reopening the queue does not replay the sound. The specific sound is not yet selected.
+Play a short completion sound as that card opens. Provide a mute control. With Reduce Motion on, the sprite breathes instead of stepping and the panel resizes without animation. Reopening the queue does not replay the sound. The specific sound is not yet selected.
 
 Preserve unacknowledged completions locally across companion restarts. Revalidate pending approval state before offering any active approval controls; never restore an old button as an actionable request solely from saved data. Completion presentation must respect the agreed priority of approval requests.
 
-The companion runs quietly in the background even while the notch is hidden. For desktop, completion acknowledgment requires explicit dismissal; observing a visit is outside this MVP. Store dismissal per completion, not permanently for the session. A completion received while Codex is foreground remains queued for presentation when away. Once presented, foreground/background changes must not replay its sound. Ghostty's verified per-pane acknowledgment remains a separate integration requirement.
+The companion runs quietly in the background even while the notch is hidden. For desktop, completion acknowledgment happens by explicit dismissal or when the desktop app's own unread flag for that thread is cleared after the completion ([desktop read state](desktop-read-state.md)); Steer never marks anything read itself. Store dismissal per completion, not permanently for the session. A completion received while Codex is foreground remains queued for presentation when away. Once presented, foreground/background changes must not replay its sound. Ghostty's verified per-pane acknowledgment remains a separate integration requirement.
 
 If the companion was fully quit when the user visited the result, that visit may not be recoverable. Restored notifications must not be described as authoritatively unread without a verified Codex read-status signal. Retain uncertain completions without replaying their sound and let the user open or dismiss them. Fully quitting the companion stops its background observation.
 
@@ -68,6 +136,8 @@ If the companion was fully quit when the user visited the result, that visit may
 Codex's documented PermissionRequest hook runs before the normal approval prompt. It can return allow or deny, or leave the decision to Codex's normal approval flow. A hook-based notch approval therefore needs an explicit handoff policy; simultaneous actionable prompts in the notch and Codex are not established by this interface. Source: https://learn.chatgpt.com/docs/hooks#permissionrequest (checked 2026-09-11).
 
 This is an integration finding, not a selected transport. Desktop app and CLI behavior still require separate verification.
+
+Codex runs hooks only when `features.hooks = true` is set in config.toml, and runs a non-managed hook only after its exact definition is trusted; trust is recorded per handler in config.toml as `[hooks.state."<hooks.json path>:<event>:<group>:<handler>"] trusted_hash = "sha256:…"`, a SHA-256 of the canonical JSON of the normalized handler (SessionEnd timeouts clamp to 3 s before hashing). Configure Codex sets the feature flag and records trust for exactly the handlers it installs, since the user approved them in the preview; a hook Codex marks as changed reads as repair-required. Verified against seven entries recorded by CLI 0.145.0 and the desktop app's bundled 0.153.4 (checked 2026-09-14). Codex desktop also rewrites config.toml on its own, so Steer owns only its lines and hook entries: status checks their presence, reinstall re-baselines on the current files, and undo removes exactly Steer's additions, restoring the original files verbatim only when they are still byte-identical to the install.
 
 The documented app-server thread/read method retrieves conversation data; it is not a user-view receipt. No authoritative user-view notification was established in the reviewed app-server reference. Exact desktop focus is deferred; Ghostty pane focus still requires technical verification. Source: https://learn.chatgpt.com/docs/app-server (checked 2026-09-11).
 
