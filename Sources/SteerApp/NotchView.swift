@@ -123,11 +123,14 @@ struct Badge: View {
     }
 }
 
-/// Codex's weekly usage limit as a vertical bar: a dark-well track filled in ink from the bottom
+/// One of Codex's usage limits as a vertical bar: a dark-well track filled in ink from the bottom
 /// to the used share, with the percent beside it; an empty track and a dash while Steer has no
-/// current reading. Gray only, per the One Color Rule. Hidden from VoiceOver; the strip label speaks it.
-struct WeeklyLimitReading: View {
-    var limit: CodexWeeklyLimit?
+/// current reading. A dim caption ahead of the bar names a second window ("5h") when two readouts
+/// share the strip; the weekly readout carries none, as it always has. Gray only, per the One
+/// Color Rule. Hidden from VoiceOver; the strip label speaks it.
+struct UsageLimitReading: View {
+    var limit: CodexUsageWindow?
+    var caption: String? = nil
     static let barWidth: CGFloat = 4
     static let barHeight: CGFloat = 14
 
@@ -135,6 +138,7 @@ struct WeeklyLimitReading: View {
 
     var body: some View {
         HStack(spacing: 5) {
+            if let caption { Text(caption).foregroundStyle(NotchStyle.dim) }
             ZStack(alignment: .bottom) {
                 Capsule().fill(NotchStyle.well)
                 Capsule().fill(NotchStyle.ink).frame(height: Self.barHeight * fraction)
@@ -642,6 +646,7 @@ struct Notch: View {
         if sessions > 1 { parts.append("\(sessions) sessions") }
         if summary.working { parts.append("working") }
         if summary.toCheck > 0 { parts.append("\(summary.toCheck) to check") }
+        if let limit = model.currentFiveHourLimit { parts.append("five-hour limit \(limit.percentText) used") }
         if let limit = model.currentWeeklyLimit { parts.append("weekly limit \(limit.percentText) used") }
         else { parts.append("weekly limit unknown") }
         return parts.joined(separator: ", ")
@@ -653,7 +658,8 @@ struct Notch: View {
             Button(action: model.expand) {
                 // One sprite per session (at most three), the overflow mark, and the to-check count
                 // sit together in the wing left of the housing; the weekly limit reading sits in the
-                // wing right of it. The gap between them is the housing itself. The name is read from
+                // wing right of it, with the five-hour reading ahead of it while Codex reports one.
+                // The gap between them is the housing itself. The name is read from
                 // the open queue and the accessibility label, never from the strip. The 8pt content
                 // inset on each side comes out of the wings.
                 let layout = model.stripLayout
@@ -679,7 +685,10 @@ struct Notch: View {
                     Color.clear.frame(width: layout.gap)
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        WeeklyLimitReading(limit: model.currentWeeklyLimit)
+                        if let fiveHour = model.currentFiveHourLimit {
+                            UsageLimitReading(limit: fiveHour, caption: "5h").padding(.trailing, 8)
+                        }
+                        UsageLimitReading(limit: model.currentWeeklyLimit)
                     }
                     .frame(width: max(0, layout.trailing - 8))
                 }
