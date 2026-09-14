@@ -33,12 +33,12 @@ private let external = NotchDisplay(id: 2, frame: CGRect(x: 1512, y: 100, width:
 
 @Test func collapsedPanelIsTheHousingRowWithAWingOnEachSide() {
     let frame = NotchPlacement.frame(on: builtIn, expanded: false, rows: 3, extraRows: false)
-    // Body 64 + 180 + 60 = 304, plus an 8-point ear on each side; exactly the housing height,
+    // Body 112 + 180 + 60 = 352, plus an 8-point ear on each side; exactly the housing height,
     // anchored to the top of the screen, with the gap centered over the housing.
-    #expect(frame == CGRect(x: 756 - 90 - 64 - 8, y: 982 - 32, width: 320, height: 32))
+    #expect(frame == CGRect(x: 756 - 90 - 112 - 8, y: 982 - 32, width: 368, height: 32))
     #expect(frame.maxY == builtIn.frame.maxY)
     let layout = NotchPlacement.strip(on: builtIn, expanded: false)
-    #expect(layout == StripLayout(leading: 64, gap: 180, trailing: 60, height: 32))
+    #expect(layout == StripLayout(leading: 112, gap: 180, trailing: 60, height: 32))
     #expect(frame.minX + NotchPlacement.earRadius + layout.leading + layout.gap / 2 == builtIn.frame.midX)
 }
 
@@ -100,7 +100,7 @@ private let external = NotchDisplay(id: 2, frame: CGRect(x: 1512, y: 100, width:
     #expect(frame.width == 396)
     // The open panel's extra width is shared by both wings so the gap stays over the housing.
     let layout = NotchPlacement.strip(on: builtIn, expanded: true)
-    #expect(layout == StripLayout(leading: 102, gap: 180, trailing: 98, height: 32))
+    #expect(layout == StripLayout(leading: 126, gap: 180, trailing: 74, height: 32))
     #expect(frame.minX + NotchPlacement.earRadius + layout.leading + layout.gap / 2 == builtIn.frame.midX)
     // A measured height smaller than a strip plus one row still leaves room for one row.
     #expect(NotchPlacement.frame(on: builtIn, expanded: true, contentHeight: 10).height == 56)

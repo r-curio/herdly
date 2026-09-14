@@ -123,6 +123,30 @@ struct Badge: View {
     }
 }
 
+/// Codex's weekly usage limit as a vertical bar: a dark-well track filled in ink from the bottom
+/// to the used share, with the percent beside it; an empty track and a dash while Steer has no
+/// current reading. Gray only, per the One Color Rule. Hidden from VoiceOver; the strip label speaks it.
+struct WeeklyLimitReading: View {
+    var limit: CodexWeeklyLimit?
+    static let barWidth: CGFloat = 4
+    static let barHeight: CGFloat = 14
+
+    private var fraction: CGFloat { CGFloat(min(100, max(0, limit?.usedPercent ?? 0)) / 100) }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            ZStack(alignment: .bottom) {
+                Capsule().fill(NotchStyle.well)
+                Capsule().fill(NotchStyle.ink).frame(height: Self.barHeight * fraction)
+            }
+            .frame(width: Self.barWidth, height: Self.barHeight)
+            Text(limit?.percentText ?? "—").foregroundStyle(limit == nil ? NotchStyle.dim : NotchStyle.ink).monospacedDigit()
+        }
+        .font(NotchStyle.mono(11, .medium))
+        .accessibilityHidden(true)
+    }
+}
+
 /// A control in the panel's own vocabulary: a dark well that inverts to light when pressed and
 /// shows a visible ring when it has keyboard focus.
 struct NotchButtonStyle: ButtonStyle {
@@ -175,8 +199,15 @@ struct Notch: View {
         case .handedBackRequest: return "Continue in Codex"
         case .question: return "Codex needs an answer"
         case .completion: return item.completion?.source == .cli ? "Codex CLI finished" : "Codex desktop finished"
-        case .running: return item.running?.source == .cli ? "Codex CLI working" : "Codex desktop working"
+        case .running: return sessionLabel(item)
         }
+    }
+
+    /// Running rows already carry the session name as their title; a CLI session gets its source
+    /// noted where the session label would otherwise sit.
+    private func rowTrailing(_ item: AttentionItem) -> String? {
+        guard item.kind == .running else { return sessionLabel(item) }
+        return item.running?.source == .cli ? "Codex CLI" : nil
     }
 
     private func sessionLabel(_ item: AttentionItem) -> String { StripSummary.sessionLabel(item.session, names: model.threadNames) }
@@ -279,8 +310,10 @@ struct Notch: View {
                 Text(rowTitle(item)).font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
-                Text(sessionLabel(item)).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                    .lineLimit(1).truncationMode(.tail)
+                if let trailing = rowTrailing(item) {
+                    Text(trailing).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                        .lineLimit(1).truncationMode(.tail)
+                }
             }
             switch item.kind {
             case .handedBackRequest:
@@ -361,7 +394,7 @@ struct Notch: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(rowTitle(item)), \(rowSubject(item))")
+        .accessibilityLabel(item.kind == .running ? "Working: \(rowSubject(item))" : "\(rowTitle(item)), \(rowSubject(item))")
     }
 
     private var stripLabel: String {
@@ -371,6 +404,8 @@ struct Notch: View {
         if sessions > 1 { parts.append("\(sessions) sessions") }
         if summary.working { parts.append("working") }
         if summary.toCheck > 0 { parts.append("\(summary.toCheck) to check") }
+        if let limit = model.currentWeeklyLimit { parts.append("weekly limit \(limit.percentText) used") }
+        else { parts.append("weekly limit unknown") }
         return parts.joined(separator: ", ")
     }
 
@@ -378,10 +413,11 @@ struct Notch: View {
         let summary = strip
         VStack(alignment: .leading, spacing: 0) {
             Button(action: model.expand) {
-                // One sprite per session (at most three) sits in the wing left of the housing; the
-                // overflow mark and the count sit in the wing right of it. The gap between them is
-                // the housing itself. The name is read from the open queue and the accessibility
-                // label, never from the strip. The 8pt content inset on each side comes out of the wings.
+                // One sprite per session (at most three), the overflow mark, and the to-check count
+                // sit together in the wing left of the housing; the weekly limit reading sits in the
+                // wing right of it. The gap between them is the housing itself. The name is read from
+                // the open queue and the accessibility label, never from the strip. The 8pt content
+                // inset on each side comes out of the wings.
                 let layout = model.stripLayout
                 HStack(spacing: 0) {
                     HStack(spacing: 6) {
@@ -391,20 +427,21 @@ struct Notch: View {
                         ForEach(summary.sessions, id: \.session) { session in
                             Sprite(working: session.working, reduceMotion: model.reduceMotion, color: session.color)
                         }
+                        if summary.overflow > 0 {
+                            Text("+\(summary.overflow)")
+                                .font(NotchStyle.mono(11, .medium)).monospacedDigit()
+                                .foregroundStyle(NotchStyle.text).lineLimit(1).fixedSize()
+                                .accessibilityLabel("\(summary.overflow) more sessions")
+                        }
+                        if summary.toCheck > 0 { Badge(count: summary.toCheck) }
                         Spacer(minLength: 0)
                     }
                     .padding(.leading, 4)
                     .frame(width: max(0, layout.leading - 8))
                     Color.clear.frame(width: layout.gap)
-                    HStack(spacing: 6) {
+                    HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        if summary.overflow > 0 {
-                            Text("+\(summary.overflow)")
-                                .font(NotchStyle.mono(11, .medium)).monospacedDigit()
-                                .foregroundStyle(NotchStyle.text)
-                                .accessibilityLabel("\(summary.overflow) more sessions")
-                        }
-                        if summary.toCheck > 0 { Badge(count: summary.toCheck) }
+                        WeeklyLimitReading(limit: model.currentWeeklyLimit)
                     }
                     .frame(width: max(0, layout.trailing - 8))
                 }
@@ -450,6 +487,9 @@ struct Notch: View {
                                                value: proxy.size.height + model.stripLayout.height + 13)
                     })
                 }
+                // The queue scrolls without a visible scroller: a scroll bar would be the only
+                // light edge inside the panel and would break its fused shape.
+                .scrollIndicators(.hidden)
                 .focusSection()
             }
         }

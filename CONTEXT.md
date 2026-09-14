@@ -20,6 +20,9 @@ An individual Codex conversation in the desktop app or CLI, distinct from its ho
 **Thread name**:
 The name Codex desktop gives a Codex session and shows in its sidebar. The companion displays it when Codex has recorded one and never invents a substitute; a session without one is labelled by its shortened identifier.
 
+**Weekly limit**:
+Codex's own figure for how much of its weekly usage window is used, read from the newest session rollout. The companion shows it on the strip while the window has not reset and never estimates it itself.
+
 **Approval request**:
 A request from Codex for the user's permission to perform an action. Before handoff, the user can approve it once, deny it, or return to Codex for more context.
 

@@ -70,6 +70,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var desktopReadStateMessage = "Desktop read state: not checked yet."
     /// Codex's own thread names by session, refreshed every scan; unknown sessions keep their identifier.
     @Published var threadNames: [UUID: String] = [:]
+    /// Codex's weekly usage limit from the newest rollout, refreshed every scan; nil until one is read.
+    @Published var weeklyLimit: CodexWeeklyLimit?
+    /// The strip's weekly reading: only a window that has not yet reset is shown.
+    var currentWeeklyLimit: CodexWeeklyLimit? {
+        weeklyLimit.flatMap { $0.isCurrent(now: Date().timeIntervalSince1970) ? $0 : nil }
+    }
     /// `--thread-names <path>` points lab runs at a copy instead of the live Codex index.
     nonisolated static var threadNamesURL: URL {
         if let path = argumentValue(for: "--thread-names") { return URL(fileURLWithPath: path) }
@@ -543,13 +549,15 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         Task { @MainActor in
             let result = await Task.detached {
                 (ReminderReader.scan(events: events, rollouts: rolloutRoot), DesktopEventReader.read(from: events),
-                 readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:])
+                 readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
+                 CodexUsageReader.latest(root: rolloutRoot))
             }.value
             let scan = result.0
             let desktopEvents = result.1
             let readState = result.2
             guard eventsPath == events.path else { scanning = false; refresh(); return }
             if threadNames != result.3 { threadNames = result.3 }
+            if weeklyLimit != result.4 { weeklyLimit = result.4 }
             cliSessions = scan.cliSessions
             liveCLI = scan.cliState.liveSessions
             let previous = Set(queue.items.map(\.id))
@@ -1007,6 +1015,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private func seedPreview(_ mode: String) {
         eventsPath = ""
         let now = Date().timeIntervalSince1970
+        weeklyLimit = CodexWeeklyLimit(usedPercent: 37, resetsAt: now + 3 * 86400)
         let working = UUID(uuidString: "01A0916C-337B-4E2A-9D11-0000000000A1")!
         let finished = UUID(uuidString: "7C2F5D10-88AA-4B7E-8E0B-0000000000B2")!
         let asking = UUID(uuidString: "3E9D1B44-51C3-4F0A-9A77-0000000000C3")!
