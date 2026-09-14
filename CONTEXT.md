@@ -23,6 +23,9 @@ The name Codex desktop gives a Codex session and shows in its sidebar. The compa
 **Weekly limit**:
 Codex's own figure for how much of its weekly usage window is used, read from the newest session rollout. The companion shows it on the strip while the window has not reset and never estimates it itself.
 
+**Five-hour limit**:
+Codex's own figure for how much of its five-hour usage window is used, from the same rollout event as the weekly limit. The companion shows it beside the weekly limit only while Codex reports one that has not reset; a plan without a short window shows nothing in its place.
+
 **Discovered session**:
 A Codex session the companion shows as working before it has observed any of that session's own activity, because Codex's own record shows an unfinished turn and its surface is still alive. Discovery adds only a working indication; it never creates a completion, request, question, or sound.
 

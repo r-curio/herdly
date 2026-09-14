@@ -81,12 +81,14 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var desktopReadStateMessage = "Desktop read state: not checked yet."
     /// Codex's own thread names by session, refreshed every scan; unknown sessions keep their identifier.
     @Published var threadNames: [UUID: String] = [:]
-    /// Codex's weekly usage limit from the newest rollout, refreshed every scan; nil until one is read.
-    @Published var weeklyLimit: CodexWeeklyLimit?
-    /// The strip's weekly reading: only a window that has not yet reset is shown.
-    var currentWeeklyLimit: CodexWeeklyLimit? {
-        weeklyLimit.flatMap { $0.isCurrent(now: Date().timeIntervalSince1970) ? $0 : nil }
-    }
+    /// Codex's usage windows from the newest rollout, refreshed every scan; nil until one is read.
+    @Published var usage: CodexUsageReading?
+    /// The strip's readings: only windows that have not yet reset are shown.
+    var currentUsage: CodexUsageReading? { usage?.current(now: Date().timeIntervalSince1970) }
+    var currentWeeklyLimit: CodexUsageWindow? { currentUsage?.weekly }
+    /// Shown beside the weekly reading only while Codex reports a five-hour window that is still
+    /// running; the wing right of the housing widens for it and narrows back without it.
+    var currentFiveHourLimit: CodexUsageWindow? { currentUsage?.fiveHour }
     /// `--reminder-rollouts <path>` points lab runs at a copy of Codex's sessions tree.
     nonisolated static var rolloutRoot: URL {
         argumentValue(for: "--reminder-rollouts").map { URL(fileURLWithPath: $0) }
@@ -321,8 +323,11 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             "displays": displays.map { ["id": Int($0.id), "frame": rect($0.frame), "top_inset": Double($0.topInset), "physical_notch": $0.hasPhysicalNotch] },
             "pointer": ["x": pointer.x, "y": pointer.y],
             "chosen_display": chosen.map { Int($0.id) } ?? NSNull(),
-            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false)) } ?? NSNull(),
-            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false)) } ?? NSNull(),
+            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false,
+                                                                      fiveHourShown: currentFiveHourLimit != nil)) } ?? NSNull(),
+            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false,
+                                                                                fiveHourShown: currentFiveHourLimit != nil)) } ?? NSNull(),
+            "five_hour_shown": currentFiveHourLimit != nil,
             "panel_frame": rect(panel.frame),
             "codex_foreground": desktopForeground,
             "panel": ["level": panel.level.rawValue, "nonactivating": panel.styleMask.contains(.nonactivatingPanel),
@@ -599,7 +604,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             let readState = result.2
             guard eventsPath == events.path else { scanning = false; refresh(); return }
             if threadNames != result.3 { threadNames = result.3 }
-            if weeklyLimit != result.4 { weeklyLimit = result.4 }
+            if usage != result.4 { usage = result.4 }
             // Sessions already working before their first hook event: shown only with liveness
             // evidence, and only as working (see docs/session-discovery.md).
             let candidates = result.5
@@ -837,13 +842,14 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                                                          current: currentDisplayID, interacting: interacting && panel.isVisible)
         else { panel.orderOut(nil); currentDisplayID = nil; return }
         currentDisplayID = display.id
-        let layout = NotchPlacement.strip(on: display, expanded: expanded)
+        let fiveHourShown = currentFiveHourLimit != nil
+        let layout = NotchPlacement.strip(on: display, expanded: expanded, fiveHourShown: fiveHourShown)
         if stripLayout != layout { stripLayout = layout }
         let rows = showAll ? orderedAttentionItems.count : (spotlightItem == nil ? 0 : 1)
         var frame = contentHeight > 0
-            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight)
+            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, fiveHourShown: fiveHourShown)
             : NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
-                                   extraRows: attention.pending && (showAll || spotlightItem == nil))
+                                   extraRows: attention.pending && (showAll || spotlightItem == nil), fiveHourShown: fiveHourShown)
         // With no menu bar and no housing the strip rests above the screen edge and slides in for
         // the pointer at the top edge or an open panel, so it does not cover a full-screen app.
         if NotchTuck.isTucked(display: display, pointer: NSEvent.mouseLocation, interacting: interacting, open: expanded) {
@@ -1269,7 +1275,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private func seedPreview(_ mode: String) {
         eventsPath = ""
         let now = Date().timeIntervalSince1970
-        weeklyLimit = CodexWeeklyLimit(usedPercent: 37, resetsAt: now + 3 * 86400)
+        usage = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 37, resetsAt: now + 3 * 86400),
+                                  fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: now + 2 * 3600))
         let working = UUID(uuidString: "01A0916C-337B-4E2A-9D11-0000000000A1")!
         let finished = UUID(uuidString: "7C2F5D10-88AA-4B7E-8E0B-0000000000B2")!
         let asking = UUID(uuidString: "3E9D1B44-51C3-4F0A-9A77-0000000000C3")!
