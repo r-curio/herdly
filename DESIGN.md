@@ -81,6 +81,17 @@ components:
   button-notch-disabled:
     backgroundColor: "{colors.well}"
     textColor: "{colors.dim}"
+  option-notch:
+    backgroundColor: "{colors.well}"
+    textColor: "{colors.ink}"
+    digitColor: "the session's sprite highlight"
+    typography: "{typography.body}"
+    rounded: "{rounded.control}"
+    padding: "4pt 8pt"
+  option-notch-chosen:
+    backgroundColor: "the session's sprite body"
+    textColor: "{colors.ground}"
+    fontWeight: 600
   row-title:
     textColor: "{colors.ink}"
     typography: "{typography.title}"
@@ -133,7 +144,7 @@ An achromatic ladder on pure black with a single green, reserved for the sprite.
 - **Seam** (`{colors.seam}`): a one-point line between the strip and the open queue. White at eight percent is the only edge drawn inside the panel.
 
 ### Named Rules
-**The One Color Rule.** Green belongs to the sprite. No badge, title, ring, state, or control may carry it; state is spoken through motion and gray, never through hue.
+**The One Color Rule.** A session's colour belongs to its sprite, and the sprite lends it to exactly one other place: the answer options of that session's question, where the digit is drawn in the session's highlight and the option the user chose fills with the session's body colour under black text. No badge, title, ring, or other control carries hue; every other state is spoken through motion and gray. A question row is headed by its session's standing sprite so the colour on the options reads as "this session", never as a category.
 
 **The Gray Ladder Rule.** Emphasis moves down four fixed steps: ink for what is read first, text for what is read, dim for what is there if needed, well for what is pressable. Do not add a fifth gray.
 

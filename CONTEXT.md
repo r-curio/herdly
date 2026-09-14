@@ -27,7 +27,7 @@ Codex's own figure for how much of its weekly usage window is used, read from th
 A request from Codex for the user's permission to perform an action. Before handoff, the user can approve it once, deny it, or return to Codex for more context.
 
 **Question request**:
-A request from Codex for the user's answer to one or more questions, posed in the Codex surface. The companion surfaces it and returns the user to Codex; it never answers on the user's behalf.
+A request from Codex for the user's answer to one or more questions, posed in the Codex surface. The companion surfaces it, relays the option the user chose in the notch to a CLI session, and otherwise returns the user to Codex; it never chooses an answer itself.
 
 **Open in Codex**:
 The action that returns the user to the Codex session associated with a notch notification.

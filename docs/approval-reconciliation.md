@@ -14,6 +14,12 @@ Matching keys on session, turn, command and receipt time together, never on sess
 
 `AttentionQueue.resolve(requests:)` removes exactly the matched identities and records them so a later scan that cannot read the rollout does not revive them. Completions and other requests are untouched.
 
+## Sub-agent threads (2026-09-14)
+
+Codex desktop spawns sub-agent threads (`thread_spawn`, and `guardian` review threads) as rollouts of their own whose `session_meta` carries `parent_thread_id` (and, for spawned agents, `forked_from_id`). A permission hook raised inside one names the **parent** session and the **sub-agent's** turn, so the turn never appears in the parent's rollout and the request stayed "Continue in Codex" until the parent thread ended. Observed with six requests from two spawned agents under one desktop thread.
+
+`ReminderReader.scan` now, for sessions that still hold a request, reads the heads of rollouts whose file names sort after the parent's (at most 200 per scan) and credits `task_complete`/`turn_aborted` of any rollout naming that session as its parent to the parent session. `AttentionQueue` resolves a request whose exact turn ended this way whichever surface raised it; before, only CLI requests cleared on rollout turn ends and desktop ones waited for the desktop Stop hook, which a sub-agent turn never gets. Two more recorded shapes matter: a sub-agent rollout's `session_id` is the parent's id while `id` is its own, and a forked rollout repeats the parent's header as its second `session_meta` line; the reader accepts exactly those for a child file and still fails closed on any other mismatch. A partial child rollout or a stranger rollout ending the same turn id is not evidence. Covered by `aRequestFromASubAgentTurnClearsWhenTheChildRolloutEndsThatTurn` in `ReminderTests.swift`.
+
 ## Release, reconnection and restart
 
 - **Open in Codex** on an actionable CLI request writes the no-decision record first, then navigates. Codex shows its own prompt within the helper's next poll (20 ms), not at the 30-second deadline. Returning to the originating Ghostty pane still hands back through the focus check. Desktop requests are released on receipt, unchanged.

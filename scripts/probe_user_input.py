@@ -21,6 +21,31 @@ import uuid
 TOOL = "request_user_input"
 MAX_CALL_ID = 256
 MAX_ARGUMENTS = 64 * 1024
+MAX_OPTIONS = 8
+MAX_QUESTIONS = 8
+MAX_DIGIT = 9
+
+
+def offer(question, index, total):
+    """Mirror of QuestionAnswerProgress.offer: what the notch would let the user send for one question."""
+    if index >= MAX_QUESTIONS:
+        return None, "beyond what Steer shows"
+    if not isinstance(question, dict):
+        return None, "unreadable"
+    raw = question.get("options")
+    if raw is None or raw == []:
+        return None, "typed answer"
+    if not isinstance(raw, list) or len(raw) > MAX_OPTIONS:
+        return None, "more options than Steer shows"
+    labels = []
+    for option in raw:
+        label = option.get("label") if isinstance(option, dict) else None
+        if not isinstance(label, str) or not label.strip():
+            return None, "an option label is unreadable"
+        labels.append(label.strip())
+    if len(labels) > MAX_DIGIT:
+        return None, "more options than one digit can name"
+    return labels, None
 
 
 def parse_time(text):
@@ -32,7 +57,7 @@ def parse_time(text):
 
 def evidence(lines, session=None):
     """Mirror of ReminderReader.evidence: (pending, answered, unexpected) for one rollout."""
-    calls, outputs, ended, unexpected = {}, set(), set(), []
+    calls, outputs, ended, unexpected, answers = {}, set(), set(), [], {}
     for index, line in enumerate(lines):
         try:
             event = json.loads(line)
@@ -51,6 +76,13 @@ def evidence(lines, session=None):
         elif event.get("type") == "response_item" and kind == "function_call_output":
             if isinstance(payload.get("call_id"), str):
                 outputs.add(payload["call_id"])
+                recorded = None
+                try:
+                    recorded = json.loads(payload.get("output") or "").get("answers")
+                except (ValueError, AttributeError, TypeError):
+                    recorded = None
+                if isinstance(recorded, dict):
+                    answers[payload["call_id"]] = recorded
         elif event.get("type") == "response_item" and kind == "function_call" and payload.get("name") == TOOL:
             call_id = payload.get("call_id")
             turn = (payload.get("internal_chat_message_metadata_passthrough") or {}).get("turn_id")
@@ -81,6 +113,8 @@ def evidence(lines, session=None):
                 continue
             if call_id not in calls:
                 calls[call_id] = {"call_id": call_id, "turn": turn, "asked_at": at, "questions": questions}
+    for call in calls.values():
+        call["recorded"] = answers.get(call["call_id"])
     pending = [c for c in calls.values() if c["call_id"] not in outputs and c["turn"] not in ended]
     answered = [c for c in calls.values() if c["call_id"] in outputs or c["turn"] in ended]
     pending.sort(key=lambda c: (c["asked_at"], c["call_id"]))
@@ -92,13 +126,27 @@ def describe(call, verdict):
     age = time.time() - call["asked_at"]
     print(f"  {verdict} call {call['call_id']} turn {call['turn'][:8]} asked {when} ({age / 60:.1f} min ago), "
           f"{len(call['questions'])} question(s)")
-    for question in call["questions"]:
+    total = len(call["questions"])
+    for index, question in enumerate(call["questions"]):
         if not isinstance(question, dict):
+            print(f"      Q{index + 1}: unreadable")
             continue
-        labels = [o.get("label") for o in question.get("options", []) if isinstance(o, dict)]
-        print(f"      [{question.get('header', '')}] {question.get('question', '')}")
-        for number, label in enumerate(labels, 1):
-            print(f"        {number}. {label}")
+        labels, reason = offer(question, index, total)
+        other = " (isOther: Codex adds a free-text row the notch never sends)" if question.get("isOther") else ""
+        if labels is None:
+            print(f"      Q{index + 1} [{question.get('header', '')}] {question.get('question', '')}")
+            print(f"        notch: continue in Codex ({reason}){other}")
+        else:
+            print(f"      Q{index + 1} [{question.get('header', '')}] {question.get('question', '')}")
+            print(f"        notch: digits 1-{len(labels)}{other}")
+            for number, label in enumerate(labels, 1):
+                print(f"        {number}. {label}")
+        recorded = call.get("recorded") or {}
+        entry = recorded.get(question.get("id")) if isinstance(recorded, dict) else None
+        if isinstance(entry, dict) and isinstance(entry.get("answers"), list):
+            chosen = entry["answers"]
+            digits = [str(labels.index(a) + 1) if labels and a in labels else "text" for a in chosen]
+            print(f"        recorded: {chosen} (digit {', '.join(digits)})")
 
 
 def report(paths):
@@ -181,6 +229,17 @@ def self_test():
     checks.append(pending == [] and len(unexpected) == 1)
     pending, answered, unexpected = evidence([meta, call("c1")], "other")
     checks.append(pending == [] and len(unexpected) == 1)
+    labels, reason = offer(json.loads(arguments)["questions"][0], 0, 1)
+    checks.append(labels == ["Flexible paths (Recommended)", "Same levels throughout"] and reason is None)
+    checks.append(offer({"header": "h", "question": "q", "options": []}, 0, 1) == (None, "typed answer"))
+    checks.append(offer({"options": [{"label": "a"}, {"description": "no label"}, {"label": "c"}]}, 0, 1)[1] == "an option label is unreadable")
+    checks.append(offer({"options": [{"label": str(n)} for n in range(9)]}, 0, 1)[1] == "more options than Steer shows")
+    checks.append(offer({"options": [{"label": "a"}]}, 8, 9)[1] == "beyond what Steer shows")
+    recorded_output = json.dumps({"timestamp": "2026-09-14T02:21:41.908Z", "type": "response_item",
+                                  "payload": {"type": "function_call_output", "call_id": "c1",
+                                              "output": json.dumps({"answers": {"q": {"answers": ["Same levels throughout"]}}})}})
+    pending, answered, unexpected = evidence([meta, call("c1"), recorded_output], session)
+    checks.append(answered and answered[0]["recorded"] == {"q": {"answers": ["Same levels throughout"]}})
     for number, ok in enumerate(checks, 1):
         print(f"check {number}: {'ok' if ok else 'FAILED'}")
     return 0 if all(checks) else 1
