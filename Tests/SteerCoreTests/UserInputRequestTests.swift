@@ -139,7 +139,7 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     #expect(queue.items.map(\.kind) == [.question])
 
     let partial = Data((meta(session) + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample)
-        + questionOutput(turn: turn, call: "call_1", at: answeredAt).dropLast(3)).utf8)
+        + String(questionOutput(turn: turn, call: "call_1", at: answeredAt).dropLast(3))).utf8)
     let wrongSession = Data((meta(UUID()) + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample)).utf8)
     for data in [partial, wrongSession] {
         let evidence = ReminderReader.evidence(in: data, session: session)
