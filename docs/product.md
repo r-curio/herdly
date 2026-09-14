@@ -33,11 +33,11 @@ Present one shared notch on the display the user is actively using. On a display
 
 ## Agreed queue experience
 
-Use one shared notch for multiple Codex sessions. Its compact state shows separate counts, such as "3 working · 2 to check". Working counts tasks currently working; to check counts pending approval requests, including requests handed back to Codex, and unacknowledged completions. Clicking expands the queue with approval requests ahead of other activity. This is a queue for the user's attention; it does not serialize Codex execution.
+Use one shared notch for multiple Codex sessions. Its compact state is a black strip fused to the bottom of the menu bar, a little wider than the camera housing, showing three readings on one line: a green pixel sprite that steps while any session is working and stands still otherwise, the task name of the top-priority item (Codex's task name when it provided one, otherwise the shortened session identifier), and a badge counting items to check, hidden at zero. To check counts pending approval requests, including requests handed back to Codex, and unacknowledged completions. Hovering the strip expands the queue with approval requests ahead of other activity, and it collapses shortly after the pointer leaves; clicking gives the panel keyboard focus and keeps it open while focused. This is a queue for the user's attention; it does not serialize Codex execution.
 
 Each approval request has its own 30-second handoff timer starting when the companion receives the request, including while it waits behind other requests. Opening the queue or reaching the request does not restart or extend its timer. Expired requests retain only Open in Codex while permission is still needed.
 
-Queue priority is: actionable notch approvals, requests handed back to Codex that still need an answer, unacknowledged completions, then running tasks. Within each group, order by original arrival time, oldest first. Expiration moves a request into the handed-back group without restarting its timer.
+Queue priority is: actionable notch approvals, question requests waiting for the user's answer, requests handed back to Codex that still need an answer, unacknowledged completions, then running tasks. Within each group, order by original arrival time, oldest first. Expiration moves a request into the handed-back group without restarting its timer.
 
 ## Agreed approval experience
 
