@@ -116,6 +116,11 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private let desktopAdapter = DesktopAdapter()
     private var cliSessions: Set<UUID> = []
     private var liveCLI: Set<UUID> = []
+    /// Sessions a Ghostty inventory proved CLI by their session-id title, this launch. They stay CLI
+    /// after the tab closes, and that closing ends them (`ReminderReader.scan`). Memory only.
+    private var knownCLISessions: Set<UUID> = []
+    /// Unix time of the inventory in `ghosttyFocusState`, for dating a session end at the tab's absence.
+    private var ghosttyInventoryAt: Double = 0
     private var checkingGhostty = false
     private var nextGhosttyScan: Double = 0
     private var checkingApprovalFocus = false
@@ -572,10 +577,16 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         let namesURL = Companion.threadNamesURL
         // Ghostty's current tab titles prove which sessions are CLI sessions when the rollout header
         // cannot (a TUI on the app-server daemon is recorded as `vscode`). Empty with controls off.
-        let cliTitles: Set<String> = { if case .known(let snapshot) = ghosttyFocusState { return snapshot.terminalNames }; return [] }()
+        let inventory: GhosttyInventory? = {
+            if case .known(let snapshot) = ghosttyFocusState, snapshot.status == "ok" {
+                return GhosttyInventory(titles: snapshot.terminalNames, takenAt: ghosttyInventoryAt)
+            }
+            return nil
+        }()
+        let known = knownCLISessions
         Task { @MainActor in
             let result = await Task.detached {
-                (ReminderReader.scan(events: events, rollouts: rolloutRoot, cliTitles: cliTitles), DesktopEventReader.read(from: events),
+                (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known), DesktopEventReader.read(from: events),
                  readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
                  CodexUsageReader.latest(root: rolloutRoot))
             }.value
@@ -587,6 +598,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             if weeklyLimit != result.4 { weeklyLimit = result.4 }
             cliSessions = scan.cliSessions
             liveCLI = scan.cliState.liveSessions
+            knownCLISessions.formUnion(scan.titledCLISessions)
             let previous = Set(queue.items.map(\.id))
             // A receipt found on disk is not a verified live interaction: such a request enters handed
             // back and, when a real helper receipt exists, a no-decision record releases it to Codex at once.
@@ -1196,7 +1208,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     func checkGhosttyFocus() {
         let now = ProcessInfo.processInfo.systemUptime
         guard ghosttyEnabled, !checkingGhostty, !openingTask, now >= nextGhosttyScan,
-              !cliItems.isEmpty else { return }
+              !cliItems.isEmpty || !queue.items.isEmpty || !liveCLI.isEmpty || !knownCLISessions.isEmpty else { return }
         checkingGhostty = true
         // Keep the last verified snapshot while a re-check is in flight. Resetting to
         // `.checking` every poll collapsed an already presented CLI popup early.
@@ -1208,6 +1220,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             if ghosttyEnabled, let snapshot {
                 ghosttyPermissionVerified = true
                 ghosttyFocusState = .known(snapshot)
+                ghosttyInventoryAt = Date().timeIntervalSince1970
                 for session in Set(queued.map(\.session)) {
                     if let target = GhosttyMatch.target(session: session, live: liveCLI, snapshot: snapshot), snapshot.selected == target {
                         for item in queued where item.session == session {

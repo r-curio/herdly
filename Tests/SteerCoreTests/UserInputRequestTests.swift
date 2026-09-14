@@ -278,16 +278,41 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     let rollout = rollouts.appendingPathComponent("rollout-2026-09-14T02-20-00-\(session.uuidString.lowercased()).jsonl")
     try (meta(session, source: "vscode") + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample))
         .write(to: rollout, atomically: true, encoding: .utf8)
-    let titled = ReminderReader.scan(events: events, rollouts: rollouts, cliTitles: [GhosttyMatch.title(session), "other tab"])
+    let takenAt = RolloutTimestamp.parse("2026-09-14T02:21:00Z")!
+    let titled = ReminderReader.scan(events: events, rollouts: rollouts,
+                                     ghostty: GhosttyInventory(titles: [GhosttyMatch.title(session), "other tab"], takenAt: takenAt))
     #expect(titled.cliSessions == [session])
+    #expect(titled.titledCLISessions == [session])
     #expect(titled.questions.map(\.id) == [QuestionIdentity(source: .cli, session: session, callID: "call_1")])
     #expect(titled.cliState.liveSessions == [session])
+    #expect(titled.sessionEnds.isEmpty)
     // Only an exact title match counts: a prefix, another session's title, or no titles leaves it desktop.
     for titles in [Set<String>(), ["other tab"], [String(GhosttyMatch.title(session).dropLast())], [session.uuidString.lowercased()]] {
-        let plain = ReminderReader.scan(events: events, rollouts: rollouts, cliTitles: titles)
+        let plain = ReminderReader.scan(events: events, rollouts: rollouts, ghostty: GhosttyInventory(titles: titles, takenAt: takenAt))
         #expect(plain.cliSessions.isEmpty, Comment(rawValue: "\(titles)"))
+        #expect(plain.titledCLISessions.isEmpty)
         #expect(plain.questions.map(\.id) == [QuestionIdentity(source: .desktop, session: session, callID: "call_1")])
     }
+    // A session proved earlier stays CLI, and its tab's absence from a later inventory ends it,
+    // dated at that inventory: the daemon keeps the thread loaded and fires no SessionEnd.
+    let gone = ReminderReader.scan(events: events, rollouts: rollouts, ghostty: GhosttyInventory(titles: ["zsh"], takenAt: takenAt),
+                                   knownCLISessions: [session])
+    #expect(gone.cliSessions == [session] && gone.titledCLISessions.isEmpty)
+    #expect(gone.sessionEnds[session] == takenAt)
+    #expect(gone.cliState.liveSessions.isEmpty && gone.cliState.endedSessions == [session])
+    #expect(gone.questions.map(\.id) == [QuestionIdentity(source: .cli, session: session, callID: "call_1")])
+    // Known but the tab is still there: live. Known with no inventory at all (Ghostty unreadable): live.
+    let still = ReminderReader.scan(events: events, rollouts: rollouts, ghostty: GhosttyInventory(titles: [GhosttyMatch.title(session)], takenAt: takenAt),
+                                    knownCLISessions: [session])
+    #expect(still.cliState.liveSessions == [session] && still.sessionEnds.isEmpty)
+    let blind = ReminderReader.scan(events: events, rollouts: rollouts, ghostty: nil, knownCLISessions: [session])
+    #expect(blind.cliSessions == [session] && blind.cliState.liveSessions == [session] && blind.sessionEnds.isEmpty)
+    // A session ended by an absent tab clears its pending question from the queue as a session end does.
+    var queue = AttentionQueue()
+    _ = queue.apply(scan: titled, desktopEvents: [], now: takenAt - 30)
+    #expect(queue.items.contains { $0.question?.callID == "call_1" })
+    _ = queue.apply(scan: gone, desktopEvents: [], now: takenAt + 1)
+    #expect(!queue.items.contains { $0.question?.callID == "call_1" })
     // The snapshot helper lists every terminal name across windows and tabs.
     let json = #"{"status":"ok","windows":[{"id":"w","tabs":[{"id":"t","terminals":[{"id":"a","name":"\#(GhosttyMatch.title(session))"},{"id":"b","name":"zsh"}]}]}],"selected":null}"#
     let snapshot = try JSONDecoder().decode(GhosttySnapshot.self, from: Data(json.utf8))
