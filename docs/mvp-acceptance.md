@@ -92,7 +92,7 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 
 ## 4. What this does and does not establish
 
-- The build and packaging route is reproducible and machine-checked; the artifact carries a checksum and a manifest naming the commit and toolchain.
+- The build and packaging route is reproducible and machine-checked; the artifact carries a checksum and a manifest naming the commit and toolchain. Reproducible means the same steps and version from the same commit, not byte-identical binaries: two local builds of unchanged app sources produced different `Contents/MacOS/Steer` hashes while the helper's hash matched, so a checksum identifies one artifact rather than the commit.
 - The artifact is an ad-hoc signed development build. A signed or notarized release needs the maintainer's Developer ID identity and has not been produced.
 - Desktop session detection, approval handoff, Ghostty navigation, and restart recovery each have earlier live human evidence on unpackaged builds and automated evidence in the tests and labs, but the integrated pass in section 3 has **not** been run on the packaged app. Until every non-deferred line there is recorded as pass, the MVP is packaged, not verified.
 - Exact desktop task focus (D7) and split-pane targeting (G4 as unavailable) remain deferred by decision, not by omission.
