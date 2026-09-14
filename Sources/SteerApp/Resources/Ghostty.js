@@ -15,8 +15,8 @@ function run(argv) {
     }
     if (request.action === 'snapshot')
         return JSON.stringify({status: 'ok', windows: inventory(), selected: selected()});
-    if (request.action !== 'select') return JSON.stringify({status: 'unknown'});
-    // Recheck the entire inventory immediately before any selection.
+    if (request.action !== 'select' && request.action !== 'answer') return JSON.stringify({status: 'unknown'});
+    // Recheck the entire inventory immediately before any selection or key.
     const matches = [];
     inventory().forEach(w => w.tabs.forEach(t => t.terminals.forEach(p => {
         if (p.name === request.title) matches.push({window_id: w.id, tab_id: t.id,
@@ -28,7 +28,18 @@ function run(argv) {
     if (m.window_id !== target.window_id || m.tab_id !== target.tab_id ||
         m.terminal_id !== target.terminal_id) return JSON.stringify({status: 'unknown'});
     const w = app.windows.byId(target.window_id), t = w.tabs.byId(target.tab_id);
-    app.activateWindow(w);
-    app.selectTab(t);
-    return JSON.stringify({status: 'ok'});
+    if (request.action === 'select') {
+        app.activateWindow(w);
+        app.selectTab(t);
+        return JSON.stringify({status: 'ok'});
+    }
+    // answer: one user-chosen digit (and Enter only where the live check proved it necessary) as
+    // key events to that exact terminal, through Ghostty's own `send key`. No text is ever input.
+    const keys = Array.isArray(request.keys) ? request.keys : [];
+    if (keys.length < 1 || keys.length > 2 || !keys.every(k => /^([1-9]|enter)$/.test(k)))
+        return JSON.stringify({status: 'unknown'});
+    const terminal = t.terminals().find(p => p.id() === target.terminal_id);
+    if (!terminal || terminal.name() !== request.title) return JSON.stringify({status: 'unknown'});
+    for (const k of keys) app.sendKey(k, {to: terminal});
+    return JSON.stringify({status: 'ok', sent: keys});
 }

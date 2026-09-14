@@ -64,6 +64,9 @@ public struct ReminderScan: Sendable {
     public var cliSessions: Set<UUID> = []
     public var liveCLISessions: Set<UUID> = []
     public var cliState = CLIState()
+    /// Sessions whose session-id title was in this scan's Ghostty inventory. The app remembers them
+    /// across scans so a session stays CLI, and can end, after its tab is gone.
+    public var titledCLISessions: Set<UUID> = []
 }
 
 public struct ReminderQueue: Sendable {
@@ -91,6 +94,30 @@ public enum ReminderReader {
         return bytes
     }
 
+    /// The first line of a rollout, read without loading the file; nil when it is longer than `limit`.
+    private static func firstLine(_ url: URL, limit: Int) -> Data? {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? file.close() }
+        guard let bytes = try? file.read(upToCount: limit), let end = bytes.firstIndex(of: 10) else { return nil }
+        return bytes[bytes.startIndex..<end]
+    }
+
+    /// The session id and, for a sub-agent thread, its parent's id from a rollout's `session_meta`.
+    /// Codex desktop records spawned agents and guardian reviews as their own rollouts whose
+    /// `parent_thread_id` (or `forked_from_id`) names the thread that owns them.
+    static func rolloutParent(_ url: URL) -> (session: UUID, parent: UUID?)? {
+        guard let line = firstLine(url, limit: 64 * 1024),
+              let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+              event["type"] as? String == "session_meta",
+              let payload = event["payload"] as? [String: Any],
+              let session = (payload["id"] as? String).flatMap(UUID.init(uuidString:)) else { return nil }
+        let parent = ((payload["parent_thread_id"] as? String) ?? (payload["forked_from_id"] as? String)).flatMap(UUID.init(uuidString:))
+        return (session, parent)
+    }
+
+    /// At most this many rollout heads are read per scan when looking for sub-agent threads.
+    static let maximumChildProbes = 200
+
     public static func completed(in data: Data, session: UUID) -> Set<TurnIdentity> {
         evidence(in: data, session: session).completed
     }
@@ -110,7 +137,9 @@ public enum ReminderReader {
 
     /// Fails closed as a whole: any line that cannot be read yields empty evidence, which the queue
     /// treats as "nothing new this scan", never as resolution or as a new question.
-    public static func evidence(in data: Data, session: UUID) -> RolloutEvidence {
+    /// `owner` is the thread that owns this rollout when it is a sub-agent's: Codex writes the
+    /// child's own id as `id` and the parent's id as `session_id`.
+    public static func evidence(in data: Data, session: UUID, owner: UUID? = nil) -> RolloutEvidence {
         guard data.last == 10, data.count <= 32 * 1024 * 1024 else { return RolloutEvidence() }
         var result = RolloutEvidence()
         var calls: [String: AttentionQuestion] = [:]
@@ -123,8 +152,11 @@ public enum ReminderReader {
                 guard event["type"] as? String == "session_meta",
                       let id = payload["id"] as? String, UUID(uuidString: id) == session else { return RolloutEvidence() }
                 if let explicit = payload["session_id"],
-                   (explicit as? String).flatMap(UUID.init(uuidString:)) != session { return RolloutEvidence() }
-            } else if event["type"] as? String == "session_meta" { return RolloutEvidence() }
+                   (explicit as? String).flatMap(UUID.init(uuidString:)) != (owner ?? session) { return RolloutEvidence() }
+            } else if event["type"] as? String == "session_meta" {
+                // A forked sub-agent rollout repeats its parent's header as its second line.
+                guard let owner, (payload["id"] as? String).flatMap(UUID.init(uuidString:)) == owner else { return RolloutEvidence() }
+            }
             let type = event["type"] as? String
             let kind = payload["type"] as? String
             if type == "event_msg", let kind, ["task_complete", "turn_aborted"].contains(kind) {
@@ -142,9 +174,9 @@ public enum ReminderReader {
                         .flatMap(UUID.init(uuidString:)),
                       let at = (event["timestamp"] as? String).flatMap(RolloutTimestamp.parse),
                       calls[callID] == nil else { continue }
-                let prompts = (payload["arguments"] as? String).flatMap(QuestionPrompt.parse(arguments:)) ?? []
+                let parsed = (payload["arguments"] as? String).flatMap(QuestionPrompt.parseCall(arguments:))
                 calls[callID] = AttentionQuestion(source: .desktop, session: session, turn: turn, callID: callID,
-                                                  arrivedAt: at, prompts: prompts)
+                                                  arrivedAt: at, prompts: parsed?.prompts ?? [], questionCount: parsed?.count)
             }
         }
         for (callID, question) in calls {
@@ -155,7 +187,53 @@ public enum ReminderReader {
         return result
     }
 
-    public static func scan(events: URL, rollouts: URL) -> ReminderScan {
+    /// The one rollout file for a session, found the way `scan` finds it: a `.jsonl` whose name ends
+    /// in the session id. Nil when there is none, more than one, or the tree is too large to walk.
+    public static func rolloutURL(for session: UUID, in rollouts: URL) -> URL? {
+        guard let enumerator = FileManager.default.enumerator(at: rollouts, includingPropertiesForKeys: nil,
+                                                               options: [.skipsHiddenFiles]) else { return nil }
+        let suffix = session.uuidString.lowercased() + ".jsonl"
+        var found: [URL] = []
+        var count = 0
+        while let url = enumerator.nextObject() as? URL {
+            count += 1
+            if count > 50000 { return nil }
+            guard url.pathExtension == "jsonl", url.lastPathComponent.lowercased().hasSuffix(suffix) else { continue }
+            found.append(url)
+        }
+        return found.count == 1 ? found[0] : nil
+    }
+
+    /// The rollout's evidence as of right now, for the pre-send check before a key is relayed.
+    /// Empty when the file cannot be found or read, which the caller treats as "not pending".
+    public static func currentEvidence(for session: UUID, in rollouts: URL) -> RolloutEvidence {
+        guard let url = rolloutURL(for: session, in: rollouts), let bytes = bounded(url, limit: 32 * 1024 * 1024) else {
+            return RolloutEvidence()
+        }
+        return evidence(in: bytes, session: session)
+    }
+
+    /// `ghostty` is Ghostty's current terminal-title inventory and `knownCLISessions` the sessions an
+    /// earlier inventory already proved. A session is a CLI session when its rollout header says
+    /// `source: cli`, when its session-id title is in the inventory, or when it was proved before: a
+    /// TUI attached to Codex's app-server daemon is recorded as `vscode`, the desktop's value, so
+    /// the header alone no longer tells the surfaces apart (CLI 0.154.0, issue #42).
+    ///
+    /// A title-proved session whose title is absent from a later inventory has lost its surface.
+    /// The daemon keeps the thread loaded and fires no SessionEnd, so Steer dates a session end at
+    /// the inventory itself. Only for sessions proved by title: a `source: cli` session in another
+    /// terminal is never in Ghostty and still ends by its own hook.
+    /// `daemonThreads` are the threads Codex's app-server daemon currently has loaded. The desktop
+    /// app runs its own engine, so a loaded thread whose rollout `originator` is not the desktop's
+    /// is a terminal session on the daemon (a TUI, or `codex agents`): CLI, even before or after
+    /// Ghostty shows its title. Such a session with no tab title in an inventory taken at least
+    /// `surfaceGrace` seconds after its SessionStart has no surface, and ends.
+    public static let surfaceGrace: Double = 15
+    public static let desktopOriginator = "Codex Desktop"
+
+    public static func scan(events: URL, rollouts: URL, ghostty: GhosttyInventory? = nil,
+                            knownCLISessions: Set<UUID> = [], daemonThreads: Set<UUID> = []) -> ReminderScan {
+        let cliTitles = ghostty?.titles ?? []
         var result = ReminderScan()
         guard let files = try? FileManager.default.contentsOfDirectory(at: events, includingPropertiesForKeys: [.creationDateKey]),
               files.count <= 4096 else { return result }
@@ -235,12 +313,33 @@ public enum ReminderReader {
                                                                options: [.skipsHiddenFiles]) else { return result }
         var paths: [UUID: [URL]] = [:]
         var count = 0
+        var rolloutFiles: [URL] = []
         while let url = enumerator.nextObject() as? URL {
             count += 1
             if count > 50000 { return result }
             guard url.pathExtension == "jsonl" else { continue }
+            rolloutFiles.append(url)
             for session in sessions where url.lastPathComponent.lowercased().hasSuffix(session.uuidString.lowercased() + ".jsonl") {
                 paths[session, default: []].append(url)
+            }
+        }
+        // A request raised by a sub-agent thread carries the parent's session id and the sub-agent's
+        // turn id, which ends only in the sub-agent's own rollout. For sessions still holding a
+        // request, read the heads of rollouts newer than the parent's (file names sort by start
+        // time) and credit ended turns of any child thread to the parent. Bounded and best effort:
+        // a miss leaves the request waiting, exactly as before.
+        var headReads = 0
+        for session in Set(result.attentionRequests.map(\.session)) {
+            guard let parentFile = paths[session], parentFile.count == 1 else { continue }
+            let parentName = parentFile[0].lastPathComponent
+            for url in rolloutFiles where url.lastPathComponent > parentName && url != parentFile[0] {
+                headReads += 1
+                if headReads > maximumChildProbes { break }
+                guard let head = rolloutParent(url), head.parent == session,
+                      let bytes = bounded(url, limit: 32 * 1024 * 1024) else { continue }
+                let child = evidence(in: bytes, session: head.session, owner: session)
+                result.completed.formUnion(child.completed.map { TurnIdentity(session: session, turn: $0.turn) })
+                result.canceled.formUnion(child.canceled.map { TurnIdentity(session: session, turn: $0.turn) })
             }
         }
         // ponytail: bounded full rereads every two seconds; use cursors if histories grow.
@@ -260,9 +359,25 @@ public enum ReminderReader {
                       event["type"] as? String == "session_meta",
                       let meta = event["payload"] as? [String: Any],
                       (meta["id"] as? String).flatMap(UUID.init(uuidString:)) == session,
-                      meta["source"] as? String == "cli" else { continue }
+                      meta["source"] as? String == "cli" || cliTitles.contains(GhosttyMatch.title(session))
+                        || knownCLISessions.contains(session)
+                        || (daemonThreads.contains(session) && meta["originator"] as? String != desktopOriginator) else { continue }
                 result.cliSessions.insert(session)
                 let sessionHooks = hooks.filter { $0.session_id == session }.sorted { $0.received_at < $1.received_at }
+                if cliTitles.contains(GhosttyMatch.title(session)) {
+                    result.titledCLISessions.insert(session)
+                } else if let ghostty, result.sessionEnds[session] == nil, meta["source"] as? String != "cli" {
+                    // No tab shows this session. Proved by title earlier: its tab closed. Known only
+                    // from the daemon: give a new session time for its tab to be inventoried first.
+                    let started = sessionHooks.first { $0.hook_event_name == "SessionStart" }
+                        .flatMap { RolloutTimestamp.parse($0.received_at) }
+                    let ended = knownCLISessions.contains(session)
+                        || (daemonThreads.contains(session) && started.map { ghostty.takenAt - $0 >= surfaceGrace } == true)
+                    if ended {
+                        result.sessionEnds[session] = ghostty.takenAt
+                        result.cliEvents.append(.sessionEnded(session: session, receivedAt: RolloutTimestamp.format(ghostty.takenAt)))
+                    }
+                }
                 for hook in sessionHooks {
                     switch hook.hook_event_name {
                     case "SessionStart":
@@ -288,6 +403,7 @@ public enum ReminderReader {
         }
         result.cliEvents.sort { $0.receivedAt < $1.receivedAt }
         result.cliState = CLIState.replay(result.cliEvents)
+        result.cliState.end(turns: result.completed.union(result.canceled))
         result.liveCLISessions = result.cliState.liveSessions
         result.attentionRequests = result.attentionRequests.map { request in
             guard result.cliSessions.contains(request.session), request.source != .cli else { return request }

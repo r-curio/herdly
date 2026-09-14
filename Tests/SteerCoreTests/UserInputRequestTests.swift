@@ -60,7 +60,7 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     #expect(question?.turn == turn)
     #expect(question?.arrivedAt == RolloutTimestamp.parse(askedAt))
     #expect(question?.prompts.count == 2)
-    #expect(question?.prompts[0] == QuestionPrompt(header: "Nested choices",
+    #expect(question?.prompts[0] == QuestionPrompt(id: "nested choices", header: "Nested choices",
                                                    question: "Should different variant paths support different levels of choices?",
                                                    options: ["Flexible paths (Recommended)", "Same levels throughout"]))
     #expect(question?.prompts[1].header == "First release")
@@ -109,7 +109,7 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     #expect(prompts?.first?.question?.count == QuestionPrompt.maximumQuestion + 1)
     // Free-text-only questions have no options and are not truncated.
     let text = questionArguments([("Name", "What should the module be called?", [])])
-    #expect(QuestionPrompt.parse(arguments: text) == [QuestionPrompt(header: "Name", question: "What should the module be called?", options: [])])
+    #expect(QuestionPrompt.parse(arguments: text) == [QuestionPrompt(id: "name", header: "Name", question: "What should the module be called?", options: [])])
 }
 
 @Test func aCallWithoutIdTurnOrTimeIsNotAQuestion() {
@@ -210,4 +210,188 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     #expect(after.pendingQuestions.isEmpty)
     #expect(after.answeredQuestions == [identity])
     #expect(after.completed == [TurnIdentity(session: session, turn: turn)])
+}
+
+@Test func optionPositionsAreKeptWhenALabelIsUnreadable() {
+    let root: [String: Any] = ["questions": [["header": "H", "question": "Q",
+                                              "options": [["label": "first"], ["description": "no label"], ["label": "third"]]]]]
+    let arguments = String(decoding: try! JSONSerialization.data(withJSONObject: root), as: UTF8.self)
+    let prompts = try? #require(QuestionPrompt.parse(arguments: arguments))
+    // The list stops where numbering would drift, so a digit never names the wrong option.
+    #expect(prompts?.first?.options == ["first"])
+    #expect(prompts?.first?.optionsComplete == false)
+    #expect(prompts?.first?.truncated == true)
+    let ok = QuestionPrompt.parse(arguments: sample)
+    #expect(ok?.allSatisfy { $0.optionsComplete && !$0.isOther } == true)
+}
+
+@Test func isOtherIsReadPerQuestion() {
+    let root: [String: Any] = ["questions": [["header": "A", "question": "Q", "isOther": true, "options": [["label": "x"]]],
+                                             ["header": "B", "question": "Q", "options": [["label": "y"]]]]]
+    let arguments = String(decoding: try! JSONSerialization.data(withJSONObject: root), as: UTF8.self)
+    let prompts = QuestionPrompt.parse(arguments: arguments)
+    #expect(prompts?.map(\.isOther) == [true, false])
+}
+
+@Test func moreOptionsOrQuestionsThanTheCapAreRecordedAsIncomplete() {
+    let many = questionArguments([("H", "Q", (0..<(QuestionPrompt.maximumOptions + 1)).map { "option \($0)" })])
+    #expect(QuestionPrompt.parse(arguments: many)?.first?.optionsComplete == false)
+    let exact = questionArguments([("H", "Q", (0..<QuestionPrompt.maximumOptions).map { "option \($0)" })])
+    #expect(QuestionPrompt.parse(arguments: exact)?.first?.optionsComplete == true)
+    let questions = questionArguments((0..<(QuestionPrompt.maximumQuestions + 1)).map { ("H\($0)", "Q", ["a", "b"]) })
+    let parsed = QuestionPrompt.parseCall(arguments: questions)
+    #expect(parsed?.count == QuestionPrompt.maximumQuestions + 1)
+    #expect(parsed?.prompts.count == QuestionPrompt.maximumQuestions)
+    let session = UUID(), turn = UUID()
+    let data = Data((meta(session) + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: questions)).utf8)
+    #expect(ReminderReader.evidence(in: data, session: session).pendingQuestions.first?.questionCount == QuestionPrompt.maximumQuestions + 1)
+    #expect(ReminderReader.evidence(in: Data((meta(session) + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: "nope")).utf8),
+                                    session: session).pendingQuestions.first?.questionCount == 0)
+}
+
+@Test func rolloutURLRequiresExactlyOneMatchingFile() throws {
+    let session = UUID()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-rollout-\(UUID().uuidString)")
+    let nested = root.appendingPathComponent("2026/09/14")
+    try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    #expect(ReminderReader.rolloutURL(for: session, in: root) == nil)
+    let first = nested.appendingPathComponent("rollout-2026-09-14T02-20-00-\(session.uuidString.lowercased()).jsonl")
+    try Data(meta(session).utf8).write(to: first)
+    try Data("x".utf8).write(to: nested.appendingPathComponent("rollout-other-\(UUID().uuidString.lowercased()).jsonl"))
+    #expect(ReminderReader.rolloutURL(for: session, in: root)?.resolvingSymlinksInPath() == first.resolvingSymlinksInPath())
+    try Data(meta(session).utf8).write(to: root.appendingPathComponent("rollout-copy-\(session.uuidString.uppercased()).jsonl"))
+    #expect(ReminderReader.rolloutURL(for: session, in: root) == nil)
+}
+
+@Test func aSessionWhoseIdTitlesAGhosttyTabIsCLIWhateverTheRolloutSays() throws {
+    // Through the app-server daemon (CLI 0.154.0) a TUI session is recorded with `source: vscode`,
+    // the desktop's value. The session-id tab title Steer configures is the proof it is a CLI session.
+    let session = UUID(), turn = UUID()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-question-\(UUID().uuidString)")
+    let events = root.appendingPathComponent("events"), rollouts = root.appendingPathComponent("sessions")
+    try FileManager.default.createDirectory(at: events, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: rollouts, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let hook = "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"\(session)\",\"turn_id\":\"\(turn)\",\"received_at\":\"2026-09-14T02:20:14Z\"}"
+    try hook.write(to: events.appendingPathComponent("\(UUID().uuidString).json"), atomically: true, encoding: .utf8)
+    let rollout = rollouts.appendingPathComponent("rollout-2026-09-14T02-20-00-\(session.uuidString.lowercased()).jsonl")
+    try (meta(session, source: "vscode") + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample))
+        .write(to: rollout, atomically: true, encoding: .utf8)
+    let takenAt = RolloutTimestamp.parse("2026-09-14T02:21:00Z")!
+    let titled = ReminderReader.scan(events: events, rollouts: rollouts,
+                                     ghostty: GhosttyInventory(titles: [GhosttyMatch.title(session), "other tab"], takenAt: takenAt))
+    #expect(titled.cliSessions == [session])
+    #expect(titled.titledCLISessions == [session])
+    #expect(titled.questions.map(\.id) == [QuestionIdentity(source: .cli, session: session, callID: "call_1")])
+    #expect(titled.cliState.liveSessions == [session])
+    #expect(titled.sessionEnds.isEmpty)
+    // Only an exact title match counts: a prefix, another session's title, or no titles leaves it desktop.
+    for titles in [Set<String>(), ["other tab"], [String(GhosttyMatch.title(session).dropLast())], [session.uuidString.lowercased()]] {
+        let plain = ReminderReader.scan(events: events, rollouts: rollouts, ghostty: GhosttyInventory(titles: titles, takenAt: takenAt))
+        #expect(plain.cliSessions.isEmpty, Comment(rawValue: "\(titles)"))
+        #expect(plain.titledCLISessions.isEmpty)
+        #expect(plain.questions.map(\.id) == [QuestionIdentity(source: .desktop, session: session, callID: "call_1")])
+    }
+    // A session proved earlier stays CLI, and its tab's absence from a later inventory ends it,
+    // dated at that inventory: the daemon keeps the thread loaded and fires no SessionEnd.
+    let gone = ReminderReader.scan(events: events, rollouts: rollouts, ghostty: GhosttyInventory(titles: ["zsh"], takenAt: takenAt),
+                                   knownCLISessions: [session])
+    #expect(gone.cliSessions == [session] && gone.titledCLISessions.isEmpty)
+    #expect(gone.sessionEnds[session] == takenAt)
+    #expect(gone.cliState.liveSessions.isEmpty && gone.cliState.endedSessions == [session])
+    #expect(gone.questions.map(\.id) == [QuestionIdentity(source: .cli, session: session, callID: "call_1")])
+    // Known but the tab is still there: live. Known with no inventory at all (Ghostty unreadable): live.
+    let still = ReminderReader.scan(events: events, rollouts: rollouts, ghostty: GhosttyInventory(titles: [GhosttyMatch.title(session)], takenAt: takenAt),
+                                    knownCLISessions: [session])
+    #expect(still.cliState.liveSessions == [session] && still.sessionEnds.isEmpty)
+    let blind = ReminderReader.scan(events: events, rollouts: rollouts, ghostty: nil, knownCLISessions: [session])
+    #expect(blind.cliSessions == [session] && blind.cliState.liveSessions == [session] && blind.sessionEnds.isEmpty)
+    // A session ended by an absent tab clears its pending question from the queue as a session end does.
+    var queue = AttentionQueue()
+    _ = queue.apply(scan: titled, desktopEvents: [], now: takenAt - 30)
+    #expect(queue.items.contains { $0.question?.callID == "call_1" })
+    _ = queue.apply(scan: gone, desktopEvents: [], now: takenAt + 1)
+    #expect(!queue.items.contains { $0.question?.callID == "call_1" })
+    // The snapshot helper lists every terminal name across windows and tabs.
+    let json = #"{"status":"ok","windows":[{"id":"w","tabs":[{"id":"t","terminals":[{"id":"a","name":"\#(GhosttyMatch.title(session))"},{"id":"b","name":"zsh"}]}]}],"selected":null}"#
+    let snapshot = try JSONDecoder().decode(GhosttySnapshot.self, from: Data(json.utf8))
+    #expect(snapshot.terminalNames == [GhosttyMatch.title(session), "zsh"])
+}
+
+@Test func aDaemonThreadIsCLIAndEndsWhenNoTabShowsItAfterTheGrace() throws {
+    let session = UUID(), turn = UUID()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-question-\(UUID().uuidString)")
+    let events = root.appendingPathComponent("events"), rollouts = root.appendingPathComponent("sessions")
+    try FileManager.default.createDirectory(at: events, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: rollouts, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let startedAt = "2026-09-14T02:20:00Z"
+    for (name, turnID) in [("SessionStart", ""), ("UserPromptSubmit", "\"turn_id\":\"\(turn)\",")] {
+        let hook = "{\"hook_event_name\":\"\(name)\",\"session_id\":\"\(session)\",\(turnID)\"received_at\":\"\(startedAt)\"}"
+        try hook.write(to: events.appendingPathComponent("\(UUID().uuidString).json"), atomically: true, encoding: .utf8)
+    }
+    let rollout = rollouts.appendingPathComponent("rollout-2026-09-14T02-20-00-\(session.uuidString.lowercased()).jsonl")
+    let header = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session)\",\"source\":\"vscode\",\"originator\":\"steer\"}}\n"
+    try (header + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample)).write(to: rollout, atomically: true, encoding: .utf8)
+    let started = RolloutTimestamp.parse(startedAt)!
+    // Loaded in the daemon with a non-desktop originator: CLI, with no Ghostty inventory at all.
+    let daemon = ReminderReader.scan(events: events, rollouts: rollouts, daemonThreads: [session])
+    #expect(daemon.cliSessions == [session] && daemon.cliState.liveSessions == [session] && daemon.sessionEnds.isEmpty)
+    #expect(daemon.questions.map(\.id) == [QuestionIdentity(source: .cli, session: session, callID: "call_1")])
+    // Not loaded in the daemon: the header's desktop label stands.
+    #expect(ReminderReader.scan(events: events, rollouts: rollouts).cliSessions.isEmpty)
+    // A desktop-originated thread loaded in the daemon stays desktop.
+    let desktopHeader = header.replacingOccurrences(of: "steer", with: ReminderReader.desktopOriginator)
+    try (desktopHeader + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample)).write(to: rollout, atomically: true, encoding: .utf8)
+    #expect(ReminderReader.scan(events: events, rollouts: rollouts, daemonThreads: [session]).cliSessions.isEmpty)
+    try (header + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample)).write(to: rollout, atomically: true, encoding: .utf8)
+    // An inventory without its title inside the grace: still live (the tab may not be listed yet).
+    let early = ReminderReader.scan(events: events, rollouts: rollouts,
+                                    ghostty: GhosttyInventory(titles: ["zsh"], takenAt: started + ReminderReader.surfaceGrace - 1), daemonThreads: [session])
+    #expect(early.cliState.liveSessions == [session] && early.sessionEnds.isEmpty)
+    // After the grace with no title: the surface is gone, the session ends at that inventory.
+    let late = ReminderReader.scan(events: events, rollouts: rollouts,
+                                   ghostty: GhosttyInventory(titles: ["zsh"], takenAt: started + ReminderReader.surfaceGrace), daemonThreads: [session])
+    #expect(late.cliSessions == [session] && late.cliState.liveSessions.isEmpty && late.sessionEnds[session] == started + ReminderReader.surfaceGrace)
+    // With the title present it is live and remembered.
+    let shown = ReminderReader.scan(events: events, rollouts: rollouts,
+                                    ghostty: GhosttyInventory(titles: [GhosttyMatch.title(session)], takenAt: started + 100), daemonThreads: [session])
+    #expect(shown.cliState.liveSessions == [session] && shown.titledCLISessions == [session] && shown.sessionEnds.isEmpty)
+}
+
+@Test func aTurnTheRolloutEndedStopsRunningWithoutAStopHook() throws {
+    let session = UUID(), turn = UUID()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-question-\(UUID().uuidString)")
+    let events = root.appendingPathComponent("events"), rollouts = root.appendingPathComponent("sessions")
+    try FileManager.default.createDirectory(at: events, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: rollouts, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let hook = "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"\(session)\",\"turn_id\":\"\(turn)\",\"received_at\":\"2026-09-14T02:20:14Z\"}"
+    try hook.write(to: events.appendingPathComponent("\(UUID().uuidString).json"), atomically: true, encoding: .utf8)
+    let rollout = rollouts.appendingPathComponent("rollout-2026-09-14T02-20-00-\(session.uuidString.lowercased()).jsonl")
+    let aborted = "{\"timestamp\":\"2026-09-14T02:21:00.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"turn_aborted\",\"turn_id\":\"\(turn)\"}}\n"
+    try meta(session, source: "cli").write(to: rollout, atomically: true, encoding: .utf8)
+    #expect(ReminderReader.scan(events: events, rollouts: rollouts).cliState.running.map(\.turn) == [turn])
+    try (meta(session, source: "cli") + aborted).write(to: rollout, atomically: true, encoding: .utf8)
+    let ended = ReminderReader.scan(events: events, rollouts: rollouts)
+    #expect(ended.cliState.running.isEmpty && ended.cliState.liveSessions == [session])
+}
+
+@Test func aDesktopLabelledTurnTheRolloutAbortedIsNotShownRunning() throws {
+    let session = UUID(), turn = UUID()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-question-\(UUID().uuidString)")
+    let events = root.appendingPathComponent("events"), rollouts = root.appendingPathComponent("sessions")
+    try FileManager.default.createDirectory(at: events, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: rollouts, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let hook = "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"\(session)\",\"turn_id\":\"\(turn)\",\"received_at\":\"2026-09-14T02:20:14Z\"}"
+    try hook.write(to: events.appendingPathComponent("\(UUID().uuidString).json"), atomically: true, encoding: .utf8)
+    let rollout = rollouts.appendingPathComponent("rollout-2026-09-14T02-20-00-\(session.uuidString.lowercased()).jsonl")
+    let aborted = "{\"timestamp\":\"2026-09-14T02:21:00.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"turn_aborted\",\"turn_id\":\"\(turn)\"}}\n"
+    try (meta(session, source: "vscode") + aborted).write(to: rollout, atomically: true, encoding: .utf8)
+    var queue = AttentionQueue()
+    let scan = ReminderReader.scan(events: events, rollouts: rollouts)
+    _ = queue.apply(scan: scan, desktopEvents: DesktopEventReader.read(from: events), now: RolloutTimestamp.parse("2026-09-14T02:22:00Z")!)
+    #expect(queue.workingCount == 0)
 }
