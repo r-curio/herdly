@@ -225,3 +225,21 @@ private let external = NotchDisplay(id: 2, frame: CGRect(x: 1512, y: 100, width:
     #expect(strip.working == false)
     #expect(strip.sessions == [StripSession(session: session, working: false, color: StripSummary.preferredColor(for: session))])
 }
+
+@Test func trailingWingWidensOnlyWhileAFiveHourReadingIsShown() {
+    // Without a five-hour reading the strip is exactly as before.
+    #expect(NotchPlacement.strip(on: builtIn, expanded: false, fiveHourShown: false) == StripLayout(leading: 112, gap: 180, trailing: 60, height: 32))
+    // With one, the wing right of the housing grows to fit two readouts; the left wing does not move.
+    let layout = NotchPlacement.strip(on: builtIn, expanded: false, fiveHourShown: true)
+    #expect(layout == StripLayout(leading: 112, gap: 180, trailing: 112, height: 32))
+    let frame = NotchPlacement.frame(on: builtIn, expanded: false, rows: 0, extraRows: false, fiveHourShown: true)
+    #expect(frame == CGRect(x: 756 - 90 - 112 - 8, y: 982 - 32, width: 420, height: 32))
+    #expect(frame.minX + NotchPlacement.earRadius + layout.leading + layout.gap / 2 == builtIn.frame.midX)
+    // The wider body already exceeds the open width, so opening adds nothing to either wing.
+    #expect(NotchPlacement.strip(on: builtIn, expanded: true, fiveHourShown: true) == StripLayout(leading: 112, gap: 180, trailing: 112, height: 32))
+    #expect(NotchPlacement.frame(on: builtIn, expanded: true, contentHeight: 200, fiveHourShown: true).width == 420)
+    // A display without a housing keeps the left wing at its full width and grows the body instead.
+    #expect(NotchPlacement.strip(on: external, expanded: false, fiveHourShown: true) == StripLayout(leading: 112, gap: 0, trailing: 112, height: 25))
+    #expect(NotchPlacement.frame(on: external, expanded: false, rows: 0, extraRows: false, fiveHourShown: true)
+            == CGRect(x: 1512 + 1280 - 120, y: 100 + 1440 - 25, width: 240, height: 25))
+}
