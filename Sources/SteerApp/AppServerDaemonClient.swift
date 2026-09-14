@@ -60,6 +60,9 @@ final class AppServerDaemonClient {
     private var upgraded = false
     private var upgradeKey = ""
     private var fragments = Data()
+    /// True while `disconnect` is tearing the connection down, so a handler it completes cannot
+    /// re-enter it (the `initialize` handler disconnects on refusal).
+    private var disconnecting = false
 
     init(socketPath: String = AppServerDaemonClient.defaultSocketPath) {
         self.socketPath = socketPath
@@ -215,17 +218,24 @@ final class AppServerDaemonClient {
     }
 
     private func disconnect(reason: String) {
+        guard !disconnecting else { return }
+        disconnecting = true
         reader?.cancel()
         reader = nil
         fd = -1
         buffer = Data()
         fragments = Data()
         upgraded = false
+        // Requests still in flight are answered here as refused: a caller waiting on one must never
+        // wait for a reply this connection can no longer receive.
+        let waiting = handlers
         handlers = [:]
         subscribed = []
         loadedThreads = []
         state = .failed(reason)
         nextRetry = ProcessInfo.processInfo.systemUptime + Self.retryInterval
+        disconnecting = false
+        for handler in waiting.values { handler(nil, ["message": reason]) }
         onDisconnect?()
     }
 
@@ -237,6 +247,16 @@ final class AppServerDaemonClient {
             handlers[id] = nil
             completion(nil, ["message": "write failed"])
             return
+        }
+    }
+
+    /// Sends one JSON-RPC request the user asked for and reports what the daemon made of it:
+    /// accepted, or refused with its own message. A write that never left reports as refused too.
+    /// Nothing here retries; one call is one request.
+    func call(_ method: String, params: [String: Any], onResult: @escaping (Bool, String?) -> Void) {
+        guard isConnected else { onResult(false, "the daemon is not connected"); return }
+        request(method, params: params) { result, error in
+            if let error { onResult(false, error["message"] as? String) } else { onResult(result != nil, nil) }
         }
     }
 
