@@ -2,9 +2,10 @@ import Foundation
 import Testing
 @testable import SteerCore
 
-private func tokenCount(primary: String, secondary: String = "null", timestamp: String = "2026-09-14T03:06:53.274Z") -> String {
+private func tokenCount(primary: String, secondary: String = "null", timestamp: String = "2026-09-14T03:06:53.274Z",
+                        limit: String = "\"limit_id\":\"codex\",\"limit_name\":null") -> String {
     "{\"timestamp\":\"\(timestamp)\",\"ordinal\":19,\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"total_tokens\":38652}},"
-        + "\"rate_limits\":{\"limit_id\":\"codex\",\"limit_name\":null,\"primary\":\(primary),\"secondary\":\(secondary),"
+        + "\"rate_limits\":{\(limit),\"primary\":\(primary),\"secondary\":\(secondary),"
         + "\"credits\":{\"has_credits\":false,\"unlimited\":false,\"balance\":\"0\"},\"plan_type\":\"pro\",\"rate_limit_reached_type\":null}}}"
 }
 
@@ -33,12 +34,32 @@ private func window(_ used: Double, minutes: Int, resets: Int) -> String {
     #expect(CodexUsageReader.parse(Data(swapped.utf8)) == reading)
 }
 
-@Test func fiveHourWindowAloneIsAReadingWithoutAWeekly() {
-    let reading = CodexUsageReader.parse(Data(tokenCount(primary: window(42.5, minutes: 300, resets: 1789800000)).utf8))
-    #expect(reading?.weekly == nil)
-    #expect(reading?.fiveHour?.usedPercent == 42.5)
+@Test func fiveHourWindowAloneIsNotAReadingAndTheWalkContinuesToTheWeeklyBeforeIt() {
+    // As before this ticket, a line without a weekly window is skipped rather than ending the walk.
+    #expect(CodexUsageReader.parse(Data(tokenCount(primary: window(42.5, minutes: 300, resets: 1789800000)).utf8)) == nil)
+    let lines = [tokenCount(primary: window(20, minutes: 300, resets: 1789800000), secondary: window(7, minutes: 10080, resets: 1789831495)),
+                 tokenCount(primary: window(42.5, minutes: 300, resets: 1789800000))]
+    #expect(CodexUsageReader.parse(Data(lines.joined(separator: "\n").utf8))
+            == CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 7, resetsAt: 1789831495, observedAt: "2026-09-14T03:06:53.274Z"),
+                                 fiveHour: CodexUsageWindow(usedPercent: 20, resetsAt: 1789800000, observedAt: "2026-09-14T03:06:53.274Z")))
     // A window of some other length is not a reading at all.
     #expect(CodexUsageReader.parse(Data(tokenCount(primary: window(1, minutes: 60, resets: 1789800000)).utf8)) == nil)
+}
+
+@Test func anotherLimitsWindowsAreNotThePlansAndAreSkipped() {
+    // Rollouts on the inspected machine mix the plan's "codex" limit with a per-model limit that
+    // reports both windows at 0%; taking it would invent a five-hour readout and zero the weekly one.
+    let spark = "\"limit_id\":\"codex_bengalfox\",\"limit_name\":\"GPT-5.3-Codex-Spark\""
+    let lines = [tokenCount(primary: window(10, minutes: 10080, resets: 1789831495)),
+                 tokenCount(primary: window(0, minutes: 300, resets: 1789394539), secondary: window(0, minutes: 10080, resets: 1789981339),
+                            timestamp: "2026-09-14T09:03:00.000Z", limit: spark)]
+    let reading = CodexUsageReader.parse(Data(lines.joined(separator: "\n").utf8))
+    #expect(reading?.weekly?.usedPercent == 10)
+    #expect(reading?.fiveHour == nil)
+    #expect(CodexUsageReader.parse(Data(lines[1].utf8)) == nil)
+    // A line that names no limit at all is still read, as older rollouts may not carry the id.
+    let unnamed = tokenCount(primary: window(4, minutes: 10080, resets: 1789831495), limit: "\"limit_name\":null")
+    #expect(CodexUsageReader.parse(Data(unnamed.utf8))?.weekly?.usedPercent == 4)
 }
 
 @Test func usageReadingTakesTheLastReadableLineAndSkipsTheRest() {
