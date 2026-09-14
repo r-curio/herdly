@@ -683,9 +683,11 @@ struct Notch: View {
                     .padding(.leading, 4)
                     .frame(width: max(0, layout.leading - 8))
                     Color.clear.frame(width: layout.gap)
-                    HStack(spacing: 8) {
+                    HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        if let fiveHour = model.currentFiveHourLimit { UsageLimitReading(limit: fiveHour, caption: "5h") }
+                        if let fiveHour = model.currentFiveHourLimit {
+                            UsageLimitReading(limit: fiveHour, caption: "5h").padding(.trailing, 8)
+                        }
                         UsageLimitReading(limit: model.currentWeeklyLimit)
                     }
                     .frame(width: max(0, layout.trailing - 8))

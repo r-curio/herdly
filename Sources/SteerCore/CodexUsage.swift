@@ -36,6 +36,9 @@ public struct CodexUsageWindow: Equatable, Sendable {
 
     /// Once the window has reset, the reading no longer describes the current period.
     public func isCurrent(now: Double) -> Bool { resetsAt > now }
+
+    /// The window itself while it has not reset; nil after.
+    public func ifCurrent(now: Double) -> CodexUsageWindow? { isCurrent(now: now) ? self : nil }
 }
 
 /// Codex's weekly and five-hour windows from one `token_count` event; either may be absent.
@@ -51,8 +54,7 @@ public struct CodexUsageReading: Equatable, Sendable {
     /// The windows that have not yet reset; nil once neither describes the present, so the strip
     /// shows nothing stale.
     public func current(now: Double) -> CodexUsageReading? {
-        let reading = CodexUsageReading(weekly: weekly.flatMap { $0.isCurrent(now: now) ? $0 : nil },
-                                        fiveHour: fiveHour.flatMap { $0.isCurrent(now: now) ? $0 : nil })
+        let reading = CodexUsageReading(weekly: weekly?.ifCurrent(now: now), fiveHour: fiveHour?.ifCurrent(now: now))
         return reading.weekly == nil && reading.fiveHour == nil ? nil : reading
     }
 }
@@ -69,7 +71,7 @@ public enum CodexUsageReader {
     }
 
     /// The latest usage reading across the newest rollouts under `root`, or nil when none of them
-    /// carries a window. Files are tried newest-modified first, so a session that has just started
+    /// carries the weekly window. Files are tried newest-modified first, so a session that has just started
     /// and has no `token_count` yet falls through to the one before it.
     public static func latest(root: URL) -> CodexUsageReading? {
         for entry in newestRollouts(root: root) {
@@ -129,28 +131,35 @@ public enum CodexUsageReader {
         return try? file.read(upToCount: tailBytes)
     }
 
-    /// The windows from the last `token_count` line that carries a weekly or a five-hour one. Lines
-    /// that are not a JSON object of that shape, including a partial line mid-append, are skipped.
+    /// The plan's own limit. Rollouts also carry per-model limits (`codex_bengalfox`, the Spark
+    /// model) whose windows are not the plan's; those lines are skipped, and a line naming no limit
+    /// at all is read as older rollouts may not carry the id.
+    public static let planLimitID = "codex"
+
+    /// The windows from the last `token_count` line that carries the plan's weekly window; the
+    /// five-hour window comes from that same line when it has one. Lines that are not a JSON object
+    /// of that shape, including a partial line mid-append, are skipped.
     public static func parse(_ bytes: Data) -> CodexUsageReading? {
         for line in bytes.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true).reversed() {
             guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                   object["type"] as? String == "event_msg",
                   let payload = object["payload"] as? [String: Any],
                   payload["type"] as? String == "token_count",
-                  let limits = payload["rate_limits"] as? [String: Any] else { continue }
+                  let limits = payload["rate_limits"] as? [String: Any],
+                  (limits["limit_id"] as? String ?? planLimitID) == planLimitID else { continue }
             let observed = object["timestamp"] as? String
             var weekly: CodexUsageWindow?
             var fiveHour: CodexUsageWindow?
             for key in ["primary", "secondary"] {
-                guard let window = limits[key] as? [String: Any],
-                      let minutes = (window["window_minutes"] as? NSNumber)?.intValue,
-                      let used = (window["used_percent"] as? NSNumber)?.doubleValue, used.isFinite,
-                      let resets = (window["resets_at"] as? NSNumber)?.doubleValue, resets.isFinite else { continue }
-                let reading = CodexUsageWindow(usedPercent: used, resetsAt: resets, observedAt: observed)
-                if minutes == CodexUsageWindow.weeklyMinutes { weekly = weekly ?? reading }
-                else if minutes == CodexUsageWindow.fiveHourMinutes { fiveHour = fiveHour ?? reading }
+                guard let entry = limits[key] as? [String: Any],
+                      let minutes = (entry["window_minutes"] as? NSNumber)?.intValue,
+                      let used = (entry["used_percent"] as? NSNumber)?.doubleValue, used.isFinite,
+                      let resets = (entry["resets_at"] as? NSNumber)?.doubleValue, resets.isFinite else { continue }
+                let window = CodexUsageWindow(usedPercent: used, resetsAt: resets, observedAt: observed)
+                if minutes == CodexUsageWindow.weeklyMinutes { weekly = weekly ?? window }
+                else if minutes == CodexUsageWindow.fiveHourMinutes { fiveHour = fiveHour ?? window }
             }
-            if weekly != nil || fiveHour != nil { return CodexUsageReading(weekly: weekly, fiveHour: fiveHour) }
+            if weekly != nil { return CodexUsageReading(weekly: weekly, fiveHour: fiveHour) }
         }
         return nil
     }

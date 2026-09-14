@@ -89,6 +89,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     /// Shown beside the weekly reading only while Codex reports a five-hour window that is still
     /// running; the wing right of the housing widens for it and narrows back without it.
     var currentFiveHourLimit: CodexUsageWindow? { currentUsage?.fiveHour }
+    /// Whether the strip is laying out for the five-hour readout right now.
+    var fiveHourShown: Bool { currentFiveHourLimit != nil }
     /// `--reminder-rollouts <path>` points lab runs at a copy of Codex's sessions tree.
     nonisolated static var rolloutRoot: URL {
         argumentValue(for: "--reminder-rollouts").map { URL(fileURLWithPath: $0) }
@@ -323,11 +325,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             "displays": displays.map { ["id": Int($0.id), "frame": rect($0.frame), "top_inset": Double($0.topInset), "physical_notch": $0.hasPhysicalNotch] },
             "pointer": ["x": pointer.x, "y": pointer.y],
             "chosen_display": chosen.map { Int($0.id) } ?? NSNull(),
-            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false,
-                                                                      fiveHourShown: currentFiveHourLimit != nil)) } ?? NSNull(),
-            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false,
-                                                                                fiveHourShown: currentFiveHourLimit != nil)) } ?? NSNull(),
-            "five_hour_shown": currentFiveHourLimit != nil,
+            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false, fiveHourShown: fiveHourShown)) } ?? NSNull(),
+            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false, fiveHourShown: fiveHourShown)) } ?? NSNull(),
+            "five_hour_shown": fiveHourShown,
             "panel_frame": rect(panel.frame),
             "codex_foreground": desktopForeground,
             "panel": ["level": panel.level.rawValue, "nonactivating": panel.styleMask.contains(.nonactivatingPanel),
@@ -842,7 +842,6 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                                                          current: currentDisplayID, interacting: interacting && panel.isVisible)
         else { panel.orderOut(nil); currentDisplayID = nil; return }
         currentDisplayID = display.id
-        let fiveHourShown = currentFiveHourLimit != nil
         let layout = NotchPlacement.strip(on: display, expanded: expanded, fiveHourShown: fiveHourShown)
         if stripLayout != layout { stripLayout = layout }
         let rows = showAll ? orderedAttentionItems.count : (spotlightItem == nil ? 0 : 1)
