@@ -1,0 +1,50 @@
+{
+  "checked_at": "2026-09-15",
+  "method": "Previously captured in the repository's disposable project-local hook lab. The recorder retained field names and correlation ids but not prompt, command, transcript, or tool-response contents. No user hook or permission configuration was changed for this evidence.",
+  "desktop": {
+    "bundle": "/Applications/ChatGPT.app",
+    "bundle_version": "26.901.51231",
+    "bundled_codex_version": "0.153.4",
+    "session_originator": "Codex Desktop",
+    "session_source": "vscode",
+    "pre_tool_use": {
+      "captured_at": "2026-09-11T08:00:52.395770+00:00",
+      "input_fields": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"],
+      "tool_input_fields": ["command"],
+      "tool_name": "Bash",
+      "tool_use_id": "exec-92c50023-8b49-44cc-9317-16c3ef0dbc81"
+    },
+    "post_tool_use": {
+      "captured_at": "2026-09-11T08:00:56.888122+00:00",
+      "input_fields": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"],
+      "tool_input_fields": ["command"],
+      "tool_name": "Bash",
+      "tool_use_id": "exec-92c50023-8b49-44cc-9317-16c3ef0dbc81"
+    }
+  },
+  "cli": {
+    "captured_codex_version": "0.145.0",
+    "installed_codex_version_checked_at_evidence_write": "0.154.0",
+    "session_originator": "codex-tui",
+    "session_source": "cli",
+    "pre_tool_use": {
+      "captured_at": "2026-09-11T15:59:38.082188+00:00",
+      "input_fields": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_use_id", "transcript_path", "turn_id"],
+      "tool_input_fields": ["command"],
+      "tool_name": "Bash",
+      "tool_use_id": "call_rEAriq6wCrVuHJn0J39zPUz9"
+    },
+    "post_tool_use": {
+      "captured_at": "2026-09-11T15:59:38.292982+00:00",
+      "input_fields": ["cwd", "hook_event_name", "model", "permission_mode", "session_id", "tool_input", "tool_name", "tool_response", "tool_use_id", "transcript_path", "turn_id"],
+      "tool_input_fields": ["command"],
+      "tool_name": "Bash",
+      "tool_use_id": "call_rEAriq6wCrVuHJn0J39zPUz9"
+    }
+  },
+  "observations": [
+    "Both surfaces pair PreToolUse and PostToolUse with tool_use_id and include session_id, turn_id, tool_name, and tool_input.",
+    "PostToolUse additionally includes tool_response; Steer does not retain it.",
+    "apply_patch file edits may not surface as PreToolUse, so absence of an action is not evidence that the session is idle."
+  ]
+}

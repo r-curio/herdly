@@ -563,7 +563,25 @@ struct Notch: View {
                 }
             case .question:
                 if let question = item.question { questionBody(question, subject: rowSubject(item)) }
-            case .actionableRequest, .running:
+            case .running:
+                if let running = item.running, let row = running.rowText {
+                    Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
+                        .lineLimit(2).truncationMode(.tail)
+                    if let full = running.fullAction {
+                        NotchDisclosure(title: "Show full action", expanded: disclosure("action:\(item.session.uuidString)")) {
+                            Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
+                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityLabel("Show full action for \(rowSubject(item))")
+                    } else if let full = running.fullPrompt, full != row {
+                        NotchDisclosure(title: "Show full prompt", expanded: disclosure("prompt:\(item.session.uuidString)")) {
+                            Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
+                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityLabel("Show full prompt for \(rowSubject(item))")
+                    }
+                }
+            case .actionableRequest:
                 EmptyView()
             }
             if let details = item.request?.details {
