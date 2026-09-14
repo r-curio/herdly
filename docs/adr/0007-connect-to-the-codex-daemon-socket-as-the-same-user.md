@@ -1,6 +1,6 @@
 # Connect to Codex's daemon socket as the same user, with no credential of Steer's own
 
-Status: proposed on 2026-09-14, awaiting the user's decision (issue #42). Not accepted.
+Accepted with the user on 2026-09-14 (issue #42). The user also chose to install Codex's managed standalone package so a daemon can run; the live proof in `docs/user-input-requests.md` is still to be recorded.
 
 When Codex's local app-server daemon is running, Steer may answer a `request_user_input` question exactly, by call id, by being a second JSON-RPC client on `~/.codex/app-server-control/app-server-control.sock`. The question this ADR settles is how Steer authenticates to that socket.
 
@@ -16,4 +16,4 @@ Consequences: any process running as the user could do the same, which is alread
 
 Rejected: a Steer-side token or allowlist (there is nothing for the daemon to check it against); connecting through `codex app-server proxy` as a child process (the same socket with an extra process, and it would tie Steer to a CLI path); the remote-control websocket (a network listener with pairing, far more than one local answer needs).
 
-Prerequisite the user decides, separately: on this machine `codex app-server daemon start` refuses to run because the Homebrew CLI has no managed standalone install, so a daemon means installing Codex's standalone package beside it (`docs/evidence/app-server-daemon.json`). Until a daemon runs and the live proof in `docs/user-input-requests.md` passes, the daemon path is a draft integration, not a capability.
+Prerequisite: on this machine `codex app-server daemon start` refused to run until Codex's managed standalone package was installed beside the Homebrew CLI (`docs/evidence/app-server-daemon.json`); the user chose to install it. Until a daemon runs and the live proof in `docs/user-input-requests.md` passes, the daemon path is a draft integration, not a capability.
