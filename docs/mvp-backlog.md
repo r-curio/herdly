@@ -30,3 +30,7 @@ Desktop MVP scope: hide the shared notch while Codex desktop is foreground; keep
 4. Finish native handoff reconciliation, restart recovery, display/keyboard behavior, and packaging.
 
 The MVP is not complete until the integrated live desktop and CLI checks in #13 pass. Issues with unresolved blockers must not be marked ready. These tickets do not authorize bypassing UI tool restrictions or altering real user configuration for tests.
+
+## After the MVP
+
+- **Answer Codex questions by call id through the app-server daemon.** Follow-up to ADR 0006. Codex's TUI attaches to a running local daemon (`~/.codex/app-server-control/app-server-control.sock`), and any client subscribed to a thread receives `item/tool/requestUserInput` and may answer it; the others get `serverRequest/resolved`. A Steer JSON-RPC client on that socket would replace the Ghostty key relay with an exact per-call answer and would cover desktop threads if the desktop app ever attaches to the same daemon. Blocked on: a daemon in the user's workflow (`codex app-server daemon start`), proof on the installed CLI that a second client receives the pending request, and a decision on how Steer authenticates to the socket. Not a prerequisite for anything in the MVP.

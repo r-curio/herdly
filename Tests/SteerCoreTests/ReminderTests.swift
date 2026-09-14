@@ -92,3 +92,62 @@ import Testing
     queue.apply(ReminderReader.scan(events: root, rollouts: root))
     #expect(Set(queue.items.map(\.id)) == [pending.id, other.id])
 }
+
+/// Codex desktop spawns sub-agent threads whose permission hooks name the parent session and the
+/// sub-agent's turn; that turn ends only in the sub-agent's rollout, whose `session_meta` carries
+/// `parent_thread_id`. Recorded 2026-09-14 from a desktop thread with two spawned agents.
+@Test func aRequestFromASubAgentTurnClearsWhenTheChildRolloutEndsThatTurn() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let parent = UUID(), child = UUID(), stranger = UUID(), parentTurn = UUID(), childTurn = UUID(), openTurn = UUID()
+    let fromChild = Reminder(request_id: UUID(), session_id: parent, turn_id: childTurn, outcome: "no_decision")
+    let stillOpen = Reminder(request_id: UUID(), session_id: parent, turn_id: openTurn, outcome: "no_decision")
+    for item in [fromChild, stillOpen] {
+        try JSONEncoder().encode(item).write(to: root.appendingPathComponent(item.id.uuidString + ".approval"))
+    }
+    // Recorded shape: a sub-agent rollout's `id` is its own thread and its `session_id` is the parent's.
+    func meta(_ id: UUID, parent: UUID? = nil, key: String = "parent_thread_id") -> String {
+        var payload: [String: Any] = ["id": id.uuidString.lowercased(), "source": "vscode",
+                                      "session_id": (parent ?? id).uuidString.lowercased()]
+        if let parent { payload[key] = parent.uuidString.lowercased() }
+        let bytes = try! JSONSerialization.data(withJSONObject: ["type": "session_meta", "payload": payload])
+        return String(decoding: bytes, as: UTF8.self) + "\n"
+    }
+    func done(_ turn: UUID) -> String {
+        "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"\(turn.uuidString.lowercased())\"}}\n"
+    }
+    let day = root.appendingPathComponent("2026/09/14")
+    try FileManager.default.createDirectory(at: day, withIntermediateDirectories: true)
+    try Data((meta(parent) + done(parentTurn)).utf8)
+        .write(to: day.appendingPathComponent("rollout-2026-09-14T13-14-39-\(parent.uuidString.lowercased()).jsonl"))
+    // A rollout that is not a child of this session ends the same turn id; it must not count.
+    try Data((meta(stranger, parent: UUID()) + done(childTurn)).utf8)
+        .write(to: day.appendingPathComponent("rollout-2026-09-14T13-30-00-\(stranger.uuidString.lowercased()).jsonl"))
+    var queue = ReminderQueue()
+    queue.apply(ReminderReader.scan(events: root, rollouts: root))
+    #expect(Set(queue.items.map(\.id)) == [fromChild.id, stillOpen.id])
+
+    let childFile = day.appendingPathComponent("rollout-2026-09-14T13-30-55-\(child.uuidString.lowercased()).jsonl")
+    // A forked rollout repeats the parent's header as its second line; a foreign header is corruption.
+    try Data((meta(child, parent: parent) + meta(stranger) + done(childTurn)).utf8).write(to: childFile)
+    queue.apply(ReminderReader.scan(events: root, rollouts: root))
+    #expect(Set(queue.items.map(\.id)) == [fromChild.id, stillOpen.id])
+    // A partial child rollout is no evidence.
+    try Data((meta(child, parent: parent) + meta(parent) + done(childTurn) + "{partial").utf8).write(to: childFile)
+    queue.apply(ReminderReader.scan(events: root, rollouts: root))
+    #expect(Set(queue.items.map(\.id)) == [fromChild.id, stillOpen.id])
+    try Data((meta(child, parent: parent) + meta(parent) + done(childTurn)).utf8).write(to: childFile)
+    let scan = ReminderReader.scan(events: root, rollouts: root)
+    #expect(scan.completed.contains(TurnIdentity(session: parent, turn: childTurn)))
+    queue.apply(scan)
+    #expect(queue.items.map(\.id) == [stillOpen.id])
+    // The same through the attention queue, which is what the notch renders.
+    var attention = AttentionQueue()
+    attention.apply(scan: ReminderReader.scan(events: root, rollouts: root), desktopEvents: [], now: 0)
+    #expect(attention.items.compactMap(\.request).map(\.turn) == [openTurn])
+    // `forked_from_id` names the parent as well.
+    try Data((meta(child, parent: parent, key: "forked_from_id") + done(openTurn)).utf8).write(to: childFile)
+    queue.apply(ReminderReader.scan(events: root, rollouts: root))
+    #expect(queue.items.isEmpty)
+}

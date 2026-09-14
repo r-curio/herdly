@@ -211,3 +211,55 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     #expect(after.answeredQuestions == [identity])
     #expect(after.completed == [TurnIdentity(session: session, turn: turn)])
 }
+
+@Test func optionPositionsAreKeptWhenALabelIsUnreadable() {
+    let root: [String: Any] = ["questions": [["header": "H", "question": "Q",
+                                              "options": [["label": "first"], ["description": "no label"], ["label": "third"]]]]]
+    let arguments = String(decoding: try! JSONSerialization.data(withJSONObject: root), as: UTF8.self)
+    let prompts = try? #require(QuestionPrompt.parse(arguments: arguments))
+    // The list stops where numbering would drift, so a digit never names the wrong option.
+    #expect(prompts?.first?.options == ["first"])
+    #expect(prompts?.first?.optionsComplete == false)
+    #expect(prompts?.first?.truncated == true)
+    let ok = QuestionPrompt.parse(arguments: sample)
+    #expect(ok?.allSatisfy { $0.optionsComplete && !$0.isOther } == true)
+}
+
+@Test func isOtherIsReadPerQuestion() {
+    let root: [String: Any] = ["questions": [["header": "A", "question": "Q", "isOther": true, "options": [["label": "x"]]],
+                                             ["header": "B", "question": "Q", "options": [["label": "y"]]]]]
+    let arguments = String(decoding: try! JSONSerialization.data(withJSONObject: root), as: UTF8.self)
+    let prompts = QuestionPrompt.parse(arguments: arguments)
+    #expect(prompts?.map(\.isOther) == [true, false])
+}
+
+@Test func moreOptionsOrQuestionsThanTheCapAreRecordedAsIncomplete() {
+    let many = questionArguments([("H", "Q", (0..<(QuestionPrompt.maximumOptions + 1)).map { "option \($0)" })])
+    #expect(QuestionPrompt.parse(arguments: many)?.first?.optionsComplete == false)
+    let exact = questionArguments([("H", "Q", (0..<QuestionPrompt.maximumOptions).map { "option \($0)" })])
+    #expect(QuestionPrompt.parse(arguments: exact)?.first?.optionsComplete == true)
+    let questions = questionArguments((0..<(QuestionPrompt.maximumQuestions + 1)).map { ("H\($0)", "Q", ["a", "b"]) })
+    let parsed = QuestionPrompt.parseCall(arguments: questions)
+    #expect(parsed?.count == QuestionPrompt.maximumQuestions + 1)
+    #expect(parsed?.prompts.count == QuestionPrompt.maximumQuestions)
+    let session = UUID(), turn = UUID()
+    let data = Data((meta(session) + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: questions)).utf8)
+    #expect(ReminderReader.evidence(in: data, session: session).pendingQuestions.first?.questionCount == QuestionPrompt.maximumQuestions + 1)
+    #expect(ReminderReader.evidence(in: Data((meta(session) + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: "nope")).utf8),
+                                    session: session).pendingQuestions.first?.questionCount == 0)
+}
+
+@Test func rolloutURLRequiresExactlyOneMatchingFile() throws {
+    let session = UUID()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-rollout-\(UUID().uuidString)")
+    let nested = root.appendingPathComponent("2026/09/14")
+    try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    #expect(ReminderReader.rolloutURL(for: session, in: root) == nil)
+    let first = nested.appendingPathComponent("rollout-2026-09-14T02-20-00-\(session.uuidString.lowercased()).jsonl")
+    try Data(meta(session).utf8).write(to: first)
+    try Data("x".utf8).write(to: nested.appendingPathComponent("rollout-other-\(UUID().uuidString.lowercased()).jsonl"))
+    #expect(ReminderReader.rolloutURL(for: session, in: root)?.resolvingSymlinksInPath() == first.resolvingSymlinksInPath())
+    try Data(meta(session).utf8).write(to: root.appendingPathComponent("rollout-copy-\(session.uuidString.uppercased()).jsonl"))
+    #expect(ReminderReader.rolloutURL(for: session, in: root) == nil)
+}

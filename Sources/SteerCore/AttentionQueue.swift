@@ -225,6 +225,7 @@ public struct AttentionQueue: Sendable {
             }
         }
         for incoming in incomingRequests where !decidedRequests.contains(incoming.identity)
+            && !endedTurns.contains(TurnIdentity(session: incoming.session, turn: incoming.turn))
             && !resolvedTurns.contains(AttentionTurnIdentity(source: incoming.source, session: incoming.session, turn: incoming.turn)) {
             if var current = requests[incoming.identity] {
                 if incoming.arrivedAt < current.arrivedAt {
@@ -274,12 +275,14 @@ public struct AttentionQueue: Sendable {
         }
     }
 
-    /// A turn that ended in the rollout resolves its questions whichever surface posed them; the
-    /// source on a question is only a navigation label.
+    /// A turn that ended in the rollout resolves its questions and its handed-back requests
+    /// whichever surface posed them; the source on either is only a navigation label. Ended turns
+    /// include those of a sub-agent thread credited to its parent session by the reader.
     private mutating func resolve(endedTurns turns: Set<TurnIdentity>) {
         guard !turns.isEmpty else { return }
         endedTurns.formUnion(turns)
         questions = questions.filter { !turns.contains(TurnIdentity(session: $0.value.session, turn: $0.value.turn)) }
+        requests = requests.filter { !turns.contains(TurnIdentity(session: $0.value.session, turn: $0.value.turn)) }
     }
 
     /// Records the receipts this process issued; only these may show decision controls.

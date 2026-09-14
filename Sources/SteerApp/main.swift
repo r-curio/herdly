@@ -61,6 +61,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
     @Published var completionPresentation = Attention()
     @Published var questionPresentation = Attention()
+    /// Steer's own bookkeeping of what it relayed for each waiting question. Memory only: a restart
+    /// returns every question as plain pending and nothing is ever re-sent.
+    @Published var answerProgress: [QuestionIdentity: QuestionAnswerProgress] = [:]
+    private var answering = false
     private var savedSnapshot = Companion.launchSnapshot
     @Published var ghosttyEnabled = false
     @Published var ghosttyPermissionVerified = false
@@ -75,6 +79,11 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     /// The strip's weekly reading: only a window that has not yet reset is shown.
     var currentWeeklyLimit: CodexWeeklyLimit? {
         weeklyLimit.flatMap { $0.isCurrent(now: Date().timeIntervalSince1970) ? $0 : nil }
+    }
+    /// `--reminder-rollouts <path>` points lab runs at a copy of Codex's sessions tree.
+    nonisolated static var rolloutRoot: URL {
+        argumentValue(for: "--reminder-rollouts").map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
     }
     /// `--thread-names <path>` points lab runs at a copy instead of the live Codex index.
     nonisolated static var threadNamesURL: URL {
@@ -542,8 +551,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         scanning = true
         nextScan = now + 2
         let events = URL(fileURLWithPath: eventsPath)
-        let rolloutRoot = Companion.argumentValue(for: "--reminder-rollouts").map { URL(fileURLWithPath: $0) }
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
+        let rolloutRoot = Companion.rolloutRoot
         let readStateURL = desktopReadStateEnabled ? Companion.desktopReadStateURL : nil
         let namesURL = Companion.threadNamesURL
         Task { @MainActor in
@@ -617,7 +625,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                                                      row["source"] = completion.source.rawValue }
                 if let request = item.request { row["request"] = request.id.uuidString; row["state"] = "\(request.state)" }
                 if let question = item.question { row["call_id"] = question.callID; row["turn"] = question.turn.uuidString
-                                                  row["source"] = question.source.rawValue }
+                                                  row["source"] = question.source.rawValue
+                                                  if let progress = answerProgress[question.id] { row["answer_phase"] = "\(progress.phase)" } }
                 return row
             },
             "released_unverified_requests": unverified.map { $0.id.uuidString },
@@ -634,6 +643,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     func refresh() {
         scanReminders()
         queue.expire(at: Date().timeIntervalSince1970)
+        pruneAnswerProgress()
         checkApprovalFocus()
         checkGhosttyFocus()
         // App identity only: no window contents, task titles, or accessibility queries.
@@ -850,6 +860,78 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     func dismissQuestion(_ question: AttentionQuestion) {
         queue.dismiss(.question(question.id)); refresh()
     }
+
+    /// Progress for a question the queue holds; a fresh, ready record when Steer has relayed nothing.
+    func progress(for question: AttentionQuestion) -> QuestionAnswerProgress {
+        answerProgress[question.id] ?? QuestionAnswerProgress(call: question.id)
+    }
+
+    /// Whether the card may show the options as controls: a CLI question with Ghostty controls on,
+    /// or a desktop question (whose pick only opens Codex). Preview renders the controls as well.
+    func showsOptionControls(for question: AttentionQuestion) -> Bool {
+        question.source == .desktop || ghosttyEnabled || previewMode != nil
+    }
+
+    /// One click on an option. Desktop: remember the pick and open the thread. CLI: relay the digit
+    /// through Ghostty after re-checking the queue, the policy, and the rollout as it is right now.
+    func chooseOption(_ question: AttentionQuestion, question index: Int, option: Int) {
+        if question.source == .desktop {
+            guard case .options = QuestionAnswerProgress.offer(question, at: index) else { return }
+            answerProgress[question.id] = progress(for: question).pickingInCodex(question: index, option: option)
+            openAttentionSession(source: .desktop, session: question.session)
+            return
+        }
+        guard !answering else { return }
+        // Re-read the queue's current copy: a question answered since the row rendered must not be relayed.
+        let current = queue.items.compactMap(\.question).first { $0.id == question.id }
+        let progress = progress(for: question)
+        if let rejection = QuestionAnswerPolicy.rejection(for: current, ghosttyEnabled: ghosttyEnabled, progress: progress,
+                                                          question: index, option: option) {
+            navigationMessage = QuestionAnswerPolicy.message(for: rejection); refresh(); return
+        }
+        guard let current, previewMode == nil else { return }
+        answering = true
+        answerProgress[question.id] = progress.startingSend(question: index, option: option)
+        let key = QuestionAnswerPolicy.key(forOption: option)
+        let live = liveCLI
+        let rolloutRoot = Companion.rolloutRoot
+        navigationMessage = "Sending \(key)…"
+        refresh()
+        Task { @MainActor in
+            let result = await Task.detached { () -> (sent: Bool, message: String) in
+                // The rollout as of this instant: an answer Codex already recorded, or an ended turn,
+                // means the pane is gone and the key would land in the composer instead.
+                let evidence = ReminderReader.currentEvidence(for: current.session, in: rolloutRoot)
+                guard QuestionAnswerGuard.stillPending(current, in: evidence) else {
+                    return (false, "Codex already has an answer or the turn ended; nothing was sent.")
+                }
+                return GhosttyNavigation.answer(session: current.session, live: live, keys: [key])
+            }.value
+            answering = false
+            navigationMessage = result.message
+            guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
+                // Answered or ended while the key was in flight: the card is gone and so is the progress.
+                answerProgress[question.id] = nil
+                refresh()
+                return
+            }
+            if let progress = answerProgress[question.id] {
+                answerProgress[question.id] = result.sent
+                    ? progress.recordingSent(question: index, option: option, of: current, at: Date().timeIntervalSince1970)
+                    : progress.recordingFailure(result.message)
+            }
+            refresh()
+        }
+    }
+
+    /// Drops progress for questions no longer waiting and turns an unconfirmed send into its final state.
+    private func pruneAnswerProgress() {
+        guard !answerProgress.isEmpty else { return }
+        let waiting = Set(queue.items.compactMap { $0.question?.id })
+        let now = Date().timeIntervalSince1970
+        let next = answerProgress.filter { waiting.contains($0.key) }.mapValues { $0.expiring(at: now) }
+        if next != answerProgress { answerProgress = next }
+    }
     func openCLI(_ session: UUID) {
         guard !openingTask else { return }
         guard ghosttyEnabled else { showControls(); return }
@@ -873,7 +955,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         cliSessions.contains(item.session_id) && !ghosttyEnabled ? "Set up Ghostty" : "Open in Codex"
     }
     var needsGhosttySetup: Bool {
-        !ghosttyEnabled && (!cliItems.isEmpty || visibleReminders.contains { cliSessions.contains($0.session_id) })
+        !ghosttyEnabled && (!cliItems.isEmpty || visibleReminders.contains { cliSessions.contains($0.session_id) }
+                            || queue.items.contains { $0.question?.source == .cli })
     }
     func openReminder(_ item: Reminder) {
         if cliSessions.contains(item.session_id) { openCLI(item.session_id) }
@@ -1024,16 +1107,21 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         let request = AttentionRequest(id: UUID(), source: .cli, session: asking, turn: UUID(), arrivedAt: now - 5, details: details)
         let completion = AttentionCompletion(source: .desktop, session: finished, turn: UUID(), arrivedAt: now - 2)
         let running = AttentionRunning(source: .cli, session: working, turn: UUID(), arrivedAt: now - 60)
-        let question = AttentionQuestion(source: .desktop, session: finished, turn: UUID(), callID: "call_preview", arrivedAt: now - 3,
+        let question = AttentionQuestion(source: .cli, session: working, turn: UUID(), callID: "call_preview", arrivedAt: now - 3,
                                          prompts: [QuestionPrompt(header: "List shape",
                                                                   question: "Should the list allow nested levels?",
                                                                   options: ["Nested levels (Recommended)", "One level only"]),
                                                    QuestionPrompt(header: "First release",
                                                                   question: "Should the first release also support checkout?",
                                                                   options: ["View only (Recommended)", "Include export"])])
+        let desktopQuestion = AttentionQuestion(source: .desktop, session: finished, turn: UUID(), callID: "call_preview_desktop",
+                                                arrivedAt: now - 4,
+                                                prompts: [QuestionPrompt(header: "Storage",
+                                                                         question: "Where should the cache live?",
+                                                                         options: ["Application Support (Recommended)", "Caches", "Next to the app"])])
         queue.recordReceipts([request], now: now)
         queue.apply(completions: [completion], running: [running], now: now)
-        queue.apply(questions: [question])
+        queue.apply(questions: [question, desktopQuestion])
         completionPresentation = Attention(restored: true)
         reminderPresentation = Attention(restored: true)
         questionPresentation = Attention(restored: true)
