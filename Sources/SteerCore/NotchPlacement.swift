@@ -55,14 +55,15 @@ public enum NotchDisplaySelection {
 
 /// Panel geometry for the chosen display. On a display with a camera housing the collapsed panel is
 /// the housing row itself: exactly as tall as the housing, anchored to the top edge of the screen,
-/// with a narrow wing on each side of the housing where the sprite (left) and the count (right) live. On any other display it is a compact strip inline with the menu bar row, anchored to the
+/// with a wing on each side of the housing where the sprites and count (left) and the weekly limit (right) live. On any other display it is a compact strip inline with the menu bar row, anchored to the
 /// top edge of the screen. The open queue grows downward from the strip. The frame includes the concave ears at the top corners.
 /// Geometry depends only on these inputs, so a display change or an interaction never changes what
 /// the queue holds or when items expire.
 public enum NotchPlacement {
-    /// Visible body left of the camera housing, where up to three session sprites live.
-    public static let leadingWing: CGFloat = 64
-    /// Visible body right of the camera housing, where the overflow mark and the count live.
+    /// Visible body left of the camera housing, where up to three session sprites, the overflow
+    /// mark, and the to-check count live.
+    public static let leadingWing: CGFloat = 112
+    /// Visible body right of the camera housing, where the weekly limit reading lives.
     public static let trailingWing: CGFloat = 60
     /// Concave fillet joining the body to the menu bar at each top corner; part of the frame.
     public static let earRadius: CGFloat = 8
