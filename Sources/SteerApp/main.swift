@@ -65,6 +65,13 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     /// returns every question as plain pending and nothing is ever re-sent.
     @Published var answerProgress: [QuestionIdentity: QuestionAnswerProgress] = [:]
     private var answering = false
+    /// The second client on Codex's app-server daemon socket, when one exists. Inert otherwise.
+    private let daemonClient = AppServerDaemonClient(socketPath: Companion.daemonSocketPath)
+    /// The daemon's pending question requests on the current connection, and the ones Steer answered.
+    @Published var daemonBook = AppServerQuestionBook()
+    @Published var daemonStatus = "Codex daemon: not checked yet."
+    /// The daemon path is available; the preview renders it with a seeded request.
+    var daemonConnected: Bool { daemonClient.isConnected || previewMode != nil }
     private var savedSnapshot = Companion.launchSnapshot
     @Published var ghosttyEnabled = false
     @Published var ghosttyPermissionVerified = false
@@ -84,6 +91,10 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     nonisolated static var rolloutRoot: URL {
         argumentValue(for: "--reminder-rollouts").map { URL(fileURLWithPath: $0) }
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
+    }
+    /// `--daemon-socket <path>` points lab runs at another app-server socket.
+    nonisolated static var daemonSocketPath: String {
+        argumentValue(for: "--daemon-socket") ?? AppServerDaemonClient.defaultSocketPath
     }
     /// `--thread-names <path>` points lab runs at a copy instead of the live Codex index.
     nonisolated static var threadNamesURL: URL {
@@ -250,6 +261,11 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in self?.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion } }
+        daemonClient.onMessage = { [weak self] message in
+            guard let self else { return }
+            _ = self.daemonBook.apply(message: message, now: Date().timeIntervalSince1970)
+        }
+        daemonClient.onDisconnect = { [weak self] in self?.daemonBook.disconnect() }
         if let mode = previewMode { seedPreview(mode) }
         refresh()
         refreshSetup()
@@ -611,6 +627,34 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         }
     }
 
+    /// `--daemon-report <path>`: a few seconds after launch, record what the daemon client saw on
+    /// `--daemon-socket`, then quit. Used by the daemon lab against a fake daemon; nothing is answered.
+    private var daemonReportDue: Double?
+    private func writeDaemonReportAndQuitIfRequested() {
+        guard let path = Companion.argumentValue(for: "--daemon-report") else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard let due = daemonReportDue else { daemonReportDue = now + 4; return }
+        guard now >= due else { return }
+        let report: [String: Any] = [
+            "socket": daemonClient.socketPath,
+            "status": daemonClient.statusText,
+            "connected": daemonClient.isConnected,
+            "subscribed": daemonClient.subscribed.sorted(),
+            "question_routes": queue.items.compactMap(\.question).map { "\($0.callID): \(route(for: $0))" },
+            "pending_requests": daemonBook.pendingRequests.map { request -> [String: Any] in
+                ["thread": request.thread.uuidString.lowercased(), "turn": request.turn?.uuidString.lowercased() ?? "",
+                 "item_id": request.itemID, "request_id": "\(request.requestID)",
+                 "questions": request.questions.map { ["id": $0.id, "options": $0.options ?? [], "takes_text": $0.takesText, "is_secret": $0.isSecret] },
+                 "route": queue.items.compactMap(\.question).first { $0.session == request.thread && $0.callID == request.itemID }
+                    .map { "\(route(for: $0))" } ?? "no rollout question in the queue"]
+            }
+        ]
+        if let bytes = try? JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]) {
+            try? bytes.write(to: URL(fileURLWithPath: path))
+        }
+        app.terminate(nil)
+    }
+
     /// `--restart-report <path>`: after the first scan, record what a restart produced, then quit.
     /// Used by the restart lab; it reads nothing beyond the queue this process already holds.
     private func writeRestartReportAndQuitIfRequested(unverified: [AttentionRequest]) {
@@ -626,7 +670,8 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                 if let request = item.request { row["request"] = request.id.uuidString; row["state"] = "\(request.state)" }
                 if let question = item.question { row["call_id"] = question.callID; row["turn"] = question.turn.uuidString
                                                   row["source"] = question.source.rawValue
-                                                  if let progress = answerProgress[question.id] { row["answer_phase"] = "\(progress.phase)" } }
+                                                  if let progress = answerProgress[question.id] { row["answer_phase"] = "\(progress.phase)" }
+                                                  row["answer_path"] = "\(route(for: question))" }
                 return row
             },
             "released_unverified_requests": unverified.map { $0.id.uuidString },
@@ -644,6 +689,18 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         scanReminders()
         queue.expire(at: Date().timeIntervalSince1970)
         pruneAnswerProgress()
+        if previewMode == nil {
+            // A waiting question on a thread Steer has not subscribed to yet: ask for the list now.
+            if daemonClient.isConnected,
+               queue.items.contains(where: { item in
+                   item.question.map { !daemonClient.subscribed.contains($0.session.uuidString.lowercased()) } ?? false
+               }) {
+                daemonClient.pollThreadsSoon()
+            }
+            daemonClient.tick(now: ProcessInfo.processInfo.systemUptime)
+            if daemonStatus != daemonClient.statusText { daemonStatus = daemonClient.statusText }
+            writeDaemonReportAndQuitIfRequested()
+        }
         checkApprovalFocus()
         checkGhosttyFocus()
         // App identity only: no window contents, task titles, or accessibility queries.
@@ -863,18 +920,45 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
 
     /// Progress for a question the queue holds; a fresh, ready record when Steer has relayed nothing.
     func progress(for question: AttentionQuestion) -> QuestionAnswerProgress {
-        answerProgress[question.id] ?? QuestionAnswerProgress(call: question.id)
+        let progress = answerProgress[question.id] ?? QuestionAnswerProgress(call: question.id)
+        // A desktop pick made before the daemon delivered the request opened Codex and nothing more;
+        // the daemon card starts from its first question.
+        if case .daemon = route(for: question) { return progress.reopeningForDaemon() }
+        return progress
     }
 
-    /// Whether the card may show the options as controls: a CLI question with Ghostty controls on,
-    /// or a desktop question (whose pick only opens Codex). Preview renders the controls as well.
+    /// Which path this question's card uses right now: the daemon when it holds the request,
+    /// otherwise the Ghostty relay (CLI) or the desktop pick, exactly as before the daemon.
+    func route(for question: AttentionQuestion) -> QuestionAnswerRoute {
+        QuestionAnswerRouting.route(for: question, book: daemonBook, daemonConnected: daemonConnected)
+    }
+
+    /// Whether the card may show the options as controls: the daemon path, a CLI question with
+    /// Ghostty controls on, or a desktop question (whose pick only opens Codex). Preview renders the
+    /// controls as well.
     func showsOptionControls(for question: AttentionQuestion) -> Bool {
-        question.source == .desktop || ghosttyEnabled || previewMode != nil
+        switch route(for: question) {
+        case .daemon: return true
+        case .daemonAnswered: return false
+        case .desktopPick: return true
+        case .ghosttyRelay: return ghosttyEnabled || previewMode != nil
+        }
     }
 
-    /// One click on an option. Desktop: remember the pick and open the thread. CLI: relay the digit
-    /// through Ghostty after re-checking the queue, the policy, and the rollout as it is right now.
+    /// One click on an option. Daemon: the exact answer by call id. Desktop: remember the pick and
+    /// open the thread. CLI: relay the digit through Ghostty after re-checking the queue, the policy,
+    /// and the rollout as it is right now.
     func chooseOption(_ question: AttentionQuestion, question index: Int, option: Int) {
+        switch route(for: question) {
+        case .daemon:
+            answerThroughDaemon(question, question: index, answer: .option(option))
+            return
+        case .daemonAnswered:
+            navigationMessage = AppServerAnswerPolicy.message(for: .alreadyAnswered); refresh()
+            return
+        case .desktopPick, .ghosttyRelay:
+            break
+        }
         if question.source == .desktop {
             guard case .options = QuestionAnswerProgress.offer(question, at: index) else { return }
             answerProgress[question.id] = progress(for: question).pickingInCodex(question: index, option: option)
@@ -920,6 +1004,61 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                     ? progress.recordingSent(question: index, option: option, of: current, at: Date().timeIntervalSince1970)
                     : progress.recordingFailure(result.message)
             }
+            refresh()
+        }
+    }
+
+    /// A typed answer; only the daemon path takes one.
+    func answerText(_ question: AttentionQuestion, question index: Int, text: String) {
+        guard case .daemon = route(for: question) else {
+            navigationMessage = "Typed answers need Codex's daemon; answer this one in Codex."; refresh()
+            return
+        }
+        answerThroughDaemon(question, question: index, answer: .text(text))
+    }
+
+    /// One answer through the daemon. A non-last question's answer is only drafted; the last one
+    /// sends the whole call as one JSON-RPC response, after re-reading the rollout, and marks the
+    /// request answered before the write so nothing is ever sent twice. Never on a timer or error.
+    private func answerThroughDaemon(_ question: AttentionQuestion, question index: Int, answer: ChosenAnswer) {
+        guard !answering else { return }
+        let current = queue.items.compactMap(\.question).first { $0.id == question.id }
+        if let rejection = AppServerAnswerPolicy.rejection(for: current, book: daemonBook, progress: progress(for: question),
+                                                           question: index, answer: answer) {
+            navigationMessage = AppServerAnswerPolicy.message(for: rejection); refresh(); return
+        }
+        guard let current, previewMode == nil, let request = daemonBook.request(for: current) else { return }
+        let isLast = index + 1 >= request.questions.count
+        answering = true
+        navigationMessage = ""
+        let rolloutRoot = Companion.rolloutRoot
+        Task { @MainActor in
+            // The rollout as of this instant, only when the answer would leave Steer: an answer Codex
+            // already recorded, or an ended turn, means the daemon request is stale.
+            let pending = isLast ? await Task.detached {
+                QuestionAnswerGuard.stillPending(current, in: ReminderReader.currentEvidence(for: current.session, in: rolloutRoot))
+            }.value : true
+            let now = Date().timeIntervalSince1970
+            let latest = queue.items.compactMap(\.question).first { $0.id == question.id }
+            let plan = AppServerAnswering.prepare(current: latest, book: daemonBook, progress: progress(for: question),
+                                                  question: index, answer: answer, stillPending: { pending }, now: now)
+            daemonBook = plan.book
+            switch plan.outcome {
+            case let .refused(rejection):
+                navigationMessage = AppServerAnswerPolicy.message(for: rejection)
+            case let .drafted(next):
+                answerProgress[question.id] = next
+            case let .sending(next):
+                answerProgress[question.id] = next
+                let written = plan.message.map { daemonClient.send($0) } ?? false
+                if let latest {
+                    answerProgress[question.id] = written
+                        ? next.recordingSent(question: index, answer: answer, of: latest, at: now)
+                        : next.recordingFailure("Could not write to Codex's daemon; Steer will not retry. Answer in Codex.")
+                }
+                navigationMessage = written ? "Answer sent to Codex's daemon." : "Could not write to Codex's daemon."
+            }
+            answering = false
             refresh()
         }
     }
@@ -1122,6 +1261,20 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         queue.recordReceipts([request], now: now)
         queue.apply(completions: [completion], running: [running], now: now)
         queue.apply(questions: [question, desktopQuestion])
+        // The CLI sample is reachable through the daemon in the preview: a seeded request whose
+        // second question takes a typed answer, so the card shows both controls.
+        _ = daemonBook.apply(message: ["jsonrpc": "2.0", "id": 1, "method": "item/tool/requestUserInput",
+                                       "params": ["threadId": working.uuidString, "turnId": question.turn.uuidString,
+                                                  "itemId": "call_preview",
+                                                  "questions": [["id": "shape", "header": "List shape",
+                                                                 "question": "Should the list allow nested levels?",
+                                                                 "options": [["label": "Nested levels (Recommended)", "description": ""],
+                                                                             ["label": "One level only", "description": ""]]],
+                                                                ["id": "name", "header": "Name",
+                                                                 "question": "What should the first release be called?", "isOther": true,
+                                                                 "options": [["label": "View only (Recommended)", "description": ""],
+                                                                             ["label": "Include export", "description": ""]]]]]],
+                             now: now)
         completionPresentation = Attention(restored: true)
         reminderPresentation = Attention(restored: true)
         questionPresentation = Attention(restored: true)
@@ -1196,6 +1349,10 @@ struct Controls: View {
                 .font(.caption).foregroundStyle(.secondary)
             Text(model.ghosttyPermissionVerified ? "Ghostty Automation permission: verified by navigation probe." : "Ghostty Automation permission: not verified; enable controls to let macOS prompt.")
                 .font(.caption).foregroundStyle(.secondary)
+            Text(model.daemonStatus)
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("With a Codex app-server daemon running (`codex app-server daemon start`), questions are answered exactly through it, including typed answers. Steer only reads its socket; it never starts the daemon.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Toggle("Clear desktop completions Codex marks read", isOn: $model.desktopReadStateEnabled)
                 .onChange(of: model.desktopReadStateEnabled) { _, enabled in
                     model.desktopReadStateChanged(enabled)

@@ -60,7 +60,7 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     #expect(question?.turn == turn)
     #expect(question?.arrivedAt == RolloutTimestamp.parse(askedAt))
     #expect(question?.prompts.count == 2)
-    #expect(question?.prompts[0] == QuestionPrompt(header: "List shape",
+    #expect(question?.prompts[0] == QuestionPrompt(id: "nested choices", header: "List shape",
                                                    question: "Should the list allow nested levels?",
                                                    options: ["Nested levels (Recommended)", "One level only"]))
     #expect(question?.prompts[1].header == "First release")
@@ -109,7 +109,7 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     #expect(prompts?.first?.question?.count == QuestionPrompt.maximumQuestion + 1)
     // Free-text-only questions have no options and are not truncated.
     let text = questionArguments([("Name", "What should the module be called?", [])])
-    #expect(QuestionPrompt.parse(arguments: text) == [QuestionPrompt(header: "Name", question: "What should the module be called?", options: [])])
+    #expect(QuestionPrompt.parse(arguments: text) == [QuestionPrompt(id: "name", header: "Name", question: "What should the module be called?", options: [])])
 }
 
 @Test func aCallWithoutIdTurnOrTimeIsNotAQuestion() {

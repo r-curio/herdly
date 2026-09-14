@@ -1,0 +1,220 @@
+{
+  "checks": {
+    "initialized_as_steer": true,
+    "missing_reported": true,
+    "nothing_answered": true,
+    "private_card_uses_daemon": true,
+    "private_connected": true,
+    "private_question_ids": true,
+    "private_received_request": true,
+    "private_subscribed": true,
+    "shared_card_falls_back": true,
+    "shared_refused": true
+  },
+  "passed": true,
+  "recorded": "2026-09-14T07:43:26.745313+00:00",
+  "runs": {
+    "no-socket": {
+      "exit": 0,
+      "report": {
+        "connected": false,
+        "pending_requests": [],
+        "question_routes": [
+          "call_daemonlab_1: ghosttyRelay"
+        ],
+        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-xag6_xbd/missing.sock",
+        "status": "Codex daemon: not running (no socket at /var/folders/xx/tmp/T/steer-daemon-lab-xag6_xbd/missing.sock).",
+        "subscribed": []
+      },
+      "stderr": ""
+    },
+    "private-socket": {
+      "answer_written_by_steer": null,
+      "daemon_log": [
+        {
+          "direction": "in",
+          "message": {
+            "id": 1,
+            "jsonrpc": "2.0",
+            "method": "initialize",
+            "params": {
+              "capabilities": {
+                "experimentalApi": true
+              },
+              "clientInfo": {
+                "name": "steer",
+                "title": "Steer",
+                "version": "0"
+              }
+            }
+          }
+        },
+        {
+          "direction": "out",
+          "message": {
+            "id": 1,
+            "jsonrpc": "2.0",
+            "result": {
+              "codexHome": "/tmp",
+              "platformFamily": "unix",
+              "platformOs": "macos",
+              "userAgent": "fake-daemon"
+            }
+          }
+        },
+        {
+          "direction": "in",
+          "message": {
+            "jsonrpc": "2.0",
+            "method": "initialized"
+          }
+        },
+        {
+          "direction": "in",
+          "message": {
+            "id": 2,
+            "jsonrpc": "2.0",
+            "method": "thread/loaded/list",
+            "params": {}
+          }
+        },
+        {
+          "direction": "out",
+          "message": {
+            "id": 2,
+            "jsonrpc": "2.0",
+            "result": {
+              "data": [
+                "01a09d9b-7642-7b51-bcce-9b66cfe5361f"
+              ]
+            }
+          }
+        },
+        {
+          "direction": "in",
+          "message": {
+            "id": 3,
+            "jsonrpc": "2.0",
+            "method": "thread/resume",
+            "params": {
+              "threadId": "01a09d9b-7642-7b51-bcce-9b66cfe5361f"
+            }
+          }
+        },
+        {
+          "direction": "out",
+          "message": {
+            "id": 3,
+            "jsonrpc": "2.0",
+            "result": {
+              "thread": {
+                "id": "01a09d9b-7642-7b51-bcce-9b66cfe5361f",
+                "status": {
+                  "type": "active"
+                }
+              }
+            }
+          }
+        },
+        {
+          "direction": "out",
+          "message": {
+            "id": 900,
+            "jsonrpc": "2.0",
+            "method": "item/tool/requestUserInput",
+            "params": {
+              "itemId": "call_daemonlab_1",
+              "questions": [
+                {
+                  "header": "Shape",
+                  "id": "shape",
+                  "options": [
+                    {
+                      "description": "",
+                      "label": "A"
+                    },
+                    {
+                      "description": "",
+                      "label": "B"
+                    }
+                  ],
+                  "question": "Which?"
+                },
+                {
+                  "header": "Name",
+                  "id": "name",
+                  "options": null,
+                  "question": "Call it?"
+                }
+              ],
+              "threadId": "01a09d9b-7642-7b51-bcce-9b66cfe5361f",
+              "turnId": "01a09db7-0c51-7f33-9ebc-4e44f91df22c"
+            }
+          }
+        },
+        {
+          "event": "client closed"
+        }
+      ],
+      "exit": 0,
+      "report": {
+        "connected": true,
+        "pending_requests": [
+          {
+            "item_id": "call_daemonlab_1",
+            "questions": [
+              {
+                "id": "shape",
+                "is_secret": false,
+                "options": [
+                  "A",
+                  "B"
+                ],
+                "takes_text": false
+              },
+              {
+                "id": "name",
+                "is_secret": false,
+                "options": [],
+                "takes_text": true
+              }
+            ],
+            "request_id": "number(900)",
+            "route": "daemon(SteerCore.AppServerQuestionRequest(requestID: SteerCore.AppServerRequestID.number(900), thread: 01A09D9B-7642-7B51-BCCE-9B66CFE5361F, turn: Optional(01A09DB7-0C51-7F33-9EBC-4E44F91DF22C), itemID: \"call_daemonlab_1\", questions: [SteerCore.AppServerQuestion(id: \"shape\", header: Optional(\"Shape\"), question: Optional(\"Which?\"), options: Optional([\"A\", \"B\"]), isOther: false, isSecret: false), SteerCore.AppServerQuestion(id: \"name\", header: Optional(\"Name\"), question: Optional(\"Call it?\"), options: nil, isOther: false, isSecret: false)], receivedAt: 1789371807.6141438))",
+            "thread": "01a09d9b-7642-7b51-bcce-9b66cfe5361f",
+            "turn": "01a09db7-0c51-7f33-9ebc-4e44f91df22c"
+          }
+        ],
+        "question_routes": [
+          "call_daemonlab_1: daemon(SteerCore.AppServerQuestionRequest(requestID: SteerCore.AppServerRequestID.number(900), thread: 01A09D9B-7642-7B51-BCCE-9B66CFE5361F, turn: Optional(01A09DB7-0C51-7F33-9EBC-4E44F91DF22C), itemID: \"call_daemonlab_1\", questions: [SteerCore.AppServerQuestion(id: \"shape\", header: Optional(\"Shape\"), question: Optional(\"Which?\"), options: Optional([\"A\", \"B\"]), isOther: false, isSecret: false), SteerCore.AppServerQuestion(id: \"name\", header: Optional(\"Name\"), question: Optional(\"Call it?\"), options: nil, isOther: false, isSecret: false)], receivedAt: 1789371807.6141438))"
+        ],
+        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-xag6_xbd/d.sock",
+        "status": "Codex daemon: connected; 1 thread subscribed.",
+        "subscribed": [
+          "01a09d9b-7642-7b51-bcce-9b66cfe5361f"
+        ]
+      },
+      "stderr": ""
+    },
+    "shared-socket": {
+      "daemon_log": [
+        {
+          "event": "no client connected"
+        }
+      ],
+      "exit": 0,
+      "report": {
+        "connected": false,
+        "pending_requests": [],
+        "question_routes": [
+          "call_daemonlab_1: ghosttyRelay"
+        ],
+        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-xag6_xbd/shared.sock",
+        "status": "Codex daemon: refusing /var/folders/xx/tmp/T/steer-daemon-lab-xag6_xbd/shared.sock; it is readable by other users.",
+        "subscribed": []
+      },
+      "stderr": ""
+    }
+  },
+  "steer": ".build/debug/Steer"
+}

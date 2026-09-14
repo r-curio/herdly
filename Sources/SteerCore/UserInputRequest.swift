@@ -24,6 +24,8 @@ public struct QuestionPrompt: Equatable, Sendable {
     public static let maximumLabel = 80
     public static let maximumArguments = 64 * 1024
 
+    /// Codex's own id for the question; the daemon answer is keyed by it. Nil when unreadable.
+    public let id: String?
     public let header: String?
     public let question: String?
     /// Option labels in Codex's own order; descriptions and the free-text field stay in Codex.
@@ -39,8 +41,9 @@ public struct QuestionPrompt: Equatable, Sendable {
     /// digits the notch could send would not cover Codex's list. Such a question stays in Codex.
     public let optionsComplete: Bool
 
-    public init(header: String?, question: String?, options: [String], truncated: Bool = false,
+    public init(id: String? = nil, header: String?, question: String?, options: [String], truncated: Bool = false,
                 isOther: Bool = false, optionsComplete: Bool = true) {
+        self.id = id
         self.header = header
         self.question = question
         self.options = options
@@ -63,6 +66,7 @@ public struct QuestionPrompt: Equatable, Sendable {
         var prompts: [QuestionPrompt] = []
         for entry in questions.prefix(maximumQuestions) {
             var truncated = questions.count > maximumQuestions
+            let id = (entry["id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             let header = capped(entry["header"] as? String, to: maximumHeader, truncated: &truncated)
             let question = capped(entry["question"] as? String, to: maximumQuestion, truncated: &truncated)
             let isOther = entry["isOther"] as? Bool ?? false
@@ -80,7 +84,7 @@ public struct QuestionPrompt: Equatable, Sendable {
                 truncated = true
                 complete = false
             }
-            prompts.append(QuestionPrompt(header: header, question: question, options: options, truncated: truncated,
+            prompts.append(QuestionPrompt(id: id, header: header, question: question, options: options, truncated: truncated,
                                           isOther: isOther, optionsComplete: complete))
         }
         return (prompts, questions.count)
@@ -92,6 +96,12 @@ public struct QuestionPrompt: Equatable, Sendable {
         guard trimmed.count > limit else { return trimmed.isEmpty ? nil : trimmed }
         truncated = true
         return String(trimmed.prefix(limit)) + "…"
+    }
+
+    /// Trimmed text shortened to `limit` with an ellipsis; nil when empty. The one display cap.
+    public static func display(_ text: String?, limit: Int) -> String? {
+        var truncated = false
+        return capped(text, to: limit, truncated: &truncated)
     }
 }
 

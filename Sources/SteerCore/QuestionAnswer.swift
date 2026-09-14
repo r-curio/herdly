@@ -1,5 +1,11 @@
 import Foundation
 
+/// One answer the user gave in the notch: a listed option by position, or typed text (daemon path only).
+public enum ChosenAnswer: Equatable, Sendable {
+    case option(Int)
+    case text(String)
+}
+
 /// What the notch may offer for one question inside a call.
 public enum QuestionOffer: Equatable, Sendable {
     /// The listed option labels; the notch can relay any of them as its one-based digit.
@@ -34,15 +40,25 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
     public let call: QuestionIdentity
     /// The question the Codex pane should now be showing (zero-based).
     public private(set) var questionIndex: Int
-    /// Zero-based option index sent, by question index.
+    /// Zero-based option index sent or drafted, by question index.
     public private(set) var picks: [Int: Int]
+    /// Typed answers drafted for the daemon path, by question index. Never used for a key relay.
+    public private(set) var texts: [Int: String]
     public private(set) var phase: QuestionAnswerPhase
 
     public init(call: QuestionIdentity) {
         self.call = call
         self.questionIndex = 0
         self.picks = [:]
+        self.texts = [:]
         self.phase = .ready
+    }
+
+    /// The answer held for a question, drafted or sent.
+    public func answer(for index: Int) -> ChosenAnswer? {
+        if let option = picks[index] { return .option(option) }
+        if let text = texts[index] { return .text(text) }
+        return nil
     }
 
     /// The offer for question `index`: digits only when Steer holds the complete option list Codex
@@ -64,18 +80,48 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
 
     /// `.ready` → `.sending` for the current question. The caller has already applied the policy.
     public func startingSend(question index: Int, option: Int) -> QuestionAnswerProgress {
+        startingSend(question: index)
+    }
+
+    /// `.ready` → `.sending` for the current question, whatever the answer's kind.
+    public func startingSend(question index: Int) -> QuestionAnswerProgress {
         var next = self
-        guard phase == .ready, index == questionIndex, picks[index] == nil else { return self }
+        guard phase == .ready, index == questionIndex, answer(for: index) == nil else { return self }
         next.phase = .sending
+        return next
+    }
+
+    /// Desktop pick made before the daemon delivered the request: the pick only opened Codex, so
+    /// the daemon card starts over. Any other phase is kept.
+    public func reopeningForDaemon() -> QuestionAnswerProgress {
+        guard case .pickedInCodex = phase else { return self }
+        var next = QuestionAnswerProgress(call: call)
+        next.questionIndex = 0
+        return next
+    }
+
+    /// Daemon path: keeps a non-last question's answer without sending anything and moves on to the
+    /// next question. The whole call is sent as one response after the last answer.
+    public func recordingDraft(question index: Int, answer: ChosenAnswer) -> QuestionAnswerProgress {
+        var next = self
+        guard phase == .ready, index == questionIndex, self.answer(for: index) == nil else { return self }
+        next.store(answer, at: index)
+        next.questionIndex = index + 1
         return next
     }
 
     /// Records a delivered key. A non-last question advances the expected pane position and stays
     /// ready; the last question waits for the rollout output.
     public func recordingSent(question index: Int, option: Int, of question: AttentionQuestion, at now: Double) -> QuestionAnswerProgress {
+        recordingSent(question: index, answer: .option(option), of: question, at: now)
+    }
+
+    /// Records a delivered answer (a key through Ghostty, or the whole call's response through the
+    /// daemon, in which case `index` is the last question).
+    public func recordingSent(question index: Int, answer: ChosenAnswer, of question: AttentionQuestion, at now: Double) -> QuestionAnswerProgress {
         var next = self
         guard phase == .sending, index == questionIndex else { return self }
-        next.picks[index] = option
+        next.store(answer, at: index)
         if index + 1 < question.questionCount {
             next.questionIndex = index + 1
             next.phase = .ready
@@ -83,6 +129,13 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
             next.phase = .sent(at: now)
         }
         return next
+    }
+
+    private mutating func store(_ answer: ChosenAnswer, at index: Int) {
+        switch answer {
+        case let .option(option): picks[index] = option
+        case let .text(text): texts[index] = text
+        }
     }
 
     /// Nothing was sent; the reason is shown and the call is never retried by Steer.
