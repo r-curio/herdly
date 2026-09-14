@@ -584,9 +584,11 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             return nil
         }()
         let known = knownCLISessions
+        let daemonThreads = daemonClient.loadedThreads
         Task { @MainActor in
             let result = await Task.detached {
-                (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known), DesktopEventReader.read(from: events),
+                (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
+                                     daemonThreads: daemonThreads), DesktopEventReader.read(from: events),
                  readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
                  CodexUsageReader.latest(root: rolloutRoot))
             }.value

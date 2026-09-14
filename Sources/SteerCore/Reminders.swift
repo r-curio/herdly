@@ -223,8 +223,16 @@ public enum ReminderReader {
     /// The daemon keeps the thread loaded and fires no SessionEnd, so Steer dates a session end at
     /// the inventory itself. Only for sessions proved by title: a `source: cli` session in another
     /// terminal is never in Ghostty and still ends by its own hook.
+    /// `daemonThreads` are the threads Codex's app-server daemon currently has loaded. The desktop
+    /// app runs its own engine, so a loaded thread whose rollout `originator` is not the desktop's
+    /// is a terminal session on the daemon (a TUI, or `codex agents`): CLI, even before or after
+    /// Ghostty shows its title. Such a session with no tab title in an inventory taken at least
+    /// `surfaceGrace` seconds after its SessionStart has no surface, and ends.
+    public static let surfaceGrace: Double = 15
+    public static let desktopOriginator = "Codex Desktop"
+
     public static func scan(events: URL, rollouts: URL, ghostty: GhosttyInventory? = nil,
-                            knownCLISessions: Set<UUID> = []) -> ReminderScan {
+                            knownCLISessions: Set<UUID> = [], daemonThreads: Set<UUID> = []) -> ReminderScan {
         let cliTitles = ghostty?.titles ?? []
         var result = ReminderScan()
         guard let files = try? FileManager.default.contentsOfDirectory(at: events, includingPropertiesForKeys: [.creationDateKey]),
@@ -352,15 +360,24 @@ public enum ReminderReader {
                       let meta = event["payload"] as? [String: Any],
                       (meta["id"] as? String).flatMap(UUID.init(uuidString:)) == session,
                       meta["source"] as? String == "cli" || cliTitles.contains(GhosttyMatch.title(session))
-                        || knownCLISessions.contains(session) else { continue }
+                        || knownCLISessions.contains(session)
+                        || (daemonThreads.contains(session) && meta["originator"] as? String != desktopOriginator) else { continue }
                 result.cliSessions.insert(session)
-                if cliTitles.contains(GhosttyMatch.title(session)) { result.titledCLISessions.insert(session) }
-                else if let ghostty, knownCLISessions.contains(session), result.sessionEnds[session] == nil {
-                    // The tab is gone: the session's surface ended at this inventory.
-                    result.sessionEnds[session] = ghostty.takenAt
-                    result.cliEvents.append(.sessionEnded(session: session, receivedAt: RolloutTimestamp.format(ghostty.takenAt)))
-                }
                 let sessionHooks = hooks.filter { $0.session_id == session }.sorted { $0.received_at < $1.received_at }
+                if cliTitles.contains(GhosttyMatch.title(session)) {
+                    result.titledCLISessions.insert(session)
+                } else if let ghostty, result.sessionEnds[session] == nil, meta["source"] as? String != "cli" {
+                    // No tab shows this session. Proved by title earlier: its tab closed. Known only
+                    // from the daemon: give a new session time for its tab to be inventoried first.
+                    let started = sessionHooks.first { $0.hook_event_name == "SessionStart" }
+                        .flatMap { RolloutTimestamp.parse($0.received_at) }
+                    let ended = knownCLISessions.contains(session)
+                        || (daemonThreads.contains(session) && started.map { ghostty.takenAt - $0 >= surfaceGrace } == true)
+                    if ended {
+                        result.sessionEnds[session] = ghostty.takenAt
+                        result.cliEvents.append(.sessionEnded(session: session, receivedAt: RolloutTimestamp.format(ghostty.takenAt)))
+                    }
+                }
                 for hook in sessionHooks {
                     switch hook.hook_event_name {
                     case "SessionStart":
@@ -386,6 +403,7 @@ public enum ReminderReader {
         }
         result.cliEvents.sort { $0.receivedAt < $1.receivedAt }
         result.cliState = CLIState.replay(result.cliEvents)
+        result.cliState.end(turns: result.completed.union(result.canceled))
         result.liveCLISessions = result.cliState.liveSessions
         result.attentionRequests = result.attentionRequests.map { request in
             guard result.cliSessions.contains(request.session), request.source != .cli else { return request }
