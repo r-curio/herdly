@@ -1,0 +1,164 @@
+{
+  "automated_checks": {
+    "daemon_lab": "scripts/daemon_lab.py against a fake daemon on a scratch socket: docs/evidence/app-server-daemon-lab.json",
+    "swift_test": "AppServerQuestionTests.swift: parsing by thread/item/question id, resolution evidence, routing, the answer policy, the response shape, one answer per call id with a fake client, refusal on uncertainty, the socket check"
+  },
+  "codex_cli": "codex-cli 0.145.0",
+  "codex_cli_path": "/opt/homebrew/bin/codex",
+  "daemon_commands": [
+    "bootstrap",
+    "start",
+    "restart",
+    "enable-remote-control",
+    "disable-remote-control",
+    "stop",
+    "version"
+  ],
+  "daemon_start": {
+    "command": "codex app-server daemon start",
+    "exit": 1,
+    "note": "Refused before creating anything: the Homebrew CLI has no managed standalone install at ~/.codex/packages/standalone/current/codex, which the daemon requires. Nothing on the machine changed; ~/.codex/app-server-control still holds only an empty app-server-startup.lock from 2026-08-02.",
+    "stderr": "Error: managed standalone Codex install not found at /Users/dev/.codex/packages/standalone/current/codex\n\nThis command requires the standalone install managed by the Codex installer, because the daemon starts and updates app-server from that fixed path.\n\nInstall it with:\n  curl -fsSL https://chatgpt.com/codex/install.sh | sh\n\nThen rerun the command you just tried.",
+    "stdout": ""
+  },
+  "daemon_version": {
+    "command": "codex app-server daemon version",
+    "exit": 1,
+    "stderr": "Error: failed to connect to /Users/dev/.codex/app-server-control/app-server-control.sock\n\nCaused by:\n    No such file or directory (os error 2)"
+  },
+  "desktop_app": "26.901.51231 (engine 0.153.4), running its engine as `codex ... app-server` on stdio with no --listen flag (process list, 2026-09-14)",
+  "protocol_from_generated_schema": {
+    "InitializeCapabilities": {
+      "properties": [
+        "experimentalApi",
+        "mcpServerOpenaiFormElicitation",
+        "optOutNotificationMethods",
+        "requestAttestation"
+      ],
+      "required": []
+    },
+    "ServerRequestResolvedNotification": {
+      "properties": [
+        "requestId",
+        "threadId"
+      ],
+      "required": [
+        "requestId",
+        "threadId"
+      ]
+    },
+    "ThreadLoadedListResponse": {
+      "properties": [
+        "data",
+        "nextCursor"
+      ],
+      "required": [
+        "data"
+      ]
+    },
+    "ThreadResumeParams_description": "There are three ways to resume a thread: 1. By thread_id: load the thread from disk by thread_id and resume it. 2. By history: instantiate the thread from memory and resume it. 3. By path: load the thread from disk by path and resume it.\n\nFor non-running threads, the precedence is: history > non-empty path > thread_id. If using history or a non-empty path for a non-running thread, the thread_id param will be ignored.\n\nIf thread_id identifies a running thread, app-server rejoins that thread and treats a non-empty path as a consistency check against the active rollout path. Empty string path values are treated as absent.\n\nPrefer using thread_id whenever possible.",
+    "ThreadResumeParams_required": [
+      "threadId"
+    ],
+    "ToolRequestUserInputAnswer": {
+      "properties": [
+        "answers"
+      ],
+      "required": [
+        "answers"
+      ]
+    },
+    "ToolRequestUserInputOption": {
+      "properties": [
+        "description",
+        "label"
+      ],
+      "required": [
+        "description",
+        "label"
+      ]
+    },
+    "ToolRequestUserInputParams": {
+      "properties": [
+        "autoResolutionMs",
+        "itemId",
+        "questions",
+        "threadId",
+        "turnId"
+      ],
+      "required": [
+        "itemId",
+        "questions",
+        "threadId",
+        "turnId"
+      ]
+    },
+    "ToolRequestUserInputQuestion": {
+      "properties": [
+        "header",
+        "id",
+        "isOther",
+        "isSecret",
+        "options",
+        "question"
+      ],
+      "required": [
+        "header",
+        "id",
+        "question"
+      ]
+    },
+    "ToolRequestUserInputResponse": {
+      "properties": [
+        "answers"
+      ],
+      "required": [
+        "answers"
+      ]
+    },
+    "client_request_methods_used": [
+      "initialize",
+      "thread/loaded/list",
+      "thread/resume",
+      "thread/unsubscribe"
+    ],
+    "command": "codex app-server generate-json-schema --out <dir>",
+    "server_notification_methods_of_interest": [
+      "item/completed",
+      "item/started",
+      "serverRequest/resolved",
+      "thread/closed",
+      "turn/completed",
+      "turn/started"
+    ],
+    "server_request_methods": [
+      "account/chatgptAuthTokens/refresh",
+      "applyPatchApproval",
+      "attestation/generate",
+      "execCommandApproval",
+      "item/commandExecution/requestApproval",
+      "item/fileChange/requestApproval",
+      "item/permissions/requestApproval",
+      "item/tool/call",
+      "item/tool/requestUserInput",
+      "mcpServer/elicitation/request"
+    ]
+  },
+  "purpose": "Evidence for issue #42: what the installed CLI says about the app-server daemon and the requestUserInput protocol, gathered without changing any Codex configuration. The live proof (a running daemon in the user's workflow and a second client receiving a real pending request) is not here; see the 'still_unproven' list.",
+  "recorded": "2026-09-14",
+  "rollout_correlation": {
+    "answer_shape": "answers[question_id].answers = [option label or typed text], exactly as the desktop recording shows",
+    "item_id": "assumed equal to the rollout function_call call_id (call_\u2026); unproven on a live daemon, and a mismatch only means the card falls back to the pre-daemon path",
+    "question_id": "the `id` inside the tool's arguments (e.g. list_shape), which the recorded function_call_output also keys its answers by (docs/evidence/desktop-user-input-request.json)",
+    "thread_id": "the rollout session id (session_meta.id); thread ids and session ids are the same UUIDs"
+  },
+  "socket": {
+    "exists": false,
+    "path": "/Users/dev/.codex/app-server-control/app-server-control.sock"
+  },
+  "socket_authentication_observed": "No token, pairing or credential is involved for the local control socket: the daemon creates it under ~/.codex/app-server-control (directory mode 0700, owned by the user). Remote control is a separate, opt-in websocket enrollment (`enable-remote-control`) that Steer never uses. Binary strings mention NetworkUnixSocketPermission and remote-control pairing only.",
+  "still_unproven": [
+    "see app-server-daemon-live.json"
+  ],
+  "superseded_by": "docs/evidence/app-server-daemon-live.json: the same day the user installed the managed standalone package (0.154.0); the daemon then started and the live proof was recorded there."
+}

@@ -13,6 +13,11 @@ public enum RolloutTimestamp {
     public static func parse(_ value: String) -> Double? {
         (fractional.date(from: value) ?? whole.date(from: value))?.timeIntervalSince1970
     }
+
+    /// The inverse of `parse`, with fractional seconds, for events Steer itself dates.
+    public static func format(_ time: Double) -> String {
+        fractional.string(from: Date(timeIntervalSince1970: time))
+    }
 }
 
 /// One handed-back request to look for in its session's rollout. Nothing is matched without an exact turn and command.

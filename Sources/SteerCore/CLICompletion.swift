@@ -48,6 +48,12 @@ public struct CLIState: Sendable {
         }
     }
 
+    /// Rollout evidence that a turn ended (`task_complete` or `turn_aborted`) ends its running row
+    /// even when no Stop hook arrived: a turn aborted as its tab closed writes no hook.
+    public mutating func end(turns: Set<TurnIdentity>) {
+        running.removeAll { turns.contains($0.id) }
+    }
+
     public static func replay(_ events: [CLIEvent]) -> CLIState {
         var state = CLIState()
         events.forEach { state.apply($0) }
