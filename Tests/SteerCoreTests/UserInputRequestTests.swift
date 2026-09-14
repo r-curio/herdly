@@ -263,3 +263,33 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     try Data(meta(session).utf8).write(to: root.appendingPathComponent("rollout-copy-\(session.uuidString.uppercased()).jsonl"))
     #expect(ReminderReader.rolloutURL(for: session, in: root) == nil)
 }
+
+@Test func aSessionWhoseIdTitlesAGhosttyTabIsCLIWhateverTheRolloutSays() throws {
+    // Through the app-server daemon (CLI 0.154.0) a TUI session is recorded with `source: vscode`,
+    // the desktop's value. The session-id tab title Steer configures is the proof it is a CLI session.
+    let session = UUID(), turn = UUID()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-question-\(UUID().uuidString)")
+    let events = root.appendingPathComponent("events"), rollouts = root.appendingPathComponent("sessions")
+    try FileManager.default.createDirectory(at: events, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: rollouts, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let hook = "{\"hook_event_name\":\"UserPromptSubmit\",\"session_id\":\"\(session)\",\"turn_id\":\"\(turn)\",\"received_at\":\"2026-09-14T02:20:14Z\"}"
+    try hook.write(to: events.appendingPathComponent("\(UUID().uuidString).json"), atomically: true, encoding: .utf8)
+    let rollout = rollouts.appendingPathComponent("rollout-2026-09-14T02-20-00-\(session.uuidString.lowercased()).jsonl")
+    try (meta(session, source: "vscode") + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample))
+        .write(to: rollout, atomically: true, encoding: .utf8)
+    let titled = ReminderReader.scan(events: events, rollouts: rollouts, cliTitles: [GhosttyMatch.title(session), "other tab"])
+    #expect(titled.cliSessions == [session])
+    #expect(titled.questions.map(\.id) == [QuestionIdentity(source: .cli, session: session, callID: "call_1")])
+    #expect(titled.cliState.liveSessions == [session])
+    // Only an exact title match counts: a prefix, another session's title, or no titles leaves it desktop.
+    for titles in [Set<String>(), ["other tab"], [String(GhosttyMatch.title(session).dropLast())], [session.uuidString.lowercased()]] {
+        let plain = ReminderReader.scan(events: events, rollouts: rollouts, cliTitles: titles)
+        #expect(plain.cliSessions.isEmpty, Comment(rawValue: "\(titles)"))
+        #expect(plain.questions.map(\.id) == [QuestionIdentity(source: .desktop, session: session, callID: "call_1")])
+    }
+    // The snapshot helper lists every terminal name across windows and tabs.
+    let json = #"{"status":"ok","windows":[{"id":"w","tabs":[{"id":"t","terminals":[{"id":"a","name":"\#(GhosttyMatch.title(session))"},{"id":"b","name":"zsh"}]}]}],"selected":null}"#
+    let snapshot = try JSONDecoder().decode(GhosttySnapshot.self, from: Data(json.utf8))
+    #expect(snapshot.terminalNames == [GhosttyMatch.title(session), "zsh"])
+}

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Probe Codex's local app-server daemon socket the way Steer's daemon client would.
 
-Read-only unless `--answer` is given. Speaks newline-delimited JSON-RPC 2.0 to
+Read-only unless `--answer` is given. Speaks JSON-RPC 2.0 over WebSocket on
 `~/.codex/app-server-control/app-server-control.sock` (the socket `codex app-server daemon start`
-creates and the TUI attaches to), and never starts, stops or configures the daemon itself.
+creates and the TUI attaches to): an HTTP upgrade, then one message per text frame, the way
+Codex's own clients do on 0.154.0. It never starts, stops or configures the daemon itself.
 
   python3 scripts/probe_app_server_daemon.py --status
       Whether the socket exists, who owns it, its mode, and `codex app-server daemon version`.
@@ -23,12 +24,15 @@ creates and the TUI attaches to), and never starts, stops or configures the daem
 never loads a thread from disk into the daemon; it only rejoins threads that are already running.
 """
 import argparse
+import base64
+import hashlib
 import json
 import os
 import pwd
 import select
 import socket
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -60,8 +64,29 @@ def daemon_version():
     return {"exit": run.returncode, "stdout": run.stdout.strip(), "stderr": run.stderr.strip()}
 
 
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def ws_accept(key):
+    return base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
+
+
+def ws_frame(payload, opcode=0x1):
+    """One client frame: FIN set, masked as RFC 6455 requires."""
+    mask = os.urandom(4)
+    head = bytes([0x80 | opcode])
+    n = len(payload)
+    if n < 126:
+        head += bytes([0x80 | n])
+    elif n < 65536:
+        head += bytes([0x80 | 126]) + struct.pack(">H", n)
+    else:
+        head += bytes([0x80 | 127]) + struct.pack(">Q", n)
+    return head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+
+
 class Client:
-    """Minimal JSON-RPC client over the daemon's Unix socket; one line per message."""
+    """Minimal JSON-RPC-over-WebSocket client on the daemon's Unix socket."""
 
     def __init__(self, path=SOCKET, record=None):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -71,11 +96,57 @@ class Client:
         self.next_id = 1
         self.record = record
         self.pending = {}
+        self.upgrade()
+
+    def upgrade(self):
+        key = base64.b64encode(os.urandom(16)).decode()
+        self.sock.sendall((f"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n"
+                           f"Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {key}\r\n\r\n").encode())
+        while b"\r\n\r\n" not in self.buffer:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise RuntimeError("connection closed during the WebSocket upgrade")
+            self.buffer += chunk
+        head, self.buffer = self.buffer.split(b"\r\n\r\n", 1)
+        lines = head.decode(errors="replace").split("\r\n")
+        if " 101 " not in lines[0]:
+            raise RuntimeError(f"upgrade refused: {lines[0]}")
+        accept = {k.strip().lower(): v.strip() for k, v in (l.split(":", 1) for l in lines[1:] if ":" in l)}.get("sec-websocket-accept")
+        if accept != ws_accept(key):
+            raise RuntimeError("Sec-WebSocket-Accept mismatch")
+        self._log("upgrade", {"status": lines[0]})
 
     def send(self, message):
-        line = json.dumps(message, separators=(",", ":")) + "\n"
-        self.sock.sendall(line.encode())
+        self.sock.sendall(ws_frame(json.dumps(message, separators=(",", ":")).encode()))
         self._log("out", message)
+
+    def _need(self, n):
+        while len(self.buffer) < n:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                return None
+            self.buffer += chunk
+        out, self.buffer = self.buffer[:n], self.buffer[n:]
+        return out
+
+    def read_frame(self):
+        """(opcode, payload) of the next complete frame, or None when the daemon closed."""
+        head = self._need(2)
+        if head is None:
+            return None
+        opcode, n = head[0] & 0x0F, head[1] & 0x7F
+        masked = head[1] & 0x80
+        if n == 126:
+            n = struct.unpack(">H", self._need(2))[0]
+        elif n == 127:
+            n = struct.unpack(">Q", self._need(8))[0]
+        mask = self._need(4) if masked else None
+        payload = self._need(n)
+        if payload is None:
+            return None
+        if mask:
+            payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        return opcode, payload
 
     def request(self, method, params=None):
         request_id = self.next_id
@@ -92,19 +163,26 @@ class Client:
             self.handle(message)
 
     def read(self, timeout=None):
-        if timeout is not None:
-            ready, _, _ = select.select([self.sock], [], [], timeout)
-            if not ready:
+        """The next JSON-RPC message; pings are answered, other control frames skipped."""
+        while True:
+            if timeout is not None and not self.buffer:
+                ready, _, _ = select.select([self.sock], [], [], timeout)
+                if not ready:
+                    return None
+            frame = self.read_frame()
+            if frame is None:
                 return None
-        while b"\n" not in self.buffer:
-            chunk = self.sock.recv(65536)
-            if not chunk:
+            opcode, payload = frame
+            if opcode == 0x9:
+                self.sock.sendall(ws_frame(payload, opcode=0xA))
+                continue
+            if opcode == 0x8:
                 return None
-            self.buffer += chunk
-        line, self.buffer = self.buffer.split(b"\n", 1)
-        message = json.loads(line)
-        self._log("in", message)
-        return message
+            if opcode not in (0x1, 0x2):
+                continue
+            message = json.loads(payload)
+            self._log("in", message)
+            return message
 
     def handle(self, message):
         """Track server requests and their resolution; print what matters for the proof."""
@@ -169,6 +247,10 @@ def self_test():
     assert answers_for(request, {"a": "x", "b": "y", "c": "z"}) is None
     status = socket_status("/definitely/not/here.sock")
     assert status == {"path": "/definitely/not/here.sock", "exists": False}
+    # RFC 6455 §4.2.2 example key and accept value.
+    assert ws_accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+    frame = ws_frame(b"hi")
+    assert frame[0] == 0x81 and frame[1] == 0x82 and len(frame) == 8
     print("Daemon probe self-check passed.")
 
 
@@ -207,24 +289,43 @@ def main():
     if not args.watch:
         return 0
     wanted = args.thread or threads
+    subscribed = set()
     for thread in wanted:
         if thread not in threads:
             print(f"{stamp()} thread {thread} is not loaded in the daemon; not resuming it")
             continue
-        result = client.request("thread/resume", {"threadId": thread})
+        try:
+            result = client.request("thread/resume", {"threadId": thread})
+        except RuntimeError as error:
+            print(f"{stamp()} not yet subscribed to {thread}: {error}")
+            continue
+        subscribed.add(thread)
         print(f"{stamp()} subscribed to {thread}: thread status " + json.dumps((result or {}).get("thread", {}).get("status"))[:120])
     given = dict(item.split("=", 1) for item in args.given)
     answered = False
     started = time.time()
+    next_poll = time.time() + 5
     print(f"{stamp()} watching; Ctrl-C to stop")
     try:
         while args.seconds is None or time.time() - started < args.seconds:
             message = client.read(timeout=1)
-            if message is None:
-                if client.buffer == b"" and not select.select([client.sock], [], [], 0)[0]:
-                    pass
-            else:
+            if message is not None:
                 client.handle(message)
+            # Threads that attach later (a TUI started after the probe) are subscribed as they appear,
+            # unless specific --thread ids were asked for.
+            if not args.thread and time.time() >= next_poll:
+                next_poll = time.time() + 5
+                for thread in loaded_threads(client):
+                    if thread not in subscribed:
+                        try:
+                            result = client.request("thread/resume", {"threadId": thread})
+                        except RuntimeError as error:
+                            # A brand-new thread has no rollout yet; the daemon refuses to resume it
+                            # until its first turn is recorded. Try again on the next poll.
+                            print(f"{stamp()} not yet subscribed to {thread}: {error}", flush=True)
+                            continue
+                        subscribed.add(thread)
+                        print(f"{stamp()} subscribed to {thread}: thread status " + json.dumps((result or {}).get("thread", {}).get("status"))[:120], flush=True)
             if args.answer and not answered and args.answer in client.pending:
                 request = client.pending[args.answer]
                 answers = answers_for(request, given)

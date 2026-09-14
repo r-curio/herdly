@@ -18,6 +18,12 @@ public struct GhosttySnapshot: Decodable, Sendable {
     public let status: String
     public let windows: [Window]
     public let selected: GhosttyTarget?
+
+    /// Every terminal title in the inventory. A session whose `GhosttyMatch.title` is among them
+    /// is a CLI session, whatever its rollout header says (see `ReminderReader.scan`).
+    public var terminalNames: Set<String> {
+        Set(windows.flatMap { $0.tabs.flatMap { $0.terminals.map(\.name) } })
+    }
 }
 public enum GhosttyMatch {
     public static func title(_ session: UUID) -> String { String(session.uuidString.lowercased().prefix(29)) + "..." }

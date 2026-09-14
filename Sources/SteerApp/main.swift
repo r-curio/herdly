@@ -570,9 +570,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         let rolloutRoot = Companion.rolloutRoot
         let readStateURL = desktopReadStateEnabled ? Companion.desktopReadStateURL : nil
         let namesURL = Companion.threadNamesURL
+        // Ghostty's current tab titles prove which sessions are CLI sessions when the rollout header
+        // cannot (a TUI on the app-server daemon is recorded as `vscode`). Empty with controls off.
+        let cliTitles: Set<String> = { if case .known(let snapshot) = ghosttyFocusState { return snapshot.terminalNames }; return [] }()
         Task { @MainActor in
             let result = await Task.detached {
-                (ReminderReader.scan(events: events, rollouts: rolloutRoot), DesktopEventReader.read(from: events),
+                (ReminderReader.scan(events: events, rollouts: rolloutRoot, cliTitles: cliTitles), DesktopEventReader.read(from: events),
                  readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
                  CodexUsageReader.latest(root: rolloutRoot))
             }.value
