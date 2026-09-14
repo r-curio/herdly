@@ -9,7 +9,27 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
       - name: Test
         run: swift test
-      - name: Build app
-        run: sh scripts/build-app.sh
+      - name: Package unsigned development build
+        run: sh scripts/package-app.sh
+      - name: Smoke test the packaged app
+        run: output/Steer.app/Contents/MacOS/Steer --smoke-test
+      - name: Checksum
+        run: cat output/dist/*.sha256 output/dist/*.manifest.json
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Steer-unsigned-dev
+          path: |
+            output/dist/*.zip
+            output/dist/*.sha256
+            output/dist/*.manifest.json
+          if-no-files-found: error
