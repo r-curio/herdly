@@ -256,6 +256,12 @@ struct Notch: View {
     @FocusState private var headerFocused: Bool
     /// Disclosures the user opened, by the item they belong to; cleared when the item leaves.
     @State private var openDisclosures: Set<String> = []
+    /// Typed answers being composed, by call id and question index; sent only on Return or Send.
+    @State private var drafts: [String: String] = [:]
+
+    private func draft(_ key: String) -> Binding<String> {
+        Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 })
+    }
 
     private func disclosure(_ key: String) -> Binding<Bool> {
         Binding(get: { openDisclosures.contains(key) },
@@ -327,7 +333,7 @@ struct Notch: View {
     /// options are controls for the question Codex is on; `pick` is the one the user chose here.
     @ViewBuilder
     private func prompt(_ prompt: QuestionPrompt, index: Int, of total: Int, subject: String = "", tone: Int = 0,
-                        pick: Int? = nil, enabled: Bool = true, choose: ((Int) -> Void)? = nil) -> some View {
+                        pick: Int? = nil, typed: String? = nil, enabled: Bool = true, choose: ((Int) -> Void)? = nil) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if let header = prompt.header {
@@ -354,10 +360,84 @@ struct Notch: View {
                     .font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
                 }
             }
+            if let typed {
+                Text("Typed: \(typed)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink).fixedSize(horizontal: false, vertical: true)
+            }
             if prompt.truncated {
                 Text("Shortened; the full question is in Codex.").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
             }
         }
+    }
+
+    /// One question as the daemon describes it, complete: every option Codex lists is a control,
+    /// and a question that takes typed text gets a field. The answer goes back by call id.
+    @ViewBuilder
+    private func daemonPrompt(_ question: AppServerQuestion, index: Int, of total: Int, callID: String, subject: String,
+                              tone: Int, answer: ChosenAnswer?, enabled: Bool,
+                              choose: @escaping (ChosenAnswer) -> Void) -> some View {
+        let pick: Int? = { if case let .option(option) = answer { return option }; return nil }()
+        let shown = question.displayPrompt
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let header = shown.header {
+                    Text(header).font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
+                }
+                if total > 1 { Text("\(index + 1) of \(total)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim) }
+            }
+            if let text = shown.question {
+                Text(text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if question.isSecret {
+                Text("Codex asked for a secret; answer it in Codex.").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+            } else {
+                ForEach(Array(shown.options.enumerated()), id: \.offset) { offset, label in
+                    OptionButton(number: offset + 1, label: label,
+                                 tone: NotchStyle.spriteColor(tone), selected: pick == offset) { choose(.option(offset)) }
+                        .disabled(!enabled)
+                        .accessibilityLabel("Answer \(offset + 1): \(label), for \(subject)")
+                        .accessibilityHint(pick == offset ? "Your answer." : "Answers with this option through Codex's daemon.")
+                }
+                if question.takesText {
+                    let key = "\(callID):\(index)"
+                    HStack(spacing: 6) {
+                        TextField(question.isOther ? "Or type another answer" : "Type your answer", text: draft(key))
+                            .textFieldStyle(.plain)
+                            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                            .disabled(!enabled)
+                            .onSubmit { choose(.text(drafts[key] ?? "")); drafts[key] = nil }
+                            .accessibilityLabel("Typed answer for \(subject)")
+                        NotchButton(title: index + 1 < total ? "Next" : "Send") { choose(.text(drafts[key] ?? "")); drafts[key] = nil }
+                            .disabled(!enabled || (drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .accessibilityLabel("Send typed answer for \(subject)")
+                    }
+                }
+            }
+        }
+    }
+
+    /// The daemon card's status sentence: which path, and where the answer stands.
+    private func daemonStatus(_ question: AttentionQuestion, request: AppServerQuestionRequest?, progress: QuestionAnswerProgress) -> String {
+        let total = request?.questions.count ?? question.questionCount
+        switch progress.phase {
+        case .ready:
+            if progress.questionIndex > 0, progress.questionIndex < total {
+                return "Answer kept. Question \(progress.questionIndex + 1) of \(total); the whole call is sent after the last one."
+            }
+            return "Answers go to Codex through its app-server daemon, exactly as chosen."
+        case .sending: return "Sending to Codex's daemon…"
+        case .sent: return "Answered through Codex's daemon. Waiting for Codex to record it."
+        case .unconfirmed: return "Answered through Codex's daemon, but Codex has not recorded an answer. Check Codex; Steer will not resend."
+        case let .failed(reason): return reason
+        case .pickedInCodex: return "Your pick opened Codex; Codex's daemon now holds the question, choose again here or in Codex."
+        }
+    }
+
+    /// Why the card is not on the daemon path, for the fallback sentences.
+    private var noDaemon: String {
+        model.daemonConnected ? "Codex's daemon does not hold this question" : "No Codex daemon"
     }
 
     /// The card's one sentence about where the answer stands. Every phase names what Steer knows
@@ -368,15 +448,15 @@ struct Notch: View {
         case .ready:
             if index >= question.prompts.count { return "Codex is on question \(index + 1) of \(total). Continue in Codex." }
             if case let .continueInCodex(reason) = QuestionAnswerProgress.offer(question, at: index) { return reason }
-            if question.source == .cli, !model.showsOptionControls(for: question) { return nil }
-            if index > 0, let previous = progress.picks[index - 1] { return "Sent \(previous + 1). Codex should now show question \(index + 1)." }
-            return question.source == .cli ? nil : "A pick opens Codex; choose it there."
+            if question.source == .cli, !model.showsOptionControls(for: question) { return "\(noDaemon); enable Ghostty controls to answer from here, or answer in Codex." }
+            if index > 0, let previous = progress.picks[index - 1] { return "Sent \(previous + 1) as a key to the Ghostty tab. Codex should now show question \(index + 1)." }
+            return question.source == .cli ? "\(noDaemon); an option goes to the Ghostty tab as its key." : "\(noDaemon); a pick opens Codex, choose it there."
         case .sending:
-            return "Sending…"
+            return "Sending the key to the Ghostty tab…"
         case .sent:
-            return "Sent \(progress.picks[index].map { $0 + 1 } ?? 0). Waiting for Codex to record it."
+            return "Sent \(progress.picks[index].map { $0 + 1 } ?? 0) as a key to the Ghostty tab. Waiting for Codex to record it."
         case .unconfirmed:
-            return "Sent \(progress.picks[index].map { $0 + 1 } ?? 0), but Codex has not recorded an answer. Check the tab; Steer will not resend."
+            return "Sent \(progress.picks[index].map { $0 + 1 } ?? 0) as a key to the Ghostty tab, but Codex has not recorded an answer. Check the tab; Steer will not resend."
         case let .failed(reason):
             return reason
         case .pickedInCodex:
@@ -389,7 +469,36 @@ struct Notch: View {
         let progress = model.progress(for: question)
         let index = progress.questionIndex
         let total = max(question.questionCount, question.prompts.count)
-        if question.prompts.isEmpty {
+        let route = model.route(for: question)
+        if case let .daemon(request) = route {
+            let current = min(max(index, 0), request.questions.count - 1)
+            daemonPrompt(request.questions[current], index: current, of: request.questions.count, callID: question.callID,
+                         subject: subject, tone: spriteColor(for: question.session), answer: progress.answer(for: current),
+                         enabled: progress.phase == .ready && index == current) { answer in
+                switch answer {
+                case let .option(option): model.chooseOption(question, question: index, option: option)
+                case let .text(text): model.answerText(question, question: index, text: text)
+                }
+            }
+            if request.questions.count > 1 {
+                NotchDisclosure(title: "Show all \(request.questions.count) questions", expanded: disclosure("questions:\(question.callID)")) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(request.questions.enumerated()).filter { $0.offset != current }, id: \.offset) { offset, rest in
+                            prompt(rest.displayPrompt, index: offset, of: request.questions.count, tone: spriteColor(for: question.session),
+                                   pick: progress.picks[offset], typed: progress.texts[offset])
+                        }
+                    }
+                }
+            }
+            Text(daemonStatus(question, request: request, progress: progress))
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+        } else if route == .daemonAnswered {
+            if let first = question.prompts.first {
+                prompt(first, index: 0, of: total, tone: spriteColor(for: question.session), pick: progress.picks[0], typed: progress.texts[0])
+            }
+            Text(daemonStatus(question, request: nil, progress: progress))
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+        } else if question.prompts.isEmpty {
             Text("Codex asked a question Steer could not read; answer it in Codex.")
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
         } else {
