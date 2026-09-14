@@ -30,6 +30,7 @@ jobs:
           name: Steer-unsigned-dev
           path: |
             output/dist/*.zip
+            output/dist/*.dmg
             output/dist/*.sha256
             output/dist/*.manifest.json
           if-no-files-found: error

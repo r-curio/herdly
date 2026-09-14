@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Test
+        run: swift test
+      - name: Package
+        run: |
+          # The tag names the marketing version: v0.1.0 or v0.1.0-dev.2 -> 0.1.0
+          tag="${GITHUB_REF_NAME#v}"
+          STEER_VERSION="${tag%%-*}" sh scripts/package-app.sh
+      - name: Release notes
+        id: notes
+        run: |
+          manifest=$(ls output/dist/*.manifest.json)
+          label=$(basename "$manifest" .manifest.json | sed 's/.*-//')
+          {
+            echo "notes<<EOF"
+            if [ "$label" = "notarized" ]; then
+              echo "Signed and notarized build. Open the disk image and drag Steer to Applications."
+            else
+              echo "**Unsigned development build** (\`$label\`). macOS refuses the first open; use System Settings › Privacy & Security › Open Anyway, or see docs/install.md. Not notarized."
+            fi
+            echo
+            echo "Install, permissions, supported versions and removal: [docs/install.md](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/docs/install.md)."
+            echo
+            echo '```'
+            cat output/dist/*.sha256
+            echo '```'
+            echo
+            echo "Build manifest:"
+            echo '```json'
+            cat "$manifest"
+            echo '```'
+            echo "EOF"
+            echo "prerelease=$([ "$label" = notarized ] && echo false || echo true)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Steer $GITHUB_REF_NAME" \
+            --notes "${{ steps.notes.outputs.notes }}" \
+            $([ "${{ steps.notes.outputs.prerelease }}" = true ] && echo --prerelease) \
+            output/dist/*.dmg output/dist/*.zip output/dist/*.sha256 output/dist/*.manifest.json

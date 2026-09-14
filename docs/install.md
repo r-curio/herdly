@@ -23,13 +23,15 @@ swift test
 sh scripts/package-app.sh
 ```
 
-`package-app.sh` builds `output/Steer.app` with `scripts/build-app.sh`, lints its property list, runs the bundled helper's self-test, signs it, verifies the signature, then writes three files to `output/dist/`:
+`package-app.sh` builds `output/Steer.app` with `scripts/build-app.sh`, lints its property list, runs the bundled helper's self-test, signs it, verifies the signature, then writes to `output/dist/`:
 
-- `Steer-<version>+<build>-<label>.zip`, the app bundle;
-- `Steer-<version>+<build>-<label>.zip.sha256`, its checksum, checkable with `shasum -a 256 -c`;
-- `Steer-<version>+<build>-<label>.manifest.json`, the commit, toolchain, host macOS, signing mode, Gatekeeper result, and per-executable hashes.
+- `Steer-<version>+<build>-<label>.dmg`, a disk image holding the app and an Applications shortcut, with its `.dmg.sha256`;
+- `Steer-<version>+<build>-<label>.zip`, the bare app bundle, with its `.zip.sha256`;
+- `Steer-<version>+<build>-<label>.manifest.json`, the commit, toolchain, host macOS, signing mode, Gatekeeper result, both checksums, and per-executable hashes.
 
-The build number is the commit count on the checked-out branch, so two people building the same commit get the same bundle version. The CI workflow ([.github/workflows/macos.yml](../.github/workflows/macos.yml)) runs the same script on a clean `macos-15` runner, smoke-tests the packaged app, prints the checksum, and uploads the zip, checksum and manifest as the `Steer-unsigned-dev` artifact.
+Checksums are checked with `shasum -a 256 -c <file>.sha256` in the folder holding the artifact.
+
+The build number is the commit count on the checked-out branch, so two people building the same commit get the same bundle version. The CI workflow ([.github/workflows/macos.yml](../.github/workflows/macos.yml)) runs the same script on a clean `macos-15` runner, smoke-tests the packaged app, prints the checksums, and uploads the disk image, zip, checksums and manifest as the `Steer-unsigned-dev` artifact. Pushing a `v*` tag runs [.github/workflows/release.yml](../.github/workflows/release.yml), which packages the same way and publishes a GitHub Release with those files; the tag's version becomes the bundle's marketing version.
 
 ### Labels
 
@@ -58,10 +60,14 @@ The script refuses to notarize with anything other than a Developer ID Applicati
 
 ## Install
 
-1. Check the checksum: `shasum -a 256 -c Steer-<version>+<build>-<label>.zip.sha256`.
-2. Unzip and move `Steer.app` to `/Applications` or `~/Applications`. Steer does not install itself, add a login item, or need to stay in the folder it was built in: Connect Codex copies the helper out of the bundle (see below), so moving or replacing the app later does not break an existing connection.
-3. For an `unsigned-dev` or `dev-signed` build, the first open is refused by Gatekeeper. Open **System Settings › Privacy & Security**, scroll to the message about Steer, and choose **Open Anyway**, or run `xattr -d com.apple.quarantine /Applications/Steer.app` and open it again. A `notarized` build opens directly.
+Releases are on the repository's [Releases page](https://github.com/r-curio/steer/releases); each one is produced by the `Release` workflow from a `v*` tag and carries the disk image, the zip, their checksums and the build manifest. A release marked pre-release is an unsigned development build.
+
+1. Download `Steer-<version>+<build>-<label>.dmg`. To check it, download the matching `.dmg.sha256` beside it and run `shasum -a 256 -c` on it in the same folder.
+2. Open the disk image and drag **Steer** onto the **Applications** shortcut. `~/Applications` works too. Eject the image. Steer does not install itself, add a login item, or need to stay where it was built: Connect Codex copies the helper out of the bundle (see below), so moving or replacing the app later does not break an existing connection.
+3. For an `unsigned-dev` or `dev-signed` build, the first open is refused by Gatekeeper. Click **Done**, then open **System Settings › Privacy & Security**, scroll to the message about Steer, and choose **Open Anyway**. The command-line equivalent is `xattr -d com.apple.quarantine /Applications/Steer.app`. A `notarized` build opens directly.
 4. Steer launches as a menu-bar app (**S**) with no Dock icon, and shows its controls window because no setup exists yet.
+
+The zip is the same bundle without the drag-to-install image; CI uploads it on every push for scripted checks.
 
 ### Connect Codex
 

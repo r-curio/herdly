@@ -1,5 +1,5 @@
 #!/bin/sh
-# Package output/Steer.app into a distributable zip with a checksum and a build manifest.
+# Package output/Steer.app into a distributable zip and disk image, each with a checksum, plus a build manifest.
 #
 #   sh scripts/package-app.sh                       # ad-hoc signed, labelled unsigned-dev
 #   STEER_SIGNING_IDENTITY="Developer ID Application: Name (TEAMID)" sh scripts/package-app.sh
@@ -86,6 +86,21 @@ rm -f "$zip" "$zip.sha256"
 ditto -c -k --keepParent "$app" "$zip"
 (cd "$dist" && shasum -a 256 "$name.zip" > "$name.zip.sha256")
 checksum=$(cut -d' ' -f1 "$zip.sha256")
+
+# A drag-to-Applications disk image for the ordinary install route; the zip stays for CI and scripts.
+dmg="$dist/$name.dmg"
+staging=$(mktemp -d "${TMPDIR:-/tmp}/steer-dmg.XXXXXX")
+cp -R "$app" "$staging/"
+ln -s /Applications "$staging/Applications"
+rm -f "$dmg" "$dmg.sha256"
+hdiutil create -quiet -volname "Steer" -srcfolder "$staging" -ov -format UDZO "$dmg" || fail "hdiutil could not create the disk image"
+rm -rf "$staging"
+if [ "$notarized" = true ]; then
+    xcrun notarytool submit "$dmg" --keychain-profile "$notary_profile" --wait || fail "disk image notarization was not accepted"
+    xcrun stapler staple "$dmg" || fail "stapling the disk image failed"
+fi
+(cd "$dist" && shasum -a 256 "$name.dmg" > "$name.dmg.sha256")
+dmg_checksum=$(cut -d' ' -f1 "$dmg.sha256")
 app_sha=$(shasum -a 256 "$app/Contents/MacOS/Steer" | cut -d' ' -f1)
 helper_sha=$(shasum -a 256 "$app/Contents/Helpers/SteerHook" | cut -d' ' -f1)
 swift_version=$(swift --version 2>&1 | head -n 1)
@@ -97,6 +112,8 @@ cat > "$dist/$name.manifest.json" <<JSON
 {
   "artifact": "$name.zip",
   "sha256": "$checksum",
+  "disk_image": "$name.dmg",
+  "disk_image_sha256": "$dmg_checksum",
   "version": "$STEER_VERSION",
   "build": "$STEER_BUILD",
   "commit": "$commit",
@@ -121,5 +138,7 @@ JSON
 
 printf '\nPackaged %s\n' "$zip"
 printf 'SHA-256  %s\n' "$checksum"
+printf 'Disk image %s\n' "$dmg"
+printf 'SHA-256  %s\n' "$dmg_checksum"
 printf 'Signing  %s (%s); notarized: %s; Gatekeeper: %s\n' "$signing" "$label" "$notarized" "$gatekeeper"
 printf 'Manifest %s\n' "$dist/$name.manifest.json"

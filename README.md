@@ -28,14 +28,18 @@ Desktop MVP visibility: hide the notch while Codex is foreground and show eligib
 - [Backlog and dependency index](docs/mvp-backlog.md)
 - [MVP implementation issues](https://github.com/r-curio/steer/issues?q=is%3Aissue+label%3Amvp)
 
-## Build and install
+## Install
+
+Download the latest disk image from [Releases](https://github.com/r-curio/steer/releases), open it, and drag Steer to Applications. Releases marked pre-release are unsigned development builds and need **Open Anyway** in System Settings on first launch; [docs/install.md](docs/install.md) has the steps, permissions, and uninstall.
+
+## Build from source
 
 ```sh
 swift test
 sh scripts/package-app.sh    # output/dist/Steer-<version>+<build>-<label>.zip, .sha256, manifest
 ```
 
-`sh scripts/build-app.sh && open output/Steer.app` is the shorter development loop. Installation, the permissions macOS asks for, supported versions, and a clean uninstall are in [docs/install.md](docs/install.md).
+`sh scripts/build-app.sh && open output/Steer.app` is the shorter development loop. Pushing a `v*` tag publishes a release with the same artifacts.
 
 ## Run the prototype controls
 
