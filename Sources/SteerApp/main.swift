@@ -590,7 +590,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                 (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
                                      daemonThreads: daemonThreads), DesktopEventReader.read(from: events),
                  readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
-                 CodexUsageReader.latest(root: rolloutRoot))
+                 CodexUsageReader.latest(root: rolloutRoot),
+                 SessionDiscovery.candidates(root: rolloutRoot, now: Date().timeIntervalSince1970),
+                 ProcessList.arguments().map(CodexCLIProcesses.isRunning(processList:)) ?? false)
             }.value
             let scan = result.0
             let desktopEvents = result.1
@@ -598,13 +600,25 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             guard eventsPath == events.path else { scanning = false; refresh(); return }
             if threadNames != result.3 { threadNames = result.3 }
             if weeklyLimit != result.4 { weeklyLimit = result.4 }
-            cliSessions = scan.cliSessions
-            liveCLI = scan.cliState.liveSessions
+            // Sessions already working before their first hook event: shown only with liveness
+            // evidence, and only as working (see docs/session-discovery.md).
+            let candidates = result.5
+            let cliCandidates = Set(candidates.filter { $0.source == .cli }.map(\.session))
+            var inGhostty: Set<UUID> = []
+            if case .known(let snapshot) = ghosttyFocusState { inGhostty = GhosttyMatch.sessions(in: snapshot, among: cliCandidates) }
+            let liveness = SessionLiveness(desktopRunning: !desktopAdapter.runningInstallations().isEmpty,
+                                           cliProcessRunning: result.6, cliSessionsInGhostty: inGhostty,
+                                           sessionEnds: scan.sessionEnds)
+            let discovered = SessionDiscovery.running(candidates, liveness: liveness)
+            let discoveredCLI = Set(discovered.filter { $0.source == .cli }.map(\.session))
+            cliSessions = scan.cliSessions.union(discoveredCLI)
+            liveCLI = scan.cliState.liveSessions.union(discoveredCLI)
             knownCLISessions.formUnion(scan.titledCLISessions)
             let previous = Set(queue.items.map(\.id))
             // A receipt found on disk is not a verified live interaction: such a request enters handed
             // back and, when a real helper receipt exists, a no-decision record releases it to Codex at once.
             let unverified = queue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970)
+            queue.apply(discovered: discovered)
             applyDesktopReadState(readState, enabled: readStateURL != nil)
             for request in unverified where ApprovalReceipts.existing(for: request.id, in: events) != nil {
                 _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision,

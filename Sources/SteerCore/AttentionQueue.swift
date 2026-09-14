@@ -252,6 +252,12 @@ public struct AttentionQueue: Sendable {
         if let now { expire(at: now) }
     }
 
+    /// Adds running work found by session discovery. A session whose running turn a hook already
+    /// reported this scan keeps the hook's row: an observed event outranks an inferred one.
+    public mutating func apply(discovered: [AttentionRunning]) {
+        apply(running: discovered.filter { runningBySession[SourceSession(source: $0.source, session: $0.session)] == nil })
+    }
+
     /// Adds pending questions. One already answered, dismissed, or belonging to an ended turn stays
     /// out; a repeat keeps the earliest arrival and the first readable text.
     public mutating func apply(questions incoming: [AttentionQuestion]) {

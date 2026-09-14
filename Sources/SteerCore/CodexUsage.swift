@@ -51,14 +51,14 @@ public enum CodexUsageReader {
     /// carries one. Files are tried newest-modified first, so a session that has just started and
     /// has no `token_count` yet falls through to the one before it.
     public static func latest(root: URL) -> CodexWeeklyLimit? {
-        for url in newestRollouts(root: root) {
-            if let bytes = tail(url), let limit = parse(bytes) { return limit }
+        for entry in newestRollouts(root: root) {
+            if let bytes = tail(entry.url), let limit = parse(bytes) { return limit }
         }
         return nil
     }
 
-    /// Rollouts from the newest day directories, newest modification first, at most `maximumFiles`.
-    static func newestRollouts(root: URL) -> [URL] {
+    /// Rollouts from the newest day directories, newest modification first, at most `limit`.
+    static func newestRollouts(root: URL, limit: Int = maximumFiles) -> [(url: URL, modified: Date)] {
         var days: [URL] = []
         for year in subdirectories(root).prefix(3) {
             for month in subdirectories(year).prefix(3) {
@@ -79,7 +79,7 @@ public enum CodexUsageReader {
                 files.append((url, modified))
             }
         }
-        return files.sorted { $0.1 == $1.1 ? $0.0.path > $1.0.path : $0.1 > $1.1 }.prefix(maximumFiles).map(\.0)
+        return files.sorted { $0.1 == $1.1 ? $0.0.path > $1.0.path : $0.1 > $1.1 }.prefix(limit).map { (url: $0.0, modified: $0.1) }
     }
 
     /// Child directories with numeric names, newest (largest) first.
@@ -90,13 +90,19 @@ public enum CodexUsageReader {
             .sorted { $0.lastPathComponent > $1.lastPathComponent }
     }
 
-    /// The last `tailBytes` of a regular, non-symlinked file. A cut first line is skipped by `parse`.
-    static func tail(_ url: URL) -> Data? {
+    /// An open handle and the size of a regular, non-symlinked file; nil for anything else.
+    static func regularFile(_ url: URL) -> (handle: FileHandle, size: Int)? {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               attributes[.type] as? FileAttributeType == .typeRegular,
               (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
               let size = (attributes[.size] as? NSNumber)?.intValue,
               let file = try? FileHandle(forReadingFrom: url) else { return nil }
+        return (file, size)
+    }
+
+    /// The last `tailBytes` of a regular, non-symlinked file. A cut first line is skipped by `parse`.
+    static func tail(_ url: URL) -> Data? {
+        guard let (file, size) = regularFile(url) else { return nil }
         defer { try? file.close() }
         if size > tailBytes { try? file.seek(toOffset: UInt64(size - tailBytes)) }
         return try? file.read(upToCount: tailBytes)
