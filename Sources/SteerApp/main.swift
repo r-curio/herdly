@@ -660,6 +660,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             else if !newQuestions.isEmpty, !questionPresentation.pending { questionPresentation = Attention(restored: true) }
             saveCompletions()
             scanning = false
+            completedAScan = true
             refresh()
             writeRestartReportAndQuitIfRequested(unverified: unverified)
         }
@@ -668,11 +669,15 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     /// `--daemon-report <path>`: a few seconds after launch, record what the daemon client saw on
     /// `--daemon-socket`, then quit. Used by the daemon lab against a fake daemon; nothing is answered.
     private var daemonReportDue: Double?
+    /// True once a scan has published its result; the lab reports wait for it.
+    private var completedAScan = false
     private func writeDaemonReportAndQuitIfRequested() {
         guard let path = Companion.argumentValue(for: "--daemon-report") else { return }
         let now = ProcessInfo.processInfo.systemUptime
         guard let due = daemonReportDue else { daemonReportDue = now + 4; return }
-        guard now >= due else { return }
+        // A scan must have finished, or the report would describe an empty queue rather than what
+        // the seeded session produced; the deadline still ends the run if no scan ever completes.
+        guard now >= due, completedAScan || now >= due + 6 else { return }
         let report: [String: Any] = [
             "socket": daemonClient.socketPath,
             "status": daemonClient.statusText,
@@ -1108,7 +1113,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     /// What Steer can see right now about reaching a finished session: the daemon's own loaded
     /// threads, the sessions Codex recorded as ended, and the sessions already working again.
     var replyAvailability: SessionReplyAvailability {
-        let working = Set(queue.items.filter { $0.kind == .running }.map(\.session))
+        // Sessions in a turn, not sessions shown as working: one blocked on a question is mid-turn
+        // too, and its running row is only withheld from the display.
+        let working = queue.sessionsInTurn
         guard previewMode == nil else {
             // The preview has no daemon; it renders the field as a reachable session would.
             return SessionReplyAvailability(daemonConnected: true,
@@ -1142,7 +1149,12 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
             navigationMessage = SessionReplyPolicy.message(for: rejection)
             refresh()
         case let .sending(next):
-            guard previewMode == nil, let params = plan.params else { return }
+            guard previewMode == nil else {
+                navigationMessage = "Preview only; nothing was sent."
+                refresh()
+                return
+            }
+            guard let params = plan.params else { return }
             replying = true
             replyProgress[completion.id] = next
             navigationMessage = "Sending your reply to Codex's daemon…"
@@ -1152,11 +1164,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
                     guard let self else { return }
                     self.replying = false
                     let progress = self.reply(for: completion)
-                    let reason = "Codex's daemon did not take the reply\(error.map { " (\($0))" } ?? ""). "
-                        + "Steer will not retry; reply in Codex."
                     self.replyProgress[completion.id] = accepted
                         ? progress.recordingSent(at: Date().timeIntervalSince1970)
-                        : progress.recordingFailure(reason)
+                        : progress.recordingFailure(SessionReplyPolicy.daemonRefused(error))
                     self.navigationMessage = accepted ? "Reply sent to Codex's daemon." : "Could not send the reply to Codex's daemon."
                     self.refresh()
                 }
@@ -1169,7 +1179,7 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private func pruneReplyProgress() {
         guard !replyProgress.isEmpty else { return }
         let queued = Set(queue.items.compactMap { $0.completion?.id })
-        let working = Set(queue.items.filter { $0.kind == .running }.map(\.session))
+        let working = queue.sessionsInTurn
         let now = Date().timeIntervalSince1970
         let next = replyProgress.filter { queued.contains($0.key) }
             .mapValues { $0.observing(sessionWorking: working.contains($0.completion.session), at: now) }

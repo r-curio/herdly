@@ -33,8 +33,11 @@ from pathlib import Path
 THREAD = "01a09d9b-7642-7b51-bcce-9b66cfe5361f"
 TURN = "01a09db7-0c51-7f33-9ebc-4e44f91df22c"
 ITEM = "call_daemonlab_1"
-# A second, finished turn in the same session: its completion card carries the reply field.
-DONE_TURN = "01a09dc4-1f22-7aa4-8c31-5b71a0c24d10"
+# A second session, finished and blocked on nothing: its completion card carries the reply field.
+# It is a separate session because a session waiting on a question is still in a turn, and a reply
+# to a session in a turn is refused.
+DONE_THREAD = "01a09dc4-1f22-7aa4-8c31-5b71a0c24d10"
+DONE_TURN = "01a09dd0-6b8e-7c05-9f42-2d6083e51ab7"
 
 
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -154,11 +157,11 @@ class FakeDaemon(threading.Thread):
                 self.send(conn, {"jsonrpc": "2.0", "id": message["id"],
                                  "result": {"userAgent": "fake-daemon", "codexHome": "/tmp", "platformFamily": "unix", "platformOs": "macos"}})
             elif method == "thread/loaded/list":
-                self.send(conn, {"jsonrpc": "2.0", "id": message["id"], "result": {"data": [THREAD]}})
+                self.send(conn, {"jsonrpc": "2.0", "id": message["id"], "result": {"data": [THREAD, DONE_THREAD]}})
             elif method == "thread/resume":
                 self.send(conn, {"jsonrpc": "2.0", "id": message["id"],
                                  "result": {"thread": {"id": message["params"]["threadId"], "status": {"type": "active"}}}})
-                if not pushed:
+                if not pushed and message["params"]["threadId"] == THREAD:
                     pushed = True
                     self.send(conn, {"jsonrpc": "2.0", "id": 900, "method": "item/tool/requestUserInput",
                                      "params": {"threadId": THREAD, "turnId": TURN, "itemId": ITEM,
@@ -180,21 +183,25 @@ def now_iso():
 
 def seed_pending_question(events, rollouts):
     """A CLI session whose rollout holds the same call the fake daemon will push, still unanswered,
-    so the queue shows the question and the report can say which path its card would use. An earlier
-    turn of the same session finished, so the queue also holds a completion whose card offers the
-    reply field; the report says where that field would send, and the lab sends nothing."""
-    def hook(name, turn):
-        record = {"hook_event_name": name, "session_id": THREAD, "turn_id": turn, "received_at": now_iso(),
+    so the queue shows the question and the report can say which path its card would use. A second
+    session finished its only turn, so the queue also holds a completion whose card offers the reply
+    field; the report says where that field would send, and the lab sends nothing."""
+    def hook(name, session, turn):
+        record = {"hook_event_name": name, "session_id": session, "turn_id": turn, "received_at": now_iso(),
                   "source": "daemon-lab", "installation_id": str(uuid.uuid4())}
         (events / f"{uuid.uuid4()}.json").write_text(json.dumps(record) + "\n")
 
-    hook("UserPromptSubmit", DONE_TURN)
-    hook("Stop", DONE_TURN)
-    hook("UserPromptSubmit", TURN)
-    lines = [
-        {"timestamp": now_iso(), "type": "session_meta", "payload": {"id": THREAD, "source": "cli"}},
+    hook("UserPromptSubmit", DONE_THREAD, DONE_TURN)
+    hook("Stop", DONE_THREAD, DONE_TURN)
+    hook("UserPromptSubmit", THREAD, TURN)
+    done = [
+        {"timestamp": now_iso(), "type": "session_meta", "payload": {"id": DONE_THREAD, "source": "cli"}},
         {"timestamp": now_iso(), "type": "event_msg", "payload": {"type": "task_started", "turn_id": DONE_TURN}},
         {"timestamp": now_iso(), "type": "event_msg", "payload": {"type": "task_complete", "turn_id": DONE_TURN}},
+    ]
+    (rollouts / f"rollout-2026-09-14T00-00-01-{DONE_THREAD}.jsonl").write_text("".join(json.dumps(l) + "\n" for l in done))
+    lines = [
+        {"timestamp": now_iso(), "type": "session_meta", "payload": {"id": THREAD, "source": "cli"}},
         {"timestamp": now_iso(), "type": "event_msg", "payload": {"type": "task_started", "turn_id": TURN}},
         {"timestamp": now_iso(), "type": "response_item",
          "payload": {"type": "function_call", "name": "request_user_input", "call_id": ITEM,
@@ -251,15 +258,16 @@ def main():
     private = results["runs"]["private-socket"]["report"] or {}
     checks = {
         "private_connected": private.get("connected") is True,
-        "private_subscribed": private.get("subscribed") == [THREAD],
+        "private_subscribed": private.get("subscribed") == sorted([THREAD, DONE_THREAD]),
         "private_received_request": [r.get("item_id") for r in private.get("pending_requests", [])] == [ITEM],
         "private_question_ids": [q["id"] for r in private.get("pending_requests", []) for q in r["questions"]] == ["shape", "name"],
         "private_card_uses_daemon": [r.get("route", "").startswith("daemon(") for r in private.get("pending_requests", [])] == [True],
-        # The completion card's reply field targets the loaded thread, and only it.
-        "private_reply_targets_the_thread": private.get("completion_reply_targets") == [f"{THREAD}: daemon(thread: {THREAD.upper()})"],
+        # The completion card's reply field targets that completion's own thread, and only it.
+        "private_reply_targets_the_thread": private.get("completion_reply_targets")
+        == [f"{DONE_THREAD}: daemon(thread: {DONE_THREAD.upper()})"],
         # With no daemon there is no reply path at all, and the card says so.
         "no_socket_reply_unavailable": (results["runs"]["no-socket"]["report"] or {}).get("completion_reply_targets")
-        == [f"{THREAD}: unavailable(SteerCore.SessionReplyPolicy.Rejection.noDaemon)"],
+        == [f"{DONE_THREAD}: unavailable(SteerCore.SessionReplyPolicy.Rejection.noDaemon)"],
         "shared_card_falls_back": any("ghosttyRelay" in r for r in (results["runs"]["shared-socket"]["report"] or {}).get("question_routes", [])),
         "nothing_answered": results["runs"]["private-socket"]["answer_written_by_steer"] is None,
         "upgraded_to_websocket": (results["runs"]["private-socket"]["daemon_log"] or [{}])[0].get("upgrade", {}).get("upgrade", "").lower() == "websocket",

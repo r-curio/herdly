@@ -182,6 +182,40 @@ struct NotchButton: View {
     }
 }
 
+/// One line of text the user types into a card and sends: a typed answer to a Codex question, or a
+/// reply to a finished session. Return in the field and the button do the same thing, and an empty
+/// or all-space draft sends nothing. Escape collapses the panel from the field without dismissing
+/// anything. The caller owns the text and decides what sending means.
+struct DraftField: View {
+    let placeholder: String
+    @Binding var text: String
+    let sendTitle: String
+    /// Names the subject session in both labels, for keyboard and VoiceOver use.
+    let fieldLabel: String
+    let sendLabel: String
+    var hint: String?
+    let onEscape: () -> Void
+    let send: () -> Void
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .onSubmit { if enabled { send() } }
+                .onExitCommand(perform: onEscape)
+                .accessibilityLabel(fieldLabel)
+                .accessibilityHint(hint ?? "")
+            NotchButton(title: sendTitle, action: send)
+                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel(sendLabel)
+        }
+    }
+}
+
 /// One answer option: its digit in the session's colour, the label in ink. The option the user
 /// chose fills with that colour and reads in black, the way a pressed control inverts; the colour
 /// says which session's question this is, the fill says what was chosen. Focus ring as elsewhere.
@@ -400,19 +434,14 @@ struct Notch: View {
                 }
                 if question.takesText {
                     let key = "\(callID):\(index)"
-                    HStack(spacing: 6) {
-                        TextField(question.isOther ? "Or type another answer" : "Type your answer", text: draft(key))
-                            .textFieldStyle(.plain)
-                            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
-                            .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                            .disabled(!enabled)
-                            .onSubmit { choose(.text(drafts[key] ?? "")); drafts[key] = nil }
-                            .accessibilityLabel("Typed answer for \(subject)")
-                        NotchButton(title: index + 1 < total ? "Next" : "Send") { choose(.text(drafts[key] ?? "")); drafts[key] = nil }
-                            .disabled(!enabled || (drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            .accessibilityLabel("Send typed answer for \(subject)")
+                    DraftField(placeholder: question.isOther ? "Or type another answer" : "Type your answer",
+                               text: draft(key), sendTitle: index + 1 < total ? "Next" : "Send",
+                               fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
+                               onEscape: model.collapse) {
+                        choose(.text(drafts[key] ?? ""))
+                        drafts[key] = nil
                     }
+                    .disabled(!enabled)
                 }
             }
         }
@@ -560,31 +589,15 @@ struct Notch: View {
     private func replyBody(_ completion: AttentionCompletion, subject: String) -> some View {
         let progress = model.reply(for: completion)
         let target = model.replyTarget(for: completion)
-        let reachable: Bool = { if case .daemon = target { return true }; return false }()
-        let enabled = reachable && progress.phase == .ready
         let key = "reply:\(completion.session.uuidString):\(completion.turn.uuidString)"
-        // The typed text is cleared only once the send is under way; a refusal keeps it to edit.
-        let send = {
+        DraftField(placeholder: "Reply to this session", text: draft(key), sendTitle: "Send",
+                   fieldLabel: "Reply to \(subject)", sendLabel: "Send reply to \(subject)",
+                   hint: "Sends a follow-up prompt to this session.", onEscape: model.collapse) {
+            // The typed text is cleared only once the send is under way; a refusal keeps it to edit.
             model.sendReply(to: completion, text: drafts[key] ?? "")
             if model.reply(for: completion).phase != .ready { drafts[key] = nil }
         }
-        HStack(spacing: 6) {
-            TextField("Reply to this session", text: draft(key))
-                .textFieldStyle(.plain)
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .disabled(!enabled)
-                .onSubmit { if enabled { send() } }
-                // Escape collapses the panel from the field too; the completion is not dismissed and
-                // the typed text is kept for the next time the card opens.
-                .onExitCommand { model.collapse() }
-                .accessibilityLabel("Reply to \(subject)")
-                .accessibilityHint("Sends a follow-up prompt to this session.")
-            NotchButton(title: "Send", action: send)
-            .disabled(!enabled || (drafts[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .accessibilityLabel("Send reply to \(subject)")
-        }
+        .disabled(!target.isReachable || progress.phase != .ready)
         if let status = replyStatus(progress, target: target) {
             Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
         }

@@ -199,6 +199,12 @@ public struct AttentionQueue: Sendable {
 
     public var items: [AttentionItem] { makeItems() }
     public var workingCount: Int { runningBySession.count }
+    /// Sessions Codex is in a turn for right now, whether or not they are shown as working: a
+    /// session blocked on a question is mid-turn too, and its running row is only withheld from the
+    /// display. Anything that must not act on a session between turns reads this, never the rows.
+    public var sessionsInTurn: Set<UUID> {
+        Set(runningBySession.values.map(\.session)).union(questions.values.map(\.session))
+    }
     public var toCheckCount: Int { requests.count + questions.count + completions.count }
     public var acknowledgedCompletions: Set<CompletionIdentity> { acknowledged }
 

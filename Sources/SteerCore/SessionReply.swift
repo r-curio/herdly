@@ -33,6 +33,12 @@ public enum SessionReplyTarget: Equatable, Sendable {
     case daemon(thread: UUID)
     /// Nothing verified can carry the text. The field is disabled and the card shows the reason.
     case unavailable(SessionReplyPolicy.Rejection)
+
+    /// Whether the card may offer the field at all.
+    public var isReachable: Bool {
+        if case .daemon = self { return true }
+        return false
+    }
 }
 
 public enum SessionReplyRouting {
@@ -155,18 +161,23 @@ public enum SessionReplyPolicy {
         return trimmed
     }
 
-    /// Nil when the reply may be sent. `completion` is the queue's copy, nil when it has left.
-    public static func rejection(for completion: AttentionCompletion?, availability: SessionReplyAvailability,
+    /// Nil when the reply may be sent. `completion` is the queue's copy, nil when it has left, and
+    /// `target` is where that copy resolves right now.
+    public static func rejection(for completion: AttentionCompletion?, target: SessionReplyTarget,
                                  progress: SessionReplyProgress, text: String) -> Rejection? {
         guard let completion, completion.id == progress.completion else { return .notInQueue }
-        if case let .unavailable(reason) = SessionReplyRouting.target(for: completion, availability: availability) {
-            return reason
-        }
+        if case let .unavailable(reason) = target { return reason }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .emptyText }
         guard trimmed.count <= maximumText else { return .textTooLong }
         guard progress.phase == .ready else { return .notReady }
         return nil
+    }
+
+    /// The card's sentence when the daemon refused the request or the write never left. Steer says
+    /// what the daemon said, and that it will not try again.
+    public static func daemonRefused(_ error: String?) -> String {
+        "Codex's daemon did not take the reply\(error.map { " (\($0))" } ?? ""). Steer will not retry; reply in Codex."
     }
 
     public static func message(for rejection: Rejection) -> String {
@@ -208,20 +219,19 @@ public enum SessionReplySending {
     public struct Plan {
         public let outcome: Outcome
         public let params: [String: Any]?
-        public let thread: UUID?
     }
 
     public static func prepare(completion: AttentionCompletion?, availability: SessionReplyAvailability,
                                progress: SessionReplyProgress, text: String) -> Plan {
-        if let rejection = SessionReplyPolicy.rejection(for: completion, availability: availability,
-                                                        progress: progress, text: text) {
-            return Plan(outcome: .refused(rejection), params: nil, thread: nil)
+        // The target is resolved once and judged once; nothing downstream walks the evidence again.
+        let target = completion.map { SessionReplyRouting.target(for: $0, availability: availability) }
+            ?? .unavailable(.notInQueue)
+        if let rejection = SessionReplyPolicy.rejection(for: completion, target: target, progress: progress, text: text) {
+            return Plan(outcome: .refused(rejection), params: nil)
         }
-        guard let completion,
-              case let .daemon(thread) = SessionReplyRouting.target(for: completion, availability: availability),
-              let params = SessionReplyRequest.params(thread: thread, text: text) else {
-            return Plan(outcome: .refused(.threadNotLoaded), params: nil, thread: nil)
+        guard case let .daemon(thread) = target, let params = SessionReplyRequest.params(thread: thread, text: text) else {
+            return Plan(outcome: .refused(.threadNotLoaded), params: nil)
         }
-        return Plan(outcome: .sending(progress.startingSend(text: text)), params: params, thread: thread)
+        return Plan(outcome: .sending(progress.startingSend(text: text)), params: params)
     }
 }

@@ -38,6 +38,27 @@ private func reachable(_ session: UUID = session) -> SessionReplyAvailability {
                       .notInQueue, .emptyText, .textTooLong, .notReady] {
         #expect(!SessionReplyPolicy.message(for: rejection).isEmpty)
     }
+    #expect(SessionReplyTarget.daemon(thread: session).isReachable)
+    #expect(SessionReplyTarget.unavailable(.noDaemon).isReachable == false)
+    // The daemon's own refusal is quoted, and the card still says Steer will not try again.
+    #expect(SessionReplyPolicy.daemonRefused("no rollout found").contains("no rollout found"))
+    #expect(SessionReplyPolicy.daemonRefused(nil).contains("will not retry"))
+}
+
+@Test func aSessionBlockedOnAQuestionCountsAsInATurn() {
+    // Its running row is withheld from the display, but Codex is mid-turn: a reply target like this
+    // is ambiguous, so the queue reports sessions in a turn rather than sessions shown as working.
+    // The finished turn is the card; a later turn of the same session is the one blocked.
+    let next = UUID(uuidString: "01A09DC4-1F22-7AA4-8C31-5B71A0C24D10")!
+    var queue = AttentionQueue()
+    queue.apply(completions: [completion()], running: [AttentionRunning(source: .cli, session: session, turn: next, arrivedAt: 100)])
+    queue.apply(questions: [AttentionQuestion(source: .cli, session: session, turn: next, callID: "call_1", arrivedAt: 101,
+                                              prompts: [QuestionPrompt(header: "H", question: "Which?", options: ["A", "B"])])])
+    #expect(queue.items.contains { $0.kind == .running } == false)
+    #expect(queue.sessionsInTurn == [session])
+    let availability = SessionReplyAvailability(daemonConnected: true, daemonThreads: [session],
+                                                workingSessions: queue.sessionsInTurn)
+    #expect(SessionReplyRouting.target(for: completion(), availability: availability) == .unavailable(.sessionWorking))
 }
 
 @Test func turnStartCarriesOnlyTheThreadAndTheUsersText() {

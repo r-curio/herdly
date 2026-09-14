@@ -15,21 +15,21 @@
     "upgraded_to_websocket": true
   },
   "passed": true,
-  "recorded": "2026-09-14T08:55:19.972685+00:00",
+  "recorded": "2026-09-14T09:22:19.843359+00:00",
   "runs": {
     "no-socket": {
       "exit": 0,
       "report": {
         "completion_reply_targets": [
-          "01a09d9b-7642-7b51-bcce-9b66cfe5361f: unavailable(SteerCore.SessionReplyPolicy.Rejection.noDaemon)"
+          "01a09dc4-1f22-7aa4-8c31-5b71a0c24d10: unavailable(SteerCore.SessionReplyPolicy.Rejection.noDaemon)"
         ],
         "connected": false,
         "pending_requests": [],
         "question_routes": [
           "call_daemonlab_1: ghosttyRelay"
         ],
-        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-_idtbwy8/missing.sock",
-        "status": "Codex daemon: not running (no socket at /var/folders/xx/tmp/T/steer-daemon-lab-_idtbwy8/missing.sock).",
+        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-egdb0qcf/missing.sock",
+        "status": "Codex daemon: not running (no socket at /var/folders/xx/tmp/T/steer-daemon-lab-egdb0qcf/missing.sock).",
         "subscribed": []
       },
       "stderr": ""
@@ -99,7 +99,8 @@
             "jsonrpc": "2.0",
             "result": {
               "data": [
-                "01a09d9b-7642-7b51-bcce-9b66cfe5361f"
+                "01a09d9b-7642-7b51-bcce-9b66cfe5361f",
+                "01a09dc4-1f22-7aa4-8c31-5b71a0c24d10"
               ]
             }
           }
@@ -167,13 +168,39 @@
           }
         },
         {
+          "direction": "in",
+          "message": {
+            "id": 4,
+            "jsonrpc": "2.0",
+            "method": "thread/resume",
+            "params": {
+              "threadId": "01a09dc4-1f22-7aa4-8c31-5b71a0c24d10"
+            }
+          }
+        },
+        {
+          "direction": "out",
+          "message": {
+            "id": 4,
+            "jsonrpc": "2.0",
+            "result": {
+              "thread": {
+                "id": "01a09dc4-1f22-7aa4-8c31-5b71a0c24d10",
+                "status": {
+                  "type": "active"
+                }
+              }
+            }
+          }
+        },
+        {
           "event": "client closed"
         }
       ],
       "exit": 0,
       "report": {
         "completion_reply_targets": [
-          "01a09d9b-7642-7b51-bcce-9b66cfe5361f: daemon(thread: 01A09D9B-7642-7B51-BCCE-9B66CFE5361F)"
+          "01a09dc4-1f22-7aa4-8c31-5b71a0c24d10: daemon(thread: 01A09DC4-1F22-7AA4-8C31-5B71A0C24D10)"
         ],
         "connected": true,
         "pending_requests": [
@@ -197,18 +224,19 @@
               }
             ],
             "request_id": "number(900)",
-            "route": "daemon(SteerCore.AppServerQuestionRequest(requestID: SteerCore.AppServerRequestID.number(900), thread: 01A09D9B-7642-7B51-BCCE-9B66CFE5361F, turn: Optional(01A09DB7-0C51-7F33-9EBC-4E44F91DF22C), itemID: \"call_daemonlab_1\", questions: [SteerCore.AppServerQuestion(id: \"shape\", header: Optional(\"Shape\"), question: Optional(\"Which?\"), options: Optional([\"A\", \"B\"]), isOther: false, isSecret: false), SteerCore.AppServerQuestion(id: \"name\", header: Optional(\"Name\"), question: Optional(\"Call it?\"), options: nil, isOther: false, isSecret: false)], receivedAt: 1789376120.3816051))",
+            "route": "daemon(SteerCore.AppServerQuestionRequest(requestID: SteerCore.AppServerRequestID.number(900), thread: 01A09D9B-7642-7B51-BCCE-9B66CFE5361F, turn: Optional(01A09DB7-0C51-7F33-9EBC-4E44F91DF22C), itemID: \"call_daemonlab_1\", questions: [SteerCore.AppServerQuestion(id: \"shape\", header: Optional(\"Shape\"), question: Optional(\"Which?\"), options: Optional([\"A\", \"B\"]), isOther: false, isSecret: false), SteerCore.AppServerQuestion(id: \"name\", header: Optional(\"Name\"), question: Optional(\"Call it?\"), options: nil, isOther: false, isSecret: false)], receivedAt: 1789377740.125272))",
             "thread": "01a09d9b-7642-7b51-bcce-9b66cfe5361f",
             "turn": "01a09db7-0c51-7f33-9ebc-4e44f91df22c"
           }
         ],
         "question_routes": [
-          "call_daemonlab_1: daemon(SteerCore.AppServerQuestionRequest(requestID: SteerCore.AppServerRequestID.number(900), thread: 01A09D9B-7642-7B51-BCCE-9B66CFE5361F, turn: Optional(01A09DB7-0C51-7F33-9EBC-4E44F91DF22C), itemID: \"call_daemonlab_1\", questions: [SteerCore.AppServerQuestion(id: \"shape\", header: Optional(\"Shape\"), question: Optional(\"Which?\"), options: Optional([\"A\", \"B\"]), isOther: false, isSecret: false), SteerCore.AppServerQuestion(id: \"name\", header: Optional(\"Name\"), question: Optional(\"Call it?\"), options: nil, isOther: false, isSecret: false)], receivedAt: 1789376120.3816051))"
+          "call_daemonlab_1: daemon(SteerCore.AppServerQuestionRequest(requestID: SteerCore.AppServerRequestID.number(900), thread: 01A09D9B-7642-7B51-BCCE-9B66CFE5361F, turn: Optional(01A09DB7-0C51-7F33-9EBC-4E44F91DF22C), itemID: \"call_daemonlab_1\", questions: [SteerCore.AppServerQuestion(id: \"shape\", header: Optional(\"Shape\"), question: Optional(\"Which?\"), options: Optional([\"A\", \"B\"]), isOther: false, isSecret: false), SteerCore.AppServerQuestion(id: \"name\", header: Optional(\"Name\"), question: Optional(\"Call it?\"), options: nil, isOther: false, isSecret: false)], receivedAt: 1789377740.125272))"
         ],
-        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-_idtbwy8/d.sock",
-        "status": "Codex daemon: connected; 1 thread subscribed.",
+        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-egdb0qcf/d.sock",
+        "status": "Codex daemon: connected; 2 threads subscribed.",
         "subscribed": [
-          "01a09d9b-7642-7b51-bcce-9b66cfe5361f"
+          "01a09d9b-7642-7b51-bcce-9b66cfe5361f",
+          "01a09dc4-1f22-7aa4-8c31-5b71a0c24d10"
         ]
       },
       "stderr": ""
@@ -222,15 +250,15 @@
       "exit": 0,
       "report": {
         "completion_reply_targets": [
-          "01a09d9b-7642-7b51-bcce-9b66cfe5361f: unavailable(SteerCore.SessionReplyPolicy.Rejection.noDaemon)"
+          "01a09dc4-1f22-7aa4-8c31-5b71a0c24d10: unavailable(SteerCore.SessionReplyPolicy.Rejection.noDaemon)"
         ],
         "connected": false,
         "pending_requests": [],
         "question_routes": [
           "call_daemonlab_1: ghosttyRelay"
         ],
-        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-_idtbwy8/shared.sock",
-        "status": "Codex daemon: refusing /var/folders/xx/tmp/T/steer-daemon-lab-_idtbwy8/shared.sock; it is readable by other users.",
+        "socket": "/var/folders/xx/tmp/T/steer-daemon-lab-egdb0qcf/shared.sock",
+        "status": "Codex daemon: refusing /var/folders/xx/tmp/T/steer-daemon-lab-egdb0qcf/shared.sock; it is readable by other users.",
         "subscribed": []
       },
       "stderr": ""

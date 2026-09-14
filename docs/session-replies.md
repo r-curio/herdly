@@ -13,6 +13,8 @@ A completion card carries a single-line field: the user reads that a session fin
 
 Params and shapes follow the schema the installed CLI generates (`codex app-server generate-json-schema --out <dir>`, 0.154.0): `TurnStartParams` requires `threadId` and `input`, and every other field is an override of the thread's model, effort, sandbox policy, approval policy, working directory or service tier. Steer sends none of them, so the reply inherits exactly the settings the session already has.
 
+The socket itself is proven: a second client connects, subscribes and receives a real `item/tool/requestUserInput` ([ADR 0007](adr/0007-connect-to-the-codex-daemon-socket-as-the-same-user.md), `docs/evidence/app-server-daemon-live.json`). `turn/start` is not: no run on the installed CLI has yet started a turn from Steer, so this is a source-level finding about the method, not a proven capability. The live walkthrough below is what would establish it.
+
 The Ghostty relay is not a second path. It delivers one key name to a matched tab and was verified for that alone (ADR 0006); nothing proves it can type a whole prompt and a Return into one unsplit tab, so a session the daemon does not hold has no reply path in Steer at all. `turn/steer`, which interjects into a running turn, is not used either: a completion card is about a turn that has ended.
 
 ## When the field is offered
@@ -22,12 +24,14 @@ The Ghostty relay is not a second path. It delivers one key name to a matched ta
 | Evidence | Card |
 | --- | --- |
 | Codex recorded the session's end | disabled: "This session has ended; there is nothing to reply to." |
-| The session is working again | disabled: "This session is working again; send your next prompt in Codex." |
+| The session is in a turn | disabled: "This session is working again; send your next prompt in Codex." |
 | No daemon connection | disabled: "No Codex daemon is running, so Steer cannot reach this session; reply in Codex." |
 | The daemon does not list the thread as loaded | disabled: "Codex's daemon is not holding this session; reply in Codex." |
 | The daemon holds the thread | the field and Send are live |
 
-An ended session has nowhere to put a turn; a session that started another turn is an ambiguous target, because a `turn/start` against it is not the interjection the user is imagining. Both are told plainly rather than attempted.
+An ended session has nowhere to put a turn; a session that started another turn is an ambiguous target, because a `turn/start` against it is not the interjection the user is imagining (`turn/steer`, which does interject, is a different method with an `expectedTurnId` precondition and is not used here). Both are told plainly rather than attempted.
+
+"In a turn" is read from `AttentionQueue.sessionsInTurn`, not from the rows on screen: a session blocked on a question has its running row withheld from the display but is mid-turn all the same, and a reply to it would be exactly the ambiguous send this rule exists to refuse.
 
 ## One card, one reply
 
@@ -47,9 +51,11 @@ A reply leaves the completion exactly where it was. It is acknowledged only by e
 
 ## Verification
 
-Automated: `Tests/SteerCoreTests/SessionReplyTests.swift` covers the target for a loaded thread, each unavailable reason, the `turn/start` shape, send-once (in flight, after the daemon took it, after it failed), refusal for an absent completion and unusable text, the waiting-then-confirmed/unconfirmed rule, and that sending acknowledges nothing.
+Source inspection: the generated schema defines `TurnStartParams` and `UserInput` as used above. Nothing here has been run against a live daemon.
 
-Automated against the real binary: `scripts/daemon_lab.py` seeds a finished turn beside the pending question and records where each completion card's reply field would send, without sending anything — `daemon(thread: …)` behind a private socket, `unavailable(noDaemon)` with no socket (`docs/evidence/app-server-daemon-lab.json`).
+Automated: `Tests/SteerCoreTests/SessionReplyTests.swift` covers the target for a loaded thread, each unavailable reason, the `turn/start` shape, send-once (in flight, after the daemon took it, after it failed), refusal for an absent completion and unusable text, a session blocked on a question counting as in a turn, the waiting-then-confirmed/unconfirmed rule, and that sending acknowledges nothing.
+
+Automated against the real binary: `scripts/daemon_lab.py` seeds a second, finished session beside the one holding the pending question, and records where each completion card's reply field would send, without sending anything — `daemon(thread: …)` behind a private socket, `unavailable(noDaemon)` with no socket (`docs/evidence/app-server-daemon-lab.json`).
 
 Live walkthrough, once a daemon is running (`codex app-server daemon start`):
 
