@@ -41,6 +41,8 @@ final class AppServerDaemonClient {
     private(set) var state: State = .idle
     private(set) var problem: AppServerSocketCheck.Problem?
     private(set) var subscribed: Set<String> = []
+    /// Thread ids the daemon reported loaded at the last poll, as UUIDs. Empty when not connected.
+    private(set) var loadedThreads: Set<UUID> = []
     /// Every notification and server request the daemon sends, in order; responses to Steer's own
     /// requests are handled here and not forwarded.
     var onMessage: (([String: Any]) -> Void)?
@@ -221,6 +223,7 @@ final class AppServerDaemonClient {
         upgraded = false
         handlers = [:]
         subscribed = []
+        loadedThreads = []
         state = .failed(reason)
         nextRetry = ProcessInfo.processInfo.systemUptime + Self.retryInterval
         onDisconnect?()
@@ -248,6 +251,7 @@ final class AppServerDaemonClient {
         nextThreadPoll = now + Self.threadPollInterval
         request("thread/loaded/list", params: [:]) { [weak self] result, _ in
             guard let self, let loaded = result?["data"] as? [String] else { return }
+            self.loadedThreads = Set(loaded.compactMap(UUID.init(uuidString:)))
             for thread in loaded where !self.subscribed.contains(thread) {
                 self.request("thread/resume", params: ["threadId": thread]) { [weak self] result, _ in
                     if result != nil { self?.subscribed.insert(thread) }
