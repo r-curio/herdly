@@ -60,6 +60,9 @@ final class AppServerDaemonClient {
     private var upgraded = false
     private var upgradeKey = ""
     private var fragments = Data()
+    /// True while `disconnect` is tearing the connection down, so a handler it completes cannot
+    /// re-enter it (the `initialize` handler disconnects on refusal).
+    private var disconnecting = false
 
     init(socketPath: String = AppServerDaemonClient.defaultSocketPath) {
         self.socketPath = socketPath
@@ -215,17 +218,24 @@ final class AppServerDaemonClient {
     }
 
     private func disconnect(reason: String) {
+        guard !disconnecting else { return }
+        disconnecting = true
         reader?.cancel()
         reader = nil
         fd = -1
         buffer = Data()
         fragments = Data()
         upgraded = false
+        // Requests still in flight are answered here as refused: a caller waiting on one must never
+        // wait for a reply this connection can no longer receive.
+        let waiting = handlers
         handlers = [:]
         subscribed = []
         loadedThreads = []
         state = .failed(reason)
         nextRetry = ProcessInfo.processInfo.systemUptime + Self.retryInterval
+        disconnecting = false
+        for handler in waiting.values { handler(nil, ["message": reason]) }
         onDisconnect?()
     }
 
