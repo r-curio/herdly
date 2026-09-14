@@ -67,6 +67,8 @@ Releases are on the repository's [Releases page](https://github.com/r-curio/stee
 3. For an `unsigned-dev` or `dev-signed` build, the first open is refused by Gatekeeper. Click **Done**, then open **System Settings › Privacy & Security**, scroll to the message about Steer, and choose **Open Anyway**. The command-line equivalent is `xattr -d com.apple.quarantine /Applications/Steer.app`. A `notarized` build opens directly.
 4. Steer launches as a menu-bar app (**S**) with no Dock icon, and shows its controls window because no setup exists yet.
 
+If Steer appears in Activity Monitor but never shows its menu-bar item or window, an endpoint-security agent is holding the launch. On a managed Mac running an endpoint-security agent (checked 2026-09-14, macOS 26.5), an unsigned Steer placed in `/Applications` was held at exec indefinitely with no dialog and no log entry, while the identical bundle in `~/Applications` launched at once. Quit the stuck process, delete the copy in `/Applications`, and drag Steer into `~/Applications` instead. Removing quarantine does not help; only the location does. A Developer ID signed and notarized build is expected to pass such agents, but that has not been verified.
+
 The zip is the same bundle without the drag-to-install image; CI uploads it on every push for scripted checks.
 
 ### Connect Codex
@@ -90,6 +92,7 @@ Codex keeps working if Steer is quit or crashes. Every hook either records metad
 | --- | --- | --- |
 | **"Steer" wants access to control "Ghostty"** (Automation) | The first time Ghostty controls are enabled in Steer and it selects a tab through `osascript`. The usage string is in the bundle's `NSAppleEventsUsageDescription`. | Open in Codex for CLI sessions reports that it cannot read Ghostty's tabs; everything else works. Re-enable under **System Settings › Privacy & Security › Automation › Steer**. |
 | Gatekeeper "cannot be opened" | First launch of an `unsigned-dev`, `dev-signed`, or `signed` build. | See step 3 above. |
+| No prompt, app never appears | An endpoint-security agent holding an unsigned app in `/Applications`. | Install in `~/Applications` instead; see the note under Install. |
 | Codex's own hook-trust prompt | The first Codex session after Configure Codex. This is Codex's prompt, not macOS's. | Codex ignores the untrusted hooks; Steer shows repair required. |
 
 Steer does not request Accessibility, Screen Recording, Input Monitoring, notifications, or Full Disk Access, and does not read the Codex desktop app's window contents. Desktop visibility comes from `NSWorkspace` app-activation notifications, desktop read state from `~/.codex/.codex-global-state.json`, thread names from `~/.codex/session_index.jsonl`, and turn state from `~/.codex/sessions` rollouts and the hook records above.

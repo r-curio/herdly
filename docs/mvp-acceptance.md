@@ -38,7 +38,7 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 
 | # | Step | Expected | Result |
 | --- | --- | --- | --- |
-| I1 | Download the `.dmg` from the release, check its `.sha256`, open it, drag Steer to Applications, eject, open Steer. | Gatekeeper refuses an `unsigned-dev` build once; Open Anyway launches it as a menu-bar app showing its controls window. | |
+| I1 | Download the `.dmg` from the release, check its `.sha256`, open it, drag Steer to Applications, eject, open Steer. | Gatekeeper refuses an `unsigned-dev` build once; Open Anyway launches it as a menu-bar app showing its controls window. | **Partial, 2026-09-14** (v0.1.0-dev.1, `Steer-0.1.0+95-unsigned-dev.dmg`): checksum OK, Gatekeeper dialog appeared as documented, but the copy in `/Applications` never launched: held at exec by an endpoint-security agent on this managed Mac, with no dialog. The same bundle in `~/Applications` launched normally. Install guide updated. |
 | I2 | Before Configure Codex, copy `~/.codex/config.toml` and `~/.codex/hooks.json` aside. Click **Check Codex setup**. | Preview lists the versions from the requirements table as supported and shows every line it would add. | |
 | I3 | **Configure Codex**. Diff both files against the copies. | Only the lines listed under "Connect Codex" in install.md were added; approval and sandbox settings unchanged. Helper present at `~/Library/Application Support/Steer/SteerHook`. | |
 | I4 | Start a new `codex` session in Ghostty and answer Codex's trust prompt. | Steer shows connected; the session's row appears with a session-id title. | |
