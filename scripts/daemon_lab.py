@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Drive Steer's daemon client against a fake app-server daemon on a scratch socket.
 
-Everything happens in a disposable lab directory: a fake daemon that speaks the newline-delimited
-JSON-RPC shapes from the installed CLI's generated schema, an isolated events directory, and an
+Everything happens in a disposable lab directory: a fake daemon that speaks JSON-RPC over
+WebSocket (the framing Codex's daemon uses on its control socket) with the shapes from the
+installed CLI's generated schema, an isolated events directory, and an
 isolated rollouts directory. The real `~/.codex/app-server-control` socket is never touched and no
 Codex configuration is read or written. Each run starts the real Steer binary with
 `--daemon-socket` pointing at the fake and reads the JSON it writes via `--daemon-report`.
@@ -14,9 +15,12 @@ docs/user-input-requests.md.
     python3 scripts/daemon_lab.py --steer .build/debug/Steer --out docs/evidence/app-server-daemon-lab.json
 """
 import argparse
+import base64
+import hashlib
 import json
 import os
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -31,8 +35,50 @@ TURN = "01a09db7-0c51-7f33-9ebc-4e44f91df22c"
 ITEM = "call_daemonlab_1"
 
 
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+def server_frame(payload, opcode=0x1):
+    n = len(payload)
+    head = bytes([0x80 | opcode])
+    if n < 126:
+        head += bytes([n])
+    elif n < 65536:
+        head += bytes([126]) + struct.pack(">H", n)
+    else:
+        head += bytes([127]) + struct.pack(">Q", n)
+    return head + payload
+
+
+def parse_frame(buffer):
+    """(opcode, payload, rest) for one complete client frame, or None when incomplete."""
+    if len(buffer) < 2:
+        return None
+    opcode, n, masked, offset = buffer[0] & 0x0F, buffer[1] & 0x7F, buffer[1] & 0x80, 2
+    if n == 126:
+        if len(buffer) < 4:
+            return None
+        n, offset = struct.unpack(">H", buffer[2:4])[0], 4
+    elif n == 127:
+        if len(buffer) < 10:
+            return None
+        n, offset = struct.unpack(">Q", buffer[2:10])[0], 10
+    mask = None
+    if masked:
+        if len(buffer) < offset + 4:
+            return None
+        mask, offset = buffer[offset:offset + 4], offset + 4
+    if len(buffer) < offset + n:
+        return None
+    payload = buffer[offset:offset + n]
+    if mask:
+        payload = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    return opcode, payload, buffer[offset + n:]
+
+
 class FakeDaemon(threading.Thread):
-    """Accepts one client, answers initialize and the thread requests, then pushes a question."""
+    """Accepts one client, completes the WebSocket upgrade, answers initialize and the thread
+    requests, then pushes a question. Records whether the client masked its frames as required."""
 
     def __init__(self, path):
         super().__init__(daemon=True)
@@ -44,6 +90,7 @@ class FakeDaemon(threading.Thread):
         self.server.listen(1)
         self.server.settimeout(15)
         self.response = None
+        self.upgrade_request = None
 
     def run(self):
         try:
@@ -55,42 +102,74 @@ class FakeDaemon(threading.Thread):
         buffer = b""
         pushed = False
         started = time.time()
-        while time.time() - started < 20:
+        # The HTTP upgrade first; a client that skips it never gets a frame back.
+        while b"\r\n\r\n" not in buffer and time.time() - started < 20:
             try:
                 chunk = conn.recv(65536)
             except socket.timeout:
                 break
             if not chunk:
-                self.log.append({"event": "client closed"})
-                break
+                self.log.append({"event": "client closed before upgrading"})
+                conn.close()
+                return
             buffer += chunk
-            while b"\n" in buffer:
-                line, buffer = buffer.split(b"\n", 1)
-                message = json.loads(line)
-                self.log.append({"direction": "in", "message": message})
-                method = message.get("method")
-                if method == "initialize":
-                    self.send(conn, {"jsonrpc": "2.0", "id": message["id"],
-                                     "result": {"userAgent": "fake-daemon", "codexHome": "/tmp", "platformFamily": "unix", "platformOs": "macos"}})
-                elif method == "thread/loaded/list":
-                    self.send(conn, {"jsonrpc": "2.0", "id": message["id"], "result": {"data": [THREAD]}})
-                elif method == "thread/resume":
-                    self.send(conn, {"jsonrpc": "2.0", "id": message["id"],
-                                     "result": {"thread": {"id": message["params"]["threadId"], "status": {"type": "active"}}}})
-                    if not pushed:
-                        pushed = True
-                        self.send(conn, {"jsonrpc": "2.0", "id": 900, "method": "item/tool/requestUserInput",
-                                         "params": {"threadId": THREAD, "turnId": TURN, "itemId": ITEM,
-                                                    "questions": [{"id": "shape", "header": "Shape", "question": "Which?",
-                                                                   "options": [{"label": "A", "description": ""}, {"label": "B", "description": ""}]},
-                                                                  {"id": "name", "header": "Name", "question": "Call it?", "options": None}]}})
-                elif method is None and message.get("id") == 900:
-                    self.response = message
+        if b"\r\n\r\n" not in buffer:
+            conn.close()
+            return
+        head, buffer = buffer.split(b"\r\n\r\n", 1)
+        lines = head.decode(errors="replace").split("\r\n")
+        headers = {k.strip().lower(): v.strip() for k, v in (l.split(":", 1) for l in lines[1:] if ":" in l)}
+        self.upgrade_request = {"request_line": lines[0], "upgrade": headers.get("upgrade"), "key_present": "sec-websocket-key" in headers}
+        self.log.append({"direction": "in", "upgrade": self.upgrade_request})
+        if headers.get("upgrade", "").lower() != "websocket" or "sec-websocket-key" not in headers:
+            conn.close()
+            return
+        accept = base64.b64encode(hashlib.sha1((headers["sec-websocket-key"] + WS_GUID).encode()).digest()).decode()
+        conn.sendall(("HTTP/1.1 101 Switching Protocols\r\nconnection: Upgrade\r\nupgrade: websocket\r\n"
+                      f"sec-websocket-accept: {accept}\r\n\r\n").encode())
+        while time.time() - started < 20:
+            frame = parse_frame(buffer)
+            if frame is None:
+                try:
+                    chunk = conn.recv(65536)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    self.log.append({"event": "client closed"})
+                    break
+                buffer += chunk
+                continue
+            opcode, payload, buffer = frame
+            if opcode == 0x8:
+                self.log.append({"event": "client sent close"})
+                break
+            if opcode != 0x1:
+                continue
+            message = json.loads(payload)
+            self.log.append({"direction": "in", "message": message})
+            method = message.get("method")
+            if method == "initialize":
+                self.send(conn, {"jsonrpc": "2.0", "id": message["id"],
+                                 "result": {"userAgent": "fake-daemon", "codexHome": "/tmp", "platformFamily": "unix", "platformOs": "macos"}})
+            elif method == "thread/loaded/list":
+                self.send(conn, {"jsonrpc": "2.0", "id": message["id"], "result": {"data": [THREAD]}})
+            elif method == "thread/resume":
+                self.send(conn, {"jsonrpc": "2.0", "id": message["id"],
+                                 "result": {"thread": {"id": message["params"]["threadId"], "status": {"type": "active"}}}})
+                if not pushed:
+                    pushed = True
+                    self.send(conn, {"jsonrpc": "2.0", "id": 900, "method": "item/tool/requestUserInput",
+                                     "params": {"threadId": THREAD, "turnId": TURN, "itemId": ITEM,
+                                                "questions": [{"id": "shape", "header": "Shape", "question": "Which?",
+                                                               "options": [{"label": "A", "description": ""}, {"label": "B", "description": ""}]},
+                                                              {"id": "name", "header": "Name", "question": "Call it?", "options": None}]}})
+            elif method is None and message.get("id") == 900:
+                self.response = message
         conn.close()
 
     def send(self, conn, message):
         self.log.append({"direction": "out", "message": message})
-        conn.sendall((json.dumps(message) + "\n").encode())
+        conn.sendall(server_frame(json.dumps(message).encode()))
 
 
 def now_iso():
@@ -167,6 +246,7 @@ def main():
         "private_card_uses_daemon": [r.get("route", "").startswith("daemon(") for r in private.get("pending_requests", [])] == [True],
         "shared_card_falls_back": any("ghosttyRelay" in r for r in (results["runs"]["shared-socket"]["report"] or {}).get("question_routes", [])),
         "nothing_answered": results["runs"]["private-socket"]["answer_written_by_steer"] is None,
+        "upgraded_to_websocket": (results["runs"]["private-socket"]["daemon_log"] or [{}])[0].get("upgrade", {}).get("upgrade", "").lower() == "websocket",
         "initialized_as_steer": any(m.get("message", {}).get("method") == "initialize"
                                     and m["message"]["params"]["clientInfo"]["name"] == "steer"
                                     for m in results["runs"]["private-socket"]["daemon_log"]),

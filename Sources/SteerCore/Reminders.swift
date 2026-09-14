@@ -210,7 +210,11 @@ public enum ReminderReader {
         return evidence(in: bytes, session: session)
     }
 
-    public static func scan(events: URL, rollouts: URL) -> ReminderScan {
+    /// `cliTitles` are the terminal titles Ghostty currently shows. A session is a CLI session when
+    /// its rollout header says `source: cli`, or when its session-id title is one of those titles:
+    /// a TUI attached to Codex's app-server daemon is recorded as `vscode`, the desktop's value, so
+    /// the header alone no longer tells the surfaces apart (CLI 0.154.0, issue #42).
+    public static func scan(events: URL, rollouts: URL, cliTitles: Set<String> = []) -> ReminderScan {
         var result = ReminderScan()
         guard let files = try? FileManager.default.contentsOfDirectory(at: events, includingPropertiesForKeys: [.creationDateKey]),
               files.count <= 4096 else { return result }
@@ -336,7 +340,7 @@ public enum ReminderReader {
                       event["type"] as? String == "session_meta",
                       let meta = event["payload"] as? [String: Any],
                       (meta["id"] as? String).flatMap(UUID.init(uuidString:)) == session,
-                      meta["source"] as? String == "cli" else { continue }
+                      meta["source"] as? String == "cli" || cliTitles.contains(GhosttyMatch.title(session)) else { continue }
                 result.cliSessions.insert(session)
                 let sessionHooks = hooks.filter { $0.session_id == session }.sorted { $0.received_at < $1.received_at }
                 for hook in sessionHooks {
