@@ -167,6 +167,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     var hovering = false
     private var hoverHold = HoverHold()
     private var hoverHeld = false
+    private var hoverExitTask: Task<Void, Never>?
     /// After Escape, hover does not reopen the panel until the pointer has left it.
     private var hoverSuppressed = false
     private var spotlight = Spotlight()
@@ -953,19 +954,35 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             frame = NotchTuck.tuckedFrame(frame)
         }
         if targetFrame != frame {
+            let opening = frame.height > panel.frame.height
             targetFrame = frame
             if reduceMotion || !panel.isVisible {
                 panel.setFrame(frame, display: true)
             } else {
                 NSAnimationContext.runAnimationGroup { context in
-                    context.duration = 0.18
-                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    context.duration = opening ? 0.16 : 0.2
+                    context.timingFunction = CAMediaTimingFunction(name: opening ? .easeOut : .easeInEaseOut)
                     panel.animator().setFrame(frame, display: true)
                 }
             }
         }
         // Never makes the panel key: an automatic notification does not take input from the user's app.
         if !panel.isVisible { panel.orderFrontRegardless() }
+    }
+
+    /// React to pointer entry without waiting for the background polling interval. Pointer exit
+    /// keeps the core hover grace, then refreshes exactly when that grace expires.
+    func setHovering(_ hovering: Bool) {
+        self.hovering = hovering
+        hoverExitTask?.cancel()
+        hoverExitTask = nil
+        refresh()
+        guard !hovering else { return }
+        hoverExitTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(HoverHold.grace))
+            guard !Task.isCancelled else { return }
+            self?.refresh()
+        }
     }
 
     /// Collapses the panel and hands keyboard input back to the app the user was using.

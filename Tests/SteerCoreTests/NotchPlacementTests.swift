@@ -118,14 +118,14 @@ private let external = NotchDisplay(id: 2, frame: CGRect(x: 1512, y: 100, width:
     #expect(step(false, 0) == false)
     #expect(step(true, 1) == true)
     #expect(step(false, 1.1) == true)
-    #expect(step(false, 1.25) == true)
-    #expect(step(false, 1.5) == false)
+    #expect(step(false, 1.27) == true)
+    #expect(step(false, 1.29) == false)
     // Re-entering within the grace keeps it held; a later leave restarts the grace.
     #expect(step(true, 2) == true)
     #expect(step(false, 2.2) == true)
-    #expect(step(true, 2.4) == true)
+    #expect(step(true, 2.3) == true)
     #expect(step(false, 3) == true)
-    #expect(step(false, 3.4) == false)
+    #expect(step(false, 3.19) == false)
 }
 
 @Test func spotlightShowsOneItemForThreeSecondsAndInteractionHoldsItWithoutExtendingIt() {

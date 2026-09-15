@@ -646,7 +646,7 @@ struct Notch: View {
                                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                         }
                         .accessibilityLabel("Show full action for \(rowSubject(item))")
-                    } else if let full = running.fullPrompt, full != row {
+                    } else if running.promptIsTruncated, let full = running.fullPrompt {
                         NotchDisclosure(title: "Show full prompt", expanded: disclosure("prompt:\(item.session.uuidString)")) {
                             Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
                                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
@@ -834,6 +834,6 @@ struct Notch: View {
         .foregroundStyle(NotchStyle.ink)
         .background(NotchStyle.ground, in: NotchShape())
         .preferredColorScheme(.dark)
-        .onHover { model.hovering = $0 }
+        .onHover(perform: model.setHovering)
     }
 }
