@@ -151,3 +151,38 @@ import Testing
     queue.apply(ReminderReader.scan(events: root, rollouts: root))
     #expect(queue.items.isEmpty)
 }
+@Test func terminalCompletionCarriesOnlyItsExactBoundedFinalResponsePreview() throws {
+    let session = UUID(), completed = UUID(), other = UUID()
+    let json = [
+        "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session)\",\"cwd\":\"/tmp/project\",\"originator\":\"Codex Desktop\"}}",
+        "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"\(other)\"}}",
+        "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"\(other)\",\"last_agent_message\":\"other response\"}}",
+        "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_started\",\"turn_id\":\"\(completed)\"}}",
+        "{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"fix the hover\"}}",
+        "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"\(completed)\",\"completed_at\":1789459200,\"last_agent_message\":\"  exact response  \"}}",
+        ""
+    ].joined(separator: "\n")
+    let evidence = ReminderReader.evidence(in: Data(json.utf8), session: session)
+    #expect(evidence.completionPreviews[TurnIdentity(session: session, turn: completed)]?.text == "exact response")
+    #expect(evidence.completionPreviews[TurnIdentity(session: session, turn: other)]?.text == "other response")
+    #expect(evidence.completionPreviews.count == 2)
+    #expect(evidence.turnContexts[TurnIdentity(session: session, turn: completed)]
+        == SpotlightRecordContext(workingDirectory: "/tmp/project", prompt: "fix the hover"))
+}
+
+@Test func malformedOrOversizedCompletionRecordsExposeNoPreviewOrContext() {
+    let session = UUID(), turn = UUID()
+    let meta = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session)\"}}\n"
+    let malformed = meta + "{not json}\n"
+    #expect(ReminderReader.evidence(in: Data(malformed.utf8), session: session).completionPreviews.isEmpty)
+
+    let huge = String(repeating: "x", count: 1024 * 1024 + 1)
+    let oversized = meta + huge + "\n"
+    let evidence = ReminderReader.evidence(in: Data(oversized.utf8), session: session)
+    #expect(evidence.completionPreviews.isEmpty)
+    #expect(evidence.turnContexts.isEmpty)
+
+    let mismatch = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(UUID())\"}}\n"
+        + "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"\(turn)\",\"last_agent_message\":\"wrong\"}}\n"
+    #expect(ReminderReader.evidence(in: Data(mismatch.utf8), session: session).completionPreviews.isEmpty)
+}

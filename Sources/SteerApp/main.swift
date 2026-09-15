@@ -156,11 +156,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     var toCheckCount: Int {
         orderedAttentionItems.filter { $0.kind != .running }.count + (attention.pending ? 1 : 0)
     }
-    /// Presentation state the notch view renders. `showAll` is hover or keyboard focus: the whole
-    /// queue. `spotlightItem` is the one new item a completion or request opened the panel for.
+    /// One presentation mode prevents passive hover from replacing a new item's focused card.
     @Published var expanded = false
-    @Published var showAll = false
-    @Published var spotlightItem: AttentionItemID?
+    @Published var presentationMode: NotchPresentationMode = .collapsed
+    /// Fresh response previews are intentionally process-memory only.
+    @Published private(set) var completionPreviews: [CompletionIdentity: CompletionPreviewAvailability] = [:]
+    @Published private(set) var spotlightContexts: [AttentionItemID: SpotlightRecordContext] = [:]
     @Published var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     /// Natural height of the open panel's content, reported by the view after layout.
     var contentHeight: CGFloat = 0
@@ -172,8 +173,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var hoverExitTask: Task<Void, Never>?
     /// After Escape, hover does not reopen the panel until the pointer has left it.
     private var hoverSuppressed = false
-    private var spotlight = Spotlight()
-    private var manualOpen = false
+    private var notchPresentation = NotchPresentationController()
     private var latestNewRequest: AttentionItemID?
     private var latestNewCompletion: AttentionItemID?
     private var latestNewQuestion: AttentionItemID?
@@ -751,6 +751,22 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let current = queue.items
             let newItems = current.filter { !previous.contains($0.id) }
             let newCompletions = newItems.compactMap(\.completion)
+            for completion in newCompletions where !completion.uncertain {
+                let turn = TurnIdentity(session: completion.session, turn: completion.turn)
+                completionPreviews[completion.id] = scan.completionPreviews[turn].map(CompletionPreviewAvailability.available)
+                    ?? .unavailable("Codex did not provide a readable final response for this turn.")
+                spotlightContexts[.completion(completion.id)] = scan.turnContexts[turn] ?? SpotlightRecordContext()
+            }
+            let liveCompletionIDs = Set(current.compactMap(\.completion).map(\.id))
+            completionPreviews = completionPreviews.filter { liveCompletionIDs.contains($0.key) }
+            let liveItemIDs = Set(current.map(\.id))
+            spotlightContexts = spotlightContexts.filter { liveItemIDs.contains($0.key) }
+            for item in current where item.kind != .completion {
+                let turn = item.request?.turn ?? item.question?.turn ?? item.running?.turn
+                if let turn, let context = scan.turnContexts[TurnIdentity(session: item.session, turn: turn)] {
+                    spotlightContexts[item.id] = context
+                }
+            }
             if let newest = newItems.filter({ $0.completion?.uncertain == false }).max(by: { $0.arrivedAt < $1.arrivedAt }) {
                 latestNewCompletion = newest.id
             }
@@ -878,7 +894,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if !pointerInside { hoverSuppressed = false }
         hoverHeld = hoverHold.update(pointerInside: pointerInside && !hoverSuppressed, now: now)
         let interacting = NotchInteraction.isActive(pointerInside: hoverHeld, keyboardFocus: panel.hasDeliberateKeyboardFocus)
-        if !interacting { manualOpen = false }
         var next = attention
         let firstPresentation = next.update(codexForeground: codexForeground, hovering: interacting,
                                             now: ProcessInfo.processInfo.systemUptime)
@@ -891,8 +906,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                                     now: ProcessInfo.processInfo.systemUptime)
         if firstReminderPresentation {
             let requests = queue.items.filter { $0.kind == .actionableRequest || $0.kind == .handedBackRequest }
-            if let id = latestNewRequest, requests.contains(where: { $0.id == id }) { spotlight.present(id, now: now) }
-            else if let newest = requests.max(by: { $0.arrivedAt < $1.arrivedAt }) { spotlight.present(newest.id, now: now) }
+            if let id = latestNewRequest, requests.contains(where: { $0.id == id }) { notchPresentation.present(id, now: now) }
+            else if let newest = requests.max(by: { $0.arrivedAt < $1.arrivedAt }) { notchPresentation.present(newest.id, now: now) }
             latestNewRequest = nil
         }
         var nextCompletionPresentation = completionPresentation
@@ -921,8 +936,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         completionPresentation = nextCompletionPresentation
         if firstCompletionPresentation {
             let completions = queue.items.filter { $0.completion?.uncertain == false }
-            if let id = latestNewCompletion, completions.contains(where: { $0.id == id }) { spotlight.present(id, now: now) }
-            else if let newest = completions.max(by: { $0.arrivedAt < $1.arrivedAt }) { spotlight.present(newest.id, now: now) }
+            if let id = latestNewCompletion, completions.contains(where: { $0.id == id }) { notchPresentation.present(id, now: now) }
+            else if let newest = completions.max(by: { $0.arrivedAt < $1.arrivedAt }) { notchPresentation.present(newest.id, now: now) }
             latestNewCompletion = nil
         }
         // A question pops under the same away-from-Codex rule as a completion; Ghostty focus is
@@ -935,18 +950,21 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                                     hovering: interacting, now: ProcessInfo.processInfo.systemUptime)
         if firstQuestionPresentation {
             let questions = queue.items.filter { $0.kind == .question }
-            if let id = latestNewQuestion, questions.contains(where: { $0.id == id }) { spotlight.present(id, now: now) }
-            else if let newest = questions.max(by: { $0.arrivedAt < $1.arrivedAt }) { spotlight.present(newest.id, now: now) }
+            if let id = latestNewQuestion, questions.contains(where: { $0.id == id }) { notchPresentation.present(id, now: now) }
+            else if let newest = questions.max(by: { $0.arrivedAt < $1.arrivedAt }) { notchPresentation.present(newest.id, now: now) }
             latestNewQuestion = nil
         }
-        if let mode = previewMode, mode == "spotlight", let id = previewSpotlight { spotlight.present(id, now: now) }
-        spotlightItem = spotlight.update(interacting: interacting, now: now)
+        if let mode = previewMode, mode == "spotlight", let id = previewSpotlight { notchPresentation.present(id, now: now) }
+        let resolvedPresentation = notchPresentation.update(interacting: interacting, now: now, legacyPopup: attention.expanded)
+        let spotlightItem: AttentionItemID? = if case let .spotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
-        case "expanded": showAll = true
-        case "collapsed", "spotlight": showAll = false
-        default: showAll = interacting || manualOpen
+        case "expanded": presentationMode = .queue
+        case "collapsed": presentationMode = .collapsed
+        case "spotlight": presentationMode = spotlightItem.map(NotchPresentationMode.spotlight) ?? .collapsed
+        default:
+            presentationMode = resolvedPresentation
         }
-        expanded = showAll || spotlightItem != nil || attention.expanded
+        expanded = presentationMode.expanded
         // Sound follows the card opening: the frame below is set in the same pass, so the chime
         // lands as the card lands. Muted, restored, and foreground cases never reach here.
         if CompletionSound.shouldPlay(firstPresentation: firstCompletionPresentation || firstQuestionPresentation, muted: muted) {
@@ -968,11 +986,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         currentDisplayID = display.id
         let layout = NotchPlacement.strip(on: display, expanded: expanded, fiveHourShown: fiveHourShown)
         if stripLayout != layout { stripLayout = layout }
-        let rows = showAll ? orderedAttentionItems.count : (spotlightItem == nil ? 0 : 1)
+        let rows = presentationMode.showsAll ? orderedAttentionItems.count : (spotlightItem == nil ? 0 : 1)
         var frame = contentHeight > 0
             ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, fiveHourShown: fiveHourShown)
             : NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
-                                   extraRows: attention.pending && (showAll || spotlightItem == nil), fiveHourShown: fiveHourShown)
+                                   extraRows: attention.pending && (presentationMode.showsAll || spotlightItem == nil), fiveHourShown: fiveHourShown)
         // With no menu bar and no housing the strip rests above the screen edge and slides in for
         // the pointer at the top edge or an open panel, so it does not cover a full-screen app.
         if NotchTuck.isTucked(display: display, pointer: NSEvent.mouseLocation, interacting: interacting, open: expanded) {
@@ -1016,8 +1034,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         reminderPresentation.collapse()
         completionPresentation.collapse()
         questionPresentation.collapse()
-        spotlight.clear()
-        manualOpen = false
+        notchPresentation.collapse()
         hoverSuppressed = true
         hoverHold = HoverHold()
         if panel.isKeyWindow {
@@ -1270,6 +1287,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         replyProgress[completion.id] ?? SessionReplyProgress(completion: completion.id)
     }
 
+    /// The view renders this stable projection and does not infer notification state from optional
+    /// queue payloads itself.
+    func spotlightDetails(for item: AttentionItem) -> SpotlightDetails {
+        let context = spotlightContexts[item.id]
+        let response = item.completion.flatMap { completionPreviews[$0.id] }
+        return SpotlightDetails.make(item: item, context: context, response: response) {
+            Date(timeIntervalSince1970: $0).formatted(date: .abbreviated, time: .standard)
+        }
+    }
+
     /// One Send on a completion card. The reply starts a new turn on that exact thread through the
     /// daemon, after re-reading the queue and the target as they are right now. Sending does not
     /// acknowledge the completion, and a card that has sent one reply never sends another.
@@ -1485,7 +1512,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Opens the whole queue from the strip (a click or VoiceOver activation); it stays open while
     /// the panel has the pointer or keyboard focus.
     func expand() {
-        manualOpen = true
+        notchPresentation.openQueue()
         attention.expand(now: ProcessInfo.processInfo.systemUptime)
         refresh()
     }

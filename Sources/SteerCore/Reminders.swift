@@ -56,6 +56,10 @@ public struct ReminderScan: Sendable {
     public var sessionEnds: [UUID: Double] = [:]
     public var completed: Set<TurnIdentity> = []
     public var canceled: Set<TurnIdentity> = []
+    /// Exact-turn response excerpts found during this scan. The app only retains excerpts for
+    /// completions first observed during this launch; they are never persisted.
+    public var completionPreviews: [TurnIdentity: CompletionPreview] = [:]
+    public var turnContexts: [TurnIdentity: SpotlightRecordContext] = [:]
     /// User-input calls still waiting for an answer, and those the rollout shows answered.
     public var questions: [AttentionQuestion] = []
     public var answeredQuestions: Set<QuestionIdentity> = []
@@ -127,6 +131,8 @@ public enum ReminderReader {
     public struct RolloutEvidence: Equatable, Sendable {
         public var completed: Set<TurnIdentity> = []
         public var canceled: Set<TurnIdentity> = []
+        public var completionPreviews: [TurnIdentity: CompletionPreview] = [:]
+        public var turnContexts: [TurnIdentity: SpotlightRecordContext] = [:]
         public var pendingQuestions: [AttentionQuestion] = []
         public var answeredQuestions: Set<QuestionIdentity> = []
         public init() {}
@@ -144,6 +150,9 @@ public enum ReminderReader {
         var result = RolloutEvidence()
         var calls: [String: AttentionQuestion] = [:]
         var outputs: Set<String> = []
+        var workingDirectory: String?
+        var prompts: [UUID: String] = [:]
+        var activeTurn: UUID?
         for (index, line) in data.split(separator: 10, omittingEmptySubsequences: false).dropLast().enumerated() {
             guard line.count <= 1024 * 1024,
                   let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
@@ -153,17 +162,37 @@ public enum ReminderReader {
                       let id = payload["id"] as? String, UUID(uuidString: id) == session else { return RolloutEvidence() }
                 if let explicit = payload["session_id"],
                    (explicit as? String).flatMap(UUID.init(uuidString:)) != (owner ?? session) { return RolloutEvidence() }
+                workingDirectory = payload["cwd"] as? String
             } else if event["type"] as? String == "session_meta" {
                 // A forked sub-agent rollout repeats its parent's header as its second line.
                 guard let owner, (payload["id"] as? String).flatMap(UUID.init(uuidString:)) == owner else { return RolloutEvidence() }
             }
             let type = event["type"] as? String
             let kind = payload["type"] as? String
-            if type == "event_msg", let kind, ["task_complete", "turn_aborted"].contains(kind) {
+            if type == "event_msg", kind == "task_started" {
+                guard let id = payload["turn_id"] as? String, let turn = UUID(uuidString: id) else { return RolloutEvidence() }
+                activeTurn = turn
+                result.turnContexts[TurnIdentity(session: session, turn: turn)] = SpotlightRecordContext(
+                    workingDirectory: workingDirectory)
+            } else if type == "event_msg", let kind, ["task_complete", "turn_aborted"].contains(kind) {
                 guard let id = payload["turn_id"] as? String, let turn = UUID(uuidString: id) else { return RolloutEvidence() }
                 let identity = TurnIdentity(session: session, turn: turn)
-                if kind == "task_complete" { result.completed.insert(identity) }
+                if kind == "task_complete" {
+                    result.completed.insert(identity)
+                    result.turnContexts[identity] = SpotlightRecordContext(
+                        workingDirectory: workingDirectory, prompt: prompts[turn])
+                    if let message = payload["last_agent_message"] as? String,
+                       let preview = CompletionPreview(message) {
+                        result.completionPreviews[identity] = preview
+                    }
+                }
                 else { result.canceled.insert(identity) }
+                if activeTurn == turn { activeTurn = nil }
+            } else if type == "event_msg", kind == "user_message", let turn = activeTurn,
+                      let message = payload["message"] as? String {
+                prompts[turn] = message
+                result.turnContexts[TurnIdentity(session: session, turn: turn)] = SpotlightRecordContext(
+                    workingDirectory: workingDirectory, prompt: message)
             } else if type == "response_item", kind == "function_call_output" {
                 if let callID = payload["call_id"] as? String { outputs.insert(callID) }
             } else if type == "response_item", kind == "function_call", payload["name"] as? String == userInputTool {
@@ -349,6 +378,8 @@ public enum ReminderReader {
                 let finished = terminal.completed
                 result.completed.formUnion(finished)
                 result.canceled.formUnion(terminal.canceled)
+                result.completionPreviews.merge(terminal.completionPreviews) { _, latest in latest }
+                result.turnContexts.merge(terminal.turnContexts) { _, latest in latest }
                 result.questions += terminal.pendingQuestions
                 result.answeredQuestions.formUnion(terminal.answeredQuestions)
                 if let sessionProbes = probes[session] {
