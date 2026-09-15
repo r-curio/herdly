@@ -164,6 +164,77 @@ private let external = NotchDisplay(id: 2, frame: CGRect(x: 1512, y: 100, width:
     #expect(again == .completion(completion.id))
 }
 
+@Test func spotlightOutranksPassiveInteractionUntilTheHeaderExplicitlyOpensTheQueue() {
+    let session = UUID(), turn = UUID()
+    let ids: [AttentionItemID] = [
+        .completion(CompletionIdentity(source: .desktop, session: session, turn: turn)),
+        .request(RequestIdentity(source: .cli, request: UUID())),
+        .question(QuestionIdentity(source: .desktop, session: session, callID: "call"))
+    ]
+    for id in ids {
+        #expect(NotchPresentationMode.resolve(spotlight: id, manualOpen: false, interacting: true) == .spotlight(id))
+        #expect(NotchPresentationMode.resolve(spotlight: id, manualOpen: true, interacting: true) == .queue)
+    }
+    #expect(NotchPresentationMode.resolve(spotlight: nil, manualOpen: false, interacting: true) == .queue)
+    #expect(NotchPresentationMode.resolve(spotlight: nil, manualOpen: false, interacting: false) == .collapsed)
+}
+
+@Test func presentationControllerCoversHeaderOverrideExpiryAndLaterOrdinaryHover() {
+    let id = AttentionItemID.completion(CompletionIdentity(source: .desktop, session: UUID(), turn: UUID()))
+    var controller = NotchPresentationController()
+    controller.present(id, now: 10)
+    #expect(controller.update(interacting: true, now: 14) == .spotlight(id))
+    controller.openQueue()
+    #expect(controller.update(interacting: true, now: 14.1) == .queue)
+    #expect(controller.update(interacting: false, now: 14.2) == .collapsed)
+    #expect(controller.update(interacting: true, now: 15) == .queue)
+}
+
+@Test func completionPreviewIsBoundedToFiveLinesAndSixHundredCharacters() {
+    let lines = (1...7).map { "line \($0)" }.joined(separator: "\n")
+    let linePreview = CompletionPreview(lines)
+    #expect(linePreview?.text == "line 1\nline 2\nline 3\nline 4\nline 5…")
+    #expect(linePreview?.truncated == true)
+
+    let unicode = String(repeating: "🦌", count: 601)
+    let characterPreview = CompletionPreview(unicode)
+    #expect(characterPreview?.text.count == 600) // Ellipsis is included in the cap.
+    #expect(characterPreview?.text.hasSuffix("…") == true)
+
+    let exactFiveLines = [String(repeating: "a", count: 116), String(repeating: "b", count: 120),
+                          String(repeating: "c", count: 120), String(repeating: "d", count: 120),
+                          String(repeating: "e", count: 120), "omitted"].joined(separator: "\n")
+    let exactLinePreview = CompletionPreview(exactFiveLines)
+    #expect(exactLinePreview?.text.count == 600)
+    #expect(exactLinePreview?.text.hasSuffix("…") == true)
+    #expect(CompletionPreview("  \n ") == nil)
+}
+
+@Test func spotlightDetailsHaveStableCompleteAndPartialFieldOrdering() {
+    let session = UUID(), turn = UUID(), requestID = UUID()
+    let request = AttentionRequest(id: requestID, source: .cli, session: session, turn: turn, arrivedAt: 10,
+                                   expiresAt: 40, details: ApprovalDetails(taskName: "Ship", project: "/repo",
+                                       action: "Run", command: "swift test", reason: "Verify", longText: "full"))
+    var queue = AttentionQueue(); queue.apply(requests: [request], now: 10)
+    let item = queue.items[0]
+    let details = SpotlightDetails.make(item: item, context: nil, response: nil) { "t\(Int($0))" }
+    #expect(details.context.map(\.label) == ["task", "working directory", "action", "command", "reason",
+                                             "full request", "deadline"])
+
+    let completion = AttentionCompletion(source: .desktop, session: session, turn: turn, arrivedAt: 20)
+    var completions = AttentionQueue(); completions.apply(completions: [completion], now: 20)
+    let partial = SpotlightDetails.make(item: completions.items[0], context: nil,
+                                        response: nil, timestamp: { _ in "time" })
+    #expect(partial.context.isEmpty)
+    #expect(partial.response == .unavailable("Response preview is unavailable."))
+
+    let restored = AttentionCompletion(source: .desktop, session: session, turn: UUID(), arrivedAt: 21, uncertain: true)
+    var restoredQueue = AttentionQueue(); restoredQueue.apply(completions: [restored], now: 21)
+    let restoredDetails = SpotlightDetails.make(item: restoredQueue.items[0], context: nil,
+                                                 response: nil, timestamp: { _ in "time" })
+    #expect(restoredDetails.response == .unavailable("Response preview unavailable after restart."))
+}
+
 @Test func stripNamesTheTopPriorityItemAndCountsOnlyItemsThatNeedTheUser() {
     let session = UUID(uuidString: "01A0916C-337B-4C2E-9C1E-000000000001")!
     let running = AttentionRunning(source: .cli, session: session, turn: UUID(), arrivedAt: 1)

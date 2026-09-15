@@ -25,7 +25,7 @@ A display that has disconnected is never chosen, even while interacting: the rul
 
 ## Interaction and timers
 
-`NotchInteraction.isActive(pointerInside:keyboardFocus:)` is the single definition of "the user is interacting". It freezes placement and keeps a completion popup open. It does not touch `AttentionRequest.expiresAt`: the approval handoff deadline is absolute from companion receipt and `AttentionQueue.expire(at:)` ignores presentation entirely. `interactionKeepsACompletionOpenButNeverExtendsAnApprovalDeadline` holds a popup open through 35 s of alternating pointer and keyboard interaction while the request hands back at exactly 30 s. Outside interaction, the completion popup collapses three seconds after it last expanded.
+`NotchInteraction.isActive(pointerInside:keyboardFocus:)` is the single definition of "the user is interacting". It freezes placement and keeps the active single-item spotlight open; passive hover does not replace that spotlight with the full queue. Header activation explicitly opens the queue. Interaction does not touch `AttentionRequest.expiresAt`: the approval handoff deadline is absolute from companion receipt and `AttentionQueue.expire(at:)` ignores presentation entirely. `interactionKeepsACompletionOpenButNeverExtendsAnApprovalDeadline` holds a popup open through 35 s of alternating pointer and keyboard interaction while the request hands back at exactly 30 s. Outside interaction, the completion popup collapses three seconds after it last expanded.
 
 ## Keyboard and accessibility
 
