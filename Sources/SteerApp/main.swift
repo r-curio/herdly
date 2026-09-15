@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 import SteerCore
 
@@ -43,7 +44,7 @@ final class NotchPanel: NSPanel {
 }
 
 @MainActor
-final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
+final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, ObservableObject {
     private enum GhosttyFocusState {
         case disabled
         case checking
@@ -180,6 +181,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     private var status: NSStatusItem!
     private var panel: NotchPanel!
     private var controls: NSWindow?
+    private var controlsAnimationGeneration = 0
+    private var controlsAnimatingOut = false
+    private var controlsRestingFrame: NSRect?
     private var timer: Timer?
     private var activationObserver: NSObjectProtocol?
     private var screenObserver: NSObjectProtocol?
@@ -238,9 +242,9 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         status.button?.title = "S"
         status.button?.toolTip = "Steer"
-        status.button?.setAccessibilityLabel("Steer prototype menu")
+        status.button?.setAccessibilityLabel("Steer menu")
         let menu = NSMenu()
-        let heading = NSMenuItem(title: "Steer · Prototype", action: nil, keyEquivalent: "")
+        let heading = NSMenuItem(title: "Steer", action: nil, keyEquivalent: "")
         menu.addItem(heading)
         for (title, action) in [("Show Steer controls", #selector(showControls)),
                                 ("Send test notification", #selector(sendTest)),
@@ -290,7 +294,13 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         if CommandLine.arguments.contains("--smoke-test") {
             showControls()
             precondition(controls?.isVisible == true && controls?.contentView != nil)
+            precondition(controls?.title == "Steer" && controls?.styleMask.contains(.resizable) == true)
+            precondition(controls?.frame.width ?? 0 >= 720 && controls?.frame.height ?? 0 >= 540)
             precondition(status.button?.title == "S" && status.menu?.items.count == 6)
+            dismissControls(animated: false)
+            precondition(controls?.isVisible == false)
+            presentControls(animated: false)
+            precondition(controls?.isVisible == true && controls?.alphaValue == 1)
             print("Steer controls-window smoke check passed.")
             app.terminate(nil)
         }
@@ -387,16 +397,88 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
 
     @objc func showControls() {
         if controls == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 700),
-                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = "Steer — Prototype"
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 620),
+                                  styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            window.title = "Steer"
+            window.minSize = NSSize(width: 720, height: 540)
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.contentView = NSHostingView(rootView: Controls(model: self))
             window.center()
             controls = window
+            controlsRestingFrame = window.frame
         }
-        controls?.makeKeyAndOrderFront(nil)
+        presentControls(animated: !reduceMotion)
+    }
+
+    private func presentControls(animated: Bool) {
+        guard let window = controls else { return }
+        let wasAnimatingOut = controlsAnimatingOut
+        controlsAnimationGeneration += 1
+        controlsAnimatingOut = false
+        let finalFrame = wasAnimatingOut ? controlsRestingFrame ?? window.frame : window.frame
+        controlsRestingFrame = finalFrame
+
+        if window.isVisible, !wasAnimatingOut, window.alphaValue > 0.99 {
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            return
+        }
+
+        if animated, !wasAnimatingOut {
+            window.alphaValue = 0
+            window.setFrame(finalFrame.offsetBy(dx: 0, dy: -10), display: false)
+        } else if !animated {
+            window.alphaValue = 1
+            window.setFrame(finalFrame, display: false)
+        }
+        window.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
+
+        guard animated else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().alphaValue = 1
+            window.animator().setFrame(finalFrame, display: true)
+        }
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard sender === controls else { return true }
+        dismissControls(animated: !reduceMotion)
+        return false
+    }
+
+    private func dismissControls(animated: Bool) {
+        guard let window = controls, window.isVisible else { return }
+        controlsAnimationGeneration += 1
+        let generation = controlsAnimationGeneration
+        controlsAnimatingOut = true
+        let finalFrame = window.frame
+        controlsRestingFrame = finalFrame
+
+        guard animated else {
+            window.orderOut(nil)
+            window.alphaValue = 1
+            controlsAnimatingOut = false
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.14
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            window.animator().alphaValue = 0
+            window.animator().setFrame(finalFrame.offsetBy(dx: 0, dy: -8), display: true)
+        } completionHandler: { [weak self, weak window] in
+            Task { @MainActor in
+                guard let self, let window, generation == self.controlsAnimationGeneration else { return }
+                window.orderOut(nil)
+                window.setFrame(finalFrame, display: false)
+                window.alphaValue = 1
+                self.controlsAnimatingOut = false
+            }
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -918,6 +1000,11 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
         UserDefaults.standard.set(muted, forKey: "muted")
         sender.state = muted ? .on : .off
     }
+    func setSoundEnabled(_ enabled: Bool) {
+        muted = !enabled
+        UserDefaults.standard.set(muted, forKey: "muted")
+        status.menu?.items.first { $0.action == #selector(toggleMute) }?.state = muted ? .on : .off
+    }
     @objc func quit() { NSApplication.shared.terminate(nil) }
     func openTestTask() {
         guard !openingTask else { return }
@@ -1426,85 +1513,404 @@ final class Companion: NSObject, NSApplicationDelegate, ObservableObject {
     }
 }
 
+private enum ControlSection: String, CaseIterable, Identifiable {
+    case general
+    case agents
+    case terminals
+    case notifications
+    case advanced
+    case about
+
+    var id: Self { self }
+    var title: String { rawValue.capitalized }
+    var symbol: String {
+        switch self {
+        case .general: "gearshape.fill"
+        case .agents: "sparkles"
+        case .terminals: "terminal.fill"
+        case .notifications: "bell.fill"
+        case .advanced: "wrench.and.screwdriver.fill"
+        case .about: "info.circle.fill"
+        }
+    }
+    var color: Color {
+        switch self {
+        case .general: .gray
+        case .agents: .indigo
+        case .terminals: .mint
+        case .notifications: .orange
+        case .advanced: .blue
+        case .about: .cyan
+        }
+    }
+}
+
 struct Controls: View {
     @ObservedObject var model: Companion
+    @State private var selection: ControlSection
+
+    init(model: Companion) {
+        self.model = model
+        // This is an intentional one-time navigation seed: restore the user's last section, then
+        // let setup lead on a fresh install until an agent is connected.
+        let saved = UserDefaults.standard.string(forKey: "controlsSection").flatMap(ControlSection.init(rawValue:))
+        _selection = State(initialValue: saved ?? (model.canUndoSetup ? .general : .agents))
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Try your notch companion").font(.title3.bold())
-            Text("Send a test, then switch between Codex and Notes. Returning to Codex hides the panel without clearing it.")
-                .font(.callout).foregroundStyle(.secondary)
-            Text("\(model.count) notifications queued")
-                .font(.callout.weight(.medium))
-            HStack {
-                Button("Send test", action: model.sendTest).keyboardShortcut(.defaultAction)
-                Button("Dismiss", action: model.dismissTest).disabled(!model.attention.pending)
-                Spacer()
-                Button("Quit", action: model.quit)
+        NavigationSplitView {
+            ControlsSidebar(selection: $selection, quit: model.quit)
+                .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 230)
+        } detail: {
+            ControlsDetail(section: selection, model: model)
+        }
+        .navigationSplitViewStyle(.balanced)
+        .frame(minWidth: 720, minHeight: 540)
+        .onChange(of: selection) { _, section in
+            UserDefaults.standard.set(section.rawValue, forKey: "controlsSection")
+        }
+    }
+}
+
+private struct ControlsSidebar: View {
+    @Binding var selection: ControlSection
+    let quit: () -> Void
+
+    private let primarySections: [ControlSection] = [.general, .agents, .terminals, .notifications, .advanced]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            List(selection: $selection) {
+                ForEach(primarySections) { section in
+                    SidebarLabel(section: section).tag(section)
+                }
+
+                Section {
+                    SidebarLabel(section: .about).tag(ControlSection.about)
+                }
             }
+            .listStyle(.sidebar)
+
             Divider()
-            Text("Codex setup").font(.callout.weight(.medium))
-            Text(model.setupStatusText).font(.caption).foregroundStyle(.secondary)
-            ForEach(model.setupSurfaceStatusText, id: \.self) { status in
-                Text(status).font(.caption).foregroundStyle(.secondary)
+            Button(role: .destructive, action: quit) {
+                Label("Quit Steer", systemImage: "xmark.circle.fill")
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if let plan = model.setupPlan, case .ready = plan.status {
-                Text(plan.requiresConfigure ? "Preview: add session-ID terminal titles and Steer-owned lifecycle hooks. Existing hooks and approval settings remain unchanged." : "The required Steer entries are already configured.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                if plan.requiresConfigure {
-                    DisclosureGroup("Show exact configuration preview") {
-                        let hooks = String(data: plan.hooksChange, encoding: .utf8) ?? "(unreadable)"
-                        Text("config.toml\n\(plan.configChange)\n\nhooks.json\n\(hooks)\n\nhelper command\n\(plan.helperCommand)")
-                            .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
+            .buttonStyle(.plain)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+            .accessibilityHint("Stops Steer and closes its menu-bar companion.")
+        }
+    }
+}
+
+private struct SidebarLabel: View {
+    let section: ControlSection
+
+    var body: some View {
+        Label {
+            Text(section.title).font(.body.weight(.medium))
+        } icon: {
+            Image(systemName: section.symbol)
+                .foregroundStyle(.white)
+                .frame(width: 26, height: 26)
+                .background(section.color, in: .rect(cornerRadius: 7))
+                .accessibilityHidden(true)
+        }
+        .padding(.vertical, 3)
+    }
+}
+
+private struct ControlsDetail: View {
+    let section: ControlSection
+    @ObservedObject var model: Companion
+
+    var body: some View {
+        switch section {
+        case .general: GeneralControls(model: model)
+        case .agents: AgentControls(model: model)
+        case .terminals: TerminalControls(model: model)
+        case .notifications: NotificationControls(model: model)
+        case .advanced: AdvancedControls(model: model)
+        case .about: AboutControls()
+        }
+    }
+}
+
+private struct ControlsPage<Content: View>: View {
+    let section: ControlSection
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(spacing: 12) {
+                    Image(systemName: section.symbol)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(section.color, in: .rect(cornerRadius: 10))
+                        .accessibilityHidden(true)
+                    Text(section.title).font(.title.bold())
+                }
+                content
+            }
+            .frame(maxWidth: 620, alignment: .leading)
+            .padding(30)
+        }
+        .background(.background)
+        .navigationTitle(section.title)
+    }
+}
+
+private struct SettingsCard<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) { content }
+            .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 12))
+            .overlay { RoundedRectangle(cornerRadius: 12).stroke(.separator.opacity(0.45)) }
+            .compositingGroup()
+            .clipShape(.rect(cornerRadius: 12))
+    }
+}
+
+private struct SettingsRow<Trailing: View>: View {
+    let title: String
+    let detail: String?
+    @ViewBuilder let trailing: Trailing
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 18) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.body.weight(.medium))
+                if let detail { Text(detail).font(.callout).foregroundStyle(.secondary) }
+            }
+            Spacer(minLength: 20)
+            trailing
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+}
+
+private struct StatusBadge: View {
+    let title: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 7, height: 7).accessibilityHidden(true)
+            Text(title).font(.callout.weight(.medium)).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Status: \(title)")
+    }
+}
+
+private struct GeneralControls: View {
+    @ObservedObject var model: Companion
+
+    private var isConnected: Bool { model.canUndoSetup }
+
+    var body: some View {
+        ControlsPage(section: .general) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(isConnected ? "Steer is monitoring agent sessions" : "Steer needs an agent connection")
+                    .font(.title3.weight(.semibold))
+                Text(isConnected ? "\(model.workingCount) working · \(model.toCheckCount) to check" : model.setupStatusText)
+                    .foregroundStyle(.secondary)
+                StatusBadge(title: isConnected ? "Connected" : "Setup required", color: isConnected ? .green : .orange)
+            }
+
+            Text("Connections").font(.headline).foregroundStyle(.secondary)
+            SettingsCard {
+                SettingsRow(title: "Agents", detail: isConnected ? "Codex is connected." : "Connect an agent to start monitoring work.") {
+                    StatusBadge(title: isConnected ? "Ready" : "Setup required", color: isConnected ? .green : .orange)
+                }
+                Divider()
+                SettingsRow(title: "Terminals", detail: model.ghosttyEnabled ? "Ghostty controls are enabled." : "No terminal controls are enabled.") {
+                    StatusBadge(title: model.ghosttyEnabled ? "Enabled" : "Off", color: model.ghosttyEnabled ? .green : .secondary)
+                }
+                Divider()
+                SettingsRow(title: "Notifications", detail: model.muted ? "Completion sounds are muted." : "Completion sounds are on.") {
+                    StatusBadge(title: model.muted ? "Muted" : "On", color: model.muted ? .secondary : .green)
+                }
+            }
+            Text("Closing this window keeps Steer running in the menu bar.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct AgentControls: View {
+    @ObservedObject var model: Companion
+
+    var body: some View {
+        ControlsPage(section: .agents) {
+            Text("Connect and manage the AI agents Steer can observe.")
+                .foregroundStyle(.secondary)
+
+            Text("Available agents").font(.headline).foregroundStyle(.secondary)
+            SettingsCard {
+                SettingsRow(title: "Codex", detail: model.setupStatusText) {
+                    StatusBadge(title: model.canUndoSetup ? "Connected" : "Not configured",
+                                color: model.canUndoSetup ? .green : .orange)
+                }
+                Divider()
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(model.setupSurfaceStatusText.prefix(2)), id: \.self) { status in
+                        Text(status).font(.callout).foregroundStyle(.secondary)
+                    }
+                    if let plan = model.setupPlan, case .ready = plan.status, plan.requiresConfigure {
+                        DisclosureGroup("Show exact configuration preview") {
+                            let hooks = String(data: plan.hooksChange, encoding: .utf8) ?? "(unreadable)"
+                            Text("config.toml\n\(plan.configChange)\n\nhooks.json\n\(hooks)\n\nhelper command\n\(plan.helperCommand)")
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    HStack {
+                        Button("Review again", action: model.refreshSetup)
+                        if model.canConfigureSetup {
+                            Button("Configure Codex", action: model.configureCodex)
+                                .buttonStyle(.borderedProminent)
+                        }
+                        if model.canUndoSetup { Button("Undo setup", action: model.undoCodexSetup) }
+                    }
+                    if !model.setupMessage.isEmpty {
+                        Text(model.setupMessage).font(.callout).foregroundStyle(.secondary)
                     }
                 }
-                HStack {
-                    Button("Review again", action: model.refreshSetup)
-                    Button("Configure Codex", action: model.configureCodex).disabled(!model.canConfigureSetup)
-                    if model.canUndoSetup { Button("Undo setup", action: model.undoCodexSetup) }
-                }
-            } else {
-                Button("Check Codex setup", action: model.refreshSetup)
+                .padding(16)
             }
-            if !model.setupMessage.isEmpty { Text(model.setupMessage).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-            Divider()
-            Button("Connect Codex events…", action: model.connectReminders)
-            Text(model.eventsPath.isEmpty ? "Codex events are not connected." : "\(model.toCheckCount) to check · \(model.workingCount) working")
-                .font(.caption).foregroundStyle(.secondary)
-            Toggle("Enable Ghostty controls", isOn: $model.ghosttyEnabled)
-                .onChange(of: model.ghosttyEnabled) { _, enabled in
-                    model.ghosttyChanged(enabled)
-                }
-            Text("Requires session-ID terminal titles and one session per unsplit tab. Enabling may request macOS Automation access.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text(model.ghosttyPermissionVerified ? "Ghostty Automation permission: verified by navigation probe." : "Ghostty Automation permission: not verified; enable controls to let macOS prompt.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text(model.daemonStatus)
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("With a Codex app-server daemon running (`codex app-server daemon start`), questions are answered exactly through it, including typed answers. Steer only reads its socket; it never starts the daemon.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Toggle("Clear desktop completions Codex marks read", isOn: $model.desktopReadStateEnabled)
-                .onChange(of: model.desktopReadStateEnabled) { _, enabled in
-                    model.desktopReadStateChanged(enabled)
-                }
-            Text("Reads the desktop app's own unread flags from its private state file. A thread counts as read only after it was open in a focused Codex window. Turn off if a Codex update changes the format.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text(model.desktopReadStateMessage)
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("Optional task-link check").font(.callout.weight(.medium))
-            HStack {
-                TextField("Local Codex task ID", text: $model.taskID)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("Local Codex task ID")
-                Button("Open task", action: model.openTestTask).disabled(model.openingTask)
-            }
-            Text(model.navigationMessage.isEmpty ? "Opening a task will not dismiss your notification." : model.navigationMessage)
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("Menu-bar shortcut: S · Closing this window keeps Steer running.")
-                .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(24)
-        .frame(width: 460, height: 800)
+    }
+}
+
+private struct TerminalControls: View {
+    @ObservedObject var model: Companion
+
+    var body: some View {
+        ControlsPage(section: .terminals) {
+            Text("Choose which terminal hosts Steer may use to return to an agent session.")
+                .foregroundStyle(.secondary)
+
+            Text("Available terminals").font(.headline).foregroundStyle(.secondary)
+            SettingsCard {
+                SettingsRow(title: "Ghostty", detail: "One agent session per unsplit tab.") {
+                    Toggle("", isOn: $model.ghosttyEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel("Enable Ghostty controls")
+                        .onChange(of: model.ghosttyEnabled) { _, enabled in model.ghosttyChanged(enabled) }
+                }
+                Divider()
+                SettingsRow(title: "Automation permission",
+                            detail: model.ghosttyPermissionVerified ? "Verified by a navigation probe." : "Enable Ghostty to let macOS request access.") {
+                    StatusBadge(title: model.ghosttyPermissionVerified ? "Granted" : "Not verified",
+                                color: model.ghosttyPermissionVerified ? .green : .orange)
+                }
+                Divider()
+                Text(model.setupSurfaceStatusText.last ?? "Ghostty: unavailable")
+                    .font(.callout).foregroundStyle(.secondary).padding(16)
+            }
+        }
+    }
+}
+
+private struct NotificationControls: View {
+    @ObservedObject var model: Companion
+
+    var body: some View {
+        ControlsPage(section: .notifications) {
+            Text("Control how Steer presents work that needs your attention.")
+                .foregroundStyle(.secondary)
+
+            SettingsCard {
+                SettingsRow(title: "Play completion sound", detail: "Plays once for each newly presented completion.") {
+                    Toggle("", isOn: Binding(get: { !model.muted }, set: { enabled in model.setSoundEnabled(enabled) }))
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel("Play completion sound")
+                }
+                Divider()
+                SettingsRow(title: "Clear completions marked read", detail: "Reads Codex's own desktop read state; Steer never marks a task read.") {
+                    Toggle("", isOn: $model.desktopReadStateEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel("Clear completions marked read")
+                        .onChange(of: model.desktopReadStateEnabled) { _, enabled in model.desktopReadStateChanged(enabled) }
+                }
+                Divider()
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(model.desktopReadStateMessage).font(.callout).foregroundStyle(.secondary)
+                    HStack {
+                        Button("Send test notification", action: model.sendTest)
+                        Button("Dismiss test", action: model.dismissTest).disabled(!model.attention.pending)
+                    }
+                }
+                .padding(16)
+            }
+        }
+    }
+}
+
+private struct AdvancedControls: View {
+    @ObservedObject var model: Companion
+
+    var body: some View {
+        ControlsPage(section: .advanced) {
+            Text("Diagnostics and integration details for troubleshooting Steer.")
+                .foregroundStyle(.secondary)
+
+            Text("Event delivery").font(.headline).foregroundStyle(.secondary)
+            SettingsCard {
+                SettingsRow(title: "Agent events", detail: model.eventsPath.isEmpty ? "Not connected." : model.eventsPath) {
+                    Button("Choose…", action: model.connectReminders)
+                }
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(model.daemonStatus).font(.callout)
+                    Text("Steer connects only to a daemon that is already running; it never starts one.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                .padding(16)
+            }
+
+            Text("Task-link check").font(.headline).foregroundStyle(.secondary)
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        TextField("Local Codex task ID", text: $model.taskID)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityLabel("Local Codex task ID")
+                        Button("Open task", action: model.openTestTask).disabled(model.openingTask)
+                    }
+                    Text(model.navigationMessage.isEmpty ? "Opening a task does not dismiss its notification." : model.navigationMessage)
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                .padding(16)
+            }
+        }
+    }
+}
+
+private struct AboutControls: View {
+    private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development" }
+
+    var body: some View {
+        ControlsPage(section: .about) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Steer").font(.title2.bold())
+                Text("Keeps agent activity and requests within reach while you work.")
+                    .foregroundStyle(.secondary)
+                Text("Version \(version)").font(.callout).foregroundStyle(.secondary)
+            }
+            Text("Steer currently supports Codex and Ghostty. Other agent and terminal integrations appear only when they are implemented.")
+                .font(.callout).foregroundStyle(.secondary)
+        }
     }
 }
 
