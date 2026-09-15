@@ -149,10 +149,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var scanning = false
     private var nextScan: Double = 0
     var orderedAttentionItems: [AttentionItem] { queue.items }
-    var count: Int { orderedAttentionItems.count + (attention.pending && !desktopForeground ? 1 : 0) }
+    var count: Int { orderedAttentionItems.count + (attention.pending ? 1 : 0) }
     var workingCount: Int { orderedAttentionItems.filter { $0.kind == .running }.count }
     var toCheckCount: Int {
-        orderedAttentionItems.filter { $0.kind != .running }.count + (attention.pending && !desktopForeground ? 1 : 0)
+        orderedAttentionItems.filter { $0.kind != .running }.count + (attention.pending ? 1 : 0)
     }
     /// Presentation state the notch view renders. `showAll` is hover or keyboard focus: the whole
     /// queue. `spotlightItem` is the one new item a completion or request opened the panel for.
@@ -838,7 +838,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         checkApprovalFocus()
         checkGhosttyFocus()
         // App identity only: no window contents, task titles, or accessibility queries.
-        // Preview screenshots ignore app activation; every real run keeps the foreground rule.
+        // App activation affects notification delivery, never the notch's visibility.
         let codexForeground = previewMode == nil ? desktopAdapter.codexForeground() : false
         desktopForeground = codexForeground == true
         // Desktop decision transport is unproven: release every desktop request at once.
