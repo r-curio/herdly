@@ -457,7 +457,7 @@ func setupMigratesLegacySteerTimeoutWithoutAddingDuplicateHandlers(legacyTimeout
     try Data(drifted.utf8).write(to: roots.configURL)
     var hooksObject = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: roots.hooksURL)) as? [String: Any])
     var hooksTable = try #require(hooksObject["hooks"] as? [String: Any])
-    hooksTable["PreToolUse"] = [["hooks": [["type": "command", "command": "/other"]]]]
+    hooksTable["PreCompact"] = [["hooks": [["type": "command", "command": "/other"]]]]
     hooksObject["hooks"] = hooksTable
     try JSONSerialization.data(withJSONObject: hooksObject).write(to: roots.hooksURL)
 
@@ -469,7 +469,7 @@ func setupMigratesLegacySteerTimeoutWithoutAddingDuplicateHandlers(legacyTimeout
     #expect(try String(contentsOf: roots.configURL) == "model_reasoning_effort = \"low\"\n\n[features]\nmemories = true\n\n[hooks.state.\"x\"]\ntrusted_hash = \"sha256:abc\"\n")
     let restored = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: roots.hooksURL)) as? [String: Any])
     let restoredHooks = try #require(restored["hooks"] as? [String: Any])
-    #expect(Set(restoredHooks.keys) == ["Stop", "PreToolUse"])
+    #expect(Set(restoredHooks.keys) == ["Stop", "PreCompact"])
     #expect(((restoredHooks["Stop"] as? [[String: Any]])?.first?["hooks"] as? [[String: Any]])?.first?["command"] as? String == "/keep")
     #expect(!FileManager.default.fileExists(atPath: roots.helperURL.path))
     #expect(!FileManager.default.fileExists(atPath: roots.stateURL.path))
@@ -483,7 +483,8 @@ func setupMigratesLegacySteerTimeoutWithoutAddingDuplicateHandlers(legacyTimeout
     // SessionEnd is clamped to three seconds before hashing, so 38 and 3 hash the same.
     #expect(CodexHookTrust.hash(event: "SessionEnd", command: command, timeout: 38) == "sha256:8b8e974bb8349a515f4b0903a9515f0b4475a1ea5af59a2f6ab14ff2a9957ec7")
     #expect(CodexHookTrust.hash(event: "SessionEnd", command: command, timeout: 3) == "sha256:8b8e974bb8349a515f4b0903a9515f0b4475a1ea5af59a2f6ab14ff2a9957ec7")
-    #expect(CodexHookTrust.hash(event: "PreToolUse", command: command, timeout: 38) == nil)
+    #expect(CodexHookTrust.hash(event: "PreToolUse", command: command, timeout: 38) != nil)
+    #expect(CodexHookTrust.hash(event: "PostToolUse", command: command, timeout: 38) != nil)
     #expect(CodexHookTrust.table(hooksPath: "/Users/me/.codex/hooks.json", event: "Stop", group: 1, handler: 0)
             == "hooks.state.\"/Users/me/.codex/hooks.json:stop:1:0\"")
 }

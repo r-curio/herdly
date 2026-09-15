@@ -40,7 +40,7 @@ public enum CodexSetupLimits {
 }
 
 public enum CodexSetupRequirements {
-    public static let hookEvents = ["SessionStart", "UserPromptSubmit", "PermissionRequest", "Stop", "SessionEnd"]
+    public static let hookEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd"]
     public static let helperSource = "steer-hook-v1"
     public static let hookTimeout = Int(ApprovalTiming.helperWaitBound + ApprovalTiming.connectionTimeout + 2)
     /// Timeouts written by earlier Steer builds; setup upgrades them in place instead of adding a handler.
@@ -144,6 +144,7 @@ public enum CodexHookTrust {
     }
 
     static let eventLabels = ["SessionStart": "session_start", "UserPromptSubmit": "user_prompt_submit",
+                              "PreToolUse": "pre_tool_use", "PostToolUse": "post_tool_use",
                               "PermissionRequest": "permission_request", "Stop": "stop", "SessionEnd": "session_end"]
 
     public static func hash(event: String, command: String, timeout: Int) -> String? {
