@@ -59,9 +59,15 @@ The script refuses to notarize with anything other than a Developer ID Applicati
 ## Install
 
 1. Check the checksum: `shasum -a 256 -c Steer-<version>+<build>-<label>.zip.sha256`.
-2. Unzip and move `Steer.app` to `/Applications` or `~/Applications`. Steer does not install itself, add a login item, or need to stay in the folder it was built in: Connect Codex copies the helper out of the bundle (see below), so moving or replacing the app later does not break an existing connection.
+2. Unzip and move `Steer.app` to `/Applications` or `~/Applications`. Steer does not install itself or add a login item unless you explicitly turn on **Launch at login**. Connect Codex copies the helper out of the bundle (see below), so moving or replacing the app later does not break an existing Codex connection. macOS owns login-item registration separately; after moving or replacing the app, open Steer's General settings and check the status macOS reports.
 3. For an `unsigned-dev` or `dev-signed` build, the first open is refused by Gatekeeper. Open **System Settings › Privacy & Security**, scroll to the message about Steer, and choose **Open Anyway**, or run `xattr -d com.apple.quarantine /Applications/Steer.app` and open it again. A `notarized` build opens directly.
 4. Steer launches as a menu-bar app (**S**) with no Dock icon, and shows its controls window because no setup exists yet.
+
+### Launch at login
+
+**Launch at login** is off by default. Turn it on in Steer's **General › Startup** settings if you want macOS to open Steer when you sign in. The displayed status comes directly from macOS rather than from a saved Steer preference.
+
+If the setting says **Approval required**, choose **Open Login Items** and allow Steer under **System Settings › General › Login Items & Extensions**. If it says **Unavailable** after the app was moved or replaced, use the same System Settings panel to remove any stale entry, then reopen Steer and opt in again. Steer never repairs or recreates a login item without your action.
 
 ### Connect Codex
 
@@ -97,18 +103,19 @@ Steer does not request Accessibility, Screen Recording, Input Monitoring, notifi
 | `~/Library/Application Support/Steer/events/` | Metadata-only hook records, approval receipts and decisions. |
 | `~/Library/Application Support/Steer/backups/` | Originals of files Steer changed. |
 | `~/Library/Application Support/Steer/attention-snapshot.json` (and `.previous`) | Undismissed completions and dismissal identities. |
-| `~/Library/Preferences/dev.rcurio.steer.prototype.plist` | Mute, the events-folder choice, the desktop read-state toggle, and the prototype's test item. |
+| `~/Library/Preferences/dev.rcurio.steer.prototype.plist` | Mute, the events-folder choice, the desktop read-state toggle, the last controls section, and the prototype's test item. Launch-at-login state is not stored here. |
 
 No conversation text or transcripts are stored.
 
 ## Uninstall
 
-1. In Steer's controls window, click **Undo setup**. Steer removes exactly the hooks and config lines it added, restores the original files byte for byte when they are unchanged since install, deletes its helper, its own event records and its backups, and leaves everything else in `~/.codex` alone. Skip to step 4 if Steer was never connected.
-2. Quit Steer from its menu.
-3. Delete `Steer.app`.
-4. Optionally remove the remaining local state: `~/Library/Application Support/Steer` (the snapshot of dismissals) and `~/Library/Preferences/dev.rcurio.steer.prototype.plist`. Neither affects Codex.
+1. In Steer's General settings, turn off **Launch at login**. This unregisters only Steer's main-app login item. If the control is unavailable, open **System Settings › General › Login Items & Extensions** and remove Steer there.
+2. In Steer's controls window, click **Undo setup**. Steer removes exactly the hooks and config lines it added, restores the original files byte for byte when they are unchanged since install, deletes its helper, its own event records and its backups, and leaves everything else in `~/.codex` alone. Skip this step if Steer was never connected.
+3. Quit Steer from its menu.
+4. Delete `Steer.app`.
+5. Optionally remove the remaining local state: `~/Library/Application Support/Steer` (the snapshot of dismissals) and `~/Library/Preferences/dev.rcurio.steer.prototype.plist`. Neither affects Codex or controls the login item.
 
-Uninstalling in this order leaves Codex exactly as it was before Connect. Deleting the app first is safe for Codex too: the hooks then point at a helper that still exists in Application Support, or, if that was also deleted, at a missing command, and Codex reports a failed hook without blocking; but the config lines remain until removed by hand as below.
+Uninstalling in this order leaves Codex exactly as it was before Connect and removes Steer's login-item registration. Deleting the app first is safe for Codex too: the hooks then point at a helper that still exists in Application Support, or, if that was also deleted, at a missing command, and Codex reports a failed hook without blocking; but the config lines remain until removed by hand as below. A stale Steer entry can also remain in Login Items until you remove it in System Settings.
 
 ### Recovery when Undo setup is unavailable
 
