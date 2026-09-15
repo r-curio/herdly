@@ -123,6 +123,10 @@ public struct AttentionRunning: Identifiable, Equatable, Sendable {
     public var rowText: String? { action?.rowText ?? QuestionPrompt.display(prompt, limit: 160) }
     public var fullAction: String? { action?.fullText }
     public var fullPrompt: String? { prompt }
+    public var promptIsTruncated: Bool {
+        guard action == nil, let prompt else { return false }
+        return QuestionPrompt.displayIsTruncated(prompt, limit: 160)
+    }
 
     public init(source: AttentionSource, session: UUID, turn: UUID, arrivedAt: Double,
                 prompt: String? = nil, action: ToolAction? = nil) {

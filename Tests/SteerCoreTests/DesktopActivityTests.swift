@@ -122,6 +122,24 @@ import Testing
     #expect(state.running.first?.fullAction == nil)
 }
 
+@Test func fullPromptIsOfferedOnlyWhenThePromptWasShortened() {
+    let session = UUID(), turn = UUID()
+    var state = DesktopState()
+
+    state.apply(.promptSubmitted(session: session, turn: turn, prompt: "  A short prompt  ", receivedAt: "01"))
+    #expect(state.running.first?.rowText == "A short prompt")
+    #expect(state.running.first?.promptIsTruncated == false)
+
+    state.apply(.promptSubmitted(session: session, turn: turn,
+                                 prompt: String(repeating: "x", count: 161), receivedAt: "02"))
+    #expect(state.running.first?.rowText?.hasSuffix("…") == true)
+    #expect(state.running.first?.promptIsTruncated == true)
+
+    let queued = AttentionRunning(source: .desktop, session: session, turn: turn, arrivedAt: 2,
+                                  prompt: "  A short prompt  ")
+    #expect(queued.promptIsTruncated == false)
+}
+
 @Test func malformedAndRestoredToolEventsNeverInventOrRestoreAnAction() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
