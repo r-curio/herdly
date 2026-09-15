@@ -13,6 +13,15 @@ func writeEvent(_ object: [String: Any], to directory: URL, installationID: Stri
         "captured_at": now.timeIntervalSince1970
     ]
     if let turn = object["turn_id"] as? String { record["turn_id"] = turn }
+    if let prompt = object["prompt"] as? String { record["prompt"] = prompt }
+    if let name = object["tool_name"] as? String { record["tool_name"] = name }
+    if let useID = object["tool_use_id"] as? String { record["tool_use_id"] = useID }
+    if let input = object["tool_input"] as? [String: Any] {
+        let kept = ["command", "cmd", "file_path", "path", "pattern"].reduce(into: [String: String]()) { result, key in
+            if let value = input[key] as? String { result[key] = value }
+        }
+        if !kept.isEmpty { record["tool_input"] = kept }
+    }
     guard JSONSerialization.isValidJSONObject(record),
           let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
           (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil else { return false }
@@ -43,6 +52,14 @@ func selfTest() -> Int32 {
     let object: [String: Any] = ["hook_event_name": "SessionStart", "session_id": session.uuidString]
     guard writeEvent(object, to: directory, installationID: "self-test"),
           let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil), files.count == 1 else { return 1 }
+    let tool: [String: Any] = ["hook_event_name": "PreToolUse", "session_id": session.uuidString,
+                               "turn_id": turn.uuidString, "tool_name": "Bash", "tool_use_id": "tool-1",
+                               "tool_input": ["command": "swift test", "ignored": ["large", "value"]]]
+    guard writeEvent(tool, to: directory, installationID: "self-test"),
+          let records = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .compactMap({ try? Data(contentsOf: $0) }).compactMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
+          let stored = records.first(where: { $0["tool_use_id"] as? String == "tool-1" }),
+          (stored["tool_input"] as? [String: String]) == ["command": "swift test"], stored["tool_response"] == nil else { return 1 }
     let request = ApprovalRequest(requestID: UUID(), sessionID: session, turnID: turn,
                                   details: ApprovalDetails(command: "touch marker"), receivedAt: 100)
     let bashPayload: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": session.uuidString,

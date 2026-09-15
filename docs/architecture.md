@@ -38,6 +38,8 @@ This diagram shows the candidate hook route. Desktop hook coverage and observing
 
 Status delivery must be quick and produce no model-visible output. Prefer non-blocking lifecycle hooks where the installed runtime supports them, accounting for their possible reordering; verify synchronous-only events separately. The app processes normalized events through one state owner. Connection loss must not stall Codex's work.
 
+`UserPromptSubmit` supplies the working row's fallback text. `PreToolUse` supplies a bounded action description keyed by session, turn, and tool-use id; only the matching `PostToolUse` clears it. The helper retains no tool response and only the input strings needed to describe commands or file access. Replaying records after launch ignores older tool events so an unmatched pre-event cannot restore a stale action.
+
 For a permission request, the helper connects to the companion with a short connection deadline. If the companion can handle the request, receipt starts the agreed 30-second timer. A separate bounded helper-side timeout prevents a stuck UI or missed receipt from extending the wait indefinitely. The app's count-down reflects the actual deadline.
 
 The helper accepts only one terminal outcome: allow once, deny, or hand back with no decision. It arbitrates user action, deadline, disconnect, and handoff on one serialized path. A late button click is rejected rather than sent to a newer request. The app reports delivery state honestly; successful local delivery is not proof that Codex executed the requested action.
