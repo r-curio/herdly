@@ -83,11 +83,11 @@ The user's reference to ChatGPT desktop means its Codex work, not regular ChatGP
 
 ## Agreed visibility behavior
 
-For the desktop MVP, hide the notch whenever the Codex desktop app is foreground. When the user is in another app, show the notch if there is running activity or an attention item. This applies even when the user is viewing a different Codex conversation: viewing B also hides A's notification. Exact desktop conversation focus is deferred.
+Keep the Steer notch visible in every app, including Codex desktop and Codex CLI, even when there is no running activity or attention item. Foreground changes do not hide the strip or its queue. Notification popup and sound eligibility remain separate from notch visibility. Exact desktop conversation focus is deferred.
 
-Hiding changes presentation only. Keep desktop completions queued until explicitly dismissed, including after Open in Codex, manual navigation, or foreground/background changes. No app activation or navigation result marks a completion read.
+Keep desktop completions queued until explicitly dismissed or the desktop app records them read, as described below. No app activation or navigation result by itself marks a completion read.
 
-Ghostty support retains its separate exact-pane requirement: using terminal pane B does not acknowledge activity from pane A. The desktop foreground rule hides the shared notch while Codex desktop is active; it does not clear Ghostty items either.
+Ghostty support retains its separate exact-pane requirement: using terminal pane B does not acknowledge activity from pane A. The shared notch remains visible while either Codex surface is active; visibility does not clear Ghostty items.
 
 If app activation or the required Ghostty pane identity is unknown, retain queue items without acknowledgment and leave approvals in Codex's normal flow. Unknown desktop activation retains the indicator rather than guessing it was viewed. Release any pending approval interaction with no decision on uncertainty; only Open in Codex remains. App-level visibility alone does not establish safe direct desktop approval support.
 

@@ -1,6 +1,6 @@
 # Replying to a session from its completion card
 
-A completion card carries a single-line field: the user reads that a session finished, types "now add tests", and sends it to that session without switching applications. The reply starts a new turn on that exact thread through the local app-server daemon, the same verified transport that answers questions by call id ([user-input requests](user-input-requests.md), [ADR 0007](adr/0007-connect-to-the-codex-daemon-socket-as-the-same-user.md)).
+A CLI completion card carries a single-line field: the user reads that a session finished, types "now add tests", and sends it to that session without switching applications. The reply starts a new turn on that exact thread through the local app-server daemon, the same verified transport that answers questions by call id ([user-input requests](user-input-requests.md), [ADR 0007](adr/0007-connect-to-the-codex-daemon-socket-as-the-same-user.md)). Desktop completion cards omit the reply field, Send button, and reply status because Steer has no supported desktop reply transport. Open in Codex and dismissal remain available.
 
 ## The only transport
 
@@ -19,7 +19,7 @@ The Ghostty relay is not a second path. It delivers one key name to a matched ta
 
 ## When the field is offered
 
-`SessionReplyRouting.target` reads what Steer can see at that instant, in this order:
+For CLI cards, `SessionReplyRouting.target` reads what Steer can see at that instant, in this order:
 
 | Evidence | Card |
 | --- | --- |
