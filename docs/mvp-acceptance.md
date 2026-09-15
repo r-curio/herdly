@@ -4,6 +4,8 @@ Status: **packaging complete; live acceptance pass not yet run.** This page sepa
 
 Install, permissions, supported versions and removal are in [install.md](install.md).
 
+Launch-at-login installed checks are tracked separately in [launch-at-login evidence](evidence/launch-at-login.md) because they require changing the test account's Login Items state and signing out and back in.
+
 ## 1. Automated evidence (agent-run, 2026-09-14)
 
 Recorded from a clean `main` checkout at the commit named in `docs/evidence/packaging-manifest.json`; that file is the manifest `scripts/package-app.sh` wrote, copied verbatim.

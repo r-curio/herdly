@@ -123,7 +123,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var setupCapabilities = CodexCapabilities(cli: false, desktop: false, ghostty: false, supported: false)
     @Published var setupPlan: CodexSetupPlan?
     @Published var setupMessage = ""
+    @Published private(set) var launchAtLogin = LaunchAtLoginState()
     @Published var desktopForeground = false
+    private let launchAtLoginCoordinator = LaunchAtLoginCoordinator(service: LaunchAtLoginService())
     private let desktopAdapter = DesktopAdapter()
     private var cliSessions: Set<UUID> = []
     private var liveCLI: Set<UUID> = []
@@ -230,6 +232,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        refreshLaunchAtLogin()
         for flag in ["--reminder-events", "--desktop-events"] {
             if let path = Companion.argumentValue(for: flag) { eventsPath = path }
         }
@@ -291,7 +294,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         refreshSetup()
         // A first/unconfigured launch should explain setup immediately. Once state
         // exists, refresh can keep the normal quiet launch behavior.
-        if previewMode == nil, !FileManager.default.fileExists(atPath: setupRoots.stateURL.path) { showControls() }
+        if previewMode == nil, launchAtLogin.shouldOpenUnconfiguredControls,
+           !FileManager.default.fileExists(atPath: setupRoots.stateURL.path) { showControls() }
         if CommandLine.arguments.contains("--smoke-test") {
             showControls()
             precondition(controls?.isVisible == true && controls?.contentView != nil)
@@ -397,6 +401,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     @objc func showControls() {
+        refreshLaunchAtLogin()
         if controls == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 620),
                                   styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
@@ -487,6 +492,24 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return true
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        refreshLaunchAtLogin()
+    }
+
+    func refreshLaunchAtLogin() {
+        launchAtLoginCoordinator.refresh()
+        launchAtLogin = launchAtLoginCoordinator.state
+    }
+
+    func launchAtLoginChanged(_ enabled: Bool) {
+        launchAtLoginCoordinator.setEnabled(enabled)
+        launchAtLogin = launchAtLoginCoordinator.state
+    }
+
+    func openLoginItemsSettings() {
+        launchAtLoginCoordinator.openSystemSettings()
+    }
+
     @objc func connectReminders() {
         let picker = NSOpenPanel()
         picker.canChooseFiles = false
@@ -521,7 +544,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // so a launch that finds setup incomplete shows it without waiting for a reopen.
             if !self.shownControlsForSetup, self.previewMode == nil {
                 self.shownControlsForSetup = true
-                if case .connected = snapshot.status {} else { self.showControls() }
+                if case .connected = snapshot.status {} else if self.launchAtLogin.shouldOpenUnconfiguredControls {
+                    self.showControls()
+                }
             }
         }
     }
@@ -1752,6 +1777,41 @@ private struct GeneralControls: View {
                 Divider()
                 SettingsRow(title: "Notifications", detail: model.muted ? "Completion sounds are muted." : "Completion sounds are on.") {
                     StatusBadge(title: model.muted ? "Muted" : "On", color: model.muted ? .secondary : .green)
+                }
+            }
+
+            Text("Startup").font(.headline).foregroundStyle(.secondary)
+            SettingsCard {
+                SettingsRow(title: "Launch at login", detail: model.launchAtLogin.detail) {
+                    Toggle("Launch at login", isOn: Binding(
+                        get: { model.launchAtLogin.isOn },
+                        set: { enabled in model.launchAtLoginChanged(enabled) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .disabled(!model.launchAtLogin.canChange)
+                    .accessibilityLabel("Launch at login")
+                    .accessibilityValue(model.launchAtLogin.statusTitle)
+                    .accessibilityHint(model.launchAtLogin.detail)
+                }
+                if let statusTitle = model.launchAtLogin.settingsActionStatusTitle {
+                    Divider()
+                    HStack {
+                        StatusBadge(title: statusTitle, color: .orange)
+                        Spacer()
+                        Button("Open Login Items", action: model.openLoginItemsSettings)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+                if let error = model.launchAtLogin.operationError {
+                    Divider()
+                    Text(error)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .padding(16)
+                        .accessibilityLabel("Launch at login error: \(error)")
                 }
             }
             Text("Closing this window keeps Steer running in the menu bar.")
