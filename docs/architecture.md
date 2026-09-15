@@ -26,6 +26,8 @@ This diagram shows the candidate hook route. Desktop hook coverage and observing
 | macOS app | Notch, sound, focus observation, navigation, storage locations, integration coordination | Starting or supervising the user's Codex sessions |
 | Hook helper | Decode Codex input, deliver bounded messages, arbitrate one permission response, emit Codex-compatible output | UI, conversation history, persistent permission rules |
 
+Launch-at-login registration is a macOS app responsibility. The app maps `SMAppService.mainApp.status` into platform-neutral presentation state in SteerCore, but ServiceManagement registration and System Settings navigation stay in SteerApp. No duplicate enabled preference, login helper, or launch-agent plist is introduced.
+
 ## Model the identities separately
 
 - Session identifies the ongoing conversation, qualified by its local runtime if needed. A project directory or title is not a unique session ID.

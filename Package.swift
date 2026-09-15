@@ -10,6 +10,6 @@ let package = Package(
         .target(name: "SteerCore"),
         .executableTarget(name: "SteerApp", dependencies: ["SteerCore"], exclude: ["Resources"]),
         .executableTarget(name: "SteerHook", dependencies: ["SteerCore"]),
-        .testTarget(name: "SteerCoreTests", dependencies: ["SteerCore"])
+        .testTarget(name: "SteerCoreTests", dependencies: ["SteerCore", "SteerApp"])
     ]
 )
