@@ -105,7 +105,7 @@ Steer does not request Accessibility, Screen Recording, Input Monitoring, notifi
 | `~/Library/Application Support/Steer/attention-snapshot.json` (and `.previous`) | Undismissed completions and dismissal identities. |
 | `~/Library/Preferences/dev.rcurio.steer.prototype.plist` | Mute, the events-folder choice, the desktop read-state toggle, the last controls section, and the prototype's test item. Launch-at-login state is not stored here. |
 
-No conversation text or transcripts are stored.
+No conversation text or transcripts are stored. Fresh notification spotlights may read bounded prompt and final-response excerpts into process memory; those excerpts disappear when Steer quits and are excluded from the attention snapshot.
 
 ## Uninstall
 
