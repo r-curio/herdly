@@ -341,16 +341,21 @@ struct Notch: View {
         return "\(task), \(sessionLabel(item))"
     }
 
-    /// Which rows the open panel shows: everything while the user is in it, otherwise only the item
-    /// that opened it.
+    /// Which rows the open panel shows: the explicit queue, or only the notification that opened it.
     private var visibleItems: [AttentionItem] {
-        if model.showAll { return model.orderedAttentionItems }
-        if let id = model.spotlightItem { return model.orderedAttentionItems.filter { $0.id == id } }
-        return []
+        switch model.presentationMode {
+        case .collapsed: return []
+        case .queue: return model.orderedAttentionItems
+        case let .spotlight(id): return model.orderedAttentionItems.filter { $0.id == id }
+        }
     }
 
     private var showsTestRow: Bool {
-        model.attention.pending && !model.desktopForeground && (model.showAll || (model.spotlightItem == nil && model.attention.expanded))
+        model.attention.pending && !model.desktopForeground && model.presentationMode.showsAll
+    }
+
+    private func isSpotlight(_ item: AttentionItem) -> Bool {
+        model.presentationMode == .spotlight(item.id)
     }
 
     @ViewBuilder
@@ -609,6 +614,7 @@ struct Notch: View {
 
     @ViewBuilder
     private func attentionRow(_ item: AttentionItem) -> some View {
+        let spotlightDetails = isSpotlight(item) ? model.spotlightDetails(for: item) : nil
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 if item.kind == .running || item.kind == .question {
@@ -622,6 +628,13 @@ struct Notch: View {
                         .lineLimit(1).truncationMode(.tail)
                 }
             }
+            if let spotlightDetails {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(spotlightDetails.context) { field in
+                        detail(field.label, field.value, selectable: true)
+                    }
+                }
+            }
             switch item.kind {
             case .handedBackRequest:
                 Text("Handed back with no decision. Steer has not seen an answer yet; this clears when Codex records one, the turn ends, or the session ends.")
@@ -631,8 +644,12 @@ struct Notch: View {
                     Text("Queued before Steer last started. You may already have seen this result; Steer cannot verify it.")
                         .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
                 }
-                if let completion = item.completion, completion.source == .cli {
-                    replyBody(completion, subject: rowSubject(item))
+                if let prompt = spotlightDetails?.originalPrompt {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Original prompt").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
+                        Text(prompt).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             case .question:
                 if let question = item.question { questionBody(question, subject: rowSubject(item)) }
@@ -657,7 +674,7 @@ struct Notch: View {
             case .actionableRequest:
                 EmptyView()
             }
-            if let details = item.request?.details {
+            if spotlightDetails == nil, let details = item.request?.details {
                 // Long commands and reasons wrap in full; nothing is truncated with an ellipsis.
                 VStack(alignment: .leading, spacing: 3) {
                     if let name = model.threadNames[item.session] { detail("thread", name, selectable: true) }
@@ -723,6 +740,23 @@ struct Notch: View {
                     }
                     .disabled(model.openingTask)
                     .accessibilityLabel("Open in Codex: \(rowSubject(item))")
+                }
+            }
+            if let completion = item.completion, completion.source == .cli {
+                replyBody(completion, subject: rowSubject(item))
+            }
+            if item.completion != nil, let spotlightDetails {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Final response").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
+                    switch spotlightDetails.response {
+                    case let .available(preview):
+                        Text(preview.text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
+                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    case let .unavailable(reason):
+                        Text(reason).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    case nil: EmptyView()
+                    }
                 }
             }
         }
@@ -801,7 +835,7 @@ struct Notch: View {
                         ForEach(visibleItems) { item in
                             attentionRow(item)
                         }
-                        if model.showAll && model.needsGhosttySetup {
+                        if model.presentationMode.showsAll && model.needsGhosttySetup {
                             Text("Enable Ghostty controls in Steer’s controls window to open these sessions.")
                                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
                         }

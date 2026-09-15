@@ -2,6 +2,15 @@ import Foundation
 import Testing
 @testable import SteerCore
 
+@Test func transientSpotlightContentCannotEnterTheSnapshot() throws {
+    let completion = AttentionCompletion(source: .desktop, session: UUID(), turn: UUID(), arrivedAt: 1)
+    let snapshot = AttentionSnapshot(completions: [completion])
+    let json = String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self)
+    #expect(!json.contains("prompt"))
+    #expect(!json.contains("response"))
+    #expect(!json.contains("workingDirectory"))
+}
+
 private func temporaryDirectory() throws -> URL {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
