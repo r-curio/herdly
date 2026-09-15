@@ -103,6 +103,11 @@ public struct QuestionPrompt: Equatable, Sendable {
         var truncated = false
         return capped(text, to: limit, truncated: &truncated)
     }
+
+    public static func displayIsTruncated(_ text: String?, limit: Int) -> Bool {
+        guard let text else { return false }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines).count > limit
+    }
 }
 
 /// A question Codex is waiting on, read from the session rollout. Pending while the rollout shows

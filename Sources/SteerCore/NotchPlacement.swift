@@ -187,7 +187,7 @@ public enum NotchInteraction {
 /// Hover with a short grace after the pointer leaves, so a slip off the edge does not snap the
 /// panel shut. Entering counts at once; leaving counts only after `grace` seconds.
 public struct HoverHold: Equatable, Sendable {
-    public static let grace: Double = 0.3
+    public static let grace: Double = 0.18
     private var leftAt: Double?
     private var inside = false
 
