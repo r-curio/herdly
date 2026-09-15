@@ -11,14 +11,14 @@ import Testing
     #expect(state.running.map(\.session) == [session])
     #expect(state.completed.isEmpty)
     #expect(DesktopVisibility.isVisible(hasActivity: !state.running.isEmpty, codexForeground: false))
-    #expect(!DesktopVisibility.isVisible(hasActivity: !state.running.isEmpty, codexForeground: true))
+    #expect(DesktopVisibility.isVisible(hasActivity: !state.running.isEmpty, codexForeground: true))
     #expect(DesktopVisibility.isVisible(hasActivity: !state.running.isEmpty, codexForeground: nil))
 
     state.apply(.turnCompleted(session: session, turn: turn, receivedAt: "03"))
     #expect(state.running.isEmpty)
     #expect(state.completed.map(\.id) == [TurnIdentity(session: session, turn: turn)])
     #expect(DesktopVisibility.isVisible(hasActivity: !state.completed.isEmpty, codexForeground: false))
-    #expect(!DesktopVisibility.isVisible(hasActivity: !state.completed.isEmpty, codexForeground: true))
+    #expect(DesktopVisibility.isVisible(hasActivity: !state.completed.isEmpty, codexForeground: true))
     #expect(DesktopVisibility.isVisible(hasActivity: !state.completed.isEmpty, codexForeground: nil))
 
     state.apply(.sessionEnded(session: session, receivedAt: "04"))
@@ -199,4 +199,12 @@ import Testing
     #expect(state.running.first?.rowText == "editing Latest.swift")
     state.apply(.toolCompleted(session: session, turn: turn, useID: "latest", capturedAt: 5))
     #expect(state.running.first?.rowText == "Inspect both files")
+}
+
+@Test func notchStaysVisibleInEveryAppEvenWhenIdle() {
+    for activity in [false, true] {
+        for foreground: Bool? in [false, true, nil] {
+            #expect(DesktopVisibility.isVisible(hasActivity: activity, codexForeground: foreground))
+        }
+    }
 }

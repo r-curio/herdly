@@ -1,6 +1,7 @@
 public enum DesktopVisibility {
-    /// Confirmed Codex foreground hides the shared panel; away and unknown keep activity visible.
+    /// The notch stays available in every app, including when there is no activity.
+    /// Focus still governs acknowledgment and notification delivery separately.
     public static func isVisible(hasActivity: Bool, codexForeground: Bool?) -> Bool {
-        hasActivity && codexForeground != true
+        true
     }
 }

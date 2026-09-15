@@ -631,7 +631,9 @@ struct Notch: View {
                     Text("Queued before Steer last started. You may already have seen this result; Steer cannot verify it.")
                         .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
                 }
-                if let completion = item.completion { replyBody(completion, subject: rowSubject(item)) }
+                if let completion = item.completion, completion.source == .cli {
+                    replyBody(completion, subject: rowSubject(item))
+                }
             case .question:
                 if let question = item.question { questionBody(question, subject: rowSubject(item)) }
             case .running:
