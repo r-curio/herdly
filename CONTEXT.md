@@ -14,11 +14,14 @@ The existing Codex desktop app or CLI through which the user works with Codex.
 **Agent source**:
 The upstream coding agent a session belongs to, currently Codex or Claude Code.
 
+**Source scope**:
+The local identity namespace in which an agent source's session identifiers are unique: the supported Codex installation or one exact Claude configuration root. Sessions and usage from distinct source scopes never merge.
+
 **Agent surface**:
 The existing app or CLI through which the user works with an agent source.
 
 **Agent session**:
-An individual conversation or unit of agent work, distinct from its hosting application and qualified by its agent source.
+An individual conversation or unit of agent work, distinct from its hosting application and qualified by its agent source and source scope.
 
 **Notch**:
 The companion's compact display at the top of the screen, intended to show supported agent activity while the user works outside the relevant session.

@@ -1,0 +1,7 @@
+# Share attention through source-scoped observations
+
+Accepted with the user on 2026-09-16 in [Choose the shared adapter and recovery boundary](https://github.com/r-curio/steer/issues/38). Steer keeps one attention queue and identifies work by agent source, source scope, upstream session, and originating surface; thin concrete Codex and Claude adapters translate their native evidence into a closed set of SteerCore observations, while source-specific actions use an exhaustive switch rather than separate queues or a general plugin framework.
+
+Live approvals and question answers additionally require the exact memory-only helper invocation, are spent before delivery, and are never retried or restored. Each adapter may reconcile only its own source: exact live evidence outranks hooks, successful inventory bounds current state, unavailable evidence clears nothing, duplicate Claude processes make targeting and direct controls unavailable, and a Claude Stop becomes an outcome only after fresh inventory confirms the session is idle with no newer activity.
+
+Snapshot version two persists only verified Finished, Failed, or Stopped outcomes, their source-scoped identity and originating surface, arrival time, and acknowledgment. Version-one completions migrate to Codex Finished outcomes; running state, tool labels, questions, approvals, and helper channels always return from fresh evidence, while restored outcomes remain uncertain and silent.
