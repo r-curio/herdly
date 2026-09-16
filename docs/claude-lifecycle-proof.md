@@ -80,3 +80,10 @@ Sanitized traces are compiled in [`docs/evidence/claude-lifecycle-lab-interactiv
 - Explicit `h 1` returned no hook output in 6.3 seconds. Claude's native prompt remained, the human chose Yes, and `HANDOFF-1` was created with matching post-use, batch and stop events.
 - With receipt only, the helper expired after 30.2 seconds. Claude had already emitted `Notification(permission_prompt)` at six seconds; the human waited past helper expiry, then chose native Yes and created `TIMEOUT-1`.
 - With no companion, Claude exposed and accepted its native prompt while the helper was still inside its five-second receipt wait: `PostToolUse` arrived 1.5 seconds after `PermissionRequest`, then the helper recorded `no_receipt_handoff` at 5.0 seconds. `NOCOMP-1` was created. The native surface is therefore concurrent with the command hook, not something the helper's no-decision return reveals.
+
+### Helper failures and native denial
+
+- An injected helper exit 1 was recorded by Claude as a PermissionRequest hook error, but the concurrently available native Yes still created `CRASH-1`; normal post-use, batch and stop hooks followed.
+- An injected 90-second helper sleep did not block the native permission surface. `Notification(permission_prompt)` fired at six seconds; the human waited more than 50 seconds, chose Yes, and `HANG-1` was created. No helper outcome event was recorded, so the runtime terminated or abandoned the hook before it could return normally.
+- After explicit no-decision handoff, native `No` left `NDENY-1` absent. No `PostToolUseFailure`, `PermissionDenied`, `PostToolBatch`, `Stop` or `SessionEnd` hook followed. The debug log records `Bash tool permission denied`, but that is not a hook contract.
+- A bounded transcript read found the exact call id as a `tool_result` with `is_error: true` and content beginning `The user doesn't want to proceed with this tool use`. This is the only exact durable native-denial evidence observed in the scenario; missing, delayed or disabled transcripts must remain unknown.

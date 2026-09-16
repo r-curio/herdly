@@ -11,9 +11,13 @@ import time
 with tempfile.TemporaryDirectory() as run:
     def answer():
         requests = os.path.join(run, "requests")
-        while not os.path.isdir(requests) or not os.listdir(requests):
+        names = []
+        while not names:
             time.sleep(0.01)
-        request = json.load(open(os.path.join(requests, os.listdir(requests)[0])))
+            if os.path.isdir(requests):
+                names = [name for name in os.listdir(requests)
+                         if name.endswith(".json") and "." not in name[:-5]]
+        request = json.load(open(os.path.join(requests, names[0])))
         rid = request["request_id"]
         now = time.time()
         for directory, body in (
