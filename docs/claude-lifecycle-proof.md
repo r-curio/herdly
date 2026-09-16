@@ -56,4 +56,12 @@ Not covered by this probe and to be recorded as unproven: sandbox network prompt
 
 ## Results (human, interactive)
 
-_Pending. Paste `compile.py` output per scenario here or attach the compiled JSON; note versions, and mark any scenario that could not be produced as uncovered, not passed._
+Sanitized traces are compiled in [`docs/evidence/claude-lifecycle-lab-interactive.json`](evidence/claude-lifecycle-lab-interactive.json). Runs use Claude Code 2.1.273, Ghostty 1.3.1 and macOS 26.5 unless noted.
+
+### Lifecycle
+
+- Ordinary prompts each received a distinct `prompt_id`; their matching `Stop` reused that id.
+- `AskUserQuestion` produced `PreToolUse` and `PostToolUse` with one `tool_use_id`, not a question-specific event. The post event recorded the human's native `Red` answer under both `tool_input.answers` and `tool_response.answers`; the parent `Stop` followed.
+- The Explore child used its own `agent_id` on `SubagentStart`, child Bash events and `SubagentStop`. The parent emitted a `Stop` immediately after launching it, then the child result arrived as another `UserPromptSubmit` with a new `prompt_id` and another parent `Stop`. Two later `SubagentStop` events carried different agent ids without matching observed starts; their meaning is unproven.
+- Pressing Esc while Claude streamed a count stopped visibly at 97 and showed `Interrupted · What should Claude do instead?` (human screenshot). The only hook was the original `UserPromptSubmit`: no `Stop`, `StopFailure` or interruption event fired.
+- `/exit` emitted `SessionEnd` with `reason: prompt_input_exit` and a fresh `prompt_id`.

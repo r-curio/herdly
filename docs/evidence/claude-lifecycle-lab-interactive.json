@@ -1,0 +1,416 @@
+{
+ "probe": "steer-claude-lifecycle-lab/1",
+ "runs": [
+  {
+   "correlation": {
+    "toolu_01EhHuRkeYC4fFohuxeXjcsw": [
+     "PreToolUse",
+     "PostToolUse"
+    ],
+    "toolu_01GLmXgG9Ce81ADyGZdFidqz": [
+     "PreToolUse",
+     "PostToolUse"
+    ],
+    "toolu_01TJLMtXzUw9T6qmCmZFo3wD": [
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "lifecycle",
+    "session_id": "e9114802-acea-46b2-96b2-231d07ae38d3",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/lifecycle-20260916T014333Z/settings.json",
+    "started_utc": "20260916T014333Z",
+    "term_program": "ghostty"
+   },
+   "run": "lifecycle-20260916T014333Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Reply with exactly ok.'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "01e3a2df-b7a1-4054-a58f-40f85f94dea7",
+     "t": 10.827,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='ok'",
+     "event": "Stop",
+     "prompt_id": "01e3a2df-b7a1-4054-a58f-40f85f94dea7",
+     "t": 12.804,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "idle_prompt 'Claude is waiting for your input'",
+     "event": "Notification",
+     "prompt_id": "01e3a2df-b7a1-4054-a58f-40f85f94dea7",
+     "t": 72.901,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use the AskUserQuestion tool to ask whether I prefer red or '",
+     "event": "UserPromptSubmit",
+     "prompt_id": "c745a44b-de18-4bd9-a65c-84dd8bd1314e",
+     "t": 81.268,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "c745a44b-de18-4bd9-a65c-84dd8bd1314e",
+     "t": 83.773,
+     "tool_use_id": "toolu_01TJLMtXzUw9T6qmCmZFo3wD"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "c745a44b-de18-4bd9-a65c-84dd8bd1314e",
+     "t": 86.384,
+     "tool_use_id": "toolu_01TJLMtXzUw9T6qmCmZFo3wD"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01TJLMtXzUw9T6qmCmZFo3wD'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "c745a44b-de18-4bd9-a65c-84dd8bd1314e",
+     "t": 86.439,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='Your answer: Red.'",
+     "event": "Stop",
+     "prompt_id": "c745a44b-de18-4bd9-a65c-84dd8bd1314e",
+     "t": 88.108,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use the Agent tool (subagent_type Explore) to list the files'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "43b59460-1493-4a32-8910-d63b87850eb8",
+     "t": 144.756,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Agent ''",
+     "event": "PreToolUse",
+     "prompt_id": "43b59460-1493-4a32-8910-d63b87850eb8",
+     "t": 147.775,
+     "tool_use_id": "toolu_01EhHuRkeYC4fFohuxeXjcsw"
+    },
+    {
+     "agent_id": "a1f9f17a9417257e1",
+     "detail": "agent_type=Explore",
+     "event": "SubagentStart",
+     "prompt_id": "43b59460-1493-4a32-8910-d63b87850eb8",
+     "t": 147.866,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Agent keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "43b59460-1493-4a32-8910-d63b87850eb8",
+     "t": 147.867,
+     "tool_use_id": "toolu_01EhHuRkeYC4fFohuxeXjcsw"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01EhHuRkeYC4fFohuxeXjcsw'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "43b59460-1493-4a32-8910-d63b87850eb8",
+     "t": 147.931,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last=\"I've launched the Explore agent to list \"",
+     "event": "Stop",
+     "prompt_id": "43b59460-1493-4a32-8910-d63b87850eb8",
+     "t": 149.973,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a1f9f17a9417257e1",
+     "detail": "Bash 'ls -la .'",
+     "event": "PreToolUse",
+     "prompt_id": "43b59460-1493-4a32-8910-d63b87850eb8",
+     "t": 150.045,
+     "tool_use_id": "toolu_01GLmXgG9Ce81ADyGZdFidqz"
+    },
+    {
+     "agent_id": "a1f9f17a9417257e1",
+     "detail": "Bash keys=['agent_id', 'agent_type', 'duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "43b59460-1493-4a32-8910-d63b87850eb8",
+     "t": 150.201,
+     "tool_use_id": "toolu_01GLmXgG9Ce81ADyGZdFidqz"
+    },
+    {
+     "agent_id": "a1f9f17a9417257e1",
+     "detail": "calls=['toolu_01GLmXgG9Ce81ADyGZdFidqz'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "43b59460-1493-4a32-8910-d63b87850eb8",
+     "t": 150.248,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a1f9f17a9417257e1",
+     "detail": "agent_type=Explore last='Here is the top-level listing of the cur'",
+     "event": "SubagentStop",
+     "prompt_id": "43b59460-1493-4a32-8910-d63b87850eb8",
+     "t": 152.562,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'<task-notification>\\n<task-id>a1f9f17a9417257e1</task-id>\\n<to'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "a65055de-0ac2-4e0a-bbe1-8caec90874c9",
+     "t": 152.621,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='The directory contains just a `.git` fol'",
+     "event": "Stop",
+     "prompt_id": "a65055de-0ac2-4e0a-bbe1-8caec90874c9",
+     "t": 155.225,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a2c17020754996252",
+     "detail": "agent_type= last='cat README.md'",
+     "event": "SubagentStop",
+     "prompt_id": "a65055de-0ac2-4e0a-bbe1-8caec90874c9",
+     "t": 156.823,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "idle_prompt 'Claude is waiting for your input'",
+     "event": "Notification",
+     "prompt_id": "a65055de-0ac2-4e0a-bbe1-8caec90874c9",
+     "t": 215.305,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a2aa8f7a1a571dadd",
+     "detail": "agent_type= last=\"We're just doing quick tool-usage demos \"",
+     "event": "SubagentStop",
+     "prompt_id": "a65055de-0ac2-4e0a-bbe1-8caec90874c9",
+     "t": 337.874,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Count slowly from 1 to 300, one number per line.'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "04101043-a144-4e3d-b85c-5d6c4bc6d7d9",
+     "t": 362.597,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "321a2594-2ef2-425c-a06b-e0104603ffec",
+     "t": 437.049,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_011M8AKhgmnFDwLv5HGGKoLM": [
+     "PreToolUse"
+    ],
+    "toolu_019QCXec5gaQ31BBNCNbymPx": [
+     "PreToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": null,
+     "outcome": "expired_handoff",
+     "probe_note": "helper outcome",
+     "prompt_id": "842f8b1b-11ec-4cd0-9941-b017ee9c7e50",
+     "receipt": {
+      "expires_at": 1789486031.881334,
+      "received_at": 1789486001.881334,
+      "request_id": "8184BB0A-9F95-4D19-8D05-E1ED829EF236"
+     },
+     "received_at": 1789486036.758338,
+     "request_id": "8184BB0A-9F95-4D19-8D05-E1ED829EF236",
+     "seconds_since_publish": 35.046,
+     "tool_use_id": null
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.272 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "haiku",
+    "permission_mode": "default",
+    "scenario": "print-approval",
+    "session_id": "a95b2734-f7b6-4c15-8d97-ab36a0bd1112",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/print-approval-20260915T152631Z/settings.json",
+    "started_utc": "20260915T152631Z",
+    "term_program": "ghostty"
+   },
+   "run": "print-approval-20260915T152631Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Run the bash command `touch marker.txt` (nothing else), then'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "842f8b1b-11ec-4cd0-9941-b017ee9c7e50",
+     "t": 3.708,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch marker.txt'",
+     "event": "PreToolUse",
+     "prompt_id": "842f8b1b-11ec-4cd0-9941-b017ee9c7e50",
+     "t": 6.792,
+     "tool_use_id": "toolu_019QCXec5gaQ31BBNCNbymPx"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch marker.txt' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "842f8b1b-11ec-4cd0-9941-b017ee9c7e50",
+     "t": 7.061,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_019QCXec5gaQ31BBNCNbymPx'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "842f8b1b-11ec-4cd0-9941-b017ee9c7e50",
+     "t": 42.427,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Write ''",
+     "event": "PreToolUse",
+     "prompt_id": "842f8b1b-11ec-4cd0-9941-b017ee9c7e50",
+     "t": 47.618,
+     "tool_use_id": "toolu_011M8AKhgmnFDwLv5HGGKoLM"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_011M8AKhgmnFDwLv5HGGKoLM'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "842f8b1b-11ec-4cd0-9941-b017ee9c7e50",
+     "t": 47.763,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='Permission is required to create the fil'",
+     "event": "Stop",
+     "prompt_id": "842f8b1b-11ec-4cd0-9941-b017ee9c7e50",
+     "t": 50.103,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=other",
+     "event": "SessionEnd",
+     "prompt_id": "842f8b1b-11ec-4cd0-9941-b017ee9c7e50",
+     "t": 50.512,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {},
+   "helper": [],
+   "meta": {
+    "claude_version": "2.1.272 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "haiku",
+    "permission_mode": "default",
+    "scenario": "print-lifecycle",
+    "session_id": "40fc26b9-d3ad-4921-9063-a1462f17d40c",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/print-lifecycle-20260915T152535Z/settings.json",
+    "started_utc": "20260915T152535Z",
+    "term_program": "ghostty"
+   },
+   "run": "print-lifecycle-20260915T152535Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Reply with exactly the word ok and use no tools.'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "a101cd39-f94b-4af2-bdc7-f7d7a5503ada",
+     "t": 3.465,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='ok'",
+     "event": "Stop",
+     "prompt_id": "a101cd39-f94b-4af2-bdc7-f7d7a5503ada",
+     "t": 7.025,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=other",
+     "event": "SessionEnd",
+     "prompt_id": "a101cd39-f94b-4af2-bdc7-f7d7a5503ada",
+     "t": 7.159,
+     "tool_use_id": null
+    }
+   ]
+  }
+ ]
+}
