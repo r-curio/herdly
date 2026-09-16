@@ -65,3 +65,11 @@ Sanitized traces are compiled in [`docs/evidence/claude-lifecycle-lab-interactiv
 - The Explore child used its own `agent_id` on `SubagentStart`, child Bash events and `SubagentStop`. The parent emitted a `Stop` immediately after launching it, then the child result arrived as another `UserPromptSubmit` with a new `prompt_id` and another parent `Stop`. Two later `SubagentStop` events carried different agent ids without matching observed starts; their meaning is unproven.
 - Pressing Esc while Claude streamed a count stopped visibly at 97 and showed `Interrupted · What should Claude do instead?` (human screenshot). The only hook was the original `UserPromptSubmit`: no `Stop`, `StopFailure` or interruption event fired.
 - `/exit` emitted `SessionEnd` with `reason: prompt_input_exit` and a fresh `prompt_id`.
+
+### Bash allow and native-prompt race
+
+- A native allow while the helper was still waiting created `ALLOW-1`; `PostToolUse`, `PostToolBatch` and `Stop` arrived before the helper's 30-second expiry. A companion allow written after expiry had no effect.
+- The first prompt companion attempt exposed a probe defect: it returned `decision: "allow"`. Claude rejected that exact output and required `decision: {"behavior":"allow"}`. `test_probe.py` now drives the real helper subprocess and locks down the accepted shape.
+- With the corrected output, the human typed `a 3`; Claude validated the hook response, logged `permissionDecision: allow`, created `ALLOW-3`, and emitted the matching `PostToolUse`, `PostToolBatch` and `Stop`. The human gave no native decision.
+- `Notification(permission_prompt)` still fired about six seconds after `PermissionRequest`, before the companion allow returned at 10.4 seconds. Direct hook decisions therefore race the native prompt after Claude's notification delay; the adapter cannot assume the native prompt remains hidden for its full 30-second window.
+- In all three requests, `PermissionRequest` omitted `tool_use_id`; the adjacent `PreToolUse` and later result carried it.

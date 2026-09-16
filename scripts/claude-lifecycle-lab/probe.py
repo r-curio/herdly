@@ -147,8 +147,8 @@ def finish(outcome, extra=None):
         rec.update(extra)
     record(session, rec)
     if outcome in ("allow", "deny"):
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": outcome,
-                                                 "decisionReason": f"steer-lab companion decision for request {rid}"}}))
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
+                                                 "decision": {"behavior": outcome}}}))
     sys.exit(0)
 
 
