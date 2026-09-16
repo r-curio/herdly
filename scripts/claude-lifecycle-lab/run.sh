@@ -25,21 +25,31 @@ mkdir -p "$RUN/events" "$PROJECT"
 SESSION="$(uuidgen | tr 'A-Z' 'a-z')"
 PROBE="python3 $LAB/probe.py"
 
-observers=(SessionStart UserPromptSubmit PreToolUse PostToolUse PostToolUseFailure PostToolBatch PermissionDenied Notification SubagentStart SubagentStop StopFailure SessionEnd PreCompact PostCompact Elicitation ElicitationResult)
+observers=(SessionStart UserPromptSubmit PostToolUse PostToolUseFailure PostToolBatch PermissionDenied Notification SubagentStart SubagentStop StopFailure SessionEnd PreCompact PostCompact Elicitation ElicitationResult)
 STOP_MODE="observe"; [ "$SCENARIO" = "stop-continue" ] && STOP_MODE="stop-continue" && touch "$RUN/stop-continue-armed"
-case "$SCENARIO" in helper-crash) echo crash > "$RUN/helper-mode";; helper-hang) echo hang > "$RUN/helper-mode";; esac
+case "$SCENARIO" in helper-crash|question-helper-crash) echo crash > "$RUN/helper-mode";; helper-hang|question-helper-hang) echo hang > "$RUN/helper-mode";; esac
 
 hooks="{"
 for ev in "${observers[@]}"; do
   hooks+="\"$ev\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE observe\",\"timeout\":10}]}],"
 done
+hooks+="\"PreToolUse\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE observe\",\"timeout\":10}]}"
+if [[ "$SCENARIO" == question-* ]]; then
+  hooks+=",{\"matcher\":\"AskUserQuestion\",\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE question\",\"timeout\":45}]}"
+fi
+if [ "$SCENARIO" = "question-coexist" ]; then
+  hooks+=",{\"matcher\":\"AskUserQuestion\",\"hooks\":[{\"type\":\"command\",\"command\":\"$LAB/other-hook.sh\",\"timeout\":10}]}"
+fi
+if [ "$SCENARIO" = "coexist" ]; then
+  hooks+=",{\"hooks\":[{\"type\":\"command\",\"command\":\"$LAB/other-hook.sh\",\"timeout\":10}]}"
+fi
+hooks+="],"
 hooks+="\"Stop\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE $STOP_MODE\",\"timeout\":10}]}],"
 hooks+="\"PermissionRequest\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE permission\",\"timeout\":45}]}"
 if [ "$SCENARIO" = "coexist" ]; then
   # A second, unrelated handler on the same events: an observer that logs to its own file and never decides.
   OTHER="$LAB/other-hook.sh"
   hooks+=",{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\",\"command\":\"$OTHER\",\"timeout\":10}]}"
-  hooks+="],\"PreToolUse\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE observe\",\"timeout\":10}]},{\"hooks\":[{\"type\":\"command\",\"command\":\"$OTHER\",\"timeout\":10}]}"
 fi
 hooks+="]}"
 printf '{"hooks":%s}' "$hooks" | python3 -m json.tool > "$RUN/settings.json"

@@ -14,6 +14,8 @@ Commands at the prompt (n = request number as printed):
   late a n S   allow request n after S seconds (late click); same for late d
   dup a n      write a second decision record for n (should be ignored)
   wrong a n    write a decision whose request_id does not match n (should be ignored)
+  answer n X   answer question request n with selected label(s) or free text X
+  late-answer n S X  write that answer after S seconds
   q            quit
 
 auto-mode (optional, for unattended timing runs only):
@@ -58,6 +60,20 @@ def decide(n, decision, delay=0.0, wrong=False):
     log(f"wrote decision {decision} for #{n} file={rid} request_id={target}")
 
 
+def answer(n, value, delay=0.0):
+    rid = order[n - 1]
+    req = seen[rid]
+    if delay:
+        log(f"scheduled answer for #{n} {rid} in {delay}s")
+        time.sleep(delay)
+    atomic(os.path.join(DEC, rid + ".json"), {
+        "request_id": rid, "session_id": req.get("session_id"),
+        "prompt_id": req.get("prompt_id"), "tool_use_id": req.get("tool_use_id"),
+        "answer": value, "decided_at": time.time(),
+    })
+    log(f"wrote answer {value!r} for #{n} file={rid}")
+
+
 def watcher():
     while True:
         for name in sorted(os.listdir(REQ)):
@@ -70,15 +86,24 @@ def watcher():
                 req = json.load(open(os.path.join(REQ, name)))
             except Exception:
                 continue
-            seen[rid] = time.time(); order.append(rid)
+            seen[rid] = req; order.append(rid)
             n = len(order)
             if AUTO != "none":
                 atomic(os.path.join(RCPT, rid + ".json"), {"request_id": rid, "received_at": time.time(),
                                                             "expires_at": time.time() + 30})
+            if req.get("kind") == "question":
+                questions = (req.get("tool_input") or {}).get("questions") or []
+                rendered = "\n".join(
+                    f"    {q.get('question')} options={[o.get('label') for o in q.get('options', [])]} multi={q.get('multiSelect')}"
+                    for q in questions
+                )
+                action = f"answer {n} <chosen label(s) or free text> | late-answer {n} 35 <answer>"
+            else:
+                rendered = f"    command={req.get('command')!r}"
+                action = f"a {n} | d {n} | h {n} | late a {n} 45 | dup a {n} | wrong a {n}"
             log(f"REQUEST #{n} {rid}\n    session={req.get('session_id')} prompt={req.get('prompt_id')}\n"
-                f"    tool_use_id={req.get('tool_use_id')} agent_id={req.get('agent_id')}\n"
-                f"    command={req.get('command')!r}\n    receipt={'written' if AUTO != 'none' else 'WITHHELD'}; "
-                f"type: a {n} | d {n} | h {n} | late a {n} 45 | dup a {n} | wrong a {n}")
+                f"    tool_use_id={req.get('tool_use_id')} agent_id={req.get('agent_id')}\n{rendered}\n"
+                f"    receipt={'written' if AUTO != 'none' else 'WITHHELD'}; type: {action}")
         time.sleep(0.2)
 
 
@@ -89,7 +114,8 @@ if AUTO != "manual":
         time.sleep(1)
 while True:
     try:
-        parts = input("> ").split()
+        line = input("> ")
+        parts = line.split()
     except EOFError:
         break
     if not parts:
@@ -105,6 +131,11 @@ while True:
             decide(int(parts[2]), {"a": "allow", "d": "deny"}[parts[1]])
         elif parts[0] == "wrong":
             decide(int(parts[2]), {"a": "allow", "d": "deny"}[parts[1]], wrong=True)
+        elif parts[0] == "answer":
+            answer(int(parts[1]), line.split(maxsplit=2)[2])
+        elif parts[0] == "late-answer":
+            n, delay, value = line.split(maxsplit=3)[1:]
+            threading.Thread(target=answer, args=(int(n), value, float(delay)), daemon=True).start()
         else:
             print("unknown command; see header of this script")
     except (IndexError, ValueError, KeyError) as e:

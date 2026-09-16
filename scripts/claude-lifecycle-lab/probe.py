@@ -11,6 +11,8 @@ Modes (argv[1]):
   stop-continue  record; if <run>/stop-continue-armed exists and this is the
                  first Stop for the prompt, consume the marker and ask Claude to
                  continue once.
+  question       record an AskUserQuestion call, wait for one exact human answer,
+                 then return the original questions plus that answer as updatedInput.
 
 Failure injection for the helper (file <run>/helper-mode, one word):
   crash   exit 1 with stderr before publishing anything
@@ -25,8 +27,8 @@ import json, os, sys, time, uuid
 MODE = sys.argv[1] if len(sys.argv) > 1 else "observe"
 RUN = os.environ.get("STEER_LAB_RUN") or (sys.argv[2] if len(sys.argv) > 2 else os.getcwd())
 HOME = os.path.expanduser("~")
-CONNECTION_TIMEOUT = 5.0
-HANDOFF_TIMEOUT = 30.0
+CONNECTION_TIMEOUT = float(os.environ.get("STEER_LAB_CONNECTION_TIMEOUT", "5"))
+HANDOFF_TIMEOUT = float(os.environ.get("STEER_LAB_HANDOFF_TIMEOUT", "30"))
 WAIT_BOUND = 31.0
 POLL = 0.02
 TRUNCATE = 400
@@ -97,7 +99,10 @@ if MODE == "stop-continue" and payload.get("hook_event_name") == "Stop":
                                                  "additionalContext": "Lab continuation: reply with exactly the word continued."}}))
     sys.exit(0)
 
-if MODE != "permission" or payload.get("hook_event_name") != "PermissionRequest":
+is_question = MODE == "question" and payload.get("hook_event_name") == "PreToolUse" \
+    and payload.get("tool_name") == "AskUserQuestion"
+is_permission = MODE == "permission" and payload.get("hook_event_name") == "PermissionRequest"
+if not is_question and not is_permission:
     sys.exit(0)
 
 helper_mode = ""
@@ -122,6 +127,7 @@ rid = str(uuid.uuid4()).upper()
 published = time.time()
 tool_input = payload.get("tool_input") or {}
 request = {
+    "kind": "question" if is_question else "permission",
     "request_id": rid,
     "session_id": session,
     "prompt_id": payload.get("prompt_id"),
@@ -136,6 +142,8 @@ request = {
     "expires_at": published + HANDOFF_TIMEOUT,
     "outcome": "pending",
 }
+if is_question:
+    request["tool_input"] = tool_input
 atomic_write(os.path.join(req_dir, rid + ".json"), sanitize(request))
 
 
@@ -146,6 +154,8 @@ def finish(outcome, extra=None):
     if extra:
         rec.update(extra)
     record(session, rec)
+    if outcome == "answered":
+        return
     if outcome in ("allow", "deny"):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest",
                                                  "decision": {"behavior": outcome}}}))
@@ -168,7 +178,7 @@ while time.monotonic() - start < CONNECTION_TIMEOUT:
         break
     time.sleep(POLL)
 if receipt is None:
-    finish("no_receipt_handoff")
+    finish("no_receipt_question_handoff" if is_question else "no_receipt_handoff")
 
 # Decision: the 30 s clock starts at the receipt, as in Steer's helper. A decision bound to this
 # request, decided after the receipt and before expiry, counts; anything else is no decision.
@@ -180,6 +190,26 @@ while time.monotonic() < hard:
     d = read_json(os.path.join(dec_dir, rid + ".json"))
     if d is not None:
         seen = d
+        if is_question:
+            answer = d.get("answer")
+            exact = d.get("session_id") == session and d.get("prompt_id") == request["prompt_id"] \
+                and d.get("tool_use_id") == request["tool_use_id"]
+            ok = d.get("request_id") == rid and exact and isinstance(answer, str) and answer.strip() \
+                and isinstance(d.get("decided_at"), (int, float)) \
+                and receipt["received_at"] <= d["decided_at"] <= time.time()
+            if not ok:
+                finish("malformed_or_mismatched_question_handoff", {"decision_record": d})
+            if time.monotonic() < expiry:
+                questions = tool_input.get("questions")
+                if not isinstance(questions, list) or len(questions) != 1 \
+                        or not isinstance(questions[0].get("question"), str):
+                    finish("unsupported_question_shape_handoff")
+                updated = dict(tool_input)
+                updated["answers"] = {questions[0]["question"]: answer.strip()}
+                finish("answered", {"decision_record": d, "receipt": receipt})
+                print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                    "permissionDecision": "allow", "updatedInput": updated}}))
+                sys.exit(0)
         ok = d.get("request_id") == rid and d.get("decision") in ("allow", "deny", "no_decision") \
             and isinstance(d.get("decided_at"), (int, float)) and receipt["received_at"] <= d["decided_at"] <= time.time()
         if ok and d["decision"] == "no_decision":
@@ -191,4 +221,5 @@ while time.monotonic() < hard:
     if time.monotonic() >= expiry:
         break
     time.sleep(POLL)
-finish("expired_handoff", {"decision_record": seen, "receipt": receipt})
+finish("expired_question_handoff" if is_question else "expired_handoff",
+       {"decision_record": seen, "receipt": receipt})
