@@ -41,4 +41,28 @@ Do not infer a pass from visible UI alone. Preserve the sanitized run until it h
 
 ## Results
 
-Pending live human checkpoints on Claude Code 2.1.273. Prior lifecycle evidence already establishes success cleanup and the lack of sufficient hook cleanup for native denial and an interrupted foreground Bash call; this ticket will confirm the remaining ordinary tool-failure case and decide the exact product rule together with the question results.
+Live checkpoints completed on Claude Code 2.1.273 and macOS 26.5 with isolated settings and disposable projects. Sanitized traces are in [`docs/evidence/claude-tool-question-lab-interactive.json`](evidence/claude-tool-question-lab-interactive.json). The prior [Claude lifecycle proof](claude-lifecycle-proof.md) supplies the matching success, native-denial, and running-tool-interruption cases.
+
+### Interactive question answers
+
+- Installed Claude accepted `PreToolUse` `permissionDecision: "allow"` with the original `questions` plus `answers` in `updatedInput` in an already-running interactive CLI. Matching `PostToolUse` repeated the same `session_id`, `prompt_id`, `tool_use_id`, questions, and answer.
+- A single option (`Red`), multi-select labels (`Development, Staging`), and per-question free text (`Ship after QA approval`) all reached Claude unchanged.
+- The helper accepted one immutable answer. A second conflicting write was refused and Claude kept the first answer. An answer written after helper expiry had no effect; Claude recorded the human's different native answer instead.
+- An injected helper exit and an injected hook timeout each supplied no answer. Claude's native question remained available and its human-selected `Blue` answer produced the normal matching post event.
+- An unrelated observer hook saw the same exact question call without interfering. Restarting the companion preserved the first receipt and answered only because the original exact helper invocation was still live; the expired-helper case proves a restart cannot revive it later.
+
+Therefore the Claude adapter may answer `AskUserQuestion` from Steer on 2.1.273 through a live `PreToolUse` helper keyed by session, prompt, tool-use, and fresh helper-request identity. It may return only the human's answer with the unchanged questions. Failure, timeout, mismatch, unsupported question shape, or loss of the live helper returns no answer and leaves Claude native. Lower Claude versions and managed policies that disable or restrict hooks remain unsupported until separately proved.
+
+### Tool-label cleanup
+
+- A successful tool clears its current label on matching `PostToolUse`; the prior lifecycle proof records this on Bash.
+- An ordinary tool failure clears its current label on matching `PostToolUseFailure`; the live Read failure carried the exact `session_id`, `prompt_id`, and `tool_use_id`, followed by `PostToolBatch` and `Stop`.
+- Native denial and interruption of an already-running foreground Bash call produced no sufficient post hook in the prior live proof. Their transcript result text was also identical, so the adapter must not infer which occurred.
+
+The exact presentation rule is: a `PreToolUse` label is current only while its exact call is unresolved and the live inventory still reports the session busy. Clear it on matching `PostToolUse` or `PostToolUseFailure`. If no matching post arrives, clear the specific label on a later prompt, stop/failure, session end, or a supported inventory observation that the session is no longer busy; fall back to the prompt or general waiting/idle state without classifying denial versus interruption. Never restore a tool label after Steer restarts. If neither hook nor inventory can establish freshness, the specific tool label is unavailable rather than asserted current.
+
+### Downstream decisions
+
+- **Agree Claude parity behavior and capability gaps:** direct single-choice, multi-select, and typed question answers are supported on the evidenced runtime; native fallback is mandatory. Tool labels are prospective only and deliberately lose specificity when cleanup is uncertain.
+- **Choose the shared adapter and recovery boundary:** keep question answering in the Claude hook adapter with exact live-call identity. Keep `agents --json` inventory separate and use it only to bound label freshness and session state. Persisted request metadata cannot recreate an answer channel after the helper expires.
+- **Agree reversible Claude setup and coexistence:** add the question hook through the same reversible composed settings path; preserve coexisting hooks and report hook policy restrictions instead of changing policy.

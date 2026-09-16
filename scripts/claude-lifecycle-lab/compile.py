@@ -24,11 +24,11 @@ SHORT = {
     "PermissionDenied": lambda p: f"{p.get('tool_name')} reason={str(p.get('denial_reason'))[:80]!r}",
     "PostToolBatch": lambda p: f"calls={[c.get('tool_use_id') for c in p.get('tool_calls', [])]} outputs={[(o.get('tool_use_id'), (o.get('error') or '')[:40]) for o in p.get('tool_outputs', [])]}",
     "Notification": lambda p: f"{p.get('notification_type')} {str(p.get('message'))[:60]!r}",
-    "Stop": lambda p: f"stop_hook_active={p.get('stop_hook_active')} last={str(p.get('last_assistant_message'))[:40]!r}",
+    "Stop": lambda p: f"stop_hook_active={p.get('stop_hook_active')}",
     "SessionEnd": lambda p: f"reason={p.get('reason')}",
     "SessionStart": lambda p: f"source={p.get('source')}",
     "SubagentStart": lambda p: f"agent_type={p.get('agent_type')}",
-    "SubagentStop": lambda p: f"agent_type={p.get('agent_type')} last={str(p.get('last_assistant_message'))[:40]!r}",
+    "SubagentStop": lambda p: f"agent_type={p.get('agent_type')}",
     "StopFailure": lambda p: f"{ {k: str(v)[:60] for k, v in p.items() if k not in ('session_id','transcript_path','cwd','hook_event_name','permission_mode','prompt_id')} }",
 }
 

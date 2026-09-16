@@ -1,0 +1,1175 @@
+{
+ "probe": "steer-claude-lifecycle-lab/1",
+ "runs": [
+  {
+   "correlation": {
+    "toolu_01PTZkx4MxhehKVRQZGUkhxi": [
+     "PreToolUse",
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": {
+      "answer": "Red",
+      "decided_at": 1789545588.392899,
+      "prompt_id": "0e02b3b9-5a17-49f9-b3d7-225d37c743ec",
+      "request_id": "A2B5E0C5-E27A-4D0E-9167-662F79AC1F45",
+      "session_id": "94c0f380-48e1-4c4c-b63e-2947d4917af1",
+      "tool_use_id": "toolu_01PTZkx4MxhehKVRQZGUkhxi"
+     },
+     "outcome": "answered",
+     "probe_note": "helper outcome",
+     "prompt_id": "0e02b3b9-5a17-49f9-b3d7-225d37c743ec",
+     "receipt": {
+      "expires_at": 1789545881.282186,
+      "received_at": 1789545581.39759,
+      "request_id": "A2B5E0C5-E27A-4D0E-9167-662F79AC1F45"
+     },
+     "received_at": 1789545588.426379,
+     "request_id": "A2B5E0C5-E27A-4D0E-9167-662F79AC1F45",
+     "seconds_since_publish": 7.144,
+     "tool_use_id": "toolu_01PTZkx4MxhehKVRQZGUkhxi"
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "question-coexist",
+    "session_id": "94c0f380-48e1-4c4c-b63e-2947d4917af1",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-tool-question/scripts/claude-lifecycle-lab/runs/question-coexist-20260916T075925Z/settings.json",
+    "started_utc": "20260916T075925Z",
+    "term_program": "ghostty"
+   },
+   "run": "question-coexist-20260916T075925Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use AskUserQuestion to ask exactly \"Which color do you choos'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "0e02b3b9-5a17-49f9-b3d7-225d37c743ec",
+     "t": 5.923,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "0e02b3b9-5a17-49f9-b3d7-225d37c743ec",
+     "t": 9.383,
+     "tool_use_id": "toolu_01PTZkx4MxhehKVRQZGUkhxi"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "0e02b3b9-5a17-49f9-b3d7-225d37c743ec",
+     "t": 9.387,
+     "tool_use_id": "toolu_01PTZkx4MxhehKVRQZGUkhxi"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "0e02b3b9-5a17-49f9-b3d7-225d37c743ec",
+     "t": 16.783,
+     "tool_use_id": "toolu_01PTZkx4MxhehKVRQZGUkhxi"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01PTZkx4MxhehKVRQZGUkhxi'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "0e02b3b9-5a17-49f9-b3d7-225d37c743ec",
+     "t": 17.112,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False",
+     "event": "Stop",
+     "prompt_id": "0e02b3b9-5a17-49f9-b3d7-225d37c743ec",
+     "t": 19.317,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "idle_prompt 'Claude is waiting for your input'",
+     "event": "Notification",
+     "prompt_id": "0e02b3b9-5a17-49f9-b3d7-225d37c743ec",
+     "t": 80.213,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "0e02b3b9-5a17-49f9-b3d7-225d37c743ec",
+     "t": 209.793,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01CnGCcgruRcYgtD1qXyC5Md": [
+     "PreToolUse",
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": {
+      "answer": "Ship after QA approval",
+      "decided_at": 1789545085.403695,
+      "prompt_id": "9f2ad979-16d5-48f7-9916-5c894935cc79",
+      "request_id": "18BE8E05-8ED7-4145-9C2F-EB99F5F9A6DF",
+      "session_id": "1bad7895-bca1-444a-9c04-cdcc0db7a5de",
+      "tool_use_id": "toolu_01CnGCcgruRcYgtD1qXyC5Md"
+     },
+     "outcome": "answered",
+     "probe_note": "helper outcome",
+     "prompt_id": "9f2ad979-16d5-48f7-9916-5c894935cc79",
+     "receipt": {
+      "expires_at": 1789545372.006948,
+      "received_at": 1789545072.130673,
+      "request_id": "18BE8E05-8ED7-4145-9C2F-EB99F5F9A6DF"
+     },
+     "received_at": 1789545085.418871,
+     "request_id": "18BE8E05-8ED7-4145-9C2F-EB99F5F9A6DF",
+     "seconds_since_publish": 13.412,
+     "tool_use_id": "toolu_01CnGCcgruRcYgtD1qXyC5Md"
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "question-free-text",
+    "session_id": "1bad7895-bca1-444a-9c04-cdcc0db7a5de",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-tool-question/scripts/claude-lifecycle-lab/runs/question-free-text-20260916T075051Z/settings.json",
+    "started_utc": "20260916T075051Z",
+    "term_program": "ghostty"
+   },
+   "run": "question-free-text-20260916T075051Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use AskUserQuestion to ask exactly \"What release note should'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "9f2ad979-16d5-48f7-9916-5c894935cc79",
+     "t": 10.214,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "9f2ad979-16d5-48f7-9916-5c894935cc79",
+     "t": 14.401,
+     "tool_use_id": "toolu_01CnGCcgruRcYgtD1qXyC5Md"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "9f2ad979-16d5-48f7-9916-5c894935cc79",
+     "t": 14.404,
+     "tool_use_id": "toolu_01CnGCcgruRcYgtD1qXyC5Md"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "9f2ad979-16d5-48f7-9916-5c894935cc79",
+     "t": 27.882,
+     "tool_use_id": "toolu_01CnGCcgruRcYgtD1qXyC5Md"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01CnGCcgruRcYgtD1qXyC5Md'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "9f2ad979-16d5-48f7-9916-5c894935cc79",
+     "t": 27.937,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False",
+     "event": "Stop",
+     "prompt_id": "9f2ad979-16d5-48f7-9916-5c894935cc79",
+     "t": 30.583,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a65d8198a01f1572c",
+     "detail": "agent_type=",
+     "event": "SubagentStop",
+     "prompt_id": "9f2ad979-16d5-48f7-9916-5c894935cc79",
+     "t": 32.686,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "9f2ad979-16d5-48f7-9916-5c894935cc79",
+     "t": 72.062,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01J1fSrVpD7yw2S2BTR5yLGB": [
+     "PreToolUse",
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "probe_note": "helper crash injected (exit 1, nothing published)",
+     "received_at": 1789545299.588769
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "question-helper-crash",
+    "session_id": "e9240e59-1ba5-4df5-a2fb-07bb70ab69b6",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-tool-question/scripts/claude-lifecycle-lab/runs/question-helper-crash-20260916T075451Z/settings.json",
+    "started_utc": "20260916T075451Z",
+    "term_program": "ghostty"
+   },
+   "run": "question-helper-crash-20260916T075451Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use AskUserQuestion to ask exactly \"Which color do you choos'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "35888a5c-d3af-4f62-89b1-510b83fb36ea",
+     "t": 1.076,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "35888a5c-d3af-4f62-89b1-510b83fb36ea",
+     "t": 3.279,
+     "tool_use_id": "toolu_01J1fSrVpD7yw2S2BTR5yLGB"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "35888a5c-d3af-4f62-89b1-510b83fb36ea",
+     "t": 3.28,
+     "tool_use_id": "toolu_01J1fSrVpD7yw2S2BTR5yLGB"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "35888a5c-d3af-4f62-89b1-510b83fb36ea",
+     "t": 5.993,
+     "tool_use_id": "toolu_01J1fSrVpD7yw2S2BTR5yLGB"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01J1fSrVpD7yw2S2BTR5yLGB'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "35888a5c-d3af-4f62-89b1-510b83fb36ea",
+     "t": 6.081,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False",
+     "event": "Stop",
+     "prompt_id": "35888a5c-d3af-4f62-89b1-510b83fb36ea",
+     "t": 7.272,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "abc4d4a1ba99a3b00",
+     "detail": "agent_type=",
+     "event": "SubagentStop",
+     "prompt_id": "35888a5c-d3af-4f62-89b1-510b83fb36ea",
+     "t": 8.961,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "idle_prompt 'Claude is waiting for your input'",
+     "event": "Notification",
+     "prompt_id": "35888a5c-d3af-4f62-89b1-510b83fb36ea",
+     "t": 67.352,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "35888a5c-d3af-4f62-89b1-510b83fb36ea",
+     "t": 71.666,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01ELLSJPbznGuLydJberxAZT": [
+     "PreToolUse",
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "probe_note": "helper hang injected after publish (sleeping 90 s)",
+     "received_at": 1789545381.443261,
+     "request_id": "C7A68F6E-FC17-482D-B348-DA8F0337C0F7"
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "question-helper-hang",
+    "session_id": "1228821a-04be-44a9-a5f4-f38d1e4dc352",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-tool-question/scripts/claude-lifecycle-lab/runs/question-helper-hang-20260916T075609Z/settings.json",
+    "started_utc": "20260916T075609Z",
+    "term_program": "ghostty"
+   },
+   "run": "question-helper-hang-20260916T075609Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use AskUserQuestion to ask exactly \"Which color do you choos'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "c4d325c8-a3b7-4692-9525-7d5c487ca722",
+     "t": 4.079,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "c4d325c8-a3b7-4692-9525-7d5c487ca722",
+     "t": 7.057,
+     "tool_use_id": "toolu_01ELLSJPbznGuLydJberxAZT"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "c4d325c8-a3b7-4692-9525-7d5c487ca722",
+     "t": 7.064,
+     "tool_use_id": "toolu_01ELLSJPbznGuLydJberxAZT"
+    },
+    {
+     "agent_id": null,
+     "detail": "permission_prompt 'Claude needs your permission'",
+     "event": "Notification",
+     "prompt_id": "c4d325c8-a3b7-4692-9525-7d5c487ca722",
+     "t": 33.072,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "c4d325c8-a3b7-4692-9525-7d5c487ca722",
+     "t": 79.102,
+     "tool_use_id": "toolu_01ELLSJPbznGuLydJberxAZT"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01ELLSJPbznGuLydJberxAZT'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "c4d325c8-a3b7-4692-9525-7d5c487ca722",
+     "t": 79.221,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False",
+     "event": "Stop",
+     "prompt_id": "c4d325c8-a3b7-4692-9525-7d5c487ca722",
+     "t": 81.109,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "idle_prompt 'Claude is waiting for your input'",
+     "event": "Notification",
+     "prompt_id": "c4d325c8-a3b7-4692-9525-7d5c487ca722",
+     "t": 141.395,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "c4d325c8-a3b7-4692-9525-7d5c487ca722",
+     "t": 183.763,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_0184zL6fzhsvNHNfPJZrMEct": [
+     "PreToolUse",
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": null,
+     "outcome": "expired_question_handoff",
+     "probe_note": "helper outcome",
+     "prompt_id": "d6663355-104d-49e4-b82f-922ec43a3b80",
+     "receipt": {
+      "expires_at": 1789545235.653566,
+      "received_at": 1789545220.764807,
+      "request_id": "A4BED474-1C8F-4AEB-A43E-B08F599DACA2"
+     },
+     "received_at": 1789545235.792995,
+     "request_id": "A4BED474-1C8F-4AEB-A43E-B08F599DACA2",
+     "seconds_since_publish": 15.139,
+     "tool_use_id": "toolu_0184zL6fzhsvNHNfPJZrMEct"
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "question-late",
+    "session_id": "4227c0c4-53fe-4c0a-83d6-16a068066fb5",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-tool-question/scripts/claude-lifecycle-lab/runs/question-late-20260916T075324Z/settings.json",
+    "started_utc": "20260916T075324Z",
+    "term_program": "ghostty"
+   },
+   "run": "question-late-20260916T075324Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use AskUserQuestion to ask exactly \"Which color do you choos'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "d6663355-104d-49e4-b82f-922ec43a3b80",
+     "t": 8.262,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "d6663355-104d-49e4-b82f-922ec43a3b80",
+     "t": 11.252,
+     "tool_use_id": "toolu_0184zL6fzhsvNHNfPJZrMEct"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "d6663355-104d-49e4-b82f-922ec43a3b80",
+     "t": 11.253,
+     "tool_use_id": "toolu_0184zL6fzhsvNHNfPJZrMEct"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "d6663355-104d-49e4-b82f-922ec43a3b80",
+     "t": 28.129,
+     "tool_use_id": "toolu_0184zL6fzhsvNHNfPJZrMEct"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_0184zL6fzhsvNHNfPJZrMEct'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "d6663355-104d-49e4-b82f-922ec43a3b80",
+     "t": 28.198,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False",
+     "event": "Stop",
+     "prompt_id": "d6663355-104d-49e4-b82f-922ec43a3b80",
+     "t": 29.346,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "ab2abe057740b24e8",
+     "detail": "agent_type=",
+     "event": "SubagentStop",
+     "prompt_id": "d6663355-104d-49e4-b82f-922ec43a3b80",
+     "t": 31.009,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "d6663355-104d-49e4-b82f-922ec43a3b80",
+     "t": 81.385,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01XTpCXcAC3EdRnZZ24VHKWo": [
+     "PreToolUse",
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": {
+      "answer": "Development, Staging",
+      "decided_at": 1789544924.6312242,
+      "prompt_id": "1a3812fc-979f-4159-8c10-0cb428fb6a03",
+      "request_id": "6DD6A7E2-5227-4858-BF51-381A85E027D9",
+      "session_id": "fa188aa4-ccac-448c-96b4-2d06b27b19e2",
+      "tool_use_id": "toolu_01XTpCXcAC3EdRnZZ24VHKWo"
+     },
+     "outcome": "answered",
+     "probe_note": "helper outcome",
+     "prompt_id": "1a3812fc-979f-4159-8c10-0cb428fb6a03",
+     "receipt": {
+      "expires_at": 1789544925.291975,
+      "received_at": 1789544805.441857,
+      "request_id": "6DD6A7E2-5227-4858-BF51-381A85E027D9"
+     },
+     "received_at": 1789544924.649195,
+     "request_id": "6DD6A7E2-5227-4858-BF51-381A85E027D9",
+     "seconds_since_publish": 119.357,
+     "tool_use_id": "toolu_01XTpCXcAC3EdRnZZ24VHKWo"
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "question-multi",
+    "session_id": "fa188aa4-ccac-448c-96b4-2d06b27b19e2",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-tool-question/scripts/claude-lifecycle-lab/runs/question-multi-20260916T074629Z/settings.json",
+    "started_utc": "20260916T074629Z",
+    "term_program": "ghostty"
+   },
+   "run": "question-multi-20260916T074629Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use AskUserQuestion to ask exactly \"Which environments shoul'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "1a3812fc-979f-4159-8c10-0cb428fb6a03",
+     "t": 7.506,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "1a3812fc-979f-4159-8c10-0cb428fb6a03",
+     "t": 10.029,
+     "tool_use_id": "toolu_01XTpCXcAC3EdRnZZ24VHKWo"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "1a3812fc-979f-4159-8c10-0cb428fb6a03",
+     "t": 10.03,
+     "tool_use_id": "toolu_01XTpCXcAC3EdRnZZ24VHKWo"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "1a3812fc-979f-4159-8c10-0cb428fb6a03",
+     "t": 129.559,
+     "tool_use_id": "toolu_01XTpCXcAC3EdRnZZ24VHKWo"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01XTpCXcAC3EdRnZZ24VHKWo'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "1a3812fc-979f-4159-8c10-0cb428fb6a03",
+     "t": 129.678,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False",
+     "event": "Stop",
+     "prompt_id": "1a3812fc-979f-4159-8c10-0cb428fb6a03",
+     "t": 131.376,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a3d943d30c19ed862",
+     "detail": "agent_type=",
+     "event": "SubagentStop",
+     "prompt_id": "1a3812fc-979f-4159-8c10-0cb428fb6a03",
+     "t": 133.23,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "idle_prompt 'Claude is waiting for your input'",
+     "event": "Notification",
+     "prompt_id": "1a3812fc-979f-4159-8c10-0cb428fb6a03",
+     "t": 192.372,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "1a3812fc-979f-4159-8c10-0cb428fb6a03",
+     "t": 254.559,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01Hi9QZVeuDAba2a1HAPKUoz": [
+     "PreToolUse",
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": {
+      "answer": "red",
+      "decided_at": 1789545147.715733,
+      "prompt_id": "fff5dc5c-50e5-4782-96fe-bfd42f0da21c",
+      "request_id": "89CA3FB1-21C1-4A1E-88F7-E1085F32417C",
+      "session_id": "87221977-a054-4667-a475-3375df4afaa4",
+      "tool_use_id": "toolu_01Hi9QZVeuDAba2a1HAPKUoz"
+     },
+     "outcome": "answered",
+     "probe_note": "helper outcome",
+     "prompt_id": "fff5dc5c-50e5-4782-96fe-bfd42f0da21c",
+     "receipt": {
+      "expires_at": 1789545445.8216372,
+      "received_at": 1789545145.87822,
+      "request_id": "89CA3FB1-21C1-4A1E-88F7-E1085F32417C"
+     },
+     "received_at": 1789545147.740999,
+     "request_id": "89CA3FB1-21C1-4A1E-88F7-E1085F32417C",
+     "seconds_since_publish": 1.919,
+     "tool_use_id": "toolu_01Hi9QZVeuDAba2a1HAPKUoz"
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "question-one-shot",
+    "session_id": "87221977-a054-4667-a475-3375df4afaa4",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-tool-question/scripts/claude-lifecycle-lab/runs/question-one-shot-20260916T075210Z/settings.json",
+    "started_utc": "20260916T075210Z",
+    "term_program": "ghostty"
+   },
+   "run": "question-one-shot-20260916T075210Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use AskUserQuestion to ask exactly \"Which color do you choos'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "fff5dc5c-50e5-4782-96fe-bfd42f0da21c",
+     "t": 5.735,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "fff5dc5c-50e5-4782-96fe-bfd42f0da21c",
+     "t": 9.217,
+     "tool_use_id": "toolu_01Hi9QZVeuDAba2a1HAPKUoz"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "fff5dc5c-50e5-4782-96fe-bfd42f0da21c",
+     "t": 9.222,
+     "tool_use_id": "toolu_01Hi9QZVeuDAba2a1HAPKUoz"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "fff5dc5c-50e5-4782-96fe-bfd42f0da21c",
+     "t": 11.361,
+     "tool_use_id": "toolu_01Hi9QZVeuDAba2a1HAPKUoz"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01Hi9QZVeuDAba2a1HAPKUoz'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "fff5dc5c-50e5-4782-96fe-bfd42f0da21c",
+     "t": 11.741,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False",
+     "event": "Stop",
+     "prompt_id": "fff5dc5c-50e5-4782-96fe-bfd42f0da21c",
+     "t": 13.762,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "fff5dc5c-50e5-4782-96fe-bfd42f0da21c",
+     "t": 64.901,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01WfMAEdAtCzYYgsFGjbGYni": [
+     "PreToolUse",
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": {
+      "answer": "Red",
+      "decided_at": 1789545835.57498,
+      "prompt_id": "30fd1580-50fe-4b9e-a0d7-a9eece6613c2",
+      "request_id": "FBE4FAF4-03BD-4598-9AAF-21F87CA2E083",
+      "session_id": "d505b660-a104-4441-a468-892a694cd881",
+      "tool_use_id": "toolu_01WfMAEdAtCzYYgsFGjbGYni"
+     },
+     "outcome": "answered",
+     "probe_note": "helper outcome",
+     "prompt_id": "30fd1580-50fe-4b9e-a0d7-a9eece6613c2",
+     "receipt": {
+      "expires_at": 1789546113.898272,
+      "received_at": 1789545814.07349,
+      "request_id": "FBE4FAF4-03BD-4598-9AAF-21F87CA2E083"
+     },
+     "received_at": 1789545835.66198,
+     "request_id": "FBE4FAF4-03BD-4598-9AAF-21F87CA2E083",
+     "seconds_since_publish": 21.764,
+     "tool_use_id": "toolu_01WfMAEdAtCzYYgsFGjbGYni"
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "question-restart",
+    "session_id": "d505b660-a104-4441-a468-892a694cd881",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-tool-question/scripts/claude-lifecycle-lab/runs/question-restart-20260916T080304Z/settings.json",
+    "started_utc": "20260916T080304Z",
+    "term_program": "ghostty"
+   },
+   "run": "question-restart-20260916T080304Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use AskUserQuestion to ask exactly \"Which color do you choos'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "30fd1580-50fe-4b9e-a0d7-a9eece6613c2",
+     "t": 11.387,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "30fd1580-50fe-4b9e-a0d7-a9eece6613c2",
+     "t": 16.187,
+     "tool_use_id": "toolu_01WfMAEdAtCzYYgsFGjbGYni"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "30fd1580-50fe-4b9e-a0d7-a9eece6613c2",
+     "t": 16.223,
+     "tool_use_id": "toolu_01WfMAEdAtCzYYgsFGjbGYni"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "30fd1580-50fe-4b9e-a0d7-a9eece6613c2",
+     "t": 39.286,
+     "tool_use_id": "toolu_01WfMAEdAtCzYYgsFGjbGYni"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01WfMAEdAtCzYYgsFGjbGYni'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "30fd1580-50fe-4b9e-a0d7-a9eece6613c2",
+     "t": 40.445,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False",
+     "event": "Stop",
+     "prompt_id": "30fd1580-50fe-4b9e-a0d7-a9eece6613c2",
+     "t": 45.505,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "idle_prompt 'Claude is waiting for your input'",
+     "event": "Notification",
+     "prompt_id": "30fd1580-50fe-4b9e-a0d7-a9eece6613c2",
+     "t": 106.03,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "30fd1580-50fe-4b9e-a0d7-a9eece6613c2",
+     "t": 115.411,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_013xiigm7HnvAq3KmxXnoS3F": [
+     "PreToolUse",
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": {
+      "answer": "Red",
+      "decided_at": 1789544345.0956101,
+      "prompt_id": "7893e39e-2272-4f6e-86a2-d412a0a446fb",
+      "request_id": "ADAA6D1C-3754-40D1-B091-BFE9A3E5681A",
+      "session_id": "904a2283-fb48-413e-b83f-d346a944d78d",
+      "tool_use_id": "toolu_013xiigm7HnvAq3KmxXnoS3F"
+     },
+     "outcome": "answered",
+     "probe_note": "helper outcome",
+     "prompt_id": "7893e39e-2272-4f6e-86a2-d412a0a446fb",
+     "receipt": {
+      "expires_at": 1789544370.2790651,
+      "received_at": 1789544340.2790651,
+      "request_id": "ADAA6D1C-3754-40D1-B091-BFE9A3E5681A"
+     },
+     "received_at": 1789544345.100018,
+     "request_id": "ADAA6D1C-3754-40D1-B091-BFE9A3E5681A",
+     "seconds_since_publish": 4.886,
+     "tool_use_id": "toolu_013xiigm7HnvAq3KmxXnoS3F"
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "question-single",
+    "session_id": "904a2283-fb48-413e-b83f-d346a944d78d",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-tool-question/scripts/claude-lifecycle-lab/runs/question-single-20260916T073844Z/settings.json",
+    "started_utc": "20260916T073844Z",
+    "term_program": "ghostty"
+   },
+   "run": "question-single-20260916T073844Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use AskUserQuestion to ask exactly \"Which color do you choos'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "7893e39e-2272-4f6e-86a2-d412a0a446fb",
+     "t": 7.294,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "7893e39e-2272-4f6e-86a2-d412a0a446fb",
+     "t": 10.494,
+     "tool_use_id": "toolu_013xiigm7HnvAq3KmxXnoS3F"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion ''",
+     "event": "PreToolUse",
+     "prompt_id": "7893e39e-2272-4f6e-86a2-d412a0a446fb",
+     "t": 10.495,
+     "tool_use_id": "toolu_013xiigm7HnvAq3KmxXnoS3F"
+    },
+    {
+     "agent_id": null,
+     "detail": "AskUserQuestion keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "7893e39e-2272-4f6e-86a2-d412a0a446fb",
+     "t": 15.462,
+     "tool_use_id": "toolu_013xiigm7HnvAq3KmxXnoS3F"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_013xiigm7HnvAq3KmxXnoS3F'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "7893e39e-2272-4f6e-86a2-d412a0a446fb",
+     "t": 15.556,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False",
+     "event": "Stop",
+     "prompt_id": "7893e39e-2272-4f6e-86a2-d412a0a446fb",
+     "t": 17.768,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a9652db931bb9ae80",
+     "detail": "agent_type=",
+     "event": "SubagentStop",
+     "prompt_id": "7893e39e-2272-4f6e-86a2-d412a0a446fb",
+     "t": 20.139,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "idle_prompt 'Claude is waiting for your input'",
+     "event": "Notification",
+     "prompt_id": "7893e39e-2272-4f6e-86a2-d412a0a446fb",
+     "t": 77.83,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "7893e39e-2272-4f6e-86a2-d412a0a446fb",
+     "t": 216.52,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_014RMi61K5Vb4Pdvv4JbuMJg": [
+     "PreToolUse",
+     "PostToolUseFailure"
+    ]
+   },
+   "helper": [],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "tool-cleanup",
+    "session_id": "10233485-d0c3-44f5-bf89-6014e436e95b",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-tool-question/scripts/claude-lifecycle-lab/runs/tool-cleanup-20260916T080514Z/settings.json",
+    "started_utc": "20260916T080514Z",
+    "term_program": "ghostty"
+   },
+   "run": "tool-cleanup-20260916T080514Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Use the Read tool to read the exact file /this-file-must-not'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "6dd43955-e783-4263-967b-09818c34ba10",
+     "t": 2.522,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Read ''",
+     "event": "PreToolUse",
+     "prompt_id": "6dd43955-e783-4263-967b-09818c34ba10",
+     "t": 5.334,
+     "tool_use_id": "toolu_014RMi61K5Vb4Pdvv4JbuMJg"
+    },
+    {
+     "agent_id": null,
+     "detail": "permission_prompt 'Claude needs your permission'",
+     "event": "Notification",
+     "prompt_id": "6dd43955-e783-4263-967b-09818c34ba10",
+     "t": 11.924,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Read error='File does not exist. Note: your current working directory is /private/tmp/steer-'",
+     "event": "PostToolUseFailure",
+     "prompt_id": "6dd43955-e783-4263-967b-09818c34ba10",
+     "t": 15.964,
+     "tool_use_id": "toolu_014RMi61K5Vb4Pdvv4JbuMJg"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_014RMi61K5Vb4Pdvv4JbuMJg'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "6dd43955-e783-4263-967b-09818c34ba10",
+     "t": 17.404,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False",
+     "event": "Stop",
+     "prompt_id": "6dd43955-e783-4263-967b-09818c34ba10",
+     "t": 18.577,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "idle_prompt 'Claude is waiting for your input'",
+     "event": "Notification",
+     "prompt_id": "6dd43955-e783-4263-967b-09818c34ba10",
+     "t": 80.635,
+     "tool_use_id": null
+    }
+   ]
+  }
+ ]
+}
