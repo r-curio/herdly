@@ -35,7 +35,7 @@ for ev in "${observers[@]}"; do
 done
 hooks+="\"PreToolUse\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE observe\",\"timeout\":10}]}"
 if [[ "$SCENARIO" == question-* ]]; then
-  hooks+=",{\"matcher\":\"AskUserQuestion\",\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE question\",\"timeout\":45}]}"
+  hooks+=",{\"matcher\":\"AskUserQuestion\",\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE question\",\"timeout\":135}]}"
 fi
 if [ "$SCENARIO" = "question-coexist" ]; then
   hooks+=",{\"matcher\":\"AskUserQuestion\",\"hooks\":[{\"type\":\"command\",\"command\":\"$LAB/other-hook.sh\",\"timeout\":10}]}"

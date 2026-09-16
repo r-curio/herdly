@@ -18,6 +18,7 @@ with tempfile.TemporaryDirectory() as run:
                 names = [name for name in os.listdir(requests)
                          if name.endswith(".json") and "." not in name[:-5]]
         request = json.load(open(os.path.join(requests, names[0])))
+        assert 29 <= request["expires_at"] - request["published_at"] <= 31, request
         rid = request["request_id"]
         now = time.time()
         for directory, body in (
@@ -55,6 +56,7 @@ with tempfile.TemporaryDirectory() as run:
                 names = [name for name in os.listdir(requests)
                          if name.endswith(".json") and "." not in name[:-5]]
         request = json.load(open(os.path.join(requests, names[0])))
+        assert 119 <= request["expires_at"] - request["published_at"] <= 121, request
         rid = request["request_id"]
         now = time.time()
         for directory, body in (

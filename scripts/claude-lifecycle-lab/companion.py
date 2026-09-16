@@ -90,14 +90,14 @@ def watcher():
             n = len(order)
             if AUTO != "none":
                 atomic(os.path.join(RCPT, rid + ".json"), {"request_id": rid, "received_at": time.time(),
-                                                            "expires_at": time.time() + 30})
+                                                            "expires_at": req.get("expires_at")})
             if req.get("kind") == "question":
                 questions = (req.get("tool_input") or {}).get("questions") or []
                 rendered = "\n".join(
                     f"    {q.get('question')} options={[o.get('label') for o in q.get('options', [])]} multi={q.get('multiSelect')}"
                     for q in questions
                 )
-                action = f"answer {n} <chosen label(s) or free text> | late-answer {n} 35 <answer>"
+                action = f"answer {n} <chosen label(s) or free text> | late-answer {n} <seconds> <answer>"
             else:
                 rendered = f"    command={req.get('command')!r}"
                 action = f"a {n} | d {n} | h {n} | late a {n} 45 | dup a {n} | wrong a {n}"

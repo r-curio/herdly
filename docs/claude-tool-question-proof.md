@@ -24,7 +24,7 @@ Use two unsplit Ghostty tabs. Start only the named checkpoint; compile it before
 | 2 | `question-multi`: ask exactly `Which environments should run?`, options Development, Staging, Production, multi-select. | Type `answer 1 <the labels you choose, comma-separated>`. | Multiple selected labels reach Claude unchanged. |
 | 3 | `question-free-text`: ask exactly `What release note should I use?`, options Short and Detailed, single-select. | Type `answer 1 <your own text that is neither option label>`. | Per-question free text reaches Claude unchanged. |
 | 4 | `question-one-shot`: repeat checkpoint 1. | Type the same `answer` command twice. | First answer wins; the second atomic write is refused; only one post event. |
-| 5 | `question-late`: repeat checkpoint 1. | Type `late-answer 1 35 <your choice>`, then answer the native question yourself when it remains available. | Helper expires at 30 seconds; late file changes nothing; native answer supplies the post event. |
+| 5 | `question-late`: repeat checkpoint 1 with `STEER_LAB_QUESTION_TIMEOUT=15`. | Type `late-answer 1 20 <your choice>`, then answer the native question yourself when it remains available. | Helper expires at 15 seconds; late file changes nothing; native answer supplies the post event. |
 | 6 | `question-helper-crash`: repeat checkpoint 1. | Answer only in Claude's native UI. | Hook exit 1 falls back without answering. |
 | 7 | `question-helper-hang`: repeat checkpoint 1. | Answer only in Claude's native UI after waiting for the hook timeout. | Hook timeout falls back without answering. |
 | 8 | `question-coexist`: repeat checkpoint 1. | Answer in the companion. | Unrelated observer hook sees the exact event and does not interfere. |

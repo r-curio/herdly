@@ -29,7 +29,7 @@ RUN = os.environ.get("STEER_LAB_RUN") or (sys.argv[2] if len(sys.argv) > 2 else 
 HOME = os.path.expanduser("~")
 CONNECTION_TIMEOUT = float(os.environ.get("STEER_LAB_CONNECTION_TIMEOUT", "5"))
 HANDOFF_TIMEOUT = float(os.environ.get("STEER_LAB_HANDOFF_TIMEOUT", "30"))
-WAIT_BOUND = 31.0
+QUESTION_TIMEOUT = float(os.environ.get("STEER_LAB_QUESTION_TIMEOUT", "120"))
 POLL = 0.02
 TRUNCATE = 400
 
@@ -104,6 +104,7 @@ is_question = MODE == "question" and payload.get("hook_event_name") == "PreToolU
 is_permission = MODE == "permission" and payload.get("hook_event_name") == "PermissionRequest"
 if not is_question and not is_permission:
     sys.exit(0)
+decision_timeout = QUESTION_TIMEOUT if is_question else HANDOFF_TIMEOUT
 
 helper_mode = ""
 try:
@@ -139,7 +140,7 @@ request = {
     "cwd": payload.get("cwd"),
     "upstream_timeout": payload.get("timeout"),
     "published_at": published,
-    "expires_at": published + HANDOFF_TIMEOUT,
+    "expires_at": published + decision_timeout,
     "outcome": "pending",
 }
 if is_question:
@@ -164,7 +165,7 @@ def finish(outcome, extra=None):
 
 if helper_mode == "hang":
     record(session, {"probe_note": "helper hang injected after publish (sleeping 90 s)", "request_id": rid, "received_at": time.time()})
-    time.sleep(90)
+    time.sleep(max(90, decision_timeout + 60))
     finish("hang-returned-without-decision")
 
 # Receipt: the companion must acknowledge this exact request within the connection timeout.
@@ -183,8 +184,8 @@ if receipt is None:
 # Decision: the 30 s clock starts at the receipt, as in Steer's helper. A decision bound to this
 # request, decided after the receipt and before expiry, counts; anything else is no decision.
 got = time.monotonic()
-expiry = got + HANDOFF_TIMEOUT
-hard = min(expiry + 1, got + WAIT_BOUND)
+expiry = got + decision_timeout
+hard = expiry + 1
 seen = None
 while time.monotonic() < hard:
     d = read_json(os.path.join(dec_dir, rid + ".json"))
