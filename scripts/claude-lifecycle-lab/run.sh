@@ -24,6 +24,8 @@ mkdir -p "$RUN/events" "$PROJECT"
 [ -d "$PROJECT/.git" ] || (cd "$PROJECT" && git init -q && echo "# disposable lab project ($SCENARIO)" > README.md && git add -A && git -c user.email=lab@example.invalid -c user.name=lab commit -qm init)
 SESSION="$(uuidgen | tr 'A-Z' 'a-z')"
 PROBE="python3 $LAB/probe.py"
+QUESTION_HOOK_TIMEOUT=315
+[ "$SCENARIO" = "question-helper-hang" ] && QUESTION_HOOK_TIMEOUT=20
 
 observers=(SessionStart UserPromptSubmit PostToolUse PostToolUseFailure PostToolBatch PermissionDenied Notification SubagentStart SubagentStop StopFailure SessionEnd PreCompact PostCompact Elicitation ElicitationResult)
 STOP_MODE="observe"; [ "$SCENARIO" = "stop-continue" ] && STOP_MODE="stop-continue" && touch "$RUN/stop-continue-armed"
@@ -35,7 +37,7 @@ for ev in "${observers[@]}"; do
 done
 hooks+="\"PreToolUse\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE observe\",\"timeout\":10}]}"
 if [[ "$SCENARIO" == question-* ]]; then
-  hooks+=",{\"matcher\":\"AskUserQuestion\",\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE question\",\"timeout\":315}]}"
+  hooks+=",{\"matcher\":\"AskUserQuestion\",\"hooks\":[{\"type\":\"command\",\"command\":\"$PROBE question\",\"timeout\":$QUESTION_HOOK_TIMEOUT}]}"
 fi
 if [ "$SCENARIO" = "question-coexist" ]; then
   hooks+=",{\"matcher\":\"AskUserQuestion\",\"hooks\":[{\"type\":\"command\",\"command\":\"$LAB/other-hook.sh\",\"timeout\":10}]}"
