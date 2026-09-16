@@ -258,6 +258,466 @@
   },
   {
    "correlation": {
+    "toolu_01JAgt6yFwjyDkrAURWfDbZq": [
+     "PreToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": {
+      "decided_at": 1789524208.439601,
+      "decision": "deny",
+      "request_id": "EE386BC7-E328-47D9-BEC1-4649A52F5BFB"
+     },
+     "outcome": "deny",
+     "probe_note": "helper outcome",
+     "prompt_id": "bf39052b-549d-4805-bf6c-da05c8ba0439",
+     "receipt": {
+      "expires_at": 1789524236.512058,
+      "received_at": 1789524206.512058,
+      "request_id": "EE386BC7-E328-47D9-BEC1-4649A52F5BFB"
+     },
+     "received_at": 1789524208.4621491,
+     "request_id": "EE386BC7-E328-47D9-BEC1-4649A52F5BFB",
+     "seconds_since_publish": 1.984,
+     "tool_use_id": null
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "approval-deny",
+    "session_id": "fa6066f7-c29e-4f00-a9c9-7a78e9a5eb84",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/approval-deny-20260916T020139Z/settings.json",
+    "started_utc": "20260916T020139Z",
+    "term_program": "ghostty"
+   },
+   "run": "approval-deny-20260916T020139Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Run the bash command touch DENY-1 and reply done.'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "bf39052b-549d-4805-bf6c-da05c8ba0439",
+     "t": 99.118,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch DENY-1'",
+     "event": "PreToolUse",
+     "prompt_id": "bf39052b-549d-4805-bf6c-da05c8ba0439",
+     "t": 102.698,
+     "tool_use_id": "toolu_01JAgt6yFwjyDkrAURWfDbZq"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch DENY-1' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "bf39052b-549d-4805-bf6c-da05c8ba0439",
+     "t": 102.802,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01JAgt6yFwjyDkrAURWfDbZq'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "bf39052b-549d-4805-bf6c-da05c8ba0439",
+     "t": 104.921,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='The command was blocked by a permission '",
+     "event": "Stop",
+     "prompt_id": "bf39052b-549d-4805-bf6c-da05c8ba0439",
+     "t": 107.237,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a6841530fe21d3ae3",
+     "detail": "agent_type= last='why was it denied'",
+     "event": "SubagentStop",
+     "prompt_id": "bf39052b-549d-4805-bf6c-da05c8ba0439",
+     "t": 109.284,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "10a06f72-b7ab-4dc6-aaca-b1267063737a",
+     "t": 122.452,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01Gtumqh9r3wLM6hGooBLmJX": [
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": {
+      "decided_at": 1789524255.462944,
+      "decision": "no_decision",
+      "request_id": "3BBD36F4-9DED-4D4B-B31D-FC556B6E67A1"
+     },
+     "outcome": "companion_handoff",
+     "probe_note": "helper outcome",
+     "prompt_id": "d34c7399-5a6e-4599-920a-780b036ccbc5",
+     "received_at": 1789524255.4704158,
+     "request_id": "3BBD36F4-9DED-4D4B-B31D-FC556B6E67A1",
+     "seconds_since_publish": 6.3,
+     "tool_use_id": null
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "approval-handoff",
+    "session_id": "055fe4b9-5b4f-4c53-ad16-97390fda0bbf",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/approval-handoff-20260916T020350Z/settings.json",
+    "started_utc": "20260916T020350Z",
+    "term_program": "ghostty"
+   },
+   "run": "approval-handoff-20260916T020350Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Run the bash command touch HANDOFF-1 and reply done.'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "d34c7399-5a6e-4599-920a-780b036ccbc5",
+     "t": 13.384,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch HANDOFF-1'",
+     "event": "PreToolUse",
+     "prompt_id": "d34c7399-5a6e-4599-920a-780b036ccbc5",
+     "t": 15.434,
+     "tool_use_id": "toolu_01Gtumqh9r3wLM6hGooBLmJX"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch HANDOFF-1' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "d34c7399-5a6e-4599-920a-780b036ccbc5",
+     "t": 15.505,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "permission_prompt 'Claude needs your permission'",
+     "event": "Notification",
+     "prompt_id": "d34c7399-5a6e-4599-920a-780b036ccbc5",
+     "t": 21.527,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "d34c7399-5a6e-4599-920a-780b036ccbc5",
+     "t": 135.444,
+     "tool_use_id": "toolu_01Gtumqh9r3wLM6hGooBLmJX"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01Gtumqh9r3wLM6hGooBLmJX'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "d34c7399-5a6e-4599-920a-780b036ccbc5",
+     "t": 135.541,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='Done.'",
+     "event": "Stop",
+     "prompt_id": "d34c7399-5a6e-4599-920a-780b036ccbc5",
+     "t": 136.511,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a94600ec0378f7514",
+     "detail": "agent_type= last='git status'",
+     "event": "SubagentStop",
+     "prompt_id": "d34c7399-5a6e-4599-920a-780b036ccbc5",
+     "t": 137.747,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "cc41484b-d915-4d3e-b76e-75bf2821f93a",
+     "t": 152.824,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01G72LWqBKiLfenW7Jhpby73": [
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "outcome": "no_receipt_handoff",
+     "probe_note": "helper outcome",
+     "prompt_id": "dffe914b-abe4-4bca-94ff-ac0fe9a089d4",
+     "received_at": 1789524655.1874392,
+     "request_id": "6E076807-0895-45A3-9E4E-76B9C907D49F",
+     "seconds_since_publish": 5.018,
+     "tool_use_id": null
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "approval-no-companion",
+    "session_id": "2b694cbd-c190-4237-8d33-d78ac2b9ee10",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/approval-no-companion-20260916T021038Z/settings.json",
+    "started_utc": "20260916T021038Z",
+    "term_program": "ghostty"
+   },
+   "run": "approval-no-companion-20260916T021038Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Run the bash command touch NOCOMP-1 and reply done.'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "dffe914b-abe4-4bca-94ff-ac0fe9a089d4",
+     "t": 5.822,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch NOCOMP-1'",
+     "event": "PreToolUse",
+     "prompt_id": "dffe914b-abe4-4bca-94ff-ac0fe9a089d4",
+     "t": 8.139,
+     "tool_use_id": "toolu_01G72LWqBKiLfenW7Jhpby73"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch NOCOMP-1' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "dffe914b-abe4-4bca-94ff-ac0fe9a089d4",
+     "t": 8.25,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "dffe914b-abe4-4bca-94ff-ac0fe9a089d4",
+     "t": 9.777,
+     "tool_use_id": "toolu_01G72LWqBKiLfenW7Jhpby73"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01G72LWqBKiLfenW7Jhpby73'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "dffe914b-abe4-4bca-94ff-ac0fe9a089d4",
+     "t": 9.866,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='Done.'",
+     "event": "Stop",
+     "prompt_id": "dffe914b-abe4-4bca-94ff-ac0fe9a089d4",
+     "t": 11.231,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "ab1b8180e606ef477",
+     "detail": "agent_type= last='git status'",
+     "event": "SubagentStop",
+     "prompt_id": "dffe914b-abe4-4bca-94ff-ac0fe9a089d4",
+     "t": 12.647,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "8176932d-e632-47d9-afc6-c3ee4bd8aba8",
+     "t": 15.189,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01HaygXtLC1CNfJaNJdzy3M6": [
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": null,
+     "outcome": "expired_handoff",
+     "probe_note": "helper outcome",
+     "prompt_id": "8a9eb29d-eb95-4444-b233-b5d625bdf16d",
+     "receipt": {
+      "expires_at": 1789524513.885709,
+      "received_at": 1789524483.885709,
+      "request_id": "CE5613D1-9320-4936-BEDB-431B410F96C1"
+     },
+     "received_at": 1789524513.9234822,
+     "request_id": "CE5613D1-9320-4936-BEDB-431B410F96C1",
+     "seconds_since_publish": 30.21,
+     "tool_use_id": null
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "approval-timeout",
+    "session_id": "76ed0df0-f890-4772-819a-fa295875e828",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/approval-timeout-20260916T020634Z/settings.json",
+    "started_utc": "20260916T020634Z",
+    "term_program": "ghostty"
+   },
+   "run": "approval-timeout-20260916T020634Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Run the bash command touch TIMEOUT-1 and reply done.'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "8a9eb29d-eb95-4444-b233-b5d625bdf16d",
+     "t": 78.665,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch TIMEOUT-1'",
+     "event": "PreToolUse",
+     "prompt_id": "8a9eb29d-eb95-4444-b233-b5d625bdf16d",
+     "t": 80.941,
+     "tool_use_id": "toolu_01HaygXtLC1CNfJaNJdzy3M6"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch TIMEOUT-1' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "8a9eb29d-eb95-4444-b233-b5d625bdf16d",
+     "t": 81.146,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "permission_prompt 'Claude needs your permission'",
+     "event": "Notification",
+     "prompt_id": "8a9eb29d-eb95-4444-b233-b5d625bdf16d",
+     "t": 87.156,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "8a9eb29d-eb95-4444-b233-b5d625bdf16d",
+     "t": 184.559,
+     "tool_use_id": "toolu_01HaygXtLC1CNfJaNJdzy3M6"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01HaygXtLC1CNfJaNJdzy3M6'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "8a9eb29d-eb95-4444-b233-b5d625bdf16d",
+     "t": 184.65,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='Done.'",
+     "event": "Stop",
+     "prompt_id": "8a9eb29d-eb95-4444-b233-b5d625bdf16d",
+     "t": 185.582,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a1c3b77d6048a5ea2",
+     "detail": "agent_type= last='git status'",
+     "event": "SubagentStop",
+     "prompt_id": "8a9eb29d-eb95-4444-b233-b5d625bdf16d",
+     "t": 186.864,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "4ee137a0-94c7-40bd-a53e-cd21610214ef",
+     "t": 225.88,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
     "toolu_01EhHuRkeYC4fFohuxeXjcsw": [
      "PreToolUse",
      "PostToolUse"

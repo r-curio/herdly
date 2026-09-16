@@ -73,3 +73,10 @@ Sanitized traces are compiled in [`docs/evidence/claude-lifecycle-lab-interactiv
 - With the corrected output, the human typed `a 3`; Claude validated the hook response, logged `permissionDecision: allow`, created `ALLOW-3`, and emitted the matching `PostToolUse`, `PostToolBatch` and `Stop`. The human gave no native decision.
 - `Notification(permission_prompt)` still fired about six seconds after `PermissionRequest`, before the companion allow returned at 10.4 seconds. Direct hook decisions therefore race the native prompt after Claude's notification delay; the adapter cannot assume the native prompt remains hidden for its full 30-second window.
 - In all three requests, `PermissionRequest` omitted `tool_use_id`; the adjacent `PreToolUse` and later result carried it.
+
+### Deny, explicit handoff, timeout and absent companion
+
+- A companion deny returned in 2.0 seconds, left `DENY-1` absent, then produced only `PostToolBatch` with the call id and empty outputs followed by `Stop`. Neither `PostToolUseFailure` nor `PermissionDenied` fired.
+- Explicit `h 1` returned no hook output in 6.3 seconds. Claude's native prompt remained, the human chose Yes, and `HANDOFF-1` was created with matching post-use, batch and stop events.
+- With receipt only, the helper expired after 30.2 seconds. Claude had already emitted `Notification(permission_prompt)` at six seconds; the human waited past helper expiry, then chose native Yes and created `TIMEOUT-1`.
+- With no companion, Claude exposed and accepted its native prompt while the helper was still inside its five-second receipt wait: `PostToolUse` arrived 1.5 seconds after `PermissionRequest`, then the helper recorded `no_receipt_handoff` at 5.0 seconds. `NOCOMP-1` was created. The native surface is therefore concurrent with the command hook, not something the helper's no-decision return reveals.
