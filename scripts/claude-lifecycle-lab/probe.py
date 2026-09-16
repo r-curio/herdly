@@ -29,7 +29,7 @@ RUN = os.environ.get("STEER_LAB_RUN") or (sys.argv[2] if len(sys.argv) > 2 else 
 HOME = os.path.expanduser("~")
 CONNECTION_TIMEOUT = float(os.environ.get("STEER_LAB_CONNECTION_TIMEOUT", "5"))
 HANDOFF_TIMEOUT = float(os.environ.get("STEER_LAB_HANDOFF_TIMEOUT", "30"))
-QUESTION_TIMEOUT = float(os.environ.get("STEER_LAB_QUESTION_TIMEOUT", "120"))
+QUESTION_TIMEOUT = float(os.environ.get("STEER_LAB_QUESTION_TIMEOUT", "300"))
 POLL = 0.02
 TRUNCATE = 400
 
