@@ -99,3 +99,15 @@ Sanitized traces are compiled in [`docs/evidence/claude-lifecycle-lab-interactiv
 
 - One `Stop` hook requested continuation. Claude emitted two `Stop` events for the same `prompt_id`: first `stop_hook_active: false` with `ok`, then `stop_hook_active: true` with `continued`. The first stop was not final.
 - A closed-port API endpoint produced the visible `Connection refused` retry UI (human screenshot at attempt 4/10); the debug log recorded 11 total attempts. After about three minutes, `StopFailure` fired for the original prompt with `error: server_error` and the full connection-refused message. No `Stop` fired. `/exit` then emitted `SessionEnd(reason: prompt_input_exit)` with a fresh prompt id.
+
+### Parallel, identical and coexisting requests
+
+- Claude did not run two Bash permission hooks concurrently. In one response it requested, allowed and executed `touch PAR-A`, then did the same for `touch PAR-B`; the final `PostToolBatch` listed both distinct call ids. Each helper invocation had a fresh request id, but neither PermissionRequest carried its call id.
+- Two identical `touch SAME-1` calls in one prompt had separate tool-call ids and separate helper request ids. A simultaneous second session used a different session id, prompt id, tool-call id and helper request id for the same command text. All three decisions reached only their own helper invocation.
+- In the coexistence run, the unrelated hook recorded the same PreToolUse and PermissionRequest while emitting no decision. The probe's allow still validated, `COEX-1` was created, and normal post-use, batch, stop and session-end events followed. Multiple hooks can observe the event; this run does not establish resolution rules for conflicting decisions.
+
+## Evidence boundary after live proof
+
+Established on Claude Code 2.1.273 in unsplit Ghostty 1.3.1 tabs: isolated hook loading, lifecycle and prompt identities, native questions, child-agent event separation, Stop continuation, API failure, explicit companion allow/deny, concurrent native permission UI, no-decision handoff, helper absence/crash/hang, late-decision isolation, native denial and running-tool interruption cleanup gaps, serialized multi-call permissions, identical commands across sessions, and coexistence with an observer hook.
+
+Still unsupported or unproven: sandbox network prompts, MCP elicitation forms and URL authentication, duplicate live instances of one resumed session id, compaction during approval, a reliable hook-only distinction between native rejection and interruption, and exact PermissionRequest-to-tool-call identity without ordered PreToolUse inference. These are evidence gaps, not accepted parity reductions.

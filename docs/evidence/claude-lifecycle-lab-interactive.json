@@ -1008,6 +1008,124 @@
   },
   {
    "correlation": {
+    "toolu_01ExzBQeKksLi2pYi1RyRhyU": [
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": {
+      "decided_at": 1789538756.29489,
+      "decision": "allow",
+      "request_id": "17C912A0-7BC1-485B-AFAA-2EE356BCBDD1"
+     },
+     "outcome": "allow",
+     "probe_note": "helper outcome",
+     "prompt_id": "d83fc40b-c5a0-4efc-86f5-0494738e8b32",
+     "receipt": {
+      "expires_at": 1789538780.284384,
+      "received_at": 1789538750.284384,
+      "request_id": "17C912A0-7BC1-485B-AFAA-2EE356BCBDD1"
+     },
+     "received_at": 1789538756.329659,
+     "request_id": "17C912A0-7BC1-485B-AFAA-2EE356BCBDD1",
+     "seconds_since_publish": 6.154,
+     "tool_use_id": null
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "coexist",
+    "session_id": "627c116e-c48d-419a-8a75-33d1c1b783aa",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/coexist-20260916T060526Z/settings.json",
+    "started_utc": "20260916T060526Z",
+    "term_program": "ghostty"
+   },
+   "run": "coexist-20260916T060526Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Run the bash command touch COEX-1 and reply done.'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "d83fc40b-c5a0-4efc-86f5-0494738e8b32",
+     "t": 12.496,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch COEX-1'",
+     "event": "PreToolUse",
+     "prompt_id": "d83fc40b-c5a0-4efc-86f5-0494738e8b32",
+     "t": 16.195,
+     "tool_use_id": "toolu_01ExzBQeKksLi2pYi1RyRhyU"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch COEX-1' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "d83fc40b-c5a0-4efc-86f5-0494738e8b32",
+     "t": 17.255,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "permission_prompt 'Claude needs your permission'",
+     "event": "Notification",
+     "prompt_id": "d83fc40b-c5a0-4efc-86f5-0494738e8b32",
+     "t": 23.322,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "d83fc40b-c5a0-4efc-86f5-0494738e8b32",
+     "t": 24.303,
+     "tool_use_id": "toolu_01ExzBQeKksLi2pYi1RyRhyU"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01ExzBQeKksLi2pYi1RyRhyU'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "d83fc40b-c5a0-4efc-86f5-0494738e8b32",
+     "t": 24.569,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='Done.'",
+     "event": "Stop",
+     "prompt_id": "d83fc40b-c5a0-4efc-86f5-0494738e8b32",
+     "t": 26.589,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "e175a0fb-2274-420c-a784-eb96c0b49583",
+     "t": 30.945,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
     "toolu_01JZbijy2913nCWr9ur2sdWE": [
      "PreToolUse",
      "PostToolUse"
@@ -1217,6 +1335,297 @@
      "event": "SessionEnd",
      "prompt_id": "4121a49f-8dc3-4b16-a16f-38dd1704be61",
      "t": 121.157,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01Ee9gKSAHHUJh1AjD4G7v3y": [
+     "PreToolUse",
+     "PostToolUse"
+    ],
+    "toolu_01JdeDfGF4PBtbguU3dTbuas": [
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": {
+      "decided_at": 1789538668.828598,
+      "decision": "allow",
+      "request_id": "0E4B73F9-E90D-461E-8A8E-580D9848EEE9"
+     },
+     "outcome": "allow",
+     "probe_note": "helper outcome",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "receipt": {
+      "expires_at": 1789538687.438103,
+      "received_at": 1789538657.438103,
+      "request_id": "0E4B73F9-E90D-461E-8A8E-580D9848EEE9"
+     },
+     "received_at": 1789538668.8392289,
+     "request_id": "0E4B73F9-E90D-461E-8A8E-580D9848EEE9",
+     "seconds_since_publish": 11.82,
+     "tool_use_id": null
+    },
+    {
+     "decision_record": {
+      "decided_at": 1789538673.711779,
+      "decision": "allow",
+      "request_id": "7AC3012A-27D0-4091-B369-E8DCBAC5BEC9"
+     },
+     "outcome": "allow",
+     "probe_note": "helper outcome",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "receipt": {
+      "expires_at": 1789538701.215014,
+      "received_at": 1789538671.215014,
+      "request_id": "7AC3012A-27D0-4091-B369-E8DCBAC5BEC9"
+     },
+     "received_at": 1789538673.735101,
+     "request_id": "7AC3012A-27D0-4091-B369-E8DCBAC5BEC9",
+     "seconds_since_publish": 2.682,
+     "tool_use_id": null
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "identical",
+    "session_id": "153c4eae-df80-4760-9660-653c7070a319",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/identical-20260916T060211Z/settings.json",
+    "started_utc": "20260916T060211Z",
+    "term_program": "ghostty"
+   },
+   "run": "identical-20260916T060211Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Run touch SAME-1, then run exactly the same command again as'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 56.458,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch SAME-1'",
+     "event": "PreToolUse",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 121.388,
+     "tool_use_id": "toolu_01JdeDfGF4PBtbguU3dTbuas"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch SAME-1' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 122.404,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "permission_prompt 'Claude needs your permission'",
+     "event": "Notification",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 127.482,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 134.57,
+     "tool_use_id": "toolu_01JdeDfGF4PBtbguU3dTbuas"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01JdeDfGF4PBtbguU3dTbuas'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 134.633,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch SAME-1'",
+     "event": "PreToolUse",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 136.51,
+     "tool_use_id": "toolu_01Ee9gKSAHHUJh1AjD4G7v3y"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch SAME-1' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 136.575,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 139.351,
+     "tool_use_id": "toolu_01Ee9gKSAHHUJh1AjD4G7v3y"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01Ee9gKSAHHUJh1AjD4G7v3y'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 139.41,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='Done.'",
+     "event": "Stop",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 140.811,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a994c26c9d5fbc450",
+     "detail": "agent_type= last='check git status'",
+     "event": "SubagentStop",
+     "prompt_id": "0c9401fe-da04-4682-96d0-15c9542b56c1",
+     "t": 142.76,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "0bbcf478-6734-4c60-afae-c202ebee4e8d",
+     "t": 187.292,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01HUGHiWqBd69AyHR8e9GbGv": [
+     "PreToolUse",
+     "PostToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "decision_record": {
+      "decided_at": 1789538704.6673632,
+      "decision": "allow",
+      "request_id": "D5598222-0735-41AC-8E60-3C00DC194F20"
+     },
+     "outcome": "allow",
+     "probe_note": "helper outcome",
+     "prompt_id": "2ecbd4bd-d7e1-46a6-9e8b-9028e07db245",
+     "receipt": {
+      "expires_at": 1789538732.6688771,
+      "received_at": 1789538702.6688771,
+      "request_id": "D5598222-0735-41AC-8E60-3C00DC194F20"
+     },
+     "received_at": 1789538704.693523,
+     "request_id": "D5598222-0735-41AC-8E60-3C00DC194F20",
+     "seconds_since_publish": 2.207,
+     "tool_use_id": null
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "identical",
+    "session_id": "ec83e569-c305-4457-b94b-0c80e2df2b54",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/identical-20260916T060441Z/settings.json",
+    "started_utc": "20260916T060441Z",
+    "term_program": "ghostty"
+   },
+   "run": "identical-20260916T060441Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'Run touch SAME-1 and reply done.'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "2ecbd4bd-d7e1-46a6-9e8b-9028e07db245",
+     "t": 9.95,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch SAME-1'",
+     "event": "PreToolUse",
+     "prompt_id": "2ecbd4bd-d7e1-46a6-9e8b-9028e07db245",
+     "t": 12.276,
+     "tool_use_id": "toolu_01HUGHiWqBd69AyHR8e9GbGv"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch SAME-1' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "2ecbd4bd-d7e1-46a6-9e8b-9028e07db245",
+     "t": 12.332,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "2ecbd4bd-d7e1-46a6-9e8b-9028e07db245",
+     "t": 14.726,
+     "tool_use_id": "toolu_01HUGHiWqBd69AyHR8e9GbGv"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_01HUGHiWqBd69AyHR8e9GbGv'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "2ecbd4bd-d7e1-46a6-9e8b-9028e07db245",
+     "t": 14.772,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='Done.'",
+     "event": "Stop",
+     "prompt_id": "2ecbd4bd-d7e1-46a6-9e8b-9028e07db245",
+     "t": 16.018,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "f4117568-ae7c-452b-b9d9-a56347b33a3c",
+     "t": 22.44,
      "tool_use_id": null
     }
    ]
@@ -1620,6 +2029,350 @@
      "event": "SessionEnd",
      "prompt_id": "321a2594-2ef2-425c-a06b-e0104603ffec",
      "t": 437.049,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_013M1bsaacoiXnkJChKxLmFm": [
+     "PreToolUse",
+     "PostToolUse"
+    ],
+    "toolu_016f5GBgUBgxe7fkrS34jzTy": [
+     "PreToolUse",
+     "PostToolUse"
+    ],
+    "toolu_01AnU442etAFh1d1y9Dpn6Xt": [
+     "PreToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "outcome": "no_receipt_handoff",
+     "probe_note": "helper outcome",
+     "prompt_id": "29ac82b3-c55a-4d76-a33d-cba11f48b7eb",
+     "received_at": 1789534094.747016,
+     "request_id": "AAA18F60-FE82-4797-B394-60B414218F60",
+     "seconds_since_publish": 5.015,
+     "tool_use_id": null
+    },
+    {
+     "decision_record": {
+      "decided_at": 1789534146.725882,
+      "decision": "allow",
+      "request_id": "374FF0D6-B6AE-4ED4-B2D3-E17B3FBA6C58"
+     },
+     "outcome": "allow",
+     "probe_note": "helper outcome",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "receipt": {
+      "expires_at": 1789534172.96831,
+      "received_at": 1789534142.96831,
+      "request_id": "374FF0D6-B6AE-4ED4-B2D3-E17B3FBA6C58"
+     },
+     "received_at": 1789534146.7557938,
+     "request_id": "374FF0D6-B6AE-4ED4-B2D3-E17B3FBA6C58",
+     "seconds_since_publish": 3.996,
+     "tool_use_id": null
+    },
+    {
+     "decision_record": {
+      "decided_at": 1789534156.942199,
+      "decision": "allow",
+      "request_id": "02FB759B-8AE1-4880-9350-656D0D771781"
+     },
+     "outcome": "allow",
+     "probe_note": "helper outcome",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "receipt": {
+      "expires_at": 1789534177.846868,
+      "received_at": 1789534147.846868,
+      "request_id": "02FB759B-8AE1-4880-9350-656D0D771781"
+     },
+     "received_at": 1789534156.961719,
+     "request_id": "02FB759B-8AE1-4880-9350-656D0D771781",
+     "seconds_since_publish": 9.21,
+     "tool_use_id": null
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "parallel",
+    "session_id": "169e1d78-fec8-4957-bc3f-c676a45bb92b",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/parallel-20260916T044749Z/settings.json",
+    "started_utc": "20260916T044749Z",
+    "term_program": "ghostty"
+   },
+   "run": "parallel-20260916T044749Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'In one single response, call Bash twice in parallel: touch P'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "29ac82b3-c55a-4d76-a33d-cba11f48b7eb",
+     "t": 10.529,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch PAR-A'",
+     "event": "PreToolUse",
+     "prompt_id": "29ac82b3-c55a-4d76-a33d-cba11f48b7eb",
+     "t": 15.012,
+     "tool_use_id": "toolu_01AnU442etAFh1d1y9Dpn6Xt"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch PAR-A' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "29ac82b3-c55a-4d76-a33d-cba11f48b7eb",
+     "t": 15.479,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'In one single response, call Bash twice in parallel: touch P'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 61.208,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch PAR-A'",
+     "event": "PreToolUse",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 66.762,
+     "tool_use_id": "toolu_013M1bsaacoiXnkJChKxLmFm"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch PAR-A' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 68.502,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 73.148,
+     "tool_use_id": "toolu_013M1bsaacoiXnkJChKxLmFm"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch PAR-B'",
+     "event": "PreToolUse",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 73.32,
+     "tool_use_id": "toolu_016f5GBgUBgxe7fkrS34jzTy"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch PAR-B' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 73.51,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "permission_prompt 'Claude needs your permission'",
+     "event": "Notification",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 79.47,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash keys=['duration_ms', 'effort', 'scratchpad_dir', 'tool_name', 'tool_response', 'tool_use_id']",
+     "event": "PostToolUse",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 83.014,
+     "tool_use_id": "toolu_016f5GBgUBgxe7fkrS34jzTy"
+    },
+    {
+     "agent_id": null,
+     "detail": "calls=['toolu_013M1bsaacoiXnkJChKxLmFm', 'toolu_016f5GBgUBgxe7fkrS34jzTy'] outputs=[]",
+     "event": "PostToolBatch",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 83.165,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "stop_hook_active=False last='done'",
+     "event": "Stop",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 86.019,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": "a88412b5105e79dd3",
+     "detail": "agent_type= last='git status'",
+     "event": "SubagentStop",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 89.097,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "idle_prompt 'Claude is waiting for your input'",
+     "event": "Notification",
+     "prompt_id": "a89c7a5d-6c00-4314-b476-8165f83be1d8",
+     "t": 147.15,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "cd1ae703-8468-4d29-9d4c-68d250fcff01",
+     "t": 154.523,
+     "tool_use_id": null
+    }
+   ]
+  },
+  {
+   "correlation": {
+    "toolu_01J15nwk3TfeGC62wFC95iiJ": [
+     "PreToolUse"
+    ],
+    "toolu_01WhsiYfUgBXsrDVhzQgBkp7": [
+     "PreToolUse"
+    ]
+   },
+   "helper": [
+    {
+     "outcome": "no_receipt_handoff",
+     "probe_note": "helper outcome",
+     "prompt_id": "976a5770-3e96-4ed6-9a70-313e3385f606",
+     "received_at": 1789533953.0338619,
+     "request_id": "D766CED8-EB66-470A-9C3C-4FD2B3F0870C",
+     "seconds_since_publish": 5.018,
+     "tool_use_id": null
+    },
+    {
+     "outcome": "no_receipt_handoff",
+     "probe_note": "helper outcome",
+     "prompt_id": "e080b63a-7d77-41a2-a250-c305a1103862",
+     "received_at": 1789533981.556989,
+     "request_id": "A2C06A58-DD9E-4018-99C2-B38CFE7003DD",
+     "seconds_since_publish": 5.021,
+     "tool_use_id": null
+    }
+   ],
+   "meta": {
+    "claude_version": "2.1.273 (Claude Code)",
+    "ghostty_resources": "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    "ghostty_version": "1.3.1",
+    "macos": "26.5",
+    "model": "sonnet",
+    "permission_mode": "default",
+    "scenario": "parallel~",
+    "session_id": "bcfede31-417d-4b41-b190-a48acc016c61",
+    "setting_sources": "",
+    "settings_file": "/private/tmp/steer-claude-lifecycle/scripts/claude-lifecycle-lab/runs/parallel~-20260916T044527Z/settings.json",
+    "started_utc": "20260916T044527Z",
+    "term_program": "ghostty"
+   },
+   "run": "parallel~-20260916T044527Z",
+   "trace": [
+    {
+     "agent_id": null,
+     "detail": "source=startup",
+     "event": "SessionStart",
+     "prompt_id": null,
+     "t": 0.0,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'In one single response, call Bash twice in parallel: touch P'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "976a5770-3e96-4ed6-9a70-313e3385f606",
+     "t": 13.592,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch PAR-A'",
+     "event": "PreToolUse",
+     "prompt_id": "976a5770-3e96-4ed6-9a70-313e3385f606",
+     "t": 17.44,
+     "tool_use_id": "toolu_01WhsiYfUgBXsrDVhzQgBkp7"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch PAR-A' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "976a5770-3e96-4ed6-9a70-313e3385f606",
+     "t": 17.507,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "permission_prompt 'Claude needs your permission'",
+     "event": "Notification",
+     "prompt_id": "976a5770-3e96-4ed6-9a70-313e3385f606",
+     "t": 23.529,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "'In one single response, call Bash twice in parallel: touch P'",
+     "event": "UserPromptSubmit",
+     "prompt_id": "e080b63a-7d77-41a2-a250-c305a1103862",
+     "t": 43.49,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch PAR-A'",
+     "event": "PreToolUse",
+     "prompt_id": "e080b63a-7d77-41a2-a250-c305a1103862",
+     "t": 45.956,
+     "tool_use_id": "toolu_01J15nwk3TfeGC62wFC95iiJ"
+    },
+    {
+     "agent_id": null,
+     "detail": "Bash 'touch PAR-A' timeout=None",
+     "event": "PermissionRequest",
+     "prompt_id": "e080b63a-7d77-41a2-a250-c305a1103862",
+     "t": 46.036,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "permission_prompt 'Claude needs your permission'",
+     "event": "Notification",
+     "prompt_id": "e080b63a-7d77-41a2-a250-c305a1103862",
+     "t": 52.156,
+     "tool_use_id": null
+    },
+    {
+     "agent_id": null,
+     "detail": "reason=prompt_input_exit",
+     "event": "SessionEnd",
+     "prompt_id": "1499fafa-2910-43d0-9f9b-78c2fe576508",
+     "t": 137.227,
      "tool_use_id": null
     }
    ]
