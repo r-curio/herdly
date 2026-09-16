@@ -80,7 +80,23 @@ Monitor only Codex sessions running locally on the user's Mac in the first versi
 
 For the initial Ghostty scope, support one Codex session in an unsplit tab and return to that exact tab in its window. Multiple panes within a tab are deferred. Split tabs are unsupported for exact targeting and must return unavailable rather than selecting an arbitrary pane. Stable Ghostty remains the baseline; a prerelease is not required merely to support splits. Session-to-tab binding still needs verification, including two tabs in the same project. See ADR 0004.
 
-The user's reference to ChatGPT desktop means its Codex work, not regular ChatGPT conversations. The installed /Applications/ChatGPT.app bundle identifies as com.openai.codex; scope remains Codex only. Available runtime integration points still require verification rather than assuming all desktop hosts expose the same capabilities.
+The user's reference to ChatGPT desktop means its Codex work, not regular ChatGPT conversations. The installed /Applications/ChatGPT.app bundle identifies as com.openai.codex; regular ChatGPT remains out of scope. Claude Code support is a separate CLI surface defined below. Available runtime integration points still require verification rather than assuming all hosts expose the same capabilities.
+
+## Agreed Claude Code parity behavior
+
+Claude Code joins Codex in one source-qualified attention queue for local sessions running directly in unsplit Ghostty tabs. Shared product language uses agent source, agent surface, agent session, and session name; actions remain explicit as Open in Codex or Open in Claude. Claude's supplied name is displayed without claiming whether the user or Claude created it, with the shortened session identifier as fallback.
+
+Show verified Claude lifecycle as Working, Waiting, Finished, Failed, or Stopped. A waiting session with no readable request still counts as needing attention and offers only Open in Claude; Steer never guesses whether it is a question or permission. Finished means verified success, Failed means verified failure, and Stopped means verified interruption. If a terminal result or current liveness cannot be classified, show Status unavailable instead of inventing an outcome. A stale or unavailable inventory preserves existing attention items, stops claiming stale work is active, and returns to a specific state only after valid evidence resumes.
+
+Known child or background work stays nested under its originating session and may keep that session working. It creates no independent outcome card without distinct user-facing completion evidence.
+
+Claude question choices, multi-select answers, and typed answers use only the exact live hook invocation proven for that request, with Claude's native question as the fallback. Direct approval initially covers Bash only. It uses the existing 30-second window: one verified decision wins, late or racing decisions are rejected, and handoff leaves only Open in Claude until exact resolution evidence arrives. Permission types beyond Bash are a separate decision effort and do not block the initial Claude release.
+
+Claude exposes no trustworthy read receipt for a particular outcome. Explicit dismissal or a verified visit to the exact Ghostty tab after the outcome acknowledges it; being in the tab when the outcome arrives does not. Fresh questions and outcomes sound and spotlight once. Discovery, repeated state updates, restored items, and restart recovery do not replay either signal.
+
+Keep the existing three-second spotlight. After five minutes, an unacknowledged Claude outcome moves below current work into Earlier while retaining its to-check count, Open, and Dismiss actions. This is presentation decay, not deletion, acknowledgment, or evidence that the result was read; preserve its age across restart.
+
+Exact return requires one live, unique, unsplit Claude terminal in Ghostty's current front window whose full session-ID title survives immediate revalidation. Cross-window, duplicate-resume, split, stale, or overwritten targets are unavailable. Claude completion cards cannot send a follow-up until a supported addressed transport exists. Show five-hour and seven-day usage only for independently valid, unexpired windows actually reported by the applicable Claude configuration root; missing or unproved values are unavailable, never zero or estimated.
 
 ## Agreed visibility behavior
 
