@@ -75,6 +75,17 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 | G9 | Answer an expired one in Codex. | The row clears on Codex's recorded answer, not before. | |
 | G10 | While a request is pending in the notch, force-quit Steer (`kill -9`). | Codex's native prompt appears within the helper's deadline; nothing approved. Relaunch: the request shows handed back with no buttons. | |
 
+### 3c.1 Claude exact-tab return (issue #84)
+
+| # | Step | Expected | Result |
+| --- | --- | --- | --- |
+| C1 | Enable Ghostty controls and start one configured Claude session with its full `Steer Claude <session-id>` title. | The Claude row offers **Open in Claude** only after the root inventory and exact unsplit target are verified. | |
+| C2 | Click **Open in Claude** while another app is frontmost and the target is in Ghostty's current window. | The exact Claude tab is selected; a queued outcome clears only after the post-selection window/tab/terminal check. | |
+| C3 | Repeat with a duplicate resume, missing or overwritten title, split tab, failed inventory, or target in another Ghostty window. | Return is unavailable; no terminal input or acknowledgment occurs. | |
+
+Automated C1–C3 coverage is source and test evidence only. Isolated live Claude/Ghostty return
+testing was deferred by the operator and remains blank until a human records it.
+
 ### 3d. Sound, mute, restart, displays
 
 | # | Step | Expected | Result |

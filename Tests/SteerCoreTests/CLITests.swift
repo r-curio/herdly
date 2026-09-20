@@ -104,6 +104,51 @@ import Testing
     #expect(GhosttyMatch.target(session: b, live: [a, b], snapshot: snapshot) == GhosttyTarget(window_id: "window-b", tab_id: "tab-b", terminal_id: "pane-b"))
 }
 
+@Test func ghosttyMatchesOnlyOneCanonicalLiveClaudeSessionInAnUnsplitTab() throws {
+    let id = "11111111-1111-4111-8111-1111111111ab"
+    let title = ClaudeSetupRequirements.titlePrefix + id
+    let data: [String: Any] = [
+        "status": "ok",
+        "front_window_id": "window-a",
+        "windows": [["id": "window-a", "tabs": [["id": "tab-a", "terminals": [["id": "pane-a", "name": title]]]]]],
+        "selected": ["window_id": "window-a", "tab_id": "tab-a", "terminal_id": "pane-a"]
+    ]
+    let snapshot = try JSONDecoder().decode(GhosttySnapshot.self, from: JSONSerialization.data(withJSONObject: data))
+
+    #expect(GhosttyMatch.claudeTitle(id) == title)
+    #expect(GhosttyMatch.target(claudeSessionID: id, live: [id], snapshot: snapshot)
+            == GhosttyTarget(window_id: "window-a", tab_id: "tab-a", terminal_id: "pane-a"))
+    #expect(GhosttyMatch.target(claudeSessionID: id, live: [id, id], snapshot: snapshot) == nil)
+    #expect(GhosttyMatch.target(claudeSessionID: id.uppercased(), live: [id], snapshot: snapshot) == nil)
+    #expect(GhosttyMatch.target(title: title + "-suffix", live: [id], snapshot: snapshot) == nil)
+
+    let split: [String: Any] = ["id": "tab-a", "terminals": [["id": "pane-a", "name": title], ["id": "pane-b", "name": "shell"]]]
+    let splitData: [String: Any] = ["status": "ok", "front_window_id": "window-a", "windows": [["id": "window-a", "tabs": [split]]], "selected": NSNull()]
+    let splitSnapshot = try JSONDecoder().decode(GhosttySnapshot.self, from: JSONSerialization.data(withJSONObject: splitData))
+    #expect(GhosttyMatch.target(claudeSessionID: id, live: [id], snapshot: splitSnapshot) == nil)
+
+    let overwrittenData: [String: Any] = ["status": "ok", "front_window_id": "window-a", "windows": [["id": "window-a", "tabs": [["id": "tab-a", "terminals": [["id": "pane-a", "name": "wayfinder-overwritten"]]]]]], "selected": NSNull()]
+    let overwritten = try JSONDecoder().decode(GhosttySnapshot.self, from: JSONSerialization.data(withJSONObject: overwrittenData))
+    #expect(GhosttyMatch.target(claudeSessionID: id, live: [id], snapshot: overwritten) == nil)
+}
+
+@Test func ghosttyClaudeReturnRejectsASecondWindowBeforeSelection() throws {
+    let id = "11111111-1111-4111-8111-1111111111ab"
+    let title = ClaudeSetupRequirements.titlePrefix + id
+    let data: [String: Any] = [
+        "status": "ok",
+        "front_window_id": "window-front",
+        "windows": [
+            ["id": "window-front", "tabs": [["id": "tab-front", "terminals": [["id": "pane-front", "name": "shell"]]]]],
+            ["id": "window-background", "tabs": [["id": "tab-a", "terminals": [["id": "pane-a", "name": title]]]]]
+        ],
+        "selected": ["window_id": "window-front", "tab_id": "tab-front", "terminal_id": "pane-front"]
+    ]
+    let snapshot = try JSONDecoder().decode(GhosttySnapshot.self, from: JSONSerialization.data(withJSONObject: data))
+    let target = try #require(GhosttyMatch.target(claudeSessionID: id, live: [id], snapshot: snapshot))
+    #expect(GhosttyMatch.isInCurrentWindow(target, snapshot: snapshot) == false)
+}
+
 
 @Test func completedRepliesGroupBySessionWithoutLosingTurnAcknowledgments() {
     let a = UUID(), b = UUID()
