@@ -4,6 +4,8 @@ public enum ClaudeQuestionTiming {
     public static let connectionTimeout: TimeInterval = 5
     public static let answerTimeout: TimeInterval = 10
     public static let pollInterval: TimeInterval = 0.02
+    public static let livenessTimeout: TimeInterval = 0.25
+    public static let deliveryAckTimeout: TimeInterval = 0.5
 }
 
 /// A live AskUserQuestion helper invocation. This is a transport record, not saved attention state.
@@ -58,6 +60,55 @@ public struct ClaudeQuestionReceipt: Codable, Equatable, Sendable {
         self.eventDirectory = eventDirectory
         self.receivedAt = receivedAt
         self.expiresAt = expiresAt
+    }
+}
+
+public struct ClaudeQuestionLiveness: Codable, Equatable, Sendable {
+    public let requestID: String
+    public let installationID: String
+    public let sourceScope: String
+    public let eventDirectory: String
+    public let sessionID: String
+    public let promptID: String
+    public let toolUseID: String
+    public let heartbeatAt: Double
+
+    public init(requestID: String, installationID: String, sourceScope: String, eventDirectory: String,
+                sessionID: String, promptID: String, toolUseID: String, heartbeatAt: Double) {
+        self.requestID = requestID
+        self.installationID = installationID
+        self.sourceScope = sourceScope
+        self.eventDirectory = eventDirectory
+        self.sessionID = sessionID
+        self.promptID = promptID
+        self.toolUseID = toolUseID
+        self.heartbeatAt = heartbeatAt
+    }
+}
+
+public struct ClaudeQuestionDelivery: Codable, Equatable, Sendable {
+    public let requestID: String
+    public let installationID: String
+    public let sourceScope: String
+    public let eventDirectory: String
+    public let sessionID: String
+    public let promptID: String
+    public let toolUseID: String
+    public let answerDecidedAt: Double
+    public let deliveredAt: Double
+
+    public init(requestID: String, installationID: String, sourceScope: String, eventDirectory: String,
+                sessionID: String, promptID: String, toolUseID: String, answerDecidedAt: Double,
+                deliveredAt: Double) {
+        self.requestID = requestID
+        self.installationID = installationID
+        self.sourceScope = sourceScope
+        self.eventDirectory = eventDirectory
+        self.sessionID = sessionID
+        self.promptID = promptID
+        self.toolUseID = toolUseID
+        self.answerDecidedAt = answerDecidedAt
+        self.deliveredAt = deliveredAt
     }
 }
 
@@ -125,6 +176,14 @@ public enum ClaudeQuestionStore {
         rendezvousDirectory(in: directory).appendingPathComponent(id + ".question-answer")
     }
 
+    public static func livenessURL(in directory: URL, id: String) -> URL {
+        rendezvousDirectory(in: directory).appendingPathComponent(id + ".question-live")
+    }
+
+    public static func deliveryURL(in directory: URL, id: String) -> URL {
+        rendezvousDirectory(in: directory).appendingPathComponent(id + ".question-delivery")
+    }
+
     @discardableResult
     public static func publish(_ request: ClaudeQuestionRequest, in directory: URL) -> Bool {
         guard validID(request.requestID) else { return false }
@@ -143,6 +202,21 @@ public enum ClaudeQuestionStore {
         return write(try? JSONEncoder().encode(answer), to: answerURL(in: directory, id: answer.requestID))
     }
 
+    /// The helper replaces this marker while it is waiting for the user's answer. Its exact
+    /// identity and freshness let the app fail closed when the helper has exited.
+    @discardableResult
+    public static func publish(_ liveness: ClaudeQuestionLiveness, in directory: URL) -> Bool {
+        guard validID(liveness.requestID) else { return false }
+        return replace(try? JSONEncoder().encode(liveness), to: livenessURL(in: directory, id: liveness.requestID))
+    }
+
+    /// This is written by the helper only after it has emitted Claude's response.
+    @discardableResult
+    public static func publish(_ delivery: ClaudeQuestionDelivery, in directory: URL) -> Bool {
+        guard validID(delivery.requestID) else { return false }
+        return write(try? JSONEncoder().encode(delivery), to: deliveryURL(in: directory, id: delivery.requestID))
+    }
+
     public static func request(for id: String, in directory: URL) -> ClaudeQuestionRequest? {
         guard validID(id) else { return nil }
         return decode(requestURL(in: directory, id: id), as: ClaudeQuestionRequest.self)
@@ -156,6 +230,26 @@ public enum ClaudeQuestionStore {
     public static func answer(for id: String, in directory: URL) -> ClaudeQuestionAnswer? {
         guard validID(id) else { return nil }
         return decode(answerURL(in: directory, id: id), as: ClaudeQuestionAnswer.self)
+    }
+
+    public static func liveness(for id: String, in directory: URL) -> ClaudeQuestionLiveness? {
+        guard validID(id) else { return nil }
+        return decode(livenessURL(in: directory, id: id), as: ClaudeQuestionLiveness.self)
+    }
+
+    public static func delivery(for id: String, in directory: URL) -> ClaudeQuestionDelivery? {
+        guard validID(id) else { return nil }
+        return decode(deliveryURL(in: directory, id: id), as: ClaudeQuestionDelivery.self)
+    }
+
+    public static func removeLiveness(for id: String, in directory: URL) {
+        guard validID(id) else { return }
+        try? FileManager.default.removeItem(at: livenessURL(in: directory, id: id))
+    }
+
+    public static func removeAnswer(for id: String, in directory: URL) {
+        guard validID(id) else { return }
+        try? FileManager.default.removeItem(at: answerURL(in: directory, id: id))
     }
 
     /// Reads only fresh, bounded request records for the selected installation.
@@ -211,7 +305,8 @@ public enum ClaudeQuestionStore {
     private static func removeTriplet(for id: String, in directory: URL) {
         let manager = FileManager.default
         for url in [requestURL(in: directory, id: id), receiptURL(in: directory, id: id),
-                    answerURL(in: directory, id: id)] {
+                    answerURL(in: directory, id: id), livenessURL(in: directory, id: id),
+                    deliveryURL(in: directory, id: id)] {
             try? manager.removeItem(at: url)
         }
     }
@@ -240,6 +335,25 @@ public enum ClaudeQuestionStore {
             return false
         }
     }
+
+    private static func replace(_ data: Data?, to destination: URL) -> Bool {
+        guard let data,
+              (try? FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
+                                                        withIntermediateDirectories: true)) != nil else { return false }
+        let temporary = destination.deletingLastPathComponent().appendingPathComponent(".steer-" + UUID().uuidString)
+        do {
+            try data.write(to: temporary, options: .atomic)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+            } else {
+                try FileManager.default.moveItem(at: temporary, to: destination)
+            }
+            return true
+        } catch {
+            try? FileManager.default.removeItem(at: temporary)
+            return false
+        }
+    }
 }
 
 /// The helper waits for an app receipt and then accepts one exact answer. Any uncertainty falls
@@ -248,9 +362,19 @@ public enum ClaudeQuestionHelper {
     public static func awaitAnswer(for request: ClaudeQuestionRequest, in directory: URL,
                                    connectionTimeout: TimeInterval = ClaudeQuestionTiming.connectionTimeout,
                                    answerTimeout: TimeInterval = ClaudeQuestionTiming.answerTimeout) -> ClaudeQuestionAnswer? {
+        func refreshLiveness() -> Bool {
+            ClaudeQuestionStore.publish(ClaudeQuestionLiveness(
+                requestID: request.requestID, installationID: request.installationID,
+                sourceScope: request.sourceScope, eventDirectory: request.eventDirectory,
+                sessionID: request.sessionID, promptID: request.promptID,
+                toolUseID: request.toolUseID, heartbeatAt: Date().timeIntervalSince1970), in: directory)
+        }
+
+        guard refreshLiveness() else { return nil }
         let connectionDeadline = ProcessInfo.processInfo.systemUptime + connectionTimeout
         var receipt: ClaudeQuestionReceipt?
         repeat {
+            guard refreshLiveness() else { return nil }
             if let candidate = ClaudeQuestionStore.receipt(for: request.requestID, in: directory),
                candidate.requestID == request.requestID,
                candidate.installationID == request.installationID,
@@ -273,6 +397,7 @@ public enum ClaudeQuestionHelper {
         let deadline = min(ProcessInfo.processInfo.systemUptime + answerTimeout,
                            ProcessInfo.processInfo.systemUptime + max(0, receipt.expiresAt - Date().timeIntervalSince1970))
         while ProcessInfo.processInfo.systemUptime < deadline {
+            guard refreshLiveness() else { return nil }
             if let answer = ClaudeQuestionStore.answer(for: request.requestID, in: directory),
                answer.requestID == request.requestID,
                answer.installationID == request.installationID,
@@ -292,6 +417,34 @@ public enum ClaudeQuestionHelper {
             Thread.sleep(forTimeInterval: ClaudeQuestionTiming.pollInterval)
         }
         return nil
+    }
+
+    /// Waits for the helper's one-shot acknowledgment after it has emitted the hook response.
+    public static func awaitDelivery(for request: ClaudeQuestionRequest, answer: ClaudeQuestionAnswer,
+                                     in directory: URL,
+                                     timeout: TimeInterval = ClaudeQuestionTiming.deliveryAckTimeout) -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            let now = Date().timeIntervalSince1970
+            if let delivery = ClaudeQuestionStore.delivery(for: request.requestID, in: directory),
+               delivery.requestID == request.requestID,
+               delivery.installationID == request.installationID,
+               delivery.sourceScope == request.sourceScope,
+               delivery.eventDirectory == request.eventDirectory,
+               delivery.eventDirectory == directory.standardizedFileURL.path,
+               delivery.sessionID == request.sessionID,
+               delivery.promptID == request.promptID,
+               delivery.toolUseID == request.toolUseID,
+               delivery.answerDecidedAt == answer.decidedAt,
+               delivery.deliveredAt.isFinite,
+               delivery.deliveredAt >= answer.decidedAt,
+               delivery.deliveredAt <= now,
+               delivery.deliveredAt <= request.expiresAt {
+                return true
+            }
+            Thread.sleep(forTimeInterval: ClaudeQuestionTiming.pollInterval)
+        }
+        return false
     }
 }
 
