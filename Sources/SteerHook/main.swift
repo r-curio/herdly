@@ -37,7 +37,8 @@ func writeEvent(_ object: [String: Any], to directory: URL, installationID: Stri
     }
 }
 
-func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID: String) -> Bool {
+func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID: String,
+                      helperRequestID: String? = nil) -> Bool {
     guard let event = boundedClaudeString(object["hook_event_name"], limit: 256),
           let session = boundedClaudeString(object["session_id"], limit: 256),
           boundedClaudeString(installationID, limit: 256) != nil else { return false }
@@ -49,6 +50,9 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
     ]
     if event == "SessionStart", let source = boundedClaudeString(object["source"], limit: 256) {
         record["session_start_source"] = source
+    }
+    if let helperRequestID = boundedClaudeString(helperRequestID, limit: 256) {
+        record["helper_request_id"] = helperRequestID
     }
     for key in ["prompt_id", "prompt", "tool_name", "tool_use_id"] {
         let limit = key == "prompt" ? QuestionPrompt.maximumQuestion : 256
@@ -87,10 +91,23 @@ private func boundedClaudeToolInput(_ input: [String: Any]) -> [String: Any] {
     for key in scalarKeys {
         if let value = boundedClaudeString(input[key], allowNewline: true) { result[key] = value }
     }
-    if let questions = input["questions"] as? [[String: Any]], questions.count <= 8 {
-        // Keep only the count and shape needed to identify a pending call. Question copy, labels,
-        // and option descriptions remain in Claude's native UI until a later decision slice.
-        result["questions"] = questions.map { _ in [String: Any]() }
+    if let questions = input["questions"] as? [[String: Any]], questions.count <= QuestionPrompt.maximumQuestions {
+        let kept = questions.compactMap { question -> [String: Any]? in
+            guard let text = boundedClaudeString(question["question"], limit: QuestionPrompt.maximumQuestion) else { return nil }
+            var value: [String: Any] = ["question": text]
+            if let header = boundedClaudeString(question["header"], limit: QuestionPrompt.maximumHeader) { value["header"] = header }
+            if let multiSelect = question["multiSelect"] as? Bool { value["multiSelect"] = multiSelect }
+            if let isOther = question["isOther"] as? Bool { value["isOther"] = isOther }
+            if let options = question["options"] as? [[String: Any]], options.count <= QuestionPrompt.maximumOptions {
+                let labels = options.compactMap { boundedClaudeString($0["label"], limit: QuestionPrompt.maximumLabel) }
+                guard labels.count == options.count else { return nil }
+                value["options"] = labels.map { ["label": $0] }
+            } else if question["options"] != nil {
+                return nil
+            }
+            return value
+        }
+        if kept.count == questions.count { result["questions"] = kept }
     }
     if let ids = input["tool_use_ids"] as? [String], ids.count <= 64 {
         let kept = ids.compactMap { boundedClaudeString($0, limit: 256) }
@@ -172,7 +189,31 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
     let directory = URL(fileURLWithPath: arguments[index + 1], isDirectory: true)
     let installationID = arguments[installationIndex + 1]
     let input = (try? FileHandle.standardInput.read(upToCount: 64 * 1024)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-    guard let object = input, writeClaudeEvent(object, to: directory, installationID: installationID) else { exit(0) }
+    guard let object = input else { exit(0) }
+    let isQuestion = arguments.contains("--question-helper") && object["hook_event_name"] as? String == "PreToolUse"
+        && object["tool_name"] as? String == "AskUserQuestion"
+    let requestID = isQuestion ? UUID().uuidString : nil
+    guard writeClaudeEvent(object, to: directory, installationID: installationID, helperRequestID: requestID) else { exit(0) }
+    if isQuestion,
+       let session = boundedClaudeString(object["session_id"], limit: 256),
+       let promptID = boundedClaudeString(object["prompt_id"], limit: 256),
+       let toolUseID = boundedClaudeString(object["tool_use_id"], limit: 256),
+       let toolInput = object["tool_input"] as? [String: Any],
+       let parsed = QuestionPrompt.parseCall(toolInput: toolInput), parsed.count == 1,
+       let requestID {
+        let publishedAt = Date().timeIntervalSince1970
+        let question = ClaudeQuestionRequest(requestID: requestID, installationID: installationID,
+                                             sourceScope: directory.standardizedFileURL.path,
+                                             sessionID: session, promptID: promptID, toolUseID: toolUseID,
+                                             publishedAt: publishedAt,
+                                             expiresAt: publishedAt + ClaudeQuestionTiming.answerTimeout,
+                                             prompts: parsed.prompts)
+        if ClaudeQuestionStore.publish(question, in: directory),
+           let answer = ClaudeQuestionHelper.awaitAnswer(for: question, in: directory),
+           let output = ClaudeQuestionAnswerPolicy.hookOutput(toolInput: toolInput, request: question, answer: answer) {
+            FileHandle.standardOutput.write(output)
+        }
+    }
     if arguments.contains("--terminal-title"),
        let event = object["hook_event_name"] as? String,
        event == "SessionStart" || event == "SessionEnd",

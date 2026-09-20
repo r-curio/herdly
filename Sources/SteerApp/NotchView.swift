@@ -296,6 +296,8 @@ struct Notch: View {
     @State private var openDisclosures: Set<String> = []
     /// Typed answers being composed, by call id and question index; sent only on Return or Send.
     @State private var drafts: [String: String] = [:]
+    /// Multi-select labels are kept in the view until the user presses Send.
+    @State private var claudeSelections: [String: Set<Int>] = [:]
 
     private func draft(_ key: String) -> Binding<String> {
         Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 })
@@ -304,6 +306,17 @@ struct Notch: View {
     private func disclosure(_ key: String) -> Binding<Bool> {
         Binding(get: { openDisclosures.contains(key) },
                 set: { open in if open { openDisclosures.insert(key) } else { openDisclosures.remove(key) } })
+    }
+
+    private func claudeSelectionKey(_ question: AgentQuestion, _ index: Int) -> String {
+        "(question.identity.session.sourceScope):(question.identity.call):(index)"
+    }
+
+    private func toggleClaudeSelection(_ question: AgentQuestion, index: Int, option: Int) {
+        let key = claudeSelectionKey(question, index)
+        var selected = claudeSelections[key] ?? []
+        if !selected.insert(option).inserted { selected.remove(option) }
+        claudeSelections[key] = selected
     }
 
     private var sessionNames: [AgentSessionIdentity: String] {
@@ -368,12 +381,12 @@ struct Notch: View {
 
     @ViewBuilder
     private func agentQuestionBody(_ question: AgentQuestion, subject: String) -> some View {
-        if let legacy = model.codexQuestion(for: question) {
+        if question.identity.session.source == .claude {
+            claudeQuestionBody(question, subject: subject)
+        } else if let legacy = model.codexQuestion(for: question) {
             questionBody(legacy, subject: subject)
         } else if question.prompts.isEmpty {
-            Text(question.identity.session.source == .claude
-                 ? "Claude is waiting for a question response; answer it in Claude."
-                 : "Codex asked a question Steer could not read; answer it in Codex.")
+            Text("Codex asked a question Steer could not read; answer it in Codex.")
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
         } else {
             ForEach(Array(question.prompts.enumerated()), id: \.offset) { index, prompt in
@@ -397,6 +410,70 @@ struct Notch: View {
                                 Text("\(option + 1)").foregroundStyle(NotchStyle.dim).frame(width: 14, alignment: .trailing)
                                 Text(label).foregroundStyle(NotchStyle.text)
                             }.font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func claudeQuestionBody(_ question: AgentQuestion, subject: String) -> some View {
+        let controls = model.canAnswerAgentQuestion(question)
+        if question.prompts.isEmpty {
+            Text("Claude is waiting for a question response; answer it in Claude.")
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+        } else {
+            ForEach(Array(question.prompts.enumerated()), id: \.offset) { index, prompt in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        if let header = prompt.header { Text(header).font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink) }
+                        if question.prompts.count > 1 { Text("\(index + 1) of \(question.prompts.count)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim) }
+                    }
+                    if let text = prompt.question {
+                        Text(text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(Array(prompt.options.enumerated()), id: \.offset) { option, label in
+                        if controls && prompt.multiSelect {
+                            let selected = claudeSelections[claudeSelectionKey(question, index)]?.contains(option) == true
+                            OptionButton(number: option + 1, label: label,
+                                         tone: NotchStyle.spriteColor(spriteColor(for: question.identity.session)),
+                                         selected: selected) {
+                                toggleClaudeSelection(question, index: index, option: option)
+                            }
+                            .accessibilityLabel("Select \(option + 1): \(label), for \(subject)")
+                        } else if controls {
+                            OptionButton(number: option + 1, label: label,
+                                         tone: NotchStyle.spriteColor(spriteColor(for: question.identity.session))) {
+                                model.answerClaudeQuestion(question, kind: .option, answer: label)
+                            }
+                            .accessibilityLabel("Answer \(option + 1): \(label), for \(subject)")
+                        } else {
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("\(option + 1)").foregroundStyle(NotchStyle.dim).frame(width: 14, alignment: .trailing)
+                                Text(label).foregroundStyle(NotchStyle.text)
+                            }.font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if controls && prompt.multiSelect {
+                        let selected = claudeSelections[claudeSelectionKey(question, index)] ?? []
+                        NotchButton(title: "Send") {
+                            let labels = selected.sorted().compactMap { prompt.options.indices.contains($0) ? prompt.options[$0] : nil }
+                            model.answerClaudeQuestion(question, kind: .multiSelect, answer: labels.joined(separator: ", "))
+                            claudeSelections[claudeSelectionKey(question, index)] = nil
+                        }
+                        .disabled(selected.isEmpty)
+                        .accessibilityLabel("Send selected answers for \(subject)")
+                    }
+                    if controls {
+                        DraftField(placeholder: prompt.options.isEmpty ? "Type your answer" : "Or type another answer",
+                                   text: draft(claudeSelectionKey(question, index)), sendTitle: "Send",
+                                   fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
+                                   onEscape: model.collapse) {
+                            model.answerClaudeQuestion(question, kind: .text,
+                                                       answer: drafts[claudeSelectionKey(question, index)] ?? "")
+                            drafts[claudeSelectionKey(question, index)] = nil
                         }
                     }
                 }
@@ -747,6 +824,11 @@ struct Notch: View {
                 if let question = item.question { agentQuestionBody(question, subject: subject) }
                 if item.session.source == .claude {
                     claudeReturnMessage(item.session)
+                }
+                if item.session.source == .claude, let question = item.question,
+                   !model.canAnswerAgentQuestion(question) {
+                    Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
                 }
             case .waiting, .running:
                 if let running = item.running, let row = running.rowText {

@@ -134,6 +134,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var setupPlan: CodexSetupPlan?
     @Published var setupMessage = ""
     let claude = ClaudeSetupModel()
+    private struct LiveClaudeQuestion {
+        let request: ClaudeQuestionRequest
+        let events: URL
+        let sourceScope: String
+    }
+    private var liveClaudeQuestions: [String: LiveClaudeQuestion] = [:]
+    private var availableClaudeQuestionTokens: Set<String> = []
+    private var spentClaudeQuestionTokens: Set<String> = []
     @Published private(set) var launchAtLogin = LaunchAtLoginState()
     @Published var desktopForeground = false
     private let launchAtLoginCoordinator = LaunchAtLoginCoordinator(service: LaunchAtLoginService())
@@ -780,6 +788,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                      ClaudeObservationReader.scan(events: root.events, sourceScope: root.scope,
                                                   installationID: root.installationID, observingSince: observingSince,
                                                   now: observationNow)
+                 },
+                 claudeRoots.map { root in
+                     ClaudeQuestionStore.pending(in: root.events, installationID: root.installationID,
+                                                 observingSince: observingSince, now: observationNow)
+                         .map { (request: $0, events: root.events, sourceScope: root.scope) }
                  })
             }.value
             let scan = result.0
@@ -801,6 +814,24 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             claudeInventoryAvailable = Dictionary(uniqueKeysWithValues: result.7.filter {
                 configuredClaudeScopes.contains($0.sourceScope)
             }.map { ($0.sourceScope, $0.available) })
+            for requests in result.9 {
+                for live in requests {
+                    liveClaudeQuestions[live.request.requestID] = LiveClaudeQuestion(request: live.request,
+                                                                                       events: live.events,
+                                                                                       sourceScope: live.sourceScope)
+                    guard !spentClaudeQuestionTokens.contains(live.request.requestID),
+                          availableClaudeQuestionTokens.insert(live.request.requestID).inserted else { continue }
+                    let receipt = ClaudeQuestionReceipt(requestID: live.request.requestID,
+                                                        installationID: live.request.installationID,
+                                                        sourceScope: live.request.sourceScope,
+                                                        receivedAt: Date().timeIntervalSince1970,
+                                                        expiresAt: live.request.expiresAt)
+                    guard ClaudeQuestionStore.publish(receipt, in: live.events) else {
+                        availableClaudeQuestionTokens.remove(live.request.requestID)
+                        continue
+                    }
+                }
+            }
             for inventory in result.7 {
                 agentQueue.apply(inventory, now: Date().timeIntervalSince1970)
                 for session in inventory.sessions {
@@ -1422,6 +1453,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func chooseAgentOption(_ question: AgentQuestion, index: Int, option: Int) {
+        if question.identity.session.source == .claude {
+            guard index == 0, let prompt = question.prompts.first, option >= 0, option < prompt.options.count else {
+                navigationMessage = "Claude question shape is unavailable; answer it in Claude."
+                refresh()
+                return
+            }
+            answerClaudeQuestion(question, kind: .option, answer: prompt.options[option])
+            return
+        }
         guard question.identity.session.source == .codex,
               let session = codexSession(question.identity.session),
               let turn = UUID(uuidString: question.turn),
@@ -1443,8 +1483,58 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func canAnswerAgentQuestion(_ question: AgentQuestion) -> Bool {
+        if question.identity.session.source == .claude {
+            return liveClaudeQuestion(for: question) != nil && question.prompts.count == 1
+                && question.prompts.first?.question != nil
+        }
         guard let current = codexQuestion(for: question) else { return false }
         return showsOptionControls(for: current)
+    }
+
+    private func liveClaudeQuestion(for question: AgentQuestion) -> LiveClaudeQuestion? {
+        guard question.identity.session.source == .claude,
+              let requestID = question.helperRequestID,
+              availableClaudeQuestionTokens.contains(requestID),
+              let live = liveClaudeQuestions[requestID],
+              live.sourceScope == question.identity.session.sourceScope,
+              live.request.sourceScope == live.events.standardizedFileURL.path,
+              live.request.sessionID == question.identity.session.session,
+              live.request.promptID == question.identity.turn,
+              live.request.toolUseID == question.identity.call,
+              live.request.expiresAt > Date().timeIntervalSince1970,
+              live.request.prompts == question.prompts else { return nil }
+        return live
+    }
+
+    func answerClaudeQuestion(_ question: AgentQuestion, kind: ClaudeQuestionAnswerKind, answer: String) {
+        guard let live = liveClaudeQuestion(for: question) else {
+            navigationMessage = "This Claude question is no longer live; answer it in Claude."
+            refresh()
+            return
+        }
+        let record = ClaudeQuestionAnswer(requestID: live.request.requestID,
+                                          installationID: live.request.installationID,
+                                          sourceScope: live.request.sourceScope,
+                                          sessionID: live.request.sessionID,
+                                          promptID: live.request.promptID,
+                                          toolUseID: live.request.toolUseID,
+                                          kind: kind, answer: answer,
+                                          decidedAt: Date().timeIntervalSince1970)
+        guard ClaudeQuestionAnswerPolicy.accepts(request: live.request, answer: record) else {
+            navigationMessage = "That answer is not valid for Claude's current question."
+            refresh()
+            return
+        }
+        // Spend the memory-only capability before writing. A failed write is never retried.
+        availableClaudeQuestionTokens.remove(live.request.requestID)
+        spentClaudeQuestionTokens.insert(live.request.requestID)
+        guard ClaudeQuestionStore.publish(record, in: live.events) else {
+            navigationMessage = "Steer could not deliver the answer; answer this question in Claude."
+            refresh()
+            return
+        }
+        navigationMessage = "Answer sent to Claude."
+        refresh()
     }
 
     func dismissAgent(_ id: AgentAttentionID) {
