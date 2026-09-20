@@ -25,17 +25,23 @@ that bound, the reader falls back to the general running prompt until newer evid
 current action.
 
 Permission observations require exactly one matching, uncompleted `PreToolUse` call in the same
-session, prompt, root, and tool name. Ambiguous, malformed, late, repeated, or cross-root records
-are ignored. A root that cannot be read is unavailable for reconciliation, so it cannot clear another
-root's attention. The root-scoped `claude agents --json` inventory is a weaker source: a valid
-interactive `busy`/`waiting` or background `working`/`blocked` row may add only a generic running
-row, while idle and background terminal states remove only inventory-derived rows. An unavailable
-or duplicate inventory leaves both inventory and hook evidence untouched. A later valid
-interactive `idle` observation confirms a previously observed provisional `Stop`; inventory alone
-never creates an outcome, tool label, question, approval, sound, or target. Duplicate interactive
-resumes therefore remain one session identity with an explicit unavailable-control signal and no
-unique direct target until a later poll is unique. Older per-root polls are ignored, so an out-of-
-order empty snapshot cannot erase newer generic lifecycle state.
+session, prompt, root, and tool name. Only `Bash` creates a direct approval observation. The helper
+adds a bounded request token because `PermissionRequest` does not supply `tool_use_id`; Steer
+publishes a receipt only for that exact candidate while the helper's short-lived heartbeat is fresh,
+and accepts one allow or deny before the request's 30-second deadline. The helper acknowledges a user decision only after emitting Claude's response;
+missing acknowledgment leaves delivery uncertain and never claims that Bash executed. Ambiguous,
+malformed, late, repeated, or cross-root records are ignored. A missing receipt, helper crash,
+restart, interruption, expiry, or handoff emits no decision and leaves Claude's native prompt
+available. A root that cannot be read is unavailable for reconciliation, so it cannot clear another
+root's attention. The root-scoped `claude agents --json` inventory is a weaker
+source: a valid interactive `busy`/`waiting` or background `working`/`blocked` row may add only a
+generic running row, while idle and background terminal states remove only inventory-derived rows.
+An unavailable or duplicate inventory leaves both inventory and hook evidence untouched. A later
+valid interactive `idle` observation confirms a previously observed provisional `Stop`; inventory
+alone never creates an outcome, tool label, question, approval, sound, or target. Duplicate
+interactive resumes therefore remain one session identity with an explicit unavailable-control signal
+and no unique direct target until a later poll is unique. Older per-root polls are ignored, so an
+out-of-order empty snapshot cannot erase newer generic lifecycle state.
 
 ## Evidence status
 
@@ -47,7 +53,9 @@ covers separate interactive/background lifecycle fields, duplicate and unavailab
 isolation, weaker inventory evidence, and provisional `Stop` confirmation. The helper self-test also
 checks bounded Claude metadata and tool input. `ClaudeQuestionTests` covers unchanged `updatedInput`,
 single-select, multi-select, typed answers, exact identity rejection, one-shot writes, and the
-receipt/answer rendezvous.
+receipt/answer rendezvous. `ClaudeApprovalTests` covers the one-winner deadline,
+atomic receipt/decision/delivery records, one-winner concurrency, helper crash handback, and Claude's exact allow/deny output shape. The app/helper build,
+packaged smoke check, and helper self-test pass on this branch.
 - **Live application proof:** pending. Restarting Steer during one real Claude session and observing
 its current state without replaying sound or fabricating a question was deferred for the user's
 walkthrough tomorrow; one live answer of each supported shape and native fallback after helper

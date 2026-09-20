@@ -24,6 +24,47 @@ struct ClaudeQuestionReceiptResult: Sendable {
     let written: Bool
 }
 
+struct ClaudeApprovalRootKey: Hashable, Sendable {
+    let sourceScope: String
+    let eventsPath: String
+    let installationID: String
+}
+
+struct ClaudeApprovalReceiptWork: Sendable {
+    let approval: AgentApproval
+    let eventsPath: String
+    let root: ClaudeApprovalRootKey
+    let receivedAt: Double
+    let scanGeneration: UInt64
+}
+
+struct ClaudeApprovalReceiptResult: Sendable {
+    let approval: AgentApproval
+    let requestID: String
+    let root: ClaudeApprovalRootKey
+    let receivedAt: Double
+    let scanGeneration: UInt64
+    let receipt: ClaudeApprovalReceipt?
+    let issuedByThisProcess: Bool
+}
+
+struct ClaudeApprovalDecisionWork: Sendable {
+    let requestID: String
+    let approvalID: AgentCallIdentity
+    let decision: ApprovalDecision
+    let decidedAt: Double
+    let receipt: ClaudeApprovalReceipt
+    let eventsPath: String
+    let root: ClaudeApprovalRootKey
+    let scanGeneration: UInt64
+}
+
+struct ClaudeApprovalDecisionResult: Sendable {
+    let work: ClaudeApprovalDecisionWork
+    let published: Bool
+    let delivered: Bool
+}
+
 enum ClaudeQuestionReceiptDisposition: Equatable {
     case accept
     case staleAccept
@@ -133,6 +174,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var agentQueue = AgentAttentionQueue(snapshot: Companion.launchSnapshot)
     /// Claude names are presentation metadata only; source scope keeps identical session IDs apart.
     @Published private(set) var claudeSessionNames: [AgentSessionIdentity: String] = [:]
+    /// Direct Claude controls are valid only for receipts issued by this running companion. A
+    /// persisted receipt must not recreate an active decision connection after a restart.
+    private var liveClaudeApprovalIDs: Set<String> = []
+    /// Receipt files are verified off the main actor and cached here for control rendering and
+    /// the decision recheck. The cache is process memory only.
+    private var verifiedClaudeApprovalReceipts: [String: ClaudeApprovalReceipt] = [:]
+    private var verifiedClaudeApprovalRoots: [String: ClaudeApprovalRootKey] = [:]
+    private var pendingClaudeApprovalReceipts: Set<String> = []
+    private var pendingClaudeApprovalDecisions: Set<String> = []
     @Published var reminderPresentation = Attention()
     @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
     @Published var completionPresentation = Attention()
@@ -209,6 +259,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var spentClaudeQuestionTokens: Set<String> = []
     private var pendingClaudeQuestionReceipts: Set<String> = []
     private var claudeQuestionScanGeneration: UInt64 = 0
+    private var claudeApprovalScanGeneration: UInt64 = 0
     @Published private(set) var launchAtLogin = LaunchAtLoginState()
     @Published var desktopForeground = false
     private let launchAtLoginCoordinator = LaunchAtLoginCoordinator(service: LaunchAtLoginService())
@@ -240,6 +291,154 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         ClaudeQuestionRootKey(sourceScope: sourceScope,
                               eventsPath: events.standardizedFileURL.path,
                               installationID: installationID)
+    }
+
+    private func claudeApprovalRootKey(sourceScope: String, events: URL, installationID: String) -> ClaudeApprovalRootKey {
+        ClaudeApprovalRootKey(sourceScope: sourceScope,
+                              eventsPath: events.standardizedFileURL.path,
+                              installationID: installationID)
+    }
+
+    private func currentClaudeApprovalRoots() -> Set<ClaudeApprovalRootKey> {
+        Set(claude.roots.compactMap { root in
+            guard root.status == .connected, !root.eventsPath.isEmpty,
+                  let installationID = root.plan?.installationID, !installationID.isEmpty else { return nil }
+            return claudeApprovalRootKey(sourceScope: root.url.standardizedFileURL.path,
+                                         events: URL(fileURLWithPath: root.eventsPath, isDirectory: true),
+                                         installationID: installationID)
+        })
+    }
+
+    private func publishClaudeApprovalReceipts(_ works: [ClaudeApprovalReceiptWork]) {
+        guard !works.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            let results = await Task.detached(priority: .utility) {
+                works.map { work -> ClaudeApprovalReceiptResult in
+                    let events = URL(fileURLWithPath: work.eventsPath, isDirectory: true)
+                    let now = Date().timeIntervalSince1970
+                    let requestID = work.approval.hookRequestID ?? ""
+                    let live = ClaudeApprovalStore.liveness(for: requestID, in: events)
+                    guard work.approval.expiresAt > Date().timeIntervalSince1970,
+                          work.receivedAt.isFinite,
+                          let live,
+                          live.requestID == requestID,
+                          live.publishedAt.isFinite, live.heartbeatAt.isFinite,
+                          live.publishedAt <= live.heartbeatAt,
+                          live.heartbeatAt <= now,
+                          now - live.heartbeatAt <= ClaudeApprovalStore.livenessTimeout else {
+                        return ClaudeApprovalReceiptResult(approval: work.approval,
+                                                           requestID: requestID,
+                                                           root: work.root, receivedAt: work.receivedAt,
+                                                           scanGeneration: work.scanGeneration, receipt: nil,
+                                                           issuedByThisProcess: false)
+                    }
+                    if let existing = ClaudeApprovalStore.receipt(for: requestID, in: events) {
+                        return ClaudeApprovalReceiptResult(approval: work.approval,
+                                                           requestID: work.approval.hookRequestID ?? "",
+                                                           root: work.root, receivedAt: work.receivedAt,
+                                                           scanGeneration: work.scanGeneration, receipt: existing,
+                                                           issuedByThisProcess: false)
+                    }
+                    guard !requestID.isEmpty else {
+                        return ClaudeApprovalReceiptResult(approval: work.approval, requestID: "", root: work.root,
+                                                           receivedAt: work.receivedAt, scanGeneration: work.scanGeneration,
+                                                           receipt: nil, issuedByThisProcess: false)
+                    }
+                    let created = ClaudeApprovalReceipt(requestID: requestID, receivedAt: work.receivedAt)
+                    let written = ClaudeApprovalStore.publish(created, in: events)
+                    let receipt = ClaudeApprovalStore.receipt(for: requestID, in: events)
+                    return ClaudeApprovalReceiptResult(approval: work.approval, requestID: requestID, root: work.root,
+                                                       receivedAt: work.receivedAt, scanGeneration: work.scanGeneration,
+                                                       receipt: receipt, issuedByThisProcess: written && receipt != nil)
+                }
+            }.value
+            self?.reconcileClaudeApprovalReceipts(results)
+        }
+    }
+
+    private func reconcileClaudeApprovalReceipts(_ results: [ClaudeApprovalReceiptResult]) {
+        let now = Date().timeIntervalSince1970
+        let roots = currentClaudeApprovalRoots()
+        let generation = claudeApprovalScanGeneration
+        for result in results {
+            if !result.requestID.isEmpty { pendingClaudeApprovalReceipts.remove(result.requestID) }
+            let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: {
+                $0.id == result.approval.id && $0.hookRequestID == result.requestID
+            })
+            if result.receipt == nil {
+                if roots.contains(result.root), current != nil {
+                    liveClaudeApprovalIDs.remove(result.requestID)
+                    verifiedClaudeApprovalReceipts.removeValue(forKey: result.requestID)
+                    verifiedClaudeApprovalRoots.removeValue(forKey: result.requestID)
+                }
+                continue
+            }
+            guard let receipt = result.receipt,
+                  result.requestID == receipt.requestID,
+                  roots.contains(result.root),
+                  receipt.receivedAt.isFinite, receipt.receivedAt <= now,
+                  receipt.receivedAt >= result.approval.arrivedAt,
+                  receipt.expiresAt > now,
+                  result.approval.expiresAt > now,
+                  let current,
+                  result.scanGeneration == generation || current.hookRequestID == result.requestID else { continue }
+            verifiedClaudeApprovalReceipts[result.requestID] = receipt
+            verifiedClaudeApprovalRoots[result.requestID] = result.root
+            if result.issuedByThisProcess { liveClaudeApprovalIDs.insert(result.requestID) }
+            let normalized = AgentApproval(session: current.identity.session, turn: current.identity.turn,
+                                           call: current.identity.call, arrivedAt: current.arrivedAt,
+                                           expiresAt: receipt.expiresAt, state: current.state,
+                                           details: current.details, hookRequestID: result.requestID)
+            agentQueue.apply(.approval(normalized), now: now)
+        }
+        verifiedClaudeApprovalReceipts = verifiedClaudeApprovalReceipts.filter { $0.value.expiresAt > now }
+        verifiedClaudeApprovalRoots = verifiedClaudeApprovalRoots.filter {
+            verifiedClaudeApprovalReceipts[$0.key] != nil
+        }
+    }
+
+    private func publishClaudeApprovalDecision(_ work: ClaudeApprovalDecisionWork) {
+        Task { @MainActor [weak self] in
+            let result = await Task.detached(priority: .utility) {
+                let events = URL(fileURLWithPath: work.eventsPath, isDirectory: true)
+                let decision = ClaudeApprovalDecision(requestID: work.requestID,
+                                                      decision: work.decision,
+                                                      decidedAt: work.decidedAt)
+                let published = ClaudeApprovalStore.publish(decision, in: events)
+                let delivered = published && ClaudeApprovalHelper.awaitDelivery(for: work.requestID,
+                                                                                  decision: decision,
+                                                                                  in: events)
+                return ClaudeApprovalDecisionResult(work: work, published: published, delivered: delivered)
+            }.value
+            self?.reconcileClaudeApprovalDecision(result)
+        }
+    }
+
+    private func reconcileClaudeApprovalDecision(_ result: ClaudeApprovalDecisionResult) {
+        pendingClaudeApprovalDecisions.remove(result.work.requestID)
+        let current = orderedAgentAttentionItems.compactMap(\.approval).first {
+            $0.id == result.work.approvalID && $0.hookRequestID == result.work.requestID
+        }
+        guard currentClaudeApprovalRoots().contains(result.work.root),
+              result.work.receipt == verifiedClaudeApprovalReceipts[result.work.requestID],
+              result.work.root == verifiedClaudeApprovalRoots[result.work.requestID],
+              result.work.receipt.expiresAt > result.work.decidedAt,
+              result.work.scanGeneration == claudeApprovalScanGeneration || current != nil else { return }
+        verifiedClaudeApprovalReceipts.removeValue(forKey: result.work.requestID)
+        verifiedClaudeApprovalRoots.removeValue(forKey: result.work.requestID)
+        guard result.published else {
+            navigationMessage = "Claude could not receive this decision; continue in Claude."
+            refresh()
+            return
+        }
+        if result.delivered {
+            navigationMessage = result.work.decision == .allowOnce
+                ? "Claude received the one-time approval."
+                : "Claude received the denial."
+        } else {
+            navigationMessage = "Claude decision delivery is unconfirmed; continue in Claude."
+        }
+        refresh()
     }
 
     private func currentClaudeQuestionRoots() -> Set<ClaudeQuestionRootKey> {
@@ -907,6 +1106,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         nextScan = now + 2
         claudeQuestionScanGeneration &+= 1
         let questionScanGeneration = claudeQuestionScanGeneration
+        claudeApprovalScanGeneration &+= 1
+        let approvalScanGeneration = claudeApprovalScanGeneration
         // Claude inventory can be the only connected source. The empty Codex input is read from
         // /dev/null so the existing bounded readers produce no Codex observations.
         let events = URL(fileURLWithPath: eventsPath.isEmpty ? "/dev/null" : eventsPath)
@@ -963,9 +1164,31 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             guard eventsPath.isEmpty || eventsPath == events.path else { scanning = false; refresh(); return }
             let previousAgent = Set(agentQueue.items(at: Date().timeIntervalSince1970).map(\.id))
             let scanNow = Date().timeIntervalSince1970
+            var approvalReceiptWork: [ClaudeApprovalReceiptWork] = []
+            for (root, claudeScan) in zip(claudeRoots, result.8) {
+                for approval in claudeScan.observations.compactMap({ observation -> AgentApproval? in
+                    if case let .approval(value) = observation { return value }
+                    return nil
+                }) {
+                    guard claudeScan.available, approval.expiresAt > scanNow,
+                          let requestID = approval.hookRequestID,
+                          !pendingClaudeApprovalReceipts.contains(requestID) else { continue }
+                    pendingClaudeApprovalReceipts.insert(requestID)
+                    approvalReceiptWork.append(ClaudeApprovalReceiptWork(
+                        approval: approval,
+                        eventsPath: root.events.standardizedFileURL.path,
+                        root: claudeApprovalRootKey(sourceScope: root.scope, events: root.events,
+                                                    installationID: root.installationID),
+                        receivedAt: scanNow,
+                        scanGeneration: approvalScanGeneration))
+                }
+            }
             for claudeScan in result.8 {
                 agentQueue.apply(claudeScan, now: scanNow)
             }
+            // Receipt reads and writes happen off the main actor. The completion rechecks the
+            // exact root, request, and deadline before making controls available.
+            publishClaudeApprovalReceipts(approvalReceiptWork)
             let configuredClaudeScopes = Set(configuredClaudeNavigationRoots().map { $0.root.path })
             liveClaudeSessions = Dictionary(uniqueKeysWithValues: result.7.filter {
                 configuredClaudeScopes.contains($0.sourceScope)
@@ -1552,7 +1775,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return "The exact Claude tab is unavailable until Steer can verify one live, unsplit target."
     }
 
-    private func openClaude(_ identity: AgentSessionIdentity) {
+    private func openClaude(_ identity: AgentSessionIdentity, approval: AgentApproval? = nil) {
         guard !openingTask else { return }
         guard ghosttyEnabled else { showControls(); return }
         guard identity.surface == .cli else {
@@ -1588,6 +1811,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             }
             navigationMessage = result.message
             if result.opened {
+                if let approval,
+                   let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: { $0.id == approval.id }) {
+                    handBackClaudeApproval(current)
+                }
                 for id in queued { agentQueue.dismiss(id) }
                 saveCompletions()
             }
@@ -1597,6 +1824,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func openAgentApproval(_ approval: AgentApproval) {
+        if approval.identity.session.source == .claude {
+            openClaude(approval.identity.session, approval: approval)
+            return
+        }
         guard approval.identity.session.source == .codex,
               let session = codexSession(approval.identity.session),
               let requestID = UUID(uuidString: approval.identity.call),
@@ -1610,6 +1841,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func decideAgent(_ approval: AgentApproval, as decision: ApprovalDecision) {
+        if approval.identity.session.source == .claude {
+            decideClaudeApproval(approval, as: decision)
+            return
+        }
         guard approval.identity.session.source == .codex,
               approval.identity.session.surface == .cli,
               let requestID = UUID(uuidString: approval.identity.call),
@@ -1621,6 +1856,77 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             return
         }
         decide(request, as: decision)
+    }
+
+    func canDecideAgent(_ approval: AgentApproval) -> Bool {
+        guard approval.identity.session.source == .claude,
+              approval.identity.session.surface == .cli,
+              approval.state == .actionable,
+              approval.expiresAt > Date().timeIntervalSince1970,
+              let requestID = approval.hookRequestID,
+              liveClaudeApprovalIDs.contains(requestID),
+              let root = claude.roots.first(where: { $0.url.standardizedFileURL.path == approval.identity.session.sourceScope }),
+              case .connected = root.status,
+              !root.eventsPath.isEmpty,
+              !pendingClaudeApprovalDecisions.contains(requestID),
+              let receipt = verifiedClaudeApprovalReceipts[requestID],
+              let installationID = root.plan?.installationID,
+              verifiedClaudeApprovalRoots[requestID] == claudeApprovalRootKey(
+                  sourceScope: approval.identity.session.sourceScope,
+                  events: URL(fileURLWithPath: root.eventsPath, isDirectory: true),
+                  installationID: installationID),
+              receipt.expiresAt > Date().timeIntervalSince1970 else {
+            return false
+        }
+        return true
+    }
+
+    private func decideClaudeApproval(_ approval: AgentApproval, as decision: ApprovalDecision) {
+        guard decision.isUserDecision else { return }
+        guard canDecideAgent(approval),
+              let requestID = approval.hookRequestID,
+              let root = claude.roots.first(where: { $0.url.standardizedFileURL.path == approval.identity.session.sourceScope }),
+              let installationID = root.plan?.installationID,
+              !root.eventsPath.isEmpty,
+              let receipt = verifiedClaudeApprovalReceipts[requestID],
+              pendingClaudeApprovalDecisions.insert(requestID).inserted else {
+            navigationMessage = "This Claude permission is no longer actionable; continue in Claude."
+            refresh()
+            return
+        }
+        let now = Date().timeIntervalSince1970
+        liveClaudeApprovalIDs.remove(requestID)
+        // Remove direct controls immediately. The detached worker reports mailbox publication and
+        // the helper's output acknowledgment separately; a crash leaves Claude's native prompt
+        // available without leaving a second direct control.
+        agentQueue.apply(.approval(approval.with(state: .handedBack)), now: now)
+        navigationMessage = "Sending the Claude decision; delivery confirmation is pending."
+        publishClaudeApprovalDecision(ClaudeApprovalDecisionWork(
+            requestID: requestID, approvalID: approval.id, decision: decision, decidedAt: now,
+            receipt: receipt,
+            eventsPath: URL(fileURLWithPath: root.eventsPath, isDirectory: true).standardizedFileURL.path,
+            root: claudeApprovalRootKey(sourceScope: approval.identity.session.sourceScope,
+                                        events: URL(fileURLWithPath: root.eventsPath, isDirectory: true),
+                                        installationID: installationID),
+            scanGeneration: claudeApprovalScanGeneration))
+        refresh()
+    }
+
+    private func handBackClaudeApproval(_ approval: AgentApproval) {
+        guard approval.state == .actionable,
+              let requestID = approval.hookRequestID,
+              let root = claude.roots.first(where: { $0.url.standardizedFileURL.path == approval.identity.session.sourceScope }),
+              !root.eventsPath.isEmpty else { return }
+        let events = URL(fileURLWithPath: root.eventsPath, isDirectory: true)
+        liveClaudeApprovalIDs.remove(requestID)
+        verifiedClaudeApprovalReceipts.removeValue(forKey: requestID)
+        verifiedClaudeApprovalRoots.removeValue(forKey: requestID)
+        agentQueue.apply(.approval(approval.with(state: .handedBack)), now: Date().timeIntervalSince1970)
+        let decidedAt = Date().timeIntervalSince1970
+        Task.detached(priority: .utility) {
+            _ = ClaudeApprovalStore.publish(ClaudeApprovalDecision(requestID: requestID, decision: .noDecision,
+                                                                   decidedAt: decidedAt), in: events)
+        }
     }
 
     func chooseAgentOption(_ question: AgentQuestion, index: Int, option: Int) {

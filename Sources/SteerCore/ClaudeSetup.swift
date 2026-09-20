@@ -58,14 +58,16 @@ public struct ClaudeOwnedHook: Codable, Equatable, Sendable {
 public enum ClaudeSetupRequirements {
     public static let minimumCLIVersion = "2.1.273"
     public static let helperSource = "steer-claude-hook-v1"
-    public static let hookTimeout = 10
+    public static let previousHookTimeout = 10
+    /// Covers the companion connection wait, one 30-second decision window, and a small bound.
+    public static let hookTimeout = 38
     public static let titlePrefix = "Steer Claude "
     public static let titleDisableEnvironmentKey = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"
     public static let titleDisableEnvironmentValue = "1"
     public static let metadataClockSkew: TimeInterval = 300
 
-    /// The events needed by the observer slice. PermissionRequest is intentionally narrowed to
-    /// Bash; other permission families stay in Claude's native flow until separately proven.
+    /// The events needed by the observer and Bash decision slices. Other permission families stay
+    /// in Claude's native flow until separately proven.
     public static let hookDefinitions = [
         ClaudeHookDefinition(event: "SessionStart", terminalTitle: true),
         ClaudeHookDefinition(event: "UserPromptSubmit"),
@@ -227,6 +229,20 @@ public enum ClaudeSetupPlanner {
                 return empty(.conflict("Duplicate Steer-owned Claude hooks were found; review settings.json before reconnecting."), settings: settings, settingsExisted: settingsExisted)
             }
             if exact.isEmpty {
+                let legacy = groups.enumerated().filter { _, group in
+                    (group["hooks"] as? [[String: Any]])?.contains(where: { handlerIsLegacy($0, command: owned.command) }) == true
+                }
+                if legacy.count > 1 {
+                    return empty(.conflict("Duplicate Steer-owned Claude hooks were found; review settings.json before reconnecting."), settings: settings, settingsExisted: settingsExisted)
+                }
+                if let (groupIndex, _) = legacy.first,
+                   var handlers = groups[groupIndex]["hooks"] as? [[String: Any]],
+                   let handlerIndex = handlers.firstIndex(where: { handlerIsLegacy($0, command: owned.command) }) {
+                    handlers[handlerIndex]["timeout"] = ClaudeSetupRequirements.hookTimeout
+                    groups[groupIndex]["hooks"] = handlers
+                    hooks[definition.event] = groups
+                    continue
+                }
                 var group: [String: Any] = ["hooks": [["type": "command", "command": owned.command, "timeout": ClaudeSetupRequirements.hookTimeout]]]
                 if let matcher = definition.matcher { group["matcher"] = matcher }
                 groups.append(group)
@@ -509,6 +525,7 @@ public enum ClaudeSetupPlanner {
                 return true
             }
             return !handlerIsExact(source, event: owned.event, matcher: owned.matcher, command: owned.command)
+                && !handlerIsLegacy(source, event: owned.event, matcher: owned.matcher, command: owned.command)
         }
     }
 
@@ -516,6 +533,19 @@ public enum ClaudeSetupPlanner {
         guard let hooks = source["hooks"] as? [String: Any], let groups = hooks[event] as? [[String: Any]] else { return false }
         return groups.contains { groupMatcher($0) == matcher &&
             ($0["hooks"] as? [[String: Any]])?.contains(where: { handlerIsCanonical($0, command: command) }) == true }
+    }
+
+    static func handlerIsLegacy(_ handler: [String: Any], command: String) -> Bool {
+        Set(handler.keys) == ["type", "command", "timeout"]
+            && handler["type"] as? String == "command"
+            && handler["command"] as? String == command
+            && (handler["timeout"] as? NSNumber)?.intValue == ClaudeSetupRequirements.previousHookTimeout
+    }
+
+    private static func handlerIsLegacy(_ source: [String: Any], event: String, matcher: String?, command: String) -> Bool {
+        guard let hooks = source["hooks"] as? [String: Any], let groups = hooks[event] as? [[String: Any]] else { return false }
+        return groups.contains { groupMatcher($0) == matcher &&
+            ($0["hooks"] as? [[String: Any]])?.contains(where: { handlerIsLegacy($0, command: command) }) == true }
     }
 
     private static func empty(_ status: ClaudeSetupStatus, settings: Data, settingsExisted: Bool) -> ClaudeSetupPlan {
@@ -887,7 +917,13 @@ public struct ClaudeSetupInstaller {
                 return .changed
             }
             let commandExists = groups.contains { ($0["hooks"] as? [[String: Any]])?.contains { $0["command"] as? String == owned.command } == true }
-            if commandExists { return .changed }
+            if commandExists {
+                let legacyExists = groups.contains { group in
+                    ClaudeSetupPlanner.groupMatcher(group) == owned.matcher
+                        && (group["hooks"] as? [[String: Any]])?.contains(where: { ClaudeSetupPlanner.handlerIsLegacy($0, command: owned.command) }) == true
+                }
+                return legacyExists ? .missing : .changed
+            }
             missing = true
         }
         return missing ? .missing : .intact

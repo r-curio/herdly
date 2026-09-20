@@ -829,8 +829,10 @@ struct Notch: View {
                 }
             case .actionableApproval:
                 if item.session.source == .claude {
-                    Text("Claude decisions are unavailable here; decide in Claude.")
-                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    if let approval = item.approval, !model.canDecideAgent(approval) {
+                        Text("Claude's native permission prompt remains available.")
+                            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    }
                     claudeReturnMessage(item.session)
                 }
             case .outcome, .earlierOutcome:
@@ -892,6 +894,14 @@ struct Notch: View {
                         NotchButton(title: "Deny") { if let approval = item.approval { model.decideAgent(approval, as: .deny) } }
                             .accessibilityLabel("Deny: \(subject)")
                             .accessibilityHint("Denies this Codex permission request.")
+                    }
+                    if item.session.source == .claude, let approval = item.approval, model.canDecideAgent(approval) {
+                        NotchButton(title: "Approve once", emphasized: true) { model.decideAgent(approval, as: .allowOnce) }
+                            .accessibilityLabel("Approve once: \(subject)")
+                            .accessibilityHint("Approves this Claude Bash request once.")
+                        NotchButton(title: "Deny") { model.decideAgent(approval, as: .deny) }
+                            .accessibilityLabel("Deny: \(subject)")
+                            .accessibilityHint("Denies this Claude Bash request.")
                     }
                     if item.session.source == .codex {
                         NotchButton(title: "Open in Codex") {
@@ -985,7 +995,13 @@ struct Notch: View {
     private func claudeReturnControl(_ item: AgentAttentionItem, subject: String, emphasized: Bool = false) -> some View {
         if item.session.source == .claude {
             if model.canOpenClaude(item.session) {
-                NotchButton(title: "Open in Claude", emphasized: emphasized) { model.openAgent(item.session) }
+                NotchButton(title: "Open in Claude", emphasized: emphasized) {
+                    if let approval = item.approval {
+                        model.openAgentApproval(approval)
+                    } else {
+                        model.openAgent(item.session)
+                    }
+                }
                     .disabled(model.openingTask)
                     .accessibilityLabel("Open in Claude: \(subject)")
                     .accessibilityHint("Open the exact Claude Ghostty tab for this session.")

@@ -118,9 +118,12 @@ exact helper is waiting; it is bound to the installation, normalized Claude root
 session, prompt, tool-use, and request identities. A human-selected single choice, multi-select, or
 typed answer can be returned once through Claude's supported `updatedInput` response. The request
 does not become an answer capability after restart, and Steer stores no transcript or tool response.
-Inventory status can add Working or Waiting rows, but a background done, failed, or stopped state
-never creates a user-facing outcome without matching hook evidence. Per-root inventory reconciliation
-is issue #82; mixed source presentation and counts in the existing notch are issue #83.
+One exact live Bash permission may be approved once or denied through the source-scoped helper
+handshake. Ambiguous, expired, disconnected, interrupted, handed-back, and non-Bash permissions
+keep only Claude's native controls. Inventory status can add Working or Waiting rows, but a
+background done, failed, or stopped state never creates a user-facing outcome without matching hook
+evidence. Per-root inventory reconciliation is issue #82; mixed source presentation and counts in the
+existing notch are issue #83.
 
 ## Agreed mixed-source notch behavior
 
@@ -143,7 +146,7 @@ helper trace cover the response shape; integrated Steer live acceptance of one a
 and native fallback after timeout remain deferred for the operator walkthrough. Claude completion
 cards retain Dismiss and explain the unavailable return action without rendering an unsupported Open
 control.
-Claude follow-up prompts and broader direct approval decisions stay unavailable until their
+Claude follow-up prompts and direct approval decisions beyond Bash stay unavailable until their
 transports are separately proven; the card explains that limitation instead of guessing a target.
 Codex cards keep their existing answer, approval, detail, and reply actions.
 

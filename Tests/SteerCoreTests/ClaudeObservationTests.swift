@@ -48,6 +48,37 @@ import Testing
     #expect(scan.observations.contains { if case .approval = $0 { return true }; return false } == false)
 }
 
+@Test func claudeBashApprovalKeepsTheHelperTokenAndCommandDetails() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Bash", toolUseID: "call",
+                     toolInput: ["command": "touch marker"]),
+        claudeRecord("PermissionRequest", at: 3, promptID: "p1", toolName: "Bash",
+                     approvalRequestID: "request-1")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let approval = try #require(scanClaude(root).observations.compactMap { observation -> AgentApproval? in
+        if case let .approval(value) = observation { return value }
+        return nil
+    }.first)
+    #expect(approval.hookRequestID == "request-1")
+    #expect(approval.details?.action == "Bash")
+    #expect(approval.details?.command == "touch marker")
+}
+
+@Test func claudePermissionBeforeItsPreToolCandidateCannotCreateApproval() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PermissionRequest", at: 2, promptID: "p1", toolName: "Bash"),
+        claudeRecord("PreToolUse", at: 3, promptID: "p1", toolName: "Bash", toolUseID: "late",
+                     toolInput: ["command": "late"])
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(scanClaude(root).observations.contains { if case .approval = $0 { return true }; return false } == false)
+}
+
 @Test func claudeMalformedRepeatedAndMismatchedEventsCannotCreateTerminalState() throws {
     let root = try makeClaudeEvents([
         claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
@@ -115,9 +146,9 @@ import Testing
         claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
         claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "AskUserQuestion", toolUseID: "q1",
                      toolInput: ["questions": [["question": "Choose"]]]),
-        claudeRecord("PreToolUse", at: 2.5, promptID: "p1", toolName: "Write", toolUseID: "a1",
-                     toolInput: ["file_path": "/tmp/file"]),
-        claudeRecord("PermissionRequest", at: 2.75, promptID: "p1", toolName: "Write")
+        claudeRecord("PreToolUse", at: 2.5, promptID: "p1", toolName: "Bash", toolUseID: "a1",
+                     toolInput: ["command": "touch marker"]),
+        claudeRecord("PermissionRequest", at: 2.75, promptID: "p1", toolName: "Bash")
     ])
     defer { try? FileManager.default.removeItem(at: root) }
     var queue = AgentAttentionQueue()
@@ -416,13 +447,14 @@ private func scanClaude(_ root: URL, now: Double = 10) -> ClaudeObservationScan 
 private func claudeRecord(_ event: String, at capturedAt: Double, promptID: String? = nil,
                           prompt: String? = nil, toolName: String? = nil, toolUseID: String? = nil,
                           helperRequestID: String? = nil,
-                          toolInput: [String: Any] = [:]) -> [String: Any] {
+                          toolInput: [String: Any] = [:], approvalRequestID: String? = nil) -> [String: Any] {
     var record: [String: Any] = ["hook_event_name": event, "session_id": "session-1", "captured_at": capturedAt]
     if let promptID { record["prompt_id"] = promptID }
     if let prompt { record["prompt"] = prompt }
     if let toolName { record["tool_name"] = toolName }
     if let toolUseID { record["tool_use_id"] = toolUseID }
     if let helperRequestID { record["helper_request_id"] = helperRequestID }
+    if let approvalRequestID { record["approval_request_id"] = approvalRequestID }
     if !toolInput.isEmpty { record["tool_input"] = toolInput }
     return record
 }
