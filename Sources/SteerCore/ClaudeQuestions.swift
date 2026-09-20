@@ -10,7 +10,10 @@ public enum ClaudeQuestionTiming {
 public struct ClaudeQuestionRequest: Codable, Equatable, Sendable {
     public let requestID: String
     public let installationID: String
+    /// The normalized Claude configuration root, which identifies the source scope.
     public let sourceScope: String
+    /// The normalized Steer event directory used only for this rendezvous.
+    public let eventDirectory: String
     public let sessionID: String
     public let promptID: String
     public let toolUseID: String
@@ -19,12 +22,14 @@ public struct ClaudeQuestionRequest: Codable, Equatable, Sendable {
     public let expiresAt: Double
     public let prompts: [QuestionPrompt]
 
-    public init(requestID: String, installationID: String, sourceScope: String, sessionID: String, promptID: String,
+    public init(requestID: String, installationID: String, sourceScope: String, eventDirectory: String,
+                sessionID: String, promptID: String,
                 toolUseID: String, toolName: String = "AskUserQuestion", publishedAt: Double,
                 expiresAt: Double, prompts: [QuestionPrompt]) {
         self.requestID = requestID
         self.installationID = installationID
         self.sourceScope = sourceScope
+        self.eventDirectory = eventDirectory
         self.sessionID = sessionID
         self.promptID = promptID
         self.toolUseID = toolUseID
@@ -39,14 +44,18 @@ public struct ClaudeQuestionReceipt: Codable, Equatable, Sendable {
     public let requestID: String
     public let installationID: String
     public let sourceScope: String
+    /// The event directory is separate from the source scope and is checked against the file path.
+    public let eventDirectory: String
     public let receivedAt: Double
     public let expiresAt: Double
 
-    public init(requestID: String, installationID: String, sourceScope: String, receivedAt: Double,
+    public init(requestID: String, installationID: String, sourceScope: String, eventDirectory: String,
+                receivedAt: Double,
                 expiresAt: Double) {
         self.requestID = requestID
         self.installationID = installationID
         self.sourceScope = sourceScope
+        self.eventDirectory = eventDirectory
         self.receivedAt = receivedAt
         self.expiresAt = expiresAt
     }
@@ -62,6 +71,8 @@ public struct ClaudeQuestionAnswer: Codable, Equatable, Sendable {
     public let requestID: String
     public let installationID: String
     public let sourceScope: String
+    /// The event directory is separate from the source scope and is checked against the file path.
+    public let eventDirectory: String
     public let sessionID: String
     public let promptID: String
     public let toolUseID: String
@@ -69,11 +80,13 @@ public struct ClaudeQuestionAnswer: Codable, Equatable, Sendable {
     public let answer: String
     public let decidedAt: Double
 
-    public init(requestID: String, installationID: String, sourceScope: String, sessionID: String, promptID: String,
+    public init(requestID: String, installationID: String, sourceScope: String, eventDirectory: String,
+                sessionID: String, promptID: String,
                 toolUseID: String, kind: ClaudeQuestionAnswerKind, answer: String, decidedAt: Double) {
         self.requestID = requestID
         self.installationID = installationID
         self.sourceScope = sourceScope
+        self.eventDirectory = eventDirectory
         self.sessionID = sessionID
         self.promptID = promptID
         self.toolUseID = toolUseID
@@ -138,7 +151,7 @@ public enum ClaudeQuestionStore {
                   let request = decode(url, as: ClaudeQuestionRequest.self),
                   validID(request.requestID),
                   request.installationID == installationID,
-                  request.sourceScope == directory.standardizedFileURL.path,
+                  request.eventDirectory == directory.standardizedFileURL.path,
                   request.toolName == "AskUserQuestion",
                   request.prompts.count == 1,
                   request.prompts.first?.question?.isEmpty == false,
@@ -188,6 +201,8 @@ public enum ClaudeQuestionHelper {
                candidate.requestID == request.requestID,
                candidate.installationID == request.installationID,
                candidate.sourceScope == request.sourceScope,
+               candidate.eventDirectory == request.eventDirectory,
+               candidate.eventDirectory == directory.standardizedFileURL.path,
                candidate.receivedAt.isFinite,
                candidate.receivedAt >= request.publishedAt,
                candidate.receivedAt <= Date().timeIntervalSince1970,
@@ -208,6 +223,8 @@ public enum ClaudeQuestionHelper {
                answer.requestID == request.requestID,
                answer.installationID == request.installationID,
                answer.sourceScope == request.sourceScope,
+               answer.eventDirectory == request.eventDirectory,
+               answer.eventDirectory == directory.standardizedFileURL.path,
                answer.sessionID == request.sessionID,
                answer.promptID == request.promptID,
                answer.toolUseID == request.toolUseID,
@@ -231,6 +248,7 @@ public enum ClaudeQuestionAnswerPolicy {
         guard answer.requestID == request.requestID,
               answer.installationID == request.installationID,
               answer.sourceScope == request.sourceScope,
+              answer.eventDirectory == request.eventDirectory,
               answer.sessionID == request.sessionID,
               answer.promptID == request.promptID,
               answer.toolUseID == request.toolUseID,

@@ -1,11 +1,62 @@
 import Foundation
 import Testing
 @testable import SteerCore
+@testable import SteerApp
+
+@Test func claudeQuestionViewStateKeySeparatesEveryQuestionIdentityPart() {
+    let session = AgentSessionIdentity(source: .claude, sourceScope: "/root-a", session: "session-a", surface: .cli)
+    let question = AgentQuestion(session: session, turn: "prompt-a", call: "tool-a", arrivedAt: 1,
+                                 helperRequestID: "request-a")
+    let key = ClaudeQuestionViewStateKey(question: question, index: 0)
+    let variants = [
+        ClaudeQuestionViewStateKey(question: AgentQuestion(
+            session: AgentSessionIdentity(source: .claude, sourceScope: "/root-b", session: "session-a", surface: .cli),
+            turn: "prompt-a", call: "tool-a", arrivedAt: 1, helperRequestID: "request-a"), index: 0),
+        ClaudeQuestionViewStateKey(question: AgentQuestion(
+            session: AgentSessionIdentity(source: .claude, sourceScope: "/root-a", session: "session-b", surface: .cli),
+            turn: "prompt-a", call: "tool-a", arrivedAt: 1, helperRequestID: "request-a"), index: 0),
+        ClaudeQuestionViewStateKey(question: AgentQuestion(session: session, turn: "prompt-b", call: "tool-a",
+                                                           arrivedAt: 1, helperRequestID: "request-a"), index: 0),
+        ClaudeQuestionViewStateKey(question: AgentQuestion(session: session, turn: "prompt-a", call: "tool-b",
+                                                           arrivedAt: 1, helperRequestID: "request-a"), index: 0),
+        ClaudeQuestionViewStateKey(question: AgentQuestion(session: session, turn: "prompt-a", call: "tool-a",
+                                                           arrivedAt: 1, helperRequestID: "request-b"), index: 0),
+        ClaudeQuestionViewStateKey(question: question, index: 1)
+    ]
+    #expect(Set(variants).count == variants.count)
+    #expect(Set(variants.map(\.storageKey)).count == variants.count)
+    #expect(!variants.contains(key))
+}
+
+@Test func staleClaudeQuestionReceiptWorkerCanReplayOnlyTheExactLiveRequest() {
+    let request = claudeQuestionRequest(requestID: "generation-race", sourceScope: "/root-a",
+                                        eventDirectory: "/events-a", publishedAt: 10, expiresAt: 20)
+    let root = ClaudeQuestionRootKey(sourceScope: "/root-a", eventsPath: "/events-a", installationID: "install-1")
+    let result = ClaudeQuestionReceiptResult(request: request, requestID: request.requestID, root: root,
+                                             scanGeneration: 1, written: true)
+    #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
+                                             liveRequest: request, rootIsCurrent: true, now: 11) == .staleAccept)
+    #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 1,
+                                             liveRequest: request, rootIsCurrent: true, now: 11) == .accept)
+    #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
+                                             liveRequest: nil, rootIsCurrent: true, now: 11) == .discard)
+    #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
+                                             liveRequest: claudeQuestionRequest(requestID: "other"),
+                                             rootIsCurrent: true, now: 11) == .discard)
+    #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
+                                             liveRequest: request, rootIsCurrent: false, now: 11) == .discard)
+    #expect(claudeQuestionReceiptDisposition(
+        ClaudeQuestionReceiptResult(request: request, requestID: request.requestID, root: root,
+                                    scanGeneration: 1, written: false),
+        currentGeneration: 2, liveRequest: request, rootIsCurrent: true, now: 11) == .discard)
+}
 
 private func claudeQuestionRequest(requestID: String = "request-1", installationID: String = "install-1",
-                                  sourceScope: String = "/events", publishedAt: Double = 10,
+                                  sourceScope: String = "/root", eventDirectory: String = "/events",
+                                  publishedAt: Double = 10,
                                   expiresAt: Double = 20) -> ClaudeQuestionRequest {
     ClaudeQuestionRequest(requestID: requestID, installationID: installationID, sourceScope: sourceScope,
+                          eventDirectory: eventDirectory,
                           sessionID: "session-1",
                           promptID: "prompt-1", toolUseID: "tool-1", publishedAt: publishedAt, expiresAt: expiresAt,
                           prompts: [QuestionPrompt(header: "Release", question: "Which?",
@@ -13,19 +64,23 @@ private func claudeQuestionRequest(requestID: String = "request-1", installation
 }
 
 private func claudeQuestionReceipt(for request: ClaudeQuestionRequest, installationID: String? = nil,
-                                  sourceScope: String? = nil, receivedAt: Double? = nil,
+                                  sourceScope: String? = nil, eventDirectory: String? = nil,
+                                  receivedAt: Double? = nil,
                                   expiresAt: Double? = nil) -> ClaudeQuestionReceipt {
     ClaudeQuestionReceipt(requestID: request.requestID, installationID: installationID ?? request.installationID,
                           sourceScope: sourceScope ?? request.sourceScope,
+                          eventDirectory: eventDirectory ?? request.eventDirectory,
                           receivedAt: receivedAt ?? request.publishedAt,
                           expiresAt: expiresAt ?? request.expiresAt)
 }
 
 private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installationID: String? = nil,
-                                  sourceScope: String? = nil, answer: String = "Blue",
+                                  sourceScope: String? = nil, eventDirectory: String? = nil,
+                                  answer: String = "Blue",
                                   decidedAt: Double? = nil) -> ClaudeQuestionAnswer {
     ClaudeQuestionAnswer(requestID: request.requestID, installationID: installationID ?? request.installationID,
                          sourceScope: sourceScope ?? request.sourceScope,
+                         eventDirectory: eventDirectory ?? request.eventDirectory,
                          sessionID: request.sessionID, promptID: request.promptID, toolUseID: request.toolUseID,
                          kind: .option, answer: answer, decidedAt: decidedAt ?? request.publishedAt)
 }
@@ -34,6 +89,7 @@ private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installati
     let request = claudeQuestionRequest()
     let answer = ClaudeQuestionAnswer(requestID: request.requestID, installationID: request.installationID,
                                       sourceScope: request.sourceScope,
+                                      eventDirectory: request.eventDirectory,
                                       sessionID: request.sessionID, promptID: request.promptID,
                                       toolUseID: request.toolUseID, kind: .option, answer: "Blue", decidedAt: 11)
     let input: [String: Any] = ["questions": [["header": "Release", "question": "Which?", "options": [["label": "Red"], ["label": "Blue"]]]],
@@ -49,24 +105,28 @@ private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installati
 }
 
 @Test func claudeQuestionPolicyAcceptsMultiSelectAndTypedAnswersButRejectsWrongIdentity() {
-    let request = ClaudeQuestionRequest(requestID: "request-1", installationID: "install-1", sourceScope: "/events",
+    let request = ClaudeQuestionRequest(requestID: "request-1", installationID: "install-1", sourceScope: "/root",
+                                        eventDirectory: "/events",
                                         sessionID: "session-1",
                                         promptID: "prompt-1", toolUseID: "tool-1", publishedAt: 10, expiresAt: 20,
                                         prompts: [QuestionPrompt(header: nil, question: "Where?",
                                                                  options: ["Development", "Production"], multiSelect: true)])
     let multi = ClaudeQuestionAnswer(requestID: request.requestID, installationID: request.installationID,
                                      sourceScope: request.sourceScope,
+                                     eventDirectory: request.eventDirectory,
                                      sessionID: request.sessionID, promptID: request.promptID,
                                      toolUseID: request.toolUseID, kind: .multiSelect,
                                      answer: "Development, Production", decidedAt: 11)
     #expect(ClaudeQuestionAnswerPolicy.accepts(request: request, answer: multi))
     let typed = ClaudeQuestionAnswer(requestID: request.requestID, installationID: request.installationID,
                                      sourceScope: request.sourceScope,
+                                     eventDirectory: request.eventDirectory,
                                      sessionID: request.sessionID, promptID: request.promptID,
                                      toolUseID: request.toolUseID, kind: .text, answer: "after QA", decidedAt: 11)
     #expect(ClaudeQuestionAnswerPolicy.accepts(request: request, answer: typed))
     let wrong = ClaudeQuestionAnswer(requestID: request.requestID, installationID: request.installationID,
                                      sourceScope: request.sourceScope,
+                                     eventDirectory: request.eventDirectory,
                                      sessionID: "other-session", promptID: request.promptID,
                                      toolUseID: request.toolUseID, kind: .multiSelect,
                                      answer: multi.answer, decidedAt: 11)
@@ -78,7 +138,8 @@ private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installati
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let now = Date().timeIntervalSince1970
-    let request = ClaudeQuestionRequest(requestID: "request-1", installationID: "install-1", sourceScope: directory.path,
+    let request = ClaudeQuestionRequest(requestID: "request-1", installationID: "install-1", sourceScope: "/root",
+                                        eventDirectory: directory.standardizedFileURL.path,
                                         sessionID: "session-1",
                                         promptID: "prompt-1", toolUseID: "tool-1", publishedAt: now,
                                         expiresAt: now + 1, prompts: [QuestionPrompt(header: "Release", question: "Which?",
@@ -105,24 +166,29 @@ private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installati
     defer { try? FileManager.default.removeItem(at: directory) }
     let now = Date().timeIntervalSince1970
 
-    let mismatched = claudeQuestionRequest(requestID: "mismatch", sourceScope: directory.path,
+    let mismatched = claudeQuestionRequest(requestID: "mismatch", sourceScope: "/root",
+                                           eventDirectory: directory.standardizedFileURL.path,
                                            publishedAt: now, expiresAt: now + 1)
     #expect(ClaudeQuestionStore.publish(mismatched, in: directory))
     #expect(ClaudeQuestionStore.publish(claudeQuestionReceipt(for: mismatched,
-                                                              installationID: "other-installation"), in: directory))
+                                                              installationID: "other-installation",
+                                                              eventDirectory: "/other-events"), in: directory))
     #expect(ClaudeQuestionHelper.awaitAnswer(for: mismatched, in: directory,
                                              connectionTimeout: 0.03, answerTimeout: 0.03) == nil)
 
-    let wrongAnswer = claudeQuestionRequest(requestID: "wrong-answer", sourceScope: directory.path,
+    let wrongAnswer = claudeQuestionRequest(requestID: "wrong-answer", sourceScope: "/root",
+                                            eventDirectory: directory.standardizedFileURL.path,
                                             publishedAt: now, expiresAt: now + 0.05)
     #expect(ClaudeQuestionStore.publish(wrongAnswer, in: directory))
     #expect(ClaudeQuestionStore.publish(claudeQuestionReceipt(for: wrongAnswer), in: directory))
     #expect(ClaudeQuestionStore.publish(claudeQuestionAnswer(for: wrongAnswer,
-                                                             installationID: "other-installation"), in: directory))
+                                                             installationID: "other-installation",
+                                                             eventDirectory: "/other-events"), in: directory))
     #expect(ClaudeQuestionHelper.awaitAnswer(for: wrongAnswer, in: directory,
                                              connectionTimeout: 0.03, answerTimeout: 0.05) == nil)
 
-    let late = claudeQuestionRequest(requestID: "late", sourceScope: directory.path,
+    let late = claudeQuestionRequest(requestID: "late", sourceScope: "/root",
+                                     eventDirectory: directory.standardizedFileURL.path,
                                      publishedAt: now, expiresAt: now + 0.05)
     #expect(ClaudeQuestionStore.publish(late, in: directory))
     #expect(ClaudeQuestionStore.publish(claudeQuestionReceipt(for: late), in: directory))
@@ -141,7 +207,8 @@ private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installati
         try? FileManager.default.removeItem(at: otherRoot)
     }
     let now = Date().timeIntervalSince1970
-    let request = claudeQuestionRequest(requestID: "cross-root", sourceScope: root.standardizedFileURL.path,
+    let request = claudeQuestionRequest(requestID: "cross-root", sourceScope: "/root",
+                                        eventDirectory: root.standardizedFileURL.path,
                                         publishedAt: now, expiresAt: now + 1)
     #expect(ClaudeQuestionStore.publish(request, in: root))
     #expect(ClaudeQuestionStore.publish(claudeQuestionReceipt(for: request), in: otherRoot))
@@ -149,7 +216,8 @@ private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installati
     #expect(ClaudeQuestionHelper.awaitAnswer(for: request, in: root,
                                              connectionTimeout: 0.03, answerTimeout: 0.03) == nil)
 
-    let restored = claudeQuestionRequest(requestID: "restored", sourceScope: root.standardizedFileURL.path,
+    let restored = claudeQuestionRequest(requestID: "restored", sourceScope: "/root",
+                                         eventDirectory: root.standardizedFileURL.path,
                                          publishedAt: now - 100, expiresAt: now + 100)
     #expect(ClaudeQuestionStore.publish(restored, in: root))
     let pending = ClaudeQuestionStore.pending(in: root, installationID: restored.installationID,

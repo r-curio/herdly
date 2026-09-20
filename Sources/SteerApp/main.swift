@@ -3,24 +3,42 @@ import QuartzCore
 import SwiftUI
 import SteerCore
 
-private struct ClaudeQuestionRootKey: Hashable, Sendable {
+struct ClaudeQuestionRootKey: Hashable, Sendable {
     let sourceScope: String
     let eventsPath: String
     let installationID: String
 }
 
-private struct ClaudeQuestionReceiptWork: Sendable {
+struct ClaudeQuestionReceiptWork: Sendable {
     let request: ClaudeQuestionRequest
     let eventsPath: String
     let root: ClaudeQuestionRootKey
     let scanGeneration: UInt64
 }
 
-private struct ClaudeQuestionReceiptResult: Sendable {
+struct ClaudeQuestionReceiptResult: Sendable {
+    let request: ClaudeQuestionRequest
     let requestID: String
     let root: ClaudeQuestionRootKey
     let scanGeneration: UInt64
     let written: Bool
+}
+
+enum ClaudeQuestionReceiptDisposition: Equatable {
+    case accept
+    case staleAccept
+    case discard
+}
+
+func claudeQuestionReceiptDisposition(_ result: ClaudeQuestionReceiptResult,
+                                      currentGeneration: UInt64,
+                                      liveRequest: ClaudeQuestionRequest?, rootIsCurrent: Bool,
+                                      now: Double) -> ClaudeQuestionReceiptDisposition {
+    guard result.written, rootIsCurrent, let liveRequest,
+          liveRequest == result.request, result.request.expiresAt > now else { return .discard }
+    // A worker may finish after a newer scan. Exact request/root identity makes that immutable
+    // receipt safe to use; a different live request or root remains fail-closed.
+    return result.scanGeneration == currentGeneration ? .accept : .staleAccept
 }
 
 private enum SetupInstallResult: Sendable {
@@ -238,16 +256,19 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 works.map { work -> ClaudeQuestionReceiptResult in
                     let now = Date().timeIntervalSince1970
                     guard work.request.expiresAt > now else {
-                        return ClaudeQuestionReceiptResult(requestID: work.request.requestID, root: work.root,
+                        return ClaudeQuestionReceiptResult(request: work.request, requestID: work.request.requestID,
+                                                          root: work.root,
                                                           scanGeneration: work.scanGeneration, written: false)
                     }
                     let receipt = ClaudeQuestionReceipt(requestID: work.request.requestID,
                                                         installationID: work.request.installationID,
                                                         sourceScope: work.request.sourceScope,
+                                                        eventDirectory: work.request.eventDirectory,
                                                         receivedAt: now, expiresAt: work.request.expiresAt)
                     let written = ClaudeQuestionStore.publish(
                         receipt, in: URL(fileURLWithPath: work.eventsPath, isDirectory: true))
-                    return ClaudeQuestionReceiptResult(requestID: work.request.requestID, root: work.root,
+                    return ClaudeQuestionReceiptResult(request: work.request, requestID: work.request.requestID,
+                                                      root: work.root,
                                                       scanGeneration: work.scanGeneration, written: written)
                 }
             }.value
@@ -259,14 +280,24 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let now = Date().timeIntervalSince1970
         let roots = currentClaudeQuestionRoots()
         for result in results {
+            let live = liveClaudeQuestions[result.requestID]
+            let rootIsCurrent = roots.contains(result.root)
+                && live.map {
+                    claudeQuestionRootKey(sourceScope: $0.sourceScope, events: $0.events,
+                                          installationID: $0.request.installationID) == result.root
+                        && $0.request.sourceScope == $0.sourceScope
+                        && $0.request.eventDirectory == $0.events.standardizedFileURL.path
+                } == true
+            let disposition = claudeQuestionReceiptDisposition(
+                result, currentGeneration: claudeQuestionScanGeneration, liveRequest: live?.request,
+                rootIsCurrent: rootIsCurrent, now: now)
             pendingClaudeQuestionReceipts.remove(result.requestID)
-            guard result.written, result.scanGeneration == claudeQuestionScanGeneration,
-                  roots.contains(result.root),
-                  let live = liveClaudeQuestions[result.requestID],
-                  live.request.expiresAt > now,
-                  claudeQuestionRootKey(sourceScope: live.sourceScope, events: live.events,
-                                        installationID: live.request.installationID) == result.root else { continue }
-            availableClaudeQuestionTokens.insert(result.requestID)
+            switch disposition {
+            case .accept, .staleAccept:
+                availableClaudeQuestionTokens.insert(result.requestID)
+            case .discard:
+                continue
+            }
         }
     }
 
@@ -923,6 +954,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             var receiptWork: [ClaudeQuestionReceiptWork] = []
             for requests in result.9 {
                 for live in requests {
+                    guard live.request.sourceScope == live.sourceScope,
+                          live.request.eventDirectory == live.events.standardizedFileURL.path else { continue }
                     pendingClaudeQuestionIDs.insert(live.request.requestID)
                     liveClaudeQuestions[live.request.requestID] = LiveClaudeQuestion(request: live.request,
                                                                                        events: live.events,
@@ -1608,7 +1641,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
               availableClaudeQuestionTokens.contains(requestID),
               let live = liveClaudeQuestions[requestID],
               live.sourceScope == question.identity.session.sourceScope,
-              live.request.sourceScope == live.events.standardizedFileURL.path,
+              live.request.sourceScope == live.sourceScope,
+              live.request.eventDirectory == live.events.standardizedFileURL.path,
               live.request.sessionID == question.identity.session.session,
               live.request.promptID == question.identity.turn,
               live.request.toolUseID == question.identity.call,
@@ -1626,6 +1660,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let record = ClaudeQuestionAnswer(requestID: live.request.requestID,
                                           installationID: live.request.installationID,
                                           sourceScope: live.request.sourceScope,
+                                          eventDirectory: live.request.eventDirectory,
                                           sessionID: live.request.sessionID,
                                           promptID: live.request.promptID,
                                           toolUseID: live.request.toolUseID,

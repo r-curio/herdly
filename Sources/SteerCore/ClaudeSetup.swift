@@ -163,6 +163,7 @@ public struct ClaudeSetupPlan: Sendable {
 public enum ClaudeSetupPlanner {
     public static func plan(capabilities: ClaudeCapabilities, settings: Data,
                             helperPath: URL, eventsPath: URL,
+                            sourceScope: URL? = nil,
                             policy: ClaudeSetupPolicy = ClaudeSetupPolicy(), usageEnabled: Bool = false,
                             settingsExisted: Bool = true, installRecordPresent: Bool = true) -> ClaudeSetupPlan {
         guard capabilities.supported else {
@@ -208,7 +209,8 @@ public enum ClaudeSetupPlanner {
             ClaudeOwnedHook(event: definition.event, matcher: definition.matcher,
                             command: command(helperPath: helperPath, eventsPath: eventsPath,
                                              installationID: installationID, terminalTitle: definition.terminalTitle,
-                                             questionHelper: definition.questionHelper))
+                                             questionHelper: definition.questionHelper,
+                                             sourceScope: definition.questionHelper ? sourceScope : nil))
         }
         if hasChangedOwnedHook(source, expected: expectedHooks, marker: marker) {
             return empty(.conflict("A Steer-owned Claude hook was changed; review setup before repair."), settings: settings, settingsExisted: settingsExisted)
@@ -276,10 +278,14 @@ public enum ClaudeSetupPlanner {
     }
 
     public static func command(helperPath: URL, eventsPath: URL, installationID: String,
-                               terminalTitle: Bool = false, questionHelper: Bool = false) -> String {
+                               terminalTitle: Bool = false, questionHelper: Bool = false,
+                               sourceScope: URL? = nil) -> String {
         var value = ownershipMarker(helperPath: helperPath, eventsPath: eventsPath) + shellQuote(installationID)
         if terminalTitle { value += " --terminal-title" }
         if questionHelper { value += " --question-helper" }
+        if questionHelper, let sourceScope {
+            value += " --source-scope \(shellQuote(sourceScope.standardizedFileURL.path))"
+        }
         return value
     }
 
