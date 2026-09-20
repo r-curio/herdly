@@ -3,6 +3,26 @@ import QuartzCore
 import SwiftUI
 import SteerCore
 
+private struct ClaudeQuestionRootKey: Hashable, Sendable {
+    let sourceScope: String
+    let eventsPath: String
+    let installationID: String
+}
+
+private struct ClaudeQuestionReceiptWork: Sendable {
+    let request: ClaudeQuestionRequest
+    let eventsPath: String
+    let root: ClaudeQuestionRootKey
+    let scanGeneration: UInt64
+}
+
+private struct ClaudeQuestionReceiptResult: Sendable {
+    let requestID: String
+    let root: ClaudeQuestionRootKey
+    let scanGeneration: UInt64
+    let written: Bool
+}
+
 private enum SetupInstallResult: Sendable {
     case success(CodexConnectionStatus)
     case failure(String)
@@ -142,6 +162,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var liveClaudeQuestions: [String: LiveClaudeQuestion] = [:]
     private var availableClaudeQuestionTokens: Set<String> = []
     private var spentClaudeQuestionTokens: Set<String> = []
+    private var pendingClaudeQuestionReceipts: Set<String> = []
+    private var claudeQuestionScanGeneration: UInt64 = 0
     @Published private(set) var launchAtLogin = LaunchAtLoginState()
     @Published var desktopForeground = false
     private let launchAtLoginCoordinator = LaunchAtLoginCoordinator(service: LaunchAtLoginService())
@@ -168,6 +190,86 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var nextApprovalFocusScan: Double = 0
     private var ghosttyFocusState: GhosttyFocusState = .disabled
     private var ghosttyUnavailable = false
+
+    private func claudeQuestionRootKey(sourceScope: String, events: URL, installationID: String) -> ClaudeQuestionRootKey {
+        ClaudeQuestionRootKey(sourceScope: sourceScope,
+                              eventsPath: events.standardizedFileURL.path,
+                              installationID: installationID)
+    }
+
+    private func currentClaudeQuestionRoots() -> Set<ClaudeQuestionRootKey> {
+        Set(claude.roots.compactMap { root in
+            guard root.status == .connected, !root.eventsPath.isEmpty,
+                  let installationID = root.plan?.installationID, !installationID.isEmpty else { return nil }
+            return claudeQuestionRootKey(sourceScope: root.url.standardizedFileURL.path,
+                                         events: URL(fileURLWithPath: root.eventsPath, isDirectory: true),
+                                         installationID: installationID)
+        })
+    }
+
+    private func observedClaudeQuestionIDs(_ scans: [ClaudeObservationScan]) -> Set<String> {
+        Set(scans.flatMap { scan in
+            scan.observations.compactMap { observation in
+                guard case let .question(question) = observation else { return nil }
+                return question.helperRequestID
+            }
+        })
+    }
+
+    private func pruneClaudeQuestionState(now: Double, roots: Set<ClaudeQuestionRootKey>,
+                                          pendingIDs: Set<String>, observedIDs: Set<String>) {
+        let retained = liveClaudeQuestions.filter { requestID, live in
+            let root = claudeQuestionRootKey(sourceScope: live.sourceScope, events: live.events,
+                                             installationID: live.request.installationID)
+            return live.request.expiresAt > now && roots.contains(root)
+                && (pendingIDs.contains(requestID) || observedIDs.contains(requestID))
+        }
+        let retainedIDs = Set(retained.keys)
+        liveClaudeQuestions = retained
+        availableClaudeQuestionTokens = availableClaudeQuestionTokens.filter { retainedIDs.contains($0) }
+        spentClaudeQuestionTokens = spentClaudeQuestionTokens.filter { retainedIDs.contains($0) }
+        pendingClaudeQuestionReceipts = pendingClaudeQuestionReceipts.filter { retainedIDs.contains($0) }
+    }
+
+    private func publishClaudeQuestionReceipts(_ works: [ClaudeQuestionReceiptWork]) {
+        guard !works.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            let results = await Task.detached(priority: .utility) {
+                works.map { work -> ClaudeQuestionReceiptResult in
+                    let now = Date().timeIntervalSince1970
+                    guard work.request.expiresAt > now else {
+                        return ClaudeQuestionReceiptResult(requestID: work.request.requestID, root: work.root,
+                                                          scanGeneration: work.scanGeneration, written: false)
+                    }
+                    let receipt = ClaudeQuestionReceipt(requestID: work.request.requestID,
+                                                        installationID: work.request.installationID,
+                                                        sourceScope: work.request.sourceScope,
+                                                        receivedAt: now, expiresAt: work.request.expiresAt)
+                    let written = ClaudeQuestionStore.publish(
+                        receipt, in: URL(fileURLWithPath: work.eventsPath, isDirectory: true))
+                    return ClaudeQuestionReceiptResult(requestID: work.request.requestID, root: work.root,
+                                                      scanGeneration: work.scanGeneration, written: written)
+                }
+            }.value
+            self?.reconcileClaudeQuestionReceipts(results)
+        }
+    }
+
+    private func reconcileClaudeQuestionReceipts(_ results: [ClaudeQuestionReceiptResult]) {
+        let now = Date().timeIntervalSince1970
+        let roots = currentClaudeQuestionRoots()
+        for result in results {
+            pendingClaudeQuestionReceipts.remove(result.requestID)
+            guard result.written, result.scanGeneration == claudeQuestionScanGeneration,
+                  roots.contains(result.root),
+                  let live = liveClaudeQuestions[result.requestID],
+                  live.request.expiresAt > now,
+                  claudeQuestionRootKey(sourceScope: live.sourceScope, events: live.events,
+                                        installationID: live.request.installationID) == result.root else { continue }
+            availableClaudeQuestionTokens.insert(result.requestID)
+        }
+    }
+
     var visibleReminders: [Reminder] {
         queue.items.compactMap { $0.request }.map {
             Reminder(request_id: $0.id, session_id: $0.session, turn_id: $0.turn, outcome: "no_decision")
@@ -745,6 +847,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         guard previewMode == nil, (!eventsPath.isEmpty || hasClaudeInventoryRoot), !scanning, now >= nextScan else { return }
         scanning = true
         nextScan = now + 2
+        claudeQuestionScanGeneration &+= 1
+        let questionScanGeneration = claudeQuestionScanGeneration
         // Claude inventory can be the only connected source. The empty Codex input is read from
         // /dev/null so the existing bounded readers produce no Codex observations.
         let events = URL(fileURLWithPath: eventsPath.isEmpty ? "/dev/null" : eventsPath)
@@ -800,8 +904,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let readState = result.2
             guard eventsPath.isEmpty || eventsPath == events.path else { scanning = false; refresh(); return }
             let previousAgent = Set(agentQueue.items(at: Date().timeIntervalSince1970).map(\.id))
+            let scanNow = Date().timeIntervalSince1970
             for claudeScan in result.8 {
-                agentQueue.apply(claudeScan, now: Date().timeIntervalSince1970)
+                agentQueue.apply(claudeScan, now: scanNow)
             }
             let configuredClaudeScopes = Set(configuredClaudeNavigationRoots().map { $0.root.path })
             liveClaudeSessions = Dictionary(uniqueKeysWithValues: result.7.filter {
@@ -814,24 +919,30 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             claudeInventoryAvailable = Dictionary(uniqueKeysWithValues: result.7.filter {
                 configuredClaudeScopes.contains($0.sourceScope)
             }.map { ($0.sourceScope, $0.available) })
+            var pendingClaudeQuestionIDs = Set<String>()
+            var receiptWork: [ClaudeQuestionReceiptWork] = []
             for requests in result.9 {
                 for live in requests {
+                    pendingClaudeQuestionIDs.insert(live.request.requestID)
                     liveClaudeQuestions[live.request.requestID] = LiveClaudeQuestion(request: live.request,
                                                                                        events: live.events,
                                                                                        sourceScope: live.sourceScope)
                     guard !spentClaudeQuestionTokens.contains(live.request.requestID),
-                          availableClaudeQuestionTokens.insert(live.request.requestID).inserted else { continue }
-                    let receipt = ClaudeQuestionReceipt(requestID: live.request.requestID,
-                                                        installationID: live.request.installationID,
-                                                        sourceScope: live.request.sourceScope,
-                                                        receivedAt: Date().timeIntervalSince1970,
-                                                        expiresAt: live.request.expiresAt)
-                    guard ClaudeQuestionStore.publish(receipt, in: live.events) else {
-                        availableClaudeQuestionTokens.remove(live.request.requestID)
-                        continue
-                    }
+                          !availableClaudeQuestionTokens.contains(live.request.requestID),
+                          pendingClaudeQuestionReceipts.insert(live.request.requestID).inserted else { continue }
+                    receiptWork.append(ClaudeQuestionReceiptWork(
+                        request: live.request, eventsPath: live.events.standardizedFileURL.path,
+                        root: claudeQuestionRootKey(sourceScope: live.sourceScope, events: live.events,
+                                                    installationID: live.request.installationID),
+                        scanGeneration: questionScanGeneration))
                 }
             }
+            pruneClaudeQuestionState(now: scanNow, roots: currentClaudeQuestionRoots(),
+                                     pendingIDs: pendingClaudeQuestionIDs,
+                                     observedIDs: observedClaudeQuestionIDs(result.8))
+            // A root can contain many pending rendezvous files. Writes happen off the main actor;
+            // the completion rechecks the scan generation, root identity, and request deadline.
+            publishClaudeQuestionReceipts(receiptWork)
             for inventory in result.7 {
                 agentQueue.apply(inventory, now: Date().timeIntervalSince1970)
                 for session in inventory.sessions {
