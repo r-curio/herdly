@@ -47,10 +47,48 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     let snapshot = ClaudeSetupDetection.setupSnapshot(
         root: config,
         applicationSupport: support,
-        capabilities: capabilities
+        capabilities: capabilities,
+        inventoryStatus: .unavailable("test inventory unavailable")
     )
     #expect(snapshot.status == .malformed("Claude settings.json has an unsupported hooks shape and was not changed."))
     #expect(snapshot.plan?.status == .malformed("Claude settings.json has an unsupported hooks shape and was not changed."))
+}
+
+@Test func claudeSetupSnapshotPreservesPlannerConflictStateWithoutInventory() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-conflict-snapshot-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = root.appendingPathComponent("config", isDirectory: true)
+    let support = root.appendingPathComponent("support", isDirectory: true)
+    try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+    try Data(#"{"env":{"CLAUDE_CODE_DISABLE_TERMINAL_TITLE":"0"}}"#.utf8)
+        .write(to: config.appendingPathComponent("settings.json"))
+
+    let snapshot = ClaudeSetupDetection.setupSnapshot(
+        root: config,
+        applicationSupport: support,
+        capabilities: capabilities,
+        inventoryStatus: .unavailable("test inventory unavailable")
+    )
+    #expect(snapshot.status == .conflict("Claude's automatic terminal title setting is owned by another value; review settings.json before reconnecting."))
+    #expect(snapshot.plan?.status == .conflict("Claude's automatic terminal title setting is owned by another value; review settings.json before reconnecting."))
+}
+
+@Test func claudeSetupSnapshotBlocksReadyPlanWithoutInventory() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-unavailable-snapshot-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = root.appendingPathComponent("config", isDirectory: true)
+    let support = root.appendingPathComponent("support", isDirectory: true)
+    try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+    try Data("{}".utf8).write(to: config.appendingPathComponent("settings.json"))
+
+    let snapshot = ClaudeSetupDetection.setupSnapshot(
+        root: config,
+        applicationSupport: support,
+        capabilities: capabilities,
+        inventoryStatus: .unavailable("test inventory unavailable")
+    )
+    #expect(snapshot.status == .unavailable("Claude setup is blocked until the selected root's agents inventory is available."))
+    #expect(snapshot.plan == nil)
 }
 
 @Test func claudeSetupActiveSessionSummaryValidatesBoundedInventory() throws {

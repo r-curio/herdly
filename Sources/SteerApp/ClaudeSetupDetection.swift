@@ -56,40 +56,44 @@ enum ClaudeSetupDetection {
     }
 
     static func setupSnapshot(root: URL, applicationSupport: URL, capabilities: ClaudeCapabilities,
-                              usageEnabled: Bool = false) -> Snapshot {
+                              usageEnabled: Bool = false,
+                              inventoryStatus: ActiveSessionStatus? = nil) -> Snapshot {
         let roots = setupRoots(configDirectory: root, applicationSupport: applicationSupport)
         let manager = FileManager.default
         let settingsExists = manager.fileExists(atPath: roots.settingsURL.path)
         let installRecordExists = manager.fileExists(atPath: roots.stateURL.path)
         let installer = ClaudeSetupInstaller()
         let installRecordPresent = installer.isInstallRecordValid(for: roots)
-        let activeSessionStatus = activeSessionsStatus(root: root, capabilities: capabilities,
-                                                       installedAt: installer.installedAt(for: roots),
-                                                       deliveredSessionIDs: installer.deliveredSessionIDs(for: roots))
+        let activeSessionStatus = inventoryStatus ?? activeSessionsStatus(root: root, capabilities: capabilities,
+                                                                          installedAt: installer.installedAt(for: roots),
+                                                                          deliveredSessionIDs: installer.deliveredSessionIDs(for: roots))
         let inventoryUnavailable = activeSessionStatus.isUnavailable
         let settings = boundedRegularData(at: roots.settingsURL) ?? Data("{}".utf8)
         let setupPolicy = policy(for: root)
-        let plan: ClaudeSetupPlan?
-        if capabilities.supported && !installRecordPresent && inventoryUnavailable {
-            plan = nil
-        } else if settingsExists && boundedRegularData(at: roots.settingsURL) == nil {
-            plan = nil
+        let plannerPlan: ClaudeSetupPlan?
+        if settingsExists && boundedRegularData(at: roots.settingsURL) == nil {
+            plannerPlan = nil
         } else if installRecordExists && !installRecordPresent {
+            plannerPlan = nil
+        } else {
+            plannerPlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: settings,
+                                                  helperPath: roots.helperURL, eventsPath: roots.eventsDirectory,
+                                                  policy: setupPolicy,
+                                                  usageEnabled: usageEnabled, settingsExisted: settingsExists,
+                                                  installRecordPresent: installRecordPresent)
+        }
+        let plan: ClaudeSetupPlan?
+        if capabilities.supported && !installRecordPresent && inventoryUnavailable,
+           let plannerPlan, case .ready = plannerPlan.status {
             plan = nil
         } else {
-            plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: settings,
-                                           helperPath: roots.helperURL, eventsPath: roots.eventsDirectory,
-                                           policy: setupPolicy,
-                                           usageEnabled: usageEnabled, settingsExisted: settingsExists,
-                                           installRecordPresent: installRecordPresent)
+            plan = plannerPlan
         }
         let status: ClaudeConnectionStatus
         if settingsExists && boundedRegularData(at: roots.settingsURL) == nil {
             status = .malformed("Claude settings.json is unreadable or too large; Steer will not change it.")
         } else if installRecordExists && !installRecordPresent {
             status = ClaudeSetupInstaller().status(roots: roots, capabilities: capabilities)
-        } else if capabilities.supported && !installRecordPresent && inventoryUnavailable {
-            status = .unavailable("Claude setup is blocked until the selected root's agents inventory is available.")
         } else if let plan, case let .unsupported(message) = plan.status {
             status = .unsupported(message)
         } else if let plan, case let .malformed(message) = plan.status {
@@ -100,6 +104,8 @@ enum ClaudeSetupDetection {
             status = .shadowed(message)
         } else if let plan, case let .blockedByPolicy(message) = plan.status {
             status = .blockedByPolicy(message)
+        } else if capabilities.supported && !installRecordPresent && inventoryUnavailable {
+            status = .unavailable("Claude setup is blocked until the selected root's agents inventory is available.")
         } else {
             status = ClaudeSetupInstaller().status(roots: roots, capabilities: capabilities)
         }
