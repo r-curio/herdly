@@ -963,7 +963,7 @@ public struct ClaudeSetupInstaller {
         let eventFiles = try boundedContents(of: roots.eventsDirectory)
         let now = Date().timeIntervalSince1970
         let ownedEvents = eventFiles.filter { validEvent($0, installationID: state.installationID, installedAt: state.installedAt, now: now) }
-        let usageFiles = (try? boundedContents(of: roots.usageDirectory)) ?? []
+        let usageRecord = roots.usageDirectory.appendingPathComponent(ClaudeUsageReader.latestRecordName)
         let backup = try validatedBackupURL(for: state, roots: roots)
         if fileManager.fileExists(atPath: roots.helperURL.path), !isRegularFile(at: roots.helperURL) {
             throw ClaudeSetupError.conflict("Steer's Claude helper path is not a regular file; undo made no changes.")
@@ -975,7 +975,7 @@ public struct ClaudeSetupInstaller {
             }
             try fileManager.removeItem(at: roots.stateURL)
             for event in ownedEvents { try fileManager.removeItem(at: event) }
-            for usageFile in usageFiles where isRegularFile(at: usageFile) { try fileManager.removeItem(at: usageFile) }
+            if ClaudeUsageReader.isOwnedRecord(at: usageRecord) { try fileManager.removeItem(at: usageRecord) }
             if let backup { try fileManager.removeItem(at: backup) }
             try removeDirectoryIfEmpty(roots.usageDirectory)
             try removeDirectoryIfEmpty(roots.helperDirectory)

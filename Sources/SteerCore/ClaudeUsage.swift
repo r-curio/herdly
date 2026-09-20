@@ -52,13 +52,15 @@ public enum ClaudeUsageReader {
     public static let source = "steer-claude-usage-v1"
     public static let maximumRecordBytes = 64 * 1024
     public static let maximumFiles = 4096
+    public static let latestRecordName = "steer-latest.json"
 
     public static func parse(_ data: Data, sourceScope: String, now: Double? = nil) -> ClaudeUsageReading? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard data.count <= maximumRecordBytes,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               object["source"] as? String == source,
               let observedAt = (object["observed_at"] as? NSNumber)?.doubleValue,
               observedAt.isFinite else { return nil }
-        let sessionID = (object["session_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let sessionID = canonicalSessionID(object["session_id"])
         guard let sessionID else { return nil }
         let limits = object["rate_limits"] as? [String: Any]
         return ClaudeUsageReading(sourceScope: sourceScope, sessionID: sessionID,
@@ -69,29 +71,20 @@ public enum ClaudeUsageReader {
     }
 
     public static func latest(root: URL, sourceScope: String? = nil, now: Double = Date().timeIntervalSince1970) -> ClaudeUsageReading? {
-        guard let entries = try? FileManager.default.contentsOfDirectory(at: root,
-                                                                           includingPropertiesForKeys: [.contentModificationDateKey],
-                                                                           options: [.skipsHiddenFiles]) else { return nil }
-        let files = entries.compactMap { url -> (URL, Date)? in
-            guard url.pathExtension == "json",
-                  regularFile(url),
-                  let values = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
-                  let date = values.contentModificationDate else { return nil }
-            return (url, date)
-        }.sorted { $0.1 > $1.1 }.prefix(maximumFiles)
-        for (url, _) in files {
-            guard let data = try? Data(contentsOf: url), data.count <= maximumRecordBytes else { return nil }
-            // The newest bridge record is authoritative for that root. A malformed or missing
-            // window report must not resurrect an older session's reading.
-            return parse(data, sourceScope: sourceScope ?? root.path, now: now)
-        }
-        return nil
+        // The bridge owns one fixed snapshot. Reading that path directly keeps lookup bounded
+        // even when a user places unrelated files or directories beside it.
+        let record = root.appendingPathComponent(latestRecordName)
+        guard regularFile(record), let data = boundedData(at: record) else { return nil }
+        // The newest bridge record is authoritative for that root. A malformed or missing
+        // window report must not resurrect an older session's reading.
+        return parse(data, sourceScope: sourceScope ?? root.path, now: now)
     }
 
     /// Keep only the two subscription windows. A valid payload with no windows still produces an
     /// empty record so a newly missing window cannot leave an older value looking current.
     public static func sanitizedRecord(_ payload: Data, observedAt: Double = Date().timeIntervalSince1970) -> Data? {
-        guard let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+        guard payload.count <= maximumRecordBytes,
+              let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
               observedAt.isFinite else { return nil }
         var windows: [String: Any] = [:]
         if let limits = object["rate_limits"] as? [String: Any] {
@@ -104,7 +97,7 @@ public enum ClaudeUsageReader {
             }
         }
         var record: [String: Any] = ["source": source, "observed_at": observedAt, "rate_limits": windows]
-        if let sessionID = object["session_id"] as? String, !sessionID.isEmpty, sessionID.utf8.count <= 256 {
+        if let sessionID = canonicalSessionID(object["session_id"]) {
             record["session_id"] = sessionID
         }
         guard JSONSerialization.isValidJSONObject(record) else { return nil }
@@ -113,16 +106,36 @@ public enum ClaudeUsageReader {
 
     public static func record(_ payload: Data, to directory: URL, observedAt: Double = Date().timeIntervalSince1970) -> Bool {
         guard let data = sanitizedRecord(payload, observedAt: observedAt) else { return false }
+        let destination = directory.appendingPathComponent(latestRecordName)
+        let temporary = directory.appendingPathComponent(".steer-usage-" + UUID().uuidString)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let temporary = directory.appendingPathComponent(".steer-" + UUID().uuidString)
-            let destination = directory.appendingPathComponent(UUID().uuidString + ".json")
             try data.write(to: temporary, options: .atomic)
-            try FileManager.default.moveItem(at: temporary, to: destination)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                guard isOwnedRecord(at: destination) else {
+                    removeTemporaryIfOwned(temporary, matching: data)
+                    return false
+                }
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+            } else {
+                try FileManager.default.moveItem(at: temporary, to: destination)
+            }
             return true
         } catch {
+            removeTemporaryIfOwned(temporary, matching: data)
             return false
         }
+    }
+
+    public static func isOwnedRecord(at url: URL) -> Bool {
+        guard url.lastPathComponent == latestRecordName, regularFile(url),
+              let data = boundedData(at: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        guard object["source"] as? String == source,
+              let observedAt = (object["observed_at"] as? NSNumber)?.doubleValue,
+              observedAt.isFinite,
+              object["rate_limits"] as? [String: Any] != nil else { return false }
+        return true
     }
 
     private static func window(_ value: Any?) -> ClaudeUsageWindow? {
@@ -133,11 +146,32 @@ public enum ClaudeUsageReader {
         return ClaudeUsageWindow(usedPercentage: used, resetsAt: resets)
     }
 
+    private static func canonicalSessionID(_ value: Any?) -> String? {
+        guard let value = value as? String, value.utf8.count == 36,
+              let uuid = UUID(uuidString: value) else { return nil }
+        return uuid.uuidString.lowercased()
+    }
+
     private static func regularFile(_ url: URL) -> Bool {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               attributes[.type] as? FileAttributeType == .typeRegular,
-              (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else { return false }
+              (try? url.resourceValues(forKeys: Set<URLResourceKey>([.isSymbolicLinkKey])).isSymbolicLink) != true else { return false }
         return true
+    }
+
+    private static func boundedData(at url: URL) -> Data? {
+        guard let values = try? url.resourceValues(forKeys: Set<URLResourceKey>([.fileSizeKey])),
+              let size = values.fileSize, size <= maximumRecordBytes,
+              let data = try? Data(contentsOf: url), data.count <= maximumRecordBytes else { return nil }
+        return data
+    }
+
+    private static func removeTemporaryIfOwned(_ url: URL, matching data: Data) {
+        let prefix = ".steer-usage-"
+        guard url.lastPathComponent.hasPrefix(prefix),
+              UUID(uuidString: String(url.lastPathComponent.dropFirst(prefix.count))) != nil,
+              regularFile(url), boundedData(at: url) == data else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 }
 

@@ -2,7 +2,14 @@ import Foundation
 import Testing
 @testable import SteerCore
 
-private func usagePayload(session: String = "session-a", five: (Double, Double)? = (12, 1_000), seven: (Double, Double)? = (42, 2_000), spend: (Double, Double)? = (99, 3_000)) -> Data {
+private let sessionA = "00000000-0000-4000-8000-000000000001"
+private let sessionB = "00000000-0000-4000-8000-000000000002"
+
+private func usageSession(_ index: Int) -> String {
+    String(format: "00000000-0000-4000-8000-%012d", index)
+}
+
+private func usagePayload(session: String = sessionA, five: (Double, Double)? = (12, 1_000), seven: (Double, Double)? = (42, 2_000), spend: (Double, Double)? = (99, 3_000)) -> Data {
     func window(_ value: (Double, Double)) -> [String: Any] {
         ["used_percentage": value.0, "resets_at": value.1]
     }
@@ -17,7 +24,7 @@ private func usagePayload(session: String = "session-a", five: (Double, Double)?
     let record = try #require(ClaudeUsageReader.sanitizedRecord(usagePayload()))
     let reading = try #require(ClaudeUsageReader.parse(record, sourceScope: "/root-a", now: 0))
     #expect(reading.sourceScope == "/root-a")
-    #expect(reading.sessionID == "session-a")
+    #expect(reading.sessionID == sessionA)
     #expect(reading.fiveHour?.usedPercentage == 12)
     #expect(reading.sevenDay?.usedPercentage == 42)
     #expect(reading.current(now: 1_001)?.fiveHour == nil)
@@ -28,6 +35,7 @@ private func usagePayload(session: String = "session-a", five: (Double, Double)?
     #expect(missingFive.fiveHour == nil)
     #expect(missingFive.sevenDay?.usedPercentage == 42)
     #expect(ClaudeUsageReader.parse(ClaudeUsageReader.sanitizedRecord(usagePayload(session: ""))!, sourceScope: "/root-a", now: 0) == nil)
+    #expect(ClaudeUsageReader.parse(ClaudeUsageReader.sanitizedRecord(usagePayload(session: "session-a"))!, sourceScope: "/root-a", now: 0) == nil)
 }
 
 @Test func claudeUsageLatestTreatsNewestMalformedRecordAsUnavailableAndKeepsRootsSeparate() throws {
@@ -37,14 +45,51 @@ private func usagePayload(session: String = "session-a", five: (Double, Double)?
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     #expect(ClaudeUsageReader.record(usagePayload(), to: directory, observedAt: 1))
     #expect(ClaudeUsageReader.latest(root: directory, sourceScope: "/root-a", now: 0)?.sourceScope == "/root-a")
-    let newest = directory.appendingPathComponent("zz-newest.json")
+    let newest = directory.appendingPathComponent(ClaudeUsageReader.latestRecordName)
     try Data("not json".utf8).write(to: newest)
-    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(10)], ofItemAtPath: newest.path)
     #expect(ClaudeUsageReader.latest(root: directory, sourceScope: "/root-a", now: 0) == nil)
 
-    #expect(ClaudeUsageReader.record(usagePayload(session: "session-b", five: (7, 2_000), seven: nil), to: other, observedAt: 2))
+    #expect(ClaudeUsageReader.record(usagePayload(session: sessionB, five: (7, 2_000), seven: nil), to: other, observedAt: 2))
     #expect(ClaudeUsageReader.latest(root: other, sourceScope: "/root-b", now: 0)?.sourceScope == "/root-b")
-    #expect(ClaudeUsageReader.latest(root: other, sourceScope: "/root-b", now: 0)?.sessionID == "session-b")
+    #expect(ClaudeUsageReader.latest(root: other, sourceScope: "/root-b", now: 0)?.sessionID == sessionB)
+}
+
+@Test func claudeUsageRejectsOversizedRecordsAndKeepsOwnedStorageBounded() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-usage-bounded-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let oversized = Data(repeating: 0x78, count: ClaudeUsageReader.maximumRecordBytes + 1)
+    #expect(ClaudeUsageReader.sanitizedRecord(oversized, observedAt: 1) == nil)
+    #expect(!ClaudeUsageReader.record(oversized, to: directory, observedAt: 1))
+
+    for index in 1...5_000 {
+        #expect(ClaudeUsageReader.record(usagePayload(session: usageSession(index)), to: directory, observedAt: Double(index)))
+    }
+    let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+    #expect(files.filter { $0.lastPathComponent.hasPrefix("steer-usage-") }.isEmpty)
+    #expect(files.filter { $0.lastPathComponent == ClaudeUsageReader.latestRecordName }.count == 1)
+    #expect(ClaudeUsageReader.latest(root: directory, sourceScope: "/root-a", now: 0)?.sessionID == usageSession(5_000))
+}
+
+@Test func claudeUsageDoesNotTrustAForgedOwnedFilename() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-usage-forged-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let record = directory.appendingPathComponent(ClaudeUsageReader.latestRecordName)
+    let forged = Data(#"{"source":"steer-claude-usage-v1"}"#.utf8)
+    try forged.write(to: record)
+    #expect(!ClaudeUsageReader.record(usagePayload(), to: directory, observedAt: 2))
+    #expect(try Data(contentsOf: record) == forged)
+}
+
+@Test func claudeUsageIgnoresAnOverCapDirectoryOfUnrelatedFiles() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-usage-over-cap-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    #expect(ClaudeUsageReader.record(usagePayload(), to: directory, observedAt: 1))
+    for index in 0...ClaudeUsageReader.maximumFiles {
+        try Data("unrelated".utf8).write(to: directory.appendingPathComponent("user-\(index).json"))
+    }
+    #expect(ClaudeUsageReader.latest(root: directory, sourceScope: "/root-a", now: 0)?.sessionID == sessionA)
 }
 
 @Test func claudeStatusLineCommandQuotesTheExistingCommandAndProbeRejectsSlowDescendants() {
@@ -130,6 +175,34 @@ private func usagePayload(session: String = "session-a", five: (Double, Double)?
     let disabled = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: setupRoots.settingsURL)) as? [String: Any])
     #expect((disabled["statusLine"] as? [String: Any])?["command"] as? String == "cat")
     #expect(FileManager.default.fileExists(atPath: setupRoots.helperURL.path))
+}
+
+@Test func claudeUsageUndoRemovesOnlyItsRecordAfterManyRefreshes() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-usage-undo-bounded-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = root.appendingPathComponent("config", isDirectory: true)
+    let support = root.appendingPathComponent("support", isDirectory: true)
+    let setupRoots = ClaudeSetupRoots(configDirectory: config,
+                                      helperDirectory: support.appendingPathComponent("claude", isDirectory: true),
+                                      eventsDirectory: support.appendingPathComponent("claude-events", isDirectory: true))
+    let original = Data(#"{"statusLine":{"type":"command","command":"cat"}}"#.utf8)
+    try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+    try original.write(to: setupRoots.settingsURL)
+    let capabilities = ClaudeCapabilities(installed: true, supported: true, version: "2.1.273")
+    let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: original, helperPath: setupRoots.helperURL,
+                                       eventsPath: setupRoots.eventsDirectory, usageEnabled: true)
+    let installer = ClaudeSetupInstaller()
+    _ = try installer.install(plan, roots: setupRoots, helper: Data("helper".utf8), capabilities: capabilities)
+    for index in 1...5_000 {
+        #expect(ClaudeUsageReader.record(usagePayload(session: usageSession(index)), to: setupRoots.usageDirectory, observedAt: Double(index)))
+    }
+    let unrelated = setupRoots.usageDirectory.appendingPathComponent("user-owned.json")
+    let unrelatedData = Data("leave me".utf8)
+    try unrelatedData.write(to: unrelated)
+
+    #expect(try installer.undo(roots: setupRoots) == .notConfigured)
+    #expect(!FileManager.default.fileExists(atPath: setupRoots.usageDirectory.appendingPathComponent(ClaudeUsageReader.latestRecordName).path))
+    #expect(try Data(contentsOf: unrelated) == unrelatedData)
 }
 
 @Test func incompatibleClaudeStatusLineLeavesCoreConnectionIntact() throws {
