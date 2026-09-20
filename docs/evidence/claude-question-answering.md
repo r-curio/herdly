@@ -14,7 +14,7 @@ single-write.
 `swift test --filter ClaudeQuestionTests` covers unchanged input, single-select, multi-select, typed
 answers, exact identity rejection, one-shot writes, receipt/answer timing, view-state key isolation,
 and stale receipt generation reconciliation. `ClaudeObservationTests` covers prompt labels and helper
-identity in the shared queue. The full suite passed with 285 tests;
+identity in the shared queue. The full suite passed with 288 tests;
 `sh scripts/build-app.sh`, `sh scripts/package-app.sh`, and
 `output/Steer.app/Contents/MacOS/Steer --smoke-test` also passed. The package was ad hoc signed and
 is development evidence only.
