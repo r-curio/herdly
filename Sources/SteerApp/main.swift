@@ -715,6 +715,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                   let installationID = root.plan?.installationID, !installationID.isEmpty else { return nil }
             return (root.url.standardizedFileURL.path, URL(fileURLWithPath: root.eventsPath, isDirectory: true), installationID)
         }
+        let claudeInventoryRoots = claude.roots.compactMap { root -> (root: URL, capabilities: ClaudeCapabilities)? in
+            guard root.capabilities.supported else { return nil }
+            return (root.url.standardizedFileURL, root.capabilities)
+        }
         Task { @MainActor in
             let result = await Task.detached {
                 (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
@@ -723,6 +727,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                  CodexUsageReader.latest(root: rolloutRoot),
                  SessionDiscovery.candidates(root: rolloutRoot, now: Date().timeIntervalSince1970),
                  ProcessList.arguments().map(CodexCLIProcesses.isRunning(processList:)) ?? false,
+                 claudeInventoryRoots.map { root in
+                     ClaudeSetupDetection.activeSessionInventory(root: root.root, capabilities: root.capabilities,
+                                                                 observedAt: observationNow)
+                 },
                  claudeRoots.map { root in
                      ClaudeObservationReader.scan(events: root.events, sourceScope: root.scope,
                                                   installationID: root.installationID, observingSince: observingSince,
@@ -733,8 +741,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let desktopEvents = result.1
             let readState = result.2
             guard eventsPath == events.path else { scanning = false; refresh(); return }
-            for claudeScan in result.7 {
+            for claudeScan in result.8 {
                 agentQueue.apply(claudeScan, now: Date().timeIntervalSince1970)
+            }
+            for inventory in result.7 {
+                agentQueue.apply(inventory, now: Date().timeIntervalSince1970)
             }
             if threadNames != result.3 { threadNames = result.3 }
             if usage != result.4 { usage = result.4 }

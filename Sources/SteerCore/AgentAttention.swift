@@ -146,6 +146,16 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     }
 }
 
+public struct AgentProvisionalStop: Equatable, Sendable {
+    public let identity: AgentTurnIdentity
+    public let arrivedAt: Double
+
+    public init(identity: AgentTurnIdentity, arrivedAt: Double) {
+        self.identity = identity
+        self.arrivedAt = arrivedAt
+    }
+}
+
 public enum AgentAttentionID: Hashable, Codable, Sendable {
     case approval(AgentCallIdentity)
     case question(AgentCallIdentity)
@@ -178,6 +188,7 @@ public enum AgentObservation: Equatable, Sendable {
     case question(AgentQuestion)
     case outcome(AgentOutcome)
     case running(AgentRunning)
+    case provisionalStop(AgentProvisionalStop)
     case resolved(AgentAttentionID)
 }
 
@@ -192,6 +203,8 @@ public struct AgentAttentionQueue: Sendable {
     private var questions: [AgentCallIdentity: AgentQuestion] = [:]
     private var outcomes: [AgentTurnIdentity: AgentOutcome] = [:]
     private var running: [AgentSessionIdentity: AgentRunning] = [:]
+    private var inventoryRunning: [AgentSessionIdentity: AgentRunning] = [:]
+    private var provisionalStops: [AgentSessionIdentity: AgentProvisionalStop] = [:]
     private var resolved: Set<AgentAttentionID> = []
     private var acknowledged: Set<AgentTurnIdentity>
     private var now: Double = 0
@@ -209,7 +222,7 @@ public struct AgentAttentionQueue: Sendable {
     }
 
     public var items: [AgentAttentionItem] { items(at: now) }
-    public var workingCount: Int { running.count }
+    public var workingCount: Int { Set(running.keys).union(inventoryRunning.keys).count }
     public var toCheckCount: Int { approvals.count + questions.count + outcomes.count }
     public var acknowledgedOutcomes: Set<AgentTurnIdentity> { acknowledged }
 
@@ -237,7 +250,8 @@ public struct AgentAttentionQueue: Sendable {
                                       approval: nil, question: nil, outcome: outcome, running: nil)
         }
         let waiting = Set(questions.values.map(\.identity.session))
-        let runningItems = running.values.filter { !waiting.contains($0.identity.session) }.map { active in
+        let inventoryItems = inventoryRunning.values.filter { running[$0.identity.session] == nil }
+        let runningItems = (running.values + inventoryItems).filter { !waiting.contains($0.identity.session) }.map { active in
             AgentAttentionItem(id: .running(active.id), kind: .running, session: active.identity.session,
                                arrivedAt: active.arrivedAt, approval: nil, question: nil, outcome: nil, running: active)
         }
@@ -288,6 +302,7 @@ public struct AgentAttentionQueue: Sendable {
             }
             questions = questions.filter { !resolved.contains(.question($0.key)) }
             if running[turn.session]?.id == turn { running.removeValue(forKey: turn.session) }
+            inventoryRunning.removeValue(forKey: turn.session)
         case let .running(active):
             guard !resolved.contains(.running(active.id)) else { return }
             if let outcome = outcomes[active.id] {
@@ -298,6 +313,13 @@ public struct AgentAttentionQueue: Sendable {
                 guard active.arrivedAt > current.arrivedAt || (active.id == current.id && active != current) else { return }
             }
             running[active.identity.session] = active
+            inventoryRunning.removeValue(forKey: active.identity.session)
+            provisionalStops = provisionalStops.filter { $0.key != active.identity.session }
+        case let .provisionalStop(stop):
+            guard stop.arrivedAt.isFinite else { return }
+            guard outcomes[stop.identity] == nil else { return }
+            if let current = provisionalStops[stop.identity.session], current.arrivedAt >= stop.arrivedAt { return }
+            provisionalStops[stop.identity.session] = stop
         case let .resolved(id):
             dismiss(id)
         }
@@ -306,6 +328,43 @@ public struct AgentAttentionQueue: Sendable {
 
     public mutating func apply(_ observations: [AgentObservation], now: Double? = nil) {
         observations.forEach { apply($0, now: now) }
+    }
+
+    /// Applies a valid root inventory as weaker lifecycle evidence. It can add a generic running
+    /// row or confirm a previously observed Stop, but it never clears hook observations.
+    public mutating func apply(_ scan: ClaudeInventoryScan, now: Double? = nil) {
+        guard scan.available, scan.observedAt.isFinite else { return }
+        let scope = scan.sourceScope
+        let sessions = scan.sessions.filter { $0.sessionID.isEmpty == false }
+        let incoming = Set(sessions.map { AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                              session: $0.sessionID, surface: .cli) })
+        inventoryRunning = inventoryRunning.filter { identity, _ in
+            identity.source != .claude || identity.sourceScope != scope || incoming.contains(identity)
+        }
+        for session in sessions {
+            let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                session: session.sessionID, surface: .cli)
+            if session.lifecycle.isIdleInteractive {
+                if let stop = provisionalStops[identity], scan.observedAt > stop.arrivedAt {
+                    provisionalStops.removeValue(forKey: identity)
+                    apply(.outcome(AgentOutcome(session: identity, turn: stop.identity.turn,
+                                                status: .finished, arrivedAt: scan.observedAt)), now: now)
+                }
+                inventoryRunning.removeValue(forKey: identity)
+                continue
+            }
+            guard session.lifecycle.isActive else {
+                inventoryRunning.removeValue(forKey: identity)
+                provisionalStops.removeValue(forKey: identity)
+                continue
+            }
+            if let stop = provisionalStops[identity], scan.observedAt > stop.arrivedAt {
+                provisionalStops.removeValue(forKey: identity)
+            }
+            guard running[identity] == nil else { continue }
+            inventoryRunning[identity] = AgentRunning(session: identity, turn: "", arrivedAt: scan.observedAt)
+        }
+        if let now { self.now = now }
     }
 
     /// Drops source-scoped actionable and running state absent from a complete source scan.
@@ -343,6 +402,7 @@ public struct AgentAttentionQueue: Sendable {
             outcomes.removeValue(forKey: identity)
         case let .running(identity):
             running.removeValue(forKey: identity.session)
+            inventoryRunning.removeValue(forKey: identity.session)
         }
     }
 

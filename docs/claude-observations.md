@@ -23,15 +23,24 @@ current action.
 Permission observations require exactly one matching, uncompleted `PreToolUse` call in the same
 session, prompt, root, and tool name. Ambiguous, malformed, late, repeated, or cross-root records
 are ignored. A root that cannot be read is unavailable for reconciliation, so it cannot clear another
-root's attention.
+root's attention. The root-scoped `claude agents --json` inventory is a weaker source: a valid
+interactive `busy`/`waiting` or background `working`/`blocked` row may add only a generic running
+row, while idle and background terminal states remove only inventory-derived rows. An unavailable
+or duplicate inventory leaves both inventory and hook evidence untouched. A later valid
+interactive `idle` observation confirms a previously observed provisional `Stop`; inventory alone
+never creates an outcome, tool label, question, approval, sound, or target. Duplicate interactive
+resumes therefore remain one session identity with no unique direct target until a later poll is
+unique.
 
 ## Evidence status
 
 - **Source inspection:** the Claude hook definitions, bounded helper records, reader, root-scoped
   intake, and queue reconciliation implement the rules above.
 - **Automated checks:** `ClaudeObservationTests` covers exact post cleanup, late and ambiguous calls,
-  session-end uncertainty, installation/root isolation, and late outcomes. The helper self-test also
-  checks bounded Claude metadata and tool input.
-- **Live application proof:** pending. The isolated run of a real Claude tool followed by continued
-  `Stop` was deferred for a separate manual check tomorrow; this change does not claim that scenario
-  passed.
+session-end uncertainty, installation/root isolation, and late outcomes. `ClaudeInventoryTests`
+covers separate interactive/background lifecycle fields, duplicate and unavailable polls, root
+isolation, weaker inventory evidence, and provisional `Stop` confirmation. The helper self-test also
+checks bounded Claude metadata and tool input.
+- **Live application proof:** pending. Restarting Steer during one real Claude session and observing
+  its current state without replaying sound or fabricating a question was deferred for the user's
+  walkthrough tomorrow; this change does not claim that scenario passed.
