@@ -51,6 +51,7 @@ public enum ClaudeObservationReader {
         var question: AgentQuestion?
         var approval: AgentApproval?
         var terminal: AgentOutcome?
+        var provisionalStopAt: Double?
         var closedAt: Double?
     }
 
@@ -136,7 +137,7 @@ public enum ClaudeObservationReader {
                     turns[turnID] = Turn(session: record.session, prompt: promptID,
                                          promptText: boundedText(record.prompt), startedAt: record.capturedAt,
                                          updatedAt: record.capturedAt, tool: nil, tools: [:], question: nil,
-                                         approval: nil, terminal: nil, closedAt: nil)
+                                         approval: nil, terminal: nil, provisionalStopAt: nil, closedAt: nil)
                 }
             case "PreToolUse":
                 guard let promptID = valid(record.promptID), let toolID = valid(record.toolUseID),
@@ -149,6 +150,7 @@ public enum ClaudeObservationReader {
                     guard record.capturedAt > closedAt else { continue }
                     turn.closedAt = nil
                     turn.terminal = nil
+                    turn.provisionalStopAt = nil
                 }
                 if let endedAt = sessionEndAt[record.session], record.capturedAt > endedAt {
                     endedSessions.remove(record.session)
@@ -180,6 +182,7 @@ public enum ClaudeObservationReader {
                 if turn.question?.identity.call == toolID { turn.question = nil }
                 if turn.approval?.identity.call == toolID { turn.approval = nil }
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                turn.provisionalStopAt = nil
                 turns[turnID] = turn
             case "PostToolBatch":
                 guard let promptID = valid(record.promptID) else { continue }
@@ -229,6 +232,7 @@ public enum ClaudeObservationReader {
                 turn.approval = nil
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                 turn.closedAt = max(turn.closedAt ?? record.capturedAt, record.capturedAt)
+                turn.provisionalStopAt = nil
                 turn.terminal = AgentOutcome(session: identity, turn: promptID, status: .failed,
                                              arrivedAt: record.capturedAt)
                 turns[turnID] = turn
@@ -246,6 +250,7 @@ public enum ClaudeObservationReader {
                     turn.approval = nil
                     turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                     turn.closedAt = max(turn.closedAt ?? record.capturedAt, record.capturedAt)
+                    turn.provisionalStopAt = record.capturedAt
                     turns[turnID] = turn
                 }
             default:
@@ -276,6 +281,11 @@ public enum ClaudeObservationReader {
                                                     toolInput: freshTool?.input ?? [:])))
                 if let question = turn.question { result.append(.question(question)) }
                 if let approval = turn.approval { result.append(.approval(approval)) }
+            }
+            if let stopAt = turn.provisionalStopAt {
+                result.append(.provisionalStop(AgentProvisionalStop(identity: AgentTurnIdentity(session: identity,
+                                                                                               turn: turn.prompt),
+                                                                     arrivedAt: stopAt)))
             }
             return result
         }
@@ -362,6 +372,7 @@ public extension AgentAttentionQueue {
             case let .question(value): return .question(value.id)
             case let .outcome(value): return .outcome(value.id)
             case let .running(value): return .running(value.id)
+            case .provisionalStop: return nil
             case .resolved: return nil
             }
         })
