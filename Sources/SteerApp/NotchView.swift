@@ -720,15 +720,13 @@ struct Notch: View {
                 Text("Handed back with no decision. Continue in \(item.session.source == .claude ? "Claude" : "Codex") to decide.")
                     .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
                 if item.session.source == .claude {
-                    Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
-                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    claudeReturnMessage(item.session)
                 }
             case .actionableApproval:
                 if item.session.source == .claude {
                     Text("Claude decisions are unavailable here; decide in Claude.")
                         .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-                    Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
-                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    claudeReturnMessage(item.session)
                 }
             case .outcome, .earlierOutcome:
                 if item.outcome?.uncertain == true {
@@ -743,14 +741,12 @@ struct Notch: View {
                     }
                 }
                 if item.session.source == .claude {
-                    Text("Open in Claude is unavailable until Steer can verify the exact Claude tab.")
-                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    claudeReturnMessage(item.session)
                 }
             case .question:
                 if let question = item.question { agentQuestionBody(question, subject: subject) }
                 if item.session.source == .claude {
-                    Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
-                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    claudeReturnMessage(item.session)
                 }
             case .waiting, .running:
                 if let running = item.running, let row = running.rowText {
@@ -770,8 +766,7 @@ struct Notch: View {
                     }
                 }
                 if item.session.source == .claude {
-                    Text("Open in Claude is unavailable until Steer can verify the exact Claude tab.")
-                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    claudeReturnMessage(item.session)
                 }
             case .statusUnavailable:
                 Text(item.unavailableReason ?? "Status unavailable. Continue in Claude to inspect the session.")
@@ -796,7 +791,16 @@ struct Notch: View {
                         .accessibilityLabel("Open in Codex: \(subject)")
                         .accessibilityHint("Hands this request back to Codex's own prompt.")
                     }
-                case .handedBackApproval, .statusUnavailable:
+                    claudeReturnControl(item, subject: subject)
+                case .handedBackApproval:
+                    if item.session.source == .codex {
+                        NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
+                            .disabled(model.openingTask)
+                            .accessibilityLabel("Open in Codex: \(subject)")
+                            .accessibilityHint("Open this session in Codex.")
+                    }
+                    claudeReturnControl(item, subject: subject)
+                case .statusUnavailable:
                     if item.session.source == .codex {
                         NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
                             .disabled(model.openingTask)
@@ -805,7 +809,7 @@ struct Notch: View {
                     }
                 case .question:
                     if item.session.source == .claude {
-                        EmptyView()
+                        claudeReturnControl(item, subject: subject, emphasized: true)
                     } else if item.session.surface == .cli && !model.ghosttyEnabled {
                         NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
                             .accessibilityLabel("Set up Ghostty: \(subject)")
@@ -827,6 +831,7 @@ struct Notch: View {
                             .accessibilityLabel("Open in Codex: \(subject)")
                             .accessibilityHint("Open this session in Codex.")
                     }
+                    claudeReturnControl(item, subject: subject)
                     NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
                         .accessibilityLabel("Dismiss completion: \(subject)")
                 case .waiting, .running:
@@ -836,6 +841,7 @@ struct Notch: View {
                             .accessibilityLabel("Open in Codex: \(subject)")
                             .accessibilityHint("Open this session in Codex.")
                     }
+                    claudeReturnControl(item, subject: subject)
                 }
             }
             if let outcome = item.outcome, outcome.session.source == .codex, let completion = model.codexCompletion(for: outcome),
@@ -855,6 +861,30 @@ struct Notch: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(rowTitle(item)), \(subject)")
+    }
+
+    @ViewBuilder
+    private func claudeReturnMessage(_ session: AgentSessionIdentity) -> some View {
+        if !model.canOpenClaude(session) {
+            Text(model.claudeReturnUnavailableMessage)
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func claudeReturnControl(_ item: AgentAttentionItem, subject: String, emphasized: Bool = false) -> some View {
+        if item.session.source == .claude {
+            if model.canOpenClaude(item.session) {
+                NotchButton(title: "Open in Claude", emphasized: emphasized) { model.openAgent(item.session) }
+                    .disabled(model.openingTask)
+                    .accessibilityLabel("Open in Claude: \(subject)")
+                    .accessibilityHint("Open the exact Claude Ghostty tab for this session.")
+            } else if !model.ghosttyEnabled {
+                NotchButton(title: "Set up Ghostty", emphasized: emphasized, action: model.showControls)
+                    .accessibilityLabel("Set up Ghostty: \(subject)")
+                    .accessibilityHint("Opens Steer controls to enable Ghostty controls.")
+            }
+        }
     }
 
     private var stripLabel: String {

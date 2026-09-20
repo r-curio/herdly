@@ -122,7 +122,8 @@ existing notch are issue #83.
 
 The notch presents Codex and Claude observations in one priority queue. Every row names its
 source explicitly. Codex actions say Open in Codex. Claude cards explain when returning to the exact
-tab is unavailable and omit that unsupported action until exact-tab targeting is verified. Claude
+tab is unavailable and show Open in Claude only after Ghostty controls, a complete live Claude
+inventory, and one exact unsplit target are verified. Claude
 uses its supplied session name for display when available and otherwise shows a shortened session
 identifier, with the source prefix retained in both cases. The name is presentation metadata and does
 not identify a target or claim who supplied it. Live rows read Working or Waiting. A finished, failed,

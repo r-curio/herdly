@@ -13,8 +13,12 @@ function run(argv) {
         const w = app.frontWindow(), t = w.selectedTab();
         return {window_id: w.id(), tab_id: t.id(), terminal_id: t.focusedTerminal().id()};
     }
+    function frontWindowID() {
+        const w = app.frontWindow();
+        return w ? w.id() : null;
+    }
     if (request.action === 'snapshot')
-        return JSON.stringify({status: 'ok', windows: inventory(), selected: selected()});
+        return JSON.stringify({status: 'ok', windows: inventory(), front_window_id: frontWindowID(), selected: selected()});
     if (request.action !== 'select' && request.action !== 'answer') return JSON.stringify({status: 'unknown'});
     // Recheck the entire inventory immediately before any selection or key.
     const matches = [];
@@ -29,6 +33,10 @@ function run(argv) {
         m.terminal_id !== target.terminal_id) return JSON.stringify({status: 'unknown'});
     const w = app.windows.byId(target.window_id), t = w.tabs.byId(target.tab_id);
     if (request.action === 'select') {
+        if (request.same_window_only) {
+            const front = app.frontWindow();
+            if (!front || front.id() !== target.window_id) return JSON.stringify({status: 'unknown'});
+        }
         app.activateWindow(w);
         app.selectTab(t);
         return JSON.stringify({status: 'ok'});
