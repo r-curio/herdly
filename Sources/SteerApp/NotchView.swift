@@ -995,7 +995,13 @@ struct Notch: View {
     private func claudeReturnControl(_ item: AgentAttentionItem, subject: String, emphasized: Bool = false) -> some View {
         if item.session.source == .claude {
             if model.canOpenClaude(item.session) {
-                NotchButton(title: "Open in Claude", emphasized: emphasized) { model.openAgent(item.session) }
+                NotchButton(title: "Open in Claude", emphasized: emphasized) {
+                    if let approval = item.approval {
+                        model.openAgentApproval(approval)
+                    } else {
+                        model.openAgent(item.session)
+                    }
+                }
                     .disabled(model.openingTask)
                     .accessibilityLabel("Open in Claude: \(subject)")
                     .accessibilityHint("Open the exact Claude Ghostty tab for this session.")

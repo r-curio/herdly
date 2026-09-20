@@ -245,12 +245,23 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
        let output = terminalSequence(for: session, reset: event == "SessionEnd") {
         FileHandle.standardOutput.write(output)
     }
-    if let approvalRequestID,
-       let receipt = ClaudeApprovalHelper.awaitReceipt(for: approvalRequestID, publishedAt: publishedAt, in: directory) {
-        let decision = ClaudeApprovalHelper.awaitDecision(for: approvalRequestID, receipt: receipt, in: directory)
-        if let output = ClaudeApprovalHelper.hookOutput(for: decision) {
+    if let approvalRequestID {
+        let live = ClaudeApprovalLiveness(requestID: approvalRequestID, publishedAt: publishedAt,
+                                          heartbeatAt: Date().timeIntervalSince1970)
+        if ClaudeApprovalStore.publish(live, in: directory),
+           let receipt = ClaudeApprovalHelper.awaitReceipt(for: approvalRequestID, publishedAt: publishedAt,
+                                                           in: directory, liveness: live),
+           let decision = ClaudeApprovalHelper.awaitDecisionRecord(for: approvalRequestID, receipt: receipt,
+                                                                   in: directory, liveness: live),
+           let output = ClaudeApprovalHelper.hookOutput(for: decision.decision) {
             FileHandle.standardOutput.write(output)
+            _ = ClaudeApprovalStore.publish(ClaudeApprovalDelivery(requestID: decision.requestID,
+                                                                   decision: decision.decision,
+                                                                   decidedAt: decision.decidedAt,
+                                                                   deliveredAt: Date().timeIntervalSince1970),
+                                            in: directory)
         }
+        ClaudeApprovalStore.removeLiveness(for: approvalRequestID, in: directory)
     }
     exit(0)
 }
