@@ -15,9 +15,23 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
 
     let scan = ClaudeInventoryDecoder.decode(data, sourceScope: "/tmp/root", observedAt: 10)
     #expect(scan.available)
+    #expect(scan.sessions[0].name == "one")
+    #expect(scan.sessions[1].name == "two")
     #expect(scan.sessions[0].lifecycle == .interactive(status: "waiting"))
     #expect(scan.sessions[1].lifecycle == .background(state: "done"))
     #expect(scan.sessions[1].lifecycle.isActive == false)
+}
+
+@Test func missingClaudeNameFallsBackToSourceAndShortenedIdentity() throws {
+    let data = try JSONSerialization.data(withJSONObject: [
+        ["sessionId": interactiveID, "kind": "interactive", "cwd": "/tmp/one",
+         "status": "busy", "startedAt": 1]
+    ])
+    let scan = ClaudeInventoryDecoder.decode(data, sourceScope: "/tmp/root", observedAt: 1)
+    #expect(scan.available)
+    #expect(scan.sessions.first?.name == "")
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    #expect(AgentStripSummary.sessionLabel(identity) == "Claude session 11111111")
 }
 
 @Test func malformedOrDuplicateInventoryIsUnavailable() throws {
@@ -174,4 +188,31 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
     ]))
     #expect(queue.items.compactMap(\.outcome).isEmpty)
     #expect(queue.items.compactMap(\.running).count == 1)
+}
+
+@Test func backgroundTerminalInventoryRetiresLifecycleWithoutCreatingOutcome() {
+    let session = ClaudeInventorySession(sessionID: backgroundID, kind: .background, startedAt: 1,
+                                         lifecycle: .background(state: "done"))
+    var queue = AgentAttentionQueue()
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 1, sessions: [
+        ClaudeInventorySession(sessionID: backgroundID, kind: .background, startedAt: 1,
+                               lifecycle: .background(state: "working"))
+    ]))
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 2, sessions: [session]))
+
+    #expect(queue.items.compactMap(\.outcome).isEmpty)
+    #expect(queue.items.compactMap(\.running).isEmpty)
+    #expect(queue.toCheckCount == 0)
+}
+
+@Test func backgroundBlockedInventoryIsWaitingAndNeedsAttention() {
+    var queue = AgentAttentionQueue()
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 1, sessions: [
+        ClaudeInventorySession(sessionID: backgroundID, kind: .background, startedAt: 1,
+                               lifecycle: .background(state: "blocked"))
+    ]))
+
+    #expect(queue.items.first?.kind == .waiting)
+    #expect(queue.items.first?.running?.status == .waiting)
+    #expect(queue.toCheckCount == 1)
 }
