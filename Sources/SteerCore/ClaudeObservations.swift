@@ -1,0 +1,337 @@
+import Foundation
+
+/// The bounded, source-scoped projection of one Claude hook directory.
+public struct ClaudeObservationScan: Equatable, Sendable {
+    public let sourceScope: String
+    public let observations: [AgentObservation]
+    public let available: Bool
+
+    public init(sourceScope: String, observations: [AgentObservation] = [], available: Bool = true) {
+        self.sourceScope = sourceScope
+        self.observations = observations
+        self.available = available
+    }
+}
+
+/// Reads only Steer's normalized Claude records. A malformed record is ignored; an unreadable
+/// directory makes the whole root unavailable so it cannot clear another root's state.
+public enum ClaudeObservationReader {
+    public static let maximumEntries = 4096
+    public static let maximumRecordSize = 128 * 1024
+    public static let maximumIdentifier = 256
+
+    private struct Record {
+        let fileName: String
+        let event: String
+        let session: String
+        let capturedAt: Double
+        let promptID: String?
+        let prompt: String?
+        let toolName: String?
+        let toolUseID: String?
+        let toolInput: [String: Any]
+    }
+
+    private struct Tool {
+        let id: String
+        let name: String
+        let input: [String: String]
+        let at: Double
+    }
+
+    private struct Turn {
+        let session: String
+        let prompt: String
+        var promptText: String?
+        var startedAt: Double
+        var updatedAt: Double
+        var tool: Tool?
+        var tools: [String: Tool]
+        var question: AgentQuestion?
+        var approval: AgentApproval?
+        var terminal: AgentOutcome?
+        var closedAt: Double?
+    }
+
+    public static func scan(events: URL, sourceScope: String, installationID: String,
+                            observingSince: Double = -.infinity) -> ClaudeObservationScan {
+        let scope = normalizedScope(sourceScope)
+        guard isDirectory(events),
+              let urls = try? FileManager.default.contentsOfDirectory(at: events, includingPropertiesForKeys: nil),
+              urls.count <= maximumEntries else {
+            return ClaudeObservationScan(sourceScope: scope, available: false)
+        }
+        let records = urls.filter { $0.pathExtension == "json" }
+            .compactMap { record(at: $0, installationID: installationID, observingSince: observingSince) }
+            .sorted {
+                if $0.capturedAt != $1.capturedAt { return $0.capturedAt < $1.capturedAt }
+                if $0.session != $1.session { return $0.session < $1.session }
+                return $0.fileName < $1.fileName
+            }
+
+        var turns: [AgentTurnIdentity: Turn] = [:]
+        var sessionPrompts: [String: String] = [:]
+        var endedSessions = Set<String>()
+        var seenApprovals = Set<AgentCallIdentity>()
+        var seenQuestions = Set<AgentCallIdentity>()
+
+        for record in records {
+            switch record.event {
+            case "SessionStart":
+                endedSessions.remove(record.session)
+            case "SessionEnd":
+                endedSessions.insert(record.session)
+                if let prompt = sessionPrompts[record.session] {
+                    let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                        session: record.session, surface: .cli)
+                    let turnID = AgentTurnIdentity(session: identity, turn: prompt)
+                    if var turn = turns[turnID] {
+                        turn.tool = nil
+                        turn.tools.removeAll()
+                        turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                        turn.closedAt = max(turn.closedAt ?? record.capturedAt, record.capturedAt)
+                        turns[turnID] = turn
+                    }
+                }
+            case "UserPromptSubmit":
+                guard let promptID = valid(record.promptID) else { continue }
+                if let previousPrompt = sessionPrompts[record.session], previousPrompt != promptID {
+                    let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                        session: record.session, surface: .cli)
+                    let previousID = AgentTurnIdentity(session: identity, turn: previousPrompt)
+                    if var previous = turns[previousID] {
+                        previous.tool = nil
+                        previous.tools.removeAll()
+                        previous.question = nil
+                        previous.approval = nil
+                        previous.updatedAt = max(previous.updatedAt, record.capturedAt)
+                        previous.closedAt = max(previous.closedAt ?? record.capturedAt, record.capturedAt)
+                        turns[previousID] = previous
+                    }
+                }
+                sessionPrompts[record.session] = promptID
+                let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                    session: record.session, surface: .cli)
+                let turnID = AgentTurnIdentity(session: identity, turn: promptID)
+                if var existing = turns[turnID] {
+                    if existing.promptText == nil { existing.promptText = boundedText(record.prompt) }
+                    existing.startedAt = min(existing.startedAt, record.capturedAt)
+                    turns[turnID] = existing
+                } else {
+                    turns[turnID] = Turn(session: record.session, prompt: promptID,
+                                         promptText: boundedText(record.prompt), startedAt: record.capturedAt,
+                                         updatedAt: record.capturedAt, tool: nil, tools: [:], question: nil,
+                                         approval: nil, terminal: nil, closedAt: nil)
+                }
+            case "PreToolUse":
+                guard let promptID = valid(record.promptID), let toolID = valid(record.toolUseID),
+                      let name = bounded(record.toolName), !name.isEmpty else { continue }
+                let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                    session: record.session, surface: .cli)
+                let turnID = AgentTurnIdentity(session: identity, turn: promptID)
+                guard var turn = turns[turnID], turn.closedAt == nil else { continue }
+                let input = stringInput(record.toolInput)
+                let tool = Tool(id: toolID, name: name, input: input, at: record.capturedAt)
+                turn.tools[toolID] = tool
+                turn.tool = tool
+                turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                if name == "AskUserQuestion", let question = question(from: record, identity: identity,
+                                                                         turn: promptID, at: record.capturedAt),
+                   seenQuestions.insert(question.id).inserted {
+                    turn.question = question
+                }
+                turn.terminal = nil
+                turns[turnID] = turn
+            case "PostToolUse", "PostToolUseFailure":
+                guard let promptID = valid(record.promptID), let toolID = valid(record.toolUseID) else { continue }
+                let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                    session: record.session, surface: .cli)
+                let turnID = AgentTurnIdentity(session: identity, turn: promptID)
+                guard var turn = turns[turnID], let tool = turn.tools[toolID],
+                      tool.at <= record.capturedAt else { continue }
+                turn.tools.removeValue(forKey: toolID)
+                turn.tool = turn.tools.values.max { lhs, rhs in
+                    lhs.at == rhs.at ? lhs.id < rhs.id : lhs.at < rhs.at
+                }
+                turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                turns[turnID] = turn
+            case "PostToolBatch":
+                guard let promptID = valid(record.promptID) else { continue }
+                let ids = record.toolInput["tool_use_ids"] as? [String]
+                    ?? (record.toolInput["tool_uses"] as? [[String: Any]] ?? []).compactMap { $0["tool_use_id"] as? String }
+                guard !ids.isEmpty else { continue }
+                let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                    session: record.session, surface: .cli)
+                let turnID = AgentTurnIdentity(session: identity, turn: promptID)
+                guard var turn = turns[turnID] else { continue }
+                let matching = turn.tools.values.filter { ids.contains($0.id) && $0.at <= record.capturedAt }
+                guard !matching.isEmpty else { continue }
+                for tool in matching { turn.tools.removeValue(forKey: tool.id) }
+                turn.tool = turn.tools.values.max { lhs, rhs in
+                    lhs.at == rhs.at ? lhs.id < rhs.id : lhs.at < rhs.at
+                }
+                turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                turns[turnID] = turn
+            case "PermissionRequest":
+                guard let promptID = valid(record.promptID), let name = bounded(record.toolName), !name.isEmpty else { continue }
+                let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                    session: record.session, surface: .cli)
+                let turnID = AgentTurnIdentity(session: identity, turn: promptID)
+                guard var turn = turns[turnID] else { continue }
+                let candidates = turn.tools.values.filter { $0.name == name && $0.at <= record.capturedAt }
+                guard candidates.count == 1, let tool = candidates.first else { continue }
+                let call = AgentCallIdentity(session: identity, turn: promptID, call: tool.id)
+                guard seenApprovals.insert(call).inserted else { continue }
+                turn.approval = AgentApproval(session: identity, turn: promptID, call: tool.id,
+                                              arrivedAt: record.capturedAt)
+                turns[turnID] = turn
+            case "StopFailure":
+                guard let promptID = valid(record.promptID) else { continue }
+                let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                    session: record.session, surface: .cli)
+                let turnID = AgentTurnIdentity(session: identity, turn: promptID)
+                guard var turn = turns[turnID] else { continue }
+                turn.tool = nil
+                turn.tools.removeAll()
+                turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                turn.closedAt = max(turn.closedAt ?? record.capturedAt, record.capturedAt)
+                turn.terminal = AgentOutcome(session: identity, turn: promptID, status: .failed,
+                                             arrivedAt: record.capturedAt)
+                turns[turnID] = turn
+            case "Stop":
+                // Stop can continue into another prompt. It clears a stale tool label but never
+                // becomes Finished without the later inventory confirmation slice.
+                guard let promptID = valid(record.promptID) else { continue }
+                let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                    session: record.session, surface: .cli)
+                let turnID = AgentTurnIdentity(session: identity, turn: promptID)
+                if var turn = turns[turnID] {
+                    turn.tool = nil
+                    turn.tools.removeAll()
+                    turn.question = nil
+                    turn.approval = nil
+                    turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                    turn.closedAt = max(turn.closedAt ?? record.capturedAt, record.capturedAt)
+                    turns[turnID] = turn
+                }
+            default:
+                continue
+            }
+        }
+
+        let observations = turns.values.sorted {
+            if $0.startedAt != $1.startedAt { return $0.startedAt < $1.startedAt }
+            return $0.prompt < $1.prompt
+        }.flatMap { turn -> [AgentObservation] in
+            guard !endedSessions.contains(turn.session) || turn.terminal != nil else { return [] }
+            let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                session: turn.session, surface: .cli)
+            var result: [AgentObservation] = []
+            if let terminal = turn.terminal {
+                result.append(.outcome(terminal))
+            } else {
+                result.append(.running(AgentRunning(session: identity, turn: turn.prompt, arrivedAt: turn.updatedAt,
+                                                    prompt: turn.promptText, toolName: turn.tool?.name,
+                                                    toolInput: turn.tool?.input ?? [:])))
+                if let question = turn.question { result.append(.question(question)) }
+                if let approval = turn.approval { result.append(.approval(approval)) }
+            }
+            return result
+        }
+        return ClaudeObservationScan(sourceScope: scope, observations: observations)
+    }
+
+    private static func record(at url: URL, installationID: String, observingSince: Double) -> Record? {
+        guard isRegularFile(url), let handle = try? FileHandle(forReadingFrom: url),
+              let data = try? handle.read(upToCount: maximumRecordSize + 1) else { return nil }
+        try? handle.close()
+        guard data.count <= maximumRecordSize,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              object["source"] as? String == ClaudeSetupRequirements.helperSource,
+              object["installation_id"] as? String == installationID,
+              let event = bounded(object["hook_event_name"] as? String), !event.isEmpty,
+              let session = valid(object["session_id"] as? String),
+              let captured = (object["captured_at"] as? NSNumber)?.doubleValue,
+              captured.isFinite, captured >= observingSince else { return nil }
+        return Record(fileName: url.lastPathComponent, event: event, session: session, capturedAt: captured,
+                      promptID: object["prompt_id"] as? String, prompt: object["prompt"] as? String,
+                      toolName: object["tool_name"] as? String, toolUseID: object["tool_use_id"] as? String,
+                      toolInput: object["tool_input"] as? [String: Any] ?? [:])
+    }
+
+    private static func question(from record: Record, identity: AgentSessionIdentity, turn: String,
+                                 at: Double) -> AgentQuestion? {
+        guard let call = valid(record.toolUseID), let questions = record.toolInput["questions"] as? [[String: Any]],
+              !questions.isEmpty, questions.count <= QuestionPrompt.maximumQuestions else { return nil }
+        return AgentQuestion(session: identity, turn: turn, call: call, arrivedAt: at)
+    }
+
+    private static func stringInput(_ input: [String: Any]) -> [String: String] {
+        input.compactMapValues { value in
+            guard let text = value as? String else { return nil }
+            return boundedText(text)
+        }
+    }
+
+    private static func valid(_ value: String?) -> String? {
+        guard let value = bounded(value), !value.isEmpty else { return nil }
+        return value
+    }
+
+    private static func bounded(_ value: String?, limit: Int = maximumIdentifier) -> String? {
+        guard let value, !value.isEmpty, value.utf8.count <= limit,
+              !value.contains(where: { $0.isNewline || $0 == "\u{1b}" || $0 == "\u{7}" }) else { return nil }
+        return value
+    }
+
+    private static func boundedText(_ value: String?, limit: Int = maximumIdentifier) -> String? {
+        guard let value, !value.isEmpty, value.utf8.count <= limit,
+              !value.contains(where: { $0 == "\u{1b}" || $0 == "\u{7}" || $0 == "\u{0}" }) else { return nil }
+        return value
+    }
+
+    private static func normalizedScope(_ value: String) -> String {
+        URL(fileURLWithPath: value).standardizedFileURL.path
+    }
+
+    private static func isRegularFile(_ url: URL) -> Bool {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil else { return false }
+        return (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeDirectory,
+              (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == nil else { return false }
+        return (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true
+    }
+}
+
+public extension AgentAttentionQueue {
+    /// Reconciles one Claude root only. An unavailable root leaves its existing observations intact.
+    mutating func apply(_ scan: ClaudeObservationScan, now: Double? = nil) {
+        guard scan.available else { return }
+        let scope = scan.sourceScope
+        let incoming = scan.observations
+        let current = items.filter { $0.session.source == .claude && $0.session.sourceScope == scope }
+        let ids = Set(incoming.compactMap { observation -> AgentAttentionID? in
+            switch observation {
+            case let .approval(value): return .approval(value.id)
+            case let .question(value): return .question(value.id)
+            case let .outcome(value): return .outcome(value.id)
+            case let .running(value): return .running(value.id)
+            case .resolved: return nil
+            }
+        })
+        for item in current where !ids.contains(item.id) {
+            switch item.id {
+            case .approval, .question: dismiss(item.id)
+            case .running: dismiss(item.id)
+            case .outcome: break
+            }
+        }
+        for observation in incoming { apply(observation, now: now) }
+    }
+}

@@ -38,17 +38,24 @@ func writeEvent(_ object: [String: Any], to directory: URL, installationID: Stri
 }
 
 func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID: String) -> Bool {
-    guard let event = object["hook_event_name"] as? String, !event.isEmpty,
-          let session = object["session_id"] as? String, !session.isEmpty, session.count <= 256,
-          !session.contains(where: { $0.isNewline || $0 == "\u{1b}" || $0 == "\u{7}" }) else { return false }
+    guard let event = boundedClaudeString(object["hook_event_name"], limit: 256),
+          let session = boundedClaudeString(object["session_id"], limit: 256),
+          boundedClaudeString(installationID, limit: 256) != nil else { return false }
     let now = Date()
     var record: [String: Any] = [
         "hook_event_name": event, "session_id": session, "source": ClaudeSetupRequirements.helperSource,
         "installation_id": installationID, "received_at": ISO8601DateFormatter().string(from: now),
         "captured_at": now.timeIntervalSince1970
     ]
-    if event == "SessionStart", let source = object["source"] as? String {
+    if event == "SessionStart", let source = boundedClaudeString(object["source"], limit: 256) {
         record["session_start_source"] = source
+    }
+    for key in ["prompt_id", "prompt", "tool_name", "tool_use_id"] {
+        if let value = boundedClaudeString(object[key], allowNewline: key == "prompt") { record[key] = value }
+    }
+    if let input = object["tool_input"] as? [String: Any] {
+        let kept = boundedClaudeToolInput(input)
+        if !kept.isEmpty { record["tool_input"] = kept }
     }
     guard JSONSerialization.isValidJSONObject(record),
           let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
@@ -63,6 +70,53 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
         try? FileManager.default.removeItem(at: temporary)
         return false
     }
+}
+
+private func boundedClaudeString(_ value: Any?, limit: Int = 4096, allowNewline: Bool = false) -> String? {
+    guard let value = value as? String, !value.isEmpty, value.utf8.count <= limit,
+          !value.contains(where: { (!allowNewline && $0.isNewline) || $0 == "\u{1b}" || $0 == "\u{7}" || $0 == "\u{0}" }) else { return nil }
+    return value
+}
+
+private func boundedClaudeToolInput(_ input: [String: Any]) -> [String: Any] {
+    let scalarKeys = Set(["command", "cmd", "file_path", "path", "pattern", "url"])
+    var result: [String: Any] = [:]
+    for key in scalarKeys {
+        if let value = boundedClaudeString(input[key], allowNewline: true) { result[key] = value }
+    }
+    if let questions = input["questions"] as? [[String: Any]], questions.count <= 8 {
+        let kept = questions.compactMap { question -> [String: Any]? in
+            var item: [String: Any] = [:]
+            for key in ["header", "question"] {
+                if let value = boundedClaudeString(question[key], allowNewline: true) { item[key] = value }
+            }
+            if let multiple = question["multiSelect"] as? Bool { item["multiSelect"] = multiple }
+            if let options = question["options"] as? [[String: Any]], options.count <= 16 {
+                let keptOptions = options.compactMap { option -> [String: Any]? in
+                    var keptOption: [String: Any] = [:]
+                    for key in ["label", "description"] {
+                        if let value = boundedClaudeString(option[key], allowNewline: true) { keptOption[key] = value }
+                    }
+                    return keptOption.isEmpty ? nil : keptOption
+                }
+                if !keptOptions.isEmpty { item["options"] = keptOptions }
+            }
+            return item.isEmpty ? nil : item
+        }
+        if !kept.isEmpty { result["questions"] = kept }
+    }
+    if let ids = input["tool_use_ids"] as? [String], ids.count <= 64 {
+        let kept = ids.compactMap { boundedClaudeString($0, limit: 256) }
+        if !kept.isEmpty { result["tool_use_ids"] = kept }
+    }
+    if let uses = input["tool_uses"] as? [[String: Any]], uses.count <= 64 {
+        let kept = uses.compactMap { use -> [String: Any]? in
+            guard let id = boundedClaudeString(use["tool_use_id"], limit: 256) else { return nil }
+            return ["tool_use_id": id]
+        }
+        if !kept.isEmpty { result["tool_uses"] = kept }
+    }
+    return result
 }
 
 func terminalSequence(for session: String, reset: Bool = false) -> Data? {
@@ -103,7 +157,8 @@ func selfTest() -> Int32 {
           ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .allowOnce, decidedAt: 101), in: directory),
           ApprovalCoordinator(requestID: request.id, expiresAt: 130).decide(requestID: request.id, decision: .allowOnce, at: 101) == .allowOnce else { return 1 }
     let claude: [String: Any] = ["hook_event_name": "SessionStart", "session_id": session.uuidString,
-                                 "source": "startup", "prompt_id": "prompt-1"]
+                                 "source": "startup", "prompt_id": "prompt-1", "tool_name": "Bash",
+                                 "tool_use_id": "claude-tool-1", "tool_input": ["command": "swift test", "secret": "drop"]]
     guard writeClaudeEvent(claude, to: directory, installationID: UUID().uuidString),
           let claudeRecord = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil))?
             .compactMap({ try? Data(contentsOf: $0) })
@@ -111,8 +166,9 @@ func selfTest() -> Int32 {
             .first(where: { $0["source"] as? String == ClaudeSetupRequirements.helperSource }),
           claudeRecord["hook_event_name"] as? String == "SessionStart",
           claudeRecord["session_start_source"] as? String == "startup",
-          claudeRecord["prompt_id"] == nil,
-          claudeRecord["tool_input"] == nil,
+          claudeRecord["prompt_id"] as? String == "prompt-1",
+          claudeRecord["tool_use_id"] as? String == "claude-tool-1",
+          (claudeRecord["tool_input"] as? [String: String]) == ["command": "swift test"],
           terminalSequence(for: session.uuidString).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: String] })?["terminalSequence"]
             == "\u{1b}]2;\(ClaudeSetupRequirements.titlePrefix)\(session.uuidString)\u{7}",
           terminalSequence(for: session.uuidString, reset: true).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: String] })?["terminalSequence"]
