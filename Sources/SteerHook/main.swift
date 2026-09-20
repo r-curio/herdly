@@ -131,6 +131,32 @@ func terminalSequence(for session: String, reset: Bool = false) -> Data? {
     return try? JSONSerialization.data(withJSONObject: ["terminalSequence": sequence], options: [.sortedKeys])
 }
 
+func runClaudeStatusLineBridge(usageDirectory: URL, existingCommand: String) -> Never {
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    _ = ClaudeUsageReader.record(input, to: usageDirectory)
+
+    // Claude cancels the status-line process. Replacing this helper with the existing shell command
+    // keeps that cancellation and the command's exit status in the same process tree.
+    var template = Array("/tmp/steer-claude-status.XXXXXX\0".utf8CString)
+    let descriptor = mkstemp(&template)
+    guard descriptor >= 0 else { exit(70) }
+    var written = 0
+    input.withUnsafeBytes { bytes in
+        while written < input.count {
+            let count = write(descriptor, bytes.baseAddress!.advanced(by: written), input.count - written)
+            if count <= 0 { break }
+            written += count
+        }
+    }
+    guard written == input.count, lseek(descriptor, 0, SEEK_SET) >= 0,
+          dup2(descriptor, STDIN_FILENO) >= 0 else { close(descriptor); exit(70) }
+    close(descriptor)
+    unlink(template)
+    var arguments: [UnsafeMutablePointer<CChar>?] = [strdup("sh"), strdup("-c"), strdup(existingCommand), nil]
+    execv("/bin/sh", &arguments)
+    exit(71)
+}
+
 private func update(_ request: ApprovalRequest, outcome: ApprovalDecision, in directory: URL) {
     let terminal = ApprovalRequest(requestID: request.requestID, sessionID: request.sessionID, turnID: request.turnID,
                                    details: request.details, receivedAt: request.receivedAt,
@@ -184,6 +210,13 @@ func selfTest() -> Int32 {
 }
 
 if arguments.contains("--self-test") { exit(selfTest()) }
+if let bridgeIndex = arguments.firstIndex(of: ClaudeStatusLineBridge.marker),
+   arguments.indices.contains(bridgeIndex + 1), arguments[bridgeIndex + 1] == "--usage-dir",
+   arguments.indices.contains(bridgeIndex + 3), arguments[bridgeIndex + 2].isEmpty == false,
+   arguments[bridgeIndex + 3] == "--existing-command", arguments.indices.contains(bridgeIndex + 4) {
+    runClaudeStatusLineBridge(usageDirectory: URL(fileURLWithPath: arguments[bridgeIndex + 2], isDirectory: true),
+                              existingCommand: arguments[bridgeIndex + 4])
+}
 if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.contains(agentIndex + 1),
    arguments[agentIndex + 1] == "claude" {
     guard let index = arguments.firstIndex(of: "--events-dir"), arguments.indices.contains(index + 1),

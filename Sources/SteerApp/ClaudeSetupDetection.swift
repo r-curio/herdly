@@ -35,6 +35,10 @@ enum ClaudeSetupDetection {
         let settingsPath: String
         let statePath: String
         let backupsPath: String
+        let usagePath: String
+        let usage: ClaudeUsageReading?
+        let usageStatus: ClaudeUsageSetupStatus
+        let usageInstalled: Bool
         let activeSessionStatus: ActiveSessionStatus
     }
 
@@ -111,10 +115,18 @@ enum ClaudeSetupDetection {
         } else {
             status = ClaudeSetupInstaller().status(roots: roots, capabilities: capabilities)
         }
+        let usageStatus = installer.usageStatus(for: roots, requested: usageEnabled,
+                                                planned: plannerPlan?.usageStatus)
+        let usageInstalled = installer.usageStatus(for: roots, requested: true) == .ready
         return Snapshot(root: root, capabilities: capabilities, plan: plan, status: status,
                         helperPath: roots.helperURL.path, eventsPath: roots.eventsDirectory.path,
                         settingsPath: roots.settingsURL.path, statePath: roots.stateURL.path,
-                        backupsPath: roots.backupsURL.path, activeSessionStatus: activeSessionStatus)
+                        backupsPath: roots.backupsURL.path, usagePath: roots.usageDirectory.path,
+                        usage: usageEnabled ? ClaudeUsageReader.latest(root: roots.usageDirectory,
+                                                                        sourceScope: root.standardizedFileURL.path) : nil,
+                        usageStatus: usageStatus,
+                        usageInstalled: usageInstalled,
+                        activeSessionStatus: activeSessionStatus)
     }
 
     static func activeSessionsStatus(root: URL, capabilities: ClaudeCapabilities,
@@ -340,6 +352,10 @@ final class ClaudeSetupModel: ObservableObject {
         let settingsPath: String
         let statePath: String
         let backupsPath: String
+        let usagePath: String
+        let usage: ClaudeUsageReading?
+        let usageStatus: ClaudeUsageSetupStatus
+        let usageInstalled: Bool
         let activeSessionStatus: ClaudeSetupDetection.ActiveSessionStatus
         var id: String { url.standardizedFileURL.path }
         var displayPath: String { url.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~") }
@@ -362,7 +378,8 @@ final class ClaudeSetupModel: ObservableObject {
                       capabilities: ClaudeCapabilities(installed: false, supported: false),
                       plan: nil, status: .unavailable("Checking Claude Code setup…"),
                       helperPath: "", eventsPath: "",
-                      settingsPath: "", statePath: "", backupsPath: "",
+                      settingsPath: "", statePath: "", backupsPath: "", usagePath: "", usage: nil, usageStatus: .off,
+                      usageInstalled: false,
                       activeSessionStatus: .unavailable(ClaudeSetupDetection.activeSessionInventoryUnavailable))]
         refresh()
     }
@@ -387,8 +404,32 @@ final class ClaudeSetupModel: ObservableObject {
                 Root(url: snapshot.root, capabilities: snapshot.capabilities, plan: snapshot.plan, status: snapshot.status,
                      helperPath: snapshot.helperPath, eventsPath: snapshot.eventsPath,
                      settingsPath: snapshot.settingsPath, statePath: snapshot.statePath,
-                     backupsPath: snapshot.backupsPath,
+                     backupsPath: snapshot.backupsPath, usagePath: snapshot.usagePath, usage: snapshot.usage,
+                     usageStatus: snapshot.usageStatus, usageInstalled: snapshot.usageInstalled,
                      activeSessionStatus: snapshot.activeSessionStatus)
+            }
+        }
+    }
+
+    func refreshUsage() {
+        let current = roots
+        let enabled = usageOptInPaths
+        Task { @MainActor in
+            let readings = await Task.detached {
+                Dictionary(uniqueKeysWithValues: current.compactMap { root -> (String, ClaudeUsageReading?)? in
+                    guard enabled.contains(root.url.standardizedFileURL.path), !root.usagePath.isEmpty else { return nil }
+                    return (root.id, ClaudeUsageReader.latest(root: URL(fileURLWithPath: root.usagePath, isDirectory: true),
+                                                              sourceScope: root.url.standardizedFileURL.path))
+                })
+            }.value
+            roots = roots.map { root in
+                guard enabled.contains(root.url.standardizedFileURL.path) else { return root }
+                return Root(url: root.url, capabilities: root.capabilities, plan: root.plan, status: root.status,
+                            helperPath: root.helperPath, eventsPath: root.eventsPath, settingsPath: root.settingsPath,
+                            statePath: root.statePath, backupsPath: root.backupsPath, usagePath: root.usagePath,
+                            usage: readings[root.id] ?? nil, usageStatus: root.usageStatus,
+                            usageInstalled: root.usageInstalled,
+                            activeSessionStatus: root.activeSessionStatus)
             }
         }
     }

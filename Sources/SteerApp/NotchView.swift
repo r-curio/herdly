@@ -357,6 +357,24 @@ struct Notch: View {
                                names: sessionNames)
     }
 
+    @ViewBuilder
+    private var claudeUsageSummary: some View {
+        ForEach(model.claudeUsage.keys.sorted(), id: \.self) { scope in
+            let reading = model.claudeUsage[scope]?.current(now: Date().timeIntervalSince1970)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Claude usage · \(scope.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))")
+                    .font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
+                if let reading {
+                    Text("5h \(reading.fiveHour?.percentText ?? "unavailable") · 7d \(reading.sevenDay?.percentText ?? "unavailable") · last reported")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
+                } else {
+                    Text("Unavailable: no current subscription window reported.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                }
+            }
+        }
+    }
+
     private func rowTitle(_ item: AgentAttentionItem) -> String {
         switch item.kind {
         case .actionableApproval: return item.session.source == .claude ? "Claude permission needed" : "Permission needed"
@@ -1081,6 +1099,7 @@ struct Notch: View {
                 Rectangle().fill(NotchStyle.seam).frame(height: 1).padding(.bottom, 12)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        claudeUsageSummary
                         ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
                             if item.kind == .earlierOutcome && (index == 0 || visibleItems[index - 1].kind != .earlierOutcome) {
                                 Text("Earlier").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.dim)
