@@ -149,7 +149,7 @@ not operate a real Ghostty tab, so this section is an operator checkpoint and
 makes no pass claim.
 
 Paste this self-contained block into a real unsplit Ghostty tab from the
-repository root after building the packaged app with `sh scripts/build-app.sh`.
+repository root after building the package with `sh scripts/package-app.sh`.
 It reads the default authenticated Claude root without editing its settings,
 writes a disposable `--settings` file, and uses a temporary working directory:
 
@@ -180,14 +180,6 @@ print(" ".join([
 ]), end="")
 PY
 )"
-  python3 - "$ROOT_RUN/helper's-dir/SteerHook" <<'PY'
-import shlex
-import sys
-
-path = sys.argv[1]
-assert shlex.split(shlex.quote(path)) == [path]
-PY
-
   python3 - "$CONFIG/settings.json" "$HOOK_COMMAND" <<'PY'
 import json
 import pathlib
@@ -216,10 +208,10 @@ after that report; clean exit and title reset are a separate later checkpoint.
 The `--setting-sources project` flag excludes the ordinary user and local
 settings while retaining the default root's authentication.
 If authentication or startup fails, report that result without retrying with a
-real credential in the disposable root. Report the tested Steer commit, helper
-SHA-256, whether the full title appeared, and any observed error. Record the
-clean shutdown reset in the later checkpoint. Do not paste credentials or raw
-conversation output into the evidence record.
+real credential in the disposable root. Report whether the full title appeared
+and any observed error. Record the clean shutdown reset in the later
+checkpoint. Do not paste credentials or raw conversation output into the
+evidence record.
 
 This run does not claim that Ghostty applied or retained the title. Clean
 shutdown reset and abrupt-exit restoration remain separate later checkpoints.
