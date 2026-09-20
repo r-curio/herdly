@@ -5,6 +5,25 @@ import SteerCore
 enum ClaudeSetupDetection {
     static let activeSessionInventoryUnavailable = "Unavailable: Claude's root-scoped agents inventory could not be read."
 
+    enum ActiveSessionStatus: Equatable, Sendable {
+        case available(restartCount: Int)
+        case unavailable(String)
+
+        var displayText: String {
+            switch self {
+            case .available(0): return "No active sessions need restart."
+            case let .available(count):
+                return "\(count) active session\(count == 1 ? "" : "s") need\(count == 1 ? "s" : "") restart after setup."
+            case let .unavailable(message): return message
+            }
+        }
+
+        var isUnavailable: Bool {
+            if case .unavailable = self { return true }
+            return false
+        }
+    }
+
     struct Snapshot: Sendable {
         let root: URL
         let capabilities: ClaudeCapabilities
@@ -12,7 +31,10 @@ enum ClaudeSetupDetection {
         let status: ClaudeConnectionStatus
         let helperPath: String
         let eventsPath: String
-        let activeSessionStatus: String
+        let settingsPath: String
+        let statePath: String
+        let backupsPath: String
+        let activeSessionStatus: ActiveSessionStatus
     }
 
     static func capabilities() -> ClaudeCapabilities {
@@ -39,9 +61,12 @@ enum ClaudeSetupDetection {
         let manager = FileManager.default
         let settingsExists = manager.fileExists(atPath: roots.settingsURL.path)
         let installRecordExists = manager.fileExists(atPath: roots.stateURL.path)
-        let installRecordPresent = ClaudeSetupInstaller().isInstallRecordValid(for: roots)
-        let activeSessionStatus = activeSessionsStatus(root: root, capabilities: capabilities)
-        let inventoryUnavailable = activeSessionStatus.hasPrefix("Unavailable:")
+        let installer = ClaudeSetupInstaller()
+        let installRecordPresent = installer.isInstallRecordValid(for: roots)
+        let activeSessionStatus = activeSessionsStatus(root: root, capabilities: capabilities,
+                                                       installedAt: installer.installedAt(for: roots),
+                                                       deliveredSessionIDs: installer.deliveredSessionIDs(for: roots))
+        let inventoryUnavailable = activeSessionStatus.isUnavailable
         let settings = boundedRegularData(at: roots.settingsURL) ?? Data("{}".utf8)
         let setupPolicy = policy(for: root)
         let plan: ClaudeSetupPlan?
@@ -80,62 +105,90 @@ enum ClaudeSetupDetection {
         }
         return Snapshot(root: root, capabilities: capabilities, plan: plan, status: status,
                         helperPath: roots.helperURL.path, eventsPath: roots.eventsDirectory.path,
-                        activeSessionStatus: activeSessionStatus)
+                        settingsPath: roots.settingsURL.path, statePath: roots.stateURL.path,
+                        backupsPath: roots.backupsURL.path, activeSessionStatus: activeSessionStatus)
     }
 
-    static func activeSessionsStatus(root: URL, capabilities: ClaudeCapabilities) -> String {
+    static func activeSessionsStatus(root: URL, capabilities: ClaudeCapabilities,
+                                     installedAt: TimeInterval? = nil,
+                                     deliveredSessionIDs: Set<String> = []) -> ActiveSessionStatus {
         guard capabilities.supported else {
-            return "Unavailable: Claude Code is below Steer's tested inventory baseline."
+            return .unavailable("Unavailable: Claude Code is below Steer's tested inventory baseline.")
         }
         guard let executable = executable(named: "claude") else {
-            return "Unavailable: the Claude executable was not found."
+            return .unavailable("Unavailable: the Claude executable was not found.")
         }
         var environment = ProcessInfo.processInfo.environment
         environment["CLAUDE_CONFIG_DIR"] = root.standardizedFileURL.path
         guard let result = runBounded(executable, arguments: ["agents", "--json"], environment: environment, timeout: 5),
               result.status == 0 else {
-            return activeSessionInventoryUnavailable
+            return .unavailable(activeSessionInventoryUnavailable)
         }
-        return activeSessionSummary(result.output)
+        return activeSessionSummary(result.output, installedAt: installedAt, deliveredSessionIDs: deliveredSessionIDs)
     }
 
-    static func activeSessionSummary(_ data: Data) -> String {
+    static func activeSessionSummary(_ data: Data, installedAt: TimeInterval? = nil,
+                                     deliveredSessionIDs: Set<String> = []) -> ActiveSessionStatus {
         guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            return "Unavailable: Claude returned an invalid agents inventory."
+            return .unavailable("Unavailable: Claude returned an invalid agents inventory.")
         }
         var seen = Set<String>()
-        var activeCount = 0
+        var restartCount = 0
         for row in rows {
             guard let sessionID = row["sessionId"] as? String,
                   sessionID.count == 36,
                   UUID(uuidString: sessionID) != nil,
                   let kind = row["kind"] as? String,
-                  seen.insert("\(kind):\(sessionID)").inserted else {
-                return "Unavailable: Claude returned an incomplete or duplicate agents inventory."
+                  let cwd = row["cwd"] as? String, !cwd.isEmpty,
+                  let name = row["name"] as? String, !name.isEmpty,
+                  let startedAt = timestamp(row["startedAt"]),
+                  seen.insert(sessionID).inserted else {
+                return .unavailable("Unavailable: Claude returned an incomplete or duplicate agents inventory.")
             }
+            var active = false
             switch kind {
             case "interactive":
                 guard let status = row["status"] as? String,
                       ["busy", "waiting", "idle"].contains(status) else {
-                    return "Unavailable: Claude returned an unknown interactive session state."
+                    return .unavailable("Unavailable: Claude returned an unknown interactive session state.")
                 }
-                activeCount += 1
+                active = true
             case "background":
                 guard let state = row["state"] as? String,
                       ["working", "blocked", "done", "failed", "stopped"].contains(state) else {
-                    return "Unavailable: Claude returned an unknown background session state."
+                    return .unavailable("Unavailable: Claude returned an unknown background session state.")
                 }
-                if ["working", "blocked"].contains(state) { activeCount += 1 }
+                active = ["working", "blocked"].contains(state)
             default:
-                return "Unavailable: Claude returned an unsupported session kind."
+                return .unavailable("Unavailable: Claude returned an unsupported session kind.")
+            }
+            if active {
+                let needsRestart: Bool
+                if let installedAt {
+                    needsRestart = startedAt < installedAt && !deliveredSessionIDs.contains(sessionID)
+                } else {
+                    needsRestart = true
+                }
+                if needsRestart { restartCount += 1 }
             }
         }
-        return activeCount == 0
-            ? "No active sessions need restart."
-            : "\(activeCount) active session\(activeCount == 1 ? "" : "s") need\(activeCount == 1 ? "s" : "") restart after setup."
+        return .available(restartCount: restartCount)
     }
 
-    private static func policy(for root: URL) -> ClaudeSetupPolicy {
+    private static func timestamp(_ value: Any?) -> TimeInterval? {
+        if let number = value as? NSNumber, number.doubleValue.isFinite {
+            return normalizedTimestamp(number.doubleValue)
+        }
+        guard let string = value as? String else { return nil }
+        if let number = Double(string), number.isFinite { return normalizedTimestamp(number) }
+        return ISO8601DateFormatter().date(from: string)?.timeIntervalSince1970
+    }
+
+    private static func normalizedTimestamp(_ value: TimeInterval) -> TimeInterval {
+        value > 100_000_000_000 ? value / 1_000 : value
+    }
+
+    static func policy(for root: URL, currentDirectory: URL? = nil) -> ClaudeSetupPolicy {
         if let configuredRoot = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"], !configuredRoot.isEmpty,
            URL(fileURLWithPath: configuredRoot).standardizedFileURL.path != root.standardizedFileURL.path {
             return ClaudeSetupPolicy(shadowedBy: "CLAUDE_CONFIG_DIR=\(configuredRoot)")
@@ -149,6 +202,29 @@ enum ClaudeSetupDetection {
             guard let data = boundedRegularData(at: url, maximum: 1024 * 1024),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             if object["allowManagedHooksOnly"] as? Bool == true { return ClaudeSetupPolicy(managedHooksOnly: true) }
+        }
+        // Claude's effective-settings resolver is not exposed by the supported CLI. We can
+        // safely fail closed for the current working project's explicit hook disablement and
+        // terminal-title override; other project roots and command-line settings stay unknown.
+        var directory = (currentDirectory ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath,
+                                                  isDirectory: true)).standardizedFileURL
+        for _ in 0..<32 {
+            for filename in ["settings.json", "settings.local.json"] {
+                let url = directory.appendingPathComponent(".claude", isDirectory: true).appendingPathComponent(filename)
+                guard let data = boundedRegularData(at: url, maximum: 1024 * 1024),
+                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+                if object["disableAllHooks"] as? Bool == true {
+                    return ClaudeSetupPolicy(shadowedBy: "project settings at \(url.path) disables all hooks")
+                }
+                if let environment = object["env"] as? [String: Any],
+                   let value = environment[ClaudeSetupRequirements.titleDisableEnvironmentKey] as? String,
+                   value != ClaudeSetupRequirements.titleDisableEnvironmentValue {
+                    return ClaudeSetupPolicy(shadowedBy: "project settings at \(url.path) overrides \(ClaudeSetupRequirements.titleDisableEnvironmentKey)")
+                }
+            }
+            let parent = directory.deletingLastPathComponent()
+            if parent.path == directory.path { break }
+            directory = parent
         }
         return ClaudeSetupPolicy()
     }
@@ -224,7 +300,10 @@ final class ClaudeSetupModel: ObservableObject {
         let status: ClaudeConnectionStatus
         let helperPath: String
         let eventsPath: String
-        let activeSessionStatus: String
+        let settingsPath: String
+        let statePath: String
+        let backupsPath: String
+        let activeSessionStatus: ClaudeSetupDetection.ActiveSessionStatus
         var id: String { url.standardizedFileURL.path }
         var displayPath: String { url.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~") }
     }
@@ -246,7 +325,8 @@ final class ClaudeSetupModel: ObservableObject {
                       capabilities: ClaudeCapabilities(installed: false, supported: false),
                       plan: nil, status: .unavailable("Checking Claude Code setup…"),
                       helperPath: "", eventsPath: "",
-                      activeSessionStatus: ClaudeSetupDetection.activeSessionInventoryUnavailable)]
+                      settingsPath: "", statePath: "", backupsPath: "",
+                      activeSessionStatus: .unavailable(ClaudeSetupDetection.activeSessionInventoryUnavailable))]
         refresh()
     }
 
@@ -269,6 +349,8 @@ final class ClaudeSetupModel: ObservableObject {
             roots = snapshots.map { snapshot in
                 Root(url: snapshot.root, capabilities: snapshot.capabilities, plan: snapshot.plan, status: snapshot.status,
                      helperPath: snapshot.helperPath, eventsPath: snapshot.eventsPath,
+                     settingsPath: snapshot.settingsPath, statePath: snapshot.statePath,
+                     backupsPath: snapshot.backupsPath,
                      activeSessionStatus: snapshot.activeSessionStatus)
             }
         }

@@ -1926,7 +1926,7 @@ private struct ClaudeAgentControls: View {
                              ?? "Claude Code not detected")
                             .font(.caption).foregroundStyle(.secondary)
                         Text(ghosttyStatusText).font(.caption).foregroundStyle(.secondary)
-                        Text("Active sessions needing restart: \(root.activeSessionStatus)")
+                        Text("Active sessions needing restart: \(root.activeSessionStatus.displayText)")
                             .font(.caption).foregroundStyle(.secondary)
                         if let plan = root.plan, case .ready = plan.status {
                             Toggle("Include optional Claude usage", isOn: Binding(
@@ -1937,13 +1937,23 @@ private struct ClaudeAgentControls: View {
                             Text("Off by default. This preview choice never replaces an existing status line; usage remains unavailable until its compatibility probe passes.")
                                 .font(.caption).foregroundStyle(.secondary)
                             DisclosureGroup("Show setup preview") {
-                                Text("settings.json\n"
-                                     + "  owned hooks: \(plan.ownedHooks.map(\.event).sorted().joined(separator: ", "))\n"
-                                     + "SteerHook: \(root.helperPath)\n"
-                                     + "event records: \(root.eventsPath)\n"
-                                     + "SessionStart title: JSON terminalSequence with the full session ID\n"
-                                     + "effective scope: selected user root; project/command-line overrides unavailable\n"
-                                     + "optional usage intent: \(plan.usageEnabled ? "on (not installed)" : "off")")
+                                let hookFields = plan.ownedHooks.map { hook in
+                                    "  hooks.\(hook.event) matcher=\(hook.matcher ?? "<any>") command=\(hook.command) timeout=\(ClaudeSetupRequirements.hookTimeout)"
+                                }.joined(separator: "\n")
+                                let environmentFields = plan.ownedEnvironment.map { key, value in
+                                    "  env.\(key)=\(value)"
+                                }.sorted().joined(separator: "\n")
+                                let previewText = [
+                                    "settings.json: \(root.settingsPath)", hookFields, environmentFields,
+                                    "owned helper: \(root.helperPath)",
+                                    "owned event records: \(root.eventsPath)",
+                                    "owned install record: \(root.statePath)",
+                                    "owned backups: \(root.backupsPath)",
+                                    "SessionStart and SessionEnd title: JSON terminalSequence with the full session ID / reset",
+                                    "effective scope: selected user root; project/command-line overrides unavailable unless detected in the current project",
+                                    "optional usage intent: \(plan.usageEnabled ? "on (not installed)" : "off")"
+                                ].joined(separator: "\n")
+                                Text(previewText)
                                     .font(.system(.caption, design: .monospaced))
                                     .textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)

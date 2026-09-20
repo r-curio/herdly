@@ -26,11 +26,14 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(plan.requiresConfigure)
     #expect(plan.usageEnabled == false)
     #expect(plan.ownedHooks.count == ClaudeSetupRequirements.hookDefinitions.count)
+    #expect(plan.ownedEnvironment == [ClaudeSetupRequirements.titleDisableEnvironmentKey: ClaudeSetupRequirements.titleDisableEnvironmentValue])
     #expect(plan.ownedHooks.contains { $0.event == "SessionStart" && $0.command.contains("--terminal-title") })
     #expect(plan.ownedHooks.contains { $0.event == "PermissionRequest" && $0.matcher == "Bash" })
     let settings = try settingsObject(plan.settingsChange)
     #expect((settings["permissions"] as? [String: Any]) == nil)
     #expect((settings["statusLine"] as? [String: Any]) == nil)
+    #expect((settings["env"] as? [String: Any])?[ClaudeSetupRequirements.titleDisableEnvironmentKey] as? String
+            == ClaudeSetupRequirements.titleDisableEnvironmentValue)
 }
 
 @Test func claudeSetupSnapshotPreservesPlannerFailureState() throws {
@@ -53,22 +56,30 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
 @Test func claudeSetupActiveSessionSummaryValidatesBoundedInventory() throws {
     let data = Data(#"""
     [
-        {"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","status":"idle"},
-        {"sessionId":"22222222-2222-4222-8222-222222222222","kind":"background","status":"busy","state":"working"},
-        {"sessionId":"33333333-3333-4333-8333-333333333333","kind":"background","status":"busy","state":"done"}
+        {"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","cwd":"/tmp/one","name":"one","status":"idle","startedAt":"2026-09-20T00:00:00Z"},
+        {"sessionId":"22222222-2222-4222-8222-222222222222","kind":"background","cwd":"/tmp/two","name":"two","status":"busy","state":"working","startedAt":"2026-09-20T00:00:00Z"},
+        {"sessionId":"33333333-3333-4333-8333-333333333333","kind":"background","cwd":"/tmp/three","name":"three","status":"busy","state":"done","startedAt":"2026-09-20T00:00:00Z"}
     ]
     """#.utf8)
-    #expect(ClaudeSetupDetection.activeSessionSummary(data) == "2 active sessions need restart after setup.")
+    #expect(ClaudeSetupDetection.activeSessionSummary(data) == .available(restartCount: 2))
     #expect(ClaudeSetupDetection.activeSessionSummary(Data("{}".utf8))
-            == "Unavailable: Claude returned an invalid agents inventory.")
+            == .unavailable("Unavailable: Claude returned an invalid agents inventory."))
     let duplicate = Data(#"""
     [
-        {"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","status":"idle"},
-        {"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","status":"busy"}
+        {"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","cwd":"/tmp/one","name":"one","status":"idle","startedAt":"2026-09-20T00:00:00Z"},
+        {"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","cwd":"/tmp/one","name":"one","status":"busy","startedAt":"2026-09-20T00:00:00Z"}
     ]
     """#.utf8)
     #expect(ClaudeSetupDetection.activeSessionSummary(duplicate)
-            == "Unavailable: Claude returned an incomplete or duplicate agents inventory.")
+            == .unavailable("Unavailable: Claude returned an incomplete or duplicate agents inventory."))
+
+    #expect(ClaudeSetupDetection.activeSessionSummary(data, installedAt: 2_000_000_000,
+                                                     deliveredSessionIDs: ["11111111-1111-4111-8111-111111111111"])
+            == .available(restartCount: 1))
+
+    let missingStartedAt = Data(#"[{"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","status":"idle"}]"#.utf8)
+    #expect(ClaudeSetupDetection.activeSessionSummary(missingStartedAt)
+            == .unavailable("Unavailable: Claude returned an incomplete or duplicate agents inventory."))
 }
 
 @Test func claudeSetupPreservesUnrelatedSettingsBytes() throws {
@@ -79,7 +90,9 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(plan.status == .ready)
     let changed = try #require(String(data: plan.settingsChange, encoding: .utf8))
     #expect(changed.hasPrefix("{\"permissions\": { \"allow\": [\"Read\"] }, \"hooks\": "))
-    #expect(changed.hasSuffix(" }"))
+    let changedSettings = try settingsObject(plan.settingsChange)
+    #expect((changedSettings["env"] as? [String: Any])?[ClaudeSetupRequirements.titleDisableEnvironmentKey] as? String
+            == ClaudeSetupRequirements.titleDisableEnvironmentValue)
 
     let missingRecord = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: plan.settingsChange,
                                                 helperPath: URL(fileURLWithPath: "/tmp/SteerHook"),
@@ -114,6 +127,34 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(shadowed.status == .shadowed("Claude settings are shadowed by project settings.json; Steer did not change settings."))
 }
 
+@Test func claudeSetupPreservesUnrelatedEnvironmentBytesAndRejectsTitleConflict() throws {
+    let original = Data("{\"env\": { \"KEEP\": \"value\", \"NESTED\": { \"x\": 1 } }, \"hooks\": {} }".utf8)
+    let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: original,
+                                       helperPath: URL(fileURLWithPath: "/tmp/SteerHook"),
+                                       eventsPath: URL(fileURLWithPath: "/tmp/events"))
+    #expect(plan.status == .ready)
+    let changed = try #require(String(data: plan.settingsChange, encoding: .utf8))
+    #expect(changed.contains("\"env\": { \"KEEP\": \"value\", \"NESTED\": { \"x\": 1 }"))
+
+    let conflicting = Data("{\"env\": { \"CLAUDE_CODE_DISABLE_TERMINAL_TITLE\": \"0\" }}".utf8)
+    #expect(ClaudeSetupPlanner.plan(capabilities: capabilities, settings: conflicting,
+                                    helperPath: URL(fileURLWithPath: "/tmp/SteerHook"),
+                                    eventsPath: URL(fileURLWithPath: "/tmp/events")).status
+            == .conflict("Claude's automatic terminal title setting is owned by another value; review settings.json before reconnecting."))
+}
+
+@Test func claudeSetupFailsClosedForKnownProjectShadowing() throws {
+    let project = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-project-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: project) }
+    let projectConfig = project.appendingPathComponent(".claude", isDirectory: true)
+    try FileManager.default.createDirectory(at: projectConfig, withIntermediateDirectories: true)
+    try Data(#"{"disableAllHooks":true}"#.utf8).write(to: projectConfig.appendingPathComponent("settings.local.json"))
+
+    let policy = ClaudeSetupDetection.policy(for: project.appendingPathComponent("user-root", isDirectory: true),
+                                             currentDirectory: project)
+    #expect(policy == ClaudeSetupPolicy(shadowedBy: "project settings at \(projectConfig.path)/settings.local.json disables all hooks"))
+}
+
 @Test func claudeSetupInstallReinstallRepairAndUndoKeepOtherRootIndependent() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-" + UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -121,7 +162,7 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     let second = roots(in: root, name: "second")
     let helper = Data("helper-v1".utf8)
     let installer = ClaudeSetupInstaller()
-    let original = Data(#"{"permissions":{"allow":["Read"]},"statusLine":{"type":"command","command":"existing"}}"#.utf8)
+    let original = Data(#"{"env": { "KEEP": "value" }, "permissions":{"allow":["Read"]},"statusLine":{"type":"command","command":"existing"}}"#.utf8)
 
     try FileManager.default.createDirectory(at: first.configDirectory, withIntermediateDirectories: true)
     try original.write(to: first.settingsURL)
@@ -199,6 +240,7 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(restored["model"] as? String == "user-changed")
     #expect((restored["permissions"] as? [String: Any])?["allow"] as? [String] == ["Read"])
     #expect((restored["statusLine"] as? [String: Any])?["command"] as? String == "existing")
+    #expect((restored["env"] as? [String: Any])?["KEEP"] as? String == "value")
     #expect(!FileManager.default.fileExists(atPath: first.stateURL.path))
     #expect(FileManager.default.fileExists(atPath: second.stateURL.path))
 }

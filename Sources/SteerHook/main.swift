@@ -65,8 +65,8 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
     }
 }
 
-func terminalSequence(for session: String) -> Data? {
-    let sequence = "\u{1b}]2;\(ClaudeSetupRequirements.titlePrefix)\(session)\u{7}"
+func terminalSequence(for session: String, reset: Bool = false) -> Data? {
+    let sequence = reset ? "\u{1b}]2;\u{7}" : "\u{1b}]2;\(ClaudeSetupRequirements.titlePrefix)\(session)\u{7}"
     return try? JSONSerialization.data(withJSONObject: ["terminalSequence": sequence], options: [.sortedKeys])
 }
 
@@ -114,7 +114,9 @@ func selfTest() -> Int32 {
           claudeRecord["prompt_id"] == nil,
           claudeRecord["tool_input"] == nil,
           terminalSequence(for: session.uuidString).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: String] })?["terminalSequence"]
-            == "\u{1b}]2;\(ClaudeSetupRequirements.titlePrefix)\(session.uuidString)\u{7}" else { return 1 }
+            == "\u{1b}]2;\(ClaudeSetupRequirements.titlePrefix)\(session.uuidString)\u{7}",
+          terminalSequence(for: session.uuidString, reset: true).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: String] })?["terminalSequence"]
+            == "\u{1b}]2;\u{7}" else { return 1 }
     return 0
 }
 
@@ -128,9 +130,11 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
     let installationID = arguments[installationIndex + 1]
     let input = (try? FileHandle.standardInput.read(upToCount: 64 * 1024)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
     guard let object = input, writeClaudeEvent(object, to: directory, installationID: installationID) else { exit(0) }
-    if arguments.contains("--terminal-title"), object["hook_event_name"] as? String == "SessionStart",
+    if arguments.contains("--terminal-title"),
+       let event = object["hook_event_name"] as? String,
+       event == "SessionStart" || event == "SessionEnd",
        let session = object["session_id"] as? String,
-       let output = terminalSequence(for: session) {
+       let output = terminalSequence(for: session, reset: event == "SessionEnd") {
         FileHandle.standardOutput.write(output)
     }
     exit(0)
