@@ -84,6 +84,14 @@ Codex loads hooks when a session starts, so sessions already running keep their 
 
 Codex keeps working if Steer is quit or crashes. Every hook either records metadata or, for `PermissionRequest`, waits at most its bounded deadline and returns no decision, after which Codex shows its own prompt. No companion process is required for normal Codex use.
 
+### Connect Claude Code
+
+Claude is configured separately in **Agents → Claude Code**. Steer previews the default `~/.claude` root first; use **Add alternate Claude root** for a manually selected `CLAUDE_CONFIG_DIR` root. Each root has its own helper, events, install record, installation identity, and undo path. See [Claude setup](claude-setup.md) for ownership and state details.
+
+Configure Claude adds only Steer's exact hook entries to that root's `settings.json` and installs the packaged helper under Steer's Application Support directory. The `SessionStart` entry emits the full-session-ID Ghostty title. Existing Claude sessions are not restarted; Steer reports **Configured; restart required** until a newly started session sends a root-matching event. Ghostty Automation readiness remains separate from this connection state.
+
+The optional Claude usage bridge is displayed in the same preview and starts off. This setup slice does not change an existing `statusLine`; usage composition is independently reversible and belongs to the later usage slice. Managed policy, shadowed settings, malformed files, duplicate installs, and changed owned values are reported without writing.
+
 ## Permissions macOS may ask for
 
 | Prompt | When | If declined |

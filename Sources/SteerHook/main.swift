@@ -37,6 +37,42 @@ func writeEvent(_ object: [String: Any], to directory: URL, installationID: Stri
     }
 }
 
+func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID: String) -> Bool {
+    guard let event = object["hook_event_name"] as? String, !event.isEmpty,
+          let session = object["session_id"] as? String, !session.isEmpty, session.count <= 256,
+          !session.contains(where: { $0.isNewline || $0 == "\u{1b}" || $0 == "\u{7}" }) else { return false }
+    let now = Date()
+    var record: [String: Any] = [
+        "hook_event_name": event, "session_id": session, "source": ClaudeSetupRequirements.helperSource,
+        "installation_id": installationID, "received_at": ISO8601DateFormatter().string(from: now),
+        "captured_at": now.timeIntervalSince1970
+    ]
+    for key in ["prompt_id", "tool_use_id", "agent_id", "agent_type", "tool_name", "cwd",
+                "permission_mode", "reason", "notification_type"] {
+        if let value = object[key] as? String, value.utf8.count <= 4096 { record[key] = value }
+    }
+    if let active = object["stop_hook_active"] as? Bool { record["stop_hook_active"] = active }
+    if let input = object["tool_input"] as? [String: Any] {
+        let kept = ["command", "description", "file_path", "path", "pattern"].reduce(into: [String: String]()) { result, key in
+            if let value = input[key] as? String, value.utf8.count <= 8192 { result[key] = value }
+        }
+        if !kept.isEmpty { record["tool_input"] = kept }
+    }
+    guard JSONSerialization.isValidJSONObject(record),
+          let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
+          (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil else { return false }
+    let temporary = directory.appendingPathComponent(".steer-" + UUID().uuidString)
+    let destination = directory.appendingPathComponent(UUID().uuidString + ".json")
+    do {
+        try data.write(to: temporary, options: .atomic)
+        try FileManager.default.moveItem(at: temporary, to: destination)
+        return true
+    } catch {
+        try? FileManager.default.removeItem(at: temporary)
+        return false
+    }
+}
+
 private func update(_ request: ApprovalRequest, outcome: ApprovalDecision, in directory: URL) {
     let terminal = ApprovalRequest(requestID: request.requestID, sessionID: request.sessionID, turnID: request.turnID,
                                    details: request.details, receivedAt: request.receivedAt,
@@ -69,10 +105,34 @@ func selfTest() -> Int32 {
           ApprovalRequestParser.request(from: bashPayload) != nil,
           ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .allowOnce, decidedAt: 101), in: directory),
           ApprovalCoordinator(requestID: request.id, expiresAt: 130).decide(requestID: request.id, decision: .allowOnce, at: 101) == .allowOnce else { return 1 }
+    let claude: [String: Any] = ["hook_event_name": "SessionStart", "session_id": session.uuidString,
+                                 "prompt_id": "prompt-1"]
+    guard writeClaudeEvent(claude, to: directory, installationID: UUID().uuidString),
+          let claudeRecord = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil))?
+            .compactMap({ try? Data(contentsOf: $0) })
+            .compactMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+            .first(where: { $0["source"] as? String == ClaudeSetupRequirements.helperSource }),
+          claudeRecord["prompt_id"] as? String == "prompt-1" else { return 1 }
     return 0
 }
 
 if arguments.contains("--self-test") { exit(selfTest()) }
+if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.contains(agentIndex + 1),
+   arguments[agentIndex + 1] == "claude" {
+    guard let index = arguments.firstIndex(of: "--events-dir"), arguments.indices.contains(index + 1),
+          let installationIndex = arguments.firstIndex(of: "--installation-id"), arguments.indices.contains(installationIndex + 1),
+          UUID(uuidString: arguments[installationIndex + 1]) != nil else { exit(0) }
+    let directory = URL(fileURLWithPath: arguments[index + 1], isDirectory: true)
+    let installationID = arguments[installationIndex + 1]
+    let input = (try? FileHandle.standardInput.read(upToCount: 64 * 1024)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    guard let object = input, writeClaudeEvent(object, to: directory, installationID: installationID) else { exit(0) }
+    if arguments.contains("--terminal-title"), object["hook_event_name"] as? String == "SessionStart",
+       let session = object["session_id"] as? String {
+        let sequence = "\u{1b}]2;\(ClaudeSetupRequirements.titlePrefix)\(session)\u{7}"
+        FileHandle.standardOutput.write(Data(sequence.utf8))
+    }
+    exit(0)
+}
 guard let index = arguments.firstIndex(of: "--events-dir"), arguments.indices.contains(index + 1),
       let installationIndex = arguments.firstIndex(of: "--installation-id"), arguments.indices.contains(installationIndex + 1),
       UUID(uuidString: arguments[installationIndex + 1]) != nil else { exit(0) }

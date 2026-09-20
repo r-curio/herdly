@@ -123,6 +123,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var setupCapabilities = CodexCapabilities(cli: false, desktop: false, ghostty: false, supported: false)
     @Published var setupPlan: CodexSetupPlan?
     @Published var setupMessage = ""
+    let claude = ClaudeSetupModel()
     @Published private(set) var launchAtLogin = LaunchAtLoginState()
     @Published var desktopForeground = false
     private let launchAtLoginCoordinator = LaunchAtLoginCoordinator(service: LaunchAtLoginService())
@@ -1889,6 +1890,95 @@ private struct AgentControls: View {
                 }
                 .padding(16)
             }
+            ClaudeAgentControls(setup: model.claude,
+                                ghosttyEnabled: model.ghosttyEnabled,
+                                ghosttyPermissionVerified: model.ghosttyPermissionVerified)
+        }
+    }
+}
+
+private struct ClaudeAgentControls: View {
+    @ObservedObject var setup: ClaudeSetupModel
+    let ghosttyEnabled: Bool
+    let ghosttyPermissionVerified: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Claude Code").font(.headline).foregroundStyle(.secondary)
+            Text("Each configuration root is configured independently. Steer never merges roots or changes Claude permissions.")
+                .font(.callout).foregroundStyle(.secondary)
+            SettingsCard {
+                ForEach(Array(setup.roots.enumerated()), id: \.element.id) { index, root in
+                    if index > 0 { Divider() }
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(root.displayPath).font(.body.weight(.medium))
+                                Text(ClaudeSetupModel.statusText(root.status)).font(.callout).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            StatusBadge(title: root.status == .connected ? "Connected" : "Not ready",
+                                        color: root.status == .connected ? .green : .orange)
+                        }
+                        Text(root.capabilities.version.map { "Claude Code \($0) · tested baseline \(ClaudeSetupRequirements.minimumCLIVersion)" }
+                             ?? "Claude Code not detected")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text(ghosttyStatusText).font(.caption).foregroundStyle(.secondary)
+                        if let plan = root.plan, case .ready = plan.status {
+                            Toggle("Include optional Claude usage", isOn: Binding(
+                                get: { setup.usageEnabled(for: root) },
+                                set: { setup.setUsageEnabled($0, for: root) }
+                            ))
+                            Text("Off by default. This preview choice never replaces an existing status line; usage remains unavailable until its compatibility probe passes.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            DisclosureGroup("Show setup preview") {
+                                Text("settings.json\n\(String(data: plan.settingsChange, encoding: .utf8) ?? "(unreadable)")\n\n"
+                                     + "optional usage bridge: \(plan.usageEnabled ? "on (not installed)" : "off")\n"
+                                     + "owned hook entries: \(plan.ownedHooks.count)\n"
+                                     + "helper command: \(plan.helperCommand)")
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            HStack {
+                                Button("Review again", action: setup.refresh)
+                                if root.status != .connected {
+                                    Button("Configure Claude") { setup.configure(root) }
+                                        .buttonStyle(.borderedProminent)
+                                }
+                                if root.status != .notConfigured {
+                                    Button("Undo setup") { setup.undo(root) }
+                                }
+                                if index > 0 {
+                                    Button("Remove root") { setup.removeAlternateRoot(root) }
+                                }
+                            }
+                        } else if index > 0 {
+                            Button("Remove root") { setup.removeAlternateRoot(root) }
+                        }
+                    }
+                    .padding(16)
+                }
+                Button("Add alternate Claude root", action: setup.addAlternateRoot)
+                    .padding(16)
+            }
+            if !setup.message.isEmpty {
+                Text(setup.message).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var ghosttyStatus: ClaudeGhosttyStatus {
+        if !ghosttyEnabled { return .off }
+        return ghosttyPermissionVerified ? .ready : .permissionRequired
+    }
+
+    private var ghosttyStatusText: String {
+        switch ghosttyStatus {
+        case .off: "Ghostty controls: off"
+        case .permissionRequired: "Ghostty controls: permission needed"
+        case .ready: "Ghostty controls: ready"
+        case .unavailable(let message): "Ghostty controls: \(message)"
         }
     }
 }
