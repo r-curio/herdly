@@ -144,15 +144,18 @@ public enum ClaudeQuestionStore {
     }
 
     public static func request(for id: String, in directory: URL) -> ClaudeQuestionRequest? {
-        decode(requestURL(in: directory, id: id), as: ClaudeQuestionRequest.self)
+        guard validID(id) else { return nil }
+        return decode(requestURL(in: directory, id: id), as: ClaudeQuestionRequest.self)
     }
 
     public static func receipt(for id: String, in directory: URL) -> ClaudeQuestionReceipt? {
-        decode(receiptURL(in: directory, id: id), as: ClaudeQuestionReceipt.self)
+        guard validID(id) else { return nil }
+        return decode(receiptURL(in: directory, id: id), as: ClaudeQuestionReceipt.self)
     }
 
     public static func answer(for id: String, in directory: URL) -> ClaudeQuestionAnswer? {
-        decode(answerURL(in: directory, id: id), as: ClaudeQuestionAnswer.self)
+        guard validID(id) else { return nil }
+        return decode(answerURL(in: directory, id: id), as: ClaudeQuestionAnswer.self)
     }
 
     /// Reads only fresh, bounded request records for the selected installation.
