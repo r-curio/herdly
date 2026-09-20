@@ -2,6 +2,29 @@ import AppKit
 import SwiftUI
 import SteerCore
 
+struct ClaudeQuestionViewStateKey: Hashable, Sendable {
+    let sourceScope: String
+    let sessionID: String
+    let promptID: String
+    let toolUseID: String
+    let requestID: String
+    let index: Int
+
+    init(question: AgentQuestion, index: Int) {
+        sourceScope = question.identity.session.sourceScope
+        sessionID = question.identity.session.session
+        promptID = question.identity.turn
+        toolUseID = question.identity.call
+        requestID = question.helperRequestID ?? ""
+        self.index = index
+    }
+
+    var storageKey: String {
+        [sourceScope, sessionID, promptID, toolUseID, requestID, String(index)]
+            .map { "\($0.utf8.count):\($0)" }.joined(separator: "|")
+    }
+}
+
 /// The one visual vocabulary of the notch: pure black fused to the menu bar, one monospaced face,
 /// one green sprite, one dark badge. Nothing here is decoration; every mark is a reading.
 enum NotchStyle {
@@ -297,7 +320,7 @@ struct Notch: View {
     /// Typed answers being composed, by call id and question index; sent only on Return or Send.
     @State private var drafts: [String: String] = [:]
     /// Multi-select labels are kept in the view until the user presses Send.
-    @State private var claudeSelections: [String: Set<Int>] = [:]
+    @State private var claudeSelections: [ClaudeQuestionViewStateKey: Set<Int>] = [:]
 
     private func draft(_ key: String) -> Binding<String> {
         Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 })
@@ -308,8 +331,8 @@ struct Notch: View {
                 set: { open in if open { openDisclosures.insert(key) } else { openDisclosures.remove(key) } })
     }
 
-    private func claudeSelectionKey(_ question: AgentQuestion, _ index: Int) -> String {
-        "(question.identity.session.sourceScope):(question.identity.call):(index)"
+    private func claudeSelectionKey(_ question: AgentQuestion, _ index: Int) -> ClaudeQuestionViewStateKey {
+        ClaudeQuestionViewStateKey(question: question, index: index)
     }
 
     private func toggleClaudeSelection(_ question: AgentQuestion, index: Int, option: Int) {
@@ -468,12 +491,12 @@ struct Notch: View {
                     }
                     if controls {
                         DraftField(placeholder: prompt.options.isEmpty ? "Type your answer" : "Or type another answer",
-                                   text: draft(claudeSelectionKey(question, index)), sendTitle: "Send",
+                                   text: draft(claudeSelectionKey(question, index).storageKey), sendTitle: "Send",
                                    fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
                                    onEscape: model.collapse) {
                             model.answerClaudeQuestion(question, kind: .text,
-                                                       answer: drafts[claudeSelectionKey(question, index)] ?? "")
-                            drafts[claudeSelectionKey(question, index)] = nil
+                                                       answer: drafts[claudeSelectionKey(question, index).storageKey] ?? "")
+                            drafts[claudeSelectionKey(question, index).storageKey] = nil
                         }
                     }
                 }

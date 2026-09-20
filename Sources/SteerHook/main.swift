@@ -188,6 +188,10 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
           UUID(uuidString: arguments[installationIndex + 1]) != nil else { exit(0) }
     let directory = URL(fileURLWithPath: arguments[index + 1], isDirectory: true)
     let installationID = arguments[installationIndex + 1]
+    let sourceScope: String? = arguments.firstIndex(of: "--source-scope").flatMap { sourceIndex in
+        guard arguments.indices.contains(sourceIndex + 1) else { return nil }
+        return URL(fileURLWithPath: arguments[sourceIndex + 1]).standardizedFileURL.path
+    }
     let input = (try? FileHandle.standardInput.read(upToCount: 64 * 1024)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
     guard let object = input else { exit(0) }
     let isQuestion = arguments.contains("--question-helper") && object["hook_event_name"] as? String == "PreToolUse"
@@ -200,10 +204,12 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
        let toolUseID = boundedClaudeString(object["tool_use_id"], limit: 256),
        let toolInput = object["tool_input"] as? [String: Any],
        let parsed = QuestionPrompt.parseCall(toolInput: toolInput), parsed.count == 1,
+       let sourceScope,
        let requestID {
         let publishedAt = Date().timeIntervalSince1970
         let question = ClaudeQuestionRequest(requestID: requestID, installationID: installationID,
-                                             sourceScope: directory.standardizedFileURL.path,
+                                             sourceScope: sourceScope,
+                                             eventDirectory: directory.standardizedFileURL.path,
                                              sessionID: session, promptID: promptID, toolUseID: toolUseID,
                                              publishedAt: publishedAt,
                                              expiresAt: publishedAt + ClaudeQuestionTiming.answerTimeout,

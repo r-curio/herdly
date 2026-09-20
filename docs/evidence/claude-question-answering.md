@@ -5,14 +5,16 @@
 `SteerHook --agent claude --question-helper` writes one bounded live request for an `AskUserQuestion`
 `PreToolUse` call, waits for a receipt, and emits Claude's `permissionDecision: allow` response with
 the unchanged `questions` input plus `answers`. The app issues the receipt and keeps the answer token
-only in memory. The request is bound to the installation, source scope, session, prompt, tool-use,
-and fresh request identity; the answer file is single-write.
+only in memory. The request is bound to the installation, normalized Claude configuration root,
+separate event directory, session, prompt, tool-use, and fresh request identity; the answer file is
+single-write.
 
 ## Automated checks
 
 `swift test --filter ClaudeQuestionTests` covers unchanged input, single-select, multi-select, typed
-answers, exact identity rejection, one-shot writes, and receipt/answer timing. `ClaudeObservationTests`
-covers prompt labels and helper identity in the shared queue. The full suite passed with 281 tests;
+answers, exact identity rejection, one-shot writes, receipt/answer timing, view-state key isolation,
+and stale receipt generation reconciliation. `ClaudeObservationTests` covers prompt labels and helper
+identity in the shared queue. The full suite passed with 285 tests;
 `sh scripts/build-app.sh`, `sh scripts/package-app.sh`, and
 `output/Steer.app/Contents/MacOS/Steer --smoke-test` also passed. The package was ad hoc signed and
 is development evidence only.
