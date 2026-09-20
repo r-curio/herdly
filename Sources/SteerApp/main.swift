@@ -1907,7 +1907,7 @@ private struct ClaudeAgentControls: View {
             Text("Claude Code").font(.headline).foregroundStyle(.secondary)
             Text("Each configuration root is configured independently. Steer never merges roots or changes Claude permissions.")
                 .font(.callout).foregroundStyle(.secondary)
-            Text("Steer configures the selected user root. Project and command-line overrides are not inspectable here; connection requires a fresh SessionStart from this exact root.")
+            Text("Steer configures the selected user root. Arbitrary future project files or command-line --settings values may override it; this root-only preview cannot know those values without an exact launch context. Connection requires a fresh SessionStart from this exact root.")
                 .font(.caption).foregroundStyle(.secondary)
             SettingsCard {
                 ForEach(Array(setup.roots.enumerated()), id: \.element.id) { index, root in
@@ -1952,7 +1952,7 @@ private struct ClaudeAgentControls: View {
                                     "owned install record: \(root.statePath)",
                                     "owned backups: \(root.backupsPath)",
                                     "SessionStart and SessionEnd title: JSON terminalSequence with the full session ID / reset",
-                                    "effective scope: selected user root; project/command-line overrides unavailable (project context not supplied)",
+                                    "effective scope: selected user root; arbitrary future project files or command-line --settings may override it (launch context unavailable)",
                                     "optional usage intent: \(plan.usageEnabled ? "on (not installed)" : "off")"
                                 ].joined(separator: "\n")
                                 Text(previewText)
