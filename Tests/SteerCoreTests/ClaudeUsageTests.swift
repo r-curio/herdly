@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import SteerCore
+@testable import SteerApp
 
 private let sessionA = "00000000-0000-4000-8000-000000000001"
 private let sessionB = "00000000-0000-4000-8000-000000000002"
@@ -68,6 +69,9 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     #expect(files.filter { $0.lastPathComponent.hasPrefix("steer-usage-") }.isEmpty)
     #expect(files.filter { $0.lastPathComponent == ClaudeUsageReader.latestRecordName }.count == 1)
     #expect(ClaudeUsageReader.latest(root: directory, sourceScope: "/root-a", now: 0)?.sessionID == usageSession(5_000))
+    try Data(repeating: 0x78, count: ClaudeUsageReader.maximumRecordBytes + 1)
+        .write(to: directory.appendingPathComponent(ClaudeUsageReader.latestRecordName), options: .atomic)
+    #expect(ClaudeUsageReader.latest(root: directory, sourceScope: "/root-a", now: 0) == nil)
 }
 
 @Test func claudeUsageDoesNotTrustAForgedOwnedFilename() throws {
@@ -118,7 +122,8 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     try original.write(to: setupRoots.settingsURL)
     let plan = ClaudeSetupPlanner.plan(capabilities: ClaudeCapabilities(installed: true, supported: true, version: "2.1.273"),
                                        settings: original, helperPath: setupRoots.helperURL,
-                                       eventsPath: setupRoots.eventsDirectory, usageEnabled: true)
+                                       eventsPath: setupRoots.eventsDirectory, usageEnabled: true,
+                                       statusLineCompatible: true)
     #expect(plan.usageStatus == .ready)
     #expect(plan.settingsChange != original)
     let installer = ClaudeSetupInstaller()
@@ -138,7 +143,8 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     try original.write(to: setupRoots.settingsURL, options: .atomic)
     let secondPlan = ClaudeSetupPlanner.plan(capabilities: ClaudeCapabilities(installed: true, supported: true, version: "2.1.273"),
                                              settings: original, helperPath: setupRoots.helperURL,
-                                             eventsPath: setupRoots.eventsDirectory, usageEnabled: true)
+                                             eventsPath: setupRoots.eventsDirectory, usageEnabled: true,
+                                             statusLineCompatible: true)
     _ = try installer.install(secondPlan, roots: setupRoots, helper: Data("helper".utf8),
                               capabilities: ClaudeCapabilities(installed: true, supported: true, version: "2.1.273"))
     var userChanged = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: setupRoots.settingsURL)) as? [String: Any])
@@ -165,7 +171,8 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     let capabilities = ClaudeCapabilities(installed: true, supported: true, version: "2.1.273")
     let installer = ClaudeSetupInstaller()
     let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: original, helperPath: setupRoots.helperURL,
-                                       eventsPath: setupRoots.eventsDirectory, usageEnabled: true)
+                                       eventsPath: setupRoots.eventsDirectory, usageEnabled: true,
+                                       statusLineCompatible: true)
     _ = try installer.install(plan, roots: setupRoots, helper: Data("helper".utf8), capabilities: capabilities)
     let installed = try Data(contentsOf: setupRoots.settingsURL)
     let disablePlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: installed, helperPath: setupRoots.helperURL,
@@ -190,7 +197,8 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     try original.write(to: setupRoots.settingsURL)
     let capabilities = ClaudeCapabilities(installed: true, supported: true, version: "2.1.273")
     let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: original, helperPath: setupRoots.helperURL,
-                                       eventsPath: setupRoots.eventsDirectory, usageEnabled: true)
+                                       eventsPath: setupRoots.eventsDirectory, usageEnabled: true,
+                                       statusLineCompatible: true)
     let installer = ClaudeSetupInstaller()
     _ = try installer.install(plan, roots: setupRoots, helper: Data("helper".utf8), capabilities: capabilities)
     for index in 1...5_000 {
@@ -218,7 +226,8 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     try original.write(to: setupRoots.settingsURL)
     let capabilities = ClaudeCapabilities(installed: true, supported: true, version: "2.1.273")
     let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: original, helperPath: setupRoots.helperURL,
-                                       eventsPath: setupRoots.eventsDirectory, usageEnabled: true)
+                                       eventsPath: setupRoots.eventsDirectory, usageEnabled: true,
+                                       statusLineCompatible: false)
     #expect(plan.usageStatus == .unavailable(ClaudeStatusLineCompatibility.failureMessage))
     #expect(String(data: plan.settingsChange, encoding: .utf8)?.contains("--claude-status-line") != true)
     _ = try ClaudeSetupInstaller().install(plan, roots: setupRoots, helper: Data("helper".utf8), capabilities: capabilities)
