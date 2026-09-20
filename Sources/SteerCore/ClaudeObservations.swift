@@ -19,6 +19,7 @@ public enum ClaudeObservationReader {
     public static let maximumEntries = 4096
     public static let maximumRecordSize = 128 * 1024
     public static let maximumIdentifier = 256
+    public static let maximumToolFreshness: Double = 30
 
     private struct Record {
         let fileName: String
@@ -54,7 +55,8 @@ public enum ClaudeObservationReader {
     }
 
     public static func scan(events: URL, sourceScope: String, installationID: String,
-                            observingSince: Double = -.infinity) -> ClaudeObservationScan {
+                            observingSince: Double = -.infinity,
+                            now: Double = Date().timeIntervalSince1970) -> ClaudeObservationScan {
         let scope = normalizedScope(sourceScope)
         guard isDirectory(events),
               let urls = try? FileManager.default.contentsOfDirectory(at: events, includingPropertiesForKeys: nil),
@@ -88,6 +90,8 @@ public enum ClaudeObservationReader {
                     if var turn = turns[turnID] {
                         turn.tool = nil
                         turn.tools.removeAll()
+                        turn.question = nil
+                        turn.approval = nil
                         turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                         turn.closedAt = max(turn.closedAt ?? record.capturedAt, record.capturedAt)
                         turns[turnID] = turn
@@ -153,6 +157,8 @@ public enum ClaudeObservationReader {
                 turn.tool = turn.tools.values.max { lhs, rhs in
                     lhs.at == rhs.at ? lhs.id < rhs.id : lhs.at < rhs.at
                 }
+                if turn.question?.identity.call == toolID { turn.question = nil }
+                if turn.approval?.identity.call == toolID { turn.approval = nil }
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                 turns[turnID] = turn
             case "PostToolBatch":
@@ -169,6 +175,12 @@ public enum ClaudeObservationReader {
                 for tool in matching { turn.tools.removeValue(forKey: tool.id) }
                 turn.tool = turn.tools.values.max { lhs, rhs in
                     lhs.at == rhs.at ? lhs.id < rhs.id : lhs.at < rhs.at
+                }
+                if let question = turn.question, matching.contains(where: { $0.id == question.identity.call }) {
+                    turn.question = nil
+                }
+                if let approval = turn.approval, matching.contains(where: { $0.id == approval.identity.call }) {
+                    turn.approval = nil
                 }
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                 turns[turnID] = turn
@@ -193,6 +205,8 @@ public enum ClaudeObservationReader {
                 guard var turn = turns[turnID] else { continue }
                 turn.tool = nil
                 turn.tools.removeAll()
+                turn.question = nil
+                turn.approval = nil
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                 turn.closedAt = max(turn.closedAt ?? record.capturedAt, record.capturedAt)
                 turn.terminal = AgentOutcome(session: identity, turn: promptID, status: .failed,
@@ -223,16 +237,23 @@ public enum ClaudeObservationReader {
             if $0.startedAt != $1.startedAt { return $0.startedAt < $1.startedAt }
             return $0.prompt < $1.prompt
         }.flatMap { turn -> [AgentObservation] in
-            guard !endedSessions.contains(turn.session) || turn.terminal != nil else { return [] }
+            let isCurrentPrompt = sessionPrompts[turn.session] == turn.prompt
+            guard ((!endedSessions.contains(turn.session) && (turn.closedAt == nil || isCurrentPrompt))
+                   || turn.terminal != nil) else { return [] }
             let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                 session: turn.session, surface: .cli)
             var result: [AgentObservation] = []
             if let terminal = turn.terminal {
                 result.append(.outcome(terminal))
             } else {
+                let freshTool = turn.tool.flatMap { tool -> Tool? in
+                    guard now.isFinite, tool.at.isFinite, tool.at <= now,
+                          now - tool.at <= maximumToolFreshness else { return nil }
+                    return tool
+                }
                 result.append(.running(AgentRunning(session: identity, turn: turn.prompt, arrivedAt: turn.updatedAt,
-                                                    prompt: turn.promptText, toolName: turn.tool?.name,
-                                                    toolInput: turn.tool?.input ?? [:])))
+                                                    prompt: turn.promptText, toolName: freshTool?.name,
+                                                    toolInput: freshTool?.input ?? [:])))
                 if let question = turn.question { result.append(.question(question)) }
                 if let approval = turn.approval { result.append(.approval(approval)) }
             }
@@ -315,7 +336,6 @@ public extension AgentAttentionQueue {
         guard scan.available else { return }
         let scope = scan.sourceScope
         let incoming = scan.observations
-        let current = items.filter { $0.session.source == .claude && $0.session.sourceScope == scope }
         let ids = Set(incoming.compactMap { observation -> AgentAttentionID? in
             switch observation {
             case let .approval(value): return .approval(value.id)
@@ -325,13 +345,7 @@ public extension AgentAttentionQueue {
             case .resolved: return nil
             }
         })
-        for item in current where !ids.contains(item.id) {
-            switch item.id {
-            case .approval, .question: dismiss(item.id)
-            case .running: dismiss(item.id)
-            case .outcome: break
-            }
-        }
+        reconcile(source: .claude, sourceScope: scope, keeping: ids)
         for observation in incoming { apply(observation, now: now) }
     }
 }

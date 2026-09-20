@@ -51,7 +51,10 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
         record["session_start_source"] = source
     }
     for key in ["prompt_id", "prompt", "tool_name", "tool_use_id"] {
-        if let value = boundedClaudeString(object[key], allowNewline: key == "prompt") { record[key] = value }
+        let limit = key == "prompt" ? QuestionPrompt.maximumQuestion : 256
+        if let value = boundedClaudeString(object[key], limit: limit, allowNewline: key == "prompt") {
+            record[key] = value
+        }
     }
     if let input = object["tool_input"] as? [String: Any] {
         let kept = boundedClaudeToolInput(input)
@@ -85,25 +88,9 @@ private func boundedClaudeToolInput(_ input: [String: Any]) -> [String: Any] {
         if let value = boundedClaudeString(input[key], allowNewline: true) { result[key] = value }
     }
     if let questions = input["questions"] as? [[String: Any]], questions.count <= 8 {
-        let kept = questions.compactMap { question -> [String: Any]? in
-            var item: [String: Any] = [:]
-            for key in ["header", "question"] {
-                if let value = boundedClaudeString(question[key], allowNewline: true) { item[key] = value }
-            }
-            if let multiple = question["multiSelect"] as? Bool { item["multiSelect"] = multiple }
-            if let options = question["options"] as? [[String: Any]], options.count <= 16 {
-                let keptOptions = options.compactMap { option -> [String: Any]? in
-                    var keptOption: [String: Any] = [:]
-                    for key in ["label", "description"] {
-                        if let value = boundedClaudeString(option[key], allowNewline: true) { keptOption[key] = value }
-                    }
-                    return keptOption.isEmpty ? nil : keptOption
-                }
-                if !keptOptions.isEmpty { item["options"] = keptOptions }
-            }
-            return item.isEmpty ? nil : item
-        }
-        if !kept.isEmpty { result["questions"] = kept }
+        // Keep only the count and shape needed to identify a pending call. Question copy, labels,
+        // and option descriptions remain in Claude's native UI until a later decision slice.
+        result["questions"] = questions.map { _ in [String: Any]() }
     }
     if let ids = input["tool_use_ids"] as? [String], ids.count <= 64 {
         let kept = ids.compactMap { boundedClaudeString($0, limit: 256) }
