@@ -142,11 +142,11 @@ and timestamps. The configured installation and session IDs matched both
 records. The allowlist contains only setup metadata; no prompt, command, path,
 reason, tool input, credential, or other event payload was stored.
 
-## Ghostty checkpoint
+## Deferred Ghostty checkpoints
 
-This was not completed in the automated run. The available automation could
-not operate a real Ghostty tab, so this section is an operator checkpoint and
-makes no pass claim.
+These checks were not completed in the automated run. The available automation
+could not operate a real Ghostty tab, so the title, clean reset, and old-session
+checks below are deferred operator checkpoints and make no pass claim.
 
 Paste this self-contained block into a real unsplit Ghostty tab from the
 repository root after building the package with `sh scripts/package-app.sh`.
@@ -215,3 +215,9 @@ evidence record.
 
 This run does not claim that Ghostty applied or retained the title. Clean
 shutdown reset and abrupt-exit restoration remain separate later checkpoints.
+
+The live old-session check is also deferred: start with an active Claude
+session from before setup and record that Steer reports it as requiring restart,
+without treating its continued existence as connected delivery. None of these
+Ghostty or old-session observations is a passed acceptance result until an
+operator records the corresponding live result here.
