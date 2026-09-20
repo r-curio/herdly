@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import SteerCore
 
@@ -118,80 +119,56 @@ enum ClaudeSetupDetection {
     static func activeSessionsStatus(root: URL, capabilities: ClaudeCapabilities,
                                      installedAt: TimeInterval? = nil,
                                      deliveredSessionIDs: Set<String> = []) -> ActiveSessionStatus {
+        let inventory = activeSessionInventory(root: root, capabilities: capabilities)
+        guard inventory.available else {
+            return .unavailable(inventory.failure ?? activeSessionInventoryUnavailable)
+        }
+        return .available(restartCount: restartCount(in: inventory, installedAt: installedAt,
+                                                     deliveredSessionIDs: deliveredSessionIDs))
+    }
+
+    static func activeSessionInventory(root: URL, capabilities: ClaudeCapabilities,
+                                       observedAt: TimeInterval = Date().timeIntervalSince1970) -> ClaudeInventoryScan {
         guard capabilities.supported else {
-            return .unavailable("Unavailable: Claude Code is below Steer's tested inventory baseline.")
+            return .unavailable(sourceScope: root.path, observedAt: observedAt,
+                                reason: "Unavailable: Claude Code is below Steer's tested inventory baseline.")
         }
         guard let executable = executable(named: "claude") else {
-            return .unavailable("Unavailable: the Claude executable was not found.")
+            return .unavailable(sourceScope: root.path, observedAt: observedAt,
+                                reason: "Unavailable: the Claude executable was not found.")
         }
         var environment = ProcessInfo.processInfo.environment
         environment["CLAUDE_CONFIG_DIR"] = root.standardizedFileURL.path
         guard let result = runBounded(executable, arguments: ["agents", "--json"], environment: environment, timeout: 5),
               result.status == 0 else {
-            return .unavailable(activeSessionInventoryUnavailable)
+            return .unavailable(sourceScope: root.path, observedAt: observedAt, reason: activeSessionInventoryUnavailable)
         }
-        return activeSessionSummary(result.output, installedAt: installedAt, deliveredSessionIDs: deliveredSessionIDs)
+        return ClaudeInventoryDecoder.decode(result.output, sourceScope: root.path, observedAt: observedAt)
     }
 
     static func activeSessionSummary(_ data: Data, installedAt: TimeInterval? = nil,
                                      deliveredSessionIDs: Set<String> = []) -> ActiveSessionStatus {
-        guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
-            return .unavailable("Unavailable: Claude returned an invalid agents inventory.")
+        let inventory = ClaudeInventoryDecoder.decode(data, sourceScope: "/", observedAt: 0)
+        guard inventory.available else {
+            return .unavailable(inventory.failure ?? "Unavailable: Claude returned an invalid agents inventory.")
         }
-        var seen = Set<String>()
-        var restartCount = 0
-        for row in rows {
-            guard let sessionID = row["sessionId"] as? String,
-                  sessionID.count == 36,
-                  UUID(uuidString: sessionID) != nil,
-                  let kind = row["kind"] as? String,
-                  let cwd = row["cwd"] as? String, !cwd.isEmpty,
-                  let name = row["name"] as? String, !name.isEmpty,
-                  let startedAt = timestamp(row["startedAt"]),
-                  seen.insert(sessionID).inserted else {
-                return .unavailable("Unavailable: Claude returned an incomplete or duplicate agents inventory.")
-            }
-            var active = false
-            switch kind {
-            case "interactive":
-                guard let status = row["status"] as? String,
-                      ["busy", "waiting", "idle"].contains(status) else {
-                    return .unavailable("Unavailable: Claude returned an unknown interactive session state.")
-                }
-                active = true
-            case "background":
-                guard let state = row["state"] as? String,
-                      ["working", "blocked", "done", "failed", "stopped"].contains(state) else {
-                    return .unavailable("Unavailable: Claude returned an unknown background session state.")
-                }
-                active = ["working", "blocked"].contains(state)
-            default:
-                return .unavailable("Unavailable: Claude returned an unsupported session kind.")
-            }
-            if active {
-                let needsRestart: Bool
-                if let installedAt {
-                    needsRestart = startedAt < installedAt && !deliveredSessionIDs.contains(sessionID)
-                } else {
-                    needsRestart = true
-                }
-                if needsRestart { restartCount += 1 }
-            }
-        }
-        return .available(restartCount: restartCount)
+        return .available(restartCount: restartCount(in: inventory, installedAt: installedAt,
+                                                     deliveredSessionIDs: deliveredSessionIDs))
     }
 
-    private static func timestamp(_ value: Any?) -> TimeInterval? {
-        if let number = value as? NSNumber, number.doubleValue.isFinite {
-            return normalizedTimestamp(number.doubleValue)
+    private static func restartCount(in inventory: ClaudeInventoryScan, installedAt: TimeInterval?,
+                                     deliveredSessionIDs: Set<String>) -> Int {
+        var count = 0
+        for session in inventory.sessions where session.lifecycle.needsRestart {
+            let needsRestart: Bool
+            if let installedAt {
+                needsRestart = session.startedAt < installedAt && !deliveredSessionIDs.contains(session.sessionID)
+            } else {
+                needsRestart = true
+            }
+            if needsRestart { count += 1 }
         }
-        guard let string = value as? String else { return nil }
-        if let number = Double(string), number.isFinite { return normalizedTimestamp(number) }
-        return ISO8601DateFormatter().date(from: string)?.timeIntervalSince1970
-    }
-
-    private static func normalizedTimestamp(_ value: TimeInterval) -> TimeInterval {
-        value > 100_000_000_000 ? value / 1_000 : value
+        return count
     }
 
     static func policy(for root: URL, projectDirectory: URL? = nil) -> ClaudeSetupPolicy {
@@ -272,19 +249,71 @@ enum ClaudeSetupDetection {
             .map(String.init)
     }
 
-    private static func runBounded(_ url: URL, arguments: [String], environment: [String: String]? = nil,
-                                   timeout: TimeInterval = 2) -> (status: Int32, output: Data)? {
+    /// Reads at most one bounded chunk and returns whether the pipe reached EOF.
+    private static func drain(_ descriptor: Int32, into buffer: inout Data) -> Bool {
+        var bytes = [UInt8](repeating: 0, count: 16 * 1024)
+        var drained = 0
+        while drained < 64 * 1024 {
+            let count = bytes.withUnsafeMutableBytes { storage in
+                read(descriptor, storage.baseAddress, storage.count)
+            }
+            if count > 0 {
+                let remaining = 64 * 1024 + 1 - buffer.count
+                if remaining > 0 {
+                    buffer.append(contentsOf: bytes.prefix(min(Int(count), remaining)))
+                }
+                drained += Int(count)
+            } else if count == 0 {
+                return true
+            } else if errno == EAGAIN || errno == EWOULDBLOCK {
+                return false
+            } else {
+                return false
+            }
+        }
+        return false
+    }
+
+    static func runBounded(_ url: URL, arguments: [String], environment: [String: String]? = nil,
+                           timeout: TimeInterval = 2) -> (status: Int32, output: Data)? {
         let process = Process(), output = Pipe()
+        var buffer = Data()
         process.executableURL = url
         process.arguments = arguments
         process.environment = environment
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        do { try process.run() } catch { return nil }
+        let descriptor = output.fileHandleForReading.fileDescriptor
+        let flags = fcntl(descriptor, F_GETFL)
+        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0 else { return nil }
+        do { try process.run() } catch {
+            return nil
+        }
+        output.fileHandleForWriting.closeFile()
         let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
-        guard !process.isRunning else { process.terminate(); return nil }
-        return (process.terminationStatus, (try? output.fileHandleForReading.read(upToCount: 64 * 1024)) ?? Data())
+        while process.isRunning && Date() < deadline {
+            _ = drain(descriptor, into: &buffer)
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        guard !process.isRunning else {
+            process.terminate()
+            let terminationDeadline = Date().addingTimeInterval(0.2)
+            while process.isRunning && Date() < terminationDeadline {
+                _ = drain(descriptor, into: &buffer)
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            process.waitUntilExit()
+            _ = drain(descriptor, into: &buffer)
+            return nil
+        }
+        process.waitUntilExit()
+        let drainDeadline = Date().addingTimeInterval(0.02)
+        while Date() < drainDeadline {
+            if drain(descriptor, into: &buffer) { break }
+            Thread.sleep(forTimeInterval: 0.005)
+        }
+        return (process.terminationStatus, buffer)
     }
 
     private static func atLeast(_ value: String?, _ minimum: String) -> Bool {

@@ -120,6 +120,30 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
             == .unavailable("Unavailable: Claude returned an incomplete or duplicate agents inventory."))
 }
 
+@Test func claudeInventorySubprocessHasHardTimeoutAndBoundedDrain() throws {
+    let completed = ClaudeSetupDetection.runBounded(URL(fileURLWithPath: "/bin/echo"), arguments: ["ok"])
+    #expect(completed?.status == 0)
+    #expect(String(data: completed?.output ?? Data(), encoding: .utf8) == "ok\n")
+
+    let inventory = #"[{"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","cwd":"/tmp/one","name":"one","status":"idle","startedAt":1}]"#
+    for _ in 0..<20 {
+        let result = ClaudeSetupDetection.runBounded(URL(fileURLWithPath: "/usr/bin/printf"),
+                                                     arguments: ["%s", inventory])
+        #expect(result?.status == 0)
+        #expect(String(data: result?.output ?? Data(), encoding: .utf8) == inventory)
+    }
+
+    let script = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-hang-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: script) }
+    try Data("#!/bin/sh\ntrap '' TERM\nwhile :; do printf x; done\n".utf8).write(to: script)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+
+    let started = Date()
+    let result = ClaudeSetupDetection.runBounded(URL(fileURLWithPath: "/bin/sh"), arguments: [script.path], timeout: 0.05)
+    #expect(result == nil)
+    #expect(Date().timeIntervalSince(started) < 1)
+}
+
 @Test func claudeSetupPreservesUnrelatedSettingsBytes() throws {
     let original = Data("{\"permissions\": { \"allow\": [\"Read\"] }, \"hooks\": {} }".utf8)
     let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: original,
