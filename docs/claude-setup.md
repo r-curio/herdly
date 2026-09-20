@@ -32,14 +32,22 @@ rechecks the root inventories, the complete Ghostty inventory, the exact window/
 locator, and the selected front window before it can acknowledge queued outcomes. A title match
 alone never acknowledges anything.
 
+Manual acknowledgment requires a fresh Ghostty snapshot to observe the exact selected target change
+after the outcome arrived. Since snapshots are polls, the outcome must also predate the prior
+snapshot that establishes the transition lower bound; an outcome arriving between snapshots stays
+queued. A tab that was already selected, a restored outcome with no new observed visit, an incomplete
+inventory, or any uncertain target remains queued. The Open in Claude path has its own immediate
+before and after selection checks and may acknowledge only after that verified selection.
+
 Same-window return is supported. Duplicate live resumes, missing or stale sessions, overwritten
 titles, split tabs, background Ghostty windows, failed inventories, and changed locators remain
 unavailable without terminal input or acknowledgment. Ghostty Automation stays opt-in.
 
 Automated coverage is in `Tests/SteerCoreTests/CLITests.swift`: canonical full-title matching,
-duplicate and missing identities, overwritten and split titles, and cross-window rejection before
-selection. The focused and full Swift suites cover source compatibility. Isolated live Claude/Ghostty
-return testing was deferred by the operator and is not claimed here.
+duplicate and missing identities, overwritten and split titles, cross-window rejection before
+selection, focus-transition timing, duplicate roots, and incomplete inventories. The focused and
+full Swift suites cover source compatibility. Isolated live Claude/Ghostty return testing was
+deferred by the operator and is not claimed here.
 
 ## Ownership and undo
 
