@@ -112,11 +112,15 @@ Session and prompt observations identify the CLI session and turn; exact tool-us
 only their matching action, while a bounded fresh `PreToolUse` may supply the current action. Missing
 denial or interruption cleanup drops tool specificity without inventing a terminal result. `Stop` is
 provisional and never creates Finished; `StopFailure` may report Failed. Claude question and approval
-observations are intake state only in this slice, and the helper stores no question copy, option
-descriptions, tool responses, or transcripts. Inventory status can add Working or Waiting rows, but a
-background done, failed, or stopped state never creates a user-facing outcome without matching hook
-evidence. Per-root inventory reconciliation is issue #82; mixed source presentation and counts in the
-existing notch are issue #83.
+observations remain bounded, source-scoped state. For one live `AskUserQuestion` helper invocation,
+Steer may retain one bounded ephemeral question request with its prompt and option labels while the
+exact helper is waiting; it is bound to the installation, normalized Claude root, event directory,
+session, prompt, tool-use, and request identities. A human-selected single choice, multi-select, or
+typed answer can be returned once through Claude's supported `updatedInput` response. The request
+does not become an answer capability after restart, and Steer stores no transcript or tool response.
+Inventory status can add Working or Waiting rows, but a background done, failed, or stopped state
+never creates a user-facing outcome without matching hook evidence. Per-root inventory reconciliation
+is issue #82; mixed source presentation and counts in the existing notch are issue #83.
 
 ## Agreed mixed-source notch behavior
 
@@ -130,10 +134,15 @@ not identify a target or claim who supplied it. Live rows read Working or Waitin
 or stopped turn keeps that terminal label; when the current or terminal state cannot be classified,
 the row says Status unavailable.
 
-Claude questions without a verified answer transport show the question as Waiting and explain that
-the answer belongs in Claude. Generic Claude Waiting rows still count as to-check attention, while
-their exact tab return is unavailable until targeting is verified. Claude completion cards retain
-Dismiss and explain the unavailable return action without rendering an unsupported Open control.
+Claude questions use that live helper route only while exact identity and freshness checks succeed;
+otherwise they show Waiting and explain that the answer belongs in Claude. Expiry, malformed or
+mismatched records, helper loss, uncertainty, and a companion restart send nothing and leave Claude's
+native question authoritative. Generic Claude Waiting rows still count as to-check attention, while
+their exact tab return is unavailable until targeting is verified. Automated checks and the isolated
+helper trace cover the response shape; integrated Steer live acceptance of one answer of each kind
+and native fallback after timeout remain deferred for the operator walkthrough. Claude completion
+cards retain Dismiss and explain the unavailable return action without rendering an unsupported Open
+control.
 Claude follow-up prompts and broader direct approval decisions stay unavailable until their
 transports are separately proven; the card explains that limitation instead of guessing a target.
 Codex cards keep their existing answer, approval, detail, and reply actions.

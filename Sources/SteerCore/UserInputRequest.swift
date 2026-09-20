@@ -16,7 +16,7 @@ public struct QuestionIdentity: Hashable, Codable, Sendable {
 }
 
 /// One question inside a call, capped for display. Empty options means free text only.
-public struct QuestionPrompt: Equatable, Sendable {
+public struct QuestionPrompt: Codable, Equatable, Sendable {
     public static let maximumQuestions = 8
     public static let maximumHeader = 80
     public static let maximumQuestion = 240
@@ -32,6 +32,8 @@ public struct QuestionPrompt: Equatable, Sendable {
     /// Position matters: the notch relays an option as its one-based digit, so a label is never
     /// skipped. When one cannot be read the list stops there and `optionsComplete` is false.
     public let options: [String]
+    /// Claude may require one or more of the listed labels instead of one.
+    public let multiSelect: Bool
     /// True when any cap shortened this prompt; the view says the full text is in Codex.
     public let truncated: Bool
     /// Codex's `isOther`: the panel adds an "Other" free-text row after the listed options. The
@@ -42,11 +44,12 @@ public struct QuestionPrompt: Equatable, Sendable {
     public let optionsComplete: Bool
 
     public init(id: String? = nil, header: String?, question: String?, options: [String], truncated: Bool = false,
-                isOther: Bool = false, optionsComplete: Bool = true) {
+                isOther: Bool = false, optionsComplete: Bool = true, multiSelect: Bool = false) {
         self.id = id
         self.header = header
         self.question = question
         self.options = options
+        self.multiSelect = multiSelect
         self.truncated = truncated
         self.isOther = isOther
         self.optionsComplete = optionsComplete
@@ -63,6 +66,16 @@ public struct QuestionPrompt: Equatable, Sendable {
         guard arguments.utf8.count <= maximumArguments,
               let root = try? JSONSerialization.jsonObject(with: Data(arguments.utf8)) as? [String: Any],
               let questions = root["questions"] as? [[String: Any]] else { return nil }
+        return parseCall(entries: questions)
+    }
+
+    /// Parses the same bounded question shape directly from a Claude hook tool input.
+    public static func parseCall(toolInput: [String: Any]) -> (prompts: [QuestionPrompt], count: Int)? {
+        guard let questions = toolInput["questions"] as? [[String: Any]] else { return nil }
+        return parseCall(entries: questions)
+    }
+
+    private static func parseCall(entries questions: [[String: Any]]) -> (prompts: [QuestionPrompt], count: Int)? {
         var prompts: [QuestionPrompt] = []
         for entry in questions.prefix(maximumQuestions) {
             var truncated = questions.count > maximumQuestions
@@ -85,7 +98,8 @@ public struct QuestionPrompt: Equatable, Sendable {
                 complete = false
             }
             prompts.append(QuestionPrompt(id: id, header: header, question: question, options: options, truncated: truncated,
-                                          isOther: isOther, optionsComplete: complete))
+                                          isOther: isOther, optionsComplete: complete,
+                                          multiSelect: entry["multiSelect"] as? Bool ?? false))
         }
         return (prompts, questions.count)
     }

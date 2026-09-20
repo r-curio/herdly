@@ -3,6 +3,71 @@ import QuartzCore
 import SwiftUI
 import SteerCore
 
+struct ClaudeQuestionRootKey: Hashable, Sendable {
+    let sourceScope: String
+    let eventsPath: String
+    let installationID: String
+}
+
+struct ClaudeQuestionReceiptWork: Sendable {
+    let request: ClaudeQuestionRequest
+    let eventsPath: String
+    let root: ClaudeQuestionRootKey
+    let scanGeneration: UInt64
+}
+
+struct ClaudeQuestionReceiptResult: Sendable {
+    let request: ClaudeQuestionRequest
+    let requestID: String
+    let root: ClaudeQuestionRootKey
+    let scanGeneration: UInt64
+    let written: Bool
+}
+
+enum ClaudeQuestionReceiptDisposition: Equatable {
+    case accept
+    case staleAccept
+    case discard
+}
+
+func claudeQuestionReceiptDisposition(_ result: ClaudeQuestionReceiptResult,
+                                      currentGeneration: UInt64,
+                                      liveRequest: ClaudeQuestionRequest?, rootIsCurrent: Bool,
+                                      now: Double) -> ClaudeQuestionReceiptDisposition {
+    guard result.written, rootIsCurrent, let liveRequest,
+          liveRequest == result.request, result.request.expiresAt > now else { return .discard }
+    // A worker may finish after a newer scan. Exact request/root identity makes that immutable
+    // receipt safe to use; a different live request or root remains fail-closed.
+    return result.scanGeneration == currentGeneration ? .accept : .staleAccept
+}
+
+func claudeQuestionLivenessIsCurrent(_ liveness: ClaudeQuestionLiveness,
+                                     request: ClaudeQuestionRequest, now: Double,
+                                     maximumAge: TimeInterval = ClaudeQuestionTiming.livenessTimeout) -> Bool {
+    guard now.isFinite, liveness.requestID == request.requestID,
+          liveness.installationID == request.installationID,
+          liveness.sourceScope == request.sourceScope,
+          liveness.eventDirectory == request.eventDirectory,
+          liveness.sessionID == request.sessionID,
+          liveness.promptID == request.promptID,
+          liveness.toolUseID == request.toolUseID,
+          liveness.heartbeatAt.isFinite,
+          liveness.heartbeatAt >= request.publishedAt,
+          liveness.heartbeatAt <= now,
+          now - liveness.heartbeatAt <= maximumAge,
+          request.expiresAt > now else { return false }
+    return true
+}
+
+func claudeQuestionAwaitDeliveryAndCleanUp(_ request: ClaudeQuestionRequest,
+                                           answer: ClaudeQuestionAnswer, in events: URL,
+                                           timeout: TimeInterval = ClaudeQuestionTiming.deliveryAckTimeout) -> Bool {
+    let confirmed = ClaudeQuestionHelper.awaitDelivery(for: request, answer: answer,
+                                                       in: events, timeout: timeout)
+    if !confirmed { ClaudeQuestionStore.removeAnswer(for: request.requestID, in: events) }
+    return confirmed
+}
+
 private enum SetupInstallResult: Sendable {
     case success(CodexConnectionStatus)
     case failure(String)
@@ -134,6 +199,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var setupPlan: CodexSetupPlan?
     @Published var setupMessage = ""
     let claude = ClaudeSetupModel()
+    private struct LiveClaudeQuestion {
+        let request: ClaudeQuestionRequest
+        let events: URL
+        let sourceScope: String
+    }
+    private var liveClaudeQuestions: [String: LiveClaudeQuestion] = [:]
+    private var availableClaudeQuestionTokens: Set<String> = []
+    private var spentClaudeQuestionTokens: Set<String> = []
+    private var pendingClaudeQuestionReceipts: Set<String> = []
+    private var claudeQuestionScanGeneration: UInt64 = 0
     @Published private(set) var launchAtLogin = LaunchAtLoginState()
     @Published var desktopForeground = false
     private let launchAtLoginCoordinator = LaunchAtLoginCoordinator(service: LaunchAtLoginService())
@@ -160,6 +235,99 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var nextApprovalFocusScan: Double = 0
     private var ghosttyFocusState: GhosttyFocusState = .disabled
     private var ghosttyUnavailable = false
+
+    private func claudeQuestionRootKey(sourceScope: String, events: URL, installationID: String) -> ClaudeQuestionRootKey {
+        ClaudeQuestionRootKey(sourceScope: sourceScope,
+                              eventsPath: events.standardizedFileURL.path,
+                              installationID: installationID)
+    }
+
+    private func currentClaudeQuestionRoots() -> Set<ClaudeQuestionRootKey> {
+        Set(claude.roots.compactMap { root in
+            guard root.status == .connected, !root.eventsPath.isEmpty,
+                  let installationID = root.plan?.installationID, !installationID.isEmpty else { return nil }
+            return claudeQuestionRootKey(sourceScope: root.url.standardizedFileURL.path,
+                                         events: URL(fileURLWithPath: root.eventsPath, isDirectory: true),
+                                         installationID: installationID)
+        })
+    }
+
+    private func observedClaudeQuestionIDs(_ scans: [ClaudeObservationScan]) -> Set<String> {
+        Set(scans.flatMap { scan in
+            scan.observations.compactMap { observation in
+                guard case let .question(question) = observation else { return nil }
+                return question.helperRequestID
+            }
+        })
+    }
+
+    private func pruneClaudeQuestionState(now: Double, roots: Set<ClaudeQuestionRootKey>,
+                                          pendingIDs: Set<String>, observedIDs: Set<String>) {
+        let retained = liveClaudeQuestions.filter { requestID, live in
+            let root = claudeQuestionRootKey(sourceScope: live.sourceScope, events: live.events,
+                                             installationID: live.request.installationID)
+            return live.request.expiresAt > now && roots.contains(root)
+                && (pendingIDs.contains(requestID) || observedIDs.contains(requestID))
+        }
+        let retainedIDs = Set(retained.keys)
+        liveClaudeQuestions = retained
+        availableClaudeQuestionTokens = availableClaudeQuestionTokens.filter { retainedIDs.contains($0) }
+        spentClaudeQuestionTokens = spentClaudeQuestionTokens.filter { retainedIDs.contains($0) }
+        pendingClaudeQuestionReceipts = pendingClaudeQuestionReceipts.filter { retainedIDs.contains($0) }
+    }
+
+    private func publishClaudeQuestionReceipts(_ works: [ClaudeQuestionReceiptWork]) {
+        guard !works.isEmpty else { return }
+        Task { @MainActor [weak self] in
+            let results = await Task.detached(priority: .utility) {
+                works.map { work -> ClaudeQuestionReceiptResult in
+                    let now = Date().timeIntervalSince1970
+                    guard work.request.expiresAt > now else {
+                        return ClaudeQuestionReceiptResult(request: work.request, requestID: work.request.requestID,
+                                                          root: work.root,
+                                                          scanGeneration: work.scanGeneration, written: false)
+                    }
+                    let receipt = ClaudeQuestionReceipt(requestID: work.request.requestID,
+                                                        installationID: work.request.installationID,
+                                                        sourceScope: work.request.sourceScope,
+                                                        eventDirectory: work.request.eventDirectory,
+                                                        receivedAt: now, expiresAt: work.request.expiresAt)
+                    let written = ClaudeQuestionStore.publish(
+                        receipt, in: URL(fileURLWithPath: work.eventsPath, isDirectory: true))
+                    return ClaudeQuestionReceiptResult(request: work.request, requestID: work.request.requestID,
+                                                      root: work.root,
+                                                      scanGeneration: work.scanGeneration, written: written)
+                }
+            }.value
+            self?.reconcileClaudeQuestionReceipts(results)
+        }
+    }
+
+    private func reconcileClaudeQuestionReceipts(_ results: [ClaudeQuestionReceiptResult]) {
+        let now = Date().timeIntervalSince1970
+        let roots = currentClaudeQuestionRoots()
+        for result in results {
+            let live = liveClaudeQuestions[result.requestID]
+            let rootIsCurrent = roots.contains(result.root)
+                && live.map {
+                    claudeQuestionRootKey(sourceScope: $0.sourceScope, events: $0.events,
+                                          installationID: $0.request.installationID) == result.root
+                        && $0.request.sourceScope == $0.sourceScope
+                        && $0.request.eventDirectory == $0.events.standardizedFileURL.path
+                } == true
+            let disposition = claudeQuestionReceiptDisposition(
+                result, currentGeneration: claudeQuestionScanGeneration, liveRequest: live?.request,
+                rootIsCurrent: rootIsCurrent, now: now)
+            pendingClaudeQuestionReceipts.remove(result.requestID)
+            switch disposition {
+            case .accept, .staleAccept:
+                availableClaudeQuestionTokens.insert(result.requestID)
+            case .discard:
+                continue
+            }
+        }
+    }
+
     var visibleReminders: [Reminder] {
         queue.items.compactMap { $0.request }.map {
             Reminder(request_id: $0.id, session_id: $0.session, turn_id: $0.turn, outcome: "no_decision")
@@ -737,6 +905,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         guard previewMode == nil, (!eventsPath.isEmpty || hasClaudeInventoryRoot), !scanning, now >= nextScan else { return }
         scanning = true
         nextScan = now + 2
+        claudeQuestionScanGeneration &+= 1
+        let questionScanGeneration = claudeQuestionScanGeneration
         // Claude inventory can be the only connected source. The empty Codex input is read from
         // /dev/null so the existing bounded readers produce no Codex observations.
         let events = URL(fileURLWithPath: eventsPath.isEmpty ? "/dev/null" : eventsPath)
@@ -780,6 +950,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                      ClaudeObservationReader.scan(events: root.events, sourceScope: root.scope,
                                                   installationID: root.installationID, observingSince: observingSince,
                                                   now: observationNow)
+                 },
+                 claudeRoots.map { root in
+                     ClaudeQuestionStore.pending(in: root.events, installationID: root.installationID,
+                                                 observingSince: observingSince, now: observationNow)
+                         .map { (request: $0, events: root.events, sourceScope: root.scope) }
                  })
             }.value
             let scan = result.0
@@ -787,8 +962,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let readState = result.2
             guard eventsPath.isEmpty || eventsPath == events.path else { scanning = false; refresh(); return }
             let previousAgent = Set(agentQueue.items(at: Date().timeIntervalSince1970).map(\.id))
+            let scanNow = Date().timeIntervalSince1970
             for claudeScan in result.8 {
-                agentQueue.apply(claudeScan, now: Date().timeIntervalSince1970)
+                agentQueue.apply(claudeScan, now: scanNow)
             }
             let configuredClaudeScopes = Set(configuredClaudeNavigationRoots().map { $0.root.path })
             liveClaudeSessions = Dictionary(uniqueKeysWithValues: result.7.filter {
@@ -801,6 +977,32 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             claudeInventoryAvailable = Dictionary(uniqueKeysWithValues: result.7.filter {
                 configuredClaudeScopes.contains($0.sourceScope)
             }.map { ($0.sourceScope, $0.available) })
+            var pendingClaudeQuestionIDs = Set<String>()
+            var receiptWork: [ClaudeQuestionReceiptWork] = []
+            for requests in result.9 {
+                for live in requests {
+                    guard live.request.sourceScope == live.sourceScope,
+                          live.request.eventDirectory == live.events.standardizedFileURL.path else { continue }
+                    pendingClaudeQuestionIDs.insert(live.request.requestID)
+                    liveClaudeQuestions[live.request.requestID] = LiveClaudeQuestion(request: live.request,
+                                                                                       events: live.events,
+                                                                                       sourceScope: live.sourceScope)
+                    guard !spentClaudeQuestionTokens.contains(live.request.requestID),
+                          !availableClaudeQuestionTokens.contains(live.request.requestID),
+                          pendingClaudeQuestionReceipts.insert(live.request.requestID).inserted else { continue }
+                    receiptWork.append(ClaudeQuestionReceiptWork(
+                        request: live.request, eventsPath: live.events.standardizedFileURL.path,
+                        root: claudeQuestionRootKey(sourceScope: live.sourceScope, events: live.events,
+                                                    installationID: live.request.installationID),
+                        scanGeneration: questionScanGeneration))
+                }
+            }
+            pruneClaudeQuestionState(now: scanNow, roots: currentClaudeQuestionRoots(),
+                                     pendingIDs: pendingClaudeQuestionIDs,
+                                     observedIDs: observedClaudeQuestionIDs(result.8))
+            // A root can contain many pending rendezvous files. Writes happen off the main actor;
+            // the completion rechecks the scan generation, root identity, and request deadline.
+            publishClaudeQuestionReceipts(receiptWork)
             for inventory in result.7 {
                 agentQueue.apply(inventory, now: Date().timeIntervalSince1970)
                 for session in inventory.sessions {
@@ -1422,6 +1624,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func chooseAgentOption(_ question: AgentQuestion, index: Int, option: Int) {
+        if question.identity.session.source == .claude {
+            guard index == 0, let prompt = question.prompts.first, option >= 0, option < prompt.options.count else {
+                navigationMessage = "Claude question shape is unavailable; answer it in Claude."
+                refresh()
+                return
+            }
+            answerClaudeQuestion(question, kind: .option, answer: prompt.options[option])
+            return
+        }
         guard question.identity.session.source == .codex,
               let session = codexSession(question.identity.session),
               let turn = UUID(uuidString: question.turn),
@@ -1443,8 +1654,80 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func canAnswerAgentQuestion(_ question: AgentQuestion) -> Bool {
+        if question.identity.session.source == .claude {
+            return liveClaudeQuestion(for: question) != nil && question.prompts.count == 1
+                && question.prompts.first?.question != nil
+        }
         guard let current = codexQuestion(for: question) else { return false }
         return showsOptionControls(for: current)
+    }
+
+    private func liveClaudeQuestion(for question: AgentQuestion) -> LiveClaudeQuestion? {
+        let now = Date().timeIntervalSince1970
+        guard question.identity.session.source == .claude,
+              let requestID = question.helperRequestID,
+              availableClaudeQuestionTokens.contains(requestID),
+              let live = liveClaudeQuestions[requestID],
+              live.sourceScope == question.identity.session.sourceScope,
+              live.request.sourceScope == live.sourceScope,
+              live.request.eventDirectory == live.events.standardizedFileURL.path,
+              live.request.sessionID == question.identity.session.session,
+              live.request.promptID == question.identity.turn,
+              live.request.toolUseID == question.identity.call,
+              live.request.expiresAt > now,
+              live.request.prompts == question.prompts,
+              let liveness = ClaudeQuestionStore.liveness(for: requestID, in: live.events),
+              claudeQuestionLivenessIsCurrent(liveness, request: live.request, now: now) else { return nil }
+        return live
+    }
+
+    func answerClaudeQuestion(_ question: AgentQuestion, kind: ClaudeQuestionAnswerKind, answer: String) {
+        guard let live = liveClaudeQuestion(for: question) else {
+            navigationMessage = "Claude's question answer control is unavailable; check Claude's native question."
+            refresh()
+            return
+        }
+        let record = ClaudeQuestionAnswer(requestID: live.request.requestID,
+                                          installationID: live.request.installationID,
+                                          sourceScope: live.request.sourceScope,
+                                          eventDirectory: live.request.eventDirectory,
+                                          sessionID: live.request.sessionID,
+                                          promptID: live.request.promptID,
+                                          toolUseID: live.request.toolUseID,
+                                          kind: kind, answer: answer,
+                                          decidedAt: Date().timeIntervalSince1970)
+        guard ClaudeQuestionAnswerPolicy.accepts(request: live.request, answer: record) else {
+            navigationMessage = "That answer is not valid for Claude's current question."
+            refresh()
+            return
+        }
+        let now = Date().timeIntervalSince1970
+        guard let liveness = ClaudeQuestionStore.liveness(for: live.request.requestID, in: live.events),
+              claudeQuestionLivenessIsCurrent(liveness, request: live.request, now: now) else {
+            navigationMessage = "Claude answer delivery is unavailable; check Claude's question."
+            refresh()
+            return
+        }
+        // Spend the memory-only capability before writing. A failed write is never retried.
+        availableClaudeQuestionTokens.remove(live.request.requestID)
+        spentClaudeQuestionTokens.insert(live.request.requestID)
+        guard ClaudeQuestionStore.publish(record, in: live.events) else {
+            navigationMessage = "Claude answer delivery could not be confirmed; check Claude's question."
+            refresh()
+            return
+        }
+        let request = live.request
+        let events = live.events
+        Task { @MainActor [weak self] in
+            let delivered = await Task.detached(priority: .utility) {
+                claudeQuestionAwaitDeliveryAndCleanUp(request, answer: record, in: events)
+            }.value
+            guard let self else { return }
+            self.navigationMessage = delivered
+                ? "Answer sent to Claude."
+                : "Claude answer delivery could not be confirmed; check Claude's question."
+            self.refresh()
+        }
     }
 
     func dismissAgent(_ id: AgentAttentionID) {

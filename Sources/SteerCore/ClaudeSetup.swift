@@ -26,11 +26,13 @@ public struct ClaudeHookDefinition: Equatable, Sendable {
     public let event: String
     public let matcher: String?
     public let terminalTitle: Bool
+    public let questionHelper: Bool
 
-    public init(event: String, matcher: String? = nil, terminalTitle: Bool = false) {
+    public init(event: String, matcher: String? = nil, terminalTitle: Bool = false, questionHelper: Bool = false) {
         self.event = event
         self.matcher = matcher
         self.terminalTitle = terminalTitle
+        self.questionHelper = questionHelper
     }
 }
 
@@ -68,6 +70,7 @@ public enum ClaudeSetupRequirements {
         ClaudeHookDefinition(event: "SessionStart", terminalTitle: true),
         ClaudeHookDefinition(event: "UserPromptSubmit"),
         ClaudeHookDefinition(event: "PreToolUse"),
+        ClaudeHookDefinition(event: "PreToolUse", matcher: "AskUserQuestion", questionHelper: true),
         ClaudeHookDefinition(event: "PostToolUse"),
         ClaudeHookDefinition(event: "PostToolUseFailure"),
         ClaudeHookDefinition(event: "PostToolBatch"),
@@ -160,6 +163,7 @@ public struct ClaudeSetupPlan: Sendable {
 public enum ClaudeSetupPlanner {
     public static func plan(capabilities: ClaudeCapabilities, settings: Data,
                             helperPath: URL, eventsPath: URL,
+                            sourceScope: URL? = nil,
                             policy: ClaudeSetupPolicy = ClaudeSetupPolicy(), usageEnabled: Bool = false,
                             settingsExisted: Bool = true, installRecordPresent: Bool = true) -> ClaudeSetupPlan {
         guard capabilities.supported else {
@@ -204,7 +208,9 @@ public enum ClaudeSetupPlanner {
         let expectedHooks = definitions.map { definition in
             ClaudeOwnedHook(event: definition.event, matcher: definition.matcher,
                             command: command(helperPath: helperPath, eventsPath: eventsPath,
-                                             installationID: installationID, terminalTitle: definition.terminalTitle))
+                                             installationID: installationID, terminalTitle: definition.terminalTitle,
+                                             questionHelper: definition.questionHelper,
+                                             sourceScope: definition.questionHelper ? sourceScope : nil))
         }
         if hasChangedOwnedHook(source, expected: expectedHooks, marker: marker) {
             return empty(.conflict("A Steer-owned Claude hook was changed; review setup before repair."), settings: settings, settingsExisted: settingsExisted)
@@ -272,9 +278,14 @@ public enum ClaudeSetupPlanner {
     }
 
     public static func command(helperPath: URL, eventsPath: URL, installationID: String,
-                               terminalTitle: Bool = false) -> String {
+                               terminalTitle: Bool = false, questionHelper: Bool = false,
+                               sourceScope: URL? = nil) -> String {
         var value = ownershipMarker(helperPath: helperPath, eventsPath: eventsPath) + shellQuote(installationID)
         if terminalTitle { value += " --terminal-title" }
+        if questionHelper { value += " --question-helper" }
+        if questionHelper, let sourceScope {
+            value += " --source-scope \(shellQuote(sourceScope.standardizedFileURL.path))"
+        }
         return value
     }
 

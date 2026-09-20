@@ -28,6 +28,14 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(plan.ownedHooks.count == ClaudeSetupRequirements.hookDefinitions.count)
     #expect(plan.ownedEnvironment == [ClaudeSetupRequirements.titleDisableEnvironmentKey: ClaudeSetupRequirements.titleDisableEnvironmentValue])
     #expect(plan.ownedHooks.contains { $0.event == "SessionStart" && $0.command.contains("--terminal-title") })
+    #expect(plan.ownedHooks.contains {
+        $0.event == "PreToolUse" && $0.matcher == "AskUserQuestion" && $0.command.contains("--question-helper")
+    })
+    let questionCommand = ClaudeSetupPlanner.command(helperPath: URL(fileURLWithPath: "/tmp/SteerHook"),
+                                                     eventsPath: URL(fileURLWithPath: "/tmp/events"),
+                                                     installationID: "install-1", questionHelper: true,
+                                                     sourceScope: URL(fileURLWithPath: "/tmp/claude-root"))
+    #expect(questionCommand.contains("--source-scope '/tmp/claude-root'"))
     #expect(plan.ownedHooks.contains { $0.event == "PermissionRequest" && $0.matcher == "Bash" })
     let settings = try settingsObject(plan.settingsChange)
     #expect((settings["permissions"] as? [String: Any]) == nil)
