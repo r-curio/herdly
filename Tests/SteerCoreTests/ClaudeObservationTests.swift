@@ -195,6 +195,25 @@ import Testing
     #expect(stale.contains { if case let .running(value) = $0 { return value.fullAction == nil && value.prompt == "Keep working" }; return false })
 }
 
+@Test func claudeQuestionCarriesBoundedPromptsAndLiveHelperIdentity() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "AskUserQuestion", toolUseID: "q1",
+                     helperRequestID: "request-1",
+                     toolInput: ["questions": [["question": "Which?",
+                                                  "options": [["label": "Red"], ["label": "Blue"]],
+                                                  "multiSelect": false]]])
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let question = try #require(scanClaude(root).observations.compactMap { observation -> AgentQuestion? in
+        if case let .question(value) = observation { return value }
+        return nil
+    }.first)
+    #expect(question.helperRequestID == "request-1")
+    #expect(question.prompts.first?.question == "Which?")
+    #expect(question.prompts.first?.options == ["Red", "Blue"])
+}
+
 @Test func claudeRootsAndInstallationIDsCannotClearEachOther() throws {
     let rootA = try makeClaudeEvents([
         claudeRecord("UserPromptSubmit", at: 1, promptID: "a"),
@@ -396,12 +415,14 @@ private func scanClaude(_ root: URL, now: Double = 10) -> ClaudeObservationScan 
 
 private func claudeRecord(_ event: String, at capturedAt: Double, promptID: String? = nil,
                           prompt: String? = nil, toolName: String? = nil, toolUseID: String? = nil,
+                          helperRequestID: String? = nil,
                           toolInput: [String: Any] = [:]) -> [String: Any] {
     var record: [String: Any] = ["hook_event_name": event, "session_id": "session-1", "captured_at": capturedAt]
     if let promptID { record["prompt_id"] = promptID }
     if let prompt { record["prompt"] = prompt }
     if let toolName { record["tool_name"] = toolName }
     if let toolUseID { record["tool_use_id"] = toolUseID }
+    if let helperRequestID { record["helper_request_id"] = helperRequestID }
     if !toolInput.isEmpty { record["tool_input"] = toolInput }
     return record
 }
