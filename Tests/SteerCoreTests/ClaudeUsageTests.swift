@@ -108,6 +108,7 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     #expect(!ClaudeStatusLineCompatibility.probe(command: "sleep 2 & exit 0"))
     #expect(!ClaudeStatusLineCompatibility.probe(command: "sleep 2 >/dev/null & exit 0"))
     #expect(!ClaudeStatusLineCompatibility.probe(command: "trap '' TERM; sleep 2 & wait", timeout: 0.05))
+    #expect(!ClaudeStatusLineCompatibility.probe(command: "exec 0<&-; sleep 2", timeout: 0.05))
 }
 
 @Test func claudeStatusLineProcessListParsingRejectsOversizedAndOverfullSnapshots() {
