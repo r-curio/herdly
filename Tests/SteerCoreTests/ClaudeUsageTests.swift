@@ -107,6 +107,17 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     #expect(!ClaudeStatusLineCompatibility.probe(command: "sleep 2", timeout: 0.05))
     #expect(!ClaudeStatusLineCompatibility.probe(command: "sleep 2 & exit 0"))
     #expect(!ClaudeStatusLineCompatibility.probe(command: "sleep 2 >/dev/null & exit 0"))
+    #expect(!ClaudeStatusLineCompatibility.probe(command: "trap '' TERM; sleep 2 & wait", timeout: 0.05))
+}
+
+@Test func claudeStatusLineProcessListParsingRejectsOversizedAndOverfullSnapshots() {
+    let oversized = Data(repeating: 0x78, count: ClaudeStatusLineCompatibility.maximumProcessListBytes + 1)
+    #expect(ClaudeStatusLineCompatibility.parseProcessList(oversized, root: 1) == nil)
+
+    let records = (0...ClaudeStatusLineCompatibility.maximumProcessListRecords)
+        .map { "\($0 + 100) 2\n" }
+        .joined()
+    #expect(ClaudeStatusLineCompatibility.parseProcessList(Data(records.utf8), root: 1) == nil)
 }
 
 @Test func claudeUsageSetupComposesReversiblyAndDetectsStatusLineConflicts() throws {
