@@ -1,0 +1,360 @@
+import Foundation
+
+public enum AgentSource: String, Codable, Sendable {
+    case codex
+    case claude
+}
+
+public enum AgentSurface: String, Codable, Sendable {
+    case desktop
+    case cli
+}
+
+/// Identity supplied by one agent's local installation or configuration root.
+public struct AgentSessionIdentity: Hashable, Codable, Sendable {
+    public let source: AgentSource
+    public let sourceScope: String
+    public let session: String
+    public let surface: AgentSurface
+
+    public init(source: AgentSource, sourceScope: String, session: String, surface: AgentSurface) {
+        self.source = source
+        self.sourceScope = sourceScope
+        self.session = session
+        self.surface = surface
+    }
+}
+
+public struct AgentTurnIdentity: Hashable, Codable, Sendable {
+    public let session: AgentSessionIdentity
+    public let turn: String
+
+    public init(session: AgentSessionIdentity, turn: String) {
+        self.session = session
+        self.turn = turn
+    }
+}
+
+public struct AgentCallIdentity: Hashable, Codable, Sendable {
+    public let session: AgentSessionIdentity
+    public let turn: String
+    public let call: String
+
+    public init(session: AgentSessionIdentity, turn: String = "", call: String) {
+        self.session = session
+        self.turn = turn
+        self.call = call
+    }
+}
+
+public enum AgentOutcomeStatus: String, Codable, Sendable {
+    case finished
+    case failed
+    case stopped
+    case unavailable
+}
+
+public struct AgentOutcome: Identifiable, Equatable, Codable, Sendable {
+    public let identity: AgentTurnIdentity
+    public let status: AgentOutcomeStatus
+    public let arrivedAt: Double
+    public let uncertain: Bool
+
+    public var id: AgentTurnIdentity { identity }
+    public var session: AgentSessionIdentity { identity.session }
+    public var turn: String { identity.turn }
+
+    public init(session: AgentSessionIdentity, turn: String, status: AgentOutcomeStatus,
+                arrivedAt: Double, uncertain: Bool = false) {
+        self.identity = AgentTurnIdentity(session: session, turn: turn)
+        self.status = status
+        self.arrivedAt = arrivedAt
+        self.uncertain = uncertain
+    }
+}
+
+public enum AgentApprovalState: String, Codable, Sendable {
+    case actionable
+    case handedBack
+}
+
+public struct AgentApproval: Identifiable, Equatable, Codable, Sendable {
+    public let identity: AgentCallIdentity
+    public let arrivedAt: Double
+    public let expiresAt: Double
+    public let state: AgentApprovalState
+
+    public var id: AgentCallIdentity { identity }
+
+    public init(session: AgentSessionIdentity, turn: String = "", call: String, arrivedAt: Double,
+                handoffAfter: Double = 30, state: AgentApprovalState = .actionable) {
+        self.init(session: session, turn: turn, call: call, arrivedAt: arrivedAt,
+                  expiresAt: arrivedAt + handoffAfter, state: state)
+    }
+
+    public init(session: AgentSessionIdentity, turn: String = "", call: String, arrivedAt: Double, expiresAt: Double,
+                state: AgentApprovalState = .actionable) {
+        self.identity = AgentCallIdentity(session: session, turn: turn, call: call)
+        self.arrivedAt = arrivedAt
+        self.expiresAt = expiresAt
+        self.state = state
+    }
+
+    public func with(state: AgentApprovalState) -> AgentApproval {
+        AgentApproval(session: identity.session, turn: identity.turn, call: identity.call, arrivedAt: arrivedAt,
+                      expiresAt: expiresAt, state: state)
+    }
+}
+
+public struct AgentQuestion: Identifiable, Equatable, Codable, Sendable {
+    public let identity: AgentCallIdentity
+    public let turn: String
+    public let arrivedAt: Double
+
+    public var id: AgentCallIdentity { identity }
+
+    public init(session: AgentSessionIdentity, turn: String, call: String, arrivedAt: Double) {
+        self.identity = AgentCallIdentity(session: session, turn: turn, call: call)
+        self.turn = turn
+        self.arrivedAt = arrivedAt
+    }
+}
+
+public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
+    public let identity: AgentTurnIdentity
+    public let arrivedAt: Double
+
+    public var id: AgentTurnIdentity { identity }
+
+    public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double) {
+        self.identity = AgentTurnIdentity(session: session, turn: turn)
+        self.arrivedAt = arrivedAt
+    }
+}
+
+public enum AgentAttentionID: Hashable, Codable, Sendable {
+    case approval(AgentCallIdentity)
+    case question(AgentCallIdentity)
+    case outcome(AgentTurnIdentity)
+    case running(AgentTurnIdentity)
+}
+
+public enum AgentAttentionKind: Int, Equatable, Sendable {
+    case actionableApproval
+    case question
+    case handedBackApproval
+    case outcome
+    case earlierOutcome
+    case running
+}
+
+public struct AgentAttentionItem: Identifiable, Equatable, Sendable {
+    public let id: AgentAttentionID
+    public let kind: AgentAttentionKind
+    public let session: AgentSessionIdentity
+    public let arrivedAt: Double
+    public let approval: AgentApproval?
+    public let question: AgentQuestion?
+    public let outcome: AgentOutcome?
+    public let running: AgentRunning?
+}
+
+public enum AgentObservation: Equatable, Sendable {
+    case approval(AgentApproval)
+    case question(AgentQuestion)
+    case outcome(AgentOutcome)
+    case running(AgentRunning)
+    case resolved(AgentAttentionID)
+}
+
+public typealias AgentAttentionSnapshot = AttentionSnapshot
+
+/// One source-qualified queue. Native adapters only need to emit observations; ordering and
+/// deadline/decay rules stay here.
+public struct AgentAttentionQueue: Sendable {
+    public static let earlierAfter: Double = 5 * 60
+
+    private var approvals: [AgentCallIdentity: AgentApproval] = [:]
+    private var questions: [AgentCallIdentity: AgentQuestion] = [:]
+    private var outcomes: [AgentTurnIdentity: AgentOutcome] = [:]
+    private var running: [AgentSessionIdentity: AgentRunning] = [:]
+    private var resolved: Set<AgentAttentionID> = []
+    private var acknowledged: Set<AgentTurnIdentity>
+    private var now: Double = 0
+
+    public init(acknowledged: Set<AgentTurnIdentity> = []) {
+        self.acknowledged = acknowledged
+    }
+
+    public init(snapshot: AgentAttentionSnapshot) {
+        acknowledged = snapshot.acknowledgedOutcomes
+        for outcome in snapshot.outcomes where !acknowledged.contains(outcome.id) {
+            outcomes[outcome.id] = AgentOutcome(session: outcome.session, turn: outcome.turn,
+                                                 status: outcome.status, arrivedAt: outcome.arrivedAt, uncertain: true)
+        }
+    }
+
+    public var items: [AgentAttentionItem] { items(at: now) }
+    public var workingCount: Int { running.count }
+    public var toCheckCount: Int { approvals.count + questions.count + outcomes.count }
+    public var acknowledgedOutcomes: Set<AgentTurnIdentity> { acknowledged }
+
+    public var snapshot: AgentAttentionSnapshot {
+        AgentAttentionSnapshot(outcomes: outcomes.values.sorted(by: Self.older), acknowledged: acknowledged)
+    }
+
+    public func items(at now: Double) -> [AgentAttentionItem] {
+        let approvalItems = approvals.values.map { approval in
+            let expired = approval.state == .actionable && approval.expiresAt <= now
+            let current = expired ? approval.with(state: .handedBack) : approval
+            return AgentAttentionItem(id: .approval(approval.id),
+                                      kind: current.state == .actionable ? .actionableApproval : .handedBackApproval,
+                                      session: approval.identity.session, arrivedAt: approval.arrivedAt,
+                                      approval: current, question: nil, outcome: nil, running: nil)
+        }
+        let questionItems = questions.values.map { question in
+            AgentAttentionItem(id: .question(question.id), kind: .question, session: question.identity.session,
+                               arrivedAt: question.arrivedAt, approval: nil, question: question, outcome: nil, running: nil)
+        }
+        let outcomeItems = outcomes.values.map { outcome in
+            let earlier = now - outcome.arrivedAt >= Self.earlierAfter
+            return AgentAttentionItem(id: .outcome(outcome.id), kind: earlier ? .earlierOutcome : .outcome,
+                                      session: outcome.session, arrivedAt: outcome.arrivedAt,
+                                      approval: nil, question: nil, outcome: outcome, running: nil)
+        }
+        let waiting = Set(questions.values.map(\.identity.session))
+        let runningItems = running.values.filter { !waiting.contains($0.identity.session) }.map { active in
+            AgentAttentionItem(id: .running(active.id), kind: .running, session: active.identity.session,
+                               arrivedAt: active.arrivedAt, approval: nil, question: nil, outcome: nil, running: active)
+        }
+        return (approvalItems + questionItems + outcomeItems + runningItems).sorted {
+            if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
+            if $0.arrivedAt != $1.arrivedAt { return $0.arrivedAt < $1.arrivedAt }
+            return Self.sortKey($0.id) < Self.sortKey($1.id)
+        }
+    }
+
+    public mutating func apply(_ observation: AgentObservation, now: Double? = nil) {
+        if let now { self.now = now }
+        switch observation {
+        case let .approval(approval):
+            guard !resolved.contains(.approval(approval.id)) else { return }
+            if let current = approvals[approval.id] {
+                let state: AgentApprovalState = current.state == .handedBack || approval.state == .handedBack
+                    ? .handedBack : .actionable
+                approvals[approval.id] = AgentApproval(session: approval.identity.session, turn: approval.identity.turn,
+                                                       call: approval.identity.call,
+                                                       arrivedAt: min(current.arrivedAt, approval.arrivedAt),
+                                                       expiresAt: min(current.expiresAt, approval.expiresAt), state: state)
+            } else {
+                approvals[approval.id] = approval
+            }
+        case let .question(question):
+            guard !resolved.contains(.question(question.id)) else { return }
+            questions[question.id] = questions[question.id].map { current in
+                current.arrivedAt <= question.arrivedAt ? current : question
+            } ?? question
+        case let .outcome(outcome):
+            guard !acknowledged.contains(outcome.id), outcome.arrivedAt.isFinite else { return }
+            outcomes[outcome.id] = outcome
+            let turn = outcome.id
+            for identity in approvals.keys where identity.session == turn.session
+                && (identity.turn.isEmpty || identity.turn == turn.turn) {
+                resolved.insert(.approval(identity))
+            }
+            approvals = approvals.filter { !resolved.contains(.approval($0.key)) }
+            for identity in questions.keys where identity.session == turn.session && identity.turn == turn.turn {
+                resolved.insert(.question(identity))
+            }
+            questions = questions.filter { !resolved.contains(.question($0.key)) }
+            if running[turn.session]?.id == turn { running.removeValue(forKey: turn.session) }
+        case let .running(active):
+            guard !resolved.contains(.running(active.id)), outcomes[active.id] == nil else { return }
+            guard running[active.identity.session]?.arrivedAt ?? -.infinity < active.arrivedAt else { return }
+            running[active.identity.session] = active
+        case let .resolved(id):
+            dismiss(id)
+        }
+        if let now { expire(at: now) }
+    }
+
+    public mutating func apply(_ observations: [AgentObservation], now: Double? = nil) {
+        observations.forEach { apply($0, now: now) }
+    }
+
+    public mutating func expire(at now: Double) {
+        self.now = now
+        for id in approvals.keys where approvals[id]?.state == .actionable && approvals[id]!.expiresAt <= now {
+            approvals[id] = approvals[id]!.with(state: .handedBack)
+        }
+    }
+
+    public mutating func dismiss(_ id: AgentAttentionID) {
+        switch id {
+        case let .approval(identity):
+            resolved.insert(id)
+            approvals.removeValue(forKey: identity)
+        case let .question(identity):
+            resolved.insert(id)
+            questions.removeValue(forKey: identity)
+        case let .outcome(identity):
+            resolved.insert(id)
+            acknowledged.insert(identity)
+            outcomes.removeValue(forKey: identity)
+        case let .running(identity):
+            running.removeValue(forKey: identity.session)
+        }
+    }
+
+    private static func older(_ lhs: AgentOutcome, _ rhs: AgentOutcome) -> Bool {
+        lhs.arrivedAt == rhs.arrivedAt ? sortKey(.outcome(lhs.id)) < sortKey(.outcome(rhs.id)) : lhs.arrivedAt < rhs.arrivedAt
+    }
+
+    private static func sortKey(_ id: AgentAttentionID) -> String {
+        switch id {
+        case let .approval(value): return "approval:\(value.session.source.rawValue):\(value.session.sourceScope):\(value.session.session):\(value.turn):\(value.call)"
+        case let .question(value): return "question:\(value.session.source.rawValue):\(value.session.sourceScope):\(value.session.session):\(value.turn):\(value.call)"
+        case let .outcome(value): return "outcome:\(value.session.source.rawValue):\(value.session.sourceScope):\(value.session.session):\(value.turn)"
+        case let .running(value): return "running:\(value.session.source.rawValue):\(value.session.sourceScope):\(value.session.session):\(value.turn)"
+        }
+    }
+}
+
+public enum CodexAttentionAdapter {
+    public static let sourceScope = "codex"
+
+    public static func session(_ id: UUID, surface: AgentSurface) -> AgentSessionIdentity {
+        AgentSessionIdentity(source: .codex, sourceScope: sourceScope, session: id.uuidString, surface: surface)
+    }
+
+    public static func outcome(from completion: AttentionCompletion, status: AgentOutcomeStatus? = nil) -> AgentOutcome {
+        AgentOutcome(session: session(completion.session, surface: completion.source == .cli ? .cli : .desktop),
+                     turn: completion.turn.uuidString, status: status ?? completion.status, arrivedAt: completion.arrivedAt,
+                     uncertain: completion.uncertain)
+    }
+
+    public static func approval(from request: AttentionRequest) -> AgentApproval {
+        AgentApproval(session: session(request.session, surface: request.source == .cli ? .cli : .desktop),
+                      turn: request.turn.uuidString, call: request.id.uuidString, arrivedAt: request.arrivedAt,
+                      expiresAt: request.expiresAt,
+                      state: request.state == .actionable ? .actionable : .handedBack)
+    }
+
+    public static func question(from question: AttentionQuestion) -> AgentQuestion {
+        AgentQuestion(session: session(question.session, surface: question.source == .cli ? .cli : .desktop),
+                      turn: question.turn.uuidString, call: question.callID, arrivedAt: question.arrivedAt)
+    }
+
+    public static func running(from running: AttentionRunning) -> AgentRunning {
+        AgentRunning(session: session(running.session, surface: running.source == .cli ? .cli : .desktop),
+                     turn: running.turn.uuidString, arrivedAt: running.arrivedAt)
+    }
+
+    public static func observations(requests: [AttentionRequest] = [], questions: [AttentionQuestion] = [],
+                                    completions: [AttentionCompletion] = [], running active: [AttentionRunning] = []) -> [AgentObservation] {
+        requests.map { .approval(approval(from: $0)) }
+            + questions.map { .question(question(from: $0)) }
+            + completions.map { .outcome(outcome(from: $0)) }
+            + active.map { .running(running(from: $0)) }
+    }
+}
