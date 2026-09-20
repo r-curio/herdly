@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import SteerCore
 
@@ -122,17 +123,8 @@ enum ClaudeSetupDetection {
         guard inventory.available else {
             return .unavailable(inventory.failure ?? activeSessionInventoryUnavailable)
         }
-        var restartCount = 0
-        for session in inventory.sessions where session.lifecycle.needsRestart {
-            let needsRestart: Bool
-            if let installedAt {
-                needsRestart = session.startedAt < installedAt && !deliveredSessionIDs.contains(session.sessionID)
-            } else {
-                needsRestart = true
-            }
-            if needsRestart { restartCount += 1 }
-        }
-        return .available(restartCount: restartCount)
+        return .available(restartCount: restartCount(in: inventory, installedAt: installedAt,
+                                                     deliveredSessionIDs: deliveredSessionIDs))
     }
 
     static func activeSessionInventory(root: URL, capabilities: ClaudeCapabilities,
@@ -160,7 +152,13 @@ enum ClaudeSetupDetection {
         guard inventory.available else {
             return .unavailable(inventory.failure ?? "Unavailable: Claude returned an invalid agents inventory.")
         }
-        var restartCount = 0
+        return .available(restartCount: restartCount(in: inventory, installedAt: installedAt,
+                                                     deliveredSessionIDs: deliveredSessionIDs))
+    }
+
+    private static func restartCount(in inventory: ClaudeInventoryScan, installedAt: TimeInterval?,
+                                     deliveredSessionIDs: Set<String>) -> Int {
+        var count = 0
         for session in inventory.sessions where session.lifecycle.needsRestart {
             let needsRestart: Bool
             if let installedAt {
@@ -168,9 +166,9 @@ enum ClaudeSetupDetection {
             } else {
                 needsRestart = true
             }
-            if needsRestart { restartCount += 1 }
+            if needsRestart { count += 1 }
         }
-        return .available(restartCount: restartCount)
+        return count
     }
 
     static func policy(for root: URL, projectDirectory: URL? = nil) -> ClaudeSetupPolicy {
@@ -270,30 +268,72 @@ enum ClaudeSetupDetection {
         }
     }
 
-    private static func runBounded(_ url: URL, arguments: [String], environment: [String: String]? = nil,
-                                   timeout: TimeInterval = 2) -> (status: Int32, output: Data)? {
+    private enum DrainResult {
+        case read
+        case wouldBlock
+        case end
+        case failed
+    }
+
+    private static func drain(_ descriptor: Int32, into buffer: OutputBuffer) -> DrainResult {
+        var bytes = [UInt8](repeating: 0, count: 16 * 1024)
+        var drained = 0
+        while drained < 64 * 1024 {
+            let count = bytes.withUnsafeMutableBytes { storage in
+                read(descriptor, storage.baseAddress, storage.count)
+            }
+            if count > 0 {
+                buffer.append(Data(bytes.prefix(Int(count))))
+                drained += Int(count)
+            } else if count == 0 {
+                return .end
+            } else if errno == EAGAIN || errno == EWOULDBLOCK {
+                return .wouldBlock
+            } else {
+                return .failed
+            }
+        }
+        return .read
+    }
+
+    static func runBounded(_ url: URL, arguments: [String], environment: [String: String]? = nil,
+                           timeout: TimeInterval = 2) -> (status: Int32, output: Data)? {
         let process = Process(), output = Pipe(), buffer = OutputBuffer()
         process.executableURL = url
         process.arguments = arguments
         process.environment = environment
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        output.fileHandleForReading.readabilityHandler = { handle in buffer.append(handle.availableData) }
+        let descriptor = output.fileHandleForReading.fileDescriptor
+        let flags = fcntl(descriptor, F_GETFL)
+        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0 else { return nil }
         do { try process.run() } catch {
-            output.fileHandleForReading.readabilityHandler = nil
             return nil
         }
+        output.fileHandleForWriting.closeFile()
         let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+        while process.isRunning && Date() < deadline {
+            _ = drain(descriptor, into: buffer)
+            Thread.sleep(forTimeInterval: 0.01)
+        }
         guard !process.isRunning else {
             process.terminate()
+            let terminationDeadline = Date().addingTimeInterval(0.2)
+            while process.isRunning && Date() < terminationDeadline {
+                _ = drain(descriptor, into: buffer)
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
             process.waitUntilExit()
-            output.fileHandleForReading.readabilityHandler = nil
+            _ = drain(descriptor, into: buffer)
             return nil
         }
         process.waitUntilExit()
-        output.fileHandleForReading.readabilityHandler = nil
-        buffer.append(output.fileHandleForReading.readDataToEndOfFile())
+        let drainDeadline = Date().addingTimeInterval(0.02)
+        while Date() < drainDeadline {
+            if case .end = drain(descriptor, into: buffer) { break }
+            Thread.sleep(forTimeInterval: 0.005)
+        }
         return (process.terminationStatus, buffer.data)
     }
 

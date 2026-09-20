@@ -32,17 +32,13 @@ public enum ClaudeInventoryLifecycle: Equatable, Sendable {
 public struct ClaudeInventorySession: Equatable, Sendable {
     public let sessionID: String
     public let kind: ClaudeInventoryKind
-    public let cwd: String
-    public let name: String
     public let startedAt: Double
     public let lifecycle: ClaudeInventoryLifecycle
 
-    public init(sessionID: String, kind: ClaudeInventoryKind, cwd: String, name: String,
-                startedAt: Double, lifecycle: ClaudeInventoryLifecycle) {
+    public init(sessionID: String, kind: ClaudeInventoryKind, startedAt: Double,
+                lifecycle: ClaudeInventoryLifecycle) {
         self.sessionID = sessionID
         self.kind = kind
-        self.cwd = cwd
-        self.name = name
         self.startedAt = startedAt
         self.lifecycle = lifecycle
     }
@@ -54,18 +50,23 @@ public struct ClaudeInventoryScan: Equatable, Sendable {
     public let sessions: [ClaudeInventorySession]
     public let available: Bool
     public let failure: String?
+    public let ambiguousSessionIDs: Set<String>
 
     public init(sourceScope: String, observedAt: Double, sessions: [ClaudeInventorySession] = [],
-                available: Bool = true, failure: String? = nil) {
+                available: Bool = true, failure: String? = nil,
+                ambiguousSessionIDs: Set<String> = []) {
         self.sourceScope = URL(fileURLWithPath: sourceScope).standardizedFileURL.path
         self.observedAt = observedAt
         self.sessions = sessions
         self.available = available
         self.failure = failure
+        self.ambiguousSessionIDs = ambiguousSessionIDs
     }
 
-    public static func unavailable(sourceScope: String, observedAt: Double, reason: String) -> Self {
-        Self(sourceScope: sourceScope, observedAt: observedAt, available: false, failure: reason)
+    public static func unavailable(sourceScope: String, observedAt: Double, reason: String,
+                                   ambiguousSessionIDs: Set<String> = []) -> Self {
+        Self(sourceScope: sourceScope, observedAt: observedAt, available: false, failure: reason,
+             ambiguousSessionIDs: ambiguousSessionIDs)
     }
 }
 
@@ -83,12 +84,12 @@ public enum ClaudeInventoryDecoder {
         guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             return .unavailable(sourceScope: sourceScope, observedAt: observedAt, reason: invalidMessage)
         }
-        var seen = Set<String>()
+        var seenKinds: [String: ClaudeInventoryKind] = [:]
         var sessions: [ClaudeInventorySession] = []
         for row in rows {
             guard let sessionID = canonicalSessionID(row["sessionId"]),
-                  let cwd = nonempty(row["cwd"] as? String),
-                  let name = nonempty(row["name"] as? String),
+                  nonempty(row["cwd"] as? String) != nil,
+                  nonempty(row["name"] as? String) != nil,
                   let startedAt = timestamp(row["startedAt"]) else {
                 return .unavailable(sourceScope: sourceScope, observedAt: observedAt, reason: incompleteMessage)
             }
@@ -100,9 +101,12 @@ public enum ClaudeInventoryDecoder {
             default:
                 return .unavailable(sourceScope: sourceScope, observedAt: observedAt, reason: unsupportedKindMessage)
             }
-            guard seen.insert("\(kind.rawValue):\(sessionID)").inserted else {
-                return .unavailable(sourceScope: sourceScope, observedAt: observedAt, reason: incompleteMessage)
+            if let previousKind = seenKinds[sessionID] {
+                let ambiguous = previousKind == .interactive && kind == .interactive ? [sessionID] : []
+                return .unavailable(sourceScope: sourceScope, observedAt: observedAt, reason: incompleteMessage,
+                                    ambiguousSessionIDs: Set(ambiguous))
             }
+            seenKinds[sessionID] = kind
 
             let lifecycle: ClaudeInventoryLifecycle
             switch kind {
@@ -119,7 +123,7 @@ public enum ClaudeInventoryDecoder {
                 }
                 lifecycle = .background(state: state)
             }
-            sessions.append(ClaudeInventorySession(sessionID: sessionID, kind: kind, cwd: cwd, name: name,
+            sessions.append(ClaudeInventorySession(sessionID: sessionID, kind: kind,
                                                    startedAt: startedAt, lifecycle: lifecycle))
         }
         return ClaudeInventoryScan(sourceScope: sourceScope, observedAt: observedAt, sessions: sessions)
@@ -140,6 +144,7 @@ public enum ClaudeInventoryDecoder {
     private static func timestamp(_ value: Any?) -> Double? {
         let number: Double?
         if let value = value as? NSNumber {
+            guard CFGetTypeID(value as CFTypeRef) != CFBooleanGetTypeID() else { return nil }
             number = value.doubleValue
         } else if let value = value as? String {
             number = Double(value) ?? ISO8601DateFormatter().date(from: value)?.timeIntervalSince1970
