@@ -249,33 +249,8 @@ enum ClaudeSetupDetection {
             .map(String.init)
     }
 
-    private final class OutputBuffer: @unchecked Sendable {
-        private let lock = NSLock()
-        private var bytes = Data()
-
-        func append(_ data: Data) {
-            guard !data.isEmpty else { return }
-            lock.lock()
-            defer { lock.unlock() }
-            let remaining = 64 * 1024 + 1 - bytes.count
-            if remaining > 0 { bytes.append(data.prefix(remaining)) }
-        }
-
-        var data: Data {
-            lock.lock()
-            defer { lock.unlock() }
-            return bytes
-        }
-    }
-
-    private enum DrainResult {
-        case read
-        case wouldBlock
-        case end
-        case failed
-    }
-
-    private static func drain(_ descriptor: Int32, into buffer: OutputBuffer) -> DrainResult {
+    /// Reads at most one bounded chunk and returns whether the pipe reached EOF.
+    private static func drain(_ descriptor: Int32, into buffer: inout Data) -> Bool {
         var bytes = [UInt8](repeating: 0, count: 16 * 1024)
         var drained = 0
         while drained < 64 * 1024 {
@@ -283,22 +258,26 @@ enum ClaudeSetupDetection {
                 read(descriptor, storage.baseAddress, storage.count)
             }
             if count > 0 {
-                buffer.append(Data(bytes.prefix(Int(count))))
+                let remaining = 64 * 1024 + 1 - buffer.count
+                if remaining > 0 {
+                    buffer.append(contentsOf: bytes.prefix(min(Int(count), remaining)))
+                }
                 drained += Int(count)
             } else if count == 0 {
-                return .end
+                return true
             } else if errno == EAGAIN || errno == EWOULDBLOCK {
-                return .wouldBlock
+                return false
             } else {
-                return .failed
+                return false
             }
         }
-        return .read
+        return false
     }
 
     static func runBounded(_ url: URL, arguments: [String], environment: [String: String]? = nil,
                            timeout: TimeInterval = 2) -> (status: Int32, output: Data)? {
-        let process = Process(), output = Pipe(), buffer = OutputBuffer()
+        let process = Process(), output = Pipe()
+        var buffer = Data()
         process.executableURL = url
         process.arguments = arguments
         process.environment = environment
@@ -313,28 +292,28 @@ enum ClaudeSetupDetection {
         output.fileHandleForWriting.closeFile()
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning && Date() < deadline {
-            _ = drain(descriptor, into: buffer)
+            _ = drain(descriptor, into: &buffer)
             Thread.sleep(forTimeInterval: 0.01)
         }
         guard !process.isRunning else {
             process.terminate()
             let terminationDeadline = Date().addingTimeInterval(0.2)
             while process.isRunning && Date() < terminationDeadline {
-                _ = drain(descriptor, into: buffer)
+                _ = drain(descriptor, into: &buffer)
                 Thread.sleep(forTimeInterval: 0.01)
             }
             if process.isRunning { kill(process.processIdentifier, SIGKILL) }
             process.waitUntilExit()
-            _ = drain(descriptor, into: buffer)
+            _ = drain(descriptor, into: &buffer)
             return nil
         }
         process.waitUntilExit()
         let drainDeadline = Date().addingTimeInterval(0.02)
         while Date() < drainDeadline {
-            if case .end = drain(descriptor, into: buffer) { break }
+            if drain(descriptor, into: &buffer) { break }
             Thread.sleep(forTimeInterval: 0.005)
         }
-        return (process.terminationStatus, buffer.data)
+        return (process.terminationStatus, buffer)
     }
 
     private static func atLeast(_ value: String?, _ minimum: String) -> Bool {
