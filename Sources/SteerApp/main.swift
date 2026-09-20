@@ -223,6 +223,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     var currentFiveHourLimit: CodexUsageWindow? { currentUsage?.fiveHour }
     /// Whether the strip is laying out for the five-hour readout right now.
     var fiveHourShown: Bool { currentFiveHourLimit != nil }
+    /// Claude readings remain keyed by their selected configuration root; values are never merged.
+    @Published var claudeUsage: [String: ClaudeUsageReading] = [:]
     /// `--reminder-rollouts <path>` points lab runs at a copy of Codex's sessions tree.
     nonisolated static var rolloutRoot: URL {
         argumentValue(for: "--reminder-rollouts").map { URL(fileURLWithPath: $0) }
@@ -1135,6 +1137,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             guard root.capabilities.supported else { return nil }
             return (root.url.standardizedFileURL, root.capabilities)
         }
+        let claudeUsageRoots = claude.roots.compactMap { root -> (scope: String, directory: URL)? in
+            guard claude.usageEnabled(for: root), !root.usagePath.isEmpty else { return nil }
+            return (root.url.standardizedFileURL.path, URL(fileURLWithPath: root.usagePath, isDirectory: true))
+        }
         Task { @MainActor in
             let result = await Task.detached {
                 (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
@@ -1156,6 +1162,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                      ClaudeQuestionStore.pending(in: root.events, installationID: root.installationID,
                                                  observingSince: observingSince, now: observationNow)
                          .map { (request: $0, events: root.events, sourceScope: root.scope) }
+                 },
+                 claudeUsageRoots.reduce(into: [String: ClaudeUsageReading]()) { result, root in
+                     if let reading = ClaudeUsageReader.latest(root: root.directory, sourceScope: root.scope, now: observationNow) {
+                         result[root.scope] = reading
+                     }
                  })
             }.value
             let scan = result.0
@@ -1236,6 +1247,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             }
             if threadNames != result.3 { threadNames = result.3 }
             if usage != result.4 { usage = result.4 }
+            if claudeUsage != result.10 { claudeUsage = result.10 }
             // Sessions already working before their first hook event: shown only with liveness
             // evidence, and only as working (see docs/session-discovery.md).
             let candidates = result.5
@@ -1318,6 +1330,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             else if !newAgentQuestions.isEmpty, !questionPresentation.pending { questionPresentation = Attention(restored: true) }
             saveCompletions()
             scanning = false
+            claude.refreshUsage()
             completedAScan = true
             refresh()
             writeRestartReportAndQuitIfRequested(unverified: unverified)
@@ -2945,13 +2958,18 @@ private struct ClaudeAgentControls: View {
                         Text(ghosttyStatusText).font(.caption).foregroundStyle(.secondary)
                         Text("Active sessions needing restart: \(root.activeSessionStatus.displayText)")
                             .font(.caption).foregroundStyle(.secondary)
+                        if setup.usageEnabled(for: root) {
+                            Text(usageText(root.usage, status: root.usageStatus))
+                                .font(.caption).foregroundStyle(.secondary)
+                                .accessibilityLabel("Claude usage for \(root.displayPath): \(usageText(root.usage, status: root.usageStatus))")
+                        }
                         if let plan = root.plan, case .ready = plan.status {
                             Toggle("Include optional Claude usage", isOn: Binding(
                                 get: { setup.usageEnabled(for: root) },
                                 set: { setup.setUsageEnabled($0, for: root) }
                             ))
                             .accessibilityLabel("Include optional Claude usage for \(root.displayPath)")
-                            Text("Off by default. This preview choice never replaces an existing status line; usage remains unavailable until its compatibility probe passes.")
+                            Text("Off by default. An existing status line is wrapped only after its cancellation compatibility probe passes.")
                                 .font(.caption).foregroundStyle(.secondary)
                             DisclosureGroup("Show setup preview") {
                                 let hookFields = plan.ownedHooks.map { hook in
@@ -2970,7 +2988,7 @@ private struct ClaudeAgentControls: View {
                                     "owned backups: \(root.backupsPath)",
                                     "SessionStart and SessionEnd title: JSON terminalSequence with the full session ID / reset",
                                     "effective scope: selected user root; arbitrary future project files or command-line --settings may override it (launch context unavailable)",
-                                    "optional usage intent: \(plan.usageEnabled ? "on (not installed)" : "off")"
+                                    "optional usage intent: \(plan.usageEnabled ? (root.usageInstalled ? "on (installed)" : "on (pending compatibility probe)") : (root.usageInstalled ? "off (remove on Configure)" : "off"))"
                                 ].joined(separator: "\n")
                                 Text(previewText)
                                     .font(.system(.caption, design: .monospaced))
@@ -2980,7 +2998,7 @@ private struct ClaudeAgentControls: View {
                             HStack {
                                 Button("Review again", action: setup.refresh)
                                     .accessibilityLabel("Review Claude setup for \(root.displayPath)")
-                                if root.status != .connected {
+                                if root.status != .connected || plan.requiresConfigure || root.usageInstalled != setup.usageEnabled(for: root) {
                                     Button("Configure Claude") { setup.configure(root) }
                                         .buttonStyle(.borderedProminent)
                                         .accessibilityLabel("Configure Claude for \(root.displayPath)")
@@ -3022,6 +3040,17 @@ private struct ClaudeAgentControls: View {
         case .ready: "Ghostty controls: ready"
         case .unavailable(let message): "Ghostty controls: \(message)"
         }
+    }
+
+    private func usageText(_ reading: ClaudeUsageReading?, status: ClaudeUsageSetupStatus) -> String {
+        if case let .unavailable(message) = status { return message }
+        if case let .conflict(message) = status { return message }
+        guard let reading = reading?.current(now: Date().timeIntervalSince1970) else {
+            return "Claude usage: unavailable (no current subscription window reported)."
+        }
+        let five = reading.fiveHour.map { "5h \($0.percentText)" } ?? "5h unavailable"
+        let seven = reading.sevenDay.map { "7d \($0.percentText)" } ?? "7d unavailable"
+        return "Claude usage: \(five), \(seven) (last reported)"
     }
 }
 

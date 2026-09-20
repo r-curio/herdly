@@ -1,0 +1,44 @@
+# Claude usage
+
+Claude usage is an optional, per configuration root status line integration. It is off by default.
+Steer does not scan credentials, merge roots, estimate usage, or substitute gateway spend limits for
+subscription usage.
+
+## Bridge behavior
+
+When enabled, Steer previews the selected root's existing `statusLine` command and runs a bounded
+compatibility probe before composing it. The probe exercises normal completion and cancellation. A
+command that does not exit within the probe bound, including one that leaves a descendant alive, is
+left unchanged. An incompatible, malformed, or policy-shadowed status line leaves the core Claude
+hooks connected and reports Claude usage as unavailable.
+
+The packaged `SteerHook` reads Claude's status-line stdin once, writes a bounded sanitized record to
+the selected root's Steer-owned usage directory, then replaces itself with the existing shell
+command. The replacement preserves stdin bytes, stdout, stderr, working directory, environment,
+arguments, and exit status. Capture-store errors fail open to the existing command. Repair and undo
+compare the exact Steer-owned status-line value and report a conflict before changing a later user
+edit.
+
+## Reading contract
+
+Each record is qualified by the selected configuration root and Claude session ID. Steer shows the
+five-hour and seven-day subscription windows independently when each object is finite, in the range
+0–100, and its reset is still in the future on Steer's clock. A missing, malformed, expired, or
+unproved window is unavailable. A newer malformed record does not resurrect an older reading. The
+`spend_limit` object is ignored.
+
+The expanded notch and the Claude Code setup page label readings as **last reported**. Readings are
+not proof that Claude made a fresh server request. A root with no accepted record remains unavailable;
+Steer does not claim live delivery for roots that have not supplied a valid session record.
+
+## Verification boundary
+
+Automated coverage is in `Tests/SteerCoreTests/ClaudeUsageTests.swift`. It covers independent window
+decoding and expiry, missing windows, spend-limit exclusion, malformed newest records, separate roots,
+status-line quoting, slow-command rejection, reversible setup, and status-line conflict handling.
+
+The compatibility and status-line coexistence proof is recorded in [Claude usage and status-line
+coexistence proof](https://github.com/r-curio/steer/blob/9b4f835/docs/claude-usage-proof.md). That proof
+used one disposable first-party Max root and did not read or change the real settings or credentials.
+Live delivery through this product bridge remains deferred until a consenting tested root is run
+against the shipped artifact. No live proof is claimed here.
