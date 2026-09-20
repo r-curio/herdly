@@ -1907,6 +1907,8 @@ private struct ClaudeAgentControls: View {
             Text("Claude Code").font(.headline).foregroundStyle(.secondary)
             Text("Each configuration root is configured independently. Steer never merges roots or changes Claude permissions.")
                 .font(.callout).foregroundStyle(.secondary)
+            Text("Steer configures the selected user root. Project and command-line overrides are not inspectable here; connection requires a fresh SessionStart from this exact root.")
+                .font(.caption).foregroundStyle(.secondary)
             SettingsCard {
                 ForEach(Array(setup.roots.enumerated()), id: \.element.id) { index, root in
                     if index > 0 { Divider() }
@@ -1924,37 +1926,47 @@ private struct ClaudeAgentControls: View {
                              ?? "Claude Code not detected")
                             .font(.caption).foregroundStyle(.secondary)
                         Text(ghosttyStatusText).font(.caption).foregroundStyle(.secondary)
+                        Text("Active sessions needing restart: \(root.activeSessionStatus)")
+                            .font(.caption).foregroundStyle(.secondary)
                         if let plan = root.plan, case .ready = plan.status {
                             Toggle("Include optional Claude usage", isOn: Binding(
                                 get: { setup.usageEnabled(for: root) },
                                 set: { setup.setUsageEnabled($0, for: root) }
                             ))
+                            .accessibilityLabel("Include optional Claude usage for \(root.displayPath)")
                             Text("Off by default. This preview choice never replaces an existing status line; usage remains unavailable until its compatibility probe passes.")
                                 .font(.caption).foregroundStyle(.secondary)
                             DisclosureGroup("Show setup preview") {
-                                Text("settings.json\n\(String(data: plan.settingsChange, encoding: .utf8) ?? "(unreadable)")\n\n"
-                                     + "optional usage bridge: \(plan.usageEnabled ? "on (not installed)" : "off")\n"
-                                     + "owned hook entries: \(plan.ownedHooks.count)\n"
-                                     + "helper command: \(plan.helperCommand)")
+                                Text("settings.json\n"
+                                     + "  owned hooks: \(plan.ownedHooks.map(\.event).sorted().joined(separator: ", "))\n"
+                                     + "SteerHook: \(root.helperPath)\n"
+                                     + "event records: \(root.eventsPath)\n"
+                                     + "SessionStart title: JSON terminalSequence with the full session ID\n"
+                                     + "optional usage intent: \(plan.usageEnabled ? "on (not installed)" : "off")")
                                     .font(.system(.caption, design: .monospaced))
                                     .textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             HStack {
                                 Button("Review again", action: setup.refresh)
+                                    .accessibilityLabel("Review Claude setup for \(root.displayPath)")
                                 if root.status != .connected {
                                     Button("Configure Claude") { setup.configure(root) }
                                         .buttonStyle(.borderedProminent)
+                                        .accessibilityLabel("Configure Claude for \(root.displayPath)")
                                 }
                                 if root.status != .notConfigured {
                                     Button("Undo setup") { setup.undo(root) }
+                                        .accessibilityLabel("Undo Claude setup for \(root.displayPath)")
                                 }
                                 if index > 0 {
                                     Button("Remove root") { setup.removeAlternateRoot(root) }
+                                        .accessibilityLabel("Remove Claude root \(root.displayPath)")
                                 }
                             }
                         } else if index > 0 {
                             Button("Remove root") { setup.removeAlternateRoot(root) }
+                                .accessibilityLabel("Remove Claude root \(root.displayPath)")
                         }
                     }
                     .padding(16)
