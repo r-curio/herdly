@@ -123,15 +123,38 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(FileManager.default.fileExists(atPath: first.stateURL.path))
     #expect(FileManager.default.fileExists(atPath: second.stateURL.path))
 
-    // A valid exact-root event is the only transition from configured to connected.
-    let event = Data(#"{"hook_event_name":"SessionStart","source":"steer-claude-hook-v1","installation_id":"PLACEHOLDER","session_id":"session-a","received_at":"2026-09-20T00:00:00Z","captured_at":PLACEHOLDER_TIME}"#.utf8)
+    // Old events and later non-SessionStart events never prove a new root connection.
     let stateData = try Data(contentsOf: first.stateURL)
     let state = try #require(JSONSerialization.jsonObject(with: stateData) as? [String: Any])
     let installationID = try #require(state["installationID"] as? String)
+    let installedAt = try #require(state["installedAt"] as? Double)
+    try FileManager.default.createDirectory(at: first.eventsDirectory, withIntermediateDirectories: true)
+    let staleEvent = Data(#"{"hook_event_name":"SessionStart","session_start_source":"startup","source":"steer-claude-hook-v1","installation_id":"PLACEHOLDER","session_id":"session-old","received_at":"2026-09-20T00:00:00Z","captured_at":PLACEHOLDER_TIME}"#.utf8)
+    try Data(String(data: staleEvent, encoding: .utf8)!
+        .replacingOccurrences(of: "PLACEHOLDER_TIME", with: String(installedAt - 60))
+        .replacingOccurrences(of: "PLACEHOLDER", with: installationID).utf8)
+        .write(to: first.eventsDirectory.appendingPathComponent("stale.json"))
+    #expect(installer.status(roots: first, capabilities: capabilities)
+            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Steer's hooks."))
+    let nonSessionEvent = Data(#"{"hook_event_name":"PreToolUse","source":"steer-claude-hook-v1","installation_id":"PLACEHOLDER","session_id":"session-new","received_at":"2026-09-20T00:00:00Z","captured_at":PLACEHOLDER_TIME}"#.utf8)
+    try Data(String(data: nonSessionEvent, encoding: .utf8)!
+        .replacingOccurrences(of: "PLACEHOLDER_TIME", with: String(Date().timeIntervalSince1970))
+        .replacingOccurrences(of: "PLACEHOLDER", with: installationID).utf8)
+        .write(to: first.eventsDirectory.appendingPathComponent("non-session.json"))
+    #expect(installer.status(roots: first, capabilities: capabilities)
+            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Steer's hooks."))
+    let resumedEvent = Data(#"{"hook_event_name":"SessionStart","session_start_source":"resume","source":"steer-claude-hook-v1","installation_id":"PLACEHOLDER","session_id":"session-old","received_at":"2026-09-20T00:00:00Z","captured_at":PLACEHOLDER_TIME}"#.utf8)
+    try Data(String(data: resumedEvent, encoding: .utf8)!
+        .replacingOccurrences(of: "PLACEHOLDER_TIME", with: String(Date().timeIntervalSince1970))
+        .replacingOccurrences(of: "PLACEHOLDER", with: installationID).utf8)
+        .write(to: first.eventsDirectory.appendingPathComponent("resumed.json"))
+    #expect(installer.status(roots: first, capabilities: capabilities)
+            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Steer's hooks."))
+
+    let event = Data(#"{"hook_event_name":"SessionStart","session_start_source":"startup","source":"steer-claude-hook-v1","installation_id":"PLACEHOLDER","session_id":"session-a","received_at":"2026-09-20T00:00:00Z","captured_at":PLACEHOLDER_TIME}"#.utf8)
     let eventData = Data(String(data: event, encoding: .utf8)!
         .replacingOccurrences(of: "PLACEHOLDER_TIME", with: String(Date().timeIntervalSince1970))
         .replacingOccurrences(of: "PLACEHOLDER", with: installationID).utf8)
-    try FileManager.default.createDirectory(at: first.eventsDirectory, withIntermediateDirectories: true)
     try eventData.write(to: first.eventsDirectory.appendingPathComponent("event.json"))
     #expect(installer.status(roots: first, capabilities: capabilities) == .connected)
 

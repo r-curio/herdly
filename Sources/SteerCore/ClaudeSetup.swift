@@ -743,7 +743,8 @@ public struct ClaudeSetupInstaller {
     private func validEvent(_ url: URL, installationID: String, installedAt: TimeInterval, now: TimeInterval) -> Bool {
         guard let data = boundedData(at: url, maximum: 64 * 1024),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let event = object["hook_event_name"] as? String, !event.isEmpty,
+              object["hook_event_name"] as? String == "SessionStart",
+              object["session_start_source"] as? String == "startup",
               object["source"] as? String == ClaudeSetupRequirements.helperSource,
               object["installation_id"] as? String == installationID,
               let session = object["session_id"] as? String, !session.isEmpty,

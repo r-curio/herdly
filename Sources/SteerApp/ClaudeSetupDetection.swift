@@ -3,11 +3,16 @@ import Foundation
 import SteerCore
 
 enum ClaudeSetupDetection {
+    static let activeSessionInventoryUnavailable = "Unavailable: Claude exposes no bounded root-scoped active-session inventory."
+
     struct Snapshot: Sendable {
         let root: URL
         let capabilities: ClaudeCapabilities
         let plan: ClaudeSetupPlan?
         let status: ClaudeConnectionStatus
+        let helperPath: String
+        let eventsPath: String
+        let activeSessionStatus: String
     }
 
     static func capabilities() -> ClaudeCapabilities {
@@ -65,7 +70,9 @@ enum ClaudeSetupDetection {
         } else {
             status = ClaudeSetupInstaller().status(roots: roots, capabilities: capabilities)
         }
-        return Snapshot(root: root, capabilities: capabilities, plan: plan, status: status)
+        return Snapshot(root: root, capabilities: capabilities, plan: plan, status: status,
+                        helperPath: roots.helperURL.path, eventsPath: roots.eventsDirectory.path,
+                        activeSessionStatus: activeSessionInventoryUnavailable)
     }
 
     private static func policy(for root: URL) -> ClaudeSetupPolicy {
@@ -153,6 +160,9 @@ final class ClaudeSetupModel: ObservableObject {
         let capabilities: ClaudeCapabilities
         let plan: ClaudeSetupPlan?
         let status: ClaudeConnectionStatus
+        let helperPath: String
+        let eventsPath: String
+        let activeSessionStatus: String
         var id: String { url.standardizedFileURL.path }
         var displayPath: String { url.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~") }
     }
@@ -172,7 +182,9 @@ final class ClaudeSetupModel: ObservableObject {
         usageOptInPaths = Set(UserDefaults.standard.stringArray(forKey: "claudeUsageRoots") ?? [])
         roots = [Root(url: defaultRoot,
                       capabilities: ClaudeCapabilities(installed: false, supported: false),
-                      plan: nil, status: .unavailable("Checking Claude Code setup…"))]
+                      plan: nil, status: .unavailable("Checking Claude Code setup…"),
+                      helperPath: "", eventsPath: "",
+                      activeSessionStatus: ClaudeSetupDetection.activeSessionInventoryUnavailable)]
         refresh()
     }
 
@@ -193,7 +205,9 @@ final class ClaudeSetupModel: ObservableObject {
             }.value
             guard token == refreshToken else { return }
             roots = snapshots.map { snapshot in
-                Root(url: snapshot.root, capabilities: snapshot.capabilities, plan: snapshot.plan, status: snapshot.status)
+                Root(url: snapshot.root, capabilities: snapshot.capabilities, plan: snapshot.plan, status: snapshot.status,
+                     helperPath: snapshot.helperPath, eventsPath: snapshot.eventsPath,
+                     activeSessionStatus: snapshot.activeSessionStatus)
             }
         }
     }
