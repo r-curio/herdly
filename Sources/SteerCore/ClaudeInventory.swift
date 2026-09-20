@@ -31,13 +31,17 @@ public enum ClaudeInventoryLifecycle: Equatable, Sendable {
 
 public struct ClaudeInventorySession: Equatable, Sendable {
     public let sessionID: String
+    /// Claude's supplied display name. It identifies the session only for presentation; it is not
+    /// used for targeting or persisted attention identity.
+    public let name: String
     public let kind: ClaudeInventoryKind
     public let startedAt: Double
     public let lifecycle: ClaudeInventoryLifecycle
 
-    public init(sessionID: String, kind: ClaudeInventoryKind, startedAt: Double,
+    public init(sessionID: String, name: String = "", kind: ClaudeInventoryKind, startedAt: Double,
                 lifecycle: ClaudeInventoryLifecycle) {
         self.sessionID = sessionID
+        self.name = name
         self.kind = kind
         self.startedAt = startedAt
         self.lifecycle = lifecycle
@@ -89,9 +93,17 @@ public enum ClaudeInventoryDecoder {
         for row in rows {
             guard let sessionID = canonicalSessionID(row["sessionId"]),
                   nonempty(row["cwd"] as? String) != nil,
-                  nonempty(row["name"] as? String) != nil,
                   let startedAt = timestamp(row["startedAt"]) else {
                 return .unavailable(sourceScope: sourceScope, observedAt: observedAt, reason: incompleteMessage)
+            }
+            let name: String
+            if let rawName = row["name"] {
+                guard let validated = nonempty(rawName as? String) else {
+                    return .unavailable(sourceScope: sourceScope, observedAt: observedAt, reason: incompleteMessage)
+                }
+                name = validated
+            } else {
+                name = ""
             }
 
             let kind: ClaudeInventoryKind
@@ -123,7 +135,7 @@ public enum ClaudeInventoryDecoder {
                 }
                 lifecycle = .background(state: state)
             }
-            sessions.append(ClaudeInventorySession(sessionID: sessionID, kind: kind,
+            sessions.append(ClaudeInventorySession(sessionID: sessionID, name: name, kind: kind,
                                                    startedAt: startedAt, lifecycle: lifecycle))
         }
         return ClaudeInventoryScan(sourceScope: sourceScope, observedAt: observedAt, sessions: sessions)

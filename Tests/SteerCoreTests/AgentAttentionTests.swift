@@ -91,3 +91,66 @@ import Testing
     #expect(Set(loaded.outcomes.map(\.id)) == Set(outcomes.map(\.id)))
     #expect(Set(loaded.outcomes.map(\.status)) == [.finished, .failed, .stopped])
 }
+
+@Test func mixedSourcesKeepPriorityCountsAndTruthfulClaudeLabels() {
+    let codex = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "codex-session", surface: .cli)
+    let claude = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "claude-session", surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: claude, turn: "turn", arrivedAt: 1, status: .waiting)))
+    queue.apply(.outcome(AgentOutcome(session: codex, turn: "turn", status: .finished, arrivedAt: 2)))
+
+    #expect(queue.items.map(\.kind) == [.waiting, .outcome])
+    #expect(queue.workingCount == 0)
+    #expect(queue.toCheckCount == 2)
+    #expect(AgentStripSummary.sessionLabel(claude) == "Claude session claude-s")
+}
+
+@Test func waitingClaudeSessionNeedsAttentionButConcreteActionsWinOnce() {
+    let session = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "waiting", surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: session, turn: "turn", arrivedAt: 1, status: .waiting)))
+    #expect(queue.items.map(\.kind) == [.waiting])
+    #expect(queue.toCheckCount == 1)
+
+    queue.apply(.question(AgentQuestion(session: session, turn: "turn", call: "question", arrivedAt: 2)))
+    #expect(queue.items.map(\.kind) == [.question])
+    #expect(queue.toCheckCount == 1)
+
+    queue.apply(.approval(AgentApproval(session: session, turn: "turn", call: "approval", arrivedAt: 3)))
+    #expect(queue.items.map(\.kind) == [.actionableApproval, .question])
+    #expect(queue.toCheckCount == 2)
+}
+
+@Test func namedAgentLabelsKeepSourceVisible() {
+    let claude = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "claude", surface: .cli)
+    let codex = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "codex", surface: .desktop)
+    #expect(AgentStripSummary.sessionLabel(claude, names: [claude: "Review API"]) == "Claude · Review API")
+    #expect(AgentStripSummary.sessionLabel(codex, names: [codex: "Fix tests"]) == "Codex · Fix tests")
+}
+
+@Test func codexAdapterKeepsDetailsAndQuestionPromptsForTheSharedView() {
+    let session = UUID()
+    let turn = UUID()
+    let request = AttentionRequest(id: UUID(), source: .cli, session: session, turn: turn, arrivedAt: 1,
+                                   details: ApprovalDetails(taskName: "Review", command: "swift test",
+                                                            reason: "Check the change."))
+    let question = AttentionQuestion(source: .cli, session: session, turn: turn, callID: "call", arrivedAt: 2,
+                                     prompts: [QuestionPrompt(header: "Choice", question: "Continue?", options: ["Yes", "No"])])
+    let approval = CodexAttentionAdapter.approval(from: request)
+    let agentQuestion = CodexAttentionAdapter.question(from: question)
+    #expect(approval.details?.taskName == "Review")
+    #expect(approval.details?.command == "swift test")
+    #expect(agentQuestion.prompts == question.prompts)
+}
+
+@Test func ambiguousClaudeSessionIsStatusUnavailableAndNeedsAttention() {
+    let session = "11111111-1111-4111-8111-111111111111"
+    var queue = AgentAttentionQueue()
+    queue.apply(.unavailable(sourceScope: "/tmp/root", observedAt: 2,
+                             reason: "duplicate", ambiguousSessionIDs: [session]))
+
+    #expect(queue.items.first?.kind == .statusUnavailable)
+    #expect(queue.items.first?.unavailableReason?.contains("unavailable") == true)
+    #expect(queue.toCheckCount == 1)
+    #expect(queue.workingCount == 0)
+}

@@ -54,6 +54,11 @@ public enum AgentOutcomeStatus: String, Codable, Sendable {
     case unavailable
 }
 
+public enum AgentRunningStatus: String, Codable, Sendable {
+    case working
+    case waiting
+}
+
 public struct AgentOutcome: Identifiable, Equatable, Codable, Sendable {
     public let identity: AgentTurnIdentity
     public let status: AgentOutcomeStatus
@@ -83,40 +88,48 @@ public struct AgentApproval: Identifiable, Equatable, Codable, Sendable {
     public let arrivedAt: Double
     public let expiresAt: Double
     public let state: AgentApprovalState
+    public let details: ApprovalDetails?
 
     public var id: AgentCallIdentity { identity }
 
     public init(session: AgentSessionIdentity, turn: String = "", call: String, arrivedAt: Double,
-                handoffAfter: Double = 30, state: AgentApprovalState = .actionable) {
+                handoffAfter: Double = 30, state: AgentApprovalState = .actionable,
+                details: ApprovalDetails? = nil) {
         self.init(session: session, turn: turn, call: call, arrivedAt: arrivedAt,
-                  expiresAt: arrivedAt + handoffAfter, state: state)
+                  expiresAt: arrivedAt + handoffAfter, state: state, details: details)
     }
 
     public init(session: AgentSessionIdentity, turn: String = "", call: String, arrivedAt: Double, expiresAt: Double,
-                state: AgentApprovalState = .actionable) {
+                state: AgentApprovalState = .actionable, details: ApprovalDetails? = nil) {
         self.identity = AgentCallIdentity(session: session, turn: turn, call: call)
         self.arrivedAt = arrivedAt
         self.expiresAt = expiresAt
         self.state = state
+        self.details = details
     }
 
     public func with(state: AgentApprovalState) -> AgentApproval {
         AgentApproval(session: identity.session, turn: identity.turn, call: identity.call, arrivedAt: arrivedAt,
-                      expiresAt: expiresAt, state: state)
+                      expiresAt: expiresAt, state: state, details: details)
     }
 }
 
-public struct AgentQuestion: Identifiable, Equatable, Codable, Sendable {
+public struct AgentQuestion: Identifiable, Equatable, Sendable {
     public let identity: AgentCallIdentity
     public let turn: String
     public let arrivedAt: Double
+    public let prompts: [QuestionPrompt]
 
     public var id: AgentCallIdentity { identity }
 
-    public init(session: AgentSessionIdentity, turn: String, call: String, arrivedAt: Double) {
+    public var questionCount: Int { prompts.count }
+
+    public init(session: AgentSessionIdentity, turn: String, call: String, arrivedAt: Double,
+                prompts: [QuestionPrompt] = []) {
         self.identity = AgentCallIdentity(session: session, turn: turn, call: call)
         self.turn = turn
         self.arrivedAt = arrivedAt
+        self.prompts = prompts
     }
 }
 
@@ -126,6 +139,7 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     public let prompt: String?
     public let toolName: String?
     public let toolInput: [String: String]
+    public let status: AgentRunningStatus
 
     public var id: AgentTurnIdentity { identity }
     public var action: ToolAction? {
@@ -137,12 +151,14 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     public var fullPrompt: String? { prompt }
 
     public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double, prompt: String? = nil,
-                toolName: String? = nil, toolInput: [String: String] = [:]) {
+                toolName: String? = nil, toolInput: [String: String] = [:],
+                status: AgentRunningStatus = .working) {
         self.identity = AgentTurnIdentity(session: session, turn: turn)
         self.arrivedAt = arrivedAt
         self.prompt = prompt
         self.toolName = toolName
         self.toolInput = toolInput
+        self.status = status
     }
 }
 
@@ -161,14 +177,17 @@ public enum AgentAttentionID: Hashable, Codable, Sendable {
     case question(AgentCallIdentity)
     case outcome(AgentTurnIdentity)
     case running(AgentTurnIdentity)
+    case unavailable(AgentSessionIdentity)
 }
 
 public enum AgentAttentionKind: Int, Equatable, Sendable {
     case actionableApproval
     case question
     case handedBackApproval
+    case waiting
     case outcome
     case earlierOutcome
+    case statusUnavailable
     case running
 }
 
@@ -181,6 +200,7 @@ public struct AgentAttentionItem: Identifiable, Equatable, Sendable {
     public let question: AgentQuestion?
     public let outcome: AgentOutcome?
     public let running: AgentRunning?
+    public let unavailableReason: String?
 }
 
 public enum AgentObservation: Equatable, Sendable {
@@ -224,8 +244,22 @@ public struct AgentAttentionQueue: Sendable {
     }
 
     public var items: [AgentAttentionItem] { items(at: now) }
-    public var workingCount: Int { Set(running.keys).union(inventoryRunning.keys).count }
-    public var toCheckCount: Int { approvals.count + questions.count + outcomes.count }
+    public var workingCount: Int {
+        let active = Array(running.values) + Array(inventoryRunning.values)
+        return Set(active
+            .filter { $0.status == .working && !ambiguousClaudeSessions.contains($0.identity.session) }
+            .map(\.identity.session)).count
+    }
+    public var toCheckCount: Int {
+        let covered = Set(approvals.keys.map(\.session)).union(questions.keys.map(\.session))
+        let waiting = Set((Array(running.values) + Array(inventoryRunning.values))
+            .filter { $0.status == .waiting }
+            .map(\.identity.session))
+            .subtracting(covered)
+            .subtracting(ambiguousClaudeSessions)
+        let unavailable = ambiguousClaudeSessions.subtracting(covered)
+        return approvals.count + questions.count + outcomes.count + unavailable.count + waiting.count
+    }
     public var acknowledgedOutcomes: Set<AgentTurnIdentity> { acknowledged }
     public var unavailableClaudeSessions: Set<AgentSessionIdentity> { ambiguousClaudeSessions }
     public func isClaudeSessionUnavailable(_ identity: AgentSessionIdentity) -> Bool {
@@ -243,25 +277,36 @@ public struct AgentAttentionQueue: Sendable {
             return AgentAttentionItem(id: .approval(approval.id),
                                       kind: current.state == .actionable ? .actionableApproval : .handedBackApproval,
                                       session: approval.identity.session, arrivedAt: approval.arrivedAt,
-                                      approval: current, question: nil, outcome: nil, running: nil)
+                                      approval: current, question: nil, outcome: nil, running: nil, unavailableReason: nil)
         }
         let questionItems = questions.values.map { question in
             AgentAttentionItem(id: .question(question.id), kind: .question, session: question.identity.session,
-                               arrivedAt: question.arrivedAt, approval: nil, question: question, outcome: nil, running: nil)
+                               arrivedAt: question.arrivedAt, approval: nil, question: question, outcome: nil, running: nil,
+                               unavailableReason: nil)
         }
         let outcomeItems = outcomes.values.map { outcome in
             let earlier = now - outcome.arrivedAt >= Self.earlierAfter
             return AgentAttentionItem(id: .outcome(outcome.id), kind: earlier ? .earlierOutcome : .outcome,
                                       session: outcome.session, arrivedAt: outcome.arrivedAt,
-                                      approval: nil, question: nil, outcome: outcome, running: nil)
+                                      approval: nil, question: nil, outcome: outcome, running: nil, unavailableReason: nil)
         }
-        let waiting = Set(questions.values.map(\.identity.session))
+        let covered = Set(approvals.keys.map(\.session)).union(questions.keys.map(\.session))
         let inventoryItems = inventoryRunning.values.filter { running[$0.identity.session] == nil }
-        let runningItems = (running.values + inventoryItems).filter { !waiting.contains($0.identity.session) }.map { active in
-            AgentAttentionItem(id: .running(active.id), kind: .running, session: active.identity.session,
-                               arrivedAt: active.arrivedAt, approval: nil, question: nil, outcome: nil, running: active)
+        let unavailableItems = ambiguousClaudeSessions.subtracting(covered).map { identity in
+            AgentAttentionItem(id: .unavailable(identity), kind: .statusUnavailable, session: identity,
+                               arrivedAt: now, approval: nil, question: nil, outcome: nil, running: nil,
+                               unavailableReason: "Claude session status unavailable; continue in Claude to inspect it.")
         }
-        return (approvalItems + questionItems + outcomeItems + runningItems).sorted {
+        let activeItems = (running.values + inventoryItems).filter {
+            !covered.contains($0.identity.session) && !ambiguousClaudeSessions.contains($0.identity.session)
+        }.map { active in
+            AgentAttentionItem(id: .running(active.id),
+                               kind: active.status == .waiting ? .waiting : .running,
+                               session: active.identity.session,
+                               arrivedAt: active.arrivedAt, approval: nil, question: nil, outcome: nil, running: active,
+                               unavailableReason: nil)
+        }
+        return (approvalItems + questionItems + outcomeItems + unavailableItems + activeItems).sorted {
             if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
             if $0.arrivedAt != $1.arrivedAt { return $0.arrivedAt < $1.arrivedAt }
             return Self.sortKey($0.id) < Self.sortKey($1.id)
@@ -279,7 +324,8 @@ public struct AgentAttentionQueue: Sendable {
                 approvals[approval.id] = AgentApproval(session: approval.identity.session, turn: approval.identity.turn,
                                                        call: approval.identity.call,
                                                        arrivedAt: min(current.arrivedAt, approval.arrivedAt),
-                                                       expiresAt: min(current.expiresAt, approval.expiresAt), state: state)
+                                                       expiresAt: min(current.expiresAt, approval.expiresAt), state: state,
+                                                       details: current.details ?? approval.details)
             } else {
                 approvals[approval.id] = approval
             }
@@ -369,6 +415,14 @@ public struct AgentAttentionQueue: Sendable {
                 inventoryRunning.removeValue(forKey: identity)
                 continue
             }
+            if case let .background(state) = session.lifecycle,
+               ["done", "failed", "stopped"].contains(state) {
+                // Inventory describes lifecycle only. It cannot prove a user-facing turn result;
+                // Claude hook evidence remains the sole source for finished/failed/stopped cards.
+                provisionalStops.removeValue(forKey: identity)
+                inventoryRunning.removeValue(forKey: identity)
+                continue
+            }
             guard session.lifecycle.isActive else {
                 inventoryRunning.removeValue(forKey: identity)
                 provisionalStops.removeValue(forKey: identity)
@@ -378,7 +432,11 @@ public struct AgentAttentionQueue: Sendable {
                 provisionalStops.removeValue(forKey: identity)
             }
             guard running[identity] == nil else { continue }
-            inventoryRunning[identity] = AgentRunning(session: identity, turn: "", arrivedAt: scan.observedAt)
+            let status: AgentRunningStatus = switch session.lifecycle {
+            case .interactive(status: "waiting"), .background(state: "blocked"): .waiting
+            default: .working
+            }
+            inventoryRunning[identity] = AgentRunning(session: identity, turn: "", arrivedAt: scan.observedAt, status: status)
         }
         if let now { self.now = now }
     }
@@ -419,6 +477,8 @@ public struct AgentAttentionQueue: Sendable {
         case let .running(identity):
             running.removeValue(forKey: identity.session)
             inventoryRunning.removeValue(forKey: identity.session)
+        case let .unavailable(identity):
+            ambiguousClaudeSessions.remove(identity)
         }
     }
 
@@ -432,6 +492,7 @@ public struct AgentAttentionQueue: Sendable {
         case let .question(value): return "question:\(value.session.source.rawValue):\(value.session.sourceScope):\(value.session.session):\(value.turn):\(value.call)"
         case let .outcome(value): return "outcome:\(value.session.source.rawValue):\(value.session.sourceScope):\(value.session.session):\(value.turn)"
         case let .running(value): return "running:\(value.session.source.rawValue):\(value.session.sourceScope):\(value.session.session):\(value.turn)"
+        case let .unavailable(value): return "unavailable:\(value.source.rawValue):\(value.sourceScope):\(value.session)"
         }
     }
 }
@@ -453,12 +514,14 @@ public enum CodexAttentionAdapter {
         AgentApproval(session: session(request.session, surface: request.source == .cli ? .cli : .desktop),
                       turn: request.turn.uuidString, call: request.id.uuidString, arrivedAt: request.arrivedAt,
                       expiresAt: request.expiresAt,
-                      state: request.state == .actionable ? .actionable : .handedBack)
+                      state: request.state == .actionable ? .actionable : .handedBack,
+                      details: request.details)
     }
 
     public static func question(from question: AttentionQuestion) -> AgentQuestion {
         AgentQuestion(session: session(question.session, surface: question.source == .cli ? .cli : .desktop),
-                      turn: question.turn.uuidString, call: question.callID, arrivedAt: question.arrivedAt)
+                      turn: question.turn.uuidString, call: question.callID, arrivedAt: question.arrivedAt,
+                      prompts: question.prompts)
     }
 
     public static func running(from running: AttentionRunning) -> AgentRunning {
