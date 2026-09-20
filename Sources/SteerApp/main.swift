@@ -133,6 +133,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var agentQueue = AgentAttentionQueue(snapshot: Companion.launchSnapshot)
     /// Claude names are presentation metadata only; source scope keeps identical session IDs apart.
     @Published private(set) var claudeSessionNames: [AgentSessionIdentity: String] = [:]
+    /// Direct Claude controls are valid only for receipts issued by this running companion. A
+    /// persisted receipt must not recreate an active decision connection after a restart.
+    private var liveClaudeApprovalIDs: Set<String> = []
     @Published var reminderPresentation = Attention()
     @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
     @Published var completionPresentation = Attention()
@@ -963,7 +966,48 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             guard eventsPath.isEmpty || eventsPath == events.path else { scanning = false; refresh(); return }
             let previousAgent = Set(agentQueue.items(at: Date().timeIntervalSince1970).map(\.id))
             let scanNow = Date().timeIntervalSince1970
-            for claudeScan in result.8 {
+            var claudeScans = result.8
+            for (index, root) in claudeRoots.enumerated() {
+                let claudeScan = claudeScans[index]
+                var receipts: [String: ClaudeApprovalReceipt] = [:]
+                for approval in claudeScan.observations.compactMap({ observation -> AgentApproval? in
+                    if case let .approval(value) = observation { return value }
+                    return nil
+                }) {
+                    guard claudeScan.available, approval.expiresAt > scanNow,
+                          let requestID = approval.hookRequestID else { continue }
+                    if let receipt = ClaudeApprovalStore.receipt(for: requestID, in: root.events) {
+                        receipts[requestID] = receipt
+                        continue
+                    }
+                    if ClaudeApprovalStore.publish(ClaudeApprovalReceipt(requestID: requestID,
+                                                                          receivedAt: scanNow),
+                                                   in: root.events),
+                       let receipt = ClaudeApprovalStore.receipt(for: requestID, in: root.events) {
+                        receipts[requestID] = receipt
+                        liveClaudeApprovalIDs.insert(requestID)
+                    }
+                }
+                if !receipts.isEmpty {
+                    let observations = claudeScan.observations.map { observation -> AgentObservation in
+                        guard case let .approval(approval) = observation,
+                              let requestID = approval.hookRequestID,
+                              let receipt = receipts[requestID] else { return observation }
+                        return .approval(AgentApproval(session: approval.identity.session,
+                                                       turn: approval.identity.turn,
+                                                       call: approval.identity.call,
+                                                       arrivedAt: approval.arrivedAt,
+                                                       expiresAt: receipt.expiresAt,
+                                                       state: approval.state,
+                                                       details: approval.details,
+                                                       hookRequestID: requestID))
+                    }
+                    claudeScans[index] = ClaudeObservationScan(sourceScope: claudeScan.sourceScope,
+                                                               observations: observations,
+                                                               available: claudeScan.available)
+                }
+            }
+            for claudeScan in claudeScans {
                 agentQueue.apply(claudeScan, now: scanNow)
             }
             let configuredClaudeScopes = Set(configuredClaudeNavigationRoots().map { $0.root.path })
@@ -1564,6 +1608,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         navigationMessage = "Finding the matching Claude tab…"
         let configuredRoots = configuredClaudeNavigationRoots()
         let queued = orderedAgentAttentionItems.filter { $0.session == identity && $0.outcome != nil }.map(\.id)
+        let queuedApprovals = orderedAgentAttentionItems.filter { $0.session == identity && $0.approval != nil }
         Task { @MainActor in
             let inventories = await Task.detached {
                 configuredRoots.map { root in
@@ -1588,6 +1633,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             }
             navigationMessage = result.message
             if result.opened {
+                for item in queuedApprovals {
+                    if let approval = item.approval { handBackClaudeApproval(approval) }
+                }
                 for id in queued { agentQueue.dismiss(id) }
                 saveCompletions()
             }
@@ -1597,6 +1645,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func openAgentApproval(_ approval: AgentApproval) {
+        if approval.identity.session.source == .claude {
+            openAgent(approval.identity.session)
+            return
+        }
         guard approval.identity.session.source == .codex,
               let session = codexSession(approval.identity.session),
               let requestID = UUID(uuidString: approval.identity.call),
@@ -1610,6 +1662,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func decideAgent(_ approval: AgentApproval, as decision: ApprovalDecision) {
+        if approval.identity.session.source == .claude {
+            decideClaudeApproval(approval, as: decision)
+            return
+        }
         guard approval.identity.session.source == .codex,
               approval.identity.session.surface == .cli,
               let requestID = UUID(uuidString: approval.identity.call),
@@ -1621,6 +1677,59 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             return
         }
         decide(request, as: decision)
+    }
+
+    func canDecideAgent(_ approval: AgentApproval) -> Bool {
+        guard approval.identity.session.source == .claude,
+              approval.identity.session.surface == .cli,
+              approval.state == .actionable,
+              approval.expiresAt > Date().timeIntervalSince1970,
+              let requestID = approval.hookRequestID,
+              liveClaudeApprovalIDs.contains(requestID),
+              let root = claude.roots.first(where: { $0.url.standardizedFileURL.path == approval.identity.session.sourceScope }),
+              case .connected = root.status,
+              !root.eventsPath.isEmpty,
+              ClaudeApprovalStore.receipt(for: requestID, in: URL(fileURLWithPath: root.eventsPath)) != nil else {
+            return false
+        }
+        return true
+    }
+
+    private func decideClaudeApproval(_ approval: AgentApproval, as decision: ApprovalDecision) {
+        guard decision.isUserDecision else { return }
+        guard canDecideAgent(approval),
+              let requestID = approval.hookRequestID,
+              let root = claude.roots.first(where: { $0.url.standardizedFileURL.path == approval.identity.session.sourceScope }) else {
+            navigationMessage = "This Claude permission is no longer actionable; continue in Claude."
+            refresh()
+            return
+        }
+        let now = Date().timeIntervalSince1970
+        guard ClaudeApprovalStore.publish(ClaudeApprovalDecision(requestID: requestID, decision: decision, decidedAt: now),
+                                          in: URL(fileURLWithPath: root.eventsPath)) else {
+            navigationMessage = "This Claude permission was already answered or is no longer available."
+            refresh()
+            return
+        }
+        liveClaudeApprovalIDs.remove(requestID)
+        // The decision record only proves delivery to the helper's mailbox. Keep the row handed
+        // back until Claude's matching post event removes it; a helper crash leaves native Claude
+        // available without leaving a second direct control.
+        agentQueue.apply(.approval(approval.with(state: .handedBack)), now: now)
+        navigationMessage = decision == .allowOnce ? "Approved once in Claude." : "Denied in Claude."
+        refresh()
+    }
+
+    private func handBackClaudeApproval(_ approval: AgentApproval) {
+        guard approval.state == .actionable,
+              let requestID = approval.hookRequestID,
+              let root = claude.roots.first(where: { $0.url.standardizedFileURL.path == approval.identity.session.sourceScope }),
+              !root.eventsPath.isEmpty else { return }
+        let events = URL(fileURLWithPath: root.eventsPath)
+        _ = ClaudeApprovalStore.publish(ClaudeApprovalDecision(requestID: requestID, decision: .noDecision,
+                                                               decidedAt: Date().timeIntervalSince1970), in: events)
+        liveClaudeApprovalIDs.remove(requestID)
+        agentQueue.apply(.approval(approval.with(state: .handedBack)), now: Date().timeIntervalSince1970)
     }
 
     func chooseAgentOption(_ question: AgentQuestion, index: Int, option: Int) {
