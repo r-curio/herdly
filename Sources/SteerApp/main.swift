@@ -1942,6 +1942,7 @@ private struct ClaudeAgentControls: View {
                                      + "SteerHook: \(root.helperPath)\n"
                                      + "event records: \(root.eventsPath)\n"
                                      + "SessionStart title: JSON terminalSequence with the full session ID\n"
+                                     + "effective scope: selected user root; project/command-line overrides unavailable\n"
                                      + "optional usage intent: \(plan.usageEnabled ? "on (not installed)" : "off")")
                                     .font(.system(.caption, design: .monospaced))
                                     .textSelection(.enabled)

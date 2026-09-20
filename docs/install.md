@@ -90,7 +90,7 @@ Claude is configured separately in **Agents → Claude Code**. Steer previews th
 
 Configure Claude adds only Steer's exact hook entries to that root's `settings.json` and installs the packaged helper under Steer's Application Support directory. The `SessionStart` entry emits the full-session-ID Ghostty title. Existing Claude sessions are not restarted; Steer reports **Configured; restart required** until a newly started session sends a root-matching event. Ghostty Automation readiness remains separate from this connection state.
 
-The optional Claude usage bridge is displayed in the same preview and starts off. This setup slice does not change an existing `statusLine`; usage composition is independently reversible and belongs to the later usage slice. Managed policy, shadowed settings, malformed files, duplicate installs, and changed owned values are reported without writing.
+The optional Claude usage bridge is displayed in the same preview and starts off. This setup slice does not change an existing `statusLine`; usage composition is independently reversible and belongs to the later usage slice. Known managed policy, root shadowing, malformed files, duplicate installs, and changed owned values are reported without writing. Project and command-line override state is outside the setup process's supported inspection scope; the preview says so and connection still requires a fresh exact-root SessionStart.
 
 ## Permissions macOS may ask for
 
