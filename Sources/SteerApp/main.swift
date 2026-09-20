@@ -123,6 +123,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var setupCapabilities = CodexCapabilities(cli: false, desktop: false, ghostty: false, supported: false)
     @Published var setupPlan: CodexSetupPlan?
     @Published var setupMessage = ""
+    let claude = ClaudeSetupModel()
     @Published private(set) var launchAtLogin = LaunchAtLoginState()
     @Published var desktopForeground = false
     private let launchAtLoginCoordinator = LaunchAtLoginCoordinator(service: LaunchAtLoginService())
@@ -1889,6 +1890,120 @@ private struct AgentControls: View {
                 }
                 .padding(16)
             }
+            ClaudeAgentControls(setup: model.claude,
+                                ghosttyEnabled: model.ghosttyEnabled,
+                                ghosttyPermissionVerified: model.ghosttyPermissionVerified)
+        }
+    }
+}
+
+private struct ClaudeAgentControls: View {
+    @ObservedObject var setup: ClaudeSetupModel
+    let ghosttyEnabled: Bool
+    let ghosttyPermissionVerified: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Claude Code").font(.headline).foregroundStyle(.secondary)
+            Text("Each configuration root is configured independently. Steer never merges roots or changes Claude permissions.")
+                .font(.callout).foregroundStyle(.secondary)
+            Text("Steer configures the selected user root. Arbitrary future project files or command-line --settings values may override it; this root-only preview cannot know those values without an exact launch context. Connection requires a fresh SessionStart from this exact root.")
+                .font(.caption).foregroundStyle(.secondary)
+            SettingsCard {
+                ForEach(Array(setup.roots.enumerated()), id: \.element.id) { index, root in
+                    if index > 0 { Divider() }
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(root.displayPath).font(.body.weight(.medium))
+                                Text(ClaudeSetupModel.statusText(root.status)).font(.callout).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            StatusBadge(title: root.status == .connected ? "Connected" : "Not ready",
+                                        color: root.status == .connected ? .green : .orange)
+                        }
+                        Text(root.capabilities.version.map { "Claude Code \($0) · tested baseline \(ClaudeSetupRequirements.minimumCLIVersion)" }
+                             ?? "Claude Code not detected")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Text(ghosttyStatusText).font(.caption).foregroundStyle(.secondary)
+                        Text("Active sessions needing restart: \(root.activeSessionStatus.displayText)")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if let plan = root.plan, case .ready = plan.status {
+                            Toggle("Include optional Claude usage", isOn: Binding(
+                                get: { setup.usageEnabled(for: root) },
+                                set: { setup.setUsageEnabled($0, for: root) }
+                            ))
+                            .accessibilityLabel("Include optional Claude usage for \(root.displayPath)")
+                            Text("Off by default. This preview choice never replaces an existing status line; usage remains unavailable until its compatibility probe passes.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            DisclosureGroup("Show setup preview") {
+                                let hookFields = plan.ownedHooks.map { hook in
+                                    "  hooks.\(hook.event) matcher=\(hook.matcher ?? "<any>") command=\(hook.command) timeout=\(ClaudeSetupRequirements.hookTimeout)"
+                                }.joined(separator: "\n")
+                                let environmentFields = plan.ownedEnvironment.isEmpty
+                                    ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey)=\(ClaudeSetupRequirements.titleDisableEnvironmentValue) (already present; preserved)"
+                                    : plan.ownedEnvironment.map { key, value in
+                                        "  env.\(key)=\(value) (Steer adds and owns)"
+                                    }.sorted().joined(separator: "\n")
+                                let previewText = [
+                                    "settings.json: \(root.settingsPath)", hookFields, environmentFields,
+                                    "owned helper: \(root.helperPath)",
+                                    "owned event records: \(root.eventsPath)",
+                                    "owned install record: \(root.statePath)",
+                                    "owned backups: \(root.backupsPath)",
+                                    "SessionStart and SessionEnd title: JSON terminalSequence with the full session ID / reset",
+                                    "effective scope: selected user root; arbitrary future project files or command-line --settings may override it (launch context unavailable)",
+                                    "optional usage intent: \(plan.usageEnabled ? "on (not installed)" : "off")"
+                                ].joined(separator: "\n")
+                                Text(previewText)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            HStack {
+                                Button("Review again", action: setup.refresh)
+                                    .accessibilityLabel("Review Claude setup for \(root.displayPath)")
+                                if root.status != .connected {
+                                    Button("Configure Claude") { setup.configure(root) }
+                                        .buttonStyle(.borderedProminent)
+                                        .accessibilityLabel("Configure Claude for \(root.displayPath)")
+                                }
+                                if root.status != .notConfigured {
+                                    Button("Undo setup") { setup.undo(root) }
+                                        .accessibilityLabel("Undo Claude setup for \(root.displayPath)")
+                                }
+                                if index > 0 {
+                                    Button("Remove root") { setup.removeAlternateRoot(root) }
+                                        .accessibilityLabel("Remove Claude root \(root.displayPath)")
+                                }
+                            }
+                        } else if index > 0 {
+                            Button("Remove root") { setup.removeAlternateRoot(root) }
+                                .accessibilityLabel("Remove Claude root \(root.displayPath)")
+                        }
+                    }
+                    .padding(16)
+                }
+                Button("Add alternate Claude root", action: setup.addAlternateRoot)
+                    .padding(16)
+            }
+            if !setup.message.isEmpty {
+                Text(setup.message).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var ghosttyStatus: ClaudeGhosttyStatus {
+        if !ghosttyEnabled { return .off }
+        return ghosttyPermissionVerified ? .ready : .permissionRequired
+    }
+
+    private var ghosttyStatusText: String {
+        switch ghosttyStatus {
+        case .off: "Ghostty controls: off"
+        case .permissionRequired: "Ghostty controls: permission needed"
+        case .ready: "Ghostty controls: ready"
+        case .unavailable(let message): "Ghostty controls: \(message)"
         }
     }
 }
