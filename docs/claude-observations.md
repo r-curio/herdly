@@ -8,8 +8,10 @@ The helper retains event and session identity, source and installation markers, 
 prompt fallback (240 characters), and only the scalar command or path fields needed for a current
 action. An `AskUserQuestion` record retains bounded question text and option labels so the notch can
 show the same choices Claude is showing. The separate live request carries the helper invocation
-identity, the normalized Claude configuration root, and the separate normalized event directory; a
-restart cannot turn its saved request record into an answer capability.
+identity, the normalized Claude configuration root, and the separate normalized event directory; its
+helper-owned liveness marker is refreshed only while the hook waits, and a delivery acknowledgment
+is written only after Claude's response is emitted. A restart cannot turn its saved request record
+into an answer capability.
 
 The reader recognizes session, prompt, tool, question, approval, and outcome events. Tool text is
 kept only while a matching `PostToolUse`, `PostToolUseFailure`, or `PostToolBatch` has not cleared

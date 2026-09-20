@@ -218,7 +218,16 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
            let answer = ClaudeQuestionHelper.awaitAnswer(for: question, in: directory),
            let output = ClaudeQuestionAnswerPolicy.hookOutput(toolInput: toolInput, request: question, answer: answer) {
             FileHandle.standardOutput.write(output)
+            let delivery = ClaudeQuestionDelivery(
+                requestID: answer.requestID, installationID: answer.installationID,
+                sourceScope: answer.sourceScope, eventDirectory: answer.eventDirectory,
+                sessionID: answer.sessionID, promptID: answer.promptID,
+                toolUseID: answer.toolUseID, answerDecidedAt: answer.decidedAt,
+                deliveredAt: Date().timeIntervalSince1970)
+            _ = ClaudeQuestionStore.publish(delivery, in: directory)
+            ClaudeQuestionStore.removeAnswer(for: answer.requestID, in: directory)
         }
+        ClaudeQuestionStore.removeLiveness(for: question.requestID, in: directory)
     }
     if arguments.contains("--terminal-title"),
        let event = object["hook_event_name"] as? String,

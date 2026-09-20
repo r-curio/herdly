@@ -444,11 +444,16 @@ struct Notch: View {
     private func claudeQuestionBody(_ question: AgentQuestion, subject: String) -> some View {
         let controls = model.canAnswerAgentQuestion(question)
         if question.prompts.isEmpty {
-            Text("Claude is waiting for a question response; answer it in Claude.")
+            Text("Claude's question answer control is unavailable; check Claude's native question.")
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
         } else {
             ForEach(Array(question.prompts.enumerated()), id: \.offset) { index, prompt in
                 VStack(alignment: .leading, spacing: 3) {
+                    if !controls {
+                        Text("Claude's question answer control is unavailable; check Claude's native question.")
+                            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         if let header = prompt.header { Text(header).font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink) }
                         if question.prompts.count > 1 { Text("\(index + 1) of \(question.prompts.count)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim) }

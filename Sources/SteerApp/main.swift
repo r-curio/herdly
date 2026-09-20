@@ -41,6 +41,33 @@ func claudeQuestionReceiptDisposition(_ result: ClaudeQuestionReceiptResult,
     return result.scanGeneration == currentGeneration ? .accept : .staleAccept
 }
 
+func claudeQuestionLivenessIsCurrent(_ liveness: ClaudeQuestionLiveness,
+                                     request: ClaudeQuestionRequest, now: Double,
+                                     maximumAge: TimeInterval = ClaudeQuestionTiming.livenessTimeout) -> Bool {
+    guard now.isFinite, liveness.requestID == request.requestID,
+          liveness.installationID == request.installationID,
+          liveness.sourceScope == request.sourceScope,
+          liveness.eventDirectory == request.eventDirectory,
+          liveness.sessionID == request.sessionID,
+          liveness.promptID == request.promptID,
+          liveness.toolUseID == request.toolUseID,
+          liveness.heartbeatAt.isFinite,
+          liveness.heartbeatAt >= request.publishedAt,
+          liveness.heartbeatAt <= now,
+          now - liveness.heartbeatAt <= maximumAge,
+          request.expiresAt > now else { return false }
+    return true
+}
+
+func claudeQuestionAwaitDeliveryAndCleanUp(_ request: ClaudeQuestionRequest,
+                                           answer: ClaudeQuestionAnswer, in events: URL,
+                                           timeout: TimeInterval = ClaudeQuestionTiming.deliveryAckTimeout) -> Bool {
+    let confirmed = ClaudeQuestionHelper.awaitDelivery(for: request, answer: answer,
+                                                       in: events, timeout: timeout)
+    if !confirmed { ClaudeQuestionStore.removeAnswer(for: request.requestID, in: events) }
+    return confirmed
+}
+
 private enum SetupInstallResult: Sendable {
     case success(CodexConnectionStatus)
     case failure(String)
@@ -1636,6 +1663,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     private func liveClaudeQuestion(for question: AgentQuestion) -> LiveClaudeQuestion? {
+        let now = Date().timeIntervalSince1970
         guard question.identity.session.source == .claude,
               let requestID = question.helperRequestID,
               availableClaudeQuestionTokens.contains(requestID),
@@ -1646,14 +1674,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
               live.request.sessionID == question.identity.session.session,
               live.request.promptID == question.identity.turn,
               live.request.toolUseID == question.identity.call,
-              live.request.expiresAt > Date().timeIntervalSince1970,
-              live.request.prompts == question.prompts else { return nil }
+              live.request.expiresAt > now,
+              live.request.prompts == question.prompts,
+              let liveness = ClaudeQuestionStore.liveness(for: requestID, in: live.events),
+              claudeQuestionLivenessIsCurrent(liveness, request: live.request, now: now) else { return nil }
         return live
     }
 
     func answerClaudeQuestion(_ question: AgentQuestion, kind: ClaudeQuestionAnswerKind, answer: String) {
         guard let live = liveClaudeQuestion(for: question) else {
-            navigationMessage = "This Claude question is no longer live; answer it in Claude."
+            navigationMessage = "Claude's question answer control is unavailable; check Claude's native question."
             refresh()
             return
         }
@@ -1671,16 +1701,33 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             refresh()
             return
         }
+        let now = Date().timeIntervalSince1970
+        guard let liveness = ClaudeQuestionStore.liveness(for: live.request.requestID, in: live.events),
+              claudeQuestionLivenessIsCurrent(liveness, request: live.request, now: now) else {
+            navigationMessage = "Claude answer delivery is unavailable; check Claude's question."
+            refresh()
+            return
+        }
         // Spend the memory-only capability before writing. A failed write is never retried.
         availableClaudeQuestionTokens.remove(live.request.requestID)
         spentClaudeQuestionTokens.insert(live.request.requestID)
         guard ClaudeQuestionStore.publish(record, in: live.events) else {
-            navigationMessage = "Steer could not deliver the answer; answer this question in Claude."
+            navigationMessage = "Claude answer delivery could not be confirmed; check Claude's question."
             refresh()
             return
         }
-        navigationMessage = "Answer sent to Claude."
-        refresh()
+        let request = live.request
+        let events = live.events
+        Task { @MainActor [weak self] in
+            let delivered = await Task.detached(priority: .utility) {
+                claudeQuestionAwaitDeliveryAndCleanUp(request, answer: record, in: events)
+            }.value
+            guard let self else { return }
+            self.navigationMessage = delivered
+                ? "Answer sent to Claude."
+                : "Claude answer delivery could not be confirmed; check Claude's question."
+            self.refresh()
+        }
     }
 
     func dismissAgent(_ id: AgentAttentionID) {

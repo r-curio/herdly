@@ -85,6 +85,14 @@ private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installati
                          kind: .option, answer: answer, decidedAt: decidedAt ?? request.publishedAt)
 }
 
+private func claudeQuestionLiveness(for request: ClaudeQuestionRequest,
+                                    heartbeatAt: Double) -> ClaudeQuestionLiveness {
+    ClaudeQuestionLiveness(requestID: request.requestID, installationID: request.installationID,
+                           sourceScope: request.sourceScope, eventDirectory: request.eventDirectory,
+                           sessionID: request.sessionID, promptID: request.promptID,
+                           toolUseID: request.toolUseID, heartbeatAt: heartbeatAt)
+}
+
 @Test func claudeQuestionPolicyPreservesInputAndAddsOnlyTheChosenAnswer() throws {
     let request = claudeQuestionRequest()
     let answer = ClaudeQuestionAnswer(requestID: request.requestID, installationID: request.installationID,
@@ -176,6 +184,63 @@ private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installati
         #expect(ClaudeQuestionStore.receipt(for: invalidID, in: directory) == nil)
         #expect(ClaudeQuestionStore.answer(for: invalidID, in: directory) == nil)
     }
+}
+
+@Test func claudeQuestionHelperLossAfterReceiptFailsClosedBeforeAnswerWrite() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-question-liveness-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let request = claudeQuestionRequest(requestID: "liveness", eventDirectory: directory.standardizedFileURL.path,
+                                        publishedAt: 10, expiresAt: 20)
+    let receipt = claudeQuestionReceipt(for: request, receivedAt: 10.5)
+    let answer = claudeQuestionAnswer(for: request, decidedAt: 11)
+    let liveness = claudeQuestionLiveness(for: request, heartbeatAt: 10.9)
+    #expect(ClaudeQuestionStore.publish(request, in: directory))
+    #expect(ClaudeQuestionStore.publish(receipt, in: directory))
+    #expect(ClaudeQuestionStore.publish(liveness, in: directory))
+    #expect(claudeQuestionLivenessIsCurrent(liveness, request: request, now: 11,
+                                            maximumAge: 0.25))
+
+    // The helper exits abruptly after the receipt but before the user clicks. Its last marker is
+    // still present but stale, so the app's final pre-write check refuses to create an answer and
+    // no delivery ack can exist.
+    #expect(ClaudeQuestionStore.liveness(for: request.requestID, in: directory) == liveness)
+    #expect(!claudeQuestionLivenessIsCurrent(liveness, request: request, now: 11.3,
+                                            maximumAge: 0.25))
+    #expect(ClaudeQuestionStore.publish(answer, in: directory))
+    #expect(!claudeQuestionAwaitDeliveryAndCleanUp(request, answer: answer, in: directory,
+                                                    timeout: 0.03))
+    #expect(ClaudeQuestionStore.delivery(for: request.requestID, in: directory) == nil)
+    #expect(!FileManager.default.fileExists(atPath: ClaudeQuestionStore.answerURL(in: directory,
+                                                                                    id: request.requestID).path))
+}
+
+@Test func claudeQuestionDeliveryAckBindsExactAnswerIdentity() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-question-delivery-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let request = claudeQuestionRequest(requestID: "delivery", eventDirectory: directory.standardizedFileURL.path,
+                                        publishedAt: 10, expiresAt: 20)
+    let answer = claudeQuestionAnswer(for: request, decidedAt: 11)
+    let wrong = ClaudeQuestionDelivery(requestID: request.requestID, installationID: request.installationID,
+                                       sourceScope: request.sourceScope, eventDirectory: request.eventDirectory,
+                                       sessionID: request.sessionID, promptID: request.promptID,
+                                       toolUseID: request.toolUseID, answerDecidedAt: 12, deliveredAt: 12)
+    #expect(ClaudeQuestionStore.publish(wrong, in: directory))
+    #expect(!ClaudeQuestionHelper.awaitDelivery(for: request, answer: answer, in: directory,
+                                                timeout: 0.03))
+    let correctRequest = claudeQuestionRequest(requestID: "delivery-correct",
+                                               eventDirectory: directory.standardizedFileURL.path,
+                                               publishedAt: 10, expiresAt: 20)
+    let correctAnswer = claudeQuestionAnswer(for: correctRequest, decidedAt: 11)
+    #expect(ClaudeQuestionStore.publish(ClaudeQuestionDelivery(
+        requestID: correctRequest.requestID, installationID: correctRequest.installationID,
+        sourceScope: correctRequest.sourceScope, eventDirectory: correctRequest.eventDirectory,
+        sessionID: correctRequest.sessionID, promptID: correctRequest.promptID,
+        toolUseID: correctRequest.toolUseID, answerDecidedAt: correctAnswer.decidedAt,
+        deliveredAt: 11.1), in: directory))
+    #expect(ClaudeQuestionHelper.awaitDelivery(for: correctRequest, answer: correctAnswer,
+                                               in: directory, timeout: 0.03))
 }
 
 @Test func claudeQuestionHelperRejectsMismatchedAndLateRecords() throws {
