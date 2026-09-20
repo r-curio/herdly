@@ -50,6 +50,27 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(snapshot.plan?.status == .malformed("Claude settings.json has an unsupported hooks shape and was not changed."))
 }
 
+@Test func claudeSetupActiveSessionSummaryValidatesBoundedInventory() throws {
+    let data = Data(#"""
+    [
+        {"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","status":"idle"},
+        {"sessionId":"22222222-2222-4222-8222-222222222222","kind":"background","status":"busy","state":"working"},
+        {"sessionId":"33333333-3333-4333-8333-333333333333","kind":"background","status":"busy","state":"done"}
+    ]
+    """#.utf8)
+    #expect(ClaudeSetupDetection.activeSessionSummary(data) == "2 active sessions need restart after setup.")
+    #expect(ClaudeSetupDetection.activeSessionSummary(Data("{}".utf8))
+            == "Unavailable: Claude returned an invalid agents inventory.")
+    let duplicate = Data(#"""
+    [
+        {"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","status":"idle"},
+        {"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","status":"busy"}
+    ]
+    """#.utf8)
+    #expect(ClaudeSetupDetection.activeSessionSummary(duplicate)
+            == "Unavailable: Claude returned an incomplete or duplicate agents inventory.")
+}
+
 @Test func claudeSetupPreservesUnrelatedSettingsBytes() throws {
     let original = Data("{\"permissions\": { \"allow\": [\"Read\"] }, \"hooks\": {} }".utf8)
     let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: original,

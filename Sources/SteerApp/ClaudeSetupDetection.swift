@@ -3,7 +3,7 @@ import Foundation
 import SteerCore
 
 enum ClaudeSetupDetection {
-    static let activeSessionInventoryUnavailable = "Unavailable: Claude exposes no bounded root-scoped active-session inventory."
+    static let activeSessionInventoryUnavailable = "Unavailable: Claude's root-scoped agents inventory could not be read."
 
     struct Snapshot: Sendable {
         let root: URL
@@ -40,10 +40,14 @@ enum ClaudeSetupDetection {
         let settingsExists = manager.fileExists(atPath: roots.settingsURL.path)
         let installRecordExists = manager.fileExists(atPath: roots.stateURL.path)
         let installRecordPresent = ClaudeSetupInstaller().isInstallRecordValid(for: roots)
+        let activeSessionStatus = activeSessionsStatus(root: root, capabilities: capabilities)
+        let inventoryUnavailable = activeSessionStatus.hasPrefix("Unavailable:")
         let settings = boundedRegularData(at: roots.settingsURL) ?? Data("{}".utf8)
         let setupPolicy = policy(for: root)
         let plan: ClaudeSetupPlan?
-        if settingsExists && boundedRegularData(at: roots.settingsURL) == nil {
+        if capabilities.supported && !installRecordPresent && inventoryUnavailable {
+            plan = nil
+        } else if settingsExists && boundedRegularData(at: roots.settingsURL) == nil {
             plan = nil
         } else if installRecordExists && !installRecordPresent {
             plan = nil
@@ -57,6 +61,10 @@ enum ClaudeSetupDetection {
         let status: ClaudeConnectionStatus
         if settingsExists && boundedRegularData(at: roots.settingsURL) == nil {
             status = .malformed("Claude settings.json is unreadable or too large; Steer will not change it.")
+        } else if installRecordExists && !installRecordPresent {
+            status = ClaudeSetupInstaller().status(roots: roots, capabilities: capabilities)
+        } else if capabilities.supported && !installRecordPresent && inventoryUnavailable {
+            status = .unavailable("Claude setup is blocked until the selected root's agents inventory is available.")
         } else if let plan, case let .unsupported(message) = plan.status {
             status = .unsupported(message)
         } else if let plan, case let .malformed(message) = plan.status {
@@ -72,7 +80,59 @@ enum ClaudeSetupDetection {
         }
         return Snapshot(root: root, capabilities: capabilities, plan: plan, status: status,
                         helperPath: roots.helperURL.path, eventsPath: roots.eventsDirectory.path,
-                        activeSessionStatus: activeSessionInventoryUnavailable)
+                        activeSessionStatus: activeSessionStatus)
+    }
+
+    static func activeSessionsStatus(root: URL, capabilities: ClaudeCapabilities) -> String {
+        guard capabilities.supported else {
+            return "Unavailable: Claude Code is below Steer's tested inventory baseline."
+        }
+        guard let executable = executable(named: "claude") else {
+            return "Unavailable: the Claude executable was not found."
+        }
+        var environment = ProcessInfo.processInfo.environment
+        environment["CLAUDE_CONFIG_DIR"] = root.standardizedFileURL.path
+        guard let result = runBounded(executable, arguments: ["agents", "--json"], environment: environment, timeout: 5),
+              result.status == 0 else {
+            return activeSessionInventoryUnavailable
+        }
+        return activeSessionSummary(result.output)
+    }
+
+    static func activeSessionSummary(_ data: Data) -> String {
+        guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return "Unavailable: Claude returned an invalid agents inventory."
+        }
+        var seen = Set<String>()
+        var activeCount = 0
+        for row in rows {
+            guard let sessionID = row["sessionId"] as? String,
+                  sessionID.count == 36,
+                  UUID(uuidString: sessionID) != nil,
+                  let kind = row["kind"] as? String,
+                  seen.insert("\(kind):\(sessionID)").inserted else {
+                return "Unavailable: Claude returned an incomplete or duplicate agents inventory."
+            }
+            switch kind {
+            case "interactive":
+                guard let status = row["status"] as? String,
+                      ["busy", "waiting", "idle"].contains(status) else {
+                    return "Unavailable: Claude returned an unknown interactive session state."
+                }
+                activeCount += 1
+            case "background":
+                guard let state = row["state"] as? String,
+                      ["working", "blocked", "done", "failed", "stopped"].contains(state) else {
+                    return "Unavailable: Claude returned an unknown background session state."
+                }
+                if ["working", "blocked"].contains(state) { activeCount += 1 }
+            default:
+                return "Unavailable: Claude returned an unsupported session kind."
+            }
+        }
+        return activeCount == 0
+            ? "No active sessions need restart."
+            : "\(activeCount) active session\(activeCount == 1 ? "" : "s") need\(activeCount == 1 ? "s" : "") restart after setup."
     }
 
     private static func policy(for root: URL) -> ClaudeSetupPolicy {
@@ -129,10 +189,12 @@ enum ClaudeSetupDetection {
             .map(String.init)
     }
 
-    private static func runBounded(_ url: URL, arguments: [String], timeout: TimeInterval = 2) -> (status: Int32, output: Data)? {
+    private static func runBounded(_ url: URL, arguments: [String], environment: [String: String]? = nil,
+                                   timeout: TimeInterval = 2) -> (status: Int32, output: Data)? {
         let process = Process(), output = Pipe()
         process.executableURL = url
         process.arguments = arguments
+        process.environment = environment
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
         do { try process.run() } catch { return nil }
