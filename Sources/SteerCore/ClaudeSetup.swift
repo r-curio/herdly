@@ -175,6 +175,9 @@ public enum ClaudeSetupPlanner {
         if let hooks = source["hooks"], !(hooks is [String: Any]) {
             return empty(.malformed("Claude settings.json has an unsupported hooks shape and was not changed."), settings: settings, settingsExisted: settingsExisted)
         }
+        if let hooks = source["hooks"] as? [String: Any], !hooksShapeIsValid(hooks) {
+            return empty(.malformed("Claude settings.json has an unsupported hooks shape and was not changed."), settings: settings, settingsExisted: settingsExisted)
+        }
 
         let marker = ownershipMarker(helperPath: helperPath, eventsPath: eventsPath)
         let installationIDs = existingInstallationIDs(source, marker: marker)
@@ -235,7 +238,10 @@ public enum ClaudeSetupPlanner {
                                    })
         }
         guard let mergedHooks = merged["hooks"] as? [String: Any],
-              let changed = try? jsonDataPreservingOtherBytes(settings, hooks: mergedHooks) else {
+              let changed = try? jsonDataPreservingOtherBytes(
+                  settings,
+                  hooks: jsonEquivalent(source["hooks"], mergedHooks) ? source["hooks"] as? [String: Any] : mergedHooks
+              ) else {
             return empty(.malformed("Claude settings.json could not be encoded safely and was not changed."), settings: settings, settingsExisted: settingsExisted)
         }
         // Usage is deliberately represented in the same plan but remains opt-in. Its reversible
@@ -264,6 +270,13 @@ public enum ClaudeSetupPlanner {
     static func jsonObject(_ data: Data) throws -> [String: Any] {
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ClaudeSetupError.conflict("not an object") }
         return object
+    }
+
+    private static func jsonEquivalent(_ lhs: Any?, _ rhs: Any?) -> Bool {
+        guard let lhs, let rhs,
+              let left = try? JSONSerialization.data(withJSONObject: lhs, options: [.sortedKeys]),
+              let right = try? JSONSerialization.data(withJSONObject: rhs, options: [.sortedKeys]) else { return false }
+        return left == right
     }
 
     /// Replace only the top-level hooks value. The rest of settings.json remains byte-for-byte
@@ -389,9 +402,24 @@ public enum ClaudeSetupPlanner {
 
     static func groupMatcher(_ group: [String: Any]) -> String? { group["matcher"] as? String }
 
+    private static func hooksShapeIsValid(_ hooks: [String: Any]) -> Bool {
+        hooks.allSatisfy { _, value in
+            guard let groups = value as? [[String: Any]] else { return false }
+            return groups.allSatisfy { group in
+                guard let handlers = group["hooks"] as? [[String: Any]] else { return false }
+                if let matcher = group["matcher"], !(matcher is String) { return false }
+                return handlers.allSatisfy { $0["type"] as? String != nil }
+            }
+        }
+    }
+
     static func handlerMatches(_ handler: [String: Any], command: String) -> Bool {
         handler["type"] as? String == "command" && handler["command"] as? String == command &&
             (handler["timeout"] as? NSNumber)?.intValue == ClaudeSetupRequirements.hookTimeout
+    }
+
+    private static func handlerIsCanonical(_ handler: [String: Any], command: String) -> Bool {
+        Set(handler.keys) == ["type", "command", "timeout"] && handlerMatches(handler, command: command)
     }
 
     static func existingInstallationIDs(_ source: [String: Any], marker: String) -> Set<String> {
@@ -399,7 +427,8 @@ public enum ClaudeSetupPlanner {
             guard let command = handler.command, command.hasPrefix(marker) else { return nil }
             let suffix = command.dropFirst(marker.count)
             guard suffix.first == "'" else { return nil }
-            return String(suffix.dropFirst().prefix { $0 != "'" })
+            let value = String(suffix.dropFirst().prefix { $0 != "'" })
+            return UUID(uuidString: value) == nil ? nil : value
         }.reduce(into: Set<String>()) { $0.insert($1) }
     }
 
@@ -415,23 +444,22 @@ public enum ClaudeSetupPlanner {
     }
 
     static func hasChangedOwnedHook(_ source: [String: Any], expected: [ClaudeOwnedHook], marker: String) -> Bool {
+        let handlers = allHandlers(source)
         let commands = Set(expected.map(\.command))
-        return allHandlers(source).contains { entry in
-            guard let command = entry.command, command.hasPrefix(marker), !commands.contains(command) else { return false }
-            return true
-        } || expected.contains { owned in
-            allHandlers(source).contains { entry in
-                guard entry.command == owned.command else { return false }
-                return entry.event == owned.event && entry.matcher == owned.matcher &&
-                    !handlerIsExact(source, event: entry.event, matcher: entry.matcher, command: owned.command)
+        return handlers.contains { entry in
+            guard let command = entry.command, command.hasPrefix(marker) else { return false }
+            guard commands.contains(command),
+                  let owned = expected.first(where: { $0.command == command && $0.event == entry.event && $0.matcher == entry.matcher }) else {
+                return true
             }
+            return !handlerIsExact(source, event: owned.event, matcher: owned.matcher, command: owned.command)
         }
     }
 
     private static func handlerIsExact(_ source: [String: Any], event: String, matcher: String?, command: String) -> Bool {
         guard let hooks = source["hooks"] as? [String: Any], let groups = hooks[event] as? [[String: Any]] else { return false }
         return groups.contains { groupMatcher($0) == matcher &&
-            ($0["hooks"] as? [[String: Any]])?.contains(where: { handlerMatches($0, command: command) }) == true }
+            ($0["hooks"] as? [[String: Any]])?.contains(where: { handlerIsCanonical($0, command: command) }) == true }
     }
 
     private static func empty(_ status: ClaudeSetupStatus, settings: Data, settingsExisted: Bool) -> ClaudeSetupPlan {
@@ -483,6 +511,10 @@ public struct ClaudeSetupInstaller {
             guard let state = try? readState(roots) else {
                 throw ClaudeSetupError.conflict("Steer Claude setup state is missing or inconsistent; review setup before changing this root.")
             }
+            guard state.rootPath == roots.configDirectory.path,
+                  UUID(uuidString: state.installationID) != nil else {
+                throw ClaudeSetupError.conflict("Steer Claude setup belongs to a different configuration root; review setup before changing this root.")
+            }
             existingState = state
         } else {
             existingState = nil
@@ -504,6 +536,10 @@ public struct ClaudeSetupInstaller {
         }
         if let existingHelper = try readableData(at: roots.helperURL), existingHelper != helper {
             throw ClaudeSetupError.conflict("A different file already exists at Steer's Claude helper path.")
+        }
+        for directory in [roots.configDirectory, roots.helperDirectory, roots.eventsDirectory]
+            where fileManager.fileExists(atPath: directory.path) && !isDirectory(at: directory) {
+            throw ClaudeSetupError.conflict("Claude setup path \(directory.path) is not a regular directory; it was not changed.")
         }
         try fileManager.createDirectory(at: roots.configDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: roots.helperDirectory, withIntermediateDirectories: true)
@@ -707,9 +743,11 @@ public struct ClaudeSetupInstaller {
     private func validEvent(_ url: URL, installationID: String, installedAt: TimeInterval, now: TimeInterval) -> Bool {
         guard let data = boundedData(at: url, maximum: 64 * 1024),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let event = object["hook_event_name"] as? String, !event.isEmpty,
               object["source"] as? String == ClaudeSetupRequirements.helperSource,
               object["installation_id"] as? String == installationID,
               let session = object["session_id"] as? String, !session.isEmpty,
+              let received = object["received_at"] as? String, !received.isEmpty,
               let captured = object["captured_at"] as? NSNumber else { return false }
         return captured.doubleValue.isFinite && captured.doubleValue >= installedAt - 1 &&
             captured.doubleValue <= now + ClaudeSetupRequirements.metadataClockSkew
