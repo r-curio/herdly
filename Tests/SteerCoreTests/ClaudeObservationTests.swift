@@ -238,6 +238,42 @@ import Testing
     #expect(queue.items.compactMap { $0.outcome }.isEmpty)
 }
 
+@Test func claudeDelayedStopFailureCannotClearNewerActivityDuringReplay() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Keep working"),
+        claudeRecord("PreToolUse", at: 10, promptID: "p1", toolName: "Bash", toolUseID: "new-tool",
+                     toolInput: ["command": "new"])
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var queue = AgentAttentionQueue()
+    queue.apply(scanClaude(root, now: 20))
+    #expect(queue.items.first?.running?.fullAction == "new")
+
+    try appendClaudeEvent(claudeRecord("StopFailure", at: 5, promptID: "p1"), to: root)
+    queue.apply(scanClaude(root, now: 20))
+
+    #expect(queue.items.filter { $0.session.source == .claude }.map(\.kind) == [.running])
+    #expect(queue.items.first?.running?.fullAction == "new")
+}
+
+@Test func claudeDelayedSessionEndCannotClearNewerActivityDuringReplay() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Keep working"),
+        claudeRecord("PreToolUse", at: 10, promptID: "p1", toolName: "Bash", toolUseID: "new-tool",
+                     toolInput: ["command": "new"])
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var queue = AgentAttentionQueue()
+    queue.apply(scanClaude(root, now: 20))
+    #expect(queue.items.first?.running?.fullAction == "new")
+
+    try appendClaudeEvent(claudeRecord("SessionEnd", at: 5), to: root)
+    queue.apply(scanClaude(root, now: 20))
+
+    #expect(queue.items.filter { $0.session.source == .claude }.map(\.kind) == [.running])
+    #expect(queue.items.first?.running?.fullAction == "new")
+}
+
 @Test func claudeQueueUpdatesToolDetailAndClearsItAfterStop() throws {
     let root = try makeClaudeEvents([claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Inspect")])
     defer { try? FileManager.default.removeItem(at: root) }
