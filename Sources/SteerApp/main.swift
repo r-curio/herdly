@@ -58,6 +58,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var openingTask = false
     private static let launchedAt = Date().timeIntervalSince1970
     @Published var queue = AttentionQueue(snapshot: Companion.launchSnapshot, observingSince: Companion.launchedAt)
+    /// Source-scoped queue for adapters that have bounded native observations. The legacy
+    /// Codex presentation queue remains the display path until its UI migration slice.
+    @Published var agentQueue = AgentAttentionQueue(snapshot: Companion.launchSnapshot)
     @Published var reminderPresentation = Attention()
     @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
     @Published var completionPresentation = Attention()
@@ -705,6 +708,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }()
         let known = knownCLISessions
         let daemonThreads = daemonClient.loadedThreads
+        let observingSince = Companion.launchedAt
+        let observationNow = Date().timeIntervalSince1970
+        let claudeRoots = claude.roots.compactMap { root -> (scope: String, events: URL, installationID: String)? in
+            guard root.status == .connected, !root.eventsPath.isEmpty,
+                  let installationID = root.plan?.installationID, !installationID.isEmpty else { return nil }
+            return (root.url.standardizedFileURL.path, URL(fileURLWithPath: root.eventsPath, isDirectory: true), installationID)
+        }
         Task { @MainActor in
             let result = await Task.detached {
                 (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
@@ -712,12 +722,20 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                  readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
                  CodexUsageReader.latest(root: rolloutRoot),
                  SessionDiscovery.candidates(root: rolloutRoot, now: Date().timeIntervalSince1970),
-                 ProcessList.arguments().map(CodexCLIProcesses.isRunning(processList:)) ?? false)
+                 ProcessList.arguments().map(CodexCLIProcesses.isRunning(processList:)) ?? false,
+                 claudeRoots.map { root in
+                     ClaudeObservationReader.scan(events: root.events, sourceScope: root.scope,
+                                                  installationID: root.installationID, observingSince: observingSince,
+                                                  now: observationNow)
+                 })
             }.value
             let scan = result.0
             let desktopEvents = result.1
             let readState = result.2
             guard eventsPath == events.path else { scanning = false; refresh(); return }
+            for claudeScan in result.7 {
+                agentQueue.apply(claudeScan, now: Date().timeIntervalSince1970)
+            }
             if threadNames != result.3 { threadNames = result.3 }
             if usage != result.4 { usage = result.4 }
             // Sessions already working before their first hook event: shown only with liveness
