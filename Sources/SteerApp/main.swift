@@ -138,6 +138,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Sessions a Ghostty inventory proved CLI by their session-id title, this launch. They stay CLI
     /// after the tab closes, and that closing ends them (`ReminderReader.scan`). Memory only.
     private var knownCLISessions: Set<UUID> = []
+    /// Complete root inventories used to prove which canonical Claude sessions are live. Memory only.
+    private var liveClaudeSessions: [String: [String]] = [:]
+    private var claudeInventoryAvailable: [String: Bool] = [:]
     /// Unix time of the inventory in `ghosttyFocusState`, for dating a session end at the tab's absence.
     private var ghosttyInventoryAt: Double = 0
     private var checkingGhostty = false
@@ -776,6 +779,20 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             for claudeScan in result.8 {
                 agentQueue.apply(claudeScan, now: Date().timeIntervalSince1970)
             }
+            let configuredClaudeScopes = Set(claude.roots.compactMap { root -> String? in
+                guard root.capabilities.supported, root.status == .connected else { return nil }
+                return root.url.standardizedFileURL.path
+            })
+            liveClaudeSessions = Dictionary(uniqueKeysWithValues: result.7.filter {
+                configuredClaudeScopes.contains($0.sourceScope)
+            }.map { scan in
+                (scan.sourceScope, scan.available
+                    ? scan.sessions.filter { $0.kind == .interactive }.map(\.sessionID)
+                    : [])
+            })
+            claudeInventoryAvailable = Dictionary(uniqueKeysWithValues: result.7.filter {
+                configuredClaudeScopes.contains($0.sourceScope)
+            }.map { ($0.sourceScope, $0.available) })
             for inventory in result.7 {
                 agentQueue.apply(inventory, now: Date().timeIntervalSince1970)
                 for session in inventory.sessions {
@@ -1268,12 +1285,79 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func openAgent(_ identity: AgentSessionIdentity) {
-        guard let session = codexSession(identity) else {
-            navigationMessage = "Open in Claude is unavailable until Steer can verify the exact Claude tab."
+        if identity.source == .claude {
+            openClaude(identity)
+        } else if let session = codexSession(identity) {
+            if identity.surface == .cli { openCLI(session) } else { openDesktop(session) }
+        } else {
+            navigationMessage = "Open in Codex is unavailable until Steer can verify the exact session."
+            refresh()
+        }
+    }
+
+    func canOpenClaude(_ identity: AgentSessionIdentity) -> Bool {
+        guard identity.source == .claude, identity.surface == .cli, ghosttyEnabled,
+              ghosttyPermissionVerified, !liveClaudeSessions.isEmpty,
+              claudeInventoryAvailable.values.allSatisfy({ $0 }),
+              liveClaudeSessions[identity.sourceScope]?.filter({ $0 == identity.session }).count == 1,
+              let snapshot = knownGhosttySnapshot else { return false }
+        let live = liveClaudeSessions.values.flatMap { $0 }
+        guard let target = GhosttyMatch.target(claudeSessionID: identity.session, live: live, snapshot: snapshot) else { return false }
+        return GhosttyMatch.isInCurrentWindow(target, snapshot: snapshot)
+    }
+
+    private var knownGhosttySnapshot: GhosttySnapshot? {
+        guard case let .known(snapshot) = ghosttyFocusState, snapshot.status == "ok" else { return nil }
+        return snapshot
+    }
+
+    var claudeReturnUnavailableMessage: String {
+        if !ghosttyEnabled { return "Enable Ghostty controls to open the exact Claude tab." }
+        if !ghosttyPermissionVerified { return "Ghostty controls are awaiting Automation permission." }
+        return "The exact Claude tab is unavailable until Steer can verify one live, unsplit target."
+    }
+
+    private func openClaude(_ identity: AgentSessionIdentity) {
+        guard !openingTask else { return }
+        guard ghosttyEnabled else { showControls(); return }
+        guard identity.surface == .cli else {
+            navigationMessage = "The exact Claude tab is unavailable for this session surface."
             refresh()
             return
         }
-        if identity.surface == .cli { openCLI(session) } else { openDesktop(session) }
+        openingTask = true
+        navigationMessage = "Finding the matching Claude tab…"
+        let configuredRoots = claude.roots.filter { $0.capabilities.supported && $0.status == .connected }
+            .map { (root: $0.url.standardizedFileURL, capabilities: $0.capabilities) }
+        let queued = orderedAgentAttentionItems.filter { $0.session == identity && $0.outcome != nil }.map(\.id)
+        Task { @MainActor in
+            let inventories = await Task.detached {
+                configuredRoots.map { root in
+                    ClaudeSetupDetection.activeSessionInventory(root: root.root, capabilities: root.capabilities)
+                }
+            }.value
+            let complete = !inventories.isEmpty && inventories.allSatisfy(\.available)
+            let live = inventories.flatMap { scan in
+                scan.sessions.filter { $0.kind == .interactive }.map(\.sessionID)
+            }
+            let ownLive = inventories.first { $0.sourceScope == identity.sourceScope }
+            let result: (opened: Bool, message: String)
+            if !complete || ownLive?.sessions.filter({ $0.kind == .interactive && $0.sessionID == identity.session }).count != 1
+                || live.filter({ $0 == identity.session }).count != 1 {
+                result = (false, claudeReturnUnavailableMessage)
+            } else {
+                result = await Task.detached {
+                    GhosttyNavigation.openClaude(sessionID: identity.session, live: live)
+                }.value
+            }
+            navigationMessage = result.message
+            if result.opened {
+                for id in queued { agentQueue.dismiss(id) }
+                saveCompletions()
+            }
+            openingTask = false
+            refresh()
+        }
     }
 
     func openAgentApproval(_ approval: AgentApproval) {
@@ -1737,7 +1821,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func checkGhosttyFocus() {
         let now = ProcessInfo.processInfo.systemUptime
         guard ghosttyEnabled, !checkingGhostty, !openingTask, now >= nextGhosttyScan,
-              !cliItems.isEmpty || !queue.items.isEmpty || !liveCLI.isEmpty || !knownCLISessions.isEmpty else { return }
+              !cliItems.isEmpty || !queue.items.isEmpty || !liveCLI.isEmpty || !knownCLISessions.isEmpty
+                || !liveClaudeSessions.isEmpty
+                || orderedAgentAttentionItems.contains(where: { $0.session.source == .claude }) else { return }
         checkingGhostty = true
         // Keep the last verified snapshot while a re-check is in flight. Resetting to
         // `.checking` every poll collapsed an already presented CLI popup early.
