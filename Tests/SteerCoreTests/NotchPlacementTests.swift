@@ -169,6 +169,8 @@ private let external = NotchDisplay(id: 2, frame: CGRect(x: 1512, y: 100, width:
     let item = AgentAttentionID.outcome(AgentTurnIdentity(session: session, turn: "turn"))
     var controller = NotchPresentationController()
     controller.present(item, now: 10)
+    #expect(controller.agentSpotlightIsActive(interacting: false, now: 12.9))
+    #expect(!controller.agentSpotlightIsActive(interacting: false, now: 13))
     #expect(controller.update(interacting: false, now: 12.9) == .agentSpotlight(item))
     #expect(controller.update(interacting: false, now: 13) == .collapsed)
 

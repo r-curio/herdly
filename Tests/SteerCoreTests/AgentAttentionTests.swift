@@ -154,3 +154,75 @@ import Testing
     #expect(queue.toCheckCount == 1)
     #expect(queue.workingCount == 0)
 }
+
+@Test func freshMixedSourceCardsChooseQueuePriorityForOneSpotlight() {
+    let codex = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "codex", surface: .cli)
+    let claude = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "claude", surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(AgentApproval(session: codex, turn: "turn", call: "approval", arrivedAt: 1)))
+    queue.apply(.question(AgentQuestion(session: claude, turn: "turn", call: "question", arrivedAt: 2)))
+    queue.apply(.outcome(AgentOutcome(session: claude, turn: "outcome", status: .finished, arrivedAt: 3)))
+    let items = queue.items(at: 1)
+    let candidates = Set(items.map(\.id))
+
+    #expect(AgentPresentationSelection.highestPriority(in: items, candidates: candidates) == items.first?.id)
+    #expect(AgentPresentationEligibility.foregroundGate(source: .claude, codexForeground: true) == false)
+    #expect(AgentPresentationEligibility.foregroundGate(source: .codex, codexForeground: true) == true)
+}
+
+@Test func foregroundCodexDoesNotSuppressFreshClaudeOrPromoteRestoredClaude() {
+    let codex = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "codex", surface: .desktop)
+    let claude = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "claude", surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.outcome(AgentOutcome(session: claude, turn: "old", status: .finished, arrivedAt: 1)))
+    queue.apply(.outcome(AgentOutcome(session: codex, turn: "new", status: .finished, arrivedAt: 2)))
+    let items = queue.items(at: 2)
+    let freshIDs = Set(items.map(\.id))
+    let eligibleWithBothFresh = Set(items.filter {
+        AgentPresentationEligibility.foregroundGate(source: $0.session.source, codexForeground: true) != true
+    }.map(\.id))
+
+    #expect(AgentPresentationSelection.highestPriority(in: items, candidates: eligibleWithBothFresh)
+            == items.first { $0.session.source == .claude }?.id)
+
+    let onlyCodexFresh = freshIDs.filter { id in
+        items.first { $0.id == id }?.session.source == .codex
+    }
+    let eligibleOnlyCodex = Set(items.filter {
+        onlyCodexFresh.contains($0.id)
+            && AgentPresentationEligibility.foregroundGate(source: $0.session.source, codexForeground: true) != true
+    }.map(\.id))
+    #expect(AgentPresentationSelection.highestPriority(in: items, candidates: eligibleOnlyCodex) == nil)
+}
+
+@Test func handedBackApprovalRetainsSourceRequestDetails() {
+    let session = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "session", surface: .cli)
+    let details = ApprovalDetails(taskName: "Review", project: "/tmp/project", action: "Run",
+                                  command: "swift test", reason: "Verify", longText: "Run the full suite.")
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(AgentApproval(session: session, turn: "turn", call: "call", arrivedAt: 1,
+                                        state: .actionable, details: details)))
+    queue.apply(.approval(AgentApproval(session: session, turn: "turn", call: "call", arrivedAt: 1,
+                                        state: .handedBack)))
+
+    let item = queue.items(at: 40).first
+    #expect(item?.kind == .handedBackApproval)
+    #expect(item?.approval?.details == details)
+}
+
+@Test func mixedPriorityLeavesSameCategoryOutcomeForTheNextSpotlight() {
+    let claude = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "claude", surface: .cli)
+    let codex = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "codex", surface: .desktop)
+    var queue = AgentAttentionQueue()
+    queue.apply(.outcome(AgentOutcome(session: claude, turn: "first", status: .finished, arrivedAt: 1)))
+    queue.apply(.outcome(AgentOutcome(session: claude, turn: "second", status: .failed, arrivedAt: 2)))
+    queue.apply(.question(AgentQuestion(session: codex, turn: "turn", call: "question", arrivedAt: 3)))
+    let items = queue.items(at: 3)
+    let firstCandidates = Set(items.map(\.id))
+    let first = AgentPresentationSelection.highestPriority(in: items, candidates: firstCandidates)
+    let remainingOutcomes = Set(items.filter { $0.kind == .outcome }.map(\.id))
+
+    #expect(first == items.first { $0.kind == .question }?.id)
+    #expect(AgentPresentationSelection.highestPriority(in: items, candidates: remainingOutcomes)
+            == items.first { $0.outcome?.turn == "first" }?.id)
+}

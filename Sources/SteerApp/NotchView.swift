@@ -423,13 +423,14 @@ struct Notch: View {
     }
 
     @ViewBuilder
-    private func detail(_ label: String, _ value: String?, selectable: Bool = false) -> some View {
+    private func detail(_ label: String, _ value: String?, selectable: Bool = false,
+                        missing: String = "Not provided by Codex") -> some View {
         HStack(alignment: .top, spacing: 8) {
             Text(label).foregroundStyle(NotchStyle.dim).frame(width: 58, alignment: .leading)
             if selectable {
-                Text(value ?? "Not provided by Codex").foregroundStyle(value == nil ? NotchStyle.dim : NotchStyle.text).textSelection(.enabled)
+                Text(value ?? missing).foregroundStyle(value == nil ? NotchStyle.dim : NotchStyle.text).textSelection(.enabled)
             } else {
-                Text(value ?? "Not provided by Codex").foregroundStyle(value == nil ? NotchStyle.dim : NotchStyle.text)
+                Text(value ?? missing).foregroundStyle(value == nil ? NotchStyle.dim : NotchStyle.text)
             }
         }
         .font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
@@ -697,26 +698,36 @@ struct Notch: View {
                     ForEach(spotlightDetails.context) { field in detail(field.label, field.value, selectable: true) }
                 }
             }
+            if let details = item.approval?.details, spotlightDetails == nil {
+                let missing = item.session.source == .claude ? "Not provided by Claude" : "Not provided by Codex"
+                VStack(alignment: .leading, spacing: 3) {
+                    detail("task", details.taskName, missing: missing)
+                    detail("project", details.project, missing: missing)
+                    detail("action", details.action, missing: missing)
+                    detail("command", details.command, selectable: true, missing: missing)
+                    detail("reason", details.reason, selectable: true, missing: missing)
+                }
+                if let longText = details.longText {
+                    NotchDisclosure(title: "Show full request", expanded: disclosure("request:\(item.session.session)")) {
+                        Text(longText).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .accessibilityLabel("Show full request for \(subject)")
+                }
+            }
             switch item.kind {
             case .handedBackApproval:
                 Text("Handed back with no decision. Continue in \(item.session.source == .claude ? "Claude" : "Codex") to decide.")
                     .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
-            case .actionableApproval:
-                if let details = item.approval?.details, spotlightDetails == nil {
-                    VStack(alignment: .leading, spacing: 3) {
-                        detail("task", details.taskName); detail("project", details.project); detail("action", details.action)
-                        detail("command", details.command, selectable: true); detail("reason", details.reason, selectable: true)
-                    }
-                    if let longText = details.longText {
-                        NotchDisclosure(title: "Show full request", expanded: disclosure("request:\(item.session.session)")) {
-                            Text(longText).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .accessibilityLabel("Show full request for \(subject)")
-                    }
+                if item.session.source == .claude {
+                    Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
                 }
+            case .actionableApproval:
                 if item.session.source == .claude {
                     Text("Claude decisions are unavailable here; decide in Claude.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
                         .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
                 }
             case .outcome, .earlierOutcome:
@@ -737,6 +748,10 @@ struct Notch: View {
                 }
             case .question:
                 if let question = item.question { agentQuestionBody(question, subject: subject) }
+                if item.session.source == .claude {
+                    Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                }
             case .waiting, .running:
                 if let running = item.running, let row = running.rowText {
                     Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).lineLimit(2).truncationMode(.tail)
@@ -765,7 +780,7 @@ struct Notch: View {
             HStack(spacing: 6) {
                 switch item.kind {
                 case .actionableApproval:
-                    if item.session.source == .codex {
+                    if item.session.source == .codex && item.session.surface == .cli {
                         NotchButton(title: "Approve once", emphasized: true) { if let approval = item.approval { model.decideAgent(approval, as: .allowOnce) } }
                             .accessibilityLabel("Approve once: \(subject)")
                             .accessibilityHint("Approves this Codex permission request once.")
@@ -791,7 +806,7 @@ struct Notch: View {
                 case .question:
                     if item.session.source == .claude {
                         EmptyView()
-                    } else if !model.ghosttyEnabled {
+                    } else if item.session.surface == .cli && !model.ghosttyEnabled {
                         NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
                             .accessibilityLabel("Set up Ghostty: \(subject)")
                             .accessibilityHint("Opens Steer controls to enable Ghostty controls.")
