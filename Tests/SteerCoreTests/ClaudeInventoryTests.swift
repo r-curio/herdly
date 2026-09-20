@@ -32,14 +32,59 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
     #expect(scan.failure == ClaudeInventoryDecoder.incompleteMessage)
 }
 
+@Test func duplicateInteractiveInventorySignalsUnavailableTargetUntilUnique() throws {
+    let duplicate = try JSONSerialization.data(withJSONObject: [
+        ["sessionId": interactiveID, "kind": "interactive", "cwd": "/tmp/one", "name": "one",
+         "status": "busy", "startedAt": 1],
+        ["sessionId": interactiveID, "kind": "interactive", "cwd": "/tmp/one", "name": "one",
+         "status": "waiting", "startedAt": 1]
+    ])
+    let ambiguous = ClaudeInventoryDecoder.decode(duplicate, sourceScope: "/tmp/root", observedAt: 2)
+    var queue = AgentAttentionQueue()
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 1, sessions: [
+        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: "busy"))
+    ]))
+    queue.apply(ambiguous)
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    #expect(queue.items.filter { $0.session == identity }.count == 1)
+    #expect(queue.isClaudeSessionUnavailable(identity))
+
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 3, sessions: [
+        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: "idle"))
+    ]))
+    #expect(queue.isClaudeSessionUnavailable(identity) == false)
+}
+
+@Test func inventoryRejectsCrossKindSessionCollision() throws {
+    let collision = try JSONSerialization.data(withJSONObject: [
+        ["sessionId": interactiveID, "kind": "interactive", "cwd": "/tmp/one", "name": "one",
+         "status": "idle", "startedAt": 1],
+        ["sessionId": interactiveID, "kind": "background", "cwd": "/tmp/one", "name": "one",
+         "status": "busy", "state": "working", "startedAt": 1]
+    ])
+    let scan = ClaudeInventoryDecoder.decode(collision, sourceScope: "/tmp/root", observedAt: 1)
+    #expect(scan.available == false)
+    #expect(scan.ambiguousSessionIDs.isEmpty)
+}
+
+@Test func inventoryRejectsBooleanStartedAt() throws {
+    let data = try JSONSerialization.data(withJSONObject: [
+        ["sessionId": interactiveID, "kind": "interactive", "cwd": "/tmp/one", "name": "one",
+         "status": "idle", "startedAt": true]
+    ])
+    #expect(ClaudeInventoryDecoder.decode(data, sourceScope: "/tmp/root", observedAt: 1).available == false)
+}
+
 @Test func inventoryCannotClearHookEvidenceAndIdleConfirmsStop() throws {
     let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
     var queue = AgentAttentionQueue()
     queue.apply(.running(AgentRunning(session: identity, turn: "prompt", arrivedAt: 2)))
 
     let active = ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 3, sessions: [
-        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, cwd: "/tmp", name: "one",
-                               startedAt: 1, lifecycle: .interactive(status: "idle"))
+        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: "idle"))
     ])
     queue.apply(active)
     #expect(queue.items.compactMap(\.running).first?.identity.turn == "prompt")
@@ -47,8 +92,8 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
     queue.apply(.provisionalStop(AgentProvisionalStop(identity: AgentTurnIdentity(session: identity, turn: "prompt"),
                                                        arrivedAt: 4)))
     queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 5, sessions: [
-        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, cwd: "/tmp", name: "one",
-                               startedAt: 1, lifecycle: .interactive(status: "idle"))
+        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: "idle"))
     ]))
     #expect(queue.items.compactMap(\.outcome).first?.status == .finished)
 }
@@ -74,8 +119,8 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
     #expect(queue.items.compactMap(\.outcome).isEmpty)
 
     queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 4, sessions: [
-        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, cwd: "/tmp", name: "one",
-                               startedAt: 1, lifecycle: .interactive(status: "idle"))
+        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: "idle"))
     ]))
     #expect(queue.items.compactMap(\.outcome).count == 1)
     #expect(queue.items.first?.outcome?.status == .finished)
@@ -84,20 +129,20 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
     #expect(queue.items.compactMap(\.outcome).count == 1)
 
     queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 5, sessions: [
-        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, cwd: "/tmp", name: "one",
-                               startedAt: 1, lifecycle: .interactive(status: "idle"))
+        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: "idle"))
     ]))
     #expect(queue.items.compactMap(\.outcome).count == 1)
     #expect(queue.items.first?.outcome?.arrivedAt == 4)
 }
 
 @Test func unavailableInventoryPreservesExistingGenericStateAndRootsStaySeparate() {
-    let rootB = ClaudeInventorySession(sessionID: backgroundID, kind: .background, cwd: "/tmp", name: "two",
-                                       startedAt: 1, lifecycle: .background(state: "working"))
+    let rootB = ClaudeInventorySession(sessionID: backgroundID, kind: .background, startedAt: 1,
+                                       lifecycle: .background(state: "working"))
     var queue = AgentAttentionQueue()
     queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/a", observedAt: 1, sessions: [
-        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, cwd: "/tmp", name: "one",
-                               startedAt: 1, lifecycle: .interactive(status: "busy"))
+        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: "busy"))
     ]))
     queue.apply(.unavailable(sourceScope: "/tmp/a", observedAt: 2, reason: "timed out"))
     queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/b", observedAt: 3, sessions: [rootB]))
@@ -105,4 +150,28 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
     let running = queue.items.compactMap(\.running)
     #expect(running.contains { $0.identity.session.sourceScope == "/tmp/a" })
     #expect(running.contains { $0.identity.session.sourceScope == "/tmp/b" })
+}
+
+@Test func olderValidInventoryCannotEraseNewerGenericStateAndEmptyNewerPollDoes() {
+    let session = ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                                         lifecycle: .interactive(status: "busy"))
+    var queue = AgentAttentionQueue()
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 10, sessions: [session]))
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 9))
+    #expect(queue.workingCount == 1)
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 11))
+    #expect(queue.workingCount == 0)
+}
+
+@Test func activeInventoryCancelsProvisionalStopWithoutCreatingOutcome() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.provisionalStop(AgentProvisionalStop(identity: AgentTurnIdentity(session: identity, turn: "prompt"),
+                                                       arrivedAt: 2)))
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 3, sessions: [
+        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: "busy"))
+    ]))
+    #expect(queue.items.compactMap(\.outcome).isEmpty)
+    #expect(queue.items.compactMap(\.running).count == 1)
 }

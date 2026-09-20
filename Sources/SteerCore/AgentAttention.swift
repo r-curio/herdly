@@ -205,6 +205,8 @@ public struct AgentAttentionQueue: Sendable {
     private var running: [AgentSessionIdentity: AgentRunning] = [:]
     private var inventoryRunning: [AgentSessionIdentity: AgentRunning] = [:]
     private var provisionalStops: [AgentSessionIdentity: AgentProvisionalStop] = [:]
+    private var inventoryObservedAt: [String: Double] = [:]
+    private var ambiguousClaudeSessions: Set<AgentSessionIdentity> = []
     private var resolved: Set<AgentAttentionID> = []
     private var acknowledged: Set<AgentTurnIdentity>
     private var now: Double = 0
@@ -225,6 +227,10 @@ public struct AgentAttentionQueue: Sendable {
     public var workingCount: Int { Set(running.keys).union(inventoryRunning.keys).count }
     public var toCheckCount: Int { approvals.count + questions.count + outcomes.count }
     public var acknowledgedOutcomes: Set<AgentTurnIdentity> { acknowledged }
+    public var unavailableClaudeSessions: Set<AgentSessionIdentity> { ambiguousClaudeSessions }
+    public func isClaudeSessionUnavailable(_ identity: AgentSessionIdentity) -> Bool {
+        ambiguousClaudeSessions.contains(identity)
+    }
 
     public var snapshot: AgentAttentionSnapshot {
         AgentAttentionSnapshot(outcomes: outcomes.values.sorted(by: Self.older), acknowledged: acknowledged)
@@ -333,8 +339,18 @@ public struct AgentAttentionQueue: Sendable {
     /// Applies a valid root inventory as weaker lifecycle evidence. It can add a generic running
     /// row or confirm a previously observed Stop, but it never clears hook observations.
     public mutating func apply(_ scan: ClaudeInventoryScan, now: Double? = nil) {
-        guard scan.available, scan.observedAt.isFinite else { return }
+        guard scan.observedAt.isFinite else { return }
         let scope = scan.sourceScope
+        guard scan.observedAt >= (inventoryObservedAt[scope] ?? -.infinity) else { return }
+        inventoryObservedAt[scope] = scan.observedAt
+        let ambiguous = Set(scan.ambiguousSessionIDs.map {
+            AgentSessionIdentity(source: .claude, sourceScope: scope, session: $0, surface: .cli)
+        })
+        if scan.available {
+            ambiguousClaudeSessions = ambiguousClaudeSessions.filter { $0.sourceScope != scope }
+        }
+        ambiguousClaudeSessions.formUnion(ambiguous)
+        guard scan.available else { return }
         let sessions = scan.sessions.filter { $0.sessionID.isEmpty == false }
         let incoming = Set(sessions.map { AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                               session: $0.sessionID, surface: .cli) })

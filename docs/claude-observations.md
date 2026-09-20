@@ -29,8 +29,9 @@ row, while idle and background terminal states remove only inventory-derived row
 or duplicate inventory leaves both inventory and hook evidence untouched. A later valid
 interactive `idle` observation confirms a previously observed provisional `Stop`; inventory alone
 never creates an outcome, tool label, question, approval, sound, or target. Duplicate interactive
-resumes therefore remain one session identity with no unique direct target until a later poll is
-unique.
+resumes therefore remain one session identity with an explicit unavailable-control signal and no
+unique direct target until a later poll is unique. Older per-root polls are ignored, so an out-of-
+order empty snapshot cannot erase newer generic lifecycle state.
 
 ## Evidence status
 
