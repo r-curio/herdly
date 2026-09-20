@@ -87,17 +87,44 @@ public struct AttentionCompletion: Identifiable, Equatable, Codable, Sendable {
     public let session: UUID
     public let turn: UUID
     public let arrivedAt: Double
+    public let status: AgentOutcomeStatus
     /// True when the user may have viewed this result while the companion was not observing
     /// (it was queued or arrived while fully quit). Such an item is retained without a sound.
     public let uncertain: Bool
     public var id: CompletionIdentity { CompletionIdentity(source: source, session: session, turn: turn) }
 
-    public init(source: AttentionSource, session: UUID, turn: UUID, arrivedAt: Double, uncertain: Bool = false) {
+    public init(source: AttentionSource, session: UUID, turn: UUID, arrivedAt: Double,
+                uncertain: Bool = false, status: AgentOutcomeStatus = .finished) {
         self.source = source
         self.session = session
         self.turn = turn
         self.arrivedAt = arrivedAt
         self.uncertain = uncertain
+        self.status = status
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case source, session, turn, arrivedAt, uncertain, status
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        source = try container.decode(AttentionSource.self, forKey: .source)
+        session = try container.decode(UUID.self, forKey: .session)
+        turn = try container.decode(UUID.self, forKey: .turn)
+        arrivedAt = try container.decode(Double.self, forKey: .arrivedAt)
+        uncertain = try container.decodeIfPresent(Bool.self, forKey: .uncertain) ?? false
+        status = try container.decodeIfPresent(AgentOutcomeStatus.self, forKey: .status) ?? .finished
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(source, forKey: .source)
+        try container.encode(session, forKey: .session)
+        try container.encode(turn, forKey: .turn)
+        try container.encode(arrivedAt, forKey: .arrivedAt)
+        try container.encode(uncertain, forKey: .uncertain)
+        try container.encode(status, forKey: .status)
     }
 }
 
@@ -198,7 +225,7 @@ public struct AttentionQueue: Sendable {
         acknowledged = snapshot.acknowledged
         for saved in snapshot.completions where !acknowledged.contains(saved.id) {
             completions[saved.id] = AttentionCompletion(source: saved.source, session: saved.session, turn: saved.turn,
-                                                        arrivedAt: saved.arrivedAt, uncertain: true)
+                                                        arrivedAt: saved.arrivedAt, uncertain: true, status: saved.status)
         }
     }
 
