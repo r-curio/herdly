@@ -171,7 +171,8 @@ public enum ClaudeSetupPlanner {
                             helperPath: URL, eventsPath: URL,
                             sourceScope: URL? = nil,
                             policy: ClaudeSetupPolicy = ClaudeSetupPolicy(), usageEnabled: Bool = false,
-                            settingsExisted: Bool = true, installRecordPresent: Bool = true) -> ClaudeSetupPlan {
+                            settingsExisted: Bool = true, installRecordPresent: Bool = true,
+                            statusLineCompatible: Bool? = nil) -> ClaudeSetupPlan {
         guard capabilities.supported else {
             return empty(.unsupported("Claude Code \(capabilities.version ?? "version unknown") is older than the tested minimum \(ClaudeSetupRequirements.minimumCLIVersion)."), settings: settings, settingsExisted: settingsExisted)
         }
@@ -296,8 +297,8 @@ public enum ClaudeSetupPlanner {
         } else if let existingCommand = ClaudeStatusLineBridge.statusLineCommand(source["statusLine"]) {
             usage = ClaudeStatusLineBridge.isBridgeCommand(existingCommand)
                 ? .ready
-                : (ClaudeStatusLineCompatibility.probe(command: existingCommand)
-                    ? .ready : .unavailable(ClaudeStatusLineCompatibility.failureMessage))
+                : (statusLineCompatible == true
+                    ? .ready : .unavailable(ClaudeUsageSetupStatus.compatibilityFailureMessage))
         } else {
             usage = .unavailable("Claude usage unavailable: the existing status line is incompatible.")
         }
@@ -713,15 +714,6 @@ public struct ClaudeSetupInstaller {
             guard let restored = try removingStatusLine(settingsChange, original: state.originalStatusLine) else {
                 throw ClaudeSetupError.conflict("Claude settings.json could not remove Steer's usage status line.")
             }
-            settingsChange = restored
-        }
-        if plan.usageEnabled, plan.usageStatus == .ready,
-           let original = try? ClaudeSetupPlanner.jsonObject(plan.originalSettings),
-           let existingCommand = ClaudeStatusLineBridge.statusLineCommand(original["statusLine"]),
-           !ClaudeStatusLineBridge.isBridgeCommand(existingCommand),
-           !ClaudeStatusLineCompatibility.probe(command: existingCommand),
-           original["statusLine"] != nil,
-           let restored = ClaudeSetupPlanner.restoreMemberBytes(settingsChange, from: plan.originalSettings, key: "statusLine") {
             settingsChange = restored
         }
         if let state = existingState, current != state.installedSettings,

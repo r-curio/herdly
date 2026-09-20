@@ -81,12 +81,14 @@ enum ClaudeSetupDetection {
         } else if installRecordExists && !installRecordPresent {
             plannerPlan = nil
         } else {
+            let statusLineCompatible = statusLineCompatibility(settings: settings, usageEnabled: usageEnabled)
             plannerPlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: settings,
                                                   helperPath: roots.helperURL, eventsPath: roots.eventsDirectory,
                                                   sourceScope: root,
                                                   policy: setupPolicy,
                                                   usageEnabled: usageEnabled, settingsExisted: settingsExists,
-                                                  installRecordPresent: installRecordPresent)
+                                                  installRecordPresent: installRecordPresent,
+                                                  statusLineCompatible: statusLineCompatible)
         }
         let plan: ClaudeSetupPlan?
         if capabilities.supported && !installRecordPresent && inventoryUnavailable,
@@ -127,6 +129,14 @@ enum ClaudeSetupDetection {
                         usageStatus: usageStatus,
                         usageInstalled: usageInstalled,
                         activeSessionStatus: activeSessionStatus)
+    }
+
+    private static func statusLineCompatibility(settings: Data, usageEnabled: Bool) -> Bool? {
+        guard usageEnabled,
+              let object = try? JSONSerialization.jsonObject(with: settings) as? [String: Any],
+              let command = ClaudeStatusLineBridge.statusLineCommand(object["statusLine"]),
+              !ClaudeStatusLineBridge.isBridgeCommand(command) else { return nil }
+        return ClaudeStatusLineCompatibility.probe(command: command)
     }
 
     static func activeSessionsStatus(root: URL, capabilities: ClaudeCapabilities,
