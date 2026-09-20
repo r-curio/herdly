@@ -23,6 +23,32 @@ Steer configures the selected user root. Claude can also merge project and comma
 
 Ghostty readiness is separate from connection health. A root can be connected while Ghostty controls are off or still awaiting Automation permission. Exact return remains unavailable for stale, duplicate, overwritten, split, cross-window, or otherwise ambiguous targets.
 
+## Exact Claude tab return (#84)
+
+When Ghostty controls are enabled and permission is verified, Claude's **Open in Claude** action is
+shown only for a canonical session that appears exactly once in every complete configured-root
+inventory and in one current unsplit Ghostty tab titled `Steer Claude <full-session-id>`. The action
+rechecks the root inventories, the complete Ghostty inventory, the exact window/tab/terminal
+locator, and the selected front window before it can acknowledge queued outcomes. A title match
+alone never acknowledges anything.
+
+Manual acknowledgment requires a fresh Ghostty snapshot to observe the exact selected target change
+after the outcome arrived. Since snapshots are polls, the outcome must also predate the prior
+snapshot that establishes the transition lower bound; an outcome arriving between snapshots stays
+queued. A tab that was already selected, a restored outcome with no new observed visit, an incomplete
+inventory, or any uncertain target remains queued. The Open in Claude path has its own immediate
+before and after selection checks and may acknowledge only after that verified selection.
+
+Same-window return is supported. Duplicate live resumes, missing or stale sessions, overwritten
+titles, split tabs, background Ghostty windows, failed inventories, and changed locators remain
+unavailable without terminal input or acknowledgment. Ghostty Automation stays opt-in.
+
+Automated coverage is in `Tests/SteerCoreTests/CLITests.swift`: canonical full-title matching,
+duplicate and missing identities, overwritten and split titles, cross-window rejection before
+selection, focus-transition timing, duplicate roots, and incomplete inventories. The focused and
+full Swift suites cover source compatibility. Isolated live Claude/Ghostty return testing was
+deferred by the operator and is not claimed here.
+
 ## Ownership and undo
 
 Reinstall reuses the root's installation identity and recreates only missing exact entries. A changed owned handler or title environment value is a conflict. Undo restores the original `settings.json` byte-for-byte when it is unchanged; after unrelated edits it removes only unchanged Steer-owned entries and the exact title environment key, preserving other settings and environment formatting. Missing or inconsistent state refuses guessed restoration and leaves targeted manual recovery to the operator.

@@ -49,21 +49,34 @@ enum GhosttyNavigation {
         return (true, "Sent \(keys.joined(separator: " ")) to the Ghostty tab.")
     }
     static func open(session: UUID, live: Set<UUID>) -> (opened: Bool, message: String) {
+        open(title: GhosttyMatch.title(session), live: live.map(GhosttyMatch.title), unavailable: "No unique live, unsplit tab matches \(GhosttyMatch.title(session)). Keep that session open with its session-ID title enabled.", sameWindowOnly: false)
+    }
+    static func openClaude(sessionID: String, live: [String]) -> (opened: Bool, message: String) {
+        guard let title = GhosttyMatch.claudeTitle(sessionID) else {
+            return (false, "The exact Claude tab is unavailable because its session identity is not canonical.")
+        }
+        return open(title: title, live: live.compactMap(GhosttyMatch.claudeTitle), unavailable: "No unique live, unsplit tab matches \(title). Keep Claude open with its exact session title enabled.", sameWindowOnly: true)
+    }
+    private static func open(title: String, live: [String], unavailable: String, sameWindowOnly: Bool) -> (opened: Bool, message: String) {
         guard let before = snapshot() else {
             return (false, "Could not read Ghostty’s tabs. Check Automation access and that Ghostty is running.")
         }
-        guard let target = GhosttyMatch.target(session: session, live: live, snapshot: before) else {
-            return (false, "No unique live, unsplit tab matches \(GhosttyMatch.title(session)). Keep that session open with its session-ID title enabled.")
+        guard let target = GhosttyMatch.target(title: title, live: live, snapshot: before) else {
+            return (false, unavailable)
+        }
+        guard !sameWindowOnly || GhosttyMatch.isInCurrentWindow(target, snapshot: before) else {
+            return (false, "The exact tab is in another Ghostty window; Steer cannot raise that window safely.")
         }
         guard let bytes = try? JSONEncoder().encode(target),
               let object = try? JSONSerialization.jsonObject(with: bytes),
-              let response = request(["action": "select", "title": GhosttyMatch.title(session), "target": object]),
+              let response = request(["action": "select", "title": title, "target": object, "same_window_only": sameWindowOnly]),
               let value = try? JSONSerialization.jsonObject(with: response) as? [String: Any],
               value["status"] as? String == "ok" else {
             return (false, "Found the tab, but selection failed or its identity changed. The reminder is retained.")
         }
-        guard let after = snapshot(), after.selected == target,
-              GhosttyMatch.target(session: session, live: live, snapshot: after) == target else {
+        guard let after = snapshot(), (!sameWindowOnly || GhosttyMatch.isInCurrentWindow(target, snapshot: after)),
+              after.selected == target,
+              GhosttyMatch.target(title: title, live: live, snapshot: after) == target else {
             return (false, "Sent the tab selection, but could not verify the foreground tab. The reminder is retained.")
         }
         return (true, "Opened the matching Ghostty tab.")
