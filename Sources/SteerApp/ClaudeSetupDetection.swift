@@ -52,9 +52,15 @@ enum ClaudeSetupDetection {
         let status: ClaudeConnectionStatus
         if settingsExists && boundedRegularData(at: roots.settingsURL) == nil {
             status = .malformed("Claude settings.json is unreadable or too large; Steer will not change it.")
-        } else if case let .shadowed(message) = plan?.status {
+        } else if let plan, case let .unsupported(message) = plan.status {
+            status = .unsupported(message)
+        } else if let plan, case let .malformed(message) = plan.status {
+            status = .malformed(message)
+        } else if let plan, case let .conflict(message) = plan.status {
+            status = .conflict(message)
+        } else if let plan, case let .shadowed(message) = plan.status {
             status = .shadowed(message)
-        } else if case let .blockedByPolicy(message) = plan?.status {
+        } else if let plan, case let .blockedByPolicy(message) = plan.status {
             status = .blockedByPolicy(message)
         } else {
             status = ClaudeSetupInstaller().status(roots: roots, capabilities: capabilities)

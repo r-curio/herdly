@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import SteerCore
+@testable import SteerApp
 
 private let capabilities = ClaudeCapabilities(installed: true, supported: true, version: "2.1.273")
 
@@ -30,6 +31,23 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     let settings = try settingsObject(plan.settingsChange)
     #expect((settings["permissions"] as? [String: Any]) == nil)
     #expect((settings["statusLine"] as? [String: Any]) == nil)
+}
+
+@Test func claudeSetupSnapshotPreservesPlannerFailureState() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-snapshot-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = root.appendingPathComponent("config", isDirectory: true)
+    let support = root.appendingPathComponent("support", isDirectory: true)
+    try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+    try Data(#"{"hooks":{"Stop":{}}}"#.utf8).write(to: config.appendingPathComponent("settings.json"))
+
+    let snapshot = ClaudeSetupDetection.setupSnapshot(
+        root: config,
+        applicationSupport: support,
+        capabilities: capabilities
+    )
+    #expect(snapshot.status == .malformed("Claude settings.json has an unsupported hooks shape and was not changed."))
+    #expect(snapshot.plan?.status == .malformed("Claude settings.json has an unsupported hooks shape and was not changed."))
 }
 
 @Test func claudeSetupPreservesUnrelatedSettingsBytes() throws {
@@ -93,6 +111,12 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(installer.status(roots: first, capabilities: capabilities)
             == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Steer's hooks."))
 
+    let installedSettings = try Data(contentsOf: first.settingsURL)
+    let stablePlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: installedSettings,
+                                             helperPath: first.helperURL, eventsPath: first.eventsDirectory)
+    #expect(stablePlan.settingsChange == installedSettings)
+    #expect(stablePlan.requiresConfigure == false)
+
     let secondPlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: Data("{}".utf8),
                                               helperPath: second.helperURL, eventsPath: second.eventsDirectory)
     _ = try installer.install(secondPlan, roots: second, helper: helper, capabilities: capabilities)
@@ -100,7 +124,7 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(FileManager.default.fileExists(atPath: second.stateURL.path))
 
     // A valid exact-root event is the only transition from configured to connected.
-    let event = Data(#"{"source":"steer-claude-hook-v1","installation_id":"PLACEHOLDER","session_id":"session-a","captured_at":PLACEHOLDER_TIME}"#.utf8)
+    let event = Data(#"{"hook_event_name":"SessionStart","source":"steer-claude-hook-v1","installation_id":"PLACEHOLDER","session_id":"session-a","received_at":"2026-09-20T00:00:00Z","captured_at":PLACEHOLDER_TIME}"#.utf8)
     let stateData = try Data(contentsOf: first.stateURL)
     let state = try #require(JSONSerialization.jsonObject(with: stateData) as? [String: Any])
     let installationID = try #require(state["installationID"] as? String)
@@ -155,6 +179,32 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     let installed = try settingsObject(Data(contentsOf: setupRoots.settingsURL))
     var hooks = try #require(installed["hooks"] as? [String: Any])
     var starts = try #require(hooks["SessionStart"] as? [[String: Any]])
+    var extraField = installed
+    var extraHooks = try #require(extraField["hooks"] as? [String: Any])
+    var extraStarts = try #require(extraHooks["SessionStart"] as? [[String: Any]])
+    var extraHandlers = try #require(extraStarts[0]["hooks"] as? [[String: Any]])
+    extraHandlers[0]["description"] = "user mutation"
+    extraStarts[0]["hooks"] = extraHandlers
+    extraHooks["SessionStart"] = extraStarts
+    extraField["hooks"] = extraHooks
+    #expect(ClaudeSetupPlanner.plan(capabilities: capabilities,
+                                    settings: try JSONSerialization.data(withJSONObject: extraField),
+                                    helperPath: setupRoots.helperURL,
+                                    eventsPath: setupRoots.eventsDirectory).status
+            == .conflict("A Steer-owned Claude hook was changed; review setup before repair."))
+
+    var shadowedHook = installed
+    var shadowedHooks = try #require(shadowedHook["hooks"] as? [String: Any])
+    var shadowedStarts = try #require(shadowedHooks["SessionStart"] as? [[String: Any]])
+    shadowedStarts[0]["matcher"] = "Bash"
+    shadowedHooks["SessionStart"] = shadowedStarts
+    shadowedHook["hooks"] = shadowedHooks
+    #expect(ClaudeSetupPlanner.plan(capabilities: capabilities,
+                                    settings: try JSONSerialization.data(withJSONObject: shadowedHook),
+                                    helperPath: setupRoots.helperURL,
+                                    eventsPath: setupRoots.eventsDirectory).status
+            == .conflict("A Steer-owned Claude hook was changed; review setup before repair."))
+
     starts[0]["hooks"] = [["type": "command", "command": "/different", "timeout": 10]]
     hooks["SessionStart"] = starts
     var changed = installed
@@ -170,4 +220,10 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     let malformed = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: Data("not json".utf8),
                                              helperPath: setupRoots.helperURL, eventsPath: setupRoots.eventsDirectory)
     #expect(malformed.status == .malformed("Claude settings.json is not valid JSON and was not changed."))
+
+    let malformedHooks = ClaudeSetupPlanner.plan(capabilities: capabilities,
+                                                 settings: Data(#"{"hooks":{"Stop":{}}}"#.utf8),
+                                                 helperPath: setupRoots.helperURL,
+                                                 eventsPath: setupRoots.eventsDirectory)
+    #expect(malformedHooks.status == .malformed("Claude settings.json has an unsupported hooks shape and was not changed."))
 }
