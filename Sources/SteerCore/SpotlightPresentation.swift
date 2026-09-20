@@ -20,6 +20,23 @@ public enum NotchPresentationMode: Equatable, Sendable {
     public var showsAll: Bool { self == .queue }
 }
 
+/// Chooses among fresh source-aware cards after each card class has applied its own
+/// presentation policy. Queue order is the product priority order.
+public enum AgentPresentationSelection {
+    public static func highestPriority(in items: [AgentAttentionItem],
+                                       candidates: Set<AgentAttentionID>) -> AgentAttentionID? {
+        items.first { candidates.contains($0.id) }?.id
+    }
+}
+
+/// Claude has no verified foreground target in the current integration. Its fresh
+/// cards may present while Codex is foreground; Codex keeps the existing foreground gate.
+public enum AgentPresentationEligibility {
+    public static func foregroundGate(source: AgentSource, codexForeground: Bool?) -> Bool? {
+        source == .claude ? false : codexForeground
+    }
+}
+
 /// Owns the causal transition between automatic spotlighting and an explicit queue open.
 public struct NotchPresentationController: Equatable, Sendable {
     private var spotlight = Spotlight()
@@ -29,6 +46,9 @@ public struct NotchPresentationController: Equatable, Sendable {
     public init() {}
     public mutating func present(_ item: AttentionItemID, now: Double) { spotlight.present(item, now: now) }
     public mutating func present(_ item: AgentAttentionID, now: Double) { agentSpotlight.present(item, now: now) }
+    public func agentSpotlightIsActive(interacting: Bool, now: Double) -> Bool {
+        agentSpotlight.isActive(interacting: interacting, now: now)
+    }
     public mutating func openQueue() { manualOpen = true }
     public mutating func collapse() { manualOpen = false; spotlight.clear(); agentSpotlight.clear() }
     public mutating func update(interacting: Bool, now: Double, legacyPopup: Bool = false) -> NotchPresentationMode {
@@ -55,6 +75,11 @@ private struct AgentSpotlight: Equatable, Sendable {
         if interacting || now < until { return item }
         clear()
         return nil
+    }
+
+    func isActive(interacting: Bool, now: Double) -> Bool {
+        guard item != nil else { return false }
+        return interacting || now < until
     }
 
     mutating func clear() {
