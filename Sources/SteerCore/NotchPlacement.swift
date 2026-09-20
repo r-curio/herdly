@@ -330,3 +330,77 @@ public struct StripSummary: Equatable, Sendable {
         names[session] ?? "session " + session.uuidString.lowercased().prefix(8)
     }
 }
+
+public struct AgentStripSession: Equatable, Sendable {
+    public let session: AgentSessionIdentity
+    public let working: Bool
+    public let color: Int
+
+    public init(session: AgentSessionIdentity, working: Bool, color: Int) {
+        self.session = session
+        self.working = working
+        self.color = color
+    }
+}
+
+public struct AgentStripSummary: Equatable, Sendable {
+    public static let maximumSprites = StripSummary.maximumSprites
+    public static let colorCount = StripSummary.colorCount
+
+    public let subject: String
+    public let working: Bool
+    public let toCheck: Int
+    public let sessions: [AgentStripSession]
+    public let overflow: Int
+
+    public init(subject: String, working: Bool, toCheck: Int, sessions: [AgentStripSession] = [], overflow: Int = 0) {
+        self.subject = subject
+        self.working = working
+        self.toCheck = toCheck
+        self.sessions = sessions
+        self.overflow = overflow
+    }
+
+    public static func preferredColor(for session: AgentSessionIdentity) -> Int {
+        (session.source.rawValue.utf8.reduce(0) { $0 &+ Int($1) }
+            &+ session.sourceScope.utf8.reduce(0) { $0 &+ Int($1) }
+            &+ session.session.utf8.reduce(0) { $0 &+ Int($1) }) % colorCount
+    }
+
+    public static func sessionLabel(_ session: AgentSessionIdentity, names: [AgentSessionIdentity: String] = [:]) -> String {
+        let source = session.source == .claude ? "Claude" : "Codex"
+        if let name = names[session], !name.isEmpty { return "\(source) · \(name)" }
+        return "\(source) session " + String(session.session.prefix(8)).lowercased()
+    }
+
+    public static func make(items: [AgentAttentionItem], testPending: Bool = false,
+                            names: [AgentSessionIdentity: String] = [:]) -> Self {
+        let toCheck = items.filter { $0.kind != .running }.count + (testPending ? 1 : 0)
+        let working = items.contains { $0.running?.status == .working }
+        let subject: String
+        if let first = items.first {
+            if let name = names[first.session], !name.isEmpty {
+                subject = sessionLabel(first.session, names: names)
+            } else if let task = first.approval?.details?.taskName, !task.isEmpty {
+                let source = first.session.source == .claude ? "Claude" : "Codex"
+                subject = "\(source) · \(task)"
+            } else {
+                subject = sessionLabel(first.session, names: names)
+            }
+        } else {
+            subject = testPending ? "test notification" : "idle"
+        }
+        var sessions: [AgentStripSession] = []
+        var seen = Set<AgentSessionIdentity>()
+        var colors = Set<Int>()
+        for item in items where seen.insert(item.session).inserted {
+            guard sessions.count < maximumSprites else { continue }
+            var color = preferredColor(for: item.session)
+            while colors.contains(color) { color = (color + 1) % colorCount }
+            colors.insert(color)
+            sessions.append(AgentStripSession(session: item.session, working: item.running?.status == .working, color: color))
+        }
+        return Self(subject: subject, working: working, toCheck: toCheck, sessions: sessions,
+                    overflow: max(0, seen.count - maximumSprites))
+    }
+}
