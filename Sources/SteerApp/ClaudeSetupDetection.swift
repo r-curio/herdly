@@ -188,7 +188,7 @@ enum ClaudeSetupDetection {
         value > 100_000_000_000 ? value / 1_000 : value
     }
 
-    static func policy(for root: URL, currentDirectory: URL? = nil) -> ClaudeSetupPolicy {
+    static func policy(for root: URL, projectDirectory: URL? = nil) -> ClaudeSetupPolicy {
         if let configuredRoot = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"], !configuredRoot.isEmpty,
            URL(fileURLWithPath: configuredRoot).standardizedFileURL.path != root.standardizedFileURL.path {
             return ClaudeSetupPolicy(shadowedBy: "CLAUDE_CONFIG_DIR=\(configuredRoot)")
@@ -203,28 +203,29 @@ enum ClaudeSetupDetection {
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             if object["allowManagedHooksOnly"] as? Bool == true { return ClaudeSetupPolicy(managedHooksOnly: true) }
         }
-        // Claude's effective-settings resolver is not exposed by the supported CLI. We can
-        // safely fail closed for the current working project's explicit hook disablement and
-        // terminal-title override; other project roots and command-line settings stay unknown.
-        var directory = (currentDirectory ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath,
-                                                  isDirectory: true)).standardizedFileURL
-        for _ in 0..<32 {
-            for filename in ["settings.json", "settings.local.json"] {
-                let url = directory.appendingPathComponent(".claude", isDirectory: true).appendingPathComponent(filename)
-                guard let data = boundedRegularData(at: url, maximum: 1024 * 1024),
-                      let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-                if object["disableAllHooks"] as? Bool == true {
-                    return ClaudeSetupPolicy(shadowedBy: "project settings at \(url.path) disables all hooks")
+        // Claude's effective-settings resolver is not exposed by the supported CLI. Project
+        // settings are inspected only when a caller supplies an exact project directory from
+        // trusted session context; the setup snapshot has no such context and stays unknown.
+        if let projectDirectory {
+            var directory = projectDirectory.standardizedFileURL
+            for _ in 0..<32 {
+                for filename in ["settings.json", "settings.local.json"] {
+                    let url = directory.appendingPathComponent(".claude", isDirectory: true).appendingPathComponent(filename)
+                    guard let data = boundedRegularData(at: url, maximum: 1024 * 1024),
+                          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+                    if object["disableAllHooks"] as? Bool == true {
+                        return ClaudeSetupPolicy(shadowedBy: "project settings at \(url.path) disables all hooks")
+                    }
+                    if let environment = object["env"] as? [String: Any],
+                       let value = environment[ClaudeSetupRequirements.titleDisableEnvironmentKey] as? String,
+                       value != ClaudeSetupRequirements.titleDisableEnvironmentValue {
+                        return ClaudeSetupPolicy(shadowedBy: "project settings at \(url.path) overrides \(ClaudeSetupRequirements.titleDisableEnvironmentKey)")
+                    }
                 }
-                if let environment = object["env"] as? [String: Any],
-                   let value = environment[ClaudeSetupRequirements.titleDisableEnvironmentKey] as? String,
-                   value != ClaudeSetupRequirements.titleDisableEnvironmentValue {
-                    return ClaudeSetupPolicy(shadowedBy: "project settings at \(url.path) overrides \(ClaudeSetupRequirements.titleDisableEnvironmentKey)")
-                }
+                let parent = directory.deletingLastPathComponent()
+                if parent.path == directory.path { break }
+                directory = parent
             }
-            let parent = directory.deletingLastPathComponent()
-            if parent.path == directory.path { break }
-            directory = parent
         }
         return ClaudeSetupPolicy()
     }

@@ -1940,9 +1940,11 @@ private struct ClaudeAgentControls: View {
                                 let hookFields = plan.ownedHooks.map { hook in
                                     "  hooks.\(hook.event) matcher=\(hook.matcher ?? "<any>") command=\(hook.command) timeout=\(ClaudeSetupRequirements.hookTimeout)"
                                 }.joined(separator: "\n")
-                                let environmentFields = plan.ownedEnvironment.map { key, value in
-                                    "  env.\(key)=\(value)"
-                                }.sorted().joined(separator: "\n")
+                                let environmentFields = plan.ownedEnvironment.isEmpty
+                                    ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey)=\(ClaudeSetupRequirements.titleDisableEnvironmentValue) (already present; preserved)"
+                                    : plan.ownedEnvironment.map { key, value in
+                                        "  env.\(key)=\(value) (Steer adds and owns)"
+                                    }.sorted().joined(separator: "\n")
                                 let previewText = [
                                     "settings.json: \(root.settingsPath)", hookFields, environmentFields,
                                     "owned helper: \(root.helperPath)",
@@ -1950,7 +1952,7 @@ private struct ClaudeAgentControls: View {
                                     "owned install record: \(root.statePath)",
                                     "owned backups: \(root.backupsPath)",
                                     "SessionStart and SessionEnd title: JSON terminalSequence with the full session ID / reset",
-                                    "effective scope: selected user root; project/command-line overrides unavailable unless detected in the current project",
+                                    "effective scope: selected user root; project/command-line overrides unavailable (project context not supplied)",
                                     "optional usage intent: \(plan.usageEnabled ? "on (not installed)" : "off")"
                                 ].joined(separator: "\n")
                                 Text(previewText)

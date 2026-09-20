@@ -136,6 +136,13 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     let changed = try #require(String(data: plan.settingsChange, encoding: .utf8))
     #expect(changed.contains("\"env\": { \"KEEP\": \"value\", \"NESTED\": { \"x\": 1 }"))
 
+    let preexisting = Data("{\"env\": { \"KEEP\": \"value\", \"CLAUDE_CODE_DISABLE_TERMINAL_TITLE\": \"1\" }}".utf8)
+    let preexistingPlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: preexisting,
+                                                   helperPath: URL(fileURLWithPath: "/tmp/SteerHook"),
+                                                   eventsPath: URL(fileURLWithPath: "/tmp/events"))
+    #expect(preexistingPlan.status == .ready)
+    #expect(preexistingPlan.ownedEnvironment.isEmpty)
+
     let conflicting = Data("{\"env\": { \"CLAUDE_CODE_DISABLE_TERMINAL_TITLE\": \"0\" }}".utf8)
     #expect(ClaudeSetupPlanner.plan(capabilities: capabilities, settings: conflicting,
                                     helperPath: URL(fileURLWithPath: "/tmp/SteerHook"),
@@ -151,8 +158,42 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     try Data(#"{"disableAllHooks":true}"#.utf8).write(to: projectConfig.appendingPathComponent("settings.local.json"))
 
     let policy = ClaudeSetupDetection.policy(for: project.appendingPathComponent("user-root", isDirectory: true),
-                                             currentDirectory: project)
+                                             projectDirectory: project)
     #expect(policy == ClaudeSetupPolicy(shadowedBy: "project settings at \(projectConfig.path)/settings.local.json disables all hooks"))
+    #expect(ClaudeSetupDetection.policy(for: project.appendingPathComponent("user-root", isDirectory: true))
+            == ClaudeSetupPolicy())
+}
+
+@Test func claudeSetupRepairOwnsTitleKeyOnlyWhenItReaddsAUserRemovedValue() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-title-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let setupRoots = roots(in: root)
+    let helper = Data("helper-v1".utf8)
+    let installer = ClaudeSetupInstaller()
+    let original = Data("{\"env\": { \"CLAUDE_CODE_DISABLE_TERMINAL_TITLE\": \"1\" }}".utf8)
+    try FileManager.default.createDirectory(at: setupRoots.configDirectory, withIntermediateDirectories: true)
+    try original.write(to: setupRoots.settingsURL)
+    let firstPlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: original,
+                                             helperPath: setupRoots.helperURL, eventsPath: setupRoots.eventsDirectory)
+    #expect(firstPlan.ownedEnvironment.isEmpty)
+    _ = try installer.install(firstPlan, roots: setupRoots, helper: helper, capabilities: capabilities)
+
+    var removed = try settingsObject(Data(contentsOf: setupRoots.settingsURL))
+    removed.removeValue(forKey: "env")
+    try JSONSerialization.data(withJSONObject: removed).write(to: setupRoots.settingsURL)
+    #expect(installer.status(roots: setupRoots, capabilities: capabilities)
+            == .repairRequired("Steer's terminal title setting is missing; Configure Claude to repair setup."))
+    let repairPlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: try Data(contentsOf: setupRoots.settingsURL),
+                                               helperPath: setupRoots.helperURL, eventsPath: setupRoots.eventsDirectory)
+    #expect(repairPlan.ownedEnvironment == [ClaudeSetupRequirements.titleDisableEnvironmentKey: ClaudeSetupRequirements.titleDisableEnvironmentValue])
+    _ = try installer.install(repairPlan, roots: setupRoots, helper: helper, capabilities: capabilities)
+
+    var drifted = try settingsObject(Data(contentsOf: setupRoots.settingsURL))
+    drifted["model"] = "user-changed"
+    try JSONSerialization.data(withJSONObject: drifted).write(to: setupRoots.settingsURL)
+    _ = try installer.undo(roots: setupRoots)
+    let restored = try settingsObject(Data(contentsOf: setupRoots.settingsURL))
+    #expect(restored["env"] == nil)
 }
 
 @Test func claudeSetupInstallReinstallRepairAndUndoKeepOtherRootIndependent() throws {
@@ -162,12 +203,13 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     let second = roots(in: root, name: "second")
     let helper = Data("helper-v1".utf8)
     let installer = ClaudeSetupInstaller()
-    let original = Data(#"{"env": { "KEEP": "value" }, "permissions":{"allow":["Read"]},"statusLine":{"type":"command","command":"existing"}}"#.utf8)
+    let original = Data(#"{"env": { "KEEP": "value", "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1" }, "permissions":{"allow":["Read"]},"statusLine":{"type":"command","command":"existing"}}"#.utf8)
 
     try FileManager.default.createDirectory(at: first.configDirectory, withIntermediateDirectories: true)
     try original.write(to: first.settingsURL)
     let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: original,
                                        helperPath: first.helperURL, eventsPath: first.eventsDirectory)
+    #expect(plan.ownedEnvironment.isEmpty)
     #expect(try installer.install(plan, roots: first, helper: helper, capabilities: capabilities)
             == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Steer's hooks."))
     #expect(installer.status(roots: first, capabilities: capabilities)
@@ -241,6 +283,8 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect((restored["permissions"] as? [String: Any])?["allow"] as? [String] == ["Read"])
     #expect((restored["statusLine"] as? [String: Any])?["command"] as? String == "existing")
     #expect((restored["env"] as? [String: Any])?["KEEP"] as? String == "value")
+    #expect((restored["env"] as? [String: Any])?[ClaudeSetupRequirements.titleDisableEnvironmentKey] as? String
+            == ClaudeSetupRequirements.titleDisableEnvironmentValue)
     #expect(!FileManager.default.fileExists(atPath: first.stateURL.path))
     #expect(FileManager.default.fileExists(atPath: second.stateURL.path))
 }
