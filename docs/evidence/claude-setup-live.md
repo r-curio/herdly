@@ -148,25 +148,47 @@ This was not completed in the automated run. The available automation could
 not operate a real Ghostty tab, so this section is an operator checkpoint and
 makes no pass claim.
 
-Paste this self-contained block into a real unsplit Ghostty tab. It reads the
-default authenticated Claude root without editing its settings, writes a
-disposable `--settings` file, and uses a temporary working directory:
+Paste this self-contained block into a real unsplit Ghostty tab from the
+repository root after building the packaged app with `sh scripts/build-app.sh`.
+It reads the default authenticated Claude root without editing its settings,
+writes a disposable `--settings` file, and uses a temporary working directory:
 
 ```sh
-set -eu
-ROOT_RUN="$(mktemp -d /private/tmp/steer-claude-ghostty.XXXXXX)"
-CONFIG="$ROOT_RUN/config"
-EVENTS="$ROOT_RUN/events"
-HELPER="/private/tmp/steer-issue-80-final/output/Steer.app/Contents/Helpers/SteerHook"
-INSTALLATION_ID="$(uuidgen | tr '[:lower:]' '[:upper:]')"
-SESSION_ID="$(uuidgen | tr '[:lower:]' '[:upper:]')"
-mkdir -p "$CONFIG" "$EVENTS"
+(
+  set -eu
+  CHECKOUT="$(pwd -P)"
+  HELPER="$CHECKOUT/output/Steer.app/Contents/Helpers/SteerHook"
+  test -x "$HELPER"
+  ROOT_RUN="$(mktemp -d /private/tmp/steer-claude-ghostty.XXXXXX)"
+  CONFIG="$ROOT_RUN/config"
+  EVENTS="$ROOT_RUN/events"
+  INSTALLATION_ID="$(uuidgen | tr '[:lower:]' '[:upper:]')"
+  SESSION_ID="$(uuidgen | tr '[:lower:]' '[:upper:]')"
+  mkdir -p "$CONFIG" "$EVENTS"
 
-shell_quote() {
-  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\''/g")"
-}
-HOOK_COMMAND="$(shell_quote "$HELPER") --agent claude --events-dir $(shell_quote "$EVENTS") --installation-id $(shell_quote "$INSTALLATION_ID") --terminal-title"
-python3 - "$CONFIG/settings.json" "$HOOK_COMMAND" <<'PY'
+  HOOK_COMMAND="$(python3 - "$HELPER" "$EVENTS" "$INSTALLATION_ID" <<'PY'
+import shlex
+import sys
+
+helper, events, installation_id = sys.argv[1:]
+print(" ".join([
+    shlex.quote(helper),
+    "--agent", "claude",
+    "--events-dir", shlex.quote(events),
+    "--installation-id", shlex.quote(installation_id),
+    "--terminal-title",
+]), end="")
+PY
+)"
+  python3 - "$ROOT_RUN/helper's-dir/SteerHook" <<'PY'
+import shlex
+import sys
+
+path = sys.argv[1]
+assert shlex.split(shlex.quote(path)) == [path]
+PY
+
+  python3 - "$CONFIG/settings.json" "$HOOK_COMMAND" <<'PY'
 import json
 import pathlib
 import sys
@@ -180,21 +202,24 @@ pathlib.Path(path).write_text(json.dumps({
     },
 }, indent=2) + "\n")
 PY
-cd "$ROOT_RUN"
-claude --settings "$CONFIG/settings.json" --setting-sources project --session-id "$SESSION_ID"
+  printf 'SESSION_ID=%s\nExpected Ghostty title: Steer Claude %s\n' "$SESSION_ID" "$SESSION_ID"
+  cd "$ROOT_RUN"
+  claude --settings "$CONFIG/settings.json" --setting-sources project --session-id "$SESSION_ID"
+)
 ```
 
-If the default root is authenticated, submit one harmless prompt and check the
-tab title is exactly `Steer Claude <full SESSION_ID>`. Exit Claude through its
-clean exit path and check that the title resets to the terminal's normal title.
+If the default root is authenticated, submit one harmless prompt. Before
+launching Claude, the block prints the full `SESSION_ID` and expected title.
+At the first checkpoint, while Claude remains open, report the exact title
+shown in the tab and whether it matches `Steer Claude <full SESSION_ID>`. Stop
+after that report; clean exit and title reset are a separate later checkpoint.
 The `--setting-sources project` flag excludes the ordinary user and local
 settings while retaining the default root's authentication.
 If authentication or startup fails, report that result without retrying with a
 real credential in the disposable root. Report the tested Steer commit, helper
-SHA-256, whether the full title appeared, whether the reset appeared, and any
-observed error. Do not paste credentials or raw conversation output into the
-evidence record.
+SHA-256, whether the full title appeared, and any observed error. Record the
+clean shutdown reset in the later checkpoint. Do not paste credentials or raw
+conversation output into the evidence record.
 
-This run does not claim that Ghostty applied or retained the title, that clean
-shutdown reset was visible in the terminal, or that abrupt-exit restoration
-works.
+This run does not claim that Ghostty applied or retained the title. Clean
+shutdown reset and abrupt-exit restoration remain separate later checkpoints.
