@@ -160,6 +160,24 @@ private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installati
                                         in: directory))
 }
 
+@Test func claudeQuestionStoreRejectsInvalidReadIDsBeforePathConstruction() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-question-read-id-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let request = claudeQuestionRequest(requestID: "sentinel", eventDirectory: directory.standardizedFileURL.path)
+    let receipt = claudeQuestionReceipt(for: request)
+    let answer = claudeQuestionAnswer(for: request)
+    try JSONEncoder().encode(request).write(to: directory.appendingPathComponent("sentinel.question"))
+    try JSONEncoder().encode(receipt).write(to: directory.appendingPathComponent("sentinel.question-receipt"))
+    try JSONEncoder().encode(answer).write(to: directory.appendingPathComponent("sentinel.question-answer"))
+
+    for invalidID in ["../sentinel", "", "a/b", "a\\b"] {
+        #expect(ClaudeQuestionStore.request(for: invalidID, in: directory) == nil)
+        #expect(ClaudeQuestionStore.receipt(for: invalidID, in: directory) == nil)
+        #expect(ClaudeQuestionStore.answer(for: invalidID, in: directory) == nil)
+    }
+}
+
 @Test func claudeQuestionHelperRejectsMismatchedAndLateRecords() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-question-mismatch-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
