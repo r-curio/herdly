@@ -149,18 +149,13 @@ private func claudeQuestionLiveness(for request: ClaudeQuestionRequest,
     let request = ClaudeQuestionRequest(requestID: "request-1", installationID: "install-1", sourceScope: "/root",
                                         eventDirectory: directory.standardizedFileURL.path,
                                         sessionID: "session-1",
-                                        promptID: "prompt-1", toolUseID: "tool-1", publishedAt: now,
+                                        promptID: "prompt-1", toolUseID: "tool-1", publishedAt: now - 0.05,
                                         expiresAt: now + 1, prompts: [QuestionPrompt(header: "Release", question: "Which?",
                                                                                      options: ["Red", "Blue"])])
     #expect(ClaudeQuestionStore.publish(request, in: directory))
     #expect(!ClaudeQuestionStore.publish(request, in: directory))
-
-    DispatchQueue.global().asyncAfter(deadline: .now() + 0.01) {
-        let receipt = claudeQuestionReceipt(for: request, receivedAt: now + 0.01)
-        let answer = claudeQuestionAnswer(for: request, decidedAt: now + 0.02)
-        _ = ClaudeQuestionStore.publish(receipt, in: directory)
-        _ = ClaudeQuestionStore.publish(answer, in: directory)
-    }
+    #expect(ClaudeQuestionStore.publish(claudeQuestionReceipt(for: request, receivedAt: now - 0.02), in: directory))
+    #expect(ClaudeQuestionStore.publish(claudeQuestionAnswer(for: request, decidedAt: now - 0.01), in: directory))
     let answer = ClaudeQuestionHelper.awaitAnswer(for: request, in: directory,
                                                   connectionTimeout: 0.2, answerTimeout: 0.2)
     #expect(answer?.answer == "Blue")
