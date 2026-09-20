@@ -74,6 +74,7 @@ public enum ClaudeObservationReader {
         var turns: [AgentTurnIdentity: Turn] = [:]
         var sessionPrompts: [String: String] = [:]
         var endedSessions = Set<String>()
+        var sessionEndAt: [String: Double] = [:]
         var seenApprovals = Set<AgentCallIdentity>()
         var seenQuestions = Set<AgentCallIdentity>()
 
@@ -81,8 +82,11 @@ public enum ClaudeObservationReader {
             switch record.event {
             case "SessionStart":
                 endedSessions.remove(record.session)
+                sessionEndAt.removeValue(forKey: record.session)
             case "SessionEnd":
                 endedSessions.insert(record.session)
+                sessionEndAt[record.session] = max(sessionEndAt[record.session] ?? -.infinity,
+                                                   record.capturedAt)
                 if let prompt = sessionPrompts[record.session] {
                     let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                         session: record.session, surface: .cli)
@@ -99,6 +103,10 @@ public enum ClaudeObservationReader {
                 }
             case "UserPromptSubmit":
                 guard let promptID = valid(record.promptID) else { continue }
+                if let endedAt = sessionEndAt[record.session], record.capturedAt > endedAt {
+                    endedSessions.remove(record.session)
+                    sessionEndAt.removeValue(forKey: record.session)
+                }
                 if let previousPrompt = sessionPrompts[record.session], previousPrompt != promptID {
                     let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                         session: record.session, surface: .cli)
@@ -118,6 +126,10 @@ public enum ClaudeObservationReader {
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
                 if var existing = turns[turnID] {
+                    if let closedAt = existing.closedAt, record.capturedAt > closedAt {
+                        existing.closedAt = nil
+                        existing.terminal = nil
+                    }
                     if existing.promptText == nil { existing.promptText = boundedText(record.prompt) }
                     existing.startedAt = min(existing.startedAt, record.capturedAt)
                     turns[turnID] = existing
@@ -133,7 +145,16 @@ public enum ClaudeObservationReader {
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
-                guard var turn = turns[turnID], turn.closedAt == nil else { continue }
+                guard var turn = turns[turnID] else { continue }
+                if let closedAt = turn.closedAt {
+                    guard record.capturedAt > closedAt else { continue }
+                    turn.closedAt = nil
+                    turn.terminal = nil
+                }
+                if let endedAt = sessionEndAt[record.session], record.capturedAt > endedAt {
+                    endedSessions.remove(record.session)
+                    sessionEndAt.removeValue(forKey: record.session)
+                }
                 let input = stringInput(record.toolInput)
                 let tool = Tool(id: toolID, name: name, input: input, at: record.capturedAt)
                 turn.tools[toolID] = tool
