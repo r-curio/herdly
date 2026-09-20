@@ -294,7 +294,9 @@ public struct AgentAttentionQueue: Sendable {
                 guard active.identity.session.source == .claude, active.arrivedAt > outcome.arrivedAt else { return }
                 outcomes.removeValue(forKey: active.id)
             }
-            guard running[active.identity.session]?.arrivedAt ?? -.infinity < active.arrivedAt else { return }
+            if let current = running[active.identity.session] {
+                guard active.arrivedAt > current.arrivedAt || (active.id == current.id && active != current) else { return }
+            }
             running[active.identity.session] = active
         case let .resolved(id):
             dismiss(id)
@@ -304,6 +306,20 @@ public struct AgentAttentionQueue: Sendable {
 
     public mutating func apply(_ observations: [AgentObservation], now: Double? = nil) {
         observations.forEach { apply($0, now: now) }
+    }
+
+    /// Drops source-scoped actionable and running state absent from a complete source scan.
+    /// Outcomes stay until the user acknowledges them. Raw stores are used so a running row hidden
+    /// behind a question is reconciled too.
+    public mutating func reconcile(source: AgentSource, sourceScope: String,
+                                   keeping incoming: Set<AgentAttentionID>) {
+        let current = Set(approvals.keys.filter { $0.session.source == source && $0.session.sourceScope == sourceScope }
+            .map(AgentAttentionID.approval)
+            + questions.keys.filter { $0.session.source == source && $0.session.sourceScope == sourceScope }
+            .map(AgentAttentionID.question)
+            + running.values.filter { $0.identity.session.source == source && $0.identity.session.sourceScope == sourceScope }
+            .map { AgentAttentionID.running($0.id) })
+        for id in current where !incoming.contains(id) { dismiss(id) }
     }
 
     public mutating func expire(at now: Double) {

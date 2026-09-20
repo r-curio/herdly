@@ -14,7 +14,7 @@ import Testing
     ])
     defer { try? FileManager.default.removeItem(at: root) }
 
-    let scan = ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install")
+    let scan = scanClaude(root)
     let running = try #require(scan.observations.compactMap { observation -> AgentRunning? in
         if case let .running(value) = observation { return value }
         return nil
@@ -37,7 +37,7 @@ import Testing
     ])
     defer { try? FileManager.default.removeItem(at: root) }
 
-    let scan = ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install")
+    let scan = scanClaude(root)
     let running = try #require(scan.observations.compactMap { observation -> AgentRunning? in
         if case let .running(value) = observation { return value }
         return nil
@@ -63,7 +63,7 @@ import Testing
         .write(to: root.appendingPathComponent("foreign.json"), options: .atomic)
     try Data("{ malformed".utf8).write(to: root.appendingPathComponent("malformed.json"), options: .atomic)
 
-    let scan = ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install")
+    let scan = scanClaude(root)
     let running = try #require(scan.observations.compactMap { observation -> AgentRunning? in
         if case let .running(value) = observation { return value }
         return nil
@@ -82,7 +82,7 @@ import Testing
     ])
     defer { try? FileManager.default.removeItem(at: root) }
 
-    let scan = ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install")
+    let scan = scanClaude(root)
 
     #expect(scan.observations.isEmpty)
 }
@@ -100,7 +100,7 @@ import Testing
     ])
     defer { try? FileManager.default.removeItem(at: root) }
 
-    let scan = ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install")
+    let scan = scanClaude(root)
 
     #expect(scan.observations.count == 1)
     guard case let .outcome(outcome) = scan.observations[0] else {
@@ -108,6 +108,91 @@ import Testing
         return
     }
     #expect(outcome.status == .failed)
+}
+
+@Test func claudeStopFailureClearsRequestsWithoutASeparateStop() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "AskUserQuestion", toolUseID: "q1",
+                     toolInput: ["questions": [["question": "Choose"]]]),
+        claudeRecord("PreToolUse", at: 2.5, promptID: "p1", toolName: "Write", toolUseID: "a1",
+                     toolInput: ["file_path": "/tmp/file"]),
+        claudeRecord("PermissionRequest", at: 2.75, promptID: "p1", toolName: "Write")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var queue = AgentAttentionQueue()
+    queue.apply(scanClaude(root))
+    #expect(queue.items.contains { $0.kind == .question })
+    #expect(queue.items.contains { $0.kind == .actionableApproval })
+
+    try appendClaudeEvent(claudeRecord("StopFailure", at: 3, promptID: "p1"), to: root)
+    queue.apply(scanClaude(root))
+
+    #expect(queue.items.filter { $0.session.source == .claude }.map(\.kind) == [.outcome])
+    #expect(queue.items.first?.outcome?.status == .failed)
+}
+
+@Test func claudeMatchingPostClearsOnlyTheQuestionOrApprovalCall() throws {
+    let questionRoot = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "AskUserQuestion", toolUseID: "question-call",
+                     toolInput: ["questions": [["question": "Choose"]]]),
+        claudeRecord("PreToolUse", at: 3, promptID: "p1", toolName: "Bash", toolUseID: "other-call",
+                     toolInput: ["command": "run"]),
+        claudeRecord("PostToolUse", at: 4, promptID: "p1", toolUseID: "question-call")
+    ])
+    let approvalRoot = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Bash", toolUseID: "approval-call",
+                     toolInput: ["command": "approval"]),
+        claudeRecord("PermissionRequest", at: 3, promptID: "p1", toolName: "Bash"),
+        claudeRecord("PostToolUseFailure", at: 4, promptID: "p1", toolUseID: "approval-call")
+    ])
+    defer {
+        try? FileManager.default.removeItem(at: questionRoot)
+        try? FileManager.default.removeItem(at: approvalRoot)
+    }
+
+    let questionObservations = scanClaude(questionRoot).observations
+    #expect(questionObservations.contains { if case .question = $0 { return true }; return false } == false)
+    #expect(questionObservations.contains { observation in
+        if case let .running(value) = observation { return value.toolInput["command"] == "run" }
+        return false
+    })
+    let approvalObservations = scanClaude(approvalRoot).observations
+    #expect(approvalObservations.contains { if case .approval = $0 { return true }; return false } == false)
+}
+
+@Test func claudeSessionEndReconcilesQuestionAndHiddenRunningState() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "AskUserQuestion", toolUseID: "question-call",
+                     toolInput: ["questions": [["question": "Choose"]]])
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var queue = AgentAttentionQueue()
+    queue.apply(scanClaude(root))
+    #expect(queue.items.contains { $0.kind == .question })
+    #expect(queue.workingCount == 1)
+
+    try appendClaudeEvent(claudeRecord("SessionEnd", at: 3), to: root)
+    queue.apply(scanClaude(root))
+    #expect(queue.items.filter { $0.session.source == .claude }.isEmpty)
+    #expect(queue.workingCount == 0)
+}
+
+@Test func claudeToolTextFallsBackAfterTheInjectedFreshnessBound() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Keep working"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Bash", toolUseID: "t1",
+                     toolInput: ["command": "run"])
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let fresh = scanClaude(root, now: 31).observations
+    let stale = scanClaude(root, now: 33).observations
+    #expect(fresh.contains { if case let .running(value) = $0 { return value.fullAction == "run" }; return false })
+    #expect(stale.contains { if case let .running(value) = $0 { return value.fullAction == nil && value.prompt == "Keep working" }; return false })
 }
 
 @Test func claudeRootsAndInstallationIDsCannotClearEachOther() throws {
@@ -132,8 +217,8 @@ import Testing
         try? FileManager.default.removeItem(at: rootB)
     }
 
-    let scanA = ClaudeObservationReader.scan(events: rootA, sourceScope: rootA.path, installationID: "install")
-    let scanB = ClaudeObservationReader.scan(events: rootB, sourceScope: rootB.path, installationID: "install")
+    let scanA = scanClaude(rootA)
+    let scanB = scanClaude(rootB)
     var queue = AgentAttentionQueue()
     queue.apply(scanB)
     queue.apply(scanA)
@@ -158,17 +243,60 @@ import Testing
     defer { try? FileManager.default.removeItem(at: root) }
     var queue = AgentAttentionQueue()
 
-    queue.apply(ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install"))
+    queue.apply(scanClaude(root))
     #expect(queue.items.first?.running?.toolName == nil)
 
     try appendClaudeEvent(claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Bash", toolUseID: "t1",
                                        toolInput: ["command": "swift test"]), to: root)
-    queue.apply(ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install"))
+    queue.apply(scanClaude(root))
     #expect(queue.items.first?.running?.fullAction == "swift test")
 
     try appendClaudeEvent(claudeRecord("Stop", at: 3, promptID: "p1"), to: root)
-    queue.apply(ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install"))
+    queue.apply(scanClaude(root))
     #expect(queue.items.first?.running?.toolName == nil)
+}
+
+@Test func claudeQueueClearsToolDetailWhenFreshnessExpires() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Keep working"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Bash", toolUseID: "t1",
+                     toolInput: ["command": "swift test"])
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var queue = AgentAttentionQueue()
+
+    queue.apply(scanClaude(root, now: 10))
+    #expect(queue.items.first?.running?.fullAction == "swift test")
+
+    queue.apply(scanClaude(root, now: 33))
+    #expect(queue.items.first?.running?.fullAction == nil)
+    #expect(queue.items.first?.running?.prompt == "Keep working")
+}
+
+@Test func claudeLaterPromptClosesOlderTurnWithoutInventingOutcome() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "First"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Bash", toolUseID: "t1",
+                     toolInput: ["command": "old"]),
+        claudeRecord("PreToolUse", at: 2.5, promptID: "p1", toolName: "AskUserQuestion", toolUseID: "q1",
+                     toolInput: ["questions": [["question": "Choose"]]]),
+        claudeRecord("PreToolUse", at: 2.75, promptID: "p1", toolName: "Write", toolUseID: "a1",
+                     toolInput: ["file_path": "/tmp/file"]),
+        claudeRecord("PermissionRequest", at: 2.8, promptID: "p1", toolName: "Write"),
+        claudeRecord("UserPromptSubmit", at: 3, promptID: "p2", prompt: "Second")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let observations = scanClaude(root, now: 10).observations
+    let running = try #require(observations.compactMap { observation -> AgentRunning? in
+        if case let .running(value) = observation { return value }
+        return nil
+    }.first)
+
+    #expect(running.identity.turn == "p2")
+    #expect(observations.contains { if case .question = $0 { return true }; return false } == false)
+    #expect(observations.contains { if case .approval = $0 { return true }; return false } == false)
+    #expect(observations.contains { if case .outcome = $0 { return true }; return false } == false)
 }
 
 private func makeClaudeEvents(_ records: [[String: Any]], installationID: String = "install") throws -> URL {
@@ -189,6 +317,10 @@ private func appendClaudeEvent(_ record: [String: Any], to root: URL, installati
     record["installation_id"] = installationID
     let data = try JSONSerialization.data(withJSONObject: record, options: [])
     try data.write(to: root.appendingPathComponent("event-\(UUID().uuidString).json"), options: .atomic)
+}
+
+private func scanClaude(_ root: URL, now: Double = 10) -> ClaudeObservationScan {
+    ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install", now: now)
 }
 
 private func claudeRecord(_ event: String, at capturedAt: Double, promptID: String? = nil,

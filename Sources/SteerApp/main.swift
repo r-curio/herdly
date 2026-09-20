@@ -709,6 +709,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let known = knownCLISessions
         let daemonThreads = daemonClient.loadedThreads
         let observingSince = Companion.launchedAt
+        let observationNow = Date().timeIntervalSince1970
         let claudeRoots = claude.roots.compactMap { root -> (scope: String, events: URL, installationID: String)? in
             guard root.status == .connected, !root.eventsPath.isEmpty,
                   let installationID = root.plan?.installationID, !installationID.isEmpty else { return nil }
@@ -724,7 +725,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                  ProcessList.arguments().map(CodexCLIProcesses.isRunning(processList:)) ?? false,
                  claudeRoots.map { root in
                      ClaudeObservationReader.scan(events: root.events, sourceScope: root.scope,
-                                                  installationID: root.installationID, observingSince: observingSince)
+                                                  installationID: root.installationID, observingSince: observingSince,
+                                                  now: observationNow)
                  })
             }.value
             let scan = result.0
