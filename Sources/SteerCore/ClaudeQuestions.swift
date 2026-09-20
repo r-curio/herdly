@@ -100,6 +100,12 @@ public struct ClaudeQuestionAnswer: Codable, Equatable, Sendable {
 /// keeps the capability to answer in memory, so a restart cannot replay a saved request.
 public enum ClaudeQuestionStore {
     private static let rendezvousDirectoryName = ".steer-claude-questions"
+    private static let maximumEntries = 4096
+
+    private struct BoundedEntries {
+        let values: [URL]
+        let hasMore: Bool
+    }
 
     /// Question transport files live below the event directory so hook observations and the
     /// rendezvous lifecycle have independent bounds.
@@ -153,13 +159,12 @@ public enum ClaudeQuestionStore {
     public static func pending(in directory: URL, installationID: String, observingSince: Double,
                                now: Double = Date().timeIntervalSince1970) -> [ClaudeQuestionRequest] {
         let rendezvous = rendezvousDirectory(in: directory)
-        guard let urls = try? FileManager.default.contentsOfDirectory(at: rendezvous,
-                                                                         includingPropertiesForKeys: nil) else {
+        guard let bounded = boundedEntries(in: rendezvous) else {
             return []
         }
         let eventDirectory = directory.standardizedFileURL.path
         var pending: [ClaudeQuestionRequest] = []
-        for url in urls where url.pathExtension == "question" {
+        for url in bounded.values where url.pathExtension == "question" {
             guard let request = decode(url, as: ClaudeQuestionRequest.self),
                   validID(request.requestID),
                   request.eventDirectory == eventDirectory,
@@ -169,6 +174,7 @@ public enum ClaudeQuestionStore {
                   request.publishedAt.isFinite, request.expiresAt.isFinite,
                   request.expiresAt >= request.publishedAt else { continue }
             if request.expiresAt < now {
+                guard url.lastPathComponent == request.requestID + ".question" else { continue }
                 removeTriplet(for: request.requestID, in: directory)
                 continue
             }
@@ -176,9 +182,27 @@ public enum ClaudeQuestionStore {
                   request.publishedAt >= observingSince, request.publishedAt <= now else { continue }
             pending.append(request)
         }
+        guard !bounded.hasMore else { return [] }
         return pending.sorted {
             $0.publishedAt == $1.publishedAt ? $0.requestID < $1.requestID : $0.publishedAt < $1.publishedAt
-        }.prefix(4096).map { $0 }
+        }.prefix(maximumEntries).map { $0 }
+    }
+
+    private static func boundedEntries(in directory: URL) -> BoundedEntries? {
+        guard let enumerator = FileManager.default.enumerator(at: directory,
+                                                               includingPropertiesForKeys: nil,
+                                                               options: []) else { return nil }
+        var entries: [URL] = []
+        while let entry = enumerator.nextObject() as? URL {
+            if entries.count == maximumEntries {
+                return BoundedEntries(values: entries, hasMore: true)
+            }
+            entries.append(entry)
+            if (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                enumerator.skipDescendants()
+            }
+        }
+        return BoundedEntries(values: entries, hasMore: false)
     }
 
     private static func removeTriplet(for id: String, in directory: URL) {

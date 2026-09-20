@@ -16,7 +16,10 @@ single-write.
 answers, exact identity rejection, one-shot writes, receipt/answer timing, view-state key isolation,
 and stale receipt generation reconciliation. `ClaudeObservationTests` covers prompt labels and helper
 identity in the shared queue, including shared-directory noise and expired-triplet cleanup. The full
-suite passed with 289 tests;
+suite passed with 292 tests. Private rendezvous scans inspect at most 4096 entries per pass, prune
+canonical expired triplets from the batch, and fail closed while more entries remain; repeated scans
+recover a current request after more than 4096 expired owned entries. The private-noise and forged
+filename regressions preserve live triplets;
 `sh scripts/build-app.sh`, `sh scripts/package-app.sh`, and
 `output/Steer.app/Contents/MacOS/Steer --smoke-test` also passed. The package was ad hoc signed and
 is development evidence only.
