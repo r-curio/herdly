@@ -31,6 +31,7 @@ public enum ClaudeObservationReader {
         let toolName: String?
         let toolUseID: String?
         let helperRequestID: String?
+        let hookRequestID: String?
         let toolInput: [String: Any]
     }
 
@@ -211,7 +212,7 @@ public enum ClaudeObservationReader {
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                 turns[turnID] = turn
             case "PermissionRequest":
-                guard let promptID = valid(record.promptID), let name = bounded(record.toolName), !name.isEmpty else { continue }
+                guard let promptID = valid(record.promptID), let name = bounded(record.toolName), name == "Bash" else { continue }
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
@@ -220,8 +221,11 @@ public enum ClaudeObservationReader {
                 guard candidates.count == 1, let tool = candidates.first else { continue }
                 let call = AgentCallIdentity(session: identity, turn: promptID, call: tool.id)
                 guard seenApprovals.insert(call).inserted else { continue }
+                let command = tool.input["command"] ?? tool.input["cmd"]
+                let details = ApprovalDetails(action: "Bash", command: command)
                 turn.approval = AgentApproval(session: identity, turn: promptID, call: tool.id,
-                                              arrivedAt: record.capturedAt)
+                                              arrivedAt: record.capturedAt, details: details,
+                                              hookRequestID: record.hookRequestID)
                 turns[turnID] = turn
             case "StopFailure":
                 guard let promptID = valid(record.promptID) else { continue }
@@ -311,6 +315,7 @@ public enum ClaudeObservationReader {
                       promptID: object["prompt_id"] as? String, prompt: object["prompt"] as? String,
                       toolName: object["tool_name"] as? String, toolUseID: object["tool_use_id"] as? String,
                       helperRequestID: valid(object["helper_request_id"] as? String),
+                      hookRequestID: valid(object["approval_request_id"] as? String),
                       toolInput: object["tool_input"] as? [String: Any] ?? [:])
     }
 

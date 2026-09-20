@@ -85,6 +85,9 @@ public enum AgentApprovalState: String, Codable, Sendable {
 
 public struct AgentApproval: Identifiable, Equatable, Codable, Sendable {
     public let identity: AgentCallIdentity
+    /// The source helper's live request token, when the source has one. The call identity remains
+    /// the upstream tool call so matching cleanup cannot be confused with the helper transport.
+    public let hookRequestID: String?
     public let arrivedAt: Double
     public let expiresAt: Double
     public let state: AgentApprovalState
@@ -94,14 +97,17 @@ public struct AgentApproval: Identifiable, Equatable, Codable, Sendable {
 
     public init(session: AgentSessionIdentity, turn: String = "", call: String, arrivedAt: Double,
                 handoffAfter: Double = 30, state: AgentApprovalState = .actionable,
-                details: ApprovalDetails? = nil) {
+                details: ApprovalDetails? = nil, hookRequestID: String? = nil) {
         self.init(session: session, turn: turn, call: call, arrivedAt: arrivedAt,
-                  expiresAt: arrivedAt + handoffAfter, state: state, details: details)
+                  expiresAt: arrivedAt + handoffAfter, state: state, details: details,
+                  hookRequestID: hookRequestID)
     }
 
     public init(session: AgentSessionIdentity, turn: String = "", call: String, arrivedAt: Double, expiresAt: Double,
-                state: AgentApprovalState = .actionable, details: ApprovalDetails? = nil) {
+                state: AgentApprovalState = .actionable, details: ApprovalDetails? = nil,
+                hookRequestID: String? = nil) {
         self.identity = AgentCallIdentity(session: session, turn: turn, call: call)
+        self.hookRequestID = hookRequestID
         self.arrivedAt = arrivedAt
         self.expiresAt = expiresAt
         self.state = state
@@ -110,7 +116,7 @@ public struct AgentApproval: Identifiable, Equatable, Codable, Sendable {
 
     public func with(state: AgentApprovalState) -> AgentApproval {
         AgentApproval(session: identity.session, turn: identity.turn, call: identity.call, arrivedAt: arrivedAt,
-                      expiresAt: expiresAt, state: state, details: details)
+                      expiresAt: expiresAt, state: state, details: details, hookRequestID: hookRequestID)
     }
 }
 
@@ -328,7 +334,8 @@ public struct AgentAttentionQueue: Sendable {
                                                        call: approval.identity.call,
                                                        arrivedAt: min(current.arrivedAt, approval.arrivedAt),
                                                        expiresAt: min(current.expiresAt, approval.expiresAt), state: state,
-                                                       details: current.details ?? approval.details)
+                                                       details: current.details ?? approval.details,
+                                                       hookRequestID: current.hookRequestID ?? approval.hookRequestID)
             } else {
                 approvals[approval.id] = approval
             }

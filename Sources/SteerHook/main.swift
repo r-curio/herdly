@@ -60,6 +60,9 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
             record[key] = value
         }
     }
+    if let requestID = boundedClaudeString(object["approval_request_id"], limit: 256) {
+        record["approval_request_id"] = requestID
+    }
     if let input = object["tool_input"] as? [String: Any] {
         let kept = boundedClaudeToolInput(input)
         if !kept.isEmpty { record["tool_input"] = kept }
@@ -193,11 +196,17 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
         return URL(fileURLWithPath: arguments[sourceIndex + 1]).standardizedFileURL.path
     }
     let input = (try? FileHandle.standardInput.read(upToCount: 64 * 1024)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-    guard let object = input else { exit(0) }
+    guard var object = input else { exit(0) }
     let isQuestion = arguments.contains("--question-helper") && object["hook_event_name"] as? String == "PreToolUse"
         && object["tool_name"] as? String == "AskUserQuestion"
-    let requestID = isQuestion ? UUID().uuidString : nil
-    guard writeClaudeEvent(object, to: directory, installationID: installationID, helperRequestID: requestID) else { exit(0) }
+    let questionRequestID = isQuestion ? UUID().uuidString : nil
+    let isBashPermission = object["hook_event_name"] as? String == "PermissionRequest"
+        && object["tool_name"] as? String == "Bash"
+    let publishedAt = Date().timeIntervalSince1970
+    let approvalRequestID = isBashPermission ? UUID().uuidString : nil
+    if let approvalRequestID { object["approval_request_id"] = approvalRequestID }
+    guard writeClaudeEvent(object, to: directory, installationID: installationID,
+                           helperRequestID: questionRequestID) else { exit(0) }
     if isQuestion,
        let session = boundedClaudeString(object["session_id"], limit: 256),
        let promptID = boundedClaudeString(object["prompt_id"], limit: 256),
@@ -205,9 +214,9 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
        let toolInput = object["tool_input"] as? [String: Any],
        let parsed = QuestionPrompt.parseCall(toolInput: toolInput), parsed.count == 1,
        let sourceScope,
-       let requestID {
+       let questionRequestID {
         let publishedAt = Date().timeIntervalSince1970
-        let question = ClaudeQuestionRequest(requestID: requestID, installationID: installationID,
+        let question = ClaudeQuestionRequest(requestID: questionRequestID, installationID: installationID,
                                              sourceScope: sourceScope,
                                              eventDirectory: directory.standardizedFileURL.path,
                                              sessionID: session, promptID: promptID, toolUseID: toolUseID,
@@ -235,6 +244,24 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
        let session = object["session_id"] as? String,
        let output = terminalSequence(for: session, reset: event == "SessionEnd") {
         FileHandle.standardOutput.write(output)
+    }
+    if let approvalRequestID {
+        let live = ClaudeApprovalLiveness(requestID: approvalRequestID, publishedAt: publishedAt,
+                                          heartbeatAt: Date().timeIntervalSince1970)
+        if ClaudeApprovalStore.publish(live, in: directory),
+           let receipt = ClaudeApprovalHelper.awaitReceipt(for: approvalRequestID, publishedAt: publishedAt,
+                                                           in: directory, liveness: live),
+           let decision = ClaudeApprovalHelper.awaitDecisionRecord(for: approvalRequestID, receipt: receipt,
+                                                                   in: directory, liveness: live),
+           let output = ClaudeApprovalHelper.hookOutput(for: decision.decision) {
+            FileHandle.standardOutput.write(output)
+            _ = ClaudeApprovalStore.publish(ClaudeApprovalDelivery(requestID: decision.requestID,
+                                                                   decision: decision.decision,
+                                                                   decidedAt: decision.decidedAt,
+                                                                   deliveredAt: Date().timeIntervalSince1970),
+                                            in: directory)
+        }
+        ClaudeApprovalStore.removeLiveness(for: approvalRequestID, in: directory)
     }
     exit(0)
 }
