@@ -58,6 +58,8 @@ public enum ClaudeSetupRequirements {
     public static let helperSource = "steer-claude-hook-v1"
     public static let hookTimeout = 10
     public static let titlePrefix = "Steer Claude "
+    public static let titleDisableEnvironmentKey = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"
+    public static let titleDisableEnvironmentValue = "1"
     public static let metadataClockSkew: TimeInterval = 300
 
     /// The events needed by the observer slice. PermissionRequest is intentionally narrowed to
@@ -72,7 +74,7 @@ public enum ClaudeSetupRequirements {
         ClaudeHookDefinition(event: "PermissionRequest", matcher: "Bash"),
         ClaudeHookDefinition(event: "Stop"),
         ClaudeHookDefinition(event: "StopFailure"),
-        ClaudeHookDefinition(event: "SessionEnd"),
+        ClaudeHookDefinition(event: "SessionEnd", terminalTitle: true),
         ClaudeHookDefinition(event: "SubagentStart"),
         ClaudeHookDefinition(event: "SubagentStop"),
         ClaudeHookDefinition(event: "Notification")
@@ -129,6 +131,7 @@ public struct ClaudeSetupPlan: Sendable {
     public let status: ClaudeSetupStatus
     public let settingsChange: Data
     public let ownedHooks: [ClaudeOwnedHook]
+    public let ownedEnvironment: [String: String]
     public let helperCommand: String
     public let requiresConfigure: Bool
     public let installationID: String
@@ -138,11 +141,13 @@ public struct ClaudeSetupPlan: Sendable {
     let originalSettingsExisted: Bool
 
     init(status: ClaudeSetupStatus, settingsChange: Data, ownedHooks: [ClaudeOwnedHook],
+         ownedEnvironment: [String: String],
          helperCommand: String, requiresConfigure: Bool, installationID: String,
          usageEnabled: Bool, originalSettings: Data, originalSettingsExisted: Bool) {
         self.status = status
         self.settingsChange = settingsChange
         self.ownedHooks = ownedHooks
+        self.ownedEnvironment = ownedEnvironment
         self.helperCommand = helperCommand
         self.requiresConfigure = requiresConfigure
         self.installationID = installationID
@@ -177,6 +182,13 @@ public enum ClaudeSetupPlanner {
         }
         if let hooks = source["hooks"] as? [String: Any], !hooksShapeIsValid(hooks) {
             return empty(.malformed("Claude settings.json has an unsupported hooks shape and was not changed."), settings: settings, settingsExisted: settingsExisted)
+        }
+        if let environment = source["env"], !(environment is [String: Any]) {
+            return empty(.malformed("Claude settings.json has an unsupported env shape and was not changed."), settings: settings, settingsExisted: settingsExisted)
+        }
+        if let existing = (source["env"] as? [String: Any])?[ClaudeSetupRequirements.titleDisableEnvironmentKey],
+           (existing as? String) != ClaudeSetupRequirements.titleDisableEnvironmentValue {
+            return empty(.conflict("Claude's automatic terminal title setting is owned by another value; review settings.json before reconnecting."), settings: settings, settingsExisted: settingsExisted)
         }
 
         let marker = ownershipMarker(helperPath: helperPath, eventsPath: eventsPath)
@@ -216,6 +228,9 @@ public enum ClaudeSetupPlanner {
             hooks[definition.event] = groups
         }
         merged["hooks"] = hooks
+        var environment = (source["env"] as? [String: Any]) ?? [:]
+        environment[ClaudeSetupRequirements.titleDisableEnvironmentKey] = ClaudeSetupRequirements.titleDisableEnvironmentValue
+        merged["env"] = environment
         let ownedHooks = expectedHooks.map { owned in
             let groups = (hooks[owned.event] as? [[String: Any]]) ?? []
             var position: (Int, Int)?
@@ -238,15 +253,17 @@ public enum ClaudeSetupPlanner {
                                    })
         }
         guard let mergedHooks = merged["hooks"] as? [String: Any],
-              let changed = try? jsonDataPreservingOtherBytes(
+              let hooksChanged = try? jsonDataPreservingOtherBytes(
                   settings,
                   hooks: jsonEquivalent(source["hooks"], mergedHooks) ? source["hooks"] as? [String: Any] : mergedHooks
-              ) else {
+              ),
+              let changed = try? jsonDataPreservingEnvironment(hooksChanged, original: source["env"], value: environment) else {
             return empty(.malformed("Claude settings.json could not be encoded safely and was not changed."), settings: settings, settingsExisted: settingsExisted)
         }
         // Usage is deliberately represented in the same plan but remains opt-in. Its reversible
         // status-line bridge is implemented by the later usage slice, so this slice never edits it.
         return ClaudeSetupPlan(status: .ready, settingsChange: changed, ownedHooks: ownedHooks,
+                               ownedEnvironment: [ClaudeSetupRequirements.titleDisableEnvironmentKey: ClaudeSetupRequirements.titleDisableEnvironmentValue],
                                helperCommand: ownedHooks.first?.command ?? "", requiresConfigure: changed != settings,
                                installationID: installationID, usageEnabled: usageEnabled,
                                originalSettings: settings, originalSettingsExisted: settingsExisted)
@@ -282,14 +299,40 @@ public enum ClaudeSetupPlanner {
     /// Replace only the top-level hooks value. The rest of settings.json remains byte-for-byte
     /// intact, so unrelated formatting, ordering, and values are not rewritten by setup or undo.
     static func jsonDataPreservingOtherBytes(_ original: Data, hooks: [String: Any]?) throws -> Data {
-        guard let raw = rawObject(original), raw.members.filter({ $0.key == "hooks" }).count <= 1 else {
-            throw ClaudeSetupError.conflict("Claude settings.json has duplicate top-level hooks keys.")
+        try jsonDataPreservingMember(original, key: "hooks", value: hooks)
+    }
+
+    private static func jsonDataPreservingEnvironment(_ data: Data, original: Any?, value: [String: Any]) throws -> Data {
+        guard !jsonEquivalent(original, value) else { return data }
+        if original != nil {
+            return try jsonDataPreservingNestedMember(data, parentKey: "env",
+                                                      key: ClaudeSetupRequirements.titleDisableEnvironmentKey,
+                                                      value: ClaudeSetupRequirements.titleDisableEnvironmentValue)
+        }
+        return try jsonDataPreservingMember(data, key: "env", value: value)
+    }
+
+    /// Replace one key inside a top-level object member while preserving the bytes around
+    /// that nested key. This keeps unrelated environment variables and formatting intact.
+    static func jsonDataPreservingNestedMember(_ original: Data, parentKey: String, key: String, value: Any?) throws -> Data {
+        guard let raw = rawObject(original), raw.members.filter({ $0.key == parentKey }).count == 1,
+              let parent = raw.members.first(where: { $0.key == parentKey }) else {
+            throw ClaudeSetupError.conflict("Claude settings.json has an invalid \(parentKey) object.")
+        }
+        let nested = original.subdata(in: parent.valueStart..<parent.valueEnd)
+        let changed = try jsonDataPreservingMember(nested, key: key, value: value)
+        return original.subdata(in: 0..<parent.valueStart) + changed + original.subdata(in: parent.valueEnd..<original.count)
+    }
+
+    static func jsonDataPreservingMember(_ original: Data, key: String, value: Any?) throws -> Data {
+        guard let raw = rawObject(original), raw.members.filter({ $0.key == key }).count <= 1 else {
+            throw ClaudeSetupError.conflict("Claude settings.json has duplicate top-level \(key) keys.")
         }
         let replacement: Data
-        if let hooks { replacement = try JSONSerialization.data(withJSONObject: hooks, options: [.prettyPrinted, .sortedKeys]) }
+        if let value { replacement = try JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed]) }
         else { replacement = Data() }
-        if let member = raw.members.first(where: { $0.key == "hooks" }) {
-            if hooks == nil {
+        if let member = raw.members.first(where: { $0.key == key }) {
+            if value == nil {
                 let bytes = [UInt8](original)
                 var start = member.keyStart
                 var after = member.valueEnd
@@ -304,8 +347,8 @@ public enum ClaudeSetupPlanner {
             }
             return original.subdata(in: 0..<member.valueStart) + replacement + original.subdata(in: member.valueEnd..<original.count)
         }
-        guard hooks != nil else { return original }
-        let insertion = Data((raw.members.isEmpty ? "\"hooks\":" : ",\"hooks\":").utf8) + replacement
+        guard value != nil else { return original }
+        let insertion = Data((raw.members.isEmpty ? "\"\(key)\":" : ",\"\(key)\":").utf8) + replacement
         return original.subdata(in: 0..<raw.close) + insertion + original.subdata(in: raw.close..<original.count)
     }
 
@@ -463,7 +506,7 @@ public enum ClaudeSetupPlanner {
     }
 
     private static func empty(_ status: ClaudeSetupStatus, settings: Data, settingsExisted: Bool) -> ClaudeSetupPlan {
-        ClaudeSetupPlan(status: status, settingsChange: settings, ownedHooks: [], helperCommand: "",
+        ClaudeSetupPlan(status: status, settingsChange: settings, ownedHooks: [], ownedEnvironment: [:], helperCommand: "",
                         requiresConfigure: false, installationID: "", usageEnabled: false,
                         originalSettings: settings, originalSettingsExisted: settingsExisted)
     }
@@ -488,11 +531,47 @@ private struct ClaudeInstallState: Codable {
     let helper: Data
     let installationID: String
     let ownedHooks: [ClaudeOwnedHook]
+    let ownedEnvironment: [String: String]
     let installedSettings: Data
     let originalSettings: Data?
     let installedAt: TimeInterval
     let backupDirectory: String?
     let usageEnabled: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case rootPath, helper, installationID, ownedHooks, ownedEnvironment, installedSettings,
+             originalSettings, installedAt, backupDirectory, usageEnabled
+    }
+
+    init(rootPath: String, helper: Data, installationID: String, ownedHooks: [ClaudeOwnedHook],
+         ownedEnvironment: [String: String], installedSettings: Data, originalSettings: Data?,
+         installedAt: TimeInterval, backupDirectory: String?, usageEnabled: Bool) {
+        self.rootPath = rootPath
+        self.helper = helper
+        self.installationID = installationID
+        self.ownedHooks = ownedHooks
+        self.ownedEnvironment = ownedEnvironment
+        self.installedSettings = installedSettings
+        self.originalSettings = originalSettings
+        self.installedAt = installedAt
+        self.backupDirectory = backupDirectory
+        self.usageEnabled = usageEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rootPath = try container.decode(String.self, forKey: .rootPath)
+        helper = try container.decode(Data.self, forKey: .helper)
+        installationID = try container.decode(String.self, forKey: .installationID)
+        ownedHooks = try container.decode([ClaudeOwnedHook].self, forKey: .ownedHooks)
+        ownedEnvironment = try container.decodeIfPresent([String: String].self, forKey: .ownedEnvironment)
+            ?? [ClaudeSetupRequirements.titleDisableEnvironmentKey: ClaudeSetupRequirements.titleDisableEnvironmentValue]
+        installedSettings = try container.decode(Data.self, forKey: .installedSettings)
+        originalSettings = try container.decodeIfPresent(Data.self, forKey: .originalSettings)
+        installedAt = try container.decode(TimeInterval.self, forKey: .installedAt)
+        backupDirectory = try container.decodeIfPresent(String.self, forKey: .backupDirectory)
+        usageEnabled = try container.decodeIfPresent(Bool.self, forKey: .usageEnabled) ?? false
+    }
 }
 
 public struct ClaudeSetupInstaller {
@@ -523,6 +602,9 @@ public struct ClaudeSetupInstaller {
            let object = try? ClaudeSetupPlanner.jsonObject(current) {
             if case .changed = ownedHookState(object, expected: state.ownedHooks) {
                 throw ClaudeSetupError.conflict("A Steer-owned Claude hook was changed; review setup before repair.")
+            }
+            if case .changed = ownedEnvironmentState(object, expected: state.ownedEnvironment) {
+                throw ClaudeSetupError.conflict("Steer's terminal title setting was changed; review setup before repair.")
             }
         }
         if current == plan.settingsChange,
@@ -557,6 +639,7 @@ public struct ClaudeSetupInstaller {
             if current != plan.settingsChange { try atomicWrite(plan.settingsChange, to: roots.settingsURL) }
             let state = ClaudeInstallState(rootPath: roots.configDirectory.path, helper: helper,
                                            installationID: plan.installationID, ownedHooks: plan.ownedHooks,
+                                           ownedEnvironment: plan.ownedEnvironment,
                                            installedSettings: plan.settingsChange,
                                            originalSettings: existingState?.originalSettings ?? (plan.originalSettingsExisted ? plan.originalSettings : nil),
                                            installedAt: Date().timeIntervalSince1970,
@@ -604,6 +687,11 @@ public struct ClaudeSetupInstaller {
         guard helper == state.helper else {
             return .conflict("Steer's Claude helper differs from the one it installed; review setup before repair.")
         }
+        switch ownedEnvironmentState(object, expected: state.ownedEnvironment) {
+        case .changed: return .conflict("Steer's terminal title setting was changed; review setup before repair.")
+        case .missing: return .repairRequired("Steer's terminal title setting is missing; Configure Claude to repair setup.")
+        case .intact: break
+        }
         switch ownedHookState(object, expected: state.ownedHooks) {
         case .changed: return .conflict("A Steer-owned Claude hook was changed; review setup before repair.")
         case .missing: return .repairRequired("Steer's Claude hook entries are missing; Configure Claude to repair setup.")
@@ -629,6 +717,24 @@ public struct ClaudeSetupInstaller {
         return true
     }
 
+    public func installedAt(for roots: ClaudeSetupRoots) -> TimeInterval? {
+        guard let state = try? readState(roots), state.rootPath == roots.configDirectory.path,
+              UUID(uuidString: state.installationID) != nil else { return nil }
+        return state.installedAt
+    }
+
+    public func deliveredSessionIDs(for roots: ClaudeSetupRoots, now: TimeInterval = Date().timeIntervalSince1970) -> Set<String> {
+        guard let state = try? readState(roots), state.rootPath == roots.configDirectory.path,
+              UUID(uuidString: state.installationID) != nil,
+              let files = try? boundedContents(of: roots.eventsDirectory) else { return [] }
+        return Set(files.compactMap { url in
+            guard validEvent(url, installationID: state.installationID, installedAt: state.installedAt, now: now),
+                  let data = boundedData(at: url, maximum: 64 * 1024),
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            return object["session_id"] as? String
+        })
+    }
+
     public func undo(roots: ClaudeSetupRoots) throws -> ClaudeConnectionStatus {
         let state = try readState(roots)
         guard state.rootPath == roots.configDirectory.path else {
@@ -641,6 +747,10 @@ public struct ClaudeSetupInstaller {
         if let helper = try readableData(at: roots.helperURL), helper != state.helper {
             throw ClaudeSetupError.conflict("A different file sits at Steer's Claude helper path; undo made no changes.")
         }
+        switch ownedEnvironmentState(object, expected: state.ownedEnvironment) {
+        case .changed: throw ClaudeSetupError.conflict("Steer's terminal title setting was changed; undo made no changes.")
+        case .intact, .missing: break
+        }
         switch ownedHookState(object, expected: state.ownedHooks) {
         case .changed: throw ClaudeSetupError.conflict("A Steer-owned Claude hook was changed; undo made no changes.")
         case .intact, .missing: break
@@ -649,8 +759,17 @@ public struct ClaudeSetupInstaller {
         if current == state.installedSettings {
             restored = state.originalSettings
         } else {
-            let reduced = removingHooks(object, owned: state.ownedHooks)
-            restored = try ClaudeSetupPlanner.jsonDataPreservingOtherBytes(current, hooks: reduced["hooks"] as? [String: Any])
+            let reducedHooks = removingHooks(object, owned: state.ownedHooks)
+            let reducedEnvironment = removingEnvironment(reducedHooks, owned: state.ownedEnvironment)
+            let withoutHooks = try ClaudeSetupPlanner.jsonDataPreservingOtherBytes(current, hooks: reducedEnvironment["hooks"] as? [String: Any])
+            if let environment = reducedEnvironment["env"] as? [String: Any], !environment.isEmpty {
+                restored = try ClaudeSetupPlanner.jsonDataPreservingNestedMember(
+                    withoutHooks, parentKey: "env",
+                    key: ClaudeSetupRequirements.titleDisableEnvironmentKey,
+                    value: nil)
+            } else {
+                restored = try ClaudeSetupPlanner.jsonDataPreservingMember(withoutHooks, key: "env", value: nil)
+            }
         }
         let originalState = try readableData(at: roots.stateURL)
         let eventFiles = try boundedContents(of: roots.eventsDirectory)
@@ -683,6 +802,19 @@ public struct ClaudeSetupInstaller {
     }
 
     private enum OwnedHookState { case intact, missing, changed }
+
+    private enum OwnedEnvironmentState { case intact, missing, changed }
+
+    private func ownedEnvironmentState(_ source: [String: Any], expected: [String: String]) -> OwnedEnvironmentState {
+        guard !expected.isEmpty else { return .intact }
+        guard let environment = source["env"] as? [String: Any] else { return .missing }
+        var missing = false
+        for (key, value) in expected {
+            guard let actual = environment[key] else { missing = true; continue }
+            guard actual as? String == value else { return .changed }
+        }
+        return missing ? .missing : .intact
+    }
 
     private func ownedHookState(_ source: [String: Any], expected: [ClaudeOwnedHook]) -> OwnedHookState {
         guard let hooks = source["hooks"] as? [String: Any] else { return .missing }
@@ -732,6 +864,17 @@ public struct ClaudeSetupInstaller {
             else { hooks[ownedHook.event] = keptGroups }
         }
         if hooks.isEmpty { result.removeValue(forKey: "hooks") } else { result["hooks"] = hooks }
+        return result
+    }
+
+    private func removingEnvironment(_ source: [String: Any], owned: [String: String]) -> [String: Any] {
+        guard var environment = source["env"] as? [String: Any] else { return source }
+        for (key, value) in owned where environment[key] as? String == value {
+            environment.removeValue(forKey: key)
+        }
+        var result = source
+        if environment.isEmpty { result.removeValue(forKey: "env") }
+        else { result["env"] = environment }
         return result
     }
 
