@@ -30,6 +30,7 @@ public enum ClaudeObservationReader {
         let prompt: String?
         let toolName: String?
         let toolUseID: String?
+        let helperRequestID: String?
         let toolInput: [String: Any]
     }
 
@@ -162,9 +163,11 @@ public enum ClaudeObservationReader {
                 turn.tool = tool
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                 if name == "AskUserQuestion", let question = question(from: record, identity: identity,
-                                                                         turn: promptID, at: record.capturedAt),
-                   seenQuestions.insert(question.id).inserted {
-                    turn.question = question
+                                                                         turn: promptID, at: record.capturedAt) {
+                    if seenQuestions.insert(question.id).inserted
+                        || (turn.question?.helperRequestID == nil && question.helperRequestID != nil) {
+                        turn.question = question
+                    }
                 }
                 turn.terminal = nil
                 turns[turnID] = turn
@@ -307,14 +310,17 @@ public enum ClaudeObservationReader {
         return Record(fileName: url.lastPathComponent, event: event, session: session, capturedAt: captured,
                       promptID: object["prompt_id"] as? String, prompt: object["prompt"] as? String,
                       toolName: object["tool_name"] as? String, toolUseID: object["tool_use_id"] as? String,
+                      helperRequestID: valid(object["helper_request_id"] as? String),
                       toolInput: object["tool_input"] as? [String: Any] ?? [:])
     }
 
     private static func question(from record: Record, identity: AgentSessionIdentity, turn: String,
                                  at: Double) -> AgentQuestion? {
-        guard let call = valid(record.toolUseID), let questions = record.toolInput["questions"] as? [[String: Any]],
-              !questions.isEmpty, questions.count <= QuestionPrompt.maximumQuestions else { return nil }
-        return AgentQuestion(session: identity, turn: turn, call: call, arrivedAt: at)
+        guard let call = valid(record.toolUseID),
+              let parsed = QuestionPrompt.parseCall(toolInput: record.toolInput),
+              !parsed.prompts.isEmpty, parsed.count <= QuestionPrompt.maximumQuestions else { return nil }
+        return AgentQuestion(session: identity, turn: turn, call: call, arrivedAt: at,
+                             prompts: parsed.prompts, helperRequestID: record.helperRequestID)
     }
 
     private static func stringInput(_ input: [String: Any]) -> [String: String] {

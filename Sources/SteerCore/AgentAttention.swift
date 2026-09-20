@@ -119,17 +119,20 @@ public struct AgentQuestion: Identifiable, Equatable, Sendable {
     public let turn: String
     public let arrivedAt: Double
     public let prompts: [QuestionPrompt]
+    /// Claude's memory-only helper invocation. Codex questions do not have one.
+    public let helperRequestID: String?
 
     public var id: AgentCallIdentity { identity }
 
     public var questionCount: Int { prompts.count }
 
     public init(session: AgentSessionIdentity, turn: String, call: String, arrivedAt: Double,
-                prompts: [QuestionPrompt] = []) {
+                prompts: [QuestionPrompt] = [], helperRequestID: String? = nil) {
         self.identity = AgentCallIdentity(session: session, turn: turn, call: call)
         self.turn = turn
         self.arrivedAt = arrivedAt
         self.prompts = prompts
+        self.helperRequestID = helperRequestID
     }
 }
 

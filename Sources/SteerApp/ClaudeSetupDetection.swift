@@ -79,6 +79,7 @@ enum ClaudeSetupDetection {
         } else {
             plannerPlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: settings,
                                                   helperPath: roots.helperURL, eventsPath: roots.eventsDirectory,
+                                                  sourceScope: root,
                                                   policy: setupPolicy,
                                                   usageEnabled: usageEnabled, settingsExisted: settingsExists,
                                                   installRecordPresent: installRecordPresent)

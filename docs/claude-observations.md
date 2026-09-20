@@ -6,8 +6,12 @@ is bounded before it reaches the shared `AgentAttentionQueue`.
 
 The helper retains event and session identity, source and installation markers, timestamps, a bounded
 prompt fallback (240 characters), and only the scalar command or path fields needed for a current
-action. An `AskUserQuestion` record retains only its question count and tool-use identity; question
-copy, option labels, descriptions, tool responses, and transcripts are not persisted.
+action. An `AskUserQuestion` record retains bounded question text and option labels so the notch can
+show the same choices Claude is showing. The separate live request carries the helper invocation
+identity, the normalized Claude configuration root, and the separate normalized event directory; its
+helper-owned liveness marker is refreshed only while the hook waits, and a delivery acknowledgment
+is written only after Claude's response is emitted. A restart cannot turn its saved request record
+into an answer capability.
 
 The reader recognizes session, prompt, tool, question, approval, and outcome events. Tool text is
 kept only while a matching `PostToolUse`, `PostToolUseFailure`, or `PostToolBatch` has not cleared
@@ -41,7 +45,10 @@ order empty snapshot cannot erase newer generic lifecycle state.
 session-end uncertainty, installation/root isolation, and late outcomes. `ClaudeInventoryTests`
 covers separate interactive/background lifecycle fields, duplicate and unavailable polls, root
 isolation, weaker inventory evidence, and provisional `Stop` confirmation. The helper self-test also
-checks bounded Claude metadata and tool input.
+checks bounded Claude metadata and tool input. `ClaudeQuestionTests` covers unchanged `updatedInput`,
+single-select, multi-select, typed answers, exact identity rejection, one-shot writes, and the
+receipt/answer rendezvous.
 - **Live application proof:** pending. Restarting Steer during one real Claude session and observing
-  its current state without replaying sound or fabricating a question was deferred for the user's
-  walkthrough tomorrow; this change does not claim that scenario passed.
+its current state without replaying sound or fabricating a question was deferred for the user's
+walkthrough tomorrow; one live answer of each supported shape and native fallback after helper
+timeout are also deferred. This change does not claim those scenarios passed.
