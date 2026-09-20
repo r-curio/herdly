@@ -123,12 +123,26 @@ public struct AgentQuestion: Identifiable, Equatable, Codable, Sendable {
 public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     public let identity: AgentTurnIdentity
     public let arrivedAt: Double
+    public let prompt: String?
+    public let toolName: String?
+    public let toolInput: [String: String]
 
     public var id: AgentTurnIdentity { identity }
+    public var action: ToolAction? {
+        guard let toolName else { return nil }
+        return ToolAction(name: toolName, input: toolInput)
+    }
+    public var rowText: String? { action?.rowText ?? QuestionPrompt.display(prompt, limit: 160) }
+    public var fullAction: String? { action?.fullText }
+    public var fullPrompt: String? { prompt }
 
-    public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double) {
+    public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double, prompt: String? = nil,
+                toolName: String? = nil, toolInput: [String: String] = [:]) {
         self.identity = AgentTurnIdentity(session: session, turn: turn)
         self.arrivedAt = arrivedAt
+        self.prompt = prompt
+        self.toolName = toolName
+        self.toolInput = toolInput
     }
 }
 
@@ -256,6 +270,12 @@ public struct AgentAttentionQueue: Sendable {
             } ?? question
         case let .outcome(outcome):
             guard !acknowledged.contains(outcome.id), outcome.arrivedAt.isFinite else { return }
+            if outcome.session.source == .claude,
+               let current = outcomes[outcome.id], current.arrivedAt > outcome.arrivedAt { return }
+            if outcome.session.source == .claude,
+               let active = running[outcome.session], active.id == outcome.id, active.arrivedAt > outcome.arrivedAt {
+                return
+            }
             outcomes[outcome.id] = outcome
             let turn = outcome.id
             for identity in approvals.keys where identity.session == turn.session
@@ -269,8 +289,14 @@ public struct AgentAttentionQueue: Sendable {
             questions = questions.filter { !resolved.contains(.question($0.key)) }
             if running[turn.session]?.id == turn { running.removeValue(forKey: turn.session) }
         case let .running(active):
-            guard !resolved.contains(.running(active.id)), outcomes[active.id] == nil else { return }
-            guard running[active.identity.session]?.arrivedAt ?? -.infinity < active.arrivedAt else { return }
+            guard !resolved.contains(.running(active.id)) else { return }
+            if let outcome = outcomes[active.id] {
+                guard active.identity.session.source == .claude, active.arrivedAt > outcome.arrivedAt else { return }
+                outcomes.removeValue(forKey: active.id)
+            }
+            if let current = running[active.identity.session] {
+                guard active.arrivedAt > current.arrivedAt || (active.id == current.id && active != current) else { return }
+            }
             running[active.identity.session] = active
         case let .resolved(id):
             dismiss(id)
@@ -280,6 +306,20 @@ public struct AgentAttentionQueue: Sendable {
 
     public mutating func apply(_ observations: [AgentObservation], now: Double? = nil) {
         observations.forEach { apply($0, now: now) }
+    }
+
+    /// Drops source-scoped actionable and running state absent from a complete source scan.
+    /// Outcomes stay until the user acknowledges them. Raw stores are used so a running row hidden
+    /// behind a question is reconciled too.
+    public mutating func reconcile(source: AgentSource, sourceScope: String,
+                                   keeping incoming: Set<AgentAttentionID>) {
+        let current = Set(approvals.keys.filter { $0.session.source == source && $0.session.sourceScope == sourceScope }
+            .map(AgentAttentionID.approval)
+            + questions.keys.filter { $0.session.source == source && $0.session.sourceScope == sourceScope }
+            .map(AgentAttentionID.question)
+            + running.values.filter { $0.identity.session.source == source && $0.identity.session.sourceScope == sourceScope }
+            .map { AgentAttentionID.running($0.id) })
+        for id in current where !incoming.contains(id) { dismiss(id) }
     }
 
     public mutating func expire(at now: Double) {
