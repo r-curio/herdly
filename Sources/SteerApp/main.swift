@@ -13,6 +13,11 @@ private enum SetupUndoResult: Sendable {
     case failure(String)
 }
 
+private struct ClaudeNavigationRoot: Sendable {
+    let root: URL
+    let capabilities: ClaudeCapabilities
+}
+
 @MainActor
 final class NotchPanel: NSPanel {
     /// Key status is only ever taken by a deliberate click or Tab into the panel; automatic
@@ -143,6 +148,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var claudeInventoryAvailable: [String: Bool] = [:]
     /// Unix time of the inventory in `ghosttyFocusState`, for dating a session end at the tab's absence.
     private var ghosttyInventoryAt: Double = 0
+    /// The first successful snapshot establishes a baseline. Later selected-target changes are
+    /// manual visits; a continuously focused tab cannot clear a completion that arrived after it.
+    private var hasGhosttySelectionBaseline = false
+    private var lastGhosttySelection: GhosttyTarget?
+    private var lastGhosttySnapshotAt: Double?
+    private var lastGhosttyVisitAfter: Double?
     private var checkingGhostty = false
     private var nextGhosttyScan: Double = 0
     private var checkingApprovalFocus = false
@@ -779,10 +790,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             for claudeScan in result.8 {
                 agentQueue.apply(claudeScan, now: Date().timeIntervalSince1970)
             }
-            let configuredClaudeScopes = Set(claude.roots.compactMap { root -> String? in
-                guard root.capabilities.supported, root.status == .connected else { return nil }
-                return root.url.standardizedFileURL.path
-            })
+            let configuredClaudeScopes = Set(configuredClaudeNavigationRoots().map { $0.root.path })
             liveClaudeSessions = Dictionary(uniqueKeysWithValues: result.7.filter {
                 configuredClaudeScopes.contains($0.sourceScope)
             }.map { scan in
@@ -1298,12 +1306,37 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func canOpenClaude(_ identity: AgentSessionIdentity) -> Bool {
         guard identity.source == .claude, identity.surface == .cli, ghosttyEnabled,
               ghosttyPermissionVerified, !liveClaudeSessions.isEmpty,
+              let configuredScopes = configuredClaudeNavigationScopes(),
+              Set(liveClaudeSessions.keys) == configuredScopes,
+              Set(claudeInventoryAvailable.keys) == configuredScopes,
               claudeInventoryAvailable.values.allSatisfy({ $0 }),
               liveClaudeSessions[identity.sourceScope]?.filter({ $0 == identity.session }).count == 1,
               let snapshot = knownGhosttySnapshot else { return false }
         let live = liveClaudeSessions.values.flatMap { $0 }
         guard let target = GhosttyMatch.target(claudeSessionID: identity.session, live: live, snapshot: snapshot) else { return false }
         return GhosttyMatch.isInCurrentWindow(target, snapshot: snapshot)
+    }
+
+    /// Navigation includes every supported root that has a configured or otherwise inspectable
+    /// setup state. An awaiting-restart root is part of the global uniqueness gate even though it
+    /// has not delivered a fresh hook event in this launch. A supported root with an unavailable
+    /// setup status stays in the gate and makes navigation unavailable until its inventory is complete.
+    private func configuredClaudeNavigationRoots() -> [ClaudeNavigationRoot] {
+        claude.roots.compactMap { root in
+            guard root.capabilities.supported else { return nil }
+            switch root.status {
+            case .notConfigured:
+                return nil
+            default:
+                return ClaudeNavigationRoot(root: root.url.standardizedFileURL, capabilities: root.capabilities)
+            }
+        }
+    }
+
+    private func configuredClaudeNavigationScopes() -> Set<String>? {
+        let roots = configuredClaudeNavigationRoots()
+        guard !roots.isEmpty else { return nil }
+        return Set(roots.map { $0.root.path })
     }
 
     private var knownGhosttySnapshot: GhosttySnapshot? {
@@ -1327,8 +1360,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         openingTask = true
         navigationMessage = "Finding the matching Claude tab…"
-        let configuredRoots = claude.roots.filter { $0.capabilities.supported && $0.status == .connected }
-            .map { (root: $0.url.standardizedFileURL, capabilities: $0.capabilities) }
+        let configuredRoots = configuredClaudeNavigationRoots()
         let queued = orderedAgentAttentionItems.filter { $0.session == identity && $0.outcome != nil }.map(\.id)
         Task { @MainActor in
             let inventories = await Task.detached {
@@ -1336,7 +1368,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                     ClaudeSetupDetection.activeSessionInventory(root: root.root, capabilities: root.capabilities)
                 }
             }.value
-            let complete = !inventories.isEmpty && inventories.allSatisfy(\.available)
+            let freshScopes = Set(inventories.map(\.sourceScope))
+            let currentScopes = Set(configuredClaudeNavigationRoots().map { $0.root.path })
+            let complete = !inventories.isEmpty && freshScopes == currentScopes && inventories.allSatisfy(\.available)
             let live = inventories.flatMap { scan in
                 scan.sessions.filter { $0.kind == .interactive }.map(\.sessionID)
             }
@@ -1830,12 +1864,33 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if case .known = ghosttyFocusState {} else { ghosttyFocusState = .checking }
         nextGhosttyScan = now + 2
         let queued = cliItems
+        let configuredRoots = configuredClaudeNavigationRoots()
         Task { @MainActor in
-            let snapshot = await Task.detached { GhosttyNavigation.snapshot() }.value
+            let observedAt = Date().timeIntervalSince1970
+            let result = await Task.detached {
+                let snapshot = GhosttyNavigation.snapshot()
+                let inventories = configuredRoots.map { root in
+                    ClaudeSetupDetection.activeSessionInventory(root: root.root, capabilities: root.capabilities,
+                                                                observedAt: observedAt)
+                }
+                return (snapshot, inventories)
+            }.value
+            let snapshot = result.0
             if ghosttyEnabled, let snapshot {
                 ghosttyPermissionVerified = true
                 ghosttyFocusState = .known(snapshot)
-                ghosttyInventoryAt = Date().timeIntervalSince1970
+                ghosttyInventoryAt = observedAt
+                let previousSnapshotAt = lastGhosttySnapshotAt
+                if hasGhosttySelectionBaseline, snapshot.selected != lastGhosttySelection,
+                   let previousSnapshotAt {
+                    // The selection changed sometime after the prior snapshot. Requiring the
+                    // outcome to predate that snapshot rejects the interval race where an outcome
+                    // arrives after a human switch but before this poll observes it.
+                    lastGhosttyVisitAfter = previousSnapshotAt
+                }
+                lastGhosttySelection = snapshot.selected
+                hasGhosttySelectionBaseline = true
+                lastGhosttySnapshotAt = observedAt
                 for session in Set(queued.map(\.session)) {
                     if let target = GhosttyMatch.target(session: session, live: liveCLI, snapshot: snapshot), snapshot.selected == target {
                         for item in queued where item.session == session {
@@ -1843,12 +1898,33 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                         }
                     }
                 }
+                let liveByScope = Dictionary(uniqueKeysWithValues: result.1.map { scan in
+                    (scan.sourceScope, scan.available
+                        ? scan.sessions.filter { $0.kind == .interactive }.map(\.sessionID)
+                        : [])
+                })
+                let inventoryAvailable = Dictionary(uniqueKeysWithValues: result.1.map { ($0.sourceScope, $0.available) })
+                let currentScopes = Set(configuredClaudeNavigationRoots().map { $0.root.path })
+                if currentScopes == Set(liveByScope.keys), let visitObservedAt = lastGhosttyVisitAfter {
+                    let acknowledged = ClaudeVisitAcknowledgment.outcomes(
+                        agentQueue.snapshot.outcomes,
+                        liveSessionsByScope: liveByScope,
+                        inventoryAvailable: inventoryAvailable,
+                        snapshot: snapshot,
+                        snapshotTakenAt: observedAt,
+                        transitionAfter: visitObservedAt)
+                    for id in acknowledged { agentQueue.dismiss(.outcome(id)) }
+                }
                 saveCompletions()
             } else if ghosttyEnabled {
                 ghosttyFocusState = .unknown
                 ghosttyUnavailable = true
                 ghosttyEnabled = false
                 ghosttyPermissionVerified = false
+                hasGhosttySelectionBaseline = false
+                lastGhosttySelection = nil
+                lastGhosttySnapshotAt = nil
+                lastGhosttyVisitAfter = nil
                 navigationMessage = "Ghostty controls unavailable. Check Automation permission before enabling them again."
             }
             checkingGhostty = false
@@ -1925,6 +2001,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         ghosttyUnavailable = false
         ghosttyPermissionVerified = false
         ghosttyFocusState = enabled ? .checking : .disabled
+        if !enabled {
+            hasGhosttySelectionBaseline = false
+            lastGhosttySelection = nil
+            lastGhosttySnapshotAt = nil
+            lastGhosttyVisitAfter = nil
+        }
         if enabled { nextGhosttyScan = 0 }
     }
 }

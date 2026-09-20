@@ -149,6 +149,40 @@ import Testing
     #expect(GhosttyMatch.isInCurrentWindow(target, snapshot: snapshot) == false)
 }
 
+@Test func claudeVisitAcknowledgesOnlyAQualifiedFocusTransitionAfterOutcome() throws {
+    let id = "11111111-1111-4111-8111-1111111111ab"
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/root-a", session: id, surface: .cli)
+    let outcome = AgentOutcome(session: identity, turn: "turn-1", status: .finished, arrivedAt: 10)
+    let title = ClaudeSetupRequirements.titlePrefix + id
+    let data: [String: Any] = [
+        "status": "ok",
+        "front_window_id": "window-a",
+        "windows": [["id": "window-a", "tabs": [["id": "tab-a", "terminals": [["id": "pane-a", "name": title]]]]]],
+        "selected": ["window_id": "window-a", "tab_id": "tab-a", "terminal_id": "pane-a"]
+    ]
+    let selected = try JSONDecoder().decode(GhosttySnapshot.self, from: JSONSerialization.data(withJSONObject: data))
+    let live = ["/root-a": [id]]
+    let available = ["/root-a": true]
+
+    // A selected tab observed after the outcome is still not a visit when the focus transition
+    // happened before the outcome. A later transition is the evidence that clears it.
+    #expect(ClaudeVisitAcknowledgment.outcomes([outcome], liveSessionsByScope: live,
+                                               inventoryAvailable: available, snapshot: selected,
+                                               snapshotTakenAt: 11, transitionAfter: 9).isEmpty)
+    #expect(ClaudeVisitAcknowledgment.outcomes([outcome], liveSessionsByScope: live,
+                                               inventoryAvailable: available, snapshot: selected,
+                                               snapshotTakenAt: 12, transitionAfter: 11) == [outcome.identity])
+
+    // Duplicate identity across configured roots and an incomplete root inventory remain queued.
+    #expect(ClaudeVisitAcknowledgment.outcomes([outcome],
+                                               liveSessionsByScope: ["/root-a": [id], "/root-b": [id]],
+                                               inventoryAvailable: ["/root-a": true, "/root-b": true],
+                                               snapshot: selected, snapshotTakenAt: 12, transitionAfter: 11).isEmpty)
+    #expect(ClaudeVisitAcknowledgment.outcomes([outcome], liveSessionsByScope: live,
+                                               inventoryAvailable: ["/root-a": false], snapshot: selected,
+                                               snapshotTakenAt: 12, transitionAfter: 11).isEmpty)
+}
+
 
 @Test func completedRepliesGroupBySessionWithoutLosingTurnAcknowledgments() {
     let a = UUID(), b = UUID()
