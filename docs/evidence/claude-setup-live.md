@@ -1,114 +1,200 @@
 # Claude setup live evidence
 
-Date: 2026-09-21  
-Scope: issue #80, isolated disposable roots only  
-Artifact under test: packaged `SteerHook` from this branch
+Date: 2026-09-21
+Scope: issue #80, isolated disposable roots only
+Tested Steer commit: `db84a9175959d51d2a53b567eccb90f46f8cdc55`
+Packaged helper: `output/Steer.app/Contents/Helpers/SteerHook`
+Helper SHA-256: `b29fc496ced6bcca953678b7801abd54392d00872b66ce220b6a57e3fc46bf1a`
+Claude Code: `2.1.278`
 
 ## Evidence boundary
 
-This record separates source and helper checks from a real Claude process. The
-commands below use placeholders so no account path, session identity, API key,
-or conversation content is stored in the repository.
+This is a sanitized run record, not a transcript. The run used a newly created
+temporary `HOME`, `CLAUDE_CONFIG_DIR`, and events directory, plus a newly
+generated fake API key value. Raw Claude stdout and stderr stayed in that
+temporary root and were not committed. Session and installation IDs were
+generated UUIDs; the record keeps only match booleans. The real `~/.claude`
+root was outside the run's home and configuration roots.
 
 ## Reproducible isolated startup
 
-Run from a checkout containing a packaged helper:
+Run from the repository root after building the packaged app with
+`sh scripts/build-app.sh`:
 
 ```sh
-ROOT="$(mktemp -d /private/tmp/steer-claude-setup.XXXXXX)"
-CONFIG="$ROOT/config"
-EVENTS="$ROOT/events"
-INSTALLATION_ID="<uuid>"
-SESSION_ID="<uuid>"
-HELPER="<packaged-app>/Contents/Helpers/SteerHook"
-mkdir -p "$CONFIG" "$EVENTS"
+set -eu
+ROOT_RUN="$(mktemp -d /private/tmp/steer-claude-setup-run.XXXXXX)"
+CONFIG="$ROOT_RUN/config"
+EVENTS="$ROOT_RUN/events"
+SELF_TEST_EVENTS="$ROOT_RUN/helper-self-test-events"
+TEMP_HOME="$ROOT_RUN/home"
+HELPER="$PWD/output/Steer.app/Contents/Helpers/SteerHook"
+INSTALLATION_ID="$(uuidgen | tr '[:lower:]' '[:upper:]')"
+SESSION_ID="$(uuidgen | tr '[:lower:]' '[:upper:]')"
+SELF_TEST_INSTALLATION_ID="$(uuidgen | tr '[:lower:]' '[:upper:]')"
+SELF_TEST_SESSION_ID="$(uuidgen | tr '[:lower:]' '[:upper:]')"
+mkdir -p "$CONFIG" "$EVENTS" "$SELF_TEST_EVENTS" "$ROOT_RUN/helper-self-test" "$TEMP_HOME"
 
-cat > "$CONFIG/settings.json" <<JSON
-{
-  "env": {"CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"},
-  "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "${HELPER} --agent claude --events-dir ${EVENTS} --installation-id ${INSTALLATION_ID} --terminal-title", "timeout": 10}]}],
-    "SessionEnd": [{"hooks": [{"type": "command", "command": "${HELPER} --agent claude --events-dir ${EVENTS} --installation-id ${INSTALLATION_ID} --terminal-title", "timeout": 10}] }]
-  }
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
 }
-JSON
+HOOK_COMMAND="$(shell_quote "$HELPER") --agent claude --events-dir $(shell_quote "$EVENTS") --installation-id $(shell_quote "$INSTALLATION_ID") --terminal-title"
 
-CLAUDE_CONFIG_DIR="$CONFIG" ANTHROPIC_API_KEY=invalid \
-  claude --session-id "$SESSION_ID" --print "isolated setup smoke"
-# Expected: nonzero status because the disposable API key is invalid.
+python3 - "$CONFIG/settings.json" "$HOOK_COMMAND" <<'PY'
+import json
+import pathlib
+import sys
 
-CLAUDE_CONFIG_DIR="$CONFIG" claude agents --json
-# Expected: [] for the disposable root.
+path, command = sys.argv[1:]
+pathlib.Path(path).write_text(json.dumps({
+    "env": {"CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"},
+    "hooks": {
+        "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": command, "timeout": 10}]}],
+        "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": command, "timeout": 10}]}],
+    },
+}, indent=2) + "\n")
+PY
+
+PRE_COUNT="$(find "$EVENTS" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+set +e
+HOME="$TEMP_HOME" CLAUDE_CONFIG_DIR="$CONFIG" ANTHROPIC_API_KEY=invalid \
+  python3 - "$SESSION_ID" "$ROOT_RUN/claude.stdout" "$ROOT_RUN/claude.stderr" <<'PY'
+import subprocess
+import sys
+
+session_id, stdout_path, stderr_path = sys.argv[1:]
+with open(stdout_path, "w") as stdout, open(stderr_path, "w") as stderr:
+    result = subprocess.run([
+        "claude", "--no-session-persistence", "--session-id", session_id,
+        "--output-format", "json", "--print", "isolated setup smoke",
+    ], stdout=stdout, stderr=stderr, timeout=30, check=False)
+raise SystemExit(result.returncode)
+PY
+CLAUDE_EXIT=$?
+set -e
+POST_COUNT="$(find "$EVENTS" -maxdepth 1 -type f | wc -l | tr -d ' ')"
+
+set +e
+HOME="$TEMP_HOME" CLAUDE_CONFIG_DIR="$CONFIG" claude agents --json >"$ROOT_RUN/agents.stdout" 2>"$ROOT_RUN/agents.stderr"
+AGENTS_EXIT=$?
+set -e
+
+# Keep helper checks in a separate directory; these are never mixed with EVENTS.
+set +e
+"$HELPER" --self-test >"$ROOT_RUN/helper-self-test.stdout" 2>"$ROOT_RUN/helper-self-test.stderr"
+HELPER_SELF_TEST_EXIT=$?
+set -e
+printf '{"hook_event_name":"SessionStart","session_id":"%s","source":"startup"}' "$SELF_TEST_SESSION_ID" |
+  "$HELPER" --agent claude --events-dir "$SELF_TEST_EVENTS" --installation-id "$SELF_TEST_INSTALLATION_ID" --terminal-title >"$ROOT_RUN/helper-self-test/session-start.json"
+printf '{"hook_event_name":"SessionEnd","session_id":"%s"}' "$SELF_TEST_SESSION_ID" |
+  "$HELPER" --agent claude --events-dir "$SELF_TEST_EVENTS" --installation-id "$SELF_TEST_INSTALLATION_ID" --terminal-title >"$ROOT_RUN/helper-self-test/session-end.json"
+
+printf 'pre_files=%s post_files=%s claude_exit=%s agents_exit=%s helper_self_test_exit=%s isolated_home=true\n' \
+  "$PRE_COUNT" "$POST_COUNT" "$CLAUDE_EXIT" "$AGENTS_EXIT" "$HELPER_SELF_TEST_EXIT"
+
+python3 - "$EVENTS" "$INSTALLATION_ID" "$SESSION_ID" "$ROOT_RUN/agents.stdout" "$ROOT_RUN/helper-self-test/session-start.json" "$ROOT_RUN/helper-self-test/session-end.json" <<'PY'
+import json
+import pathlib
+import sys
+
+events, installation_id, session_id, agents_path, title_start, title_end = sys.argv[1:]
+records = []
+for path in sorted(pathlib.Path(events).glob("*.json")):
+    record = json.loads(path.read_text())
+    records.append({
+        "hook_event_name": record.get("hook_event_name"),
+        "session_start_source": record.get("session_start_source"),
+        "source": record.get("source"),
+        "installation_id_match": record.get("installation_id") == installation_id,
+        "session_id_match": record.get("session_id") == session_id,
+        "received_at": record.get("received_at"),
+        "captured_at": record.get("captured_at"),
+        "keys": sorted(record),
+    })
+for record in sorted(records, key=lambda item: (item["captured_at"] or 0, item["hook_event_name"] or "")):
+    print(json.dumps(record, sort_keys=True, separators=(",", ":")))
+agents = json.loads(pathlib.Path(agents_path).read_text())
+start = json.loads(pathlib.Path(title_start).read_text())["terminalSequence"]
+end = json.loads(pathlib.Path(title_end).read_text())["terminalSequence"]
+print("agents_shape=%s agents_count=%s" % ("array" if isinstance(agents, list) else type(agents).__name__, len(agents) if isinstance(agents, list) else "n/a"))
+print("title_start_json=%s title_end_json=%s" % (start.startswith("\033]2;Steer Claude ") and start.endswith("\007"), end == "\033]2;\007"))
+PY
 ```
 
-Before starting Claude, the helper output was checked directly as well:
+The direct helper calls above use the separate self-test directory. The real
+Claude run never invokes the helper before startup; its first event file is
+created by Claude's `SessionStart` delivery.
 
-```sh
-printf '{"hook_event_name":"SessionStart","session_id":"%s","source":"startup"}' "$SESSION_ID" |
-  "$HELPER" --agent claude --events-dir "$EVENTS" \
-    --installation-id "$INSTALLATION_ID" --terminal-title > "$ROOT/session-start.json"
-printf '{"hook_event_name":"SessionEnd","session_id":"%s"}' "$SESSION_ID" |
-  "$HELPER" --agent claude --events-dir "$EVENTS" \
-    --installation-id "$INSTALLATION_ID" --terminal-title > "$ROOT/session-end.json"
-```
-
-The first output was one JSON object with only `terminalSequence`; its value
-contained the full session ID. The second output was one JSON object with the
-empty-title reset sequence. Diagnostics stayed out of stdout.
-
-The actual run used a fresh temporary root and fake credentials. Claude
-started, delivered `SessionStart` before the request failed, and wrote a
-matching metadata-only `SessionStart` record with these exact fields:
+Observed run record:
 
 ```text
-hook_event_name=SessionStart
-session_start_source=startup
-source=steer-claude-hook-v1
-installation_id=<configured lab installation id>
-session_id=<configured lab session id>
-received_at=<present ISO-8601 timestamp>
-captured_at=<present timestamp>
+pre_files=0 post_files=2 claude_exit=1 agents_exit=0 helper_self_test_exit=0 isolated_home=true
+{"captured_at":1789924593.599845,"hook_event_name":"SessionStart","installation_id_match":true,"keys":["captured_at","hook_event_name","installation_id","received_at","session_id","session_start_source","source"],"received_at":"2026-09-20T17:16:33Z","session_id_match":true,"session_start_source":"startup","source":"steer-claude-hook-v1"}
+{"captured_at":1789924594.296905,"hook_event_name":"SessionEnd","installation_id_match":true,"keys":["captured_at","hook_event_name","installation_id","received_at","session_id","source"],"received_at":"2026-09-20T17:16:34Z","session_id_match":true,"session_start_source":null,"source":"steer-claude-hook-v1"}
+agents_shape=array agents_count=0
+title_start_json=True title_end_json=True
 ```
 
-The configured installation ID and session ID matched the received record.
-`claude agents --json` returned a top-level empty array. The run changed no
-real `~/.claude` file. A field allowlist inspection found no prompt, command,
-path, reason, tool input, credential, or other event payload in the Claude
-record. The process exited nonzero only because the API key was intentionally
-invalid.
+The Claude subprocess had a 30-second bound and exited with status `1` after
+the fake API key was rejected.
+The two records came from the process run itself and have distinct event names
+and timestamps. The configured installation and session IDs matched both
+records. The allowlist contains only setup metadata; no prompt, command, path,
+reason, tool input, credential, or other event payload was stored.
 
-The helper self-test separately proved that `SessionStart` returns Claude's
-JSON `terminalSequence` containing the full session ID and that `SessionEnd`
-returns the reset sequence. It also proved that a Claude record keeps only the
-setup metadata listed above.
+## Ghostty checkpoint
 
-## Restart evidence
+This was not completed in the automated run. The available automation could
+not operate a real Ghostty tab, so this section is an operator checkpoint and
+makes no pass claim.
 
-No pre-existing live session was present in the disposable root, so this run
-does not claim an observed old-session restart. The automated setup test covers
-the boundary: a session record delivered before installation, a non-SessionStart
-event, or a resume event does not make the root Connected. The status path also
-requires the current installation ID. The root remains **Configured; restart
-required** until a new exact-root `SessionStart` with `source=startup` and the
-current installation ID arrives. A malformed,
-disabled, failed, or timed-out `claude agents --json` probe is reported as
-typed unavailable and is never treated as an empty root.
+Paste this self-contained block into a real unsplit Ghostty tab. It reads the
+default authenticated Claude root without editing its settings, writes a
+disposable `--settings` file, and uses a temporary working directory:
 
-## Ghostty attempt
+```sh
+set -eu
+ROOT_RUN="$(mktemp -d /private/tmp/steer-claude-ghostty.XXXXXX)"
+CONFIG="$ROOT_RUN/config"
+EVENTS="$ROOT_RUN/events"
+HELPER="/private/tmp/steer-issue-80-final/output/Steer.app/Contents/Helpers/SteerHook"
+INSTALLATION_ID="$(uuidgen | tr '[:lower:]' '[:upper:]')"
+SESSION_ID="$(uuidgen | tr '[:lower:]' '[:upper:]')"
+mkdir -p "$CONFIG" "$EVENTS"
 
-I attempted a disposable Ghostty launch with a temporary `--settings` file,
-the same local hook, a local stub API, and no changes to the default Claude or
-Ghostty configuration. The hook record proved the exact startup event. The
-noninteractive `claude --print` route did not expose an observable Ghostty
-title, and the isolated interactive process could not be given its initial
-submit key through the available automation surface. Therefore this evidence
-does not claim that Ghostty applied or retained the title, or that a clean
-`SessionEnd` reset was visible in the terminal. No abrupt-exit restoration was
-attempted or claimed.
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\''/g")"
+}
+HOOK_COMMAND="$(shell_quote "$HELPER") --agent claude --events-dir $(shell_quote "$EVENTS") --installation-id $(shell_quote "$INSTALLATION_ID") --terminal-title"
+python3 - "$CONFIG/settings.json" "$HOOK_COMMAND" <<'PY'
+import json
+import pathlib
+import sys
 
-The remaining operator checkpoint is to launch the packaged app against a
-disposable Claude root in a real unsplit Ghostty tab, start a new session, and
-observe the title `Steer Claude <full-session-id>` and the clean shutdown reset.
-Project and command-line settings precedence remains an explicit product
-boundary: this root-only evidence does not prove that higher-priority sources
-are absent.
+path, command = sys.argv[1:]
+pathlib.Path(path).write_text(json.dumps({
+    "env": {"CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"},
+    "hooks": {
+        "SessionStart": [{"matcher": "", "hooks": [{"type": "command", "command": command, "timeout": 10}]}],
+        "SessionEnd": [{"matcher": "", "hooks": [{"type": "command", "command": command, "timeout": 10}]}],
+    },
+}, indent=2) + "\n")
+PY
+cd "$ROOT_RUN"
+claude --settings "$CONFIG/settings.json" --setting-sources project --session-id "$SESSION_ID"
+```
+
+If the default root is authenticated, submit one harmless prompt and check the
+tab title is exactly `Steer Claude <full SESSION_ID>`. Exit Claude through its
+clean exit path and check that the title resets to the terminal's normal title.
+The `--setting-sources project` flag excludes the ordinary user and local
+settings while retaining the default root's authentication.
+If authentication or startup fails, report that result without retrying with a
+real credential in the disposable root. Report the tested Steer commit, helper
+SHA-256, whether the full title appeared, whether the reset appeared, and any
+observed error. Do not paste credentials or raw conversation output into the
+evidence record.
+
+This run does not claim that Ghostty applied or retained the title, that clean
+shutdown reset was visible in the terminal, or that abrupt-exit restoration
+works.
