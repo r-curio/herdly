@@ -99,16 +99,24 @@ public struct ClaudeQuestionAnswer: Codable, Equatable, Sendable {
 /// Files are only a rendezvous for an invocation that is still waiting in a hook process. The app
 /// keeps the capability to answer in memory, so a restart cannot replay a saved request.
 public enum ClaudeQuestionStore {
+    private static let rendezvousDirectoryName = ".steer-claude-questions"
+
+    /// Question transport files live below the event directory so hook observations and the
+    /// rendezvous lifecycle have independent bounds.
+    public static func rendezvousDirectory(in directory: URL) -> URL {
+        directory.appendingPathComponent(rendezvousDirectoryName, isDirectory: true)
+    }
+
     public static func requestURL(in directory: URL, id: String) -> URL {
-        directory.appendingPathComponent(id + ".question")
+        rendezvousDirectory(in: directory).appendingPathComponent(id + ".question")
     }
 
     public static func receiptURL(in directory: URL, id: String) -> URL {
-        directory.appendingPathComponent(id + ".question-receipt")
+        rendezvousDirectory(in: directory).appendingPathComponent(id + ".question-receipt")
     }
 
     public static func answerURL(in directory: URL, id: String) -> URL {
-        directory.appendingPathComponent(id + ".question-answer")
+        rendezvousDirectory(in: directory).appendingPathComponent(id + ".question-answer")
     }
 
     @discardableResult
@@ -144,22 +152,41 @@ public enum ClaudeQuestionStore {
     /// Reads only fresh, bounded request records for the selected installation.
     public static func pending(in directory: URL, installationID: String, observingSince: Double,
                                now: Double = Date().timeIntervalSince1970) -> [ClaudeQuestionRequest] {
-        guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil),
-              urls.count <= 4096 else { return [] }
-        return urls.compactMap { url -> ClaudeQuestionRequest? in
-            guard url.pathExtension == "question",
-                  let request = decode(url, as: ClaudeQuestionRequest.self),
+        let rendezvous = rendezvousDirectory(in: directory)
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: rendezvous,
+                                                                         includingPropertiesForKeys: nil) else {
+            return []
+        }
+        let eventDirectory = directory.standardizedFileURL.path
+        var pending: [ClaudeQuestionRequest] = []
+        for url in urls where url.pathExtension == "question" {
+            guard let request = decode(url, as: ClaudeQuestionRequest.self),
                   validID(request.requestID),
-                  request.installationID == installationID,
-                  request.eventDirectory == directory.standardizedFileURL.path,
+                  request.eventDirectory == eventDirectory,
                   request.toolName == "AskUserQuestion",
                   request.prompts.count == 1,
                   request.prompts.first?.question?.isEmpty == false,
-                  request.publishedAt.isFinite, request.publishedAt >= observingSince,
-                  request.publishedAt <= now, request.expiresAt >= request.publishedAt,
-                  request.expiresAt >= now else { return nil }
-            return request
-        }.sorted { $0.publishedAt == $1.publishedAt ? $0.requestID < $1.requestID : $0.publishedAt < $1.publishedAt }
+                  request.publishedAt.isFinite, request.expiresAt.isFinite,
+                  request.expiresAt >= request.publishedAt else { continue }
+            if request.expiresAt < now {
+                removeTriplet(for: request.requestID, in: directory)
+                continue
+            }
+            guard request.installationID == installationID,
+                  request.publishedAt >= observingSince, request.publishedAt <= now else { continue }
+            pending.append(request)
+        }
+        return pending.sorted {
+            $0.publishedAt == $1.publishedAt ? $0.requestID < $1.requestID : $0.publishedAt < $1.publishedAt
+        }.prefix(4096).map { $0 }
+    }
+
+    private static func removeTriplet(for id: String, in directory: URL) {
+        let manager = FileManager.default
+        for url in [requestURL(in: directory, id: id), receiptURL(in: directory, id: id),
+                    answerURL(in: directory, id: id)] {
+            try? manager.removeItem(at: url)
+        }
     }
 
     private static func decode<T: Decodable>(_ url: URL, as type: T.Type) -> T? {
