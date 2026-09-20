@@ -24,8 +24,12 @@ enum ClaudeStatusLineCompatibility {
         // explicit so a future launch implementation cannot accidentally signal Steer's group.
         let processGroupOwned = getpgid(process.processIdentifier) == process.processIdentifier
         stdout.fileHandleForWriting.closeFile()
-        stdin.fileHandleForWriting.write(input)
+        let inputForwarded = writeProbeInput(input, to: stdin.fileHandleForWriting.fileDescriptor)
         stdin.fileHandleForWriting.closeFile()
+        guard inputForwarded else {
+            terminateAndReap(process: process, groupOwned: processGroupOwned)
+            return false
+        }
         let deadline = Date().addingTimeInterval(timeout)
         guard wait(for: process, until: deadline) else {
             terminateAndReap(process: process, groupOwned: processGroupOwned)
@@ -44,6 +48,25 @@ enum ClaudeStatusLineCompatibility {
                                 events: Int16(POLLHUP), revents: 0)
         guard poll(&descriptor, 1, 200) > 0, descriptor.revents & Int16(POLLHUP) != 0 else {
             return false
+        }
+        return true
+    }
+
+    private static func writeProbeInput(_ input: Data, to descriptor: Int32) -> Bool {
+        guard fcntl(descriptor, F_SETNOSIGPIPE, 1) == 0 else { return false }
+        var offset = 0
+        while offset < input.count {
+            let count = input.withUnsafeBytes { bytes in
+                guard let base = bytes.baseAddress else { return -1 }
+                return write(descriptor, base.advanced(by: offset), input.count - offset)
+            }
+            if count > 0 {
+                offset += count
+            } else if count < 0, errno == EINTR {
+                continue
+            } else {
+                return false
+            }
         }
         return true
     }
