@@ -126,9 +126,8 @@ public enum ClaudeObservationReader {
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
                 if var existing = turns[turnID] {
-                    if let closedAt = existing.closedAt, record.capturedAt > closedAt {
+                    if existing.terminal == nil, let closedAt = existing.closedAt, record.capturedAt > closedAt {
                         existing.closedAt = nil
-                        existing.terminal = nil
                     }
                     if existing.promptText == nil { existing.promptText = boundedText(record.prompt) }
                     existing.startedAt = min(existing.startedAt, record.capturedAt)

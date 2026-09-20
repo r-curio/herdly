@@ -274,6 +274,41 @@ import Testing
     #expect(queue.items.first?.running?.fullAction == "new")
 }
 
+@Test func claudeDelayedFailureCannotReintroduceAnOlderPromptAfterALaterPrompt() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "First"),
+        claudeRecord("UserPromptSubmit", at: 10, promptID: "p2", prompt: "Second")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var queue = AgentAttentionQueue()
+    queue.apply(scanClaude(root, now: 20))
+    #expect(queue.items.filter { $0.session.source == .claude }.map(\.running?.identity.turn) == ["p2"])
+
+    try appendClaudeEvent(claudeRecord("StopFailure", at: 5, promptID: "p1"), to: root)
+    queue.apply(scanClaude(root, now: 20))
+
+    #expect(queue.items.filter { $0.session.source == .claude }.map(\.kind) == [.outcome, .running])
+    #expect(queue.items.first?.outcome?.status == .failed)
+    #expect(queue.items.compactMap(\.running).first?.identity.turn == "p2")
+}
+
+@Test func claudeRepeatedPromptCannotReopenAVerifiedFailureDuringReplay() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "First"),
+        claudeRecord("StopFailure", at: 5, promptID: "p1")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var queue = AgentAttentionQueue()
+    queue.apply(scanClaude(root, now: 20))
+    #expect(queue.items.first?.outcome?.status == .failed)
+
+    try appendClaudeEvent(claudeRecord("UserPromptSubmit", at: 10, promptID: "p1", prompt: "First"), to: root)
+    queue.apply(scanClaude(root, now: 20))
+
+    #expect(queue.items.filter { $0.session.source == .claude }.map(\.kind) == [.outcome])
+    #expect(queue.items.first?.outcome?.status == .failed)
+}
+
 @Test func claudeQueueUpdatesToolDetailAndClearsItAfterStop() throws {
     let root = try makeClaudeEvents([claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Inspect")])
     defer { try? FileManager.default.removeItem(at: root) }
