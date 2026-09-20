@@ -5,6 +5,7 @@ import Foundation
 public enum NotchPresentationMode: Equatable, Sendable {
     case collapsed
     case spotlight(AttentionItemID)
+    case agentSpotlight(AgentAttentionID)
     case queue
 
     public static func resolve(spotlight: AttentionItemID?, manualOpen: Bool,
@@ -19,19 +20,71 @@ public enum NotchPresentationMode: Equatable, Sendable {
     public var showsAll: Bool { self == .queue }
 }
 
+/// Chooses among fresh source-aware cards after each card class has applied its own
+/// presentation policy. Queue order is the product priority order.
+public enum AgentPresentationSelection {
+    public static func highestPriority(in items: [AgentAttentionItem],
+                                       candidates: Set<AgentAttentionID>) -> AgentAttentionID? {
+        items.first { candidates.contains($0.id) }?.id
+    }
+}
+
+/// Claude has no verified foreground target in the current integration. Its fresh
+/// cards may present while Codex is foreground; Codex keeps the existing foreground gate.
+public enum AgentPresentationEligibility {
+    public static func foregroundGate(source: AgentSource, codexForeground: Bool?) -> Bool? {
+        source == .claude ? false : codexForeground
+    }
+}
+
 /// Owns the causal transition between automatic spotlighting and an explicit queue open.
 public struct NotchPresentationController: Equatable, Sendable {
     private var spotlight = Spotlight()
+    private var agentSpotlight = AgentSpotlight()
     private var manualOpen = false
 
     public init() {}
     public mutating func present(_ item: AttentionItemID, now: Double) { spotlight.present(item, now: now) }
+    public mutating func present(_ item: AgentAttentionID, now: Double) { agentSpotlight.present(item, now: now) }
+    public func agentSpotlightIsActive(interacting: Bool, now: Double) -> Bool {
+        agentSpotlight.isActive(interacting: interacting, now: now)
+    }
     public mutating func openQueue() { manualOpen = true }
-    public mutating func collapse() { manualOpen = false; spotlight.clear() }
+    public mutating func collapse() { manualOpen = false; spotlight.clear(); agentSpotlight.clear() }
     public mutating func update(interacting: Bool, now: Double, legacyPopup: Bool = false) -> NotchPresentationMode {
         if !interacting { manualOpen = false }
+        if let id = agentSpotlight.update(interacting: interacting, now: now) {
+            return manualOpen ? .queue : .agentSpotlight(id)
+        }
         return NotchPresentationMode.resolve(spotlight: spotlight.update(interacting: interacting, now: now),
                                              manualOpen: manualOpen, interacting: interacting, legacyPopup: legacyPopup)
+    }
+}
+
+private struct AgentSpotlight: Equatable, Sendable {
+    private var item: AgentAttentionID?
+    private var until: Double = 0
+
+    mutating func present(_ item: AgentAttentionID, now: Double) {
+        self.item = item
+        until = now + Spotlight.duration
+    }
+
+    mutating func update(interacting: Bool, now: Double) -> AgentAttentionID? {
+        guard let item else { return nil }
+        if interacting || now < until { return item }
+        clear()
+        return nil
+    }
+
+    func isActive(interacting: Bool, now: Double) -> Bool {
+        guard item != nil else { return false }
+        return interacting || now < until
+    }
+
+    mutating func clear() {
+        item = nil
+        until = 0
     }
 }
 

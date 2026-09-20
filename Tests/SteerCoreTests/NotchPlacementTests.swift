@@ -164,6 +164,21 @@ private let external = NotchDisplay(id: 2, frame: CGRect(x: 1512, y: 100, width:
     #expect(again == .completion(completion.id))
 }
 
+@Test func agentSpotlightUsesTheSameThreeSecondWindowAndQueueOverride() {
+    let session = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "session", surface: .cli)
+    let item = AgentAttentionID.outcome(AgentTurnIdentity(session: session, turn: "turn"))
+    var controller = NotchPresentationController()
+    controller.present(item, now: 10)
+    #expect(controller.agentSpotlightIsActive(interacting: false, now: 12.9))
+    #expect(!controller.agentSpotlightIsActive(interacting: false, now: 13))
+    #expect(controller.update(interacting: false, now: 12.9) == .agentSpotlight(item))
+    #expect(controller.update(interacting: false, now: 13) == .collapsed)
+
+    controller.present(item, now: 20)
+    controller.openQueue()
+    #expect(controller.update(interacting: true, now: 21) == .queue)
+}
+
 @Test func spotlightOutranksPassiveInteractionUntilTheHeaderExplicitlyOpensTheQueue() {
     let session = UUID(), turn = UUID()
     let ids: [AttentionItemID] = [

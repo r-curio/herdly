@@ -306,47 +306,111 @@ struct Notch: View {
                 set: { open in if open { openDisclosures.insert(key) } else { openDisclosures.remove(key) } })
     }
 
-    private var strip: StripSummary {
-        StripSummary.make(items: model.orderedAttentionItems, testPending: model.attention.pending && !model.desktopForeground,
-                          names: model.threadNames)
+    private var sessionNames: [AgentSessionIdentity: String] {
+        var names = model.claudeSessionNames
+        for (session, name) in model.threadNames {
+            names[CodexAttentionAdapter.session(session, surface: .desktop)] = name
+            names[CodexAttentionAdapter.session(session, surface: .cli)] = name
+        }
+        return names
     }
 
-    private func rowTitle(_ item: AttentionItem) -> String {
+    private var strip: AgentStripSummary {
+        AgentStripSummary.make(items: model.orderedAgentAttentionItems,
+                               testPending: model.attention.pending && !model.desktopForeground,
+                               names: sessionNames)
+    }
+
+    private func rowTitle(_ item: AgentAttentionItem) -> String {
         switch item.kind {
-        case .actionableRequest: return "Permission needed"
-        case .handedBackRequest: return "Continue in Codex"
-        case .question: return "Codex needs an answer"
-        case .completion: return item.completion?.source == .cli ? "Codex CLI finished" : "Codex desktop finished"
-        case .running: return sessionLabel(item)
+        case .actionableApproval: return item.session.source == .claude ? "Claude permission needed" : "Permission needed"
+        case .handedBackApproval: return item.session.source == .claude ? "Continue in Claude" : "Continue in Codex"
+        case .question: return item.session.source == .claude ? "Claude waiting" : "Codex needs an answer"
+        case .outcome, .earlierOutcome:
+            let status = item.outcome?.status
+            let label = switch status {
+            case .finished: "finished"
+            case .failed: "failed"
+            case .stopped: "stopped"
+            case .unavailable, nil: "status unavailable"
+            }
+            return "\(item.session.source == .claude ? "Claude" : "Codex") \(label)"
+        case .statusUnavailable: return "Claude status unavailable"
+        case .waiting: return "Waiting"
+        case .running: return "Working"
         }
     }
 
     /// Running rows already carry the session name as their title; a CLI session gets its source
     /// noted where the session label would otherwise sit.
-    private func rowTrailing(_ item: AttentionItem) -> String? {
-        guard item.kind == .running else { return sessionLabel(item) }
-        return item.running?.source == .cli ? "Codex CLI" : nil
+    private func rowTrailing(_ item: AgentAttentionItem) -> String? {
+        sessionLabel(item.session)
     }
 
-    private func sessionLabel(_ item: AttentionItem) -> String { StripSummary.sessionLabel(item.session, names: model.threadNames) }
+    private func sessionLabel(_ session: AgentSessionIdentity) -> String {
+        AgentStripSummary.sessionLabel(session, names: sessionNames)
+    }
 
     /// The color the strip gives this session, or its preferred color if it is not on the strip.
-    private func spriteColor(for session: UUID) -> Int {
-        strip.sessions.first { $0.session == session }?.color ?? StripSummary.preferredColor(for: session)
+    private func spriteColor(for session: AgentSessionIdentity) -> Int {
+        strip.sessions.first { $0.session == session }?.color ?? AgentStripSummary.preferredColor(for: session)
     }
 
-    private func rowSubject(_ item: AttentionItem) -> String {
-        if model.threadNames[item.session] != nil { return sessionLabel(item) }
-        guard let task = item.request?.details?.taskName, !task.isEmpty else { return sessionLabel(item) }
-        return "\(task), \(sessionLabel(item))"
+    private func rowSubject(_ item: AgentAttentionItem) -> String {
+        if let task = item.approval?.details?.taskName, !task.isEmpty { return "\(task), \(sessionLabel(item.session))" }
+        return sessionLabel(item.session)
+    }
+
+    private func spriteColor(for session: UUID) -> Int {
+        let identity = CodexAttentionAdapter.session(session, surface: .cli)
+        return strip.sessions.first { $0.session == identity }?.color ?? AgentStripSummary.preferredColor(for: identity)
+    }
+
+    @ViewBuilder
+    private func agentQuestionBody(_ question: AgentQuestion, subject: String) -> some View {
+        if let legacy = model.codexQuestion(for: question) {
+            questionBody(legacy, subject: subject)
+        } else if question.prompts.isEmpty {
+            Text(question.identity.session.source == .claude
+                 ? "Claude is waiting for a question response; answer it in Claude."
+                 : "Codex asked a question Steer could not read; answer it in Codex.")
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+        } else {
+            ForEach(Array(question.prompts.enumerated()), id: \.offset) { index, prompt in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        if let header = prompt.header { Text(header).font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink) }
+                        if question.prompts.count > 1 { Text("\(index + 1) of \(question.prompts.count)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim) }
+                    }
+                    if let text = prompt.question {
+                        Text(text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(Array(prompt.options.enumerated()), id: \.offset) { option, label in
+                        if model.canAnswerAgentQuestion(question) {
+                            OptionButton(number: option + 1, label: label, tone: NotchStyle.spriteColor(spriteColor(for: question.identity.session))) {
+                                model.chooseAgentOption(question, index: index, option: option)
+                            }
+                            .accessibilityLabel("Answer \(option + 1): \(label), for \(subject)")
+                        } else {
+                            HStack(alignment: .top, spacing: 8) {
+                                Text("\(option + 1)").foregroundStyle(NotchStyle.dim).frame(width: 14, alignment: .trailing)
+                                Text(label).foregroundStyle(NotchStyle.text)
+                            }.font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Which rows the open panel shows: the explicit queue, or only the notification that opened it.
-    private var visibleItems: [AttentionItem] {
+    private var visibleItems: [AgentAttentionItem] {
         switch model.presentationMode {
         case .collapsed: return []
-        case .queue: return model.orderedAttentionItems
-        case let .spotlight(id): return model.orderedAttentionItems.filter { $0.id == id }
+        case .queue: return model.orderedAgentAttentionItems
+        case .agentSpotlight(let id): return model.orderedAgentAttentionItems.filter { $0.id == id }
+        case .spotlight: return []
         }
     }
 
@@ -354,18 +418,19 @@ struct Notch: View {
         model.attention.pending && !model.desktopForeground && model.presentationMode.showsAll
     }
 
-    private func isSpotlight(_ item: AttentionItem) -> Bool {
-        model.presentationMode == .spotlight(item.id)
+    private func isSpotlight(_ item: AgentAttentionItem) -> Bool {
+        model.presentationMode == .agentSpotlight(item.id)
     }
 
     @ViewBuilder
-    private func detail(_ label: String, _ value: String?, selectable: Bool = false) -> some View {
+    private func detail(_ label: String, _ value: String?, selectable: Bool = false,
+                        missing: String = "Not provided by Codex") -> some View {
         HStack(alignment: .top, spacing: 8) {
             Text(label).foregroundStyle(NotchStyle.dim).frame(width: 58, alignment: .leading)
             if selectable {
-                Text(value ?? "Not provided by Codex").foregroundStyle(value == nil ? NotchStyle.dim : NotchStyle.text).textSelection(.enabled)
+                Text(value ?? missing).foregroundStyle(value == nil ? NotchStyle.dim : NotchStyle.text).textSelection(.enabled)
             } else {
-                Text(value ?? "Not provided by Codex").foregroundStyle(value == nil ? NotchStyle.dim : NotchStyle.text)
+                Text(value ?? missing).foregroundStyle(value == nil ? NotchStyle.dim : NotchStyle.text)
             }
         }
         .font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
@@ -613,155 +678,183 @@ struct Notch: View {
     }
 
     @ViewBuilder
-    private func attentionRow(_ item: AttentionItem) -> some View {
+    private func attentionRow(_ item: AgentAttentionItem) -> some View {
         let spotlightDetails = isSpotlight(item) ? model.spotlightDetails(for: item) : nil
+        let subject = rowSubject(item)
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if item.kind == .running || item.kind == .question {
-                    Sprite(working: item.kind == .running, reduceMotion: model.reduceMotion, color: spriteColor(for: item.session)).offset(y: -1)
+                if item.kind == .running || item.kind == .waiting || item.kind == .question {
+                    Sprite(working: item.running?.status == .working, reduceMotion: model.reduceMotion,
+                           color: spriteColor(for: item.session)).offset(y: -1)
                 }
                 Text(rowTitle(item)).font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
-                if let trailing = rowTrailing(item) {
-                    Text(trailing).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                        .lineLimit(1).truncationMode(.tail)
-                }
+                Text(rowTrailing(item) ?? "").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                    .lineLimit(1).truncationMode(.tail)
             }
             if let spotlightDetails {
                 VStack(alignment: .leading, spacing: 3) {
-                    ForEach(spotlightDetails.context) { field in
-                        detail(field.label, field.value, selectable: true)
+                    ForEach(spotlightDetails.context) { field in detail(field.label, field.value, selectable: true) }
+                }
+            }
+            if let details = item.approval?.details, spotlightDetails == nil {
+                let missing = item.session.source == .claude ? "Not provided by Claude" : "Not provided by Codex"
+                VStack(alignment: .leading, spacing: 3) {
+                    detail("task", details.taskName, missing: missing)
+                    detail("project", details.project, missing: missing)
+                    detail("action", details.action, missing: missing)
+                    detail("command", details.command, selectable: true, missing: missing)
+                    detail("reason", details.reason, selectable: true, missing: missing)
+                }
+                if let longText = details.longText {
+                    NotchDisclosure(title: "Show full request", expanded: disclosure("request:\(item.session.session)")) {
+                        Text(longText).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .accessibilityLabel("Show full request for \(subject)")
                 }
             }
             switch item.kind {
-            case .handedBackRequest:
-                Text("Handed back with no decision. Steer has not seen an answer yet; this clears when Codex records one, the turn ends, or the session ends.")
+            case .handedBackApproval:
+                Text("Handed back with no decision. Continue in \(item.session.source == .claude ? "Claude" : "Codex") to decide.")
                     .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
-            case .completion:
-                if item.completion?.uncertain == true {
+                if item.session.source == .claude {
+                    Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                }
+            case .actionableApproval:
+                if item.session.source == .claude {
+                    Text("Claude decisions are unavailable here; decide in Claude.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                }
+            case .outcome, .earlierOutcome:
+                if item.outcome?.uncertain == true {
                     Text("Queued before Steer last started. You may already have seen this result; Steer cannot verify it.")
                         .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
                 }
                 if let prompt = spotlightDetails?.originalPrompt {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Original prompt").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
-                        Text(prompt).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
-                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-            case .question:
-                if let question = item.question { questionBody(question, subject: rowSubject(item)) }
-            case .running:
-                if let running = item.running, let row = running.rowText {
-                    Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
-                        .lineLimit(2).truncationMode(.tail)
-                    if let full = running.fullAction {
-                        NotchDisclosure(title: "Show full action", expanded: disclosure("action:\(item.session.uuidString)")) {
-                            Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
-                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                        }
-                        .accessibilityLabel("Show full action for \(rowSubject(item))")
-                    } else if running.promptIsTruncated, let full = running.fullPrompt {
-                        NotchDisclosure(title: "Show full prompt", expanded: disclosure("prompt:\(item.session.uuidString)")) {
-                            Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
-                                .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                        }
-                        .accessibilityLabel("Show full prompt for \(rowSubject(item))")
-                    }
-                }
-            case .actionableRequest:
-                EmptyView()
-            }
-            if spotlightDetails == nil, let details = item.request?.details {
-                // Long commands and reasons wrap in full; nothing is truncated with an ellipsis.
-                VStack(alignment: .leading, spacing: 3) {
-                    if let name = model.threadNames[item.session] { detail("thread", name, selectable: true) }
-                    detail("task", details.taskName)
-                    detail("project", details.project)
-                    detail("action", details.action)
-                    detail("command", details.command, selectable: true)
-                    detail("reason", details.reason, selectable: true)
-                }
-                if let longText = details.longText {
-                    NotchDisclosure(title: "Show full request", expanded: disclosure("request:\(item.session.uuidString)")) {
-                        Text(longText).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                        Text(prompt).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .accessibilityLabel("Show full request for \(rowSubject(item))")
                 }
+                if item.session.source == .claude {
+                    Text("Open in Claude is unavailable until Steer can verify the exact Claude tab.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                }
+            case .question:
+                if let question = item.question { agentQuestionBody(question, subject: subject) }
+                if item.session.source == .claude {
+                    Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                }
+            case .waiting, .running:
+                if let running = item.running, let row = running.rowText {
+                    Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).lineLimit(2).truncationMode(.tail)
+                    if let full = running.fullAction {
+                        NotchDisclosure(title: "Show full action", expanded: disclosure("action:\(item.session.session)")) {
+                            Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityLabel("Show full action for \(subject)")
+                    } else if let full = running.fullPrompt, full != row {
+                        NotchDisclosure(title: "Show full prompt", expanded: disclosure("prompt:\(item.session.session)")) {
+                            Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .accessibilityLabel("Show full prompt for \(subject)")
+                    }
+                }
+                if item.session.source == .claude {
+                    Text("Open in Claude is unavailable until Steer can verify the exact Claude tab.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                }
+            case .statusUnavailable:
+                Text(item.unavailableReason ?? "Status unavailable. Continue in Claude to inspect the session.")
+                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
             }
             HStack(spacing: 6) {
                 switch item.kind {
-                case .actionableRequest:
-                    if item.request?.source == .cli {
-                        NotchButton(title: "Approve once", emphasized: true) { if let request = item.request { model.decide(request, as: .allowOnce) } }
-                            .accessibilityLabel("Approve once: \(rowSubject(item))")
-                        NotchButton(title: "Deny") { if let request = item.request { model.decide(request, as: .deny) } }
-                            .accessibilityLabel("Deny: \(rowSubject(item))")
+                case .actionableApproval:
+                    if item.session.source == .codex && item.session.surface == .cli {
+                        NotchButton(title: "Approve once", emphasized: true) { if let approval = item.approval { model.decideAgent(approval, as: .allowOnce) } }
+                            .accessibilityLabel("Approve once: \(subject)")
+                            .accessibilityHint("Approves this Codex permission request once.")
+                        NotchButton(title: "Deny") { if let approval = item.approval { model.decideAgent(approval, as: .deny) } }
+                            .accessibilityLabel("Deny: \(subject)")
+                            .accessibilityHint("Denies this Codex permission request.")
                     }
-                    NotchButton(title: "Open in Codex") { if let request = item.request { model.openApprovalInCodex(request) } }
-                        .disabled(model.openingTask)
-                        .accessibilityLabel("Open in Codex: \(rowSubject(item))")
-                        .accessibilityHint("Hands this request back to Codex's own prompt.")
-                case .handedBackRequest:
-                    NotchButton(title: "Open in Codex") {
-                        if let request = item.request { model.openAttentionSession(source: request.source, session: request.session) }
-                    }
-                    .disabled(model.openingTask)
-                    .accessibilityLabel("Open in Codex: \(rowSubject(item))")
-                case .question:
-                    if let question = item.question, question.source == .cli, !model.ghosttyEnabled {
-                        NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
-                            .accessibilityLabel("Set up Ghostty: \(rowSubject(item))")
-                            .accessibilityHint("Opens Steer controls to enable Ghostty controls.")
-                    } else {
-                        NotchButton(title: "Open in Codex", emphasized: item.question.map { model.progress(for: $0).offersButtons } != true) {
-                            if let question = item.question { model.openAttentionSession(source: question.source, session: question.session) }
+                    if item.session.source == .codex {
+                        NotchButton(title: "Open in Codex") {
+                            if let approval = item.approval { model.openAgentApproval(approval) }
                         }
                         .disabled(model.openingTask)
-                        .accessibilityLabel("Open in Codex: \(rowSubject(item))")
-                        .accessibilityHint("Answer the question in Codex's own panel.")
+                        .accessibilityLabel("Open in Codex: \(subject)")
+                        .accessibilityHint("Hands this request back to Codex's own prompt.")
                     }
-                    NotchButton(title: "Dismiss") { if let question = item.question { model.dismissQuestion(question) } }
-                        .accessibilityLabel("Dismiss question: \(rowSubject(item))")
-                case .completion:
-                    NotchButton(title: "Open in Codex") {
-                        if item.completion?.source == .cli { model.openCLI(item.session) } else { model.openDesktop(item.session) }
+                case .handedBackApproval, .statusUnavailable:
+                    if item.session.source == .codex {
+                        NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
+                            .disabled(model.openingTask)
+                            .accessibilityLabel("Open in Codex: \(subject)")
+                            .accessibilityHint("Open this session in Codex.")
                     }
-                    .disabled(model.openingTask)
-                    .accessibilityLabel("Open in Codex: \(rowSubject(item))")
-                    NotchButton(title: "Dismiss") { if let completion = item.completion { model.dismissAttention(completion) } }
-                        .accessibilityLabel("Dismiss completion: \(rowSubject(item))")
-                case .running:
-                    NotchButton(title: "Open in Codex") {
-                        if item.running?.source == .cli { model.openCLI(item.session) } else { model.openDesktop(item.session) }
+                case .question:
+                    if item.session.source == .claude {
+                        EmptyView()
+                    } else if item.session.surface == .cli && !model.ghosttyEnabled {
+                        NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
+                            .accessibilityLabel("Set up Ghostty: \(subject)")
+                            .accessibilityHint("Opens Steer controls to enable Ghostty controls.")
+                    } else {
+                        NotchButton(title: "Open in Codex", emphasized: true) { model.openAgent(item.session) }
+                            .disabled(model.openingTask)
+                            .accessibilityLabel("Open in Codex: \(subject)")
+                            .accessibilityHint("Answer the question in Codex's own panel.")
                     }
-                    .disabled(model.openingTask)
-                    .accessibilityLabel("Open in Codex: \(rowSubject(item))")
+                    if item.session.source == .codex {
+                        NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+                            .accessibilityLabel("Dismiss question: \(subject)")
+                    }
+                case .outcome, .earlierOutcome:
+                    if item.session.source == .codex {
+                        NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
+                            .disabled(model.openingTask)
+                            .accessibilityLabel("Open in Codex: \(subject)")
+                            .accessibilityHint("Open this session in Codex.")
+                    }
+                    NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+                        .accessibilityLabel("Dismiss completion: \(subject)")
+                case .waiting, .running:
+                    if item.session.source == .codex {
+                        NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
+                            .disabled(model.openingTask)
+                            .accessibilityLabel("Open in Codex: \(subject)")
+                            .accessibilityHint("Open this session in Codex.")
+                    }
                 }
             }
-            if let completion = item.completion, completion.source == .cli {
-                replyBody(completion, subject: rowSubject(item))
+            if let outcome = item.outcome, outcome.session.source == .codex, let completion = model.codexCompletion(for: outcome),
+               completion.source == .cli {
+                replyBody(completion, subject: subject)
             }
-            if item.completion != nil, let spotlightDetails {
+            if item.outcome != nil, let spotlightDetails {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Final response").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
                     switch spotlightDetails.response {
-                    case let .available(preview):
-                        Text(preview.text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
-                            .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                    case let .unavailable(reason):
-                        Text(reason).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                            .fixedSize(horizontal: false, vertical: true)
+                    case let .available(preview): Text(preview.text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    case let .unavailable(reason): Text(reason).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
                     case nil: EmptyView()
                     }
                 }
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(item.kind == .running ? "Working: \(rowSubject(item))" : "\(rowTitle(item)), \(rowSubject(item))")
+        .accessibilityLabel("\(rowTitle(item)), \(subject)")
     }
 
     private var stripLabel: String {
@@ -832,7 +925,10 @@ struct Notch: View {
                 Rectangle().fill(NotchStyle.seam).frame(height: 1).padding(.bottom, 12)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        ForEach(visibleItems) { item in
+                        ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
+                            if item.kind == .earlierOutcome && (index == 0 || visibleItems[index - 1].kind != .earlierOutcome) {
+                                Text("Earlier").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.dim)
+                            }
                             attentionRow(item)
                         }
                         if model.presentationMode.showsAll && model.needsGhosttySetup {

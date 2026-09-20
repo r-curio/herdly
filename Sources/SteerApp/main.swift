@@ -61,6 +61,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Source-scoped queue for adapters that have bounded native observations. The legacy
     /// Codex presentation queue remains the display path until its UI migration slice.
     @Published var agentQueue = AgentAttentionQueue(snapshot: Companion.launchSnapshot)
+    /// Claude names are presentation metadata only; source scope keeps identical session IDs apart.
+    @Published private(set) var claudeSessionNames: [AgentSessionIdentity: String] = [:]
     @Published var reminderPresentation = Attention()
     @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
     @Published var completionPresentation = Attention()
@@ -155,11 +157,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var scanning = false
     private var nextScan: Double = 0
     var orderedAttentionItems: [AttentionItem] { queue.items }
-    var count: Int { orderedAttentionItems.count + (attention.pending ? 1 : 0) }
-    var workingCount: Int { orderedAttentionItems.filter { $0.kind == .running }.count }
-    var toCheckCount: Int {
-        orderedAttentionItems.filter { $0.kind != .running }.count + (attention.pending ? 1 : 0)
-    }
+    var orderedAgentAttentionItems: [AgentAttentionItem] { agentQueue.items(at: Date().timeIntervalSince1970) }
+    var count: Int { orderedAgentAttentionItems.count + (attention.pending ? 1 : 0) }
+    var workingCount: Int { agentQueue.workingCount }
+    var toCheckCount: Int { agentQueue.toCheckCount + (attention.pending ? 1 : 0) }
     /// One presentation mode prevents passive hover from replacing a new item's focused card.
     @Published var expanded = false
     @Published var presentationMode: NotchPresentationMode = .collapsed
@@ -178,9 +179,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// After Escape, hover does not reopen the panel until the pointer has left it.
     private var hoverSuppressed = false
     private var notchPresentation = NotchPresentationController()
-    private var latestNewRequest: AttentionItemID?
-    private var latestNewCompletion: AttentionItemID?
-    private var latestNewQuestion: AttentionItemID?
+    /// Fresh IDs stay pending until an eligible card is selected for the single shared spotlight.
+    /// Keeping all IDs lets a Claude card remain eligible when a same-scan Codex card is newer.
+    private var freshAgentRequestIDs: Set<AgentAttentionID> = []
+    private var freshAgentCompletionIDs: Set<AgentAttentionID> = []
+    private var freshAgentQuestionIDs: Set<AgentAttentionID> = []
+    private var previewSpotlightAgent: AgentAttentionID?
     private var targetFrame: CGRect = .zero
     /// `--preview-queue <collapsed|spotlight|expanded>` seeds in-memory sample items for screenshots.
     /// It never scans Codex events, never saves, and never releases approvals.
@@ -241,7 +245,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             if let path = Companion.argumentValue(for: flag) { eventsPath = path }
         }
         // Restored completions never replay their sound or popup.
-        if queue.items.contains(where: { $0.kind == .completion }) { completionPresentation = Attention(restored: true) }
+        if agentQueue.items(at: Date().timeIntervalSince1970).contains(where: { $0.outcome != nil }) {
+            completionPresentation = Attention(restored: true)
+        }
         // Checkpoint what was restored: the store keeps the current valid file as the fallback for the next
         // save, and rewrites a corrupt file from that fallback. A missing snapshot is not created here.
         if FileManager.default.fileExists(atPath: Companion.snapshotURL.path) {
@@ -556,6 +562,28 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     private var shownControlsForSetup = false
 
+    /// Projects the legacy Codex adapter into the source-neutral queue used by the notch. Claude
+    /// observations already arrive there, so this keeps both sources under one ordering/count path.
+    private func syncAgentQueueWithCodex(now: Double) {
+        let items = queue.items
+        let keeping = Set(items.map { item -> AgentAttentionID in
+            switch item.kind {
+            case .actionableRequest, .handedBackRequest: return .approval(CodexAttentionAdapter.approval(from: item.request!).id)
+            case .question: return .question(CodexAttentionAdapter.question(from: item.question!).id)
+            case .completion: return .outcome(CodexAttentionAdapter.outcome(from: item.completion!).id)
+            case .running: return .running(CodexAttentionAdapter.running(from: item.running!).id)
+            }
+        })
+        agentQueue.reconcile(source: .codex, sourceScope: CodexAttentionAdapter.sourceScope, keeping: keeping)
+        let requests = items.compactMap { $0.request }
+        let questions = items.compactMap { $0.question }
+        let completions = items.compactMap { $0.completion }
+        let running = items.compactMap { $0.running }
+        agentQueue.apply(CodexAttentionAdapter.observations(requests: requests, questions: questions,
+                                                            completions: completions, running: running), now: now)
+        agentQueue.expire(at: now)
+    }
+
     /// A connected install delivers to Steer's own events folder; watch it even if an earlier lab
     /// folder was chosen or a previous Configure attempt ended before recording the path.
     private func adoptInstalledEventsFolder(_ roots: CodexSetupRoots) {
@@ -691,10 +719,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
 
     func scanReminders() {
         let now = ProcessInfo.processInfo.systemUptime
-        guard previewMode == nil, !eventsPath.isEmpty, !scanning, now >= nextScan else { return }
+        let hasClaudeInventoryRoot = claude.roots.contains { $0.capabilities.supported }
+        guard previewMode == nil, (!eventsPath.isEmpty || hasClaudeInventoryRoot), !scanning, now >= nextScan else { return }
         scanning = true
         nextScan = now + 2
-        let events = URL(fileURLWithPath: eventsPath)
+        // Claude inventory can be the only connected source. The empty Codex input is read from
+        // /dev/null so the existing bounded readers produce no Codex observations.
+        let events = URL(fileURLWithPath: eventsPath.isEmpty ? "/dev/null" : eventsPath)
         let rolloutRoot = Companion.rolloutRoot
         let readStateURL = desktopReadStateEnabled ? Companion.desktopReadStateURL : nil
         let namesURL = Companion.threadNamesURL
@@ -740,12 +771,18 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let scan = result.0
             let desktopEvents = result.1
             let readState = result.2
-            guard eventsPath == events.path else { scanning = false; refresh(); return }
+            guard eventsPath.isEmpty || eventsPath == events.path else { scanning = false; refresh(); return }
+            let previousAgent = Set(agentQueue.items(at: Date().timeIntervalSince1970).map(\.id))
             for claudeScan in result.8 {
                 agentQueue.apply(claudeScan, now: Date().timeIntervalSince1970)
             }
             for inventory in result.7 {
                 agentQueue.apply(inventory, now: Date().timeIntervalSince1970)
+                for session in inventory.sessions {
+                    let identity = AgentSessionIdentity(source: .claude, sourceScope: inventory.sourceScope,
+                                                        session: session.sessionID, surface: .cli)
+                    if !session.name.isEmpty { claudeSessionNames[identity] = session.name }
+                }
             }
             if threadNames != result.3 { threadNames = result.3 }
             if usage != result.4 { usage = result.4 }
@@ -778,7 +815,18 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let receipted = ApprovalReceipts.issue(scan.awaitingReceipt, in: events, cliSessions: scan.cliSessions,
                                                    now: Date().timeIntervalSince1970)
             if !receipted.isEmpty { queue.recordReceipts(receipted, now: Date().timeIntervalSince1970) }
+            syncAgentQueueWithCodex(now: Date().timeIntervalSince1970)
             let current = queue.items
+            let currentAgent = agentQueue.items(at: Date().timeIntervalSince1970)
+            let newAgentItems = currentAgent.filter { !previousAgent.contains($0.id) }
+            let newAgentOutcomes = newAgentItems.compactMap(\.outcome)
+            let newAgentQuestions = newAgentItems.compactMap(\.question)
+            let freshAgentOutcomes = newAgentOutcomes.filter { !$0.uncertain && $0.arrivedAt >= Companion.launchedAt }
+            let freshAgentQuestions = newAgentQuestions.filter { $0.arrivedAt >= Companion.launchedAt }
+            let newAgentRequests = newAgentItems.filter {
+                ($0.kind == .actionableApproval || $0.kind == .handedBackApproval)
+            }
+            let freshAgentRequests = newAgentRequests.filter { $0.arrivedAt >= Companion.launchedAt }
             let newItems = current.filter { !previous.contains($0.id) }
             let newCompletions = newItems.compactMap(\.completion)
             for completion in newCompletions where !completion.uncertain {
@@ -797,26 +845,27 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                     spotlightContexts[item.id] = context
                 }
             }
-            if let newest = newItems.filter({ $0.completion?.uncertain == false }).max(by: { $0.arrivedAt < $1.arrivedAt }) {
-                latestNewCompletion = newest.id
+            freshAgentCompletionIDs.formUnion(freshAgentOutcomes.map { .outcome($0.id) })
+            freshAgentRequestIDs.formUnion(freshAgentRequests.map(\.id))
+            freshAgentQuestionIDs.formUnion(freshAgentQuestions.map { .question($0.id) })
+            if !freshAgentOutcomes.isEmpty { completionPresentation.enqueue() }
+            else if newAgentOutcomes.contains(where: { !$0.uncertain }), !completionPresentation.pending {
+                completionPresentation = Attention(restored: true)
             }
-            if let newest = newItems.filter({ $0.kind == .actionableRequest || $0.kind == .handedBackRequest })
-                .max(by: { $0.arrivedAt < $1.arrivedAt }) {
-                latestNewRequest = newest.id
-            }
-            let newQuestions = newItems.filter { $0.kind == .question }
-            if let newest = newQuestions.max(by: { $0.arrivedAt < $1.arrivedAt }) { latestNewQuestion = newest.id }
-            if newCompletions.contains(where: { !$0.uncertain }) { completionPresentation.enqueue() }
-            else if !newCompletions.isEmpty, !completionPresentation.pending { completionPresentation = Attention(restored: true) }
             if ghosttyEnabled && newCompletions.contains(where: { $0.source == .cli }) { nextGhosttyScan = 0 }
-            if !current.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.dismiss() }
-            else if newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }) { reminderPresentation.enqueue() }
-            if !current.contains(where: { $0.kind == .completion }) { completionPresentation.dismiss() }
+            if !currentAgent.contains(where: { $0.approval != nil }) { reminderPresentation.dismiss() }
+            else if newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest })
+                    || !freshAgentRequests.isEmpty {
+                reminderPresentation.enqueue()
+            } else if !newAgentRequests.isEmpty, !reminderPresentation.pending {
+                reminderPresentation = Attention(restored: true)
+            }
+            if !currentAgent.contains(where: { $0.outcome != nil }) { completionPresentation.dismiss() }
             // A question posed before this launch is shown but does not pop or chime: the user may
             // already be looking at it, and Steer was not observing when it arrived.
-            if !current.contains(where: { $0.kind == .question }) { questionPresentation.dismiss() }
-            else if newQuestions.contains(where: { $0.arrivedAt >= Companion.launchedAt }) { questionPresentation.enqueue() }
-            else if !newQuestions.isEmpty, !questionPresentation.pending { questionPresentation = Attention(restored: true) }
+            if !currentAgent.contains(where: { $0.question != nil }) { questionPresentation.dismiss() }
+            else if !freshAgentQuestions.isEmpty { questionPresentation.enqueue() }
+            else if !newAgentQuestions.isEmpty, !questionPresentation.pending { questionPresentation = Attention(restored: true) }
             saveCompletions()
             scanning = false
             completedAScan = true
@@ -932,15 +981,17 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         if firstPresentation && !muted { NSSound(named: "Glass")?.play() }
         // Use the same visibility as the count and rows, including CLI reminders.
-        let firstReminderPresentation = reminderPresentation.update(codexForeground: visibleReminders.isEmpty, hovering: interacting,
+        let agentItems = orderedAgentAttentionItems
+        let liveAgentIDs = Set(agentItems.map(\.id))
+        freshAgentRequestIDs.formIntersection(liveAgentIDs)
+        freshAgentCompletionIDs.formIntersection(liveAgentIDs)
+        freshAgentQuestionIDs.formIntersection(liveAgentIDs)
+        let freshRequests = agentItems.filter { freshAgentRequestIDs.contains($0.id)
+            && ($0.kind == .actionableApproval || $0.kind == .handedBackApproval) }
+        var firstReminderPresentation = reminderPresentation.update(codexForeground: !agentItems.contains {
+            $0.kind == .actionableApproval || $0.kind == .handedBackApproval
+        }, hovering: interacting,
                                                                     now: ProcessInfo.processInfo.systemUptime)
-        if firstReminderPresentation {
-            let requests = queue.items.filter { $0.kind == .actionableRequest || $0.kind == .handedBackRequest }
-            if let id = latestNewRequest, requests.contains(where: { $0.id == id }) { notchPresentation.present(id, now: now) }
-            else if let newest = requests.max(by: { $0.arrivedAt < $1.arrivedAt }) { notchPresentation.present(newest.id, now: now) }
-            latestNewRequest = nil
-        }
-        var nextCompletionPresentation = completionPresentation
         let ghosttyFocus: CompletionFocus
         switch ghosttyFocusState {
         case .disabled: ghosttyFocus = .disabled
@@ -948,56 +999,128 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         case .known(let snapshot): ghosttyFocus = snapshot.selected == nil ? .unknown : .away
         case .unknown: ghosttyFocus = .unknown
         }
-        let canPresentCompletion = queue.items.contains { item in
-            guard let completion = item.completion else { return false }
-            guard CompletionVisibility.allows(source: completion.source, codexForeground: codexForeground,
-                                             ghosttyFocus: ghosttyFocus) else { return false }
-            guard completion.source == .cli, ghosttyEnabled else { return true }
-            guard case .known(let snapshot) = ghosttyFocusState,
-                  let target = GhosttyMatch.target(session: completion.session, live: liveCLI, snapshot: snapshot)
-            else { return false }
-            return snapshot.selected != target
+        func completionIsEligible(_ item: AgentAttentionItem) -> Bool {
+            guard let outcome = item.outcome, !outcome.uncertain else { return false }
+            guard outcome.session.source == .claude else {
+                guard let session = UUID(uuidString: outcome.session.session) else { return false }
+                let source: AttentionSource = outcome.session.surface == .cli ? .cli : .desktop
+                guard CompletionVisibility.allows(source: source, codexForeground: codexForeground,
+                                                 ghosttyFocus: ghosttyFocus) else { return false }
+                guard source == .cli, ghosttyEnabled else { return true }
+                guard case .known(let snapshot) = ghosttyFocusState,
+                      let target = GhosttyMatch.target(session: session, live: liveCLI, snapshot: snapshot)
+                else { return false }
+                return snapshot.selected != target
+            }
+            return true
         }
-        let firstCompletionPresentation = nextCompletionPresentation.update(
-            codexForeground: canPresentCompletion ? codexForeground : true,
+        let freshCompletions = agentItems.filter { freshAgentCompletionIDs.contains($0.id) }
+        let eligibleFreshCompletions = freshCompletions.filter(completionIsEligible)
+        let canPresentCompletion = agentItems.contains(where: completionIsEligible)
+        func questionIsEligible(_ item: AgentAttentionItem) -> Bool {
+            guard item.question != nil else { return false }
+            return item.session.source == .claude || codexForeground != true
+        }
+        let freshQuestions = agentItems.filter { freshAgentQuestionIDs.contains($0.id) }
+        let eligibleFreshQuestions = freshQuestions.filter(questionIsEligible)
+        let canPresentQuestion = agentItems.contains(where: questionIsEligible)
+        let agentSpotlightAvailable = !notchPresentation.agentSpotlightIsActive(interacting: interacting, now: now)
+        var freshAgentSpotlightCandidates = Set<AgentAttentionID>()
+        if agentSpotlightAvailable {
+            freshAgentSpotlightCandidates.formUnion(freshRequests.map(\.id))
+            freshAgentSpotlightCandidates.formUnion(eligibleFreshCompletions.map(\.id))
+            freshAgentSpotlightCandidates.formUnion(eligibleFreshQuestions.map(\.id))
+        }
+        let selectedFreshAgent = AgentPresentationSelection.highestPriority(in: agentItems,
+                                                                              candidates: freshAgentSpotlightCandidates)
+
+        var nextCompletionPresentation = completionPresentation
+        let selectedCompletion = selectedFreshAgent.flatMap { id in
+            eligibleFreshCompletions.first { $0.id == id }
+        }
+        let completionForegroundGate: Bool? = if let selectedCompletion {
+            AgentPresentationEligibility.foregroundGate(source: selectedCompletion.session.source,
+                                                        codexForeground: codexForeground)
+        } else if !freshCompletions.isEmpty {
+            // A higher priority card owns this tick, or Codex's focus/target gate is still closed.
+            true
+        } else {
+            canPresentCompletion ? codexForeground : true
+        }
+        var firstCompletionPresentation = nextCompletionPresentation.update(
+            codexForeground: completionForegroundGate,
             hovering: interacting,
             now: ProcessInfo.processInfo.systemUptime
         )
         completionPresentation = nextCompletionPresentation
-        if firstCompletionPresentation {
-            let completions = queue.items.filter { $0.completion?.uncertain == false }
-            if let id = latestNewCompletion, completions.contains(where: { $0.id == id }) { notchPresentation.present(id, now: now) }
-            else if let newest = completions.max(by: { $0.arrivedAt < $1.arrivedAt }) { notchPresentation.present(newest.id, now: now) }
-            latestNewCompletion = nil
-        }
+
         // A question pops under the same away-from-Codex rule as a completion; Ghostty focus is
         // not consulted because the question stays pending until Codex records the answer.
-        let canPresentQuestion = queue.items.contains { item in
-            guard let question = item.question else { return false }
-            return CompletionVisibility.allows(source: question.source, codexForeground: codexForeground, ghosttyFocus: .disabled)
+        let selectedQuestion = selectedFreshAgent.flatMap { id in
+            eligibleFreshQuestions.first { $0.id == id }
         }
-        let firstQuestionPresentation = questionPresentation.update(codexForeground: canPresentQuestion ? codexForeground : true,
-                                                                    hovering: interacting, now: ProcessInfo.processInfo.systemUptime)
-        if firstQuestionPresentation {
-            let questions = queue.items.filter { $0.kind == .question }
-            if let id = latestNewQuestion, questions.contains(where: { $0.id == id }) { notchPresentation.present(id, now: now) }
-            else if let newest = questions.max(by: { $0.arrivedAt < $1.arrivedAt }) { notchPresentation.present(newest.id, now: now) }
-            latestNewQuestion = nil
+        let questionForegroundGate: Bool? = if let selectedQuestion {
+            AgentPresentationEligibility.foregroundGate(source: selectedQuestion.session.source,
+                                                        codexForeground: codexForeground)
+        } else if !freshQuestions.isEmpty {
+            true
+        } else {
+            canPresentQuestion ? codexForeground : true
         }
-        if let mode = previewMode, mode == "spotlight", let id = previewSpotlight { notchPresentation.present(id, now: now) }
+        var firstQuestionPresentation = questionPresentation.update(
+            codexForeground: questionForegroundGate,
+            hovering: interacting, now: ProcessInfo.processInfo.systemUptime)
+        let selectedReminder = selectedFreshAgent.flatMap { id in freshRequests.first { $0.id == id } }
+        if selectedReminder != nil, reminderPresentation.presented, !firstReminderPresentation {
+            reminderPresentation.enqueue()
+            firstReminderPresentation = reminderPresentation.update(
+                codexForeground: false, hovering: interacting, now: ProcessInfo.processInfo.systemUptime)
+        }
+        if firstReminderPresentation, let id = selectedReminder?.id {
+            freshAgentRequestIDs.remove(id)
+        }
+        if selectedCompletion != nil, completionPresentation.presented, !firstCompletionPresentation {
+            nextCompletionPresentation = completionPresentation
+            nextCompletionPresentation.enqueue()
+            firstCompletionPresentation = nextCompletionPresentation.update(
+                codexForeground: completionForegroundGate, hovering: interacting,
+                now: ProcessInfo.processInfo.systemUptime)
+            completionPresentation = nextCompletionPresentation
+        }
+        if firstCompletionPresentation, let id = selectedCompletion?.id {
+            freshAgentCompletionIDs.remove(id)
+        }
+        if selectedQuestion != nil, questionPresentation.presented, !firstQuestionPresentation {
+            questionPresentation.enqueue()
+            firstQuestionPresentation = questionPresentation.update(
+                codexForeground: questionForegroundGate, hovering: interacting,
+                now: ProcessInfo.processInfo.systemUptime)
+        }
+        if firstQuestionPresentation, let id = selectedQuestion?.id {
+            freshAgentQuestionIDs.remove(id)
+        }
+        let selectedPresentationWasFresh = (selectedReminder != nil && firstReminderPresentation)
+            || (selectedCompletion != nil && firstCompletionPresentation)
+            || (selectedQuestion != nil && firstQuestionPresentation)
+        if selectedPresentationWasFresh, let id = selectedFreshAgent {
+            notchPresentation.present(id, now: now)
+        }
+        if let mode = previewMode, mode == "spotlight", let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
         let resolvedPresentation = notchPresentation.update(interacting: interacting, now: now, legacyPopup: attention.expanded)
-        let spotlightItem: AttentionItemID? = if case let .spotlight(id) = resolvedPresentation { id } else { nil }
+        let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
         case "expanded": presentationMode = .queue
         case "collapsed": presentationMode = .collapsed
-        case "spotlight": presentationMode = spotlightItem.map(NotchPresentationMode.spotlight) ?? .collapsed
+        case "spotlight": presentationMode = spotlightItem.map(NotchPresentationMode.agentSpotlight) ?? .collapsed
         default:
             presentationMode = resolvedPresentation
         }
         expanded = presentationMode.expanded
         // Sound follows the card opening: the frame below is set in the same pass, so the chime
         // lands as the card lands. Muted, restored, and foreground cases never reach here.
-        if CompletionSound.shouldPlay(firstPresentation: firstCompletionPresentation || firstQuestionPresentation, muted: muted) {
+        let selectedAgentSound = (selectedCompletion != nil && firstCompletionPresentation)
+            || (selectedQuestion != nil && firstQuestionPresentation)
+        if CompletionSound.shouldPlay(firstPresentation: selectedAgentSound, muted: muted) {
             NSSound(named: "Glass")?.play()
         }
         guard DesktopVisibility.isVisible(hasActivity: count > 0, codexForeground: codexForeground) else {
@@ -1016,7 +1139,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         currentDisplayID = display.id
         let layout = NotchPlacement.strip(on: display, expanded: expanded, fiveHourShown: fiveHourShown)
         if stripLayout != layout { stripLayout = layout }
-        let rows = presentationMode.showsAll ? orderedAttentionItems.count : (spotlightItem == nil ? 0 : 1)
+        let rows = presentationMode.showsAll ? orderedAgentAttentionItems.count : (spotlightItem == nil ? 0 : 1)
         var frame = contentHeight > 0
             ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, fiveHourShown: fiveHourShown)
             : NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
@@ -1129,9 +1252,98 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Persists unacknowledged completions and acknowledgments atomically whenever they change.
     func saveCompletions() {
         guard previewMode == nil else { return }
-        let snapshot = queue.snapshot
+        let snapshot = agentQueue.snapshot
         guard snapshot != savedSnapshot else { return }
         if AttentionSnapshotStore.save(snapshot, to: Companion.snapshotURL) { savedSnapshot = snapshot }
+    }
+
+    private func codexSession(_ identity: AgentSessionIdentity) -> UUID? {
+        guard identity.source == .codex else { return nil }
+        return UUID(uuidString: identity.session)
+    }
+
+    private func codexTurn(_ identity: AgentTurnIdentity) -> AttentionCompletion? {
+        guard let session = codexSession(identity.session), let turn = UUID(uuidString: identity.turn) else { return nil }
+        return queue.items.compactMap(\.completion).first { $0.session == session && $0.turn == turn }
+    }
+
+    func openAgent(_ identity: AgentSessionIdentity) {
+        guard let session = codexSession(identity) else {
+            navigationMessage = "Open in Claude is unavailable until Steer can verify the exact Claude tab."
+            refresh()
+            return
+        }
+        if identity.surface == .cli { openCLI(session) } else { openDesktop(session) }
+    }
+
+    func openAgentApproval(_ approval: AgentApproval) {
+        guard approval.identity.session.source == .codex,
+              let session = codexSession(approval.identity.session),
+              let requestID = UUID(uuidString: approval.identity.call),
+              let request = queue.items.compactMap(\.request).first(where: { $0.id == requestID }) else {
+            navigationMessage = "Open in Claude is unavailable until Steer can verify the exact Claude tab."
+            refresh()
+            return
+        }
+        openApprovalInCodex(request)
+        _ = session
+    }
+
+    func decideAgent(_ approval: AgentApproval, as decision: ApprovalDecision) {
+        guard approval.identity.session.source == .codex,
+              approval.identity.session.surface == .cli,
+              let requestID = UUID(uuidString: approval.identity.call),
+              let request = queue.items.compactMap(\.request).first(where: { $0.id == requestID }) else {
+            navigationMessage = approval.identity.session.source == .claude
+                ? "Claude decisions are unavailable here; decide in Claude."
+                : "Desktop Codex decisions are handled by Codex's native prompt."
+            refresh()
+            return
+        }
+        decide(request, as: decision)
+    }
+
+    func chooseAgentOption(_ question: AgentQuestion, index: Int, option: Int) {
+        guard question.identity.session.source == .codex,
+              let session = codexSession(question.identity.session),
+              let turn = UUID(uuidString: question.turn),
+              let current = queue.items.compactMap(\.question).first(where: { $0.session == session && $0.turn == turn && $0.callID == question.identity.call }) else {
+            navigationMessage = "Claude questions are answered in Claude."
+            refresh()
+            return
+        }
+        chooseOption(current, question: index, option: option)
+    }
+
+    func codexQuestion(for question: AgentQuestion) -> AttentionQuestion? {
+        guard question.identity.session.source == .codex,
+              let session = codexSession(question.identity.session),
+              let turn = UUID(uuidString: question.turn) else { return nil }
+        return queue.items.compactMap(\.question).first {
+            $0.session == session && $0.turn == turn && $0.callID == question.identity.call
+        }
+    }
+
+    func canAnswerAgentQuestion(_ question: AgentQuestion) -> Bool {
+        guard let current = codexQuestion(for: question) else { return false }
+        return showsOptionControls(for: current)
+    }
+
+    func dismissAgent(_ id: AgentAttentionID) {
+        if case let .outcome(identity) = id, let completion = codexTurn(identity) {
+            queue.dismiss(.completion(completion.id))
+        } else if case let .approval(identity) = id, let requestID = UUID(uuidString: identity.call),
+                  let request = queue.items.compactMap(\.request).first(where: { $0.id == requestID }) {
+            queue.dismiss(.request(request.identity))
+        } else if case let .question(identity) = id, let session = codexSession(identity.session),
+                  let turn = UUID(uuidString: identity.turn),
+                  let question = queue.items.compactMap(\.question).first(where: { $0.session == session && $0.turn == turn && $0.callID == identity.call }) {
+            queue.dismiss(.question(question.id))
+        }
+        agentQueue.dismiss(id)
+        syncAgentQueueWithCodex(now: Date().timeIntervalSince1970)
+        saveCompletions()
+        refresh()
     }
     func dismissAttention(_ item: AttentionCompletion) {
         switch item.source {
@@ -1326,6 +1538,24 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             Date(timeIntervalSince1970: $0).formatted(date: .abbreviated, time: .standard)
         }
     }
+
+    func spotlightDetails(for item: AgentAttentionItem) -> SpotlightDetails? {
+        guard item.session.source == .codex,
+              let session = UUID(uuidString: item.session.session) else { return nil }
+        let legacy = queue.items.first { candidate in
+            guard candidate.session == session else { return false }
+            switch (candidate.id, item.id) {
+            case let (.request(request), .approval(approval)): return request.request.uuidString.lowercased() == approval.call.lowercased()
+            case let (.question(question), .question(agent)): return question.callID == agent.call
+            case let (.completion(completion), .outcome(outcome)): return completion.turn.uuidString.lowercased() == outcome.turn.lowercased()
+            case let (.running(running), .running(agent)): return running.turn.uuidString.lowercased() == agent.turn.lowercased()
+            default: return false
+            }
+        }
+        return legacy.map { spotlightDetails(for: $0) }
+    }
+
+    func codexCompletion(for outcome: AgentOutcome) -> AttentionCompletion? { codexTurn(outcome.identity) }
 
     /// One Send on a completion card. The reply starts a new turn on that exact thread through the
     /// daemon, after re-reading the queue and the target as they are right now. Sending does not
@@ -1594,7 +1824,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         completionPresentation = Attention(restored: true)
         reminderPresentation = Attention(restored: true)
         questionPresentation = Attention(restored: true)
-        previewSpotlight = .completion(completion.id)
+        syncAgentQueueWithCodex(now: now)
+        previewSpotlightAgent = .outcome(CodexAttentionAdapter.outcome(from: completion).id)
         _ = mode
     }
 

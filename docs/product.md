@@ -96,11 +96,11 @@ Present one shared notch on the display the user is actively using. On a display
 
 ## Agreed queue experience
 
-Use one shared notch for multiple Codex sessions. Its compact state is a black strip fused to the bottom of the menu bar, a little wider than the camera housing, showing three readings on one line: a green pixel sprite that steps while any session is working and stands still otherwise, the task name of the top-priority item (Codex's task name when it provided one, otherwise the shortened session identifier), and a badge counting items to check, hidden at zero. To check counts pending approval requests, including requests handed back to Codex, and unacknowledged completions. Hovering the strip expands the queue with approval requests ahead of other activity, and it collapses shortly after the pointer leaves; clicking gives the panel keyboard focus and keeps it open while focused. This is a queue for the user's attention; it does not serialize Codex execution.
+Use one shared notch for multiple Codex sessions. Its compact state is a black strip fused to the bottom of the menu bar, a little wider than the camera housing, showing three readings on one line: a green pixel sprite that steps while any session is working and stands still otherwise, the task name of the top-priority item (Codex's task name when it provided one, otherwise the shortened session identifier), and a badge counting items to check, hidden at zero. To check counts pending approval requests, including requests handed back to Codex, unknown Claude waiting sessions, and unacknowledged completions. Hovering the strip expands the queue with approval requests ahead of other activity, and it collapses shortly after the pointer leaves; clicking gives the panel keyboard focus and keeps it open while focused. This is a queue for the user's attention; it does not serialize Codex execution.
 
 Each approval request has its own 30-second handoff timer starting when the companion receives the request, including while it waits behind other requests. Opening the queue or reaching the request does not restart or extend its timer. Expired requests retain only Open in Codex while permission is still needed.
 
-Queue priority is: actionable notch approvals, question requests waiting for the user's answer, requests handed back to Codex that still need an answer, unacknowledged completions, then running tasks. Within each group, order by original arrival time, oldest first. Expiration moves a request into the handed-back group without restarting its timer.
+Queue priority is: actionable notch approvals, question requests waiting for the user's answer, requests handed back to Codex that still need an answer, unknown Claude waiting sessions, unacknowledged completions, then running tasks. Within each group, order by original arrival time, oldest first. A concrete approval or question for a Claude session replaces its generic waiting row so the same session is not counted twice. Expiration moves a request into the handed-back group without restarting its timer.
 
 A session already working when the companion launches, or before its first hook event arrives, is shown as working from its rollout when there is liveness evidence for it: the desktop app running for a desktop session, its tab in Ghostty or a Codex CLI process for a CLI session, and no session end recorded since the turn began. Discovery only ever adds a running row; a completion, request, question, or sound still needs its own evidence. See [session discovery](session-discovery.md).
 
@@ -113,8 +113,37 @@ only their matching action, while a bounded fresh `PreToolUse` may supply the cu
 denial or interruption cleanup drops tool specificity without inventing a terminal result. `Stop` is
 provisional and never creates Finished; `StopFailure` may report Failed. Claude question and approval
 observations are intake state only in this slice, and the helper stores no question copy, option
-descriptions, tool responses, or transcripts. Per-root inventory reconciliation is issue #82; mixed
-source presentation and counts in the existing notch are issue #83.
+descriptions, tool responses, or transcripts. Inventory status can add Working or Waiting rows, but a
+background done, failed, or stopped state never creates a user-facing outcome without matching hook
+evidence. Per-root inventory reconciliation is issue #82; mixed source presentation and counts in the
+existing notch are issue #83.
+
+## Agreed mixed-source notch behavior
+
+The notch presents Codex and Claude observations in one priority queue. Every row names its
+source explicitly. Codex actions say Open in Codex. Claude cards explain when returning to the exact
+tab is unavailable and omit that unsupported action until exact-tab targeting is verified. Claude
+uses its supplied session name for display when available and otherwise shows a shortened session
+identifier, with the source prefix retained in both cases. The name is presentation metadata and does
+not identify a target or claim who supplied it. Live rows read Working or Waiting. A finished, failed,
+or stopped turn keeps that terminal label; when the current or terminal state cannot be classified,
+the row says Status unavailable.
+
+Claude questions without a verified answer transport show the question as Waiting and explain that
+the answer belongs in Claude. Generic Claude Waiting rows still count as to-check attention, while
+their exact tab return is unavailable until targeting is verified. Claude completion cards retain
+Dismiss and explain the unavailable return action without rendering an unsupported Open control.
+Claude follow-up prompts and broader direct approval decisions stay unavailable until their
+transports are separately proven; the card explains that limitation instead of guessing a target.
+Codex cards keep their existing answer, approval, detail, and reply actions.
+
+Each fresh Claude question or outcome can sound and spotlight once for three seconds. Repeated
+observations, discovery, and restart recovery do not replay either presentation. An outcome that
+arrived before Steer restarted is uncertain and silent. After five minutes, an unacknowledged
+outcome moves into Earlier while retaining its to-check count and Dismiss action; Codex retains Open
+in Codex, while Claude keeps the unavailable return explanation. This is
+presentation decay, not deletion or acknowledgment. Claude has no trustworthy read receipt; only
+explicit dismissal or a later verified exact-tab visit can acknowledge its outcome.
 
 ## Agreed approval experience
 
