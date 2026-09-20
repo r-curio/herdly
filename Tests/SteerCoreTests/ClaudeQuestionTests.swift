@@ -262,3 +262,92 @@ private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installati
                                                                                     id: expired.requestID).path))
     #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("unrelated-4099.json").path))
 }
+
+@Test func claudeQuestionPendingFailsClosedForPrivateNoiseWithoutDeletingLiveTriplet() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-question-private-noise-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let now = Date().timeIntervalSince1970
+    let current = claudeQuestionRequest(requestID: "current", sourceScope: "/root",
+                                        eventDirectory: directory.standardizedFileURL.path,
+                                        publishedAt: now - 0.1, expiresAt: now + 100)
+    #expect(ClaudeQuestionStore.publish(current, in: directory))
+    #expect(ClaudeQuestionStore.publish(claudeQuestionReceipt(for: current), in: directory))
+    #expect(ClaudeQuestionStore.publish(claudeQuestionAnswer(for: current), in: directory))
+    let rendezvous = ClaudeQuestionStore.rendezvousDirectory(in: directory)
+    for index in 0..<4100 {
+        try Data("unrelated".utf8).write(to: rendezvous.appendingPathComponent("unrelated-\(index).tmp"))
+    }
+
+    #expect(ClaudeQuestionStore.pending(in: directory, installationID: current.installationID,
+                                        observingSince: now - 1, now: now).isEmpty)
+    #expect(FileManager.default.fileExists(atPath: ClaudeQuestionStore.requestURL(in: directory,
+                                                                                    id: current.requestID).path))
+    #expect(FileManager.default.fileExists(atPath: ClaudeQuestionStore.receiptURL(in: directory,
+                                                                                    id: current.requestID).path))
+    #expect(FileManager.default.fileExists(atPath: ClaudeQuestionStore.answerURL(in: directory,
+                                                                                   id: current.requestID).path))
+}
+
+@Test func claudeQuestionPendingNeverDeletesLiveTripletForForgedFilename() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-question-forged-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let now = Date().timeIntervalSince1970
+    let live = claudeQuestionRequest(requestID: "live", sourceScope: "/root",
+                                     eventDirectory: directory.standardizedFileURL.path,
+                                     publishedAt: now - 0.1, expiresAt: now + 100)
+    #expect(ClaudeQuestionStore.publish(live, in: directory))
+    #expect(ClaudeQuestionStore.publish(claudeQuestionReceipt(for: live), in: directory))
+    #expect(ClaudeQuestionStore.publish(claudeQuestionAnswer(for: live), in: directory))
+    let forged = claudeQuestionRequest(requestID: live.requestID, sourceScope: live.sourceScope,
+                                       eventDirectory: live.eventDirectory,
+                                       publishedAt: now - 100, expiresAt: now - 1)
+    let forgedURL = ClaudeQuestionStore.rendezvousDirectory(in: directory).appendingPathComponent("other.question")
+    try JSONEncoder().encode(forged).write(to: forgedURL)
+
+    let pending = ClaudeQuestionStore.pending(in: directory, installationID: live.installationID,
+                                              observingSince: now - 1, now: now)
+    #expect(pending.map(\.requestID) == [live.requestID])
+    #expect(FileManager.default.fileExists(atPath: ClaudeQuestionStore.requestURL(in: directory,
+                                                                                    id: live.requestID).path))
+    #expect(FileManager.default.fileExists(atPath: ClaudeQuestionStore.receiptURL(in: directory,
+                                                                                    id: live.requestID).path))
+    #expect(FileManager.default.fileExists(atPath: ClaudeQuestionStore.answerURL(in: directory,
+                                                                                   id: live.requestID).path))
+    #expect(FileManager.default.fileExists(atPath: forgedURL.path))
+}
+
+@Test func claudeQuestionPendingDrainsExpiredBatchesBeforeRecoveringLiveRequest() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-question-expired-batches-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let now = Date().timeIntervalSince1970
+    let eventDirectory = directory.standardizedFileURL.path
+    let current = claudeQuestionRequest(requestID: "current", sourceScope: "/root",
+                                        eventDirectory: eventDirectory, publishedAt: now - 0.1, expiresAt: now + 100)
+    #expect(ClaudeQuestionStore.publish(current, in: directory))
+
+    // Each expired request contributes a request, receipt, and answer file. This exceeds the
+    // bounded scan in one pass while keeping the records canonical and safe to prune.
+    for index in 0..<1400 {
+        let expired = claudeQuestionRequest(requestID: "expired-\(index)", sourceScope: "/root",
+                                            eventDirectory: eventDirectory, publishedAt: now - 100,
+                                            expiresAt: now - 1)
+        #expect(ClaudeQuestionStore.publish(expired, in: directory))
+        #expect(ClaudeQuestionStore.publish(claudeQuestionReceipt(for: expired), in: directory))
+        #expect(ClaudeQuestionStore.publish(claudeQuestionAnswer(for: expired), in: directory))
+    }
+
+    var pending: [ClaudeQuestionRequest] = []
+    for _ in 0..<8 {
+        pending = ClaudeQuestionStore.pending(in: directory, installationID: current.installationID,
+                                              observingSince: now - 200, now: now)
+        if !pending.isEmpty { break }
+    }
+    #expect(pending.map(\.requestID) == [current.requestID])
+    #expect(FileManager.default.fileExists(atPath: ClaudeQuestionStore.requestURL(in: directory,
+                                                                                    id: current.requestID).path))
+    #expect(!FileManager.default.fileExists(atPath: ClaudeQuestionStore.requestURL(in: directory,
+                                                                                     id: "expired-0").path))
+}
