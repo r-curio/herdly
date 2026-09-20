@@ -224,3 +224,41 @@ private func claudeQuestionAnswer(for request: ClaudeQuestionRequest, installati
                                               observingSince: now - 1, now: now)
     #expect(!pending.contains { $0.requestID == restored.requestID })
 }
+
+@Test func claudeQuestionPendingIgnoresSharedDirectoryNoiseAndPrunesOnlyExpiredTriplets() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-question-bounded-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let now = Date().timeIntervalSince1970
+    let eventDirectory = directory.standardizedFileURL.path
+    let current = claudeQuestionRequest(requestID: "current", sourceScope: "/root",
+                                        eventDirectory: eventDirectory, publishedAt: now - 0.1, expiresAt: now + 100)
+    let live = claudeQuestionRequest(requestID: "live", sourceScope: "/root",
+                                     eventDirectory: eventDirectory, publishedAt: now - 10, expiresAt: now + 100)
+    let expired = claudeQuestionRequest(requestID: "expired", sourceScope: "/root",
+                                        eventDirectory: eventDirectory, publishedAt: now - 100, expiresAt: now - 1)
+    #expect(ClaudeQuestionStore.publish(current, in: directory))
+    #expect(ClaudeQuestionStore.publish(live, in: directory))
+    #expect(ClaudeQuestionStore.publish(expired, in: directory))
+    #expect(ClaudeQuestionStore.publish(claudeQuestionReceipt(for: expired), in: directory))
+    #expect(ClaudeQuestionStore.publish(claudeQuestionAnswer(for: expired), in: directory))
+
+    for index in 0..<4100 {
+        try Data("unrelated".utf8).write(to: directory.appendingPathComponent("unrelated-\(index).json"))
+    }
+
+    let pending = ClaudeQuestionStore.pending(in: directory, installationID: current.installationID,
+                                              observingSince: now - 200, now: now)
+    #expect(Set(pending.map(\.requestID)) == Set([current.requestID, live.requestID]))
+    #expect(FileManager.default.fileExists(atPath: ClaudeQuestionStore.requestURL(in: directory,
+                                                                                    id: current.requestID).path))
+    #expect(FileManager.default.fileExists(atPath: ClaudeQuestionStore.requestURL(in: directory,
+                                                                                    id: live.requestID).path))
+    #expect(!FileManager.default.fileExists(atPath: ClaudeQuestionStore.requestURL(in: directory,
+                                                                                     id: expired.requestID).path))
+    #expect(!FileManager.default.fileExists(atPath: ClaudeQuestionStore.receiptURL(in: directory,
+                                                                                     id: expired.requestID).path))
+    #expect(!FileManager.default.fileExists(atPath: ClaudeQuestionStore.answerURL(in: directory,
+                                                                                    id: expired.requestID).path))
+    #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("unrelated-4099.json").path))
+}
