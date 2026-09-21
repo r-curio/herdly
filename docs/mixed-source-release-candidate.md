@@ -63,7 +63,10 @@ Run from the clean source checkout named by the package evidence:
 swift test
 sh scripts/package-app.sh
 output/Steer.app/Contents/MacOS/Steer --smoke-test
-shasum -a 256 -c output/dist/*.zip.sha256
+(
+    cd output/dist
+    shasum -a 256 -c ./*.zip.sha256
+)
 codesign --verify --deep --strict output/Steer.app
 output/Steer.app/Contents/Helpers/SteerHook --self-test
 git diff --check
