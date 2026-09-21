@@ -26,6 +26,9 @@ Codex's own figure for how much of its weekly usage window is used, read from th
 **Five-hour limit**:
 Codex's own figure for how much of its five-hour usage window is used, reported together with the weekly limit. The companion shows it beside the weekly limit only while Codex reports one that has not reset; a plan without a short window shows nothing in its place.
 
+**Claude subscription window**:
+Claude's own five-hour or seven-day subscription window from a status-line payload, qualified by one configuration root and session. The companion shows each independently while it remains current on Steer's clock, ignores gateway spend limits, and reports missing or unproved windows as unavailable.
+
 **Discovered session**:
 A Codex session the companion shows as working before it has observed any of that session's own activity, because Codex's own record shows an unfinished turn and its surface is still alive. Discovery adds only a working indication; it never creates a completion, request, question, or sound.
 

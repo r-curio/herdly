@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import SteerCore
 
@@ -131,6 +132,165 @@ func terminalSequence(for session: String, reset: Bool = false) -> Data? {
     return try? JSONSerialization.data(withJSONObject: ["terminalSequence": sequence], options: [.sortedKeys])
 }
 
+private let bridgeChunkBytes = 64 * 1024
+// The helper has one foreground bridge operation. This PID is written before streaming and
+// cleared after waitpid; the signal handler reads it only to terminate that operation's group.
+nonisolated(unsafe) private var bridgeChildPID: pid_t = 0
+
+private func writeAll(_ descriptor: Int32, base: UnsafeRawPointer, count: Int) -> Bool {
+    var offset = 0
+    while offset < count {
+        let written = write(descriptor, base.advanced(by: offset), count - offset)
+        if written > 0 {
+            offset += written
+        } else if written < 0, errno == EINTR {
+            continue
+        } else {
+            return false
+        }
+    }
+    return true
+}
+
+private func execExistingStatusLine(_ existingCommand: String) -> Never {
+    var arguments: [UnsafeMutablePointer<CChar>?] = [strdup("sh"), strdup("-c"), strdup(existingCommand), nil]
+    execv("/bin/sh", &arguments)
+    _exit(71)
+}
+
+private func bridgeSignalHandler(_ signalNumber: Int32) -> Void {
+    let child = bridgeChildPID
+    if child > 0 {
+        _ = kill(-child, SIGKILL)
+        _ = kill(child, SIGKILL)
+    }
+    _exit(128 + signalNumber)
+}
+
+private func finishWithChildStatus(_ status: Int32) -> Never {
+    if status & 0x7f == 0 {
+        exit((status >> 8) & 0xff)
+    }
+    let signalNumber = status & 0x7f
+    if signalNumber != 0x7f {
+        signal(signalNumber, SIG_DFL)
+        _ = kill(getpid(), signalNumber)
+        _exit(128 + signalNumber)
+    }
+    _exit(70)
+}
+
+func runClaudeStatusLineBridge(usageDirectory: URL, existingCommand: String) -> Never {
+    // Stream stdin through a pipe so forwarding remains byte-preserving without an unbounded
+    // temporary file. Only a bounded prefix is retained for the optional usage projection.
+    var bridgeInputPipe = [Int32](repeating: 0, count: 2)
+    guard bridgeInputPipe.withUnsafeMutableBufferPointer({ buffer in
+        pipe(buffer.baseAddress!)
+    }) == 0 else {
+        execExistingStatusLine(existingCommand)
+    }
+    var actions = posix_spawn_file_actions_t(bitPattern: 0)
+    guard posix_spawn_file_actions_init(&actions) == 0,
+          posix_spawn_file_actions_adddup2(&actions, bridgeInputPipe[0], STDIN_FILENO) == 0,
+          posix_spawn_file_actions_addclose(&actions, bridgeInputPipe[0]) == 0,
+          posix_spawn_file_actions_addclose(&actions, bridgeInputPipe[1]) == 0 else {
+        close(bridgeInputPipe[0])
+        close(bridgeInputPipe[1])
+        execExistingStatusLine(existingCommand)
+    }
+    var attributes = posix_spawnattr_t(bitPattern: 0)
+    guard posix_spawnattr_init(&attributes) == 0,
+          posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP)) == 0,
+          posix_spawnattr_setpgroup(&attributes, 0) == 0 else {
+        posix_spawn_file_actions_destroy(&actions)
+        close(bridgeInputPipe[0])
+        close(bridgeInputPipe[1])
+        execExistingStatusLine(existingCommand)
+    }
+    var childSignalMask = sigset_t()
+    sigemptyset(&childSignalMask)
+    guard posix_spawnattr_setsigmask(&attributes, &childSignalMask) == 0 else {
+        posix_spawnattr_destroy(&attributes)
+        posix_spawn_file_actions_destroy(&actions)
+        close(bridgeInputPipe[0])
+        close(bridgeInputPipe[1])
+        execExistingStatusLine(existingCommand)
+    }
+    var blockedSignals = sigset_t()
+    sigemptyset(&blockedSignals)
+    sigaddset(&blockedSignals, SIGTERM)
+    sigaddset(&blockedSignals, SIGINT)
+    sigprocmask(SIG_BLOCK, &blockedSignals, nil)
+    var child: pid_t = 0
+    var arguments: [UnsafeMutablePointer<CChar>?] = [strdup("sh"), strdup("-c"), strdup(existingCommand), nil]
+    let spawnResult = arguments.withUnsafeMutableBufferPointer { argumentBuffer in
+        posix_spawn(&child, "/bin/sh", &actions, &attributes, argumentBuffer.baseAddress!, environ)
+    }
+    posix_spawnattr_destroy(&attributes)
+    posix_spawn_file_actions_destroy(&actions)
+    guard spawnResult == 0 else {
+        sigprocmask(SIG_UNBLOCK, &blockedSignals, nil)
+        close(bridgeInputPipe[0])
+        close(bridgeInputPipe[1])
+        execExistingStatusLine(existingCommand)
+    }
+    close(bridgeInputPipe[0])
+    bridgeChildPID = child
+    signal(SIGTERM, bridgeSignalHandler)
+    signal(SIGINT, bridgeSignalHandler)
+    // A command may finish without reading stdin. Treat its closed pipe as an ordinary
+    // forwarding short read so the helper can return the command's real exit status.
+    signal(SIGPIPE, SIG_IGN)
+    sigprocmask(SIG_UNBLOCK, &blockedSignals, nil)
+
+    var inputSize = 0
+    var captured = Data()
+    captured.reserveCapacity(ClaudeUsageReader.maximumRecordBytes + 1)
+    var buffer = [UInt8](repeating: 0, count: bridgeChunkBytes)
+    var captureCompleted = true
+    while true {
+        let readCount = buffer.withUnsafeMutableBytes { bytes -> Int in
+            guard let base = bytes.baseAddress else { return -1 }
+            return read(STDIN_FILENO, base, bytes.count)
+        }
+        if readCount == 0 { break }
+        if readCount < 0 {
+            if errno == EINTR { continue }
+            captureCompleted = false
+            break
+        }
+        guard inputSize <= Int.max - readCount,
+              buffer.withUnsafeBytes({ bytes in
+                  guard let base = bytes.baseAddress else { return false }
+                  return writeAll(bridgeInputPipe[1], base: base, count: readCount)
+              }) else {
+            captureCompleted = false
+            break
+        }
+        inputSize += readCount
+        if captured.count <= ClaudeUsageReader.maximumRecordBytes {
+            let remaining = ClaudeUsageReader.maximumRecordBytes + 1 - captured.count
+            captured.append(contentsOf: buffer.prefix(min(remaining, readCount)))
+        }
+    }
+    close(bridgeInputPipe[1])
+    if captureCompleted, inputSize <= ClaudeUsageReader.maximumRecordBytes {
+        _ = ClaudeUsageReader.record(captured, to: usageDirectory)
+    }
+
+    var status: Int32 = 0
+    while true {
+        let result = waitpid(child, &status, 0)
+        if result >= 0 { break }
+        if errno != EINTR {
+            bridgeChildPID = 0
+            _exit(70)
+        }
+    }
+    bridgeChildPID = 0
+    finishWithChildStatus(status)
+}
+
 private func update(_ request: ApprovalRequest, outcome: ApprovalDecision, in directory: URL) {
     let terminal = ApprovalRequest(requestID: request.requestID, sessionID: request.sessionID, turnID: request.turnID,
                                    details: request.details, receivedAt: request.receivedAt,
@@ -184,6 +344,13 @@ func selfTest() -> Int32 {
 }
 
 if arguments.contains("--self-test") { exit(selfTest()) }
+if let bridgeIndex = arguments.firstIndex(of: ClaudeStatusLineBridge.marker),
+   arguments.indices.contains(bridgeIndex + 1), arguments[bridgeIndex + 1] == "--usage-dir",
+   arguments.indices.contains(bridgeIndex + 3), arguments[bridgeIndex + 2].isEmpty == false,
+   arguments[bridgeIndex + 3] == "--existing-command", arguments.indices.contains(bridgeIndex + 4) {
+    runClaudeStatusLineBridge(usageDirectory: URL(fileURLWithPath: arguments[bridgeIndex + 2], isDirectory: true),
+                              existingCommand: arguments[bridgeIndex + 4])
+}
 if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.contains(agentIndex + 1),
    arguments[agentIndex + 1] == "claude" {
     guard let index = arguments.firstIndex(of: "--events-dir"), arguments.indices.contains(index + 1),
