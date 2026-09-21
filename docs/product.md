@@ -150,6 +150,11 @@ Claude follow-up prompts and direct approval decisions beyond Bash stay unavaila
 transports are separately proven; the card explains that limitation instead of guessing a target.
 Codex cards keep their existing answer, approval, detail, and reply actions.
 
+The mixed-source release walkthrough, including the required usage proof and
+unavailable-root check, is tracked in [the issue #88 runbook](mixed-source-release-candidate.md).
+Its live result remains pending until a consenting operator records each
+checkpoint against one packaged artifact.
+
 Each fresh Claude question or outcome can sound and spotlight once for three seconds. Repeated
 observations, discovery, and restart recovery do not replay either presentation. An outcome that
 arrived before Steer restarted is uncertain and silent. After five minutes, an unacknowledged

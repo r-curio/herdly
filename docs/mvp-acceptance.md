@@ -4,6 +4,11 @@ Status: **packaging complete; live acceptance pass not yet run.** This page sepa
 
 Install, permissions, supported versions and removal are in [install.md](install.md).
 
+The mixed Codex and Claude release gate is a separate, still-pending operator
+pass in [mixed-source-release-candidate.md](mixed-source-release-candidate.md).
+It records the exact package and live result for issues #80–#88 without turning
+the package or smoke check into a release claim.
+
 Launch-at-login installed checks are tracked separately in [launch-at-login evidence](evidence/launch-at-login.md) because they require changing the test account's Login Items state and signing out and back in.
 
 ## 1. Automated evidence (agent-run, 2026-09-14)
@@ -85,6 +90,15 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 
 Automated C1–C3 coverage is source and test evidence only. Isolated live Claude/Ghostty return
 testing was deferred by the operator and remains blank until a human records it.
+
+### 3c.2 Mixed-source release candidate (issue #88)
+
+The required Codex and Claude integrated walkthrough, including Claude restart,
+questions, Bash allow/deny and handoff, confirmed outcomes, same-window return,
+unavailable paths, and usage on both tested and unproved roots, is defined in
+[mixed-source-release-candidate.md](mixed-source-release-candidate.md). It is
+pending a human run against the named packaged artifact. Source inspection and
+automated tests do not fill its result cells.
 
 ### 3d. Sound, mute, restart, displays
 
