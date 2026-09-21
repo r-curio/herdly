@@ -110,17 +110,35 @@ If the inventory is unavailable, duplicate, malformed, or timed out, record
 `unavailable` and verify that stronger hook evidence was retained. Do not turn
 an unavailable scan into an empty root.
 
-### L3 — Answer one exact Claude question
+### L3 — Answer exact Claude questions
+
+Run each subcheck separately and record its result before starting the next one.
+Use a fresh disposable question for each shape. Do not record question text,
+option labels, typed answers, or transcripts.
+
+#### L3a — Single choice
 
 | Operator action | Expected observation | Result |
 | --- | --- | --- |
-| Ask one disposable single choice question from the Claude session. | The Claude row shows the exact bounded question and choices; no Codex row changes. | |
-| Choose one option once in Steer. | Claude receives the selected option through the live helper; Steer reports delivery only after the matching helper acknowledgment. | |
-| Observe the next Claude state. | The question clears on Claude's resolution evidence; sending a choice does not claim completion or acknowledgment of unrelated items. | |
+| Ask one disposable single choice question from the Claude session, then human-select one option once in Steer. | Claude receives exactly the selected option through the live helper; Steer reports delivery only after the matching helper acknowledgment and the question clears on Claude's resolution evidence. | |
 
-Do not record the question text or answer. A multi-select or typed answer is a
-separate optional repeat of this checkpoint; it must follow the same identity
-and one-shot rules.
+#### L3b — Multi select
+
+| Operator action | Expected observation | Result |
+| --- | --- | --- |
+| Ask one disposable multi-select question from the same Claude session, then human-select the allowed set once in Steer. | Claude receives exactly the selected set through the live helper; the question clears only on matching resolution evidence. | |
+
+#### L3c — Typed answer
+
+| Operator action | Expected observation | Result |
+| --- | --- | --- |
+| Ask one disposable typed-answer question from the same Claude session, then submit one answer that the human enters in Steer. | Claude receives exactly that answer through the live helper; Steer reports delivery only after the matching acknowledgment and does not acknowledge unrelated items. | |
+
+#### L3d — Timeout and native fallback
+
+| Operator action | Expected observation | Result |
+| --- | --- | --- |
+| Ask another disposable question, then let the helper timeout, stop Steer, or make the request identity unavailable before answering. | No answer is sent. The Claude native question remains available, and the row offers the native fallback without inventing a choice. | |
 
 ### L4 — Approve one Bash request
 
@@ -182,16 +200,35 @@ Run each row separately and stop after recording it:
 | A configured root with no accepted usage record, expired windows, or only a spend-limit object | Claude usage reads unavailable independently for each missing window. Steer does not estimate or substitute spend limits. | |
 | Question helper timeout, restart, identity mismatch, or helper loss | No answer is sent; Claude's native question remains available. | |
 
-### L10 — Prove usage on a consenting root
+### L10 — Prove usage on tested and unproved roots
+
+Run each subcheck separately. Do not paste status-line payloads, account
+identifiers, or credentials into the evidence record.
+
+#### L10a — Both delivered windows on the consenting root
 
 | Operator action | Expected observation | Result |
 | --- | --- | --- |
 | On the consenting test root, enable the optional usage bridge through the preview and start a fresh Claude session. | Existing status-line behavior is preserved; Steer accepts only the root-scoped sanitized record. | |
-| Wait for a valid status-line payload with a future five-hour and/or seven-day reset. | Each valid window appears independently as **last reported**, with the tested root identified outside the user-facing record. | |
-| Refresh one window or allow one to expire while the other remains valid. | The valid window remains; the missing or expired window becomes unavailable and does not resurrect an older reading. | |
+| Wait for one valid delivered record containing future five-hour and seven-day subscription resets. | Both windows appear together as independent **last reported** readings. Record each displayed result separately. | |
 
-Do not paste status-line payloads, account identifiers, or credentials into the
-evidence record. This is the required consenting tested root gate.
+#### L10b — Five-hour expiry
+
+| Operator action | Expected observation | Result |
+| --- | --- | --- |
+| Use the tested root's five-hour reset boundary while its seven-day window remains current. | The five-hour reading becomes unavailable on Steer's clock; the seven-day reading remains visible and current. | |
+
+#### L10c — Seven-day expiry
+
+| Operator action | Expected observation | Result |
+| --- | --- | --- |
+| Use the tested root's seven-day reset boundary after the five-hour reading is unavailable or separately refreshed. | The seven-day reading becomes unavailable without resurrecting an older record; the five-hour state remains independently determined. | |
+
+#### L10d — Unproved root unavailable
+
+| Operator action | Expected observation | Result |
+| --- | --- | --- |
+| Select a second configured root with no accepted valid usage record, or with malformed, expired, or spend-limit-only data. | Five-hour and seven-day usage are each unavailable. Steer does not estimate, aggregate roots, or substitute gateway spend limits. | |
 
 ### L11 — Run the Codex regression pass
 
@@ -228,15 +265,20 @@ checkpoints:
   L0_candidate: {result: "", notes: ""}
   L1_mixed_codex_claude: {result: "", notes: ""}
   L2_claude_restart_recovery: {result: "", notes: ""}
-  L3_exact_question: {result: "", notes: ""}
+  L3a_single_choice: {result: "", notes: ""}
+  L3b_multi_select: {result: "", notes: ""}
+  L3c_typed_answer: {result: "", notes: ""}
+  L3d_question_timeout_native_fallback: {result: "", notes: ""}
   L4_bash_allow_once: {result: "", notes: ""}
   L5_bash_deny: {result: "", notes: ""}
   L6_handoff_native_fallback: {result: "", notes: ""}
   L7_confirmed_outcome: {result: "", notes: ""}
   L8_same_window_exact_return: {result: "", notes: ""}
   L9_unavailable_paths: {result: "", notes: ""}
-  L10_usage_tested_root: {result: "", notes: ""}
-  L10_usage_unproved_root: {result: "", notes: ""}
+  L10a_usage_both_windows_delivered: {result: "", notes: ""}
+  L10b_usage_five_hour_expiry: {result: "", notes: ""}
+  L10c_usage_seven_day_expiry: {result: "", notes: ""}
+  L10d_usage_unproved_root_unavailable: {result: "", notes: ""}
   L11_codex_regression: {result: "", notes: ""}
 live_claim: "pending until every required checkpoint is recorded against this artifact"
 ```
