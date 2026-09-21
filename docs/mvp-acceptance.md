@@ -19,6 +19,7 @@ Recorded from a clean `main` checkout at the commit named in `docs/evidence/pack
 | --- | --- |
 | `swift test` | 138 tests pass (host: macOS 26.5, Xcode 26.6, Swift 6.3.3). |
 | `sh scripts/package-app.sh` (no identity) | Builds, lints `Info.plist`, `SteerHook --self-test` passes, ad-hoc signature verifies with `codesign --verify --deep --strict`, artifact `Steer-0.1.0+<build>-unsigned-dev.zip` written with `.sha256` and manifest. |
+| Issue #88 candidate package (clean source commit `b8b6d4e`) | `Steer-0.1.0+173-unsigned-dev.zip`, SHA-256 `2ed9ca263c58a0fd54ae9cb63d535f2dd0bf0c33334f78e2091a5a0783e86317`; packaged smoke, helper self-test, checksum, and signature verification passed. Full record: [Claude release candidate package](evidence/claude-release-candidate-package.json). |
 | Round trip of the artifact | Zip extracted to a scratch directory; `shasum -a 256 -c` OK; extracted bundle's signature verifies; extracted helper self-test passes. |
 | Identity signing path | Run once with the only identity in the maintainer's keychain, `Apple Development: … (5TUQCAA8MS)`. Signs with hardened runtime and the Apple Events entitlement and labels the result `dev-signed`. This is not a Developer ID identity, so Gatekeeper still rejects it and it is not a release artifact. |
 | Notarization | Not run: no Developer ID identity or notarytool profile is available. The script refuses to notarize with any other identity. |
