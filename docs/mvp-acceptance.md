@@ -95,8 +95,10 @@ testing was deferred by the operator and remains blank until a human records it.
 ### 3c.2 Mixed-source release candidate (issue #88)
 
 The required Codex and Claude integrated walkthrough, including Claude restart,
-questions, Bash allow/deny and handoff, confirmed outcomes, same-window return,
-unavailable paths, and usage on both tested and unproved roots, is defined in
+single-choice, multi-select, typed-answer and timeout fallback questions, Bash
+allow/deny and handoff, confirmed outcomes, same-window return, unavailable
+paths, both delivered usage windows with independent expiry, and an unproved
+root, is defined in
 [mixed-source-release-candidate.md](mixed-source-release-candidate.md). It is
 pending a human run against the named packaged artifact. Source inspection and
 automated tests do not fill its result cells.
