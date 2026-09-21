@@ -31,6 +31,11 @@ sh scripts/package-app.sh
 
 The build number is the commit count on the checked-out branch, so two people building the same commit get the same bundle version. The CI workflow ([.github/workflows/macos.yml](../.github/workflows/macos.yml)) runs the same script on a clean `macos-15` runner, smoke-tests the packaged app, prints the checksum, and uploads the zip, checksum and manifest as the `Steer-unsigned-dev` artifact.
 
+For the mixed Codex and Claude candidate gate, use the one-checkpoint-at-a-time
+[release candidate runbook](mixed-source-release-candidate.md). The package
+artifact is only a candidate until its live rows are recorded against the same
+source commit and checksum.
+
 ### Labels
 
 The artifact name says what the signature is; the script never labels a build as more than it verified.
