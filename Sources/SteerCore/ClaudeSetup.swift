@@ -130,6 +130,7 @@ public struct ClaudeSetupRoots: Equatable, Sendable {
     public var helperURL: URL { helperDirectory.appendingPathComponent("SteerHook") }
     public var stateURL: URL { helperDirectory.appendingPathComponent("install.json") }
     public var backupsURL: URL { helperDirectory.appendingPathComponent("backups", isDirectory: true) }
+    public var usageDirectory: URL { helperDirectory.appendingPathComponent("usage", isDirectory: true) }
 }
 
 public struct ClaudeSetupPlan: Sendable {
@@ -141,6 +142,7 @@ public struct ClaudeSetupPlan: Sendable {
     public let requiresConfigure: Bool
     public let installationID: String
     public let usageEnabled: Bool
+    public let usageStatus: ClaudeUsageSetupStatus
 
     let originalSettings: Data
     let originalSettingsExisted: Bool
@@ -148,7 +150,8 @@ public struct ClaudeSetupPlan: Sendable {
     init(status: ClaudeSetupStatus, settingsChange: Data, ownedHooks: [ClaudeOwnedHook],
          ownedEnvironment: [String: String],
          helperCommand: String, requiresConfigure: Bool, installationID: String,
-         usageEnabled: Bool, originalSettings: Data, originalSettingsExisted: Bool) {
+         usageEnabled: Bool, usageStatus: ClaudeUsageSetupStatus,
+         originalSettings: Data, originalSettingsExisted: Bool) {
         self.status = status
         self.settingsChange = settingsChange
         self.ownedHooks = ownedHooks
@@ -157,6 +160,7 @@ public struct ClaudeSetupPlan: Sendable {
         self.requiresConfigure = requiresConfigure
         self.installationID = installationID
         self.usageEnabled = usageEnabled
+        self.usageStatus = usageStatus
         self.originalSettings = originalSettings
         self.originalSettingsExisted = originalSettingsExisted
     }
@@ -167,7 +171,8 @@ public enum ClaudeSetupPlanner {
                             helperPath: URL, eventsPath: URL,
                             sourceScope: URL? = nil,
                             policy: ClaudeSetupPolicy = ClaudeSetupPolicy(), usageEnabled: Bool = false,
-                            settingsExisted: Bool = true, installRecordPresent: Bool = true) -> ClaudeSetupPlan {
+                            settingsExisted: Bool = true, installRecordPresent: Bool = true,
+                            statusLineCompatible: Bool? = nil) -> ClaudeSetupPlan {
         guard capabilities.supported else {
             return empty(.unsupported("Claude Code \(capabilities.version ?? "version unknown") is older than the tested minimum \(ClaudeSetupRequirements.minimumCLIVersion)."), settings: settings, settingsExisted: settingsExisted)
         }
@@ -281,15 +286,34 @@ public enum ClaudeSetupPlanner {
                   settings,
                   hooks: jsonEquivalent(source["hooks"], mergedHooks) ? source["hooks"] as? [String: Any] : mergedHooks
               ),
-              let changed = try? jsonDataPreservingEnvironment(hooksChanged, original: source["env"], value: environment) else {
+              let changedBase = try? jsonDataPreservingEnvironment(hooksChanged, original: source["env"], value: environment) else {
             return empty(.malformed("Claude settings.json could not be encoded safely and was not changed."), settings: settings, settingsExisted: settingsExisted)
         }
-        // Usage is deliberately represented in the same plan but remains opt-in. Its reversible
-        // status-line bridge is implemented by the later usage slice, so this slice never edits it.
+        let usage: ClaudeUsageSetupStatus
+        if !usageEnabled {
+            usage = .off
+        } else if source["statusLine"] == nil {
+            usage = .ready
+        } else if let existingCommand = ClaudeStatusLineBridge.statusLineCommand(source["statusLine"]) {
+            usage = ClaudeStatusLineBridge.isBridgeCommand(existingCommand)
+                ? .ready
+                : (statusLineCompatible == true
+                    ? .ready : .unavailable(ClaudeUsageSetupStatus.compatibilityFailureMessage))
+        } else {
+            usage = .unavailable("Claude usage unavailable: the existing status line is incompatible.")
+        }
+        var changed = changedBase
+        if usage == .ready, usageEnabled,
+           !(ClaudeStatusLineBridge.statusLineCommand(source["statusLine"]).map { ClaudeStatusLineBridge.isBridgeCommand($0) } ?? false),
+           let bridged = ClaudeStatusLineBridge.bridgeStatusLine(source["statusLine"], helperPath: helperPath,
+                                                                 usagePath: helperPath.deletingLastPathComponent().appendingPathComponent("usage", isDirectory: true)),
+           let statusLineChanged = try? jsonDataPreservingMember(changed, key: "statusLine", value: bridged) {
+            changed = statusLineChanged
+        }
         return ClaudeSetupPlan(status: .ready, settingsChange: changed, ownedHooks: ownedHooks,
                                ownedEnvironment: titleEnvironmentAlreadyPresent ? [:] : [ClaudeSetupRequirements.titleDisableEnvironmentKey: ClaudeSetupRequirements.titleDisableEnvironmentValue],
                                helperCommand: ownedHooks.first?.command ?? "", requiresConfigure: changed != settings,
-                               installationID: installationID, usageEnabled: usageEnabled,
+                               installationID: installationID, usageEnabled: usageEnabled, usageStatus: usage,
                                originalSettings: settings, originalSettingsExisted: settingsExisted)
     }
 
@@ -318,11 +342,26 @@ public enum ClaudeSetupPlanner {
         return object
     }
 
-    private static func jsonEquivalent(_ lhs: Any?, _ rhs: Any?) -> Bool {
+    static func jsonEquivalent(_ lhs: Any?, _ rhs: Any?) -> Bool {
         guard let lhs, let rhs,
               let left = try? JSONSerialization.data(withJSONObject: lhs, options: [.sortedKeys]),
               let right = try? JSONSerialization.data(withJSONObject: rhs, options: [.sortedKeys]) else { return false }
         return left == right
+    }
+
+    static func memberData(_ settings: Data, key: String) -> Data? {
+        guard let source = try? jsonObject(settings), let value = source[key],
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return nil }
+        return data
+    }
+
+    static func restoreMemberBytes(_ changed: Data, from original: Data, key: String) -> Data? {
+        guard let changedObject = rawObject(changed), let originalObject = rawObject(original),
+              let changedMember = changedObject.members.first(where: { $0.key == key }),
+              let originalMember = originalObject.members.first(where: { $0.key == key }) else { return nil }
+        return changed.subdata(in: 0..<changedMember.valueStart)
+            + original.subdata(in: originalMember.valueStart..<originalMember.valueEnd)
+            + changed.subdata(in: changedMember.valueEnd..<changed.count)
     }
 
     /// Replace only the top-level hooks value. The rest of settings.json remains byte-for-byte
@@ -550,7 +589,7 @@ public enum ClaudeSetupPlanner {
 
     private static func empty(_ status: ClaudeSetupStatus, settings: Data, settingsExisted: Bool) -> ClaudeSetupPlan {
         ClaudeSetupPlan(status: status, settingsChange: settings, ownedHooks: [], ownedEnvironment: [:], helperCommand: "",
-                        requiresConfigure: false, installationID: "", usageEnabled: false,
+                        requiresConfigure: false, installationID: "", usageEnabled: false, usageStatus: .off,
                         originalSettings: settings, originalSettingsExisted: settingsExisted)
     }
 }
@@ -581,15 +620,19 @@ private struct ClaudeInstallState: Codable {
     let backupDirectory: String?
     let usageEnabled: Bool
     let environmentOwnershipRecorded: Bool
+    let originalStatusLine: Data?
+    let installedStatusLine: Data?
 
     private enum CodingKeys: String, CodingKey {
         case rootPath, helper, installationID, ownedHooks, ownedEnvironment, installedSettings,
-             originalSettings, installedAt, backupDirectory, usageEnabled, environmentOwnershipRecorded
+             originalSettings, installedAt, backupDirectory, usageEnabled, environmentOwnershipRecorded,
+             originalStatusLine, installedStatusLine
     }
 
     init(rootPath: String, helper: Data, installationID: String, ownedHooks: [ClaudeOwnedHook],
          ownedEnvironment: [String: String], installedSettings: Data, originalSettings: Data?,
          installedAt: TimeInterval, backupDirectory: String?, usageEnabled: Bool,
+         originalStatusLine: Data? = nil, installedStatusLine: Data? = nil,
          environmentOwnershipRecorded: Bool = true) {
         self.rootPath = rootPath
         self.helper = helper
@@ -602,6 +645,8 @@ private struct ClaudeInstallState: Codable {
         self.backupDirectory = backupDirectory
         self.usageEnabled = usageEnabled
         self.environmentOwnershipRecorded = environmentOwnershipRecorded
+        self.originalStatusLine = originalStatusLine
+        self.installedStatusLine = installedStatusLine
     }
 
     init(from decoder: Decoder) throws {
@@ -634,6 +679,8 @@ private struct ClaudeInstallState: Codable {
         backupDirectory = try container.decodeIfPresent(String.self, forKey: .backupDirectory)
         usageEnabled = try container.decodeIfPresent(Bool.self, forKey: .usageEnabled) ?? false
         environmentOwnershipRecorded = ownershipRecorded
+        originalStatusLine = try container.decodeIfPresent(Data.self, forKey: .originalStatusLine)
+        installedStatusLine = try container.decodeIfPresent(Data.self, forKey: .installedStatusLine)
     }
 }
 
@@ -648,6 +695,7 @@ public struct ClaudeSetupInstaller {
         guard !helper.isEmpty else { throw ClaudeSetupError.failed("The bundled Steer helper is unavailable.") }
         let currentSettings = try readableData(at: roots.settingsURL)
         let current = currentSettings ?? Data("{}" .utf8)
+        var settingsChange = plan.settingsChange
         let existingState: ClaudeInstallState?
         if fileManager.fileExists(atPath: roots.stateURL.path) {
             guard let state = try? readState(roots) else {
@@ -661,6 +709,13 @@ public struct ClaudeSetupInstaller {
         } else {
             existingState = nil
         }
+        if !plan.usageEnabled, let state = existingState,
+           state.installedStatusLine != state.originalStatusLine {
+            guard let restored = try removingStatusLine(settingsChange, original: state.originalStatusLine) else {
+                throw ClaudeSetupError.conflict("Claude settings.json could not remove Steer's usage status line.")
+            }
+            settingsChange = restored
+        }
         if let state = existingState, current != state.installedSettings,
            let object = try? ClaudeSetupPlanner.jsonObject(current) {
             if case .changed = ownedHookState(object, expected: state.ownedHooks) {
@@ -669,8 +724,14 @@ public struct ClaudeSetupInstaller {
             if case .changed = ownedEnvironmentState(object, expected: state.ownedEnvironment) {
                 throw ClaudeSetupError.conflict("Steer's terminal title setting was changed; review setup before repair.")
             }
+            if let installed = state.installedStatusLine {
+                guard let currentStatusLine = ClaudeSetupPlanner.memberData(current, key: "statusLine"),
+                      currentStatusLine == installed else {
+                    throw ClaudeSetupError.conflict("Steer's Claude usage status line was changed; review setup before repair.")
+                }
+            }
         }
-        if current == plan.settingsChange,
+        if current == settingsChange,
            (try? readableData(at: roots.helperURL)) == helper,
            let state = existingState, state.rootPath == roots.configDirectory.path,
            state.installationID == plan.installationID {
@@ -682,24 +743,27 @@ public struct ClaudeSetupInstaller {
         if let existingHelper = try readableData(at: roots.helperURL), existingHelper != helper {
             throw ClaudeSetupError.conflict("A different file already exists at Steer's Claude helper path.")
         }
-        for directory in [roots.configDirectory, roots.helperDirectory, roots.eventsDirectory]
+        for directory in [roots.configDirectory, roots.helperDirectory, roots.eventsDirectory, roots.usageDirectory]
             where fileManager.fileExists(atPath: directory.path) && !isDirectory(at: directory) {
             throw ClaudeSetupError.conflict("Claude setup path \(directory.path) is not a regular directory; it was not changed.")
         }
         try fileManager.createDirectory(at: roots.configDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: roots.helperDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: roots.eventsDirectory, withIntermediateDirectories: true)
+        if plan.usageEnabled, plan.usageStatus == .ready {
+            try fileManager.createDirectory(at: roots.usageDirectory, withIntermediateDirectories: true)
+        }
         let backupDirectory = roots.backupsURL.appendingPathComponent(UUID().uuidString, isDirectory: true)
         let oldSettings = currentSettings
         let oldHelper = try readableData(at: roots.helperURL)
         do {
-            if current != plan.settingsChange { try backup(oldSettings, named: "settings.json", in: backupDirectory) }
+            if current != settingsChange { try backup(oldSettings, named: "settings.json", in: backupDirectory) }
             if oldHelper != helper { try backup(oldHelper, named: "SteerHook", in: backupDirectory) }
             if oldHelper != helper {
                 try atomicWrite(helper, to: roots.helperURL)
                 try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: roots.helperURL.path)
             }
-            if current != plan.settingsChange { try atomicWrite(plan.settingsChange, to: roots.settingsURL) }
+            if current != settingsChange { try atomicWrite(settingsChange, to: roots.settingsURL) }
             let ownedEnvironment: [String: String]
             if let existingState, !existingState.ownedEnvironment.isEmpty {
                 ownedEnvironment = existingState.ownedEnvironment
@@ -709,11 +773,14 @@ public struct ClaudeSetupInstaller {
             let state = ClaudeInstallState(rootPath: roots.configDirectory.path, helper: helper,
                                            installationID: plan.installationID, ownedHooks: plan.ownedHooks,
                                            ownedEnvironment: ownedEnvironment,
-                                           installedSettings: plan.settingsChange,
+                                           installedSettings: settingsChange,
                                            originalSettings: existingState?.originalSettings ?? (plan.originalSettingsExisted ? plan.originalSettings : nil),
                                            installedAt: Date().timeIntervalSince1970,
                                            backupDirectory: existingState?.backupDirectory ?? backupDirectory.lastPathComponent,
-                                           usageEnabled: plan.usageEnabled)
+                                           usageEnabled: plan.usageEnabled,
+                                           originalStatusLine: existingState?.originalStatusLine
+                                               ?? ClaudeSetupPlanner.memberData(plan.originalSettings, key: "statusLine"),
+                                           installedStatusLine: ClaudeSetupPlanner.memberData(settingsChange, key: "statusLine"))
             try atomicWrite(try JSONEncoder().encode(state), to: roots.stateURL)
         } catch let error {
             do {
@@ -766,6 +833,14 @@ public struct ClaudeSetupInstaller {
         case .missing: return .repairRequired("Steer's terminal title setting is missing; Configure Claude to repair setup.")
         case .intact: break
         }
+        if let installed = state.installedStatusLine {
+            guard let currentStatusLine = ClaudeSetupPlanner.memberData(settings, key: "statusLine") else {
+                return .repairRequired("Steer's Claude usage status line is missing; Configure Claude to repair setup.")
+            }
+            guard currentStatusLine == installed else {
+                return .conflict("Steer's Claude usage status line was changed; review setup before repair.")
+            }
+        }
         switch ownedHookState(object, expected: state.ownedHooks) {
         case .changed: return .conflict("A Steer-owned Claude hook was changed; review setup before repair.")
         case .missing: return .repairRequired("Steer's Claude hook entries are missing; Configure Claude to repair setup.")
@@ -789,6 +864,26 @@ public struct ClaudeSetupInstaller {
         guard let state = try? readState(roots), state.rootPath == roots.configDirectory.path,
               UUID(uuidString: state.installationID) != nil else { return false }
         return true
+    }
+
+    public func usageStatus(for roots: ClaudeSetupRoots, requested: Bool,
+                            planned: ClaudeUsageSetupStatus? = nil) -> ClaudeUsageSetupStatus {
+        guard requested else { return .off }
+        guard let state = try? readState(roots) else { return planned ?? .unavailable("Claude usage is unavailable until Claude setup is connected.") }
+        guard let installed = state.installedStatusLine else {
+            return .unavailable("Claude usage unavailable: the status-line compatibility probe did not pass; Claude connection remains active.")
+        }
+        guard let settings = try? readableData(at: roots.settingsURL),
+              let current = ClaudeSetupPlanner.memberData(settings, key: "statusLine") else {
+            return .conflict("Claude usage unavailable: Steer's status line is missing; review setup before repair.")
+        }
+        guard current == installed else {
+            return .conflict("Claude usage unavailable: Steer's status line was changed; review setup before repair.")
+        }
+        if installed == state.originalStatusLine {
+            return .unavailable("Claude usage unavailable: the status-line compatibility probe did not pass; Claude connection remains active.")
+        }
+        return .ready
     }
 
     public func installedAt(for roots: ClaudeSetupRoots) -> TimeInterval? {
@@ -825,11 +920,17 @@ public struct ClaudeSetupInstaller {
         case .changed: throw ClaudeSetupError.conflict("Steer's terminal title setting was changed; undo made no changes.")
         case .intact, .missing: break
         }
+        if let installed = state.installedStatusLine {
+            guard let currentStatusLine = ClaudeSetupPlanner.memberData(current, key: "statusLine"),
+                  currentStatusLine == installed else {
+                throw ClaudeSetupError.conflict("Steer's Claude usage status line was changed; undo made no changes.")
+            }
+        }
         switch ownedHookState(object, expected: state.ownedHooks) {
         case .changed: throw ClaudeSetupError.conflict("A Steer-owned Claude hook was changed; undo made no changes.")
         case .intact, .missing: break
         }
-        let restored: Data?
+        var restored: Data?
         if current == state.installedSettings {
             restored = state.originalSettings
         } else {
@@ -846,11 +947,15 @@ public struct ClaudeSetupInstaller {
             } else {
                 restored = try ClaudeSetupPlanner.jsonDataPreservingMember(withoutHooks, key: "env", value: nil)
             }
+            if state.installedStatusLine != nil {
+                restored = try removingStatusLine(restored, original: state.originalStatusLine)
+            }
         }
         let originalState = try readableData(at: roots.stateURL)
         let eventFiles = try boundedContents(of: roots.eventsDirectory)
         let now = Date().timeIntervalSince1970
         let ownedEvents = eventFiles.filter { validEvent($0, installationID: state.installationID, installedAt: state.installedAt, now: now) }
+        let usageRecord = roots.usageDirectory.appendingPathComponent(ClaudeUsageReader.latestRecordName)
         let backup = try validatedBackupURL(for: state, roots: roots)
         if fileManager.fileExists(atPath: roots.helperURL.path), !isRegularFile(at: roots.helperURL) {
             throw ClaudeSetupError.conflict("Steer's Claude helper path is not a regular file; undo made no changes.")
@@ -862,7 +967,9 @@ public struct ClaudeSetupInstaller {
             }
             try fileManager.removeItem(at: roots.stateURL)
             for event in ownedEvents { try fileManager.removeItem(at: event) }
+            if ClaudeUsageReader.isOwnedRecord(at: usageRecord) { try fileManager.removeItem(at: usageRecord) }
             if let backup { try fileManager.removeItem(at: backup) }
+            try removeDirectoryIfEmpty(roots.usageDirectory)
             try removeDirectoryIfEmpty(roots.helperDirectory)
         } catch let error {
             do {
@@ -880,6 +987,12 @@ public struct ClaudeSetupInstaller {
     private enum OwnedHookState { case intact, missing, changed }
 
     private enum OwnedEnvironmentState { case intact, missing, changed }
+
+    private func removingStatusLine(_ settings: Data?, original: Data?) throws -> Data? {
+        guard let settings else { return nil }
+        let value = original.flatMap { try? JSONSerialization.jsonObject(with: $0) }
+        return try ClaudeSetupPlanner.jsonDataPreservingMember(settings, key: "statusLine", value: value)
+    }
 
     private func titleEnvironmentState(_ source: [String: Any]) -> OwnedEnvironmentState {
         guard let environment = source["env"] as? [String: Any],
