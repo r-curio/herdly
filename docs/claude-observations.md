@@ -34,8 +34,9 @@ malformed, late, repeated, or cross-root records are ignored. A missing receipt,
 restart, interruption, expiry, or handoff emits no decision and leaves Claude's native prompt
 available. A root that cannot be read is unavailable for reconciliation, so it cannot clear another
 root's attention. The root-scoped `claude agents --json` inventory is a weaker
-source: a valid interactive `busy`/`waiting` or background `working`/`blocked` row may add only a
-generic running row, while idle and background terminal states remove only inventory-derived rows.
+source: a valid interactive `busy`/`waiting` row may add only a generic running row; background
+lifecycle rows alone do not create queue items. Idle and background terminal states remove only
+inventory-derived rows.
 An unavailable or duplicate inventory leaves both inventory and hook evidence untouched. A later
 valid interactive `idle` observation confirms a previously observed provisional `Stop`; inventory
 alone never creates an outcome, tool label, question, approval, sound, or target. Duplicate
