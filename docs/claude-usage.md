@@ -47,5 +47,5 @@ stdin forwarding, a command that exits without reading stdin, output preservatio
 The compatibility and status-line coexistence proof is recorded in [Claude usage and status-line
 coexistence proof](https://github.com/r-curio/steer/blob/9b4f835/docs/claude-usage-proof.md). That proof
 used one disposable first-party Max root and did not read or change the real settings or credentials.
-Live delivery through this product bridge remains deferred until a consenting tested root is run
-against the shipped artifact. No live proof is claimed here.
+Live delivery through this product bridge has not been verified on a shipped
+artifact. This check is optional; no live proof is claimed here.
