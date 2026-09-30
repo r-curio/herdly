@@ -14,6 +14,7 @@ Recorded from a clean `main` checkout at the commit named in `docs/evidence/pack
 | --- | --- |
 | `swift test` | 138 tests pass (host: macOS 26.5, Xcode 26.6, Swift 6.3.3). |
 | `sh scripts/package-app.sh` (no identity) | Builds, lints `Info.plist`, `SteerHook --self-test` passes, ad-hoc signature verifies with `codesign --verify --deep --strict`, artifact `Steer-0.1.0+<build>-unsigned-dev.zip` written with `.sha256` and manifest. |
+| Issue #88 candidate package (clean source commit `6b3664c`) | `Steer-0.1.0+175-unsigned-dev.zip`, SHA-256 `35826f78ea907926f0a52acc9169d2b4d2e4c6232d15cefe7563ecf7866e1f8f`; packaged smoke, helper self-test, checksum, and signature verification passed. Full record: [Claude release candidate package](evidence/claude-release-candidate-package.json). |
 | Round trip of the artifact | Zip extracted to a scratch directory; `shasum -a 256 -c` OK; extracted bundle's signature verifies; extracted helper self-test passes. |
 | Identity signing path | Run once with the only identity in the maintainer's keychain, `Apple Development: … (5TUQCAA8MS)`. Signs with hardened runtime and the Apple Events entitlement and labels the result `dev-signed`. This is not a Developer ID identity, so Gatekeeper still rejects it and it is not a release artifact. |
 | Notarization | Not run: no Developer ID identity or notarytool profile is available. The script refuses to notarize with any other identity. |
@@ -74,17 +75,6 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 | G8 | Let one expire. | At 30 s the row becomes Continue in Codex with only Open in Codex; Codex's native prompt is showing; nothing was approved. | |
 | G9 | Answer an expired one in Codex. | The row clears on Codex's recorded answer, not before. | |
 | G10 | While a request is pending in the notch, force-quit Steer (`kill -9`). | Codex's native prompt appears within the helper's deadline; nothing approved. Relaunch: the request shows handed back with no buttons. | |
-
-### 3c.1 Claude exact-tab return (issue #84)
-
-| # | Step | Expected | Result |
-| --- | --- | --- | --- |
-| C1 | Enable Ghostty controls and start one configured Claude session with its full `Steer Claude <session-id>` title. | The Claude row offers **Open in Claude** only after the root inventory and exact unsplit target are verified. | |
-| C2 | Click **Open in Claude** while another app is frontmost and the target is in Ghostty's current window. | The exact Claude tab is selected; a queued outcome clears only after the post-selection window/tab/terminal check. | |
-| C3 | Repeat with a duplicate resume, missing or overwritten title, split tab, failed inventory, or target in another Ghostty window. | Return is unavailable; no terminal input or acknowledgment occurs. | |
-
-Automated C1–C3 coverage is source and test evidence only. Isolated live Claude/Ghostty return
-testing was deferred by the operator and remains blank until a human records it.
 
 ### 3d. Sound, mute, restart, displays
 

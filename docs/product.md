@@ -142,13 +142,17 @@ otherwise they show Waiting and explain that the answer belongs in Claude. Expir
 mismatched records, helper loss, uncertainty, and a companion restart send nothing and leave Claude's
 native question authoritative. Generic Claude Waiting rows still count as to-check attention, while
 their exact tab return is unavailable until targeting is verified. Automated checks and the isolated
-helper trace cover the response shape; integrated Steer live acceptance of one answer of each kind
-and native fallback after timeout remain deferred for the operator walkthrough. Claude completion
+helper trace cover the response shape; integrated Steer behavior for each answer
+kind and native fallback after timeout has not yet been observed in use. Claude completion
 cards retain Dismiss and explain the unavailable return action without rendering an unsupported Open
 control.
 Claude follow-up prompts and direct approval decisions beyond Bash stay unavailable until their
 transports are separately proven; the card explains that limitation instead of guessing a target.
 Codex cards keep their existing answer, approval, detail, and reply actions.
+
+Mixed-source release checks require reviewed source, automated tests, package
+build, helper self-test, and packaged smoke check. Integrated live behavior is
+unverified until observed during use; a scripted operator pass is optional.
 
 Each fresh Claude question or outcome can sound and spotlight once for three seconds. Repeated
 observations, discovery, and restart recovery do not replay either presentation. An outcome that
