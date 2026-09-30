@@ -120,10 +120,10 @@ typed answer can be returned once through Claude's supported `updatedInput` resp
 does not become an answer capability after restart, and Steer stores no transcript or tool response.
 One exact live Bash permission may be approved once or denied through the source-scoped helper
 handshake. Ambiguous, expired, disconnected, interrupted, handed-back, and non-Bash permissions
-keep only Claude's native controls. Inventory status can add Working or Waiting rows, but a
-background done, failed, or stopped state never creates a user-facing outcome without matching hook
-evidence. Per-root inventory reconciliation is issue #82; mixed source presentation and counts in the
-existing notch are issue #83.
+keep only Claude's native controls. Interactive inventory status can add Working or Waiting rows;
+background inventory alone does not create a queue row. A background done, failed, or stopped state
+never creates a user-facing outcome without matching hook evidence. Per-root inventory reconciliation
+is issue #82; mixed source presentation and counts in the existing notch are issue #83.
 
 ## Agreed mixed-source notch behavior
 
