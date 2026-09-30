@@ -56,6 +56,10 @@ public struct ClaudeInventoryScan: Equatable, Sendable {
     public let failure: String?
     public let ambiguousSessionIDs: Set<String>
 
+    public func isBackgroundSession(_ sessionID: String) -> Bool {
+        available && sessions.contains { $0.sessionID == sessionID && $0.kind == .background }
+    }
+
     public init(sourceScope: String, observedAt: Double, sessions: [ClaudeInventorySession] = [],
                 available: Bool = true, failure: String? = nil,
                 ambiguousSessionIDs: Set<String> = []) {
