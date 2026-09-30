@@ -44,6 +44,8 @@ before and after selection checks and may acknowledge only after that verified s
 Same-window return is supported. Duplicate live resumes, missing or stale sessions, overwritten
 titles, split tabs, background Ghostty windows, failed inventories, and changed locators remain
 unavailable without terminal input or acknowledgment. Ghostty Automation stays opt-in.
+Background Claude sessions do not create separate queue rows or exact-tab warnings; only
+interactive sessions can have a Ghostty target.
 
 Automated coverage is in `Tests/SteerCoreTests/CLITests.swift`: canonical full-title matching,
 duplicate and missing identities, overwritten and split titles, cross-window rejection before
