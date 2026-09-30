@@ -874,6 +874,7 @@ struct Notch: View {
                     claudeReturnMessage(item.session)
                 }
                 if item.session.source == .claude, let question = item.question,
+                   !model.isBackgroundClaudeSession(item.session),
                    !model.canAnswerAgentQuestion(question) {
                     Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
                         .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
@@ -1003,7 +1004,7 @@ struct Notch: View {
 
     @ViewBuilder
     private func claudeReturnMessage(_ session: AgentSessionIdentity) -> some View {
-        if !model.canOpenClaude(session) {
+        if !model.isBackgroundClaudeSession(session), !model.canOpenClaude(session) {
             Text(model.claudeReturnUnavailableMessage)
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
         }

@@ -408,8 +408,9 @@ public struct AgentAttentionQueue: Sendable {
         ambiguousClaudeSessions.formUnion(ambiguous)
         guard scan.available else { return }
         let sessions = scan.sessions.filter { $0.sessionID.isEmpty == false }
-        let incoming = Set(sessions.map { AgentSessionIdentity(source: .claude, sourceScope: scope,
-                                                              session: $0.sessionID, surface: .cli) })
+        let incoming = Set(sessions.filter { $0.kind == .interactive }.map {
+            AgentSessionIdentity(source: .claude, sourceScope: scope, session: $0.sessionID, surface: .cli)
+        })
         inventoryRunning = inventoryRunning.filter { identity, _ in
             identity.source != .claude || identity.sourceScope != scope || incoming.contains(identity)
         }
@@ -433,6 +434,7 @@ public struct AgentAttentionQueue: Sendable {
                 inventoryRunning.removeValue(forKey: identity)
                 continue
             }
+            guard session.kind == .interactive else { continue }
             guard session.lifecycle.isActive else {
                 inventoryRunning.removeValue(forKey: identity)
                 provisionalStops.removeValue(forKey: identity)
