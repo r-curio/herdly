@@ -22,6 +22,21 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
     #expect(scan.sessions[1].lifecycle.isActive == false)
 }
 
+@Test func backgroundKindIsKnownOnlyFromACompleteInventory() {
+    let scan = ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 1, sessions: [
+        ClaudeInventorySession(sessionID: backgroundID, kind: .background, startedAt: 1,
+                               lifecycle: .background(state: "blocked")),
+        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: "busy"))
+    ])
+    let unavailable = ClaudeInventoryScan.unavailable(sourceScope: "/tmp/root", observedAt: 2,
+                                                       reason: "timed out")
+
+    #expect(scan.isBackgroundSession(backgroundID))
+    #expect(!scan.isBackgroundSession(interactiveID))
+    #expect(!unavailable.isBackgroundSession(backgroundID))
+}
+
 @Test func missingClaudeNameFallsBackToSourceAndShortenedIdentity() throws {
     let data = try JSONSerialization.data(withJSONObject: [
         ["sessionId": interactiveID, "kind": "interactive", "cwd": "/tmp/one",
@@ -163,7 +178,7 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
 
     let running = queue.items.compactMap(\.running)
     #expect(running.contains { $0.identity.session.sourceScope == "/tmp/a" })
-    #expect(running.contains { $0.identity.session.sourceScope == "/tmp/b" })
+    #expect(!running.contains { $0.identity.session.sourceScope == "/tmp/b" })
 }
 
 @Test func olderValidInventoryCannotEraseNewerGenericStateAndEmptyNewerPollDoes() {
@@ -205,14 +220,14 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
     #expect(queue.toCheckCount == 0)
 }
 
-@Test func backgroundBlockedInventoryIsWaitingAndNeedsAttention() {
+@Test func backgroundBlockedInventoryAloneDoesNotCreateQueueRows() {
     var queue = AgentAttentionQueue()
     queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 1, sessions: [
         ClaudeInventorySession(sessionID: backgroundID, kind: .background, startedAt: 1,
                                lifecycle: .background(state: "blocked"))
     ]))
 
-    #expect(queue.items.first?.kind == .waiting)
-    #expect(queue.items.first?.running?.status == .waiting)
-    #expect(queue.toCheckCount == 1)
+    #expect(queue.items.isEmpty)
+    #expect(queue.workingCount == 0)
+    #expect(queue.toCheckCount == 0)
 }

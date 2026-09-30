@@ -274,6 +274,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Complete root inventories used to prove which canonical Claude sessions are live. Memory only.
     private var liveClaudeSessions: [String: [String]] = [:]
     private var claudeInventoryAvailable: [String: Bool] = [:]
+    private var claudeInventories: [String: ClaudeInventoryScan] = [:]
     /// Unix time of the inventory in `ghosttyFocusState`, for dating a session end at the tab's absence.
     private var ghosttyInventoryAt: Double = 0
     /// The first successful snapshot establishes a baseline. Later selected-target changes are
@@ -1201,6 +1202,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // exact root, request, and deadline before making controls available.
             publishClaudeApprovalReceipts(approvalReceiptWork)
             let configuredClaudeScopes = Set(configuredClaudeNavigationRoots().map { $0.root.path })
+            claudeInventories = Dictionary(uniqueKeysWithValues: result.7.filter {
+                configuredClaudeScopes.contains($0.sourceScope)
+            }.map { ($0.sourceScope, $0) })
             liveClaudeSessions = Dictionary(uniqueKeysWithValues: result.7.filter {
                 configuredClaudeScopes.contains($0.sourceScope)
             }.map { scan in
@@ -1753,6 +1757,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let live = liveClaudeSessions.values.flatMap { $0 }
         guard let target = GhosttyMatch.target(claudeSessionID: identity.session, live: live, snapshot: snapshot) else { return false }
         return GhosttyMatch.isInCurrentWindow(target, snapshot: snapshot)
+    }
+
+    func isBackgroundClaudeSession(_ identity: AgentSessionIdentity) -> Bool {
+        identity.source == .claude && claudeInventories[identity.sourceScope]?.isBackgroundSession(identity.session) == true
     }
 
     /// Navigation includes every supported root that has a configured or otherwise inspectable
