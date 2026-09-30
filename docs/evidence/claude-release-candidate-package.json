@@ -1,6 +1,6 @@
 {
   "issue": 88,
-  "status": "package-prepared-live-pending",
+  "status": "package-prepared",
   "base_commit": "90549cda2e65a0953d3005506b23e749927c6d27",
   "source_commit": "6b3664c7db421867013baa2d6facdacc78ae888e",
   "artifact": "Steer-0.1.0+175-unsigned-dev.zip",
@@ -32,5 +32,5 @@
     "git_diff_check": "passed"
   },
   "main_ci": "not claimed; post-merge run 35546830796 was refused before steps by the account billing limit",
-  "live": "pending; see docs/mixed-source-release-candidate.md"
+  "live": "not run; optional feedback from normal use"
 }

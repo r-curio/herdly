@@ -4,11 +4,6 @@ Status: **packaging complete; live acceptance pass not yet run.** This page sepa
 
 Install, permissions, supported versions and removal are in [install.md](install.md).
 
-The mixed Codex and Claude release gate is a separate, still-pending operator
-pass in [mixed-source-release-candidate.md](mixed-source-release-candidate.md).
-It records the exact package and live result for issues #80–#88 without turning
-the package or smoke check into a release claim.
-
 Launch-at-login installed checks are tracked separately in [launch-at-login evidence](evidence/launch-at-login.md) because they require changing the test account's Login Items state and signing out and back in.
 
 ## 1. Automated evidence (agent-run, 2026-09-14)
@@ -80,28 +75,6 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 | G8 | Let one expire. | At 30 s the row becomes Continue in Codex with only Open in Codex; Codex's native prompt is showing; nothing was approved. | |
 | G9 | Answer an expired one in Codex. | The row clears on Codex's recorded answer, not before. | |
 | G10 | While a request is pending in the notch, force-quit Steer (`kill -9`). | Codex's native prompt appears within the helper's deadline; nothing approved. Relaunch: the request shows handed back with no buttons. | |
-
-### 3c.1 Claude exact-tab return (issue #84)
-
-| # | Step | Expected | Result |
-| --- | --- | --- | --- |
-| C1 | Enable Ghostty controls and start one configured Claude session with its full `Steer Claude <session-id>` title. | The Claude row offers **Open in Claude** only after the root inventory and exact unsplit target are verified. | |
-| C2 | Click **Open in Claude** while another app is frontmost and the target is in Ghostty's current window. | The exact Claude tab is selected; a queued outcome clears only after the post-selection window/tab/terminal check. | |
-| C3 | Repeat with a duplicate resume, missing or overwritten title, split tab, failed inventory, or target in another Ghostty window. | Return is unavailable; no terminal input or acknowledgment occurs. | |
-
-Automated C1–C3 coverage is source and test evidence only. Isolated live Claude/Ghostty return
-testing was deferred by the operator and remains blank until a human records it.
-
-### 3c.2 Mixed-source release candidate (issue #88)
-
-The required Codex and Claude integrated walkthrough, including Claude restart,
-single-choice, multi-select, typed-answer and timeout fallback questions, Bash
-allow/deny and handoff, confirmed outcomes, same-window return, unavailable
-paths, both delivered usage windows with independent expiry, and an unproved
-root, is defined in
-[mixed-source-release-candidate.md](mixed-source-release-candidate.md). It is
-pending a human run against the named packaged artifact. Source inspection and
-automated tests do not fill its result cells.
 
 ### 3d. Sound, mute, restart, displays
 
