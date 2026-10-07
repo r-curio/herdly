@@ -198,6 +198,25 @@ The companion runs quietly in the background even while the notch is hidden. For
 
 If the companion was fully quit when the user visited the result, that visit may not be recoverable. Restored notifications must not be described as authoritatively unread without a verified Codex read-status signal. Retain uncertain completions without replaying their sound and let the user open or dismiss them. Fully quitting the companion stops its background observation.
 
+## Agreed herdr presentation
+
+Agreed with the user on 2026-10-07 (issue #114). This covers how herdr readiness and unavailable reasons appear for Claude Code and Codex CLI sessions in a herdr tab hosted by Ghostty. Binding, transport, question relay and Open follow ADRs [0008](adr/0008-bind-herdr-panes-when-steer-and-herdr-agree.md), [0009](adr/0009-talk-to-herdr-over-its-socket-and-poll-snapshots.md), [0010](adr/0010-relay-codex-question-options-as-herdr-pane-keys.md) and [0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md). None of this is implemented yet.
+
+**Settings.** The Terminals page shows a read-only herdr row under Ghostty, with no switch of its own. herdr works only while Ghostty controls are on. Until a session has reported running in herdr, the row says "No herdr sessions seen", Steer does not contact herdr, and the badge reads Not in use. Otherwise the badge reads Ready or Needs attention, and the row lists every problem that applies, one per line, because they are independent fixes:
+
+- herdr integration missing or not current for an agent Steer has seen in herdr: the exact `herdr integration install <agent>` command with a Copy button. Steer never runs it or edits herdr's configuration.
+- Ghostty cannot identify herdr's tab: update Ghostty. Steer decides this by checking that Ghostty exposes each terminal's `tty`, not by comparing version numbers. The message names a Ghostty version only once a release has been verified to provide it.
+- herdr unavailable (not found in the fixed locations, not running, unsupported protocol, untrusted socket, and similar): generic wording.
+
+**Notch.** Rows never label a session as running in herdr. When Open in Codex or Open in Claude is unavailable for a herdr session, the card replaces Open with one reason line and shows no disabled button, as Claude cards do. The internal reasons fall into four groups the user can act on:
+
+- Ghostty too old: "Update Ghostty to return to herdr panes."
+- Integration missing or not current: run `herdr integration install <agent>`.
+- Layout not supported (a split, several herdr clients, a named herdr session, a Ghostty tab in another window): "Steer returns only to a single-pane herdr tab in one Ghostty window."
+- Everything else: "Open in Codex (or Claude) is unavailable until Steer can verify the exact herdr pane."
+
+The exact internal reason goes to diagnostics, not to the card. Every action whose own route still works stays on the card while Open is unavailable: Dismiss, details, CLI approve or deny through the hook, and question options when ADR 0010's checks pass. If Open passes the scan but fails its recheck at click time, the same grouped reason appears in the navigation message, the item is retained, and the card swaps Open for the reason line on the next scan. When a Codex question cannot be relayed and Open is also unavailable, the card shows one line: "Answer this in Codex." followed by Open's grouped reason. Why the relay failed goes to diagnostics.
+
 ## Integration findings
 
 Codex's documented PermissionRequest hook runs before the normal approval prompt. It can return allow or deny, or leave the decision to Codex's normal approval flow. A hook-based notch approval therefore needs an explicit handoff policy; simultaneous actionable prompts in the notch and Codex are not established by this interface. Source: https://learn.chatgpt.com/docs/hooks#permissionrequest (checked 2026-09-11).
