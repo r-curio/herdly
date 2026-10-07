@@ -302,8 +302,8 @@ public struct HerdrFocusObservation: Equatable, Sendable {
 }
 
 /// ADR 0011's acknowledgment rule. Only completions are acknowledged by a visit; approval requests,
-/// questions and reminders clear only on resolution evidence and are never passed here. Without a
-/// TTY join nothing is acknowledged, so only explicit dismissal clears a completion.
+/// questions and reminders clear only on resolution evidence and are never passed here. On a Ghostty
+/// without `tty`, an interim rule (issue #155) accepts Ghostty frontmost in place of the TTY join.
 public enum HerdrOpenAcknowledgment {
     /// After an Open: only when it reported Opened, the completions that arrived strictly before the
     /// pre-Open herdr scan started.
@@ -317,6 +317,11 @@ public enum HerdrOpenAcknowledgment {
     /// taken at or after `current` shows the TTY-matched tab selected with Ghostty frontmost. Only
     /// completions that arrived before `previous` started are acknowledged, so an outcome arriving
     /// during the observation interval stays queued.
+    ///
+    /// Interim (issue #155): when Ghostty lacks `tty`, Ghostty frontmost stands in for the selected
+    /// matched tab. Steer cannot see which tab is selected, so a focus change the user did not watch
+    /// can acknowledge; the user accepted that until a Ghostty with `tty` ships. A Ghostty that has
+    /// `tty` always uses the exact join, with no fallback.
     public static func manualVisit<ID>(
         _ completions: [HerdrCompletionCandidate<ID>],
         boundPaneID: String,
@@ -329,9 +334,21 @@ public enum HerdrOpenAcknowledgment {
         guard let previous, let current, let ghostty, ghosttyTakenAt.isFinite,
               previous.takenAt < current.takenAt, current.takenAt <= ghosttyTakenAt,
               previous.focusedPaneID != boundPaneID, current.focusedPaneID == boundPaneID,
-              let tty = current.clientTTY,
-              case .matched(let target) = GhosttyTTYMatch.join(clientTTY: tty, support: support, snapshot: ghostty),
-              ghostty.selected == target else { return [] }
+              ghosttyShowsVisit(clientTTY: current.clientTTY, support: support, ghostty: ghostty) else { return [] }
         return Set(completions.filter { $0.arrivedAt.isFinite && $0.arrivedAt < previous.takenAt }.map(\.id))
+    }
+
+    private static func ghosttyShowsVisit(clientTTY: String?, support: GhosttyTTYSupport,
+                                          ghostty: GhosttySnapshot) -> Bool {
+        switch support {
+        case .supported:
+            guard let clientTTY,
+                  case .matched(let target) = GhosttyTTYMatch.join(clientTTY: clientTTY, support: support,
+                                                                   snapshot: ghostty) else { return false }
+            return ghostty.selected == target
+        case .unsupported:
+            // `selected` is present only while Ghostty is frontmost (Ghostty.js).
+            return ghostty.selected != nil
+        }
     }
 }
