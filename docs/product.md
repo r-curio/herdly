@@ -200,18 +200,18 @@ If the companion was fully quit when the user visited the result, that visit may
 
 ## Agreed herdr presentation
 
-Agreed with the user on 2026-10-07 (issue #114). This covers how herdr readiness and unavailable reasons appear for Claude Code and Codex CLI sessions in a herdr tab hosted by Ghostty. Binding, transport, question relay and Open follow ADRs [0008](adr/0008-bind-herdr-panes-when-steer-and-herdr-agree.md), [0009](adr/0009-talk-to-herdr-over-its-socket-and-poll-snapshots.md), [0010](adr/0010-relay-codex-question-options-as-herdr-pane-keys.md) and [0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md). The settings row and the notch reason lines are implemented (#127), and failed Opens (#125) and unrelayable questions (#126) route through the same groups (#141).
+Agreed with the user on 2026-10-07 (issue #114). This covers how herdr readiness and unavailable reasons appear for Claude Code and Codex CLI sessions in a herdr tab hosted by Ghostty. Binding, transport, question relay and Open follow ADRs [0008](adr/0008-bind-herdr-panes-when-steer-and-herdr-agree.md) (Claude), [0012](adr/0012-bind-codex-herdr-panes-by-title-and-foreground-process.md) (Codex, issue #144), [0009](adr/0009-talk-to-herdr-over-its-socket-and-poll-snapshots.md), [0010](adr/0010-relay-codex-question-options-as-herdr-pane-keys.md) and [0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md). The settings row and the notch reason lines are implemented (#127), and failed Opens (#125) and unrelayable questions (#126) route through the same groups (#141).
 
-**Settings.** The Terminals page shows a read-only herdr row under Ghostty, with no switch of its own. herdr works only while Ghostty controls are on. Until a session has reported running in herdr, the row says "No herdr sessions seen", Steer does not contact herdr, and the badge reads Not in use. Otherwise the badge reads Ready or Needs attention, and the row lists every problem that applies, one per line, because they are independent fixes:
+**Settings.** The Terminals page shows a read-only herdr row under Ghostty, with no switch of its own. herdr works only while Ghostty controls are on. Until ADR 0009's gate opens (a Claude session has reported running in herdr, or a Codex session's title is missing from Ghostty while herdr's default socket passes ADR 0009's trust check), the row says "No herdr sessions seen", Steer does not contact herdr, and the badge reads Not in use. Otherwise the badge reads Ready or Needs attention, and the row lists every problem that applies, one per line, because they are independent fixes:
 
-- herdr integration missing or not current for an agent Steer has seen in herdr: the exact `herdr integration install <agent>` command with a Copy button. Steer never runs it or edits herdr's configuration.
+- herdr's Claude integration missing or not current while Steer has seen Claude in herdr: the exact `herdr integration install claude` command with a Copy button. Steer never runs it or edits herdr's configuration.
 - Ghostty cannot identify herdr's tab: update Ghostty. Steer decides this by checking that Ghostty exposes each terminal's `tty`, not by comparing version numbers. The message names a Ghostty version only once a release has been verified to provide it.
 - herdr unavailable (not found in the fixed locations, not running, unsupported protocol, untrusted socket, and similar): generic wording.
 
 **Notch.** Rows never label a session as running in herdr. When Open in Codex or Open in Claude is unavailable for a herdr session, the card replaces Open with one reason line and shows no disabled button, as Claude cards do. The internal reasons fall into four groups the user can act on:
 
 - Ghostty too old: "Update Ghostty to return to herdr panes."
-- Integration missing or not current: run `herdr integration install <agent>`.
+- Integration missing or not current (Claude only; Codex needs no herdr integration): run `herdr integration install claude`.
 - Layout not supported (a split, several herdr clients, a named herdr session, a Ghostty tab in another window): "Steer returns only to a single-pane herdr tab in one Ghostty window."
 - Everything else: "Open in Codex (or Claude) is unavailable until Steer can verify the exact herdr pane."
 
