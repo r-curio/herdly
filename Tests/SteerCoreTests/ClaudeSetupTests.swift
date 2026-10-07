@@ -429,3 +429,58 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
                                                  eventsPath: setupRoots.eventsDirectory)
     #expect(malformedHooks.status == .malformed("Claude settings.json has an unsupported hooks shape and was not changed."))
 }
+
+@Test func claudeSetupRefreshesItsOwnUnchangedHelperAndConfigureAcceptsANewerOne() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-refresh-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let paths = roots(in: root)
+    let installer = ClaudeSetupInstaller()
+    #expect(try installer.refreshHelper(roots: paths, helper: Data("helper-v2".utf8)) == .skipped("Claude setup is not installed."))
+    try FileManager.default.createDirectory(at: paths.configDirectory, withIntermediateDirectories: true)
+    try Data(#"{"model":"keep"}"#.utf8).write(to: paths.settingsURL)
+    let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: try Data(contentsOf: paths.settingsURL),
+                                       helperPath: paths.helperURL, eventsPath: paths.eventsDirectory)
+    _ = try installer.install(plan, roots: paths, helper: Data("helper-v1".utf8), capabilities: capabilities)
+    let installedStatus = installer.status(roots: paths, capabilities: capabilities)
+    let settings = try Data(contentsOf: paths.settingsURL)
+
+    #expect(try installer.refreshHelper(roots: paths, helper: Data("helper-v1".utf8)) == .current)
+    #expect(try installer.refreshHelper(roots: paths, helper: Data("helper-v2".utf8)) == .updated)
+    #expect(try Data(contentsOf: paths.helperURL) == Data("helper-v2".utf8))
+    #expect(((try FileManager.default.attributesOfItem(atPath: paths.helperURL.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) == 0o755)
+    #expect(installer.status(roots: paths, capabilities: capabilities) == installedStatus)
+    #expect(try Data(contentsOf: paths.settingsURL) == settings)
+    #expect(try installer.refreshHelper(roots: paths, helper: Data("helper-v2".utf8)) == .current)
+
+    // Configure from a newer app replaces Steer's own unchanged helper instead of reporting a conflict.
+    let repair = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: settings,
+                                         helperPath: paths.helperURL, eventsPath: paths.eventsDirectory)
+    #expect(try installer.install(repair, roots: paths, helper: Data("helper-v3".utf8), capabilities: capabilities) == installedStatus)
+    #expect(try Data(contentsOf: paths.helperURL) == Data("helper-v3".utf8))
+
+    // A helper changed by someone else is never replaced, by refresh or by Configure.
+    try Data("user-edited".utf8).write(to: paths.helperURL)
+    #expect(try installer.refreshHelper(roots: paths, helper: Data("helper-v4".utf8))
+            == .skipped("Steer's Claude helper differs from the one it installed."))
+    #expect(throws: ClaudeSetupError.conflict("A different file already exists at Steer's Claude helper path.")) {
+        _ = try installer.install(repair, roots: paths, helper: Data("helper-v4".utf8), capabilities: capabilities)
+    }
+    #expect(try Data(contentsOf: paths.helperURL) == Data("user-edited".utf8))
+    try Data("helper-v3".utf8).write(to: paths.helperURL)
+
+    #expect(try installer.undo(roots: paths) == .notConfigured)
+    #expect(!FileManager.default.fileExists(atPath: paths.helperURL.path))
+    #expect(try Data(contentsOf: paths.settingsURL) == Data(#"{"model":"keep"}"#.utf8))
+}
+
+@Test func claudeSetupHelperRefreshSkipsAnInconsistentRecord() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-claude-refresh-bad-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let paths = roots(in: root)
+    try FileManager.default.createDirectory(at: paths.helperDirectory, withIntermediateDirectories: true)
+    try Data("helper-v1".utf8).write(to: paths.helperURL)
+    try Data("not json".utf8).write(to: paths.stateURL)
+    #expect(try ClaudeSetupInstaller().refreshHelper(roots: paths, helper: Data("helper-v2".utf8))
+            == .skipped("Steer Claude setup state is missing or inconsistent."))
+    #expect(try Data(contentsOf: paths.helperURL) == Data("helper-v1".utf8))
+}

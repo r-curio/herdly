@@ -54,11 +54,14 @@ extension Companion {
     func refreshSetup() {
         let roots = setupRoots
         Task { @MainActor [weak self] in
-            let snapshot = await Task.detached {
+            let (snapshot, helperUpdated) = await Task.detached {
+                // Only Steer's own unchanged helper is replaced; Codex's files are never touched here.
+                let refresh = BundledHelper.validated.flatMap { try? CodexSetupInstaller().refreshHelper(roots: roots, helper: $0) }
                 let capabilities = CodexSetupDetection.capabilities()
-                return CodexSetupDetection.setupSnapshot(roots: roots, capabilities: capabilities)
+                return (CodexSetupDetection.setupSnapshot(roots: roots, capabilities: capabilities), refresh == .updated)
             }.value
             guard let self else { return }
+            if helperUpdated { self.setupMessage = "Updated Steer's Codex helper to match this version of Steer." }
             self.setupCapabilities = snapshot.capabilities
             self.setupPlan = snapshot.plan
             self.setupStatus = snapshot.status

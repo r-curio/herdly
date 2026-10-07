@@ -84,6 +84,8 @@ Connecting is explicit and previewed. In the controls window, review the setup p
 
 Nothing else in `~/.codex` is touched: approval policy, sandbox settings, model, profiles and every other table stay as they were, and the preview shows every line before it is written. If Codex already has hooks disabled, a different `tui.terminal_title`, or a second Steer install, Steer reports a conflict and writes nothing.
 
+Steer keeps its installed helper in step with the running app. At launch and on each setup refresh, when the bundled helper passes its self-test and differs from the installed one, Steer replaces the installed helper (mode 755, renamed into place) and updates its record in `install.json`, but only while the installed file is still exactly the one Steer recorded. It never edits `config.toml` or `hooks.json` to do this. A helper that someone else changed is left alone and reported as a conflict. Hooks already running finish with the old helper; the next hook invocation uses the new one. The same applies to each configured Claude root's helper.
+
 Codex loads hooks when a session starts, so sessions already running keep their old settings until restarted. Codex also asks once whether to trust the new hooks; Steer records the trust entries, and a hook that Codex reports as changed shows in Steer as **repair required** rather than being silently re-trusted.
 
 Codex keeps working if Steer is quit or crashes. Every hook either records metadata or, for `PermissionRequest`, waits at most its bounded deadline and returns no decision, after which Codex shows its own prompt. No companion process is required for normal Codex use.
@@ -110,7 +112,7 @@ Steer does not request Accessibility, Screen Recording, Input Monitoring, notifi
 
 | Location | Contents |
 | --- | --- |
-| `~/Library/Application Support/Steer/SteerHook` | The installed helper (a copy of the bundle's). |
+| `~/Library/Application Support/Steer/SteerHook` | The installed helper (a copy of the bundle's, kept in step with the running app while unchanged). |
 | `~/Library/Application Support/Steer/install.json` | What Configure Codex wrote, so undo can remove exactly that. |
 | `~/Library/Application Support/Steer/events/` | Metadata-only hook records, approval receipts and decisions. |
 | `~/Library/Application Support/Steer/backups/` | Originals of files Steer changed. |
