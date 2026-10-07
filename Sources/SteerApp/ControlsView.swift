@@ -469,8 +469,113 @@ private struct TerminalControls: View {
                 Divider()
                 Text(model.setupSurfaceStatusText.last ?? "Ghostty: unavailable")
                     .font(.callout).foregroundStyle(.secondary).padding(16)
+                Divider()
+                HerdrControls(model: model)
             }
         }
+    }
+}
+
+/// The read-only herdr row (product.md, "Agreed herdr presentation"). It has no switch: herdr
+/// works only while Ghostty controls are on. Copy places a command on the pasteboard and never
+/// runs it. Exact internal reasons appear only under diagnostics, never on a notch card.
+private struct HerdrControls: View {
+    @ObservedObject var model: Companion
+    @ObservedObject private var tty = GhosttyTTYSupportMonitor.shared
+
+    private var row: HerdrSettingsRow {
+        HerdrPresentation.settingsRow(inUse: model.herdr.inUse, ghosttyControlsEnabled: model.ghosttyEnabled,
+                                      outcome: model.herdrScanOutcome, agentsSeen: model.herdrAgentsSeen,
+                                      ttySupport: tty.support)
+    }
+
+    var body: some View {
+        let row = row
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsRow(title: "herdr", detail: row.detail) {
+                if let badge = row.badge {
+                    StatusBadge(title: badge.title, color: color(badge))
+                } else {
+                    ProgressView().controlSize(.small).accessibilityLabel("Checking herdr")
+                }
+            }
+            if !row.problems.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(row.problems, id: \.self) { problem in
+                        HerdrProblemLine(problem: problem)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+            }
+            if model.herdr.inUse, !diagnostics.isEmpty {
+                DisclosureGroup("Show herdr diagnostics") {
+                    Text(diagnostics.joined(separator: "\n"))
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .font(.callout)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
+            }
+        }
+        .onAppear { tty.refreshIfStale() }
+        .onChange(of: model.herdrScanOutcome) { _, _ in tty.refreshIfStale() }
+    }
+
+    private func color(_ badge: HerdrReadinessBadge) -> Color {
+        switch badge {
+        case .notInUse: .secondary
+        case .ready: .green
+        case .needsAttention: .orange
+        }
+    }
+
+    /// The scan's exact reason and each queued herdr session's exact reason.
+    private var diagnostics: [String] {
+        var lines: [String] = []
+        if case .unavailable(let reason) = model.herdrScanOutcome { lines.append("scan: \(reason)") }
+        var seen: Set<AgentSessionIdentity> = []
+        for item in model.orderedAgentAttentionItems where seen.insert(item.session).inserted {
+            if case .unavailable(let cause) = model.herdrOpenAvailability(item.session, ttySupport: tty.support) {
+                lines.append("\(item.session.source.rawValue) \(item.session.session.prefix(8)): \(cause.diagnostic)")
+            }
+        }
+        return lines
+    }
+}
+
+private struct HerdrProblemLine: View {
+    let problem: HerdrSettingsProblem
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text(problem.message).font(.callout).fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).accessibilityHidden(true)
+            }
+            if let command = problem.command {
+                HStack(spacing: 10) {
+                    Text(command)
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.quaternary.opacity(0.6), in: .rect(cornerRadius: 6))
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(command, forType: .string)
+                    }
+                    .accessibilityLabel("Copy \(command)")
+                    .accessibilityHint("Copies the command. Steer does not run it.")
+                }
+                .padding(.leading, 28)
+            }
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 
