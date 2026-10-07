@@ -229,10 +229,6 @@ extension Companion {
         herdr.open.failures[session]
     }
 
-    static func herdrOpenUnavailableMessage(_ agent: HerdrAgentKind) -> String {
-        "Open in \(agent == .claude ? "Claude" : "Codex") is unavailable until Steer can verify the exact herdr pane."
-    }
-
     /// Runs ADR 0011's sequence for a session in herdr. The completion or reminder is retained on
     /// every failure; only completions that arrived before the pre-Open scan are acknowledged on success.
     fileprivate func openHerdr(_ key: HerdrSessionKey, subject: HerdrOpenSubject) {
@@ -259,7 +255,8 @@ extension Companion {
                                             subject: subject)
             case .unavailable(let failure):
                 herdr.open.failures[key] = failure
-                navigationMessage = Self.herdrOpenUnavailableMessage(key.agent)
+                // The grouped reason only; the exact failure stays in diagnostics.
+                navigationMessage = HerdrPresentation.cardLine(for: .open(failure), agent: key.agent)
             }
             openingTask = false
             refresh()

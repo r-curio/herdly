@@ -19,10 +19,9 @@ public enum HerdrReasonGroup: Equatable, Hashable, Sendable {
 
 /// One reason a herdr session's Open (or relay) is unavailable, from any of the typed sources.
 ///
-/// Extension point: when Open (#125) or question relay (#126) gains its own typed failure enum,
-/// add one case wrapping it here and one case in `group`'s switch. `diagnostic` needs no change;
-/// it describes the wrapped value as is. Callers then route the failure through
-/// `HerdrPresentation.cardLine(for:agent:)` like any other reason.
+/// Extension point: when another path gains its own typed failure enum, add one case wrapping it
+/// here, one case in `group`'s switch and one in `diagnostic`'s. Callers then route the failure
+/// through `HerdrPresentation.cardLine(for:agent:)` like any other reason.
 public enum HerdrUnavailableCause: Equatable, Sendable {
     /// The scan-time binding of the session (`Companion.herdrBinding(for:)`).
     case session(HerdrSessionUnavailable)
@@ -31,12 +30,20 @@ public enum HerdrUnavailableCause: Equatable, Sendable {
     case ghosttyTTY(GhosttyTTYJoin)
     /// The Ghostty bundle's scripting dictionary does not declare `tty`.
     case ghosttyTTYUnsupported
+    /// A click-time Open that failed one of ADR 0011's steps (`Companion.herdrOpenFailure(for:)`).
+    case open(HerdrOpenFailure)
+    /// Why ADR 0010's key relay cannot answer a Codex question. For diagnostics: the card presents
+    /// an unrelayed question through Open's cause (`HerdrPresentation.unrelayedQuestionLine`), never
+    /// this one, so the group only keeps the mapping total.
+    case relay(HerdrQuestionRelayUnavailable)
 
     public var group: HerdrReasonGroup {
         switch self {
         case .session(let reason): HerdrPresentation.group(reason)
         case .ghosttyTTY(let join): HerdrPresentation.group(join)
         case .ghosttyTTYUnsupported: .ghosttyTooOld
+        case .open(let failure): HerdrPresentation.group(failure)
+        case .relay(let reason): HerdrPresentation.group(reason)
         }
     }
 
@@ -46,6 +53,8 @@ public enum HerdrUnavailableCause: Equatable, Sendable {
         case .session(let reason): "herdr session: \(reason)"
         case .ghosttyTTY(let join): "Ghostty tty join: \(join)"
         case .ghosttyTTYUnsupported: "Ghostty tty: unsupported"
+        case .open(let failure): "herdr Open, \(failure.step): \(failure)"
+        case .relay(let reason): "herdr question relay: \(reason)"
         }
     }
 }
@@ -157,6 +166,36 @@ public enum HerdrPresentation {
         }
     }
 
+    /// A wrapped reason keeps its own group, wherever in ADR 0011's sequence it arose: a split or a
+    /// stale integration found by the verification scan is as fixable as one found by the
+    /// revalidation. Step-level failures with nothing for the user to fix (herdr refusing or timing
+    /// out on `agent.focus`, focus or selection that did not verify, a client or binding that changed
+    /// under the request, an unreadable inventory) are generic.
+    public static func group(_ failure: HerdrOpenFailure) -> HerdrReasonGroup {
+        switch failure {
+        case .ghosttyTTYUnsupported: .ghosttyTooOld
+        case .binding(let reason), .herdrVerifyUnavailable(let reason): group(reason)
+        case .ghosttyTab(let join), .ghosttyJoinChanged(let join): group(join)
+        case .sessionNotInHerdr, .clientTTYUnknown, .ghosttyInventoryUnavailable, .focusRejected,
+             .herdrBindingChanged, .herdrPaneNotFocused, .herdrClientChanged, .ghosttySelectFailed,
+             .ghosttyVerifyInventoryUnavailable, .ghosttyTabNotSelected: .generic
+        }
+    }
+
+    /// A pane binding that does not hold keeps its own group. Every other veto is generic: the
+    /// question is already answered or ended (`answeredInRollout`, `turnEnded`), held for the daemon
+    /// (`daemonAnswerInProgress`), or its pending state or pane could not be confirmed. Those mean
+    /// "answer it in Codex", not a reason Open is unavailable, which is why the card never presents
+    /// a relay cause and uses Open's own instead. herdr refusing the key request is generic, like a
+    /// refused `agent.focus`.
+    public static func group(_ reason: HerdrQuestionRelayUnavailable) -> HerdrReasonGroup {
+        switch reason {
+        case .binding(let reason): group(reason)
+        case .leftHerdr, .paneChanged, .answeredInRollout, .turnEnded, .rolloutUnreadable, .agentNotBlocked,
+             .daemonAnswerInProgress, .herdrRefused: .generic
+        }
+    }
+
     // MARK: - Card wording
 
     /// The one line that replaces Open on a card. `agent` is the card's own agent; an integration
@@ -181,6 +220,20 @@ public enum HerdrPresentation {
     /// The single line for a Codex question that cannot be relayed while Open is also unavailable.
     public static func unrelayedQuestionLine(openCause: HerdrUnavailableCause) -> String {
         "Answer this in Codex. " + cardLine(for: openCause, agent: .codex)
+    }
+
+    /// Where a Codex question card's relayed key went, as its status sentences name it: the herdr
+    /// pane for the herdr route (ADR 0010), otherwise the Ghostty tab (ADR 0006).
+    public static func keyDestination(for route: QuestionAnswerRoute) -> (place: String, noun: String) {
+        route == .herdrRelay ? ("the herdr pane", "pane") : ("the Ghostty tab", "tab")
+    }
+
+    /// The card's sentence when no relay can answer a CLI question but Open still works. Ghostty
+    /// controls are already on here, so the Ghostty fallback sentence would mislead. Only a session
+    /// in herdr has a pane to open; daemon drafts in progress just point to Codex.
+    public static func relayUnavailableLine(for reason: HerdrQuestionRelayUnavailable) -> String {
+        if case .binding = reason { return "Steer can't answer this from here. Answer in Codex, or open its pane." }
+        return "Steer can't answer this from here. Answer in Codex."
     }
 
     public static func openTitle(_ agent: HerdrAgentKind) -> String { "Open in \(agentName(agent))" }

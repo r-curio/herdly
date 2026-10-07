@@ -139,6 +139,95 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
         == "Answer this in Codex. " + genericCodex)
     #expect(HerdrPresentation.unrelayedQuestionLine(openCause: .ghosttyTTYUnsupported)
         == "Answer this in Codex. " + ghosttyLine)
+    #expect(HerdrPresentation.unrelayedQuestionLine(openCause: .open(.herdrPaneNotFocused))
+        == "Answer this in Codex. " + genericCodex)
+    #expect(HerdrPresentation.unrelayedQuestionLine(openCause: .open(.ghosttyTab(.otherWindow)))
+        == "Answer this in Codex. " + layoutLine)
+}
+
+// MARK: - Open and relay failures
+
+@Test func herdrPresentationGroupsEveryOpenFailure() {
+    let target = GhosttyTarget(window_id: "w", tab_id: "t", terminal_id: "s")
+    let cases: [(HerdrOpenFailure, HerdrReasonGroup)] = [
+        (.ghosttyTTYUnsupported, .ghosttyTooOld),
+        (.sessionNotInHerdr, .generic),
+        (.binding(.notScanned), .generic),
+        (.binding(.binding(.split)), .layoutNotSupported),
+        (.binding(.herdr(.integrationNotCurrent(.claude))), .integration(.claude)),
+        (.clientTTYUnknown, .generic),
+        (.ghosttyInventoryUnavailable, .generic),
+        (.ghosttyTab(.noMatch), .generic),
+        (.ghosttyTab(.split), .layoutNotSupported),
+        (.ghosttyTab(.otherWindow), .layoutNotSupported),
+        (.ghosttyTab(.ttyUnsupported), .ghosttyTooOld),
+        (.focusRejected(.timeout), .generic),
+        (.focusRejected(.requestRefused(code: "denied")), .generic),
+        (.focusRejected(.split), .generic),
+        (.herdrVerifyUnavailable(.binding(.multipleClients(2))), .layoutNotSupported),
+        (.herdrVerifyUnavailable(.binding(.integrationNotCurrent(.codex, nil))), .integration(.codex)),
+        (.herdrVerifyUnavailable(.herdr(.notRunning)), .generic),
+        (.herdrBindingChanged, .generic),
+        (.herdrPaneNotFocused, .generic),
+        (.herdrClientChanged, .generic),
+        (.ghosttySelectFailed, .generic),
+        (.ghosttyVerifyInventoryUnavailable, .generic),
+        (.ghosttyJoinChanged(.matched(target)), .generic),
+        (.ghosttyJoinChanged(.noMatch), .generic),
+        (.ghosttyJoinChanged(.split), .layoutNotSupported),
+        (.ghosttyTabNotSelected, .generic),
+    ]
+    for (failure, group) in cases {
+        #expect(HerdrPresentation.group(failure) == group, "\(failure)")
+        #expect(HerdrUnavailableCause.open(failure).group == group, "\(failure)")
+    }
+}
+
+@Test func herdrPresentationGroupsEveryRelayUnavailableReason() {
+    let cases: [(HerdrQuestionRelayUnavailable, HerdrReasonGroup)] = [
+        (.binding(.notScanned), .generic),
+        (.binding(.binding(.namedSession)), .layoutNotSupported),
+        (.binding(.herdr(.integrationNotCurrent(.codex))), .integration(.codex)),
+        (.leftHerdr, .generic),
+        (.paneChanged, .generic),
+        (.answeredInRollout, .generic),
+        (.turnEnded, .generic),
+        (.rolloutUnreadable, .generic),
+        (.agentNotBlocked(.working), .generic),
+        (.agentNotBlocked(nil), .generic),
+        (.daemonAnswerInProgress, .generic),
+        (.herdrRefused(.timeout), .generic),
+        (.herdrRefused(.split), .generic),
+    ]
+    for (reason, group) in cases {
+        #expect(HerdrPresentation.group(reason) == group, "\(reason)")
+        #expect(HerdrUnavailableCause.relay(reason).group == group, "\(reason)")
+    }
+}
+
+@Test func herdrPresentationOpenFailureCardLineIsGroupedAndKeepsTheExactReasonInDiagnostics() {
+    let paneNotFocused = HerdrUnavailableCause.open(.herdrPaneNotFocused)
+    #expect(HerdrPresentation.cardLine(for: paneNotFocused, agent: .claude) == genericClaude)
+    #expect(HerdrPresentation.cardLine(for: .open(.ghosttyTab(.split)), agent: .codex) == layoutLine)
+    #expect(HerdrPresentation.cardLine(for: .open(.ghosttyTTYUnsupported), agent: .codex) == ghosttyLine)
+    #expect(HerdrPresentation.cardLine(for: .open(.binding(.binding(.integrationNotCurrent(.codex, .outdated)))), agent: .codex)
+        == "Run herdr integration install codex to return to herdr panes.")
+    #expect(paneNotFocused.diagnostic.contains("verifyHerdr"))
+    #expect(paneNotFocused.diagnostic.contains("herdrPaneNotFocused"))
+    #expect(HerdrUnavailableCause.relay(.agentNotBlocked(.working)).diagnostic.contains("agentNotBlocked"))
+}
+
+@Test func herdrPresentationNamesTheHerdrPaneOnlyForTheHerdrRoute() {
+    #expect(HerdrPresentation.keyDestination(for: .herdrRelay) == ("the herdr pane", "pane"))
+    #expect(HerdrPresentation.keyDestination(for: .ghosttyRelay) == ("the Ghostty tab", "tab"))
+    #expect(HerdrPresentation.keyDestination(for: .relayUnavailable(.leftHerdr)) == ("the Ghostty tab", "tab"))
+}
+
+@Test func herdrPresentationDoesNotAskForGhosttyControlsWhenTheRelayIsUnavailable() {
+    #expect(HerdrPresentation.relayUnavailableLine(for: .binding(.notScanned))
+        == "Steer can't answer this from here. Answer in Codex, or open its pane.")
+    #expect(HerdrPresentation.relayUnavailableLine(for: .daemonAnswerInProgress)
+        == "Steer can't answer this from here. Answer in Codex.")
 }
 
 // MARK: - Open availability
