@@ -54,8 +54,8 @@ function run(argv) {
     const keys = Array.isArray(request.keys) ? request.keys : [];
     if (keys.length < 1 || keys.length > 2 || !keys.every(k => /^([1-9]|enter)$/.test(k)))
         return JSON.stringify({status: 'unknown'});
-    const terminal = t.terminals().find(p => p.id() === target.terminal_id);
-    if (!terminal || terminal.name() !== request.title) return JSON.stringify({status: 'unknown'});
-    for (const k of keys) app.sendKey(k, {to: terminal});
+    const recipient = t.terminals().find(p => p.id() === target.terminal_id);
+    if (!recipient || recipient.name() !== request.title) return JSON.stringify({status: 'unknown'});
+    for (const k of keys) app.sendKey(k, {to: recipient});
     return JSON.stringify({status: 'ok', sent: keys});
 }
