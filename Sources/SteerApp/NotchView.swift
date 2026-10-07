@@ -672,26 +672,38 @@ struct Notch: View {
     /// The card's one sentence about where the answer stands. Every phase names what Steer knows
     /// and nothing more; a relayed key is never described as an answer Codex has.
     private func questionStatus(_ question: AttentionQuestion, progress: QuestionAnswerProgress, total: Int) -> String? {
+        // The card's one reason line already says to answer it in Codex (`herdrReasonLine`).
+        if unrelayedHerdrQuestion(question) { return nil }
         let index = progress.questionIndex
+        let destination = HerdrPresentation.keyDestination(for: model.route(for: question))
         switch progress.phase {
         case .ready:
             if index >= question.prompts.count { return "Codex is on question \(index + 1) of \(total). Continue in Codex." }
             if case let .continueInCodex(reason) = QuestionAnswerProgress.offer(question, at: index) { return reason }
             if question.source == .cli, !model.showsOptionControls(for: question) { return "\(noDaemon); enable Ghostty controls to answer from here, or answer in Codex." }
-            if index > 0, let previous = progress.picks[index - 1] { return "Sent \(previous + 1) as a key to the Ghostty tab. Codex should now show question \(index + 1)." }
+            if index > 0, let previous = progress.picks[index - 1] { return "Sent \(previous + 1) as a key to \(destination.place). Codex should now show question \(index + 1)." }
             // Nothing sent yet: no sentence. The path is named once something is.
             return nil
         case .sending:
-            return "Sending the key to the Ghostty tab…"
+            return "Sending the key to \(destination.place)…"
         case .sent:
-            return "Sent \(progress.picks[index].map { $0 + 1 } ?? 0) as a key to the Ghostty tab. Waiting for Codex to record it."
+            return "Sent \(progress.picks[index].map { $0 + 1 } ?? 0) as a key to \(destination.place). Waiting for Codex to record it."
         case .unconfirmed:
-            return "Sent \(progress.picks[index].map { $0 + 1 } ?? 0) as a key to the Ghostty tab, but Codex has not recorded an answer. Check the tab; Steer will not resend."
+            return "Sent \(progress.picks[index].map { $0 + 1 } ?? 0) as a key to \(destination.place), but Codex has not recorded an answer. Check the \(destination.noun); Steer will not resend."
         case let .failed(reason):
             return reason
         case .pickedInCodex:
             return "Choose it in Codex to answer."
         }
+    }
+
+    /// A Codex question in a herdr session that no relay can answer while Open is unavailable too.
+    /// Its card shows only `HerdrPresentation.unrelayedQuestionLine`; why the relay failed stays in
+    /// diagnostics. With Open available the card keeps offering Open in Codex as before.
+    private func unrelayedHerdrQuestion(_ question: AttentionQuestion) -> Bool {
+        guard case .relayUnavailable = model.route(for: question),
+              case .unavailable = herdrOpen(CodexAttentionAdapter.session(question.session, surface: .cli)) else { return false }
+        return true
     }
 
     @ViewBuilder
@@ -1022,8 +1034,8 @@ struct Notch: View {
     @ViewBuilder
     private func herdrReasonLine(_ item: AgentAttentionItem, cause: HerdrUnavailableCause) -> some View {
         let agent: HerdrAgentKind = item.session.source == .claude ? .claude : .codex
-        let unrelayed = item.kind == .question && item.session.source == .codex
-            && !(item.question.map(model.canAnswerAgentQuestion) ?? false)
+        let unrelayed = item.kind == .question
+            && item.question.flatMap(model.codexQuestion(for:)).map(unrelayedHerdrQuestion) == true
         let line = unrelayed ? HerdrPresentation.unrelayedQuestionLine(openCause: cause)
             : HerdrPresentation.cardLine(for: cause, agent: agent)
         Text(line)
