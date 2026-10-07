@@ -43,6 +43,15 @@ public struct ClaudeUsageReading: Equatable, Sendable {
                                          observedAt: observedAt)
         return current.fiveHour == nil && current.sevenDay == nil ? nil : current
     }
+
+    /// The one reading the strip shows when several roots report: the most recently observed
+    /// reading with a window still current. Equal observation times go to the lexicographically
+    /// smallest root path, so the choice does not depend on dictionary order.
+    public static func newest(_ readings: some Collection<ClaudeUsageReading>, now: Double) -> ClaudeUsageReading? {
+        readings.compactMap { $0.current(now: now) }.max { lhs, rhs in
+            lhs.observedAt != rhs.observedAt ? lhs.observedAt < rhs.observedAt : lhs.sourceScope > rhs.sourceScope
+        }
+    }
 }
 
 /// Decode and read Steer's sanitized status-line records. The directory itself supplies the root

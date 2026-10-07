@@ -182,7 +182,7 @@ public struct NotchDisplayChoices: Equatable, Sendable {
 
 /// Panel geometry for the chosen display. On a display with a camera housing the collapsed panel is
 /// the housing row itself: exactly as tall as the housing, anchored to the top edge of the screen,
-/// with a wing on each side of the housing where the sprites and count (left) and the weekly limit (right) live. On any other display it is a compact strip inline with the menu bar row, anchored to the
+/// with a wing on each side of the housing where the sprites and count (left) and the usage readouts (right) live. On any other display it is a compact strip inline with the menu bar row, anchored to the
 /// top edge of the screen. The open queue grows downward from the strip. The frame includes the concave ears at the top corners.
 /// Geometry depends only on these inputs, so a display change or an interaction never changes what
 /// the queue holds or when items expire.
@@ -190,11 +190,11 @@ public enum NotchPlacement {
     /// Visible body left of the camera housing, where up to three session sprites, the overflow
     /// mark, and the to-check count live.
     public static let leadingWing: CGFloat = 112
-    /// Visible body right of the camera housing, where the weekly limit reading lives.
+    /// Visible body right of the camera housing while it holds only Codex's weekly readout.
     public static let trailingWing: CGFloat = 60
-    /// The same wing while Codex also reports a five-hour window, so both readouts fit beside
-    /// each other without moving the left wing.
-    public static let trailingWingWithFiveHour: CGFloat = 112
+    /// Width Codex's five-hour readout adds ahead of the weekly one. Claude readouts are sized by
+    /// `UsageStripReadouts.wingWidth`.
+    public static let readoutWidth: CGFloat = 52
     /// Concave fillet joining the body to the menu bar at each top corner; part of the frame.
     public static let earRadius: CGFloat = 8
     /// Radius of the two bottom corners.
@@ -207,13 +207,8 @@ public enum NotchPlacement {
     public static let collapsedHeight: CGFloat = 40
     public static let maximumExpandedHeight: CGFloat = 480
 
-    /// Width of the wing right of the housing for the readouts currently shown there.
-    public static func trailingWing(fiveHourShown: Bool) -> CGFloat {
-        fiveHourShown ? trailingWingWithFiveHour : trailingWing
-    }
-
-    public static func bodyWidth(on display: NotchDisplay, expanded: Bool, fiveHourShown: Bool = false) -> CGFloat {
-        let collapsed = max(display.housingWidth + leadingWing + trailingWing(fiveHourShown: fiveHourShown), minimumBodyWidth)
+    public static func bodyWidth(on display: NotchDisplay, expanded: Bool, wing: CGFloat = trailingWing) -> CGFloat {
+        let collapsed = max(display.housingWidth + leadingWing + max(trailingWing, wing), minimumBodyWidth)
         return expanded ? max(collapsed, expandedBodyWidth) : collapsed
     }
 
@@ -225,11 +220,11 @@ public enum NotchPlacement {
     }
 
     /// How the strip's content is split around the housing. Extra width when the panel is open is
-    /// shared equally by both wings so the housing stays centered in the gap. `fiveHourShown`
-    /// widens the trailing wing for the second readout; the leading wing never moves for it.
-    public static func strip(on display: NotchDisplay, expanded: Bool, fiveHourShown: Bool = false) -> StripLayout {
-        let body = bodyWidth(on: display, expanded: expanded, fiveHourShown: fiveHourShown)
-        let trailing = trailingWing(fiveHourShown: fiveHourShown)
+    /// shared equally by both wings so the housing stays centered in the gap. `wing` is the trailing
+    /// wing's width for the usage readouts shown (`UsageStripReadouts.wingWidth`); the leading wing never moves for it.
+    public static func strip(on display: NotchDisplay, expanded: Bool, wing: CGFloat = trailingWing) -> StripLayout {
+        let body = bodyWidth(on: display, expanded: expanded, wing: wing)
+        let trailing = max(trailingWing, wing)
         guard display.hasPhysicalNotch else {
             return StripLayout(leading: body - trailing, gap: 0, trailing: trailing, height: stripHeight(on: display))
         }
@@ -239,16 +234,16 @@ public enum NotchPlacement {
     }
 
     /// Estimated frame from a row count, used before the content has been measured.
-    public static func frame(on display: NotchDisplay, expanded: Bool, rows: Int, extraRows: Bool, fiveHourShown: Bool = false) -> CGRect {
+    public static func frame(on display: NotchDisplay, expanded: Bool, rows: Int, extraRows: Bool, wing: CGFloat = trailingWing) -> CGRect {
         let estimate = stripHeight(on: display) + 28 + CGFloat(rows) * 64 + (extraRows ? 56 : 0)
-        return frame(on: display, expanded: expanded, contentHeight: estimate, fiveHourShown: fiveHourShown)
+        return frame(on: display, expanded: expanded, contentHeight: estimate, wing: wing)
     }
 
     /// Frame for a measured content height (strip included): the open panel is exactly as tall as
     /// what it shows, growing downward and capped for long queues.
-    public static func frame(on display: NotchDisplay, expanded: Bool, contentHeight: CGFloat, fiveHourShown: Bool = false) -> CGRect {
-        let layout = strip(on: display, expanded: expanded, fiveHourShown: fiveHourShown)
-        let width = bodyWidth(on: display, expanded: expanded, fiveHourShown: fiveHourShown) + 2 * earRadius
+    public static func frame(on display: NotchDisplay, expanded: Bool, contentHeight: CGFloat, wing: CGFloat = trailingWing) -> CGRect {
+        let layout = strip(on: display, expanded: expanded, wing: wing)
+        let width = bodyWidth(on: display, expanded: expanded, wing: wing) + 2 * earRadius
         let height = expanded ? min(maximumExpandedHeight, max(layout.height + 24, contentHeight.rounded(.up))) : layout.height
         // The panel starts at the very top of the screen on every display: its gap over the housing
         // where there is one, otherwise centered in the menu bar row.

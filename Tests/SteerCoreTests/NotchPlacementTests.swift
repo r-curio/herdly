@@ -410,20 +410,56 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     #expect(strip.sessions == [StripSession(session: session, working: false, color: StripSummary.preferredColor(for: session))])
 }
 
-@Test func trailingWingWidensOnlyWhileAFiveHourReadingIsShown() {
-    // Without a five-hour reading the strip is exactly as before.
-    #expect(NotchPlacement.strip(on: builtIn, expanded: false, fiveHourShown: false) == StripLayout(leading: 112, gap: 180, trailing: 60, height: 32))
-    // With one, the wing right of the housing grows to fit two readouts; the left wing does not move.
-    let layout = NotchPlacement.strip(on: builtIn, expanded: false, fiveHourShown: true)
+@Test func trailingWingWidensForTheUsageReadoutsShown() {
+    // With only the weekly reading the strip is exactly as before.
+    #expect(NotchPlacement.strip(on: builtIn, expanded: false, wing: NotchPlacement.trailingWing) == StripLayout(leading: 112, gap: 180, trailing: 60, height: 32))
+    // With a second readout, the wing right of the housing grows to fit two readouts; the left wing does not move.
+    let layout = NotchPlacement.strip(on: builtIn, expanded: false, wing: 112)
     #expect(layout == StripLayout(leading: 112, gap: 180, trailing: 112, height: 32))
-    let frame = NotchPlacement.frame(on: builtIn, expanded: false, rows: 0, extraRows: false, fiveHourShown: true)
+    let frame = NotchPlacement.frame(on: builtIn, expanded: false, rows: 0, extraRows: false, wing: 112)
     #expect(frame == CGRect(x: 756 - 90 - 112 - 8, y: 982 - 32, width: 420, height: 32))
     #expect(frame.minX + NotchPlacement.earRadius + layout.leading + layout.gap / 2 == builtIn.frame.midX)
     // The wider body already exceeds the open width, so opening adds nothing to either wing.
-    #expect(NotchPlacement.strip(on: builtIn, expanded: true, fiveHourShown: true) == StripLayout(leading: 112, gap: 180, trailing: 112, height: 32))
-    #expect(NotchPlacement.frame(on: builtIn, expanded: true, contentHeight: 200, fiveHourShown: true).width == 420)
+    #expect(NotchPlacement.strip(on: builtIn, expanded: true, wing: 112) == StripLayout(leading: 112, gap: 180, trailing: 112, height: 32))
+    #expect(NotchPlacement.frame(on: builtIn, expanded: true, contentHeight: 200, wing: 112).width == 420)
     // A display without a housing keeps the left wing at its full width and grows the body instead.
-    #expect(NotchPlacement.strip(on: external, expanded: false, fiveHourShown: true) == StripLayout(leading: 112, gap: 0, trailing: 112, height: 25))
-    #expect(NotchPlacement.frame(on: external, expanded: false, rows: 0, extraRows: false, fiveHourShown: true)
+    #expect(NotchPlacement.strip(on: external, expanded: false, wing: 112) == StripLayout(leading: 112, gap: 0, trailing: 112, height: 25))
+    #expect(NotchPlacement.frame(on: external, expanded: false, rows: 0, extraRows: false, wing: 112)
             == CGRect(x: 1512 + 1280 - 120, y: 100 + 1440 - 25, width: 240, height: 25))
+    // A wider wing grows the body to the right; the left wing and housing center stay put.
+    let wide = NotchPlacement.strip(on: builtIn, expanded: false, wing: 240)
+    #expect(wide == StripLayout(leading: 112, gap: 180, trailing: 240, height: 32))
+    let four = NotchPlacement.frame(on: builtIn, expanded: false, rows: 0, extraRows: false, wing: 240)
+    let two = NotchPlacement.frame(on: builtIn, expanded: false, rows: 0, extraRows: false, wing: 112)
+    #expect(four.width - two.width == 128)
+    #expect(four.minX == two.minX)
+    #expect(NotchPlacement.strip(on: external, expanded: false, wing: 240) == StripLayout(leading: 112, gap: 0, trailing: 240, height: 25))
+    // A wing narrower than the weekly readout's lays out as that readout's.
+    #expect(NotchPlacement.strip(on: builtIn, expanded: false, wing: 0) == StripLayout(leading: 112, gap: 180, trailing: 60, height: 32))
+}
+
+@Test func usageStripOrdersClaudeBeforeCodexAndSizesItsWing() {
+    let codex = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 37, resetsAt: 1_000),
+                                  fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: 1_000))
+    let claude = ClaudeUsageReading(sourceScope: "/a", sessionID: "00000000-0000-4000-8000-000000000001",
+                                    fiveHour: ClaudeUsageWindow(usedPercentage: 100, resetsAt: 1_000),
+                                    sevenDay: ClaudeUsageWindow(usedPercentage: 18, resetsAt: 1_000), observedAt: 1)
+    let all = UsageStripReadouts.make(codex: codex, claude: claude)
+    #expect(all.map(\.source) == [.claude, .claude, .codex, .codex])
+    #expect(all.map(\.caption) == ["5h", "7d", "5h", nil])
+    #expect(all.map(\.spokenLabel) == ["Claude five-hour limit 100% used", "Claude seven-day limit 18% used",
+                                        "Codex five-hour limit 40% used", "Codex weekly limit 37% used"])
+    // Codex-only widths are unchanged; each Claude readout adds room for "100%" plus the group gap.
+    #expect(UsageStripReadouts.wingWidth(all) == 240) // 60 + 52 + 2 × 62 + 4
+    let codexOnly = UsageStripReadouts.make(codex: codex, claude: nil)
+    #expect(UsageStripReadouts.wingWidth(codexOnly) == 112)
+    // With no readings the weekly readout is still there, unknown, and the wing is its own width.
+    let none = UsageStripReadouts.make(codex: nil, claude: nil)
+    #expect(none == [UsageStripReadout(source: .codex, caption: nil, usedPercent: nil, percentText: nil)])
+    #expect(none.map(\.spokenLabel) == ["Codex weekly limit unknown"])
+    #expect(UsageStripReadouts.wingWidth(none) == NotchPlacement.trailingWing)
+    // Only Claude's seven-day window: one Claude readout ahead of the weekly one.
+    let sevenOnly = ClaudeUsageReading(sourceScope: "/a", sessionID: nil, fiveHour: nil,
+                                       sevenDay: ClaudeUsageWindow(usedPercentage: 5, resetsAt: 1_000), observedAt: 1)
+    #expect(UsageStripReadouts.make(codex: nil, claude: sevenOnly).map(\.caption) == ["7d", nil])
 }
