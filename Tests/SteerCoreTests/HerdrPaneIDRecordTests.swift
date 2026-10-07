@@ -86,3 +86,64 @@ import Testing
     let scan = ClaudeObservationReader.scan(events: claude, sourceScope: claude.path, installationID: "install", now: 10)
     #expect(scan.observations.contains { if case .running = $0 { return true }; return false })
 }
+
+@Test func herdrPaneSocketPathAcceptsBoundedAbsolutePaths() {
+    let path = "/Users/me/.config/herdr/herdr.sock"
+    #expect(HerdrSocketPath.validated(path) == path)
+    #expect(HerdrSocketPath.validated("/tmp/herdr sessions/é.sock") == "/tmp/herdr sessions/é.sock")
+    let longest = "/" + String(repeating: "a", count: HerdrSocketPath.maximumLength - 1)
+    #expect(HerdrSocketPath.validated(longest) == longest)
+}
+
+@Test func herdrPaneSocketPathRejectsMissingRelativeOversizedAndControlValues() {
+    let rejected: [String?] = [
+        nil, "", "herdr.sock", "./herdr.sock", "~/.config/herdr/herdr.sock", " /tmp/herdr.sock",
+        "/" + String(repeating: "a", count: HerdrSocketPath.maximumLength),
+        "/tmp/herdr\u{0}.sock", "/tmp/herdr.sock\n", "/tmp/her\tdr.sock", "/tmp/\u{1b}]2;x\u{7}",
+        "/tmp/herdr\u{7f}.sock", "/tmp/herdr\u{85}.sock"
+    ]
+    for value in rejected {
+        #expect(HerdrSocketPath.validated(value) == nil, "\(String(describing: value))")
+    }
+}
+
+@Test func herdrPaneSocketPathTravelsOnlyWithAValidPaneID() {
+    let socket = "/Users/me/.config/herdr/herdr.sock"
+
+    var both: [String: Any] = [:]
+    HerdrPaneID.record(from: ["HERDR_PANE_ID": "w1:p1", "HERDR_SOCKET_PATH": socket], into: &both)
+    #expect(both[HerdrPaneID.recordKey] as? String == "w1:p1")
+    #expect(both[HerdrSocketPath.recordKey] as? String == socket)
+    #expect(HerdrSocketPath.recorded(in: both) == socket)
+
+    var paneOnly: [String: Any] = [:]
+    HerdrPaneID.record(from: ["HERDR_PANE_ID": "w1:p1"], into: &paneOnly)
+    #expect(paneOnly[HerdrPaneID.recordKey] as? String == "w1:p1")
+    #expect(paneOnly[HerdrSocketPath.recordKey] == nil)
+
+    for invalidSocket in ["", "herdr.sock", "/tmp/herdr.sock\n", "/" + String(repeating: "s", count: 1024)] {
+        var record: [String: Any] = [:]
+        HerdrPaneID.record(from: ["HERDR_PANE_ID": "w1:p1", "HERDR_SOCKET_PATH": invalidSocket], into: &record)
+        #expect(record[HerdrPaneID.recordKey] as? String == "w1:p1")
+        #expect(record[HerdrSocketPath.recordKey] == nil)
+    }
+
+    for invalidPane in [[:], ["HERDR_PANE_ID": ""], ["HERDR_PANE_ID": "w1 p1"]] {
+        var record: [String: Any] = [:]
+        HerdrPaneID.record(from: invalidPane.merging(["HERDR_SOCKET_PATH": socket]) { $1 }, into: &record)
+        #expect(record.isEmpty)
+    }
+}
+
+@Test func herdrPaneSocketPathReadsAsAbsentFromOldOrInvalidRecords() throws {
+    let old = Data(#"{"captured_at":1,"hook_event_name":"SessionStart","herdr_pane_id":"w1:p1","session_id":"s","source":"steer-hook-v1"}"#.utf8)
+    let oldObject = try #require(try JSONSerialization.jsonObject(with: old) as? [String: Any])
+    #expect(HerdrSocketPath.recorded(in: oldObject) == nil)
+    #expect(HerdrSocketPath.recorded(in: [:]) == nil)
+    #expect(HerdrSocketPath.recorded(in: [HerdrPaneID.recordKey: "w1:p1", HerdrSocketPath.recordKey: 7]) == nil)
+    #expect(HerdrSocketPath.recorded(in: [HerdrPaneID.recordKey: "w1:p1", HerdrSocketPath.recordKey: "rel.sock"]) == nil)
+    // A socket path without a valid pane ID never reads as a binding signal.
+    #expect(HerdrSocketPath.recorded(in: [HerdrSocketPath.recordKey: "/tmp/herdr.sock"]) == nil)
+    #expect(HerdrSocketPath.recorded(in: [HerdrPaneID.recordKey: "w1:p1", HerdrSocketPath.recordKey: "/tmp/herdr.sock"])
+        == "/tmp/herdr.sock")
+}
