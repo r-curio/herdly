@@ -252,3 +252,59 @@ private let ghosttyChain: [HerdrProcessAncestor] = [
     #expect(HerdrScanOutcome.unavailable(.notRunning).targetReason(for: .codex) == .notRunning)
     #expect(HerdrScanOutcome.unavailable(.notRunning).scan == nil)
 }
+
+// MARK: - pane.process_info
+
+/// A `pane.process_info` reply in herdr 0.9.3's protocol 22 shape (`PaneProcessInfo`).
+func herdrProcessInfoReply(id: String, pane: String = "w1:p8", processes: String? = nil) -> String {
+    let list = processes ?? #"[{"pid":60859,"name":"codex","argv0":"codex","argv":["codex","resume"],"cmdline":"codex resume","cwd":"/lab"}]"#
+    return #"{"id":"\#(id)","result":{"type":"pane_process_info","process_info":{"pane_id":"\#(pane)","tty":"/dev/ttys004","shell_pid":60700,"foreground_process_group_id":60859,"foreground_processes":\#(list)}}}"#
+}
+
+@Test func herdrProcessInfoDecodesTheForegroundProcesses() throws {
+    guard case .processInfo(let info) = try decode(herdrProcessInfoReply(id: "r1")).get() else {
+        Issue.record("not process info"); return
+    }
+    #expect(info == HerdrProcessInfo(paneID: "w1:p8", shellPID: 60700, foregroundProcessGroupID: 60859,
+                                     foregroundProcesses: [HerdrForegroundProcess(pid: 60859, name: "codex",
+                                                                                  argv: ["codex", "resume"], cwd: "/lab")]))
+    // Optional fields may be null or absent; a missing list is zero processes.
+    let sparse = #"{"id":"r1","result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p8","shell_pid":null,"foreground_processes":[{"pid":7,"name":"zsh","argv":null}]}}}"#
+    #expect(try decode(sparse).get() == .processInfo(HerdrProcessInfo(
+        paneID: "w1:p8", shellPID: nil, foregroundProcessGroupID: nil,
+        foregroundProcesses: [HerdrForegroundProcess(pid: 7, name: "zsh", argv: nil, cwd: nil)])))
+    let empty = #"{"id":"r1","result":{"type":"pane_process_info","process_info":{"pane_id":"w1:p8"}}}"#
+    #expect(try decode(empty).get() == .processInfo(HerdrProcessInfo(paneID: "w1:p8", shellPID: nil,
+                                                                     foregroundProcessGroupID: nil, foregroundProcesses: [])))
+}
+
+@Test func herdrMalformedProcessInfoIsUnavailable() {
+    let malformed = [
+        // Required fields missing or mistyped.
+        #"{"id":"r1","result":{"type":"pane_process_info"}}"#,
+        #"{"id":"r1","result":{"type":"pane_process_info","process_info":{"foreground_processes":[]}}}"#,
+        herdrProcessInfoReply(id: "r1", processes: #"[{"pid":1}]"#),
+        herdrProcessInfoReply(id: "r1", processes: #"[{"name":"codex"}]"#),
+        herdrProcessInfoReply(id: "r1", processes: #"[{"pid":"1","name":"codex"}]"#),
+        herdrProcessInfoReply(id: "r1", processes: #"{"pid":1,"name":"codex"}"#),
+        // PIDs outside a positive Int32.
+        herdrProcessInfoReply(id: "r1", processes: #"[{"pid":0,"name":"codex"}]"#),
+        herdrProcessInfoReply(id: "r1", processes: #"[{"pid":4294967295,"name":"codex"}]"#),
+        herdrProcessInfoReply(id: "r1").replacingOccurrences(of: #""shell_pid":60700"#, with: #""shell_pid":-1"#),
+        // Another request's reply.
+        herdrProcessInfoReply(id: "other"),
+    ]
+    for text in malformed { #expect(decode(text) == .failure(.malformedReply), "\(text)") }
+}
+
+@Test func herdrOversizedProcessInfoIsMalformedRatherThanTruncated() {
+    let many = "[" + (1...(HerdrWire.maximumProcesses + 1)).map { #"{"pid":\#($0),"name":"codex"}"# }.joined(separator: ",") + "]"
+    #expect(decode(herdrProcessInfoReply(id: "r1", processes: many)) == .failure(.malformedReply))
+    let atBound = "[" + (1...HerdrWire.maximumProcesses).map { #"{"pid":\#($0),"name":"sh"}"# }.joined(separator: ",") + "]"
+    #expect((try? decode(herdrProcessInfoReply(id: "r1", processes: atBound)).get()) != nil)
+    let arguments = "[" + Array(repeating: #""x""#, count: HerdrWire.maximumArguments + 1).joined(separator: ",") + "]"
+    #expect(decode(herdrProcessInfoReply(id: "r1", processes: #"[{"pid":1,"name":"codex","argv":\#(arguments)}]"#))
+        == .failure(.malformedReply))
+    let padding = String(repeating: " ", count: HerdrWire.maximumReply)
+    #expect(decode(herdrProcessInfoReply(id: "r1") + padding) == .failure(.malformedReply))
+}

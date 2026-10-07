@@ -189,12 +189,55 @@ public struct HerdrSnapshot: Equatable, Sendable {
     public func tab(_ tabID: String) -> HerdrTab? { tabs.first { $0.tabID == tabID } }
 }
 
+// MARK: - Pane processes
+
+/// One process in a pane's foreground process group, as herdr reads it from the pane's own
+/// terminal (`pane.process_info`). `name` is the executable name; `argv` is never used to decide
+/// what runs in the pane (ADR 0012).
+public struct HerdrForegroundProcess: Equatable, Sendable {
+    public let pid: Int32
+    public let name: String
+    public let argv: [String]?
+    public let cwd: String?
+
+    public init(pid: Int32, name: String, argv: [String]?, cwd: String?) {
+        self.pid = pid
+        self.name = name
+        self.argv = argv
+        self.cwd = cwd
+    }
+
+    /// The number of `processes` whose executable name is exactly `name`.
+    public static func count(named name: String, in processes: [HerdrForegroundProcess]) -> Int {
+        processes.filter { $0.name == name }.count
+    }
+}
+
+/// One `pane.process_info` result. herdr reports it from the pane's terminal, not from any agent
+/// report, so a shared Codex daemon cannot affect it (docs/evidence/herdr-daemon-pane-signals.md).
+public struct HerdrProcessInfo: Equatable, Sendable {
+    public let paneID: String
+    public let shellPID: Int32?
+    public let foregroundProcessGroupID: Int32?
+    public let foregroundProcesses: [HerdrForegroundProcess]
+
+    public init(paneID: String, shellPID: Int32?, foregroundProcessGroupID: Int32?,
+                foregroundProcesses: [HerdrForegroundProcess]) {
+        self.paneID = paneID
+        self.shellPID = shellPID
+        self.foregroundProcessGroupID = foregroundProcessGroupID
+        self.foregroundProcesses = foregroundProcesses
+    }
+}
+
 // MARK: - Socket replies
 
 /// One decoded socket reply that answered Steer's request.
 public enum HerdrReply: Equatable, Sendable {
     case pong(version: String, protocolVersion: Int)
     case snapshot(HerdrSnapshot)
+    /// A `pane.process_info` result. The caller checks it names the pane it asked about.
+    case processInfo(HerdrProcessInfo)
     /// A success whose result type Steer does not decode further (focus, send_keys).
     case accepted(type: String)
 }
@@ -204,6 +247,10 @@ public enum HerdrWire {
     public static let maximumReply = 2 * 1024 * 1024
     /// Fixed bounds on snapshot collections; a larger snapshot is malformed rather than truncated.
     public static let maximumRecords = 4096
+    /// Fixed bounds on one `pane.process_info` result: foreground processes, and `argv` entries per
+    /// process. A larger result is malformed rather than truncated.
+    public static let maximumProcesses = 256
+    public static let maximumArguments = 1024
 
     /// One newline-terminated request line. `params` must be JSON-serializable; nil when not.
     public static func requestLine(id: String, method: String, params: [String: Any]) -> Data? {
@@ -235,6 +282,9 @@ public enum HerdrWire {
             if let reason = HerdrProtocol.check(wire.protocolVersion) { return .failure(reason) }
             guard let snapshot = wire.snapshot else { return .failure(.malformedReply) }
             return .success(.snapshot(snapshot))
+        case .processInfo(let wire):
+            guard let info = wire.info else { return .failure(.malformedReply) }
+            return .success(.processInfo(info))
         case .other(let type):
             return .success(.accepted(type: type))
         }
@@ -253,9 +303,10 @@ public enum HerdrWire {
     private enum ResultBody: Decodable {
         case pong(String, Int)
         case snapshot(WireSnapshot)
+        case processInfo(WireProcessInfo)
         case other(String)
 
-        private enum Keys: String, CodingKey { case type, version, `protocol`, snapshot }
+        private enum Keys: String, CodingKey { case type, version, `protocol`, snapshot, process_info }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: Keys.self)
@@ -266,6 +317,8 @@ public enum HerdrWire {
                              try container.decode(Int.self, forKey: .protocol))
             case "session_snapshot":
                 self = .snapshot(try container.decode(WireSnapshot.self, forKey: .snapshot))
+            case "pane_process_info":
+                self = .processInfo(try container.decode(WireProcessInfo.self, forKey: .process_info))
             default:
                 self = .other(String(type.prefix(64)))
             }
@@ -306,6 +359,45 @@ public enum HerdrWire {
                                              terminalTitle: $0.terminal_title_stripped) },
                 layouts: layouts.map { HerdrLayout(tabID: $0.tab_id, zoomed: $0.zoomed,
                                                    paneIDs: $0.panes.map(\.pane_id)) })
+        }
+    }
+
+    /// `pane.process_info` as sent. `info` is nil when a bound is exceeded or a PID is out of range.
+    private struct WireProcessInfo: Decodable {
+        let info: HerdrProcessInfo?
+
+        private enum Keys: String, CodingKey { case pane_id, shell_pid, foreground_process_group_id, foreground_processes }
+
+        private struct Process: Decodable {
+            let pid: Int
+            let name: String
+            let argv: [String]?
+            let cwd: String?
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: Keys.self)
+            let paneID = try container.decode(String.self, forKey: .pane_id)
+            let shell = try container.decodeIfPresent(Int.self, forKey: .shell_pid)
+            let group = try container.decodeIfPresent(Int.self, forKey: .foreground_process_group_id)
+            // herdr omits the list for a pane with nothing in the foreground; that is zero processes.
+            let processes = try container.decodeIfPresent([Process].self, forKey: .foreground_processes) ?? []
+            guard processes.count <= HerdrWire.maximumProcesses,
+                  processes.allSatisfy({ ($0.argv?.count ?? 0) <= HerdrWire.maximumArguments }),
+                  let pids = Self.pids(processes.map(\.pid)),
+                  Self.pids([shell, group].compactMap { $0 }) != nil else { info = nil; return }
+            info = HerdrProcessInfo(
+                paneID: paneID, shellPID: shell.flatMap(Int32.init(exactly:)),
+                foregroundProcessGroupID: group.flatMap(Int32.init(exactly:)),
+                foregroundProcesses: zip(processes, pids).map {
+                    HerdrForegroundProcess(pid: $1, name: $0.name, argv: $0.argv, cwd: $0.cwd)
+                })
+        }
+
+        /// Each value as a positive `Int32`, or nil when any is out of range.
+        private static func pids(_ values: [Int]) -> [Int32]? {
+            let converted = values.compactMap { $0 > 0 ? Int32(exactly: $0) : nil }
+            return converted.count == values.count ? converted : nil
         }
     }
 
@@ -496,13 +588,42 @@ public struct HerdrAttachedClient: Equatable, Sendable {
 
 // MARK: - Scan
 
+/// What one scan reads beyond `ping`, the snapshot and `lsof`, decided by the caller from the gate
+/// inputs (ADR 0009). `herdr integration status` concerns Claude Code only (ADR 0008), so it runs
+/// only when a Claude session opened the gate. `pane.process_info` is requested for each pane whose
+/// title is one of `processInfoTitles`, the shortened identifiers of live Codex sessions (ADR 0012).
+public struct HerdrScanRequest: Equatable, Hashable, Sendable {
+    /// At most this many `pane.process_info` requests per scan, each with ADR 0009's deadline.
+    public static let maximumProcessInfoRequests = 16
+
+    public let includeIntegration: Bool
+    public let processInfoTitles: Set<String>
+
+    public init(includeIntegration: Bool = true, processInfoTitles: Set<String> = []) {
+        self.includeIntegration = includeIntegration
+        self.processInfoTitles = processInfoTitles
+    }
+
+    /// The panes to ask about, in pane ID order, at most `maximumProcessInfoRequests`. A pane past
+    /// the bound gets no reply, which leaves any binding to it unavailable rather than guessed.
+    public func processInfoPanes(in snapshot: HerdrSnapshot) -> [String] {
+        guard !processInfoTitles.isEmpty else { return [] }
+        let panes = Set(snapshot.panes.filter { $0.terminalTitle.map(processInfoTitles.contains) == true }.map(\.paneID))
+        return Array(panes.sorted().prefix(Self.maximumProcessInfoRequests))
+    }
+}
+
 /// Everything one herdr scan read, taken together. Scan-wide failures (socket, protocol, reply,
-/// subprocess) are reported by `HerdrScanOutcome.unavailable`; the client verdict and integration
-/// state are per target and surface through `targetReason(for:)`.
+/// subprocess) are reported by `HerdrScanOutcome.unavailable`; the client verdict, integration
+/// state and each pane's process info are per target. The first two surface through
+/// `targetReason(for:)`; process info is read by the binding rules.
 public struct HerdrScan: Equatable, Sendable {
     public let snapshot: HerdrSnapshot
     public let integration: HerdrIntegrationReport
     public let client: Result<HerdrAttachedClient, HerdrUnavailableReason>
+    /// `pane.process_info` per pane ID the request selected. A pane that is absent was not asked
+    /// about; a failure is that request's own typed reason.
+    public let processInfo: [String: Result<HerdrProcessInfo, HerdrUnavailableReason>]
     /// When the one herdr server process listening on the client socket started, in seconds since
     /// 1970 (the clock of hook records' `captured_at`). It is the server identity ADR 0008's
     /// restart check compares against. Nil when the listing showed zero or several server
@@ -510,18 +631,21 @@ public struct HerdrScan: Equatable, Sendable {
     public let serverStartedAt: Double?
 
     public init(snapshot: HerdrSnapshot, integration: HerdrIntegrationReport,
-                client: Result<HerdrAttachedClient, HerdrUnavailableReason>, serverStartedAt: Double? = nil) {
+                client: Result<HerdrAttachedClient, HerdrUnavailableReason>, serverStartedAt: Double? = nil,
+                processInfo: [String: Result<HerdrProcessInfo, HerdrUnavailableReason>] = [:]) {
         self.snapshot = snapshot
         self.integration = integration
         self.client = client
         self.serverStartedAt = serverStartedAt
+        self.processInfo = processInfo
     }
 
-    /// The first scan-level reason a session of `agent` cannot be targeted, or nil when the
-    /// integration is current and exactly one Ghostty-hosted client is attached. Binding,
-    /// split and named-session checks are applied by the binding rules, not here.
+    /// The first scan-level reason a session of `agent` cannot be targeted, or nil when exactly one
+    /// Ghostty-hosted client is attached and, for Claude Code, its integration is current. Codex
+    /// needs no herdr integration (ADR 0012). Binding, split and named-session checks are applied
+    /// by the binding rules, not here.
     public func targetReason(for agent: HerdrAgentKind) -> HerdrUnavailableReason? {
-        if let reason = integration.reason(for: agent) { return reason }
+        if agent == .claude, let reason = integration.reason(for: agent) { return reason }
         if case .failure(let reason) = client { return reason }
         return nil
     }

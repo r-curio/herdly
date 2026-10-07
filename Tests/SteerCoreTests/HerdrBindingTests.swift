@@ -7,7 +7,7 @@ private let defaultSocket = "/Users/test/.config/herdr/herdr.sock"
 
 private func record(
     _ sessionID: String = session,
-    agent: HerdrAgentKind = .codex,
+    agent: HerdrAgentKind = .claude,
     pane: String? = "w1:p1",
     socket: String? = defaultSocket,
     at recordedAt: Double = 100
@@ -17,7 +17,7 @@ private func record(
 
 private func pane(
     _ paneID: String = "w1:p1",
-    agent: HerdrAgentKind? = .codex,
+    agent: HerdrAgentKind? = .claude,
     session agentSession: String? = session,
     panesInTab: Int = 1,
     title: String? = nil
@@ -30,7 +30,7 @@ private func observation(
     serverStartedAt: Double = 50,
     session herdrSession: HerdrSessionName = .defaultSession,
     clients: [HerdrClientObservation] = [HerdrClientObservation(processID: 93954, ancestryReachesGhostty: true)],
-    integrations: [HerdrAgentKind: HerdrIntegrationState] = [.codex: .current(version: 8), .claude: .current(version: 10)],
+    integrations: [HerdrAgentKind: HerdrIntegrationState] = [.claude: .current(version: 8), .codex: .current(version: 10)],
     panes: [HerdrPaneObservation] = [pane(), pane("w1:p2", agent: nil, session: nil)]
 ) -> HerdrObservation {
     HerdrObservation(
@@ -58,16 +58,20 @@ private func evaluate(
     )
 }
 
-private let bound = HerdrBinding.bound(HerdrPaneTarget(sessionID: session, agent: .codex, paneID: "w1:p1"))
+private let bound = HerdrBinding.bound(HerdrPaneTarget(sessionID: session, agent: .claude, paneID: "w1:p1"))
 
 @Test func herdrPaneBindsWhenHookRecordAndAgentSessionAgreeOnOnePane() {
     #expect(evaluate() == bound)
-    let claude = "c1a0de00-0000-4000-8000-000000000001"
-    #expect(evaluate(
-        claude,
-        records: [record(claude, agent: .claude)],
-        observation: observation(panes: [pane(agent: .claude, session: claude, title: "Claude Code")])
-    ) == .bound(HerdrPaneTarget(sessionID: claude, agent: .claude, paneID: "w1:p1")))
+    #expect(evaluate(observation: observation(panes: [pane(title: "Claude Code")])) == bound)
+}
+
+@Test func herdrRulesIgnoreCodexHookRecords() {
+    // ADR 0012: under Codex's shared daemon a Codex record names another CLI's pane, so a newer
+    // Codex record naming this Claude pane neither voids the Claude binding nor binds Codex.
+    #expect(evaluate(records: [record(), record(otherSession, agent: .codex, at: 120)]) == bound)
+    #expect(evaluate(otherSession, records: [record(otherSession, agent: .codex, at: 120)],
+                     observation: observation(panes: [pane(agent: .codex, session: otherSession)]))
+        == .unavailable(.noHookRecord))
 }
 
 @Test func herdrBindingIsVoidWhenTheSessionEnds() {
@@ -108,9 +112,9 @@ private let bound = HerdrBinding.bound(HerdrPaneTarget(sessionID: session, agent
 @Test func herdrBindingIsVoidWhenHerdrReportsNullOrAnotherSession() {
     #expect(evaluate(observation: observation(panes: [pane(session: nil)])) == .unavailable(.agentSessionNull))
     // Before a Codex session's first turn herdr sees the agent but no session.
-    #expect(evaluate(observation: observation(panes: [pane(agent: .codex, session: nil)])) == .unavailable(.agentSessionNull))
+    #expect(evaluate(observation: observation(panes: [pane(agent: .claude, session: nil)])) == .unavailable(.agentSessionNull))
     #expect(evaluate(observation: observation(panes: [pane(session: otherSession)])) == .unavailable(.agentSessionMismatch))
-    #expect(evaluate(observation: observation(panes: [pane(agent: .claude)])) == .unavailable(.agentSessionMismatch))
+    #expect(evaluate(observation: observation(panes: [pane(agent: .codex)])) == .unavailable(.agentSessionMismatch))
     #expect(evaluate(observation: observation(panes: [pane("w1:p2")])) == .unavailable(.paneMissing))
     // herdr reports the session in another pane while the recorded pane reports nothing.
     #expect(evaluate(observation: observation(panes: [pane(session: nil), pane("w1:p2")])) == .unavailable(.agentSessionNull))
@@ -152,11 +156,11 @@ private let bound = HerdrBinding.bound(HerdrPaneTarget(sessionID: session, agent
 }
 
 @Test func herdrBindingRequiresTheSessionsOwnIntegrationToBeCurrent() {
-    #expect(evaluate(observation: observation(integrations: [.codex: .outdated])) == .unavailable(.integrationNotCurrent(.codex, .outdated)))
-    #expect(evaluate(observation: observation(integrations: [.codex: .notInstalled])) == .unavailable(.integrationNotCurrent(.codex, .notInstalled)))
-    #expect(evaluate(observation: observation(integrations: [.codex: .unparseable])) == .unavailable(.integrationNotCurrent(.codex, .unparseable)))
-    #expect(evaluate(observation: observation(integrations: [.claude: .current(version: 10)])) == .unavailable(.integrationNotCurrent(.codex, nil)))
-    #expect(evaluate(observation: observation(integrations: [.codex: .current(version: 8), .claude: .outdated])) == bound)
+    #expect(evaluate(observation: observation(integrations: [.claude: .outdated])) == .unavailable(.integrationNotCurrent(.claude, .outdated)))
+    #expect(evaluate(observation: observation(integrations: [.claude: .notInstalled])) == .unavailable(.integrationNotCurrent(.claude, .notInstalled)))
+    #expect(evaluate(observation: observation(integrations: [.claude: .unparseable])) == .unavailable(.integrationNotCurrent(.claude, .unparseable)))
+    #expect(evaluate(observation: observation(integrations: [.codex: .current(version: 10)])) == .unavailable(.integrationNotCurrent(.claude, nil)))
+    #expect(evaluate(observation: observation(integrations: [.claude: .current(version: 8), .codex: .outdated])) == bound)
 }
 
 @Test func herdrBindingRequiresExactlyOneGhosttyClient() {
@@ -177,7 +181,7 @@ private let bound = HerdrBinding.bound(HerdrPaneTarget(sessionID: session, agent
     // A newer record moves the session to another pane regardless of input order.
     let moved = [record(at: 100), record(pane: "w2:p1", at: 130)]
     let movedPanes = observation(panes: [pane(session: nil), pane("w2:p1")])
-    let target = HerdrBinding.bound(HerdrPaneTarget(sessionID: session, agent: .codex, paneID: "w2:p1"))
+    let target = HerdrBinding.bound(HerdrPaneTarget(sessionID: session, agent: .claude, paneID: "w2:p1"))
     #expect(evaluate(records: moved, observation: movedPanes) == target)
     #expect(evaluate(records: moved.reversed(), observation: movedPanes) == target)
 }
@@ -189,13 +193,13 @@ private let bound = HerdrBinding.bound(HerdrPaneTarget(sessionID: session, agent
 }
 
 @Test func herdrBindingRestoresWhenTheSessionEndsAndANewOneStartsInThePane() {
-    // Codex exits: herdr clears the pane and Steer marks the session ended.
+    // Claude exits: herdr clears the pane and Steer marks the session ended.
     let cleared = observation(panes: [pane(agent: nil, session: nil)])
     #expect(evaluate(liveness: .ended, observation: cleared) == .unavailable(.sessionEnded))
-    // A new Codex in the same pane binds once both sides report the new session.
+    // A new Claude session in the same pane binds once both sides report the new session.
     let records = [record(at: 100), record(otherSession, at: 150)]
     #expect(evaluate(otherSession, records: records, observation: observation(panes: [pane(session: otherSession)]))
-        == .bound(HerdrPaneTarget(sessionID: otherSession, agent: .codex, paneID: "w1:p1")))
+        == .bound(HerdrPaneTarget(sessionID: otherSession, agent: .claude, paneID: "w1:p1")))
     #expect(evaluate(records: records, observation: observation(panes: [pane(session: otherSession)]))
         == .unavailable(.paneReusedBySession(otherSession)))
 }
