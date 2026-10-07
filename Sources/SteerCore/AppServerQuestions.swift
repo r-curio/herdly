@@ -194,6 +194,11 @@ public enum QuestionAnswerRoute: Equatable, Sendable {
     case daemonAnswered
     /// CLI session without the daemon: the one relayed key through Ghostty (ADR 0006).
     case ghosttyRelay
+    /// CLI session bound to a herdr pane without the daemon: one key per click through herdr's
+    /// `agent.send_keys` (ADR 0010). See `QuestionRelayRouting`.
+    case herdrRelay
+    /// CLI session with no usable relay for this call: nothing is offered but Open in Codex.
+    case relayUnavailable(HerdrQuestionRelayUnavailable)
     /// Desktop session without the daemon: a highlighted pick that opens the thread.
     case desktopPick
 }
