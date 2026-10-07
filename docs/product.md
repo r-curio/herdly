@@ -70,7 +70,7 @@ Undecided product facts: the completion sound; a global hotkey for keyboard-only
 
 ## Accessibility & Inclusion
 
-Keyboard and VoiceOver operation of the notch panel are in scope: every row and button carries a label naming its action and subject, Tab moves through controls once the panel is key, Escape collapses without dismissing, and long commands read in full. Keyboard-only entry currently requires one click; a global hotkey is deferred. Placement follows the pointer's display.
+Keyboard and VoiceOver operation of the notch panel are in scope: every row and button carries a label naming its action and subject, Tab moves through controls once the panel is key, Escape collapses without dismissing, and long commands read in full. Keyboard-only entry currently requires one click; a global hotkey is deferred. Placement follows the pointer's display unless the user has pinned a display.
 
 ## Initial supported surfaces
 
@@ -92,7 +92,7 @@ Ghostty support retains its separate exact-pane requirement: using terminal pane
 
 If app activation or the required Ghostty pane identity is unknown, retain queue items without acknowledgment and leave approvals in Codex's normal flow. Unknown desktop activation retains the indicator rather than guessing it was viewed. Release any pending approval interaction with no decision on uncertainty; only Open in Codex remains. App-level visibility alone does not establish safe direct desktop approval support.
 
-Present one shared notch on the display the user is actively using. On a display without a physical notch, use a compact top-center panel. Do not duplicate the queue across displays. The active display is the one under the pointer; while the user is interacting with the panel (pointer over it or keyboard focus in it) placement stays on the panel's current display, and a display that disconnects is never chosen. Display changes and interaction never change the queue, replay a notification, or extend an approval deadline. See [notch placement and keyboard interaction](notch-placement.md).
+Present one shared notch on the display the user is actively using. On a display without a physical notch, use a compact top-center panel. Do not duplicate the queue across displays. The active display is the one under the pointer, unless the user has pinned the notch to one display in the controls window or the menu bar item. A pinned display is used wherever the pointer is; while it is not connected the notch shows on the built-in display (or follows the pointer when there is no built-in display) and returns to the pinned display when it reconnects, with the pin kept. While the user is interacting with the panel (pointer over it or keyboard focus in it) placement stays on the panel's current display, and a display that disconnects is never chosen. Display changes and interaction never change the queue, replay a notification, or extend an approval deadline. See [notch placement and keyboard interaction](notch-placement.md).
 
 ## Agreed queue experience
 
