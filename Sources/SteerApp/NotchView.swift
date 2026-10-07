@@ -162,18 +162,11 @@ struct UsageLimitReading: View {
     static let barWidth: CGFloat = 4
     static let barHeight: CGFloat = 14
 
-    init(limit: CodexUsageWindow?, caption: String? = nil) {
-        percent = limit?.usedPercent
-        percentText = limit?.percentText
-        self.caption = caption
-        tint = NotchStyle.codexUsage
-    }
-
-    init(limit: ClaudeUsageWindow, caption: String) {
-        percent = limit.usedPercentage
-        percentText = limit.percentText
-        self.caption = caption
-        tint = NotchStyle.claudeUsage
+    init(_ readout: UsageStripReadout) {
+        percent = readout.usedPercent
+        percentText = readout.percentText
+        caption = readout.caption
+        tint = readout.source == .claude ? NotchStyle.claudeUsage : NotchStyle.codexUsage
     }
 
     private var fraction: CGFloat { CGFloat(min(100, max(0, percent ?? 0)) / 100) }
@@ -1105,13 +1098,7 @@ struct Notch: View {
         if sessions > 1 { parts.append("\(sessions) sessions") }
         if summary.working { parts.append("working") }
         if summary.toCheck > 0 { parts.append("\(summary.toCheck) to check") }
-        if let claude = model.currentClaudeUsage {
-            if let limit = claude.fiveHour { parts.append("Claude five-hour limit \(limit.percentText) used") }
-            if let limit = claude.sevenDay { parts.append("Claude seven-day limit \(limit.percentText) used") }
-        }
-        if let limit = model.currentFiveHourLimit { parts.append("Codex five-hour limit \(limit.percentText) used") }
-        if let limit = model.currentWeeklyLimit { parts.append("Codex weekly limit \(limit.percentText) used") }
-        else { parts.append("Codex weekly limit unknown") }
+        parts += model.usageStripReadouts.map(\.spokenLabel)
         return parts.joined(separator: ", ")
     }
 
@@ -1149,19 +1136,16 @@ struct Notch: View {
                     Color.clear.frame(width: layout.gap)
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        if let claude = model.currentClaudeUsage {
-                            if let fiveHour = claude.fiveHour {
-                                UsageLimitReading(limit: fiveHour, caption: "5h").padding(.trailing, 8)
+                        let readouts = model.usageStripReadouts
+                        ForEach(readouts.indices, id: \.self) { index in
+                            let readout = readouts[index]
+                            UsageLimitReading(readout)
+                            if index + 1 < readouts.count {
+                                // 8pt between readouts; the groupGap more where Claude's bars end.
+                                Color.clear.frame(width: 8 + (readout.source != readouts[index + 1].source
+                                                              ? UsageStripReadouts.groupGap : 0))
                             }
-                            if let sevenDay = claude.sevenDay {
-                                UsageLimitReading(limit: sevenDay, caption: "7d").padding(.trailing, 8)
-                            }
-                            Color.clear.frame(width: 4)
                         }
-                        if let fiveHour = model.currentFiveHourLimit {
-                            UsageLimitReading(limit: fiveHour, caption: "5h").padding(.trailing, 8)
-                        }
-                        UsageLimitReading(limit: model.currentWeeklyLimit)
                     }
                     .frame(width: max(0, layout.trailing - 8))
                 }

@@ -212,13 +212,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     var fiveHourShown: Bool { currentFiveHourLimit != nil }
     /// Claude readings remain keyed by their selected configuration root; values are never merged.
     @Published var claudeUsage: [String: ClaudeUsageReading] = [:]
-    /// The one Claude reading the strip shows: the newest still-current reading of any root.
-    var currentClaudeUsage: ClaudeUsageReading? { ClaudeUsageReading.newest(claudeUsage.values, now: Date().timeIntervalSince1970) }
-    /// Readouts the strip's right wing lays out for: Codex's weekly reading always, then each
-    /// current Codex five-hour, Claude five-hour, and Claude seven-day window.
-    var usageReadouts: Int {
-        let claude = currentClaudeUsage
-        return 1 + (fiveHourShown ? 1 : 0) + (claude?.fiveHour != nil ? 1 : 0) + (claude?.sevenDay != nil ? 1 : 0)
+    /// The strip's usage bars, Claude's then Codex's, from one clock reading so the bars drawn and
+    /// the wing laid out for them agree.
+    var usageStripReadouts: [UsageStripReadout] {
+        let now = Date().timeIntervalSince1970
+        return UsageStripReadouts.make(codex: usage?.current(now: now),
+                                       claude: ClaudeUsageReading.newest(claudeUsage.values, now: now))
     }
     /// `--reminder-rollouts <path>` points lab runs at a copy of Codex's sessions tree.
     nonisolated static var rolloutRoot: URL {
@@ -643,10 +642,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             "displays": displays.map { ["id": Int($0.id), "frame": rect($0.frame), "top_inset": Double($0.topInset), "physical_notch": $0.hasPhysicalNotch] },
             "pointer": ["x": pointer.x, "y": pointer.y],
             "chosen_display": chosen.map { Int($0.id) } ?? NSNull(),
-            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false, readouts: usageReadouts)) } ?? NSNull(),
-            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false, readouts: usageReadouts)) } ?? NSNull(),
+            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts))) } ?? NSNull(),
+            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts))) } ?? NSNull(),
             "five_hour_shown": fiveHourShown,
-            "usage_readouts": usageReadouts,
+            "usage_readouts": usageStripReadouts.count,
             "panel_frame": rect(panel.frame),
             "codex_foreground": desktopForeground,
             "panel": ["level": panel.level.rawValue, "nonactivating": panel.styleMask.contains(.nonactivatingPanel),
@@ -1346,13 +1345,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                          current: currentDisplayID, interacting: interacting && panel.isVisible)
         else { panel.orderOut(nil); currentDisplayID = nil; return }
         currentDisplayID = display.id
-        let layout = NotchPlacement.strip(on: display, expanded: expanded, readouts: usageReadouts)
+        let layout = NotchPlacement.strip(on: display, expanded: expanded, wing: UsageStripReadouts.wingWidth(usageStripReadouts))
         if stripLayout != layout { stripLayout = layout }
         let rows = presentationMode.showsAll ? orderedAgentAttentionItems.count : (spotlightItem == nil ? 0 : 1)
         var frame = contentHeight > 0
-            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, readouts: usageReadouts)
+            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, wing: UsageStripReadouts.wingWidth(usageStripReadouts))
             : NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
-                                   extraRows: attention.pending && (presentationMode.showsAll || spotlightItem == nil), readouts: usageReadouts)
+                                   extraRows: attention.pending && (presentationMode.showsAll || spotlightItem == nil), wing: UsageStripReadouts.wingWidth(usageStripReadouts))
         // With no menu bar and no housing the strip rests above the screen edge and slides in for
         // the pointer at the top edge or an open panel, so it does not cover a full-screen app.
         if NotchTuck.isTucked(display: display, pointer: NSEvent.mouseLocation, interacting: interacting, open: expanded) {

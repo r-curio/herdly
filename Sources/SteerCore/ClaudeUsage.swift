@@ -45,10 +45,12 @@ public struct ClaudeUsageReading: Equatable, Sendable {
     }
 
     /// The one reading the strip shows when several roots report: the most recently observed
-    /// reading with a window still current. Ties break by root path so the choice is stable.
+    /// reading with a window still current. Equal observation times go to the lexicographically
+    /// smallest root path, so the choice does not depend on dictionary order.
     public static func newest(_ readings: some Collection<ClaudeUsageReading>, now: Double) -> ClaudeUsageReading? {
-        readings.compactMap { $0.current(now: now) }
-            .max { ($0.observedAt, $1.sourceScope) < ($1.observedAt, $0.sourceScope) }
+        readings.compactMap { $0.current(now: now) }.max { lhs, rhs in
+            lhs.observedAt != rhs.observedAt ? lhs.observedAt < rhs.observedAt : lhs.sourceScope > rhs.sourceScope
+        }
     }
 }
 

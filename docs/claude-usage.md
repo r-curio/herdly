@@ -31,7 +31,7 @@ its reset is still in the future on Steer's clock. A missing, malformed, expired
 is unavailable. A newer malformed record does not resurrect an older reading. The `spend_limit`
 object is ignored.
 
-The collapsed strip draws the current five-hour and seven-day windows as orange bars (captioned "5h" and "7d") ahead of Codex's blue bars. With several roots it shows only the newest still-current reading (`ClaudeUsageReading.newest`, ties broken by root path); a root whose windows have all reset never hides an older current one. The expanded notch still lists every root.
+The collapsed strip draws the current five-hour and seven-day windows as orange bars (captioned "5h" and "7d") ahead of Codex's blue bars. With several roots it shows only the newest still-current reading (`ClaudeUsageReading.newest`; equal observation times go to the lexicographically smallest root path); a root whose windows have all reset never hides an older current one. The expanded notch still lists every root.
 
 The expanded notch and the Claude Code setup page label readings as **last reported**. Readings are
 not proof that Claude made a fresh server request. A root with no accepted record remains unavailable;
