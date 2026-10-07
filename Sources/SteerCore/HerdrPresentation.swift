@@ -228,6 +228,14 @@ public enum HerdrPresentation {
         route == .herdrRelay ? ("the herdr pane", "pane") : ("the Ghostty tab", "tab")
     }
 
+    /// The card's sentence when no relay can answer a CLI question but Open still works. Ghostty
+    /// controls are already on here, so the Ghostty fallback sentence would mislead. Only a session
+    /// in herdr has a pane to open; daemon drafts in progress just point to Codex.
+    public static func relayUnavailableLine(for reason: HerdrQuestionRelayUnavailable) -> String {
+        if case .binding = reason { return "Steer can't answer this from here. Answer in Codex, or open its pane." }
+        return "Steer can't answer this from here. Answer in Codex."
+    }
+
     public static func openTitle(_ agent: HerdrAgentKind) -> String { "Open in \(agentName(agent))" }
 
     public static func agentName(_ agent: HerdrAgentKind) -> String {
