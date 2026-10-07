@@ -215,10 +215,26 @@ extension Companion {
         return progress
     }
 
-    /// Which path this question's card uses right now: the daemon when it holds the request,
-    /// otherwise the Ghostty relay (CLI) or the desktop pick, exactly as before the daemon.
+    /// Which path this question's card uses right now, in ADR 0010's precedence: a call keeps the
+    /// route its first answer left by; otherwise the daemon when it holds the request, then herdr
+    /// keys for a session in herdr, Ghostty keys for a CLI session not in herdr, or the desktop pick.
     func route(for question: AttentionQuestion) -> QuestionAnswerRoute {
-        QuestionAnswerRouting.route(for: question, book: daemonBook, daemonConnected: daemonConnected)
+        QuestionRelayRouting.route(for: question, book: daemonBook, daemonConnected: daemonConnected,
+                                   ledger: relayLedger, progress: answerProgress[question.id],
+                                   herdr: question.source == .cli ? herdrBinding(for: herdrKey(question)) : .notInHerdr)
+    }
+
+    private func herdrKey(_ question: AttentionQuestion) -> HerdrSessionKey {
+        HerdrSessionKey(agent: .codex, sessionID: question.session.uuidString)
+    }
+
+    /// Why the herdr relay is unavailable for this question, for presentation and diagnostics: the
+    /// route's own reason (no usable pane, or daemon drafts), else the last pre-send failure for the
+    /// call. Nil while the relay is usable or the question is not on a herdr path. The card keeps
+    /// the generic wording in `HerdrQuestionRelayUnavailable.message`.
+    func herdrRelayUnavailable(for question: AttentionQuestion) -> HerdrQuestionRelayUnavailable? {
+        if case let .relayUnavailable(reason) = route(for: question) { return reason }
+        return relayLedger.failure(for: question.id)
     }
 
     /// Whether the card may show the options as controls: the daemon path, a CLI question with
@@ -229,7 +245,8 @@ extension Companion {
         case .daemon: return true
         case .daemonAnswered: return false
         case .desktopPick: return true
-        case .ghosttyRelay: return ghosttyEnabled || previewMode != nil
+        case .ghosttyRelay, .herdrRelay: return ghosttyEnabled || previewMode != nil
+        case .relayUnavailable: return false
         }
     }
 
@@ -243,6 +260,12 @@ extension Companion {
             return
         case .daemonAnswered:
             navigationMessage = AppServerAnswerPolicy.message(for: .alreadyAnswered); refresh()
+            return
+        case .herdrRelay:
+            answerThroughHerdr(question, question: index, option: option)
+            return
+        case let .relayUnavailable(reason):
+            navigationMessage = reason.message; refresh()
             return
         case .desktopPick, .ghosttyRelay:
             break
@@ -262,6 +285,10 @@ extension Companion {
             navigationMessage = QuestionAnswerPolicy.message(for: rejection); refresh(); return
         }
         guard let current, previewMode == nil else { return }
+        // Spend the key before sending; it is released only when Ghostty certainly sent nothing.
+        guard relayLedger.spend(current.id, question: index, route: .ghostty) else {
+            navigationMessage = QuestionAnswerPolicy.message(for: .notReady); refresh(); return
+        }
         answering = true
         answerProgress[question.id] = progress.startingSend(question: index, option: option)
         let key = QuestionAnswerPolicy.key(forOption: option)
@@ -281,6 +308,7 @@ extension Companion {
             }.value
             answering = false
             navigationMessage = result.message
+            if !result.sent { relayLedger.release(current.id, question: index) }
             guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
                 // Answered or ended while the key was in flight: the card is gone and so is the progress.
                 answerProgress[question.id] = nil
@@ -291,6 +319,76 @@ extension Companion {
                 answerProgress[question.id] = result.sent
                     ? progress.recordingSent(question: index, option: option, of: current, at: Date().timeIntervalSince1970)
                     : progress.recordingFailure(result.message)
+            }
+            refresh()
+        }
+    }
+
+    /// One click on a herdr-bound session (ADR 0010): one `agent.send_keys` carrying only the
+    /// option's digit, to the bound pane, never Enter. The key is spent before anything is sent.
+    /// Immediately before it, a fresh scan re-runs ADR 0008's target checks and herdr must report
+    /// the pane's agent `blocked`, then the rollout is re-read. A key that may have been written
+    /// counts as sent and is never resent; nothing is sent on a timer, retry, restart or error.
+    private func answerThroughHerdr(_ question: AttentionQuestion, question index: Int, option: Int) {
+        guard !answering else { return }
+        let current = queue.items.compactMap(\.question).first { $0.id == question.id }
+        let session = herdrKey(question)
+        // Later questions in a keyed call go to the pane the first key went to; the send rechecks it.
+        let pane: String?
+        if case let .herdr(paneID)? = relayLedger.keyRoute(for: question.id) { pane = paneID }
+        else { pane = herdrBinding(for: session).target?.paneID }
+        let start: HerdrQuestionRelay.Start
+        switch HerdrQuestionRelay.start(current: current, progress: progress(for: question), ledger: relayLedger,
+                                        ghosttyEnabled: ghosttyEnabled, pane: pane, question: index, option: option) {
+        case let .failure(.policy(rejection)):
+            navigationMessage = QuestionAnswerPolicy.message(for: rejection); refresh(); return
+        case .failure(.noPane):
+            navigationMessage = HerdrQuestionRelayUnavailable.leftHerdr.message; refresh(); return
+        case .failure(.alreadySent):
+            navigationMessage = QuestionAnswerPolicy.message(for: .notReady); refresh(); return
+        case let .success(value):
+            start = value
+        }
+        guard let current, previewMode == nil else { return }
+        answering = true
+        relayLedger = start.ledger
+        answerProgress[question.id] = start.progress
+        navigationMessage = "Sending \(start.key)…"
+        refresh()
+        let rolloutRoot = Companion.rolloutRoot
+        let client = HerdrClient()
+        Task { @MainActor in
+            let fresh = await revalidateHerdrBinding(for: session)
+            let outcome = await Task.detached { () -> HerdrQuestionRelay.Outcome in
+                // The rollout last, as of this instant: a manual answer Codex already recorded, or an
+                // ended turn, sends nothing.
+                let evidence = ReminderReader.currentEvidence(for: current.session, in: rolloutRoot)
+                switch HerdrQuestionRelay.preSendCheck(question: current, evidence: evidence, binding: fresh.binding,
+                                                       outcome: fresh.outcome, spentPane: start.pane) {
+                case let .failure(veto): return .vetoed(veto)
+                case let .success(target): return .delivered(client.sendKeysOnce(target: target.paneID, keys: [start.key]))
+                }
+            }.value
+            answering = false
+            switch outcome {
+            case let .delivered(delivery) where delivery.countsAsSent:
+                navigationMessage = "Sent \(start.key) as a key."
+            case let .vetoed(reason):
+                navigationMessage = reason.message
+            case .delivered:
+                navigationMessage = HerdrQuestionRelayUnavailable.herdrRefused(.notRunning).message
+            }
+            guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
+                // Answered or ended while the key was in flight: the card is gone and so is the progress.
+                answerProgress[question.id] = nil
+                refresh()
+                return
+            }
+            if let progress = answerProgress[question.id] {
+                let settled = HerdrQuestionRelay.settle(outcome, progress: progress, ledger: relayLedger, question: current,
+                                                        index: index, option: option, now: Date().timeIntervalSince1970)
+                answerProgress[question.id] = settled.progress
+                relayLedger = settled.ledger
             }
             refresh()
         }
@@ -353,8 +451,11 @@ extension Companion {
 
     /// Drops progress for questions no longer waiting and turns an unconfirmed send into its final state.
     func pruneAnswerProgress() {
-        guard !answerProgress.isEmpty else { return }
         let waiting = Set(queue.items.compactMap { $0.question?.id })
+        var ledger = relayLedger
+        ledger.prune(keeping: waiting)
+        if ledger != relayLedger { relayLedger = ledger }
+        guard !answerProgress.isEmpty else { return }
         let now = Date().timeIntervalSince1970
         let next = answerProgress.filter { waiting.contains($0.key) }.mapValues { $0.expiring(at: now) }
         if next != answerProgress { answerProgress = next }
