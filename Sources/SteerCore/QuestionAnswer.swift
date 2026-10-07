@@ -69,6 +69,7 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
             return .continueInCodex("This question is beyond what Steer can show.")
         }
         let prompt = question.prompts[index]
+        guard !prompt.isSecret else { return .continueInCodex("Codex asked for a secret; answer it in Codex.") }
         guard !prompt.options.isEmpty else { return .continueInCodex("This question takes a typed answer.") }
         guard prompt.optionsComplete, prompt.options.count <= QuestionAnswerPolicy.maximumDigit else {
             return .continueInCodex("Codex lists more options than Steer can show.")

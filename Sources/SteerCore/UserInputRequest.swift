@@ -42,9 +42,12 @@ public struct QuestionPrompt: Codable, Equatable, Sendable {
     /// False when Codex listed more options than Steer keeps or one label was unreadable, so the
     /// digits the notch could send would not cover Codex's list. Such a question stays in Codex.
     public let optionsComplete: Bool
+    /// Codex's `isSecret`: the answer is hidden in Codex's panel. The notch is not a private
+    /// surface, so it offers no controls for such a question (ADR 0010).
+    public let isSecret: Bool
 
     public init(id: String? = nil, header: String?, question: String?, options: [String], truncated: Bool = false,
-                isOther: Bool = false, optionsComplete: Bool = true, multiSelect: Bool = false) {
+                isOther: Bool = false, optionsComplete: Bool = true, multiSelect: Bool = false, isSecret: Bool = false) {
         self.id = id
         self.header = header
         self.question = question
@@ -53,6 +56,25 @@ public struct QuestionPrompt: Codable, Equatable, Sendable {
         self.truncated = truncated
         self.isOther = isOther
         self.optionsComplete = optionsComplete
+        self.isSecret = isSecret
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, header, question, options, multiSelect, truncated, isOther, optionsComplete, isSecret
+    }
+
+    /// Records written before `isSecret` existed decode as not secret.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        header = try container.decodeIfPresent(String.self, forKey: .header)
+        question = try container.decodeIfPresent(String.self, forKey: .question)
+        options = try container.decode([String].self, forKey: .options)
+        multiSelect = try container.decode(Bool.self, forKey: .multiSelect)
+        truncated = try container.decode(Bool.self, forKey: .truncated)
+        isOther = try container.decode(Bool.self, forKey: .isOther)
+        optionsComplete = try container.decode(Bool.self, forKey: .optionsComplete)
+        isSecret = try container.decodeIfPresent(Bool.self, forKey: .isSecret) ?? false
     }
 
     /// Parses the tool's `arguments` JSON (`{"questions":[{header, question, isOther, options:[{label}]}]}`).
@@ -99,7 +121,8 @@ public struct QuestionPrompt: Codable, Equatable, Sendable {
             }
             prompts.append(QuestionPrompt(id: id, header: header, question: question, options: options, truncated: truncated,
                                           isOther: isOther, optionsComplete: complete,
-                                          multiSelect: entry["multiSelect"] as? Bool ?? false))
+                                          multiSelect: entry["multiSelect"] as? Bool ?? false,
+                                          isSecret: entry["isSecret"] as? Bool ?? false))
         }
         return (prompts, questions.count)
     }
