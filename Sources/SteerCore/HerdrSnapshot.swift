@@ -339,7 +339,9 @@ public enum HerdrWire {
 
 /// One agent's line from `herdr integration status`, which prints
 /// `<target>: <state> (<path>)` per installed integration (herdr 0.9.3 `src/cli/integration.rs`).
-public enum HerdrIntegrationState: Equatable, Sendable {
+/// The same value feeds ADR 0008's binding rules (`HerdrObservation.integrations`) unchanged, so
+/// there is one integration-state type. Only `current` permits targeting.
+public enum HerdrIntegrationState: Equatable, Hashable, Sendable {
     case current(version: Int)
     /// Not listed, or listed as `not installed`.
     case notInstalled
@@ -501,12 +503,18 @@ public struct HerdrScan: Equatable, Sendable {
     public let snapshot: HerdrSnapshot
     public let integration: HerdrIntegrationReport
     public let client: Result<HerdrAttachedClient, HerdrUnavailableReason>
+    /// When the one herdr server process listening on the client socket started, in seconds since
+    /// 1970 (the clock of hook records' `captured_at`). It is the server identity ADR 0008's
+    /// restart check compares against. Nil when the listing showed zero or several server
+    /// processes or the kernel could not report a start time; a binding is then unavailable.
+    public let serverStartedAt: Double?
 
     public init(snapshot: HerdrSnapshot, integration: HerdrIntegrationReport,
-                client: Result<HerdrAttachedClient, HerdrUnavailableReason>) {
+                client: Result<HerdrAttachedClient, HerdrUnavailableReason>, serverStartedAt: Double? = nil) {
         self.snapshot = snapshot
         self.integration = integration
         self.client = client
+        self.serverStartedAt = serverStartedAt
     }
 
     /// The first scan-level reason a session of `agent` cannot be targeted, or nil when the

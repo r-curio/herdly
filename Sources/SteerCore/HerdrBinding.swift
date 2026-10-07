@@ -51,14 +51,6 @@ public struct HerdrClientObservation: Equatable, Hashable, Sendable {
     }
 }
 
-/// `herdr integration status` for one agent. Only `current` permits targeting.
-public enum HerdrIntegrationStatus: Equatable, Hashable, Sendable {
-    case current(version: Int)
-    case outdated
-    case notInstalled
-    case unparseable
-}
-
 /// One pane in a fresh herdr snapshot. `panesInTab` counts every pane in the pane's tab,
 /// including panes hidden by a zoomed split.
 public struct HerdrPaneObservation: Equatable, Hashable, Sendable {
@@ -85,7 +77,7 @@ public struct HerdrObservation: Equatable, Sendable {
     public let server: HerdrServerInstance
     public let session: HerdrSessionName
     public let clients: [HerdrClientObservation]
-    public let integrations: [HerdrAgentKind: HerdrIntegrationStatus]
+    public let integrations: [HerdrAgentKind: HerdrIntegrationState]
     public let panes: [HerdrPaneObservation]
 
     public init(
@@ -93,7 +85,7 @@ public struct HerdrObservation: Equatable, Sendable {
         server: HerdrServerInstance,
         session: HerdrSessionName,
         clients: [HerdrClientObservation],
-        integrations: [HerdrAgentKind: HerdrIntegrationStatus],
+        integrations: [HerdrAgentKind: HerdrIntegrationState],
         panes: [HerdrPaneObservation]
     ) {
         self.protocolVersion = protocolVersion
@@ -161,7 +153,7 @@ public enum HerdrBindingUnavailable: Equatable, Hashable, Sendable {
     /// The pane's tab holds more than one pane (split or zoomed split).
     case split
     /// herdr's integration for the session's agent is not `current`.
-    case integrationNotCurrent(HerdrAgentKind, HerdrIntegrationStatus?)
+    case integrationNotCurrent(HerdrAgentKind, HerdrIntegrationState?)
     /// No herdr client is attached.
     case noClient
     /// More than one herdr client is attached.
