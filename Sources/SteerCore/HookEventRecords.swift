@@ -229,10 +229,14 @@ public enum HerdrPaneID {
         validated(environment[environmentKey])
     }
 
-    /// Adds the environment's validated pane ID to a hook event record; leaves the record unchanged
-    /// when the value is absent or invalid.
+    /// Adds the environment's validated pane ID to a hook event record, together with the validated
+    /// `HERDR_SOCKET_PATH` when present. Pane IDs are unique only within one herdr server, so a
+    /// socket path is never recorded without a valid pane ID. Leaves the record unchanged when the
+    /// pane ID is absent or invalid.
     public static func record(from environment: [String: String], into record: inout [String: Any]) {
-        if let paneID = value(in: environment) { record[recordKey] = paneID }
+        guard let paneID = value(in: environment) else { return }
+        record[recordKey] = paneID
+        if let socketPath = HerdrSocketPath.value(in: environment) { record[HerdrSocketPath.recordKey] = socketPath }
     }
 
     /// The pane ID recorded in a decoded hook event record: `nil` for records without the field
@@ -250,5 +254,37 @@ public enum HerdrPaneID {
         default:
             return false
         }
+    }
+}
+
+/// The herdr server socket a hook event's pane belongs to, from the `HERDR_SOCKET_PATH` herdr
+/// injects alongside `HERDR_PANE_ID` (ADR 0008, ADR 0009). Recorded under `recordKey` only with a
+/// valid pane ID; whether it is herdr's default socket is decided by readers, not here.
+///
+/// A missing, empty, relative, oversized or control-character value is absent, never normalized
+/// or guessed. Records written before this field decode as absent.
+public enum HerdrSocketPath {
+    public static let environmentKey = "HERDR_SOCKET_PATH"
+    public static let recordKey = "herdr_socket_path"
+    public static let maximumLength = 1024
+
+    /// `value` when it is an absolute path of at most `maximumLength` UTF-8 bytes with no NUL or
+    /// other control characters.
+    public static func validated(_ value: String?) -> String? {
+        guard let value, value.hasPrefix("/"), value.utf8.count <= maximumLength,
+              !value.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) else { return nil }
+        return value
+    }
+
+    /// The validated socket path from a hook helper's environment.
+    public static func value(in environment: [String: String]) -> String? {
+        validated(environment[environmentKey])
+    }
+
+    /// The socket path recorded in a decoded hook event record: `nil` for records without the
+    /// field, for an invalid stored value, and for a record without a valid pane ID.
+    public static func recorded(in record: [String: Any]) -> String? {
+        guard HerdrPaneID.recorded(in: record) != nil else { return nil }
+        return validated(record[recordKey] as? String)
     }
 }

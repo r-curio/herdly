@@ -320,17 +320,21 @@ func selfTest() -> Int32 {
           (stored["tool_input"] as? [String: String]) == ["command": "swift test"], stored["tool_response"] == nil else { return 1 }
     let paneDirectory = directory.appendingPathComponent("herdr", isDirectory: true)
     let paneEvent: [String: Any] = ["hook_event_name": "SessionStart", "session_id": session.uuidString]
-    guard writeEvent(paneEvent, to: paneDirectory, installationID: "self-test", environment: ["HERDR_PANE_ID": "w1:p1"]),
+    let paneEnvironment = ["HERDR_PANE_ID": "w1:p1", "HERDR_SOCKET_PATH": "/tmp/herdr.sock"]
+    guard writeEvent(paneEvent, to: paneDirectory, installationID: "self-test", environment: paneEnvironment),
           writeClaudeEvent(paneEvent, to: paneDirectory, installationID: UUID().uuidString,
-                           environment: ["HERDR_PANE_ID": "w1:p1"]),
-          writeEvent(paneEvent, to: paneDirectory, installationID: "self-test", environment: ["HERDR_PANE_ID": "w1:p1\n"]),
+                           environment: paneEnvironment),
+          writeEvent(paneEvent, to: paneDirectory, installationID: "self-test",
+                     environment: ["HERDR_PANE_ID": "w1:p1\n", "HERDR_SOCKET_PATH": "/tmp/herdr.sock"]),
           writeEvent(paneEvent, to: paneDirectory, installationID: "self-test", environment: [:]),
           let paneRecords = (try? FileManager.default.contentsOfDirectory(at: paneDirectory, includingPropertiesForKeys: nil))?
             .compactMap({ try? Data(contentsOf: $0) })
             .compactMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
           paneRecords.count == 4,
           paneRecords.filter({ HerdrPaneID.recorded(in: $0) == "w1:p1" }).count == 2,
-          paneRecords.filter({ $0[HerdrPaneID.recordKey] != nil }).count == 2 else { return 1 }
+          paneRecords.filter({ $0[HerdrPaneID.recordKey] != nil }).count == 2,
+          paneRecords.filter({ HerdrSocketPath.recorded(in: $0) == "/tmp/herdr.sock" }).count == 2,
+          paneRecords.filter({ $0[HerdrSocketPath.recordKey] != nil }).count == 2 else { return 1 }
     try? FileManager.default.removeItem(at: paneDirectory)
     let request = ApprovalRequest(requestID: UUID(), sessionID: session, turnID: turn,
                                   details: ApprovalDetails(command: "touch marker"), receivedAt: 100)
