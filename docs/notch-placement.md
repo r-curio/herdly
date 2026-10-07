@@ -10,18 +10,29 @@ Steer creates exactly one `NotchPanel` and one `AttentionQueue`. Every display c
 
 ## Active-display rule
 
-`NotchDisplaySelection.choose(displays:pointer:current:interacting:)` decides where the panel goes on every refresh (five times a second and on app activation or screen-parameter changes):
+`NotchDisplaySelection.choose(displays:pointer:current:interacting:preference:)` decides where the panel goes on every refresh (five times a second and on app activation or screen-parameter changes):
 
 1. **Interacting → freeze.** While the pointer is over the panel or the panel has keyboard focus, keep the display the panel is already on. Controls never move to another display mid-click or mid-Tab; expanding or collapsing still resizes the panel in place. The app confirms the hover flag against the real pointer location, so a panel re-placed out from under the pointer does not stay frozen.
-2. **Otherwise the display under the pointer.** This is the display the user is actively using.
-3. **Pointer on no display → keep the current display.**
-4. **No current display → the first attached display.**
+2. **Pinned → the pinned display.** With a pin (see [Pinned display](#pinned-display-2026-10-08)), the pinned display wherever the pointer is; while it is not attached, the built-in display. With neither attached, the steps below apply.
+3. **Otherwise the display under the pointer.** This is the display the user is actively using.
+4. **Pointer on no display → keep the current display.**
+5. **No current display → the first attached display.**
 
 A display that has disconnected is never chosen, even while interacting: the rule falls through to the pointer, then the first display. `NSApplication.didChangeScreenParametersNotification` triggers a refresh, so connect, disconnect, and rearrangement re-place the panel within one refresh.
 
 ## Geometry
 
 `NotchPlacement.frame(on:expanded:rows:extraRows:)` is pure. On a display with a physical camera housing (`safeAreaInsets.top` > 0) the panel's top edge sits 6 pt below the housing; on a display without one it sits 12 pt below the top edge as a compact top-center panel. Width is 210 pt collapsed and 380 pt expanded; expanded height grows 65 pt per row from 150 pt and is capped at 380 pt, with the row list scrolling beyond that.
+
+## Pinned display (2026-10-08)
+
+The user can keep the notch on one display instead of following the pointer. The default is Follow pointer, so nothing changes until a display is chosen.
+
+- **Choosing.** The General page of the controls window has a Notch display picker, and the S menu bar item has a Show notch on submenu. Both list Follow pointer, then each attached display by its macOS name, left to right (`NotchDisplayChoices`). Two displays with the same name are numbered in that order. Choosing an option re-places the panel at once; the queue, presentations, and approval deadlines are untouched.
+- **Identity.** A pin is the display's UUID (`CGDisplayCreateUUIDFromDisplayID`), which survives reboots and reconnects where the display number does not, plus the label shown when it was chosen. Both are stored in UserDefaults as `notchDisplayPinID` and `notchDisplayPinName`; a missing or empty identifier means Follow pointer. A display the system reports no UUID for is not offered.
+- **Pinned display not connected.** The notch shows on the built-in display, or follows the pointer when there is no built-in display (a closed lid). The pin is kept: the pickers list it as "*name* (not connected)", and the notch returns to it when it reconnects. The setting's detail line says which of these applies, naming the display as the picker does.
+- **Unchanged rules.** Interaction still freezes placement first, so a pinned display that reconnects mid-click does not pull the panel away until the interaction ends. A pinned external monitor showing no menu bar still tucks the strip, and only the pointer at that display's top edge reveals it; a new item's spotlight still slides it in.
+- **Probe.** `--placement-probe` records each display's `persistent_id`, `name`, and `built_in`, and the `display_preference`. Launch arguments `-notchDisplayPinID <uuid> -notchDisplayPinName <name>` set a pin for that launch only through the UserDefaults argument domain, without saving anything.
 
 ## Interaction and timers
 
@@ -38,7 +49,7 @@ A display that has disconnected is never chosen, even while interacting: the rul
 
 ## Automated checks
 
-`swift test` (97 tests). New in `Tests/SteerCoreTests/NotchPlacementTests.swift`: pointer display chosen when idle; placement frozen on the current display while interacting; a disconnected current display falling back even while interacting; pointer off every display keeping the current display, then the first, then nil with no displays; collapsed frame below the physical housing and centered; the compact top-center panel on a non-notch display; the expanded height cap; pointer or keyboard focus counting as interaction; interaction holding a completion open without extending the approval deadline; and Escape collapsing without dismissing.
+`swift test`. New in `Tests/SteerCoreTests/NotchPlacementTests.swift`: pointer display chosen when idle; placement frozen on the current display while interacting; a disconnected current display falling back even while interacting; pointer off every display keeping the current display, then the first, then nil with no displays; collapsed frame below the physical housing and centered; the compact top-center panel on a non-notch display; the expanded height cap; pointer or keyboard focus counting as interaction; interaction holding a completion open without extending the approval deadline; and Escape collapsing without dismissing. Pinned display: the pinned display chosen wherever the pointer is; a missing pin falling back to the built-in display and returning on reconnect; a missing pin with no built-in display following the pointer; the interaction freeze holding over a reconnecting pin; stored values without an identifier meaning Follow pointer; picker options numbering same-named displays and listing a disconnected pin; the checked entry and detail line naming the pinned display by its current label after a rename or a swap of same-named displays; and the detail line for each case.
 
 ## Hidden menu bar (2026-09-14)
 
@@ -76,10 +87,11 @@ Not performed by the agent: it needs a second display, Mission Control, and the 
 5. **Keyboard.** With another app active, wait for a completion: the other app keeps keyboard focus. Click the panel, press Tab repeatedly: the focus ring moves through the controls and is visible on each. Press Escape: the panel collapses and typing goes to the previous app.
 6. **VoiceOver.** Turn VoiceOver on and navigate the expanded panel: each row announces its kind and subject, each button its action and subject, and a long command reads in full.
 7. **Spaces and full screen.** Open a full-screen app and switch Spaces: the panel shows over the full-screen app and on each Space, once.
+8. **Pinned display.** Choose the external monitor under Show notch on. Move the pointer to the built-in display: the panel stays on the external one. Unplug it: the panel appears once on the built-in display and Notch display reads "*name* (not connected)". Reconnect it: the panel returns to the external monitor. Choose Follow pointer: the panel follows the pointer again.
 
 ## Boundaries
 
-- "Actively using" means the display under the pointer. Keyboard-only users on a multi-display setup get the pointer's display; a rule based on the key window's display is deferred until it is needed.
+- "Actively using" means the display under the pointer, or the pinned display when the user has chosen one. Keyboard-only users on a multi-display setup get the pointer's display; a rule based on the key window's display is deferred until it is needed.
 - Escape is the only keyboard collapse; there is no global hotkey to open or focus the panel, so keyboard-only users must click it once.
 - `--assume-codex-away` and `--placement-probe` are lab flags compiled into the app like `--restart-report`; they change nothing unless passed.
 - Focus rings depend on macOS Full Keyboard Access for Tab to reach buttons, as in any macOS app.

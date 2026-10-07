@@ -3,8 +3,10 @@ import CoreGraphics
 import Testing
 @testable import SteerCore
 
-private let builtIn = NotchDisplay(id: 1, frame: CGRect(x: 0, y: 0, width: 1512, height: 982), topInset: 32, housingWidth: 180, menuBarHeight: 32, isBuiltIn: true)
-private let external = NotchDisplay(id: 2, frame: CGRect(x: 1512, y: 100, width: 2560, height: 1440), topInset: 0, housingWidth: 0, menuBarHeight: 25)
+private let builtIn = NotchDisplay(id: 1, frame: CGRect(x: 0, y: 0, width: 1512, height: 982), topInset: 32, housingWidth: 180, menuBarHeight: 32, isBuiltIn: true,
+                                    persistentID: "BUILT-IN-UUID", name: "Built-in Retina Display")
+private let external = NotchDisplay(id: 2, frame: CGRect(x: 1512, y: 100, width: 2560, height: 1440), topInset: 0, housingWidth: 0, menuBarHeight: 25,
+                                    persistentID: "EXTERNAL-UUID", name: "DELL U2720Q")
 
 @Test func pointerDisplayIsChosenWhenNotInteracting() {
     let choice = NotchDisplaySelection.choose(displays: [builtIn, external], pointer: CGPoint(x: 2000, y: 500),
@@ -29,6 +31,102 @@ private let external = NotchDisplay(id: 2, frame: CGRect(x: 1512, y: 100, width:
     #expect(NotchDisplaySelection.choose(displays: [builtIn, external], pointer: offscreen, current: external.id, interacting: false) == external)
     #expect(NotchDisplaySelection.choose(displays: [builtIn, external], pointer: offscreen, current: nil, interacting: false) == builtIn)
     #expect(NotchDisplaySelection.choose(displays: [], pointer: offscreen, current: builtIn.id, interacting: true) == nil)
+}
+
+private let pinnedExternal = NotchDisplayPreference.pinned(NotchDisplayPin(id: "EXTERNAL-UUID", name: "DELL U2720Q"))
+private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, width: 1920, height: 1080), topInset: 0, menuBarHeight: 25,
+                                          persistentID: "SECOND-UUID", name: "DELL U2720Q")
+
+@Test func pinnedDisplayIsChosenWhereverThePointerIs() {
+    let onBuiltIn = CGPoint(x: 700, y: 500)
+    #expect(NotchDisplaySelection.choose(displays: [builtIn, external], pointer: onBuiltIn, current: builtIn.id,
+                                         interacting: false, preference: pinnedExternal) == external)
+    #expect(NotchDisplaySelection.choose(displays: [builtIn, external], pointer: CGPoint(x: -50, y: -50), current: nil,
+                                         interacting: false, preference: pinnedExternal) == external)
+}
+
+@Test func missingPinnedDisplayFallsBackToTheBuiltInDisplayAndReturnsWhenItReconnects() {
+    // The pointer is on another external display; the fallback is still the built-in display.
+    let onSecond = CGPoint(x: -900, y: 500)
+    #expect(NotchDisplaySelection.choose(displays: [builtIn, secondExternal], pointer: onSecond, current: external.id,
+                                         interacting: false, preference: pinnedExternal) == builtIn)
+    // Reconnected, the pinned display is chosen again without the user re-pinning it.
+    #expect(NotchDisplaySelection.choose(displays: [builtIn, secondExternal, external], pointer: onSecond, current: builtIn.id,
+                                         interacting: false, preference: pinnedExternal) == external)
+}
+
+@Test func missingPinnedDisplayWithNoBuiltInDisplayFollowsThePointer() {
+    let onSecond = CGPoint(x: -900, y: 500)
+    #expect(NotchDisplaySelection.choose(displays: [secondExternal], pointer: onSecond, current: nil,
+                                         interacting: false, preference: pinnedExternal) == secondExternal)
+    // A pin to the built-in display itself, with the lid closed, also falls through to the pointer rule.
+    let pinnedBuiltIn = NotchDisplayPreference.pinned(NotchDisplayPin(id: "BUILT-IN-UUID", name: "Built-in Retina Display"))
+    #expect(NotchDisplaySelection.choose(displays: [external, secondExternal], pointer: onSecond, current: nil,
+                                         interacting: false, preference: pinnedBuiltIn) == secondExternal)
+}
+
+@Test func interactionKeepsTheCurrentDisplayWhenThePinnedDisplayReconnects() {
+    #expect(NotchDisplaySelection.choose(displays: [builtIn, external], pointer: CGPoint(x: 700, y: 500), current: builtIn.id,
+                                         interacting: true, preference: pinnedExternal) == builtIn)
+    // Once interaction ends the pin applies again.
+    #expect(NotchDisplaySelection.choose(displays: [builtIn, external], pointer: CGPoint(x: 700, y: 500), current: builtIn.id,
+                                         interacting: false, preference: pinnedExternal) == external)
+}
+
+@Test func storedPreferenceWithoutAnIdentifierFollowsThePointer() {
+    #expect(NotchDisplayPreference.restored(id: nil, name: "DELL U2720Q") == .followPointer)
+    #expect(NotchDisplayPreference.restored(id: "", name: "DELL U2720Q") == .followPointer)
+    #expect(NotchDisplayPreference.restored(id: "EXTERNAL-UUID", name: "DELL U2720Q") == pinnedExternal)
+    #expect(NotchDisplayPreference.restored(id: "EXTERNAL-UUID", name: nil)
+            == .pinned(NotchDisplayPin(id: "EXTERNAL-UUID", name: "Pinned display")))
+}
+
+@Test func displayChoicesNumberTwinsAndKeepADisconnectedPinVisible() {
+    let choices = NotchDisplayChoices(displays: [builtIn, external, secondExternal], preference: .followPointer)
+    // Follow pointer first, then left to right; two monitors of one model are numbered in that order.
+    #expect(choices.options.map(\.label) == ["Follow pointer", "DELL U2720Q (1)", "Built-in Retina Display", "DELL U2720Q (2)"])
+    #expect(choices.options[1].preference.pin?.id == "SECOND-UUID")
+    #expect(choices.selected == choices.options[0])
+
+    // A display the system gives no UUID cannot be pinned, so it is not offered.
+    let anonymous = NotchDisplay(id: 9, frame: CGRect(x: 5000, y: 0, width: 800, height: 600), topInset: 0, name: "Projector")
+    let disconnected = NotchDisplayChoices(displays: [builtIn, anonymous], preference: pinnedExternal)
+    #expect(disconnected.options.map(\.label) == ["Follow pointer", "Built-in Retina Display", "DELL U2720Q (not connected)"])
+    #expect(disconnected.selected == disconnected.options.last)
+    #expect(disconnected.selected.preference == pinnedExternal)
+
+    // A display that reports no name is labeled by kind rather than left blank.
+    let unnamed = NotchDisplay(id: 1, frame: builtIn.frame, topInset: 32, isBuiltIn: true, persistentID: "BUILT-IN-UUID")
+    #expect(NotchDisplayChoices(displays: [unnamed], preference: .followPointer).options.map(\.label)
+            == ["Follow pointer", "Built-in display"])
+}
+
+@Test func displayChoicesCheckAndDescribeThePinnedDisplayByItsCurrentLabel() {
+    // A stored name that has gone out of date still checks the right display, and the detail line
+    // names it the way the picker does.
+    let renamed = NotchDisplayPreference.pinned(NotchDisplayPin(id: "EXTERNAL-UUID", name: "Old name"))
+    let connected = NotchDisplayChoices(displays: [builtIn, external], preference: renamed)
+    #expect(connected.options.count == 3)
+    #expect(connected.selected.label == "DELL U2720Q")
+    #expect(connected.detail == "Stays on DELL U2720Q.")
+    // Twins that swap places keep the pin on the same monitor, under its new number.
+    let pinnedSecond = NotchDisplayPreference.pinned(NotchDisplayPin(id: "SECOND-UUID", name: "DELL U2720Q (1)"))
+    let movedRight = NotchDisplay(id: 3, frame: CGRect(x: 5000, y: 0, width: 1920, height: 1080), topInset: 0, menuBarHeight: 25,
+                                  persistentID: "SECOND-UUID", name: "DELL U2720Q")
+    let swapped = NotchDisplayChoices(displays: [builtIn, external, movedRight], preference: pinnedSecond)
+    #expect(swapped.selected.preference.pin?.id == "SECOND-UUID")
+    #expect(swapped.selected.label == "DELL U2720Q (2)")
+    #expect(swapped.detail == "Stays on DELL U2720Q (2).")
+}
+
+@Test func displayDetailDescribesWhereTheNotchIsShown() {
+    #expect(NotchDisplayChoices(displays: [builtIn, external], preference: .followPointer).detail
+            == "Follows the pointer to the display you're using.")
+    #expect(NotchDisplayChoices(displays: [builtIn, external], preference: pinnedExternal).detail == "Stays on DELL U2720Q.")
+    #expect(NotchDisplayChoices(displays: [builtIn], preference: pinnedExternal).detail
+            == "DELL U2720Q isn't connected. Showing on the built-in display.")
+    #expect(NotchDisplayChoices(displays: [secondExternal], preference: pinnedExternal).detail
+            == "DELL U2720Q isn't connected. Following the pointer.")
 }
 
 @Test func collapsedPanelIsTheHousingRowWithAWingOnEachSide() {

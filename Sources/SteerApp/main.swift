@@ -198,6 +198,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// cleared. Private format; on by default, off with one switch when a desktop update breaks it.
     @Published var desktopReadStateEnabled = UserDefaults.standard.object(forKey: "desktopReadStateEnabled") as? Bool ?? true
     @Published var desktopReadStateMessage = "Desktop read state: not checked yet."
+    /// Follow the pointer, or keep the notch on one display; saved by `setNotchDisplayPreference`.
+    @Published private(set) var notchDisplayPreference = NotchDisplayPreference.restored(
+        id: UserDefaults.standard.string(forKey: "notchDisplayPinID"),
+        name: UserDefaults.standard.string(forKey: "notchDisplayPinName"))
+    /// The display picker's entries, checked entry, and detail line; see `updateNotchDisplayChoices`.
+    @Published private(set) var notchDisplayChoices = NotchDisplayChoices(displays: [], preference: .followPointer)
     /// Codex's own thread names by session, refreshed every scan; unknown sessions keep their identifier.
     @Published var threadNames: [UUID: String] = [:]
     /// Codex's usage windows from the newest rollout, refreshed every scan; nil until one is read.
@@ -475,6 +481,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// It never scans Codex events, never saves, and never releases approvals.
     let previewMode = Companion.argumentValue(for: "--preview-queue")
     private var status: NSStatusItem!
+    private var notchDisplayMenu: NotchDisplayMenu!
     private var panel: NotchPanel!
     private var controls: NSWindow?
     private var controlsAnimationGeneration = 0
@@ -549,6 +556,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             if action == #selector(toggleMute) { item.state = muted ? .on : .off }
             menu.addItem(item)
         }
+        notchDisplayMenu = NotchDisplayMenu(choices: { [weak self] in self?.updateNotchDisplayChoices() },
+                                            select: { [weak self] in self?.setNotchDisplayPreference($0) })
+        let displayItem = NSMenuItem(title: "Show notch on", action: nil, keyEquivalent: "")
+        displayItem.submenu = notchDisplayMenu.menu
+        menu.insertItem(displayItem, at: menu.indexOfItem(withTitle: "Show Steer controls") + 1)
         status.menu = menu
         panel = NotchPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
@@ -566,7 +578,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // Display connect, disconnect, and rearrangement re-place the one panel; queue state is untouched.
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
-        ) { [weak self] _ in Task { @MainActor in self?.refresh() } }
+        ) { [weak self] _ in Task { @MainActor in self?.updateNotchDisplayChoices(); self?.refresh() } }
         timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
@@ -579,6 +591,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         daemonClient.onDisconnect = { [weak self] in self?.daemonBook.disconnect() }
         if let mode = previewMode { seedPreview(mode) }
+        updateNotchDisplayChoices()
         refresh()
         refreshSetup()
         // A first/unconfigured launch should explain setup immediately. Once state
@@ -590,7 +603,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             precondition(controls?.isVisible == true && controls?.contentView != nil)
             precondition(controls?.title == "Steer" && controls?.styleMask.contains(.resizable) == true)
             precondition(controls?.frame.width ?? 0 >= 720 && controls?.frame.height ?? 0 >= 540)
-            precondition(status.button?.title == "S" && status.menu?.items.count == 6)
+            precondition(status.button?.title == "S" && status.menu?.items.count == 7)
+            precondition(status.menu?.item(withTitle: "Show notch on")?.submenu === notchDisplayMenu.menu)
             dismissControls(animated: false)
             precondition(controls?.isVisible == false)
             presentControls(animated: false)
@@ -629,10 +643,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         refresh()
         let displays = Companion.attachedDisplays()
         let pointer = NSEvent.mouseLocation
-        let chosen = NotchDisplaySelection.choose(displays: displays, pointer: pointer, current: currentDisplayID, interacting: false)
+        let chosen = NotchDisplaySelection.choose(displays: displays, pointer: pointer, current: currentDisplayID, interacting: false,
+                                                  preference: notchDisplayPreference)
         func rect(_ r: CGRect) -> [String: Double] { ["x": r.minX, "y": r.minY, "width": r.width, "height": r.height] }
         let report: [String: Any] = [
-            "displays": displays.map { ["id": Int($0.id), "frame": rect($0.frame), "top_inset": Double($0.topInset), "physical_notch": $0.hasPhysicalNotch] },
+            "displays": displays.map { ["id": Int($0.id), "frame": rect($0.frame), "top_inset": Double($0.topInset), "physical_notch": $0.hasPhysicalNotch,
+                                        "built_in": $0.isBuiltIn, "persistent_id": $0.persistentID ?? NSNull(), "name": $0.name ?? NSNull()] },
+            "display_preference": notchDisplayPreference.pin.map { ["pinned_id": $0.id, "pinned_name": $0.name] as Any } ?? "follow_pointer",
             "pointer": ["x": pointer.x, "y": pointer.y],
             "chosen_display": chosen.map { Int($0.id) } ?? NSNull(),
             "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false, fiveHourShown: fiveHourShown)) } ?? NSNull(),
@@ -663,9 +680,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 housing = max(0, screen.frame.width - left.width - right.width)
             }
             let menuBar = NotchDisplay.shownMenuBarHeight(on: screen.frame, menuBars: menuBars)
+            // The UUID survives reboots and reconnects, unlike the display number, so a pin keys on it.
+            let uuid = CGDisplayCreateUUIDFromDisplayID(number.uint32Value).map {
+                CFUUIDCreateString(nil, $0.takeRetainedValue()) as String
+            }
             return NotchDisplay(id: number.uint32Value, frame: screen.frame, topInset: screen.safeAreaInsets.top,
                                 housingWidth: housing, menuBarHeight: menuBar,
-                                isBuiltIn: CGDisplayIsBuiltin(number.uint32Value) != 0)
+                                isBuiltIn: CGDisplayIsBuiltin(number.uint32Value) != 0,
+                                persistentID: uuid, name: screen.localizedName)
         }
     }
 
@@ -691,6 +713,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
 
     @objc func showControls() {
         refreshLaunchAtLogin()
+        updateNotchDisplayChoices()
         if controls == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 620),
                                   styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
@@ -1331,10 +1354,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             currentDisplayID = nil
             return
         }
-        // One panel, one queue: the display is chosen by the documented rule and frozen while the
-        // user is interacting, so controls never move away mid-action. Only geometry changes here.
+        // One panel, one queue: the display is chosen by the documented rule (the pinned display when
+        // there is one) and frozen while the user is interacting, so controls never move away
+        // mid-action. Only geometry changes here.
         guard let display = NotchDisplaySelection.choose(displays: Companion.attachedDisplays(), pointer: NSEvent.mouseLocation,
-                                                         current: currentDisplayID, interacting: interacting && panel.isVisible)
+                                                         current: currentDisplayID, interacting: interacting && panel.isVisible,
+                                                         preference: notchDisplayPreference)
         else { panel.orderOut(nil); currentDisplayID = nil; return }
         currentDisplayID = display.id
         let layout = NotchPlacement.strip(on: display, expanded: expanded, fiveHourShown: fiveHourShown)
@@ -1416,6 +1441,29 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         muted = !enabled
         UserDefaults.standard.set(muted, forKey: "muted")
         status.menu?.items.first { $0.action == #selector(toggleMute) }?.state = muted ? .on : .off
+    }
+    /// Recomputes the display picker from the attached displays. Called at launch, on display
+    /// changes, and when the controls window or the menu opens, so it stays current while the panel
+    /// is hidden and placement is not running.
+    @discardableResult
+    func updateNotchDisplayChoices() -> NotchDisplayChoices {
+        let choices = NotchDisplayChoices(displays: Companion.attachedDisplays(), preference: notchDisplayPreference)
+        if notchDisplayChoices != choices { notchDisplayChoices = choices }
+        return choices
+    }
+    /// Saves the choice and re-places the panel at once. Only placement changes: the queue,
+    /// presentations, and approval deadlines are untouched.
+    func setNotchDisplayPreference(_ preference: NotchDisplayPreference) {
+        notchDisplayPreference = preference
+        if let pin = preference.pin {
+            UserDefaults.standard.set(pin.id, forKey: "notchDisplayPinID")
+            UserDefaults.standard.set(pin.name, forKey: "notchDisplayPinName")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "notchDisplayPinID")
+            UserDefaults.standard.removeObject(forKey: "notchDisplayPinName")
+        }
+        updateNotchDisplayChoices()
+        refresh()
     }
     @objc func quit() { NSApplication.shared.terminate(nil) }
     func openTestTask() {
