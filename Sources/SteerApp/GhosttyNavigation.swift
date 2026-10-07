@@ -53,6 +53,17 @@ enum GhosttyNavigation {
         }
         return (true, "Sent \(keys.joined(separator: " ")) to the Ghostty tab.")
     }
+    /// Selects the herdr client's Ghostty tab for an Open (ADR 0011, step 4): Ghostty rechecks that
+    /// exactly one terminal reports `tty`, alone in its tab in the front window, and that it is still
+    /// `target`, then selects it and activates Ghostty. True only when Ghostty reported ok; the caller
+    /// verifies the result with a fresh inventory. Sends no input.
+    static func selectHerdrTab(target: GhosttyTarget, tty: String) -> Bool {
+        guard let bytes = try? JSONEncoder().encode(target),
+              let object = try? JSONSerialization.jsonObject(with: bytes),
+              let response = request(["action": "select_tty", "tty": tty, "target": object]),
+              let value = try? JSONSerialization.jsonObject(with: response) as? [String: Any] else { return false }
+        return value["status"] as? String == "ok"
+    }
     static func open(session: UUID, live: Set<UUID>) -> (opened: Bool, message: String) {
         open(title: GhosttyMatch.title(session), live: live.map(GhosttyMatch.title), unavailable: "No unique live, unsplit tab matches \(GhosttyMatch.title(session)). Keep that session open with its session-ID title enabled.", sameWindowOnly: false)
     }
