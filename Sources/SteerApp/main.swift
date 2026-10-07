@@ -192,8 +192,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The daemon path is available; the preview renders it with a seeded request.
     var daemonConnected: Bool { daemonClient.isConnected || previewMode != nil }
     private var savedSnapshot = Companion.launchSnapshot
+    /// Remembered across launches; switched off only by the user or an Automation denial.
     @Published var ghosttyEnabled = false
     @Published var ghosttyPermissionVerified = false
+    /// The latest Automation consent check for Ghostty; nil until one has run in this launch.
+    @Published var ghosttyAccess: GhosttyAutomationAccess?
     /// Read the Codex desktop app's own unread flags to acknowledge desktop completions it has
     /// cleared. Private format; on by default, off with one switch when a desktop update breaks it.
     @Published var desktopReadStateEnabled = UserDefaults.standard.object(forKey: "desktopReadStateEnabled") as? Bool ?? true
@@ -291,6 +294,17 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var nextApprovalFocusScan: Double = 0
     private var ghosttyFocusState: GhosttyFocusState = .disabled
     private var ghosttyUnavailable = false
+    /// Consent checks may block on the macOS prompt; one runs at a time, and a result from before
+    /// the user last switched controls applies to nothing.
+    private var probingGhosttyAccess = false
+    private var ghosttyAccessGeneration = 0
+    private var ghosttyLaunchObserver: NSObjectProtocol?
+    /// The value `ghosttyChanged` last acted on. Code that sets `ghosttyEnabled` and calls it also
+    /// fires the Settings toggle's `onChange`; the repeat call is a no-op.
+    private var appliedGhosttyEnabled = false
+    private var ghosttyStartupRetries = 0
+    static let ghosttyEnabledKey = "ghosttyControlsEnabled"
+    static let ghosttyOfferedKey = "ghosttyFirstRunOffered"
 
     private func claudeApprovalRootKey(sourceScope: String, events: URL, installationID: String) -> ClaudeApprovalRootKey {
         ClaudeApprovalRootKey(sourceScope: sourceScope,
@@ -621,6 +635,121 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         writePlacementProbeAndQuitIfRequested()
         printSetupProbeAndQuitIfRequested()
+        startGhosttyControls()
+    }
+
+    /// Resumes remembered Ghostty controls, or offers them once on the first interactive launch.
+    /// Preview and probe launches never read the saved choice, so they keep controls off.
+    private func startGhosttyControls() {
+        guard previewMode == nil,
+              !["--smoke-test", "--setup-probe", "--placement-probe"].contains(where: CommandLine.arguments.contains) else { return }
+        observeGhosttyLaunches()
+        let defaults = UserDefaults.standard
+        let stored = defaults.object(forKey: Companion.ghosttyEnabledKey) as? Bool
+        if stored == true {
+            ghosttyEnabled = true
+            appliedGhosttyEnabled = true
+            ghosttyFocusState = .checking
+            probeGhosttyAccess()
+            return
+        }
+        // Controls are off: a silent check only restores a remembered denial's Settings guidance.
+        Task { @MainActor in
+            let access = await Task.detached { GhosttyAutomationPermission.check(askIfNeeded: false) }.value
+            if access == .denied, !ghosttyEnabled { ghosttyAccess = access }
+        }
+        guard GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: defaults.bool(forKey: Companion.ghosttyOfferedKey),
+                                                        storedPreference: stored) else { return }
+        // Ask after launch finishes, on the controls window, so the notch keeps refreshing.
+        DispatchQueue.main.async { [weak self] in self?.offerGhosttyControls() }
+    }
+
+    /// Steer's own explanation before macOS's one-time Automation prompt, so Not Now leaves that
+    /// prompt unused. A sheet, not `runModal`, so the refresh timer and approval cards keep running.
+    private func offerGhosttyControls() {
+        showControls()
+        guard let window = controls else { return }
+        let alert = NSAlert()
+        alert.messageText = "Use Ghostty with Steer?"
+        alert.informativeText = "Steer can bring you back to the exact Ghostty tab for a Codex or Claude session, and relay the option you pick for a question. macOS will ask you to allow Steer to control Ghostty. You can change this later in Settings › Terminals."
+        alert.addButton(withTitle: "Enable Ghostty Controls")
+        alert.addButton(withTitle: "Not Now")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            Task { @MainActor in
+                guard let self else { return }
+                // Recorded on an answer, so quitting with the sheet open offers it again next launch.
+                UserDefaults.standard.set(true, forKey: Companion.ghosttyOfferedKey)
+                guard response == .alertFirstButtonReturn else { return }
+                self.ghosttyEnabled = true
+                self.ghosttyChanged(true)
+            }
+        }
+    }
+
+    private func observeGhosttyLaunches() {
+        guard ghosttyLaunchObserver == nil else { return }
+        ghosttyLaunchObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
+            let launched = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier
+            guard launched == GhosttyAutomationPermission.bundleIdentifier else { return }
+            Task { @MainActor in
+                guard let self, self.ghosttyEnabled, !self.ghosttyPermissionVerified else { return }
+                self.probeGhosttyAccess()
+            }
+        }
+    }
+
+    /// Asks macOS for Automation consent to Ghostty, showing its prompt when no decision exists.
+    /// Only a denial switches controls off; Ghostty not running keeps them on until it launches.
+    /// Tab scans wait while a check is open, so the prompt never races an `osascript` deadline.
+    private func probeGhosttyAccess() {
+        guard ghosttyEnabled, !probingGhosttyAccess else { return }
+        probingGhosttyAccess = true
+        let generation = ghosttyAccessGeneration
+        Task { @MainActor in
+            let access = await Task.detached { GhosttyAutomationPermission.check(askIfNeeded: true) }.value
+            probingGhosttyAccess = false
+            // The user switched controls while the check was open, or Ghostty launched during a
+            // check that found it absent: check again for the current state.
+            if generation != ghosttyAccessGeneration {
+                probeGhosttyAccess()
+                return
+            }
+            if access == .ghosttyNotRunning, GhosttyAutomationPermission.ghosttyIsRunning,
+               ghosttyStartupRetries < 10 {
+                // Ghostty is listed before it accepts Apple Events; retry once a second, ten times
+                // at most, then wait for the next launch or toggle.
+                ghosttyStartupRetries += 1
+                probingGhosttyAccess = true   // tab scans keep waiting through the pause
+                try? await Task.sleep(for: .seconds(1))
+                probingGhosttyAccess = false
+                probeGhosttyAccess()
+                return
+            }
+            ghosttyStartupRetries = 0
+            applyGhosttyAccess(access)
+            refresh()
+        }
+    }
+
+    private func applyGhosttyAccess(_ access: GhosttyAutomationAccess) {
+        guard ghosttyEnabled else { return }
+        ghosttyAccess = access
+        switch GhosttyControlsPolicy.outcome(for: access) {
+        case .verified:
+            ghosttyPermissionVerified = true
+            nextGhosttyScan = 0
+        case .disable:
+            ghosttyEnabled = false
+            ghosttyChanged(false)
+            navigationMessage = "Steer is not allowed to control Ghostty. \(GhosttyAutomationPermission.deniedGuidance) Then enable Ghostty controls again."
+        case .awaitGhostty:
+            ghosttyPermissionVerified = false
+            ghosttyFocusState = .unknown
+            navigationMessage = "macOS will ask for access to Ghostty when Ghostty is open."
+        case .unverified:
+            break
+        }
     }
 
     /// `--setup-probe`: print the Codex setup status and plan this build computes, then quit.
@@ -1811,7 +1940,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     func checkGhosttyFocus() {
         let now = ProcessInfo.processInfo.systemUptime
-        guard ghosttyEnabled, !checkingGhostty, !openingTask, now >= nextGhosttyScan,
+        guard ghosttyEnabled, !probingGhosttyAccess, ghosttyAccess != .ghosttyNotRunning, !checkingGhostty, !openingTask, now >= nextGhosttyScan,
               !cliItems.isEmpty || !queue.items.isEmpty || !liveCLI.isEmpty || !knownCLISessions.isEmpty
                 || !liveClaudeSessions.isEmpty
                 || orderedAgentAttentionItems.contains(where: { $0.session.source == .claude }) else { return }
@@ -1874,19 +2003,36 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 }
                 saveCompletions()
             } else if ghosttyEnabled {
-                ghosttyFocusState = .unknown
-                ghosttyUnavailable = true
-                ghosttyEnabled = false
-                ghosttyPermissionVerified = false
-                hasGhosttySelectionBaseline = false
-                lastGhosttySelection = nil
-                lastGhosttySnapshotAt = nil
-                lastGhosttyVisitAfter = nil
-                navigationMessage = "Ghostty controls unavailable. Check Automation permission before enabling them again."
+                let generation = ghosttyAccessGeneration
+                let access = await Task.detached { GhosttyAutomationPermission.check(askIfNeeded: false) }.value
+                if generation == ghosttyAccessGeneration, ghosttyEnabled {
+                    // A denial switches controls off and remembers it; Ghostty not running keeps them
+                    // on and waits for its launch instead of polling. Anything else is an unexplained
+                    // native failure. A result from before the user switched controls applies to nothing.
+                    if access == .denied || access == .ghosttyNotRunning {
+                        applyGhosttyAccess(access)
+                    } else {
+                        disableGhosttyForLaunch()
+                    }
+                }
             }
             checkingGhostty = false
             refresh()
         }
+    }
+
+    /// Off for this launch only after an unexplained native failure; the remembered choice stays.
+    private func disableGhosttyForLaunch() {
+        ghosttyFocusState = .unknown
+        ghosttyUnavailable = true
+        ghosttyEnabled = false
+        appliedGhosttyEnabled = false
+        ghosttyPermissionVerified = false
+        hasGhosttySelectionBaseline = false
+        lastGhosttySelection = nil
+        lastGhosttySnapshotAt = nil
+        lastGhosttyVisitAfter = nil
+        navigationMessage = "Ghostty controls unavailable. Check Automation permission before enabling them again."
     }
     /// Opens the whole queue from the strip (a click or VoiceOver activation); it stays open while
     /// the panel has the pointer or keyboard focus.
@@ -1959,6 +2105,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     func ghosttyChanged(_ enabled: Bool) {
         if !enabled && ghosttyUnavailable { return }
+        guard enabled != appliedGhosttyEnabled else { return }
+        appliedGhosttyEnabled = enabled
+        ghosttyStartupRetries = 0
+        UserDefaults.standard.set(enabled, forKey: Companion.ghosttyEnabledKey)
+        ghosttyAccessGeneration += 1
+        // A denial stays visible after controls switch off; enabling checks again.
+        if enabled { ghosttyAccess = nil }
         ghosttyUnavailable = false
         ghosttyPermissionVerified = false
         ghosttyFocusState = enabled ? .checking : .disabled
@@ -1968,7 +2121,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             lastGhosttySnapshotAt = nil
             lastGhosttyVisitAfter = nil
         }
-        if enabled { nextGhosttyScan = 0 }
+        if enabled {
+            nextGhosttyScan = 0
+            probeGhosttyAccess()
+        }
     }
 }
 

@@ -102,7 +102,7 @@ The optional Claude usage bridge is displayed in the same preview and starts off
 
 | Prompt | When | If declined |
 | --- | --- | --- |
-| **"Steer" wants access to control "Ghostty"** (Automation) | The first time Ghostty controls are enabled in Steer and it selects a tab through `osascript`. The usage string is in the bundle's `NSAppleEventsUsageDescription`. | Open in Codex for CLI sessions reports that it cannot read Ghostty's tabs; everything else works. Re-enable under **System Settings › Privacy & Security › Automation › Steer**. |
+| **"Steer" wants access to control "Ghostty"** (Automation) | Right after **Enable Ghostty Controls** in Steer's first-launch prompt, or after turning on Ghostty under **Settings › Terminals** (if Ghostty is not running, when it next opens). The usage string is in the bundle's `NSAppleEventsUsageDescription`. | Open in Codex for CLI sessions reports that it cannot read Ghostty's tabs; everything else works. Steer switches Ghostty controls off; re-enable under **System Settings › Privacy & Security › Automation › Steer** (Settings › Terminals has a button for it), then turn the controls back on. |
 | Gatekeeper "cannot be opened" | First launch of an `unsigned-dev`, `dev-signed`, or `signed` build. | See step 3 above. |
 | Codex's own hook-trust prompt | The first Codex session after Configure Codex. This is Codex's prompt, not macOS's. | Codex ignores the untrusted hooks; Steer shows repair required. |
 
