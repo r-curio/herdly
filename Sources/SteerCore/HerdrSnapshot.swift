@@ -35,6 +35,9 @@ public enum HerdrUnavailableReason: Error, Equatable, Hashable, Sendable {
     case timeout
     /// A reply or command output could not be decoded within bounds, or answered another request.
     case malformedReply
+    /// A pane's title changed while its `pane.process_info` was read, so the reply may describe
+    /// another session than the snapshot's title (ADR 0012).
+    case paneChangedDuringScan
     /// herdr answered with an error object; `code` is herdr's own, truncated.
     case requestRefused(code: String)
 }
@@ -647,6 +650,25 @@ public struct HerdrScanRequest: Equatable, Hashable, Sendable {
         let titled = Set(snapshot.panes.filter { $0.terminalTitle.map(processInfoTitles.contains) == true }.map(\.paneID))
             .subtracting(recorded)
         return Array((recorded.sorted() + titled.sorted()).prefix(Self.maximumProcessInfoRequests))
+    }
+
+    /// `processInfo` with each reply for a pane that carried one of `processInfoTitles` in `before`
+    /// replaced by `paneChangedDuringScan` unless `after`, read once every reply was in, shows the
+    /// pane with the same title. Title and foreground process then describe one pane state; a
+    /// title that changed and changed back between the reads is not detected.
+    public func confirmingTitles(_ processInfo: [String: Result<HerdrProcessInfo, HerdrUnavailableReason>],
+                                 before: HerdrSnapshot, after: HerdrSnapshot)
+        -> [String: Result<HerdrProcessInfo, HerdrUnavailableReason>] {
+        let titlesBefore = Dictionary(before.panes.map { ($0.paneID, $0.terminalTitle) }, uniquingKeysWith: { first, _ in first })
+        var confirmed = processInfo
+        for paneID in processInfo.keys {
+            guard let title = titlesBefore[paneID] ?? nil, processInfoTitles.contains(title) else { continue }
+            let titlesAfter = after.panes.filter { $0.paneID == paneID }.map(\.terminalTitle)
+            if titlesAfter.isEmpty || titlesAfter.contains(where: { $0 != title }) {
+                confirmed[paneID] = .failure(.paneChangedDuringScan)
+            }
+        }
+        return confirmed
     }
 }
 
