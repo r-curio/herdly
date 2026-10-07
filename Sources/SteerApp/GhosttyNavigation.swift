@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import SteerCore
 
-/// Only called after the user enables Ghostty controls in this app launch.
+/// Only called while the user has Ghostty controls enabled (remembered across launches).
 /// Besides tab selection it relays one user-chosen digit for a Codex question to the exact
 /// matched terminal (ADR 0006). No text input and no approval keystrokes are supported.
 enum GhosttyNavigation {

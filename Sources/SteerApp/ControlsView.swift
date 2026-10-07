@@ -461,10 +461,11 @@ private struct TerminalControls: View {
                         .onChange(of: model.ghosttyEnabled) { _, enabled in model.ghosttyChanged(enabled) }
                 }
                 Divider()
-                SettingsRow(title: "Automation permission",
-                            detail: model.ghosttyPermissionVerified ? "Verified by a navigation probe." : "Enable Ghostty to let macOS request access.") {
-                    StatusBadge(title: model.ghosttyPermissionVerified ? "Granted" : "Not verified",
-                                color: model.ghosttyPermissionVerified ? .green : .orange)
+                SettingsRow(title: "Automation permission", detail: automationDetail) {
+                    if model.ghosttyAccess == .denied {
+                        Button("Open Automation Settings") { NSWorkspace.shared.open(GhosttyAutomationPermission.settingsURL) }
+                    }
+                    StatusBadge(title: automationBadge, color: model.ghosttyPermissionVerified ? .green : .orange)
                 }
                 Divider()
                 Text(model.setupSurfaceStatusText.last ?? "Ghostty: unavailable")
@@ -472,6 +473,20 @@ private struct TerminalControls: View {
                 Divider()
                 HerdrControls(model: model)
             }
+        }
+    }
+
+    private var automationBadge: String {
+        if model.ghosttyPermissionVerified { return "Granted" }
+        return model.ghosttyAccess == .denied ? "Not allowed" : "Not verified"
+    }
+
+    private var automationDetail: String {
+        if model.ghosttyPermissionVerified { return "Granted in System Settings." }
+        switch model.ghosttyAccess {
+        case .denied: return "Not allowed. Turn on Steer › Ghostty in System Settings › Privacy & Security › Automation."
+        case .ghosttyNotRunning: return "Waiting for Ghostty to open; macOS asks then."
+        default: return model.ghosttyEnabled ? "Waiting for macOS to confirm access." : "Enable Ghostty to let macOS request access."
         }
     }
 }
