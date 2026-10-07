@@ -1,0 +1,29 @@
+{
+  "note": "Ghostty snapshot inventories in Ghostty.js output shape, constructed for each TTY join outcome. The 1.3.1 entry has no tty key, as an inventory taken without tty support. Not captured from a live Ghostty: no released Ghostty exposes tty yet.",
+  "1.3.1": {"status": "ok", "front_window_id": "w1", "selected": null, "windows": [
+    {"id": "w1", "tabs": [{"id": "t1", "terminals": [{"id": "p1", "name": "herdr"}]}]}]},
+  "matched": {"status": "ok", "front_window_id": "w1", "selected": null, "windows": [
+    {"id": "w1", "tabs": [
+      {"id": "t1", "terminals": [{"id": "p1", "name": "herdr", "tty": "/dev/ttys012"}]},
+      {"id": "t2", "terminals": [{"id": "p2", "name": "herdr", "tty": "/dev/ttys013"}]}]},
+    {"id": "w2", "tabs": [{"id": "t3", "terminals": [{"id": "p3", "name": "zsh", "tty": "/dev/ttys014"}]}]}]},
+  "noMatch": {"status": "ok", "front_window_id": "w1", "selected": null, "windows": [
+    {"id": "w1", "tabs": [{"id": "t1", "terminals": [{"id": "p1", "name": "herdr", "tty": "/dev/ttys013"}]}]}]},
+  "emptyValue": {"status": "ok", "front_window_id": "w1", "selected": null, "windows": [
+    {"id": "w1", "tabs": [
+      {"id": "t1", "terminals": [{"id": "p1", "name": "herdr", "tty": ""}]},
+      {"id": "t2", "terminals": [{"id": "p2", "name": "herdr", "tty": "/dev/ttys013"}]}]}]},
+  "multipleMatches": {"status": "ok", "front_window_id": "w1", "selected": null, "windows": [
+    {"id": "w1", "tabs": [
+      {"id": "t1", "terminals": [{"id": "p1", "name": "herdr", "tty": "/dev/ttys012"}]},
+      {"id": "t2", "terminals": [{"id": "p2", "name": "herdr", "tty": "/dev/ttys012"}]}]}]},
+  "split": {"status": "ok", "front_window_id": "w1", "selected": null, "windows": [
+    {"id": "w1", "tabs": [{"id": "t1", "terminals": [
+      {"id": "p1", "name": "herdr", "tty": "/dev/ttys012"},
+      {"id": "p2", "name": "zsh", "tty": "/dev/ttys013"}]}]}]},
+  "otherWindow": {"status": "ok", "front_window_id": "w1", "selected": null, "windows": [
+    {"id": "w1", "tabs": [{"id": "t1", "terminals": [{"id": "p1", "name": "zsh", "tty": "/dev/ttys013"}]}]},
+    {"id": "w2", "tabs": [{"id": "t2", "terminals": [{"id": "p2", "name": "herdr", "tty": "/dev/ttys012"}]}]}]},
+  "inventoryUnavailable": {"status": "ok", "front_window_id": "w1", "selected": null, "windows": [
+    {"id": "w1", "tabs": [{"id": "", "terminals": [{"id": "p1", "name": "herdr", "tty": "/dev/ttys012"}]}]}]}
+}
