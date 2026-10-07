@@ -34,7 +34,7 @@ public enum HerdrCodexBindingRules {
             return .unavailable(.unsupportedProtocol(snapshot.protocolVersion))
         }
         guard let title = title(forSession: sessionID) else { return .unavailable(.titleNotInHerdr) }
-        let sharing = Set(liveSessions.map { $0.lowercased() }).filter { self.title(forSession: $0) == title }.count
+        let sharing = Set(liveSessions.map { HerdrBindingInputs.normalizedSessionID($0, agent: .codex) }).filter { self.title(forSession: $0) == title }.count
         guard sharing == 1 else { return .unavailable(.sessionPrefixNotUnique(sharing)) }
 
         guard let panes = uniquePanes(snapshot.panes) else { return .unavailable(.conflictingPaneObservations) }

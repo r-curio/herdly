@@ -102,19 +102,19 @@ extension Companion {
         let checkSocket = ghosttyEnabled && !herdrCodexTitles().outsideGhostty.isEmpty
         Task { @MainActor in
             let result = await Task.detached(priority: .utility) {
-                (directories.isEmpty ? HerdrHookRecordReader.Result.empty
+                (records: directories.isEmpty ? HerdrHookRecordReader.Result.empty
                     : HerdrHookRecordReader.read(directories: directories, cache: cache),
-                 checkSocket && HerdrSocketTrust.reason(at: socketPath) == nil)
+                 socketTrusted: checkSocket && HerdrSocketTrust.reason(at: socketPath) == nil)
             }.value
             herdr.reading = false
-            herdr.hookRecords = result.0.records
-            herdr.recordCache = result.0.cache
+            herdr.hookRecords = result.records.records
+            herdr.recordCache = result.records.cache
             // Liveness and titles are re-read here: sessions may have ended while the records were read.
             let codex = herdrCodexTitles()
-            let paneIDs = HerdrBindingInputs.gatePaneIDs(records: result.0.records, liveSessions: herdrLiveSessions())
+            let paneIDs = HerdrBindingInputs.gatePaneIDs(records: result.records.records, liveSessions: herdrLiveSessions())
             herdr.claudePaneIDs = paneIDs
             tickHerdrMonitor(paneIDs: paneIDs,
-                             codexGate: HerdrBindingInputs.codexGateOpens(codex, defaultSocketTrusted: result.1),
+                             codexGate: HerdrBindingInputs.codexGateOpens(codex, defaultSocketTrusted: result.socketTrusted),
                              codex: codex)
         }
     }
