@@ -280,9 +280,8 @@ extension Companion {
         Task { @MainActor in
             let ghosttyTakenAt = Date().timeIntervalSince1970
             let observed = await Task.detached { () -> (GhosttyTTYSupport, GhosttySnapshot?) in
-                let support = GhosttyScriptingSupport.ttySupport()
-                // Without a TTY join only Dismiss acknowledges, so no inventory is needed.
-                return (support, support == .supported ? GhosttyNavigation.snapshot() : nil)
+                // Without `tty` the inventory still says whether Ghostty is frontmost (interim, issue #155).
+                (GhosttyScriptingSupport.ttySupport(), GhosttyNavigation.snapshot())
             }.value
             herdr.open.checkingVisit = false
             guard ghosttyEnabled else { return }
