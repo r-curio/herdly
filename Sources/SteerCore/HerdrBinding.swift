@@ -267,15 +267,9 @@ public enum HerdrBindingRules {
 
         // The agent must still be in the pane's foreground: `agent_session` can linger after it
         // exits. Checked on every scan, including Open's revalidation.
-        switch observation.processInfo[paneID] {
-        case nil:
-            return .unavailable(.processInfoUnavailable(nil))
-        case .failure(let reason)?:
-            return .unavailable(.processInfoUnavailable(reason))
-        case .success(let info)?:
-            guard info.paneID == paneID else { return .unavailable(.processInfoUnavailable(.malformedReply)) }
-            let count = HerdrForegroundProcess.count(named: record.agent.rawValue, in: info.foregroundProcesses)
-            guard count >= 1 else { return .unavailable(.foregroundProcesses(record.agent, count: count)) }
+        if let veto = HerdrForegroundProcess.veto(observation.processInfo[paneID], paneID: paneID, agent: record.agent,
+                                                  accepts: { $0 >= 1 }) {
+            return .unavailable(veto)
         }
 
         return .bound(HerdrPaneTarget(sessionID: sessionID, agent: record.agent, paneID: paneID))
