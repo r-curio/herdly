@@ -129,14 +129,16 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
 }
 
 @Test func claudeInventorySubprocessHasHardTimeoutAndBoundedDrain() throws {
-    let completed = ClaudeSetupDetection.runBounded(URL(fileURLWithPath: "/bin/echo"), arguments: ["ok"])
+    // These calls check the drain, not the deadline (the hang below does), so they get a deadline a
+    // loaded test machine should not reach: with the 2 s default, full-suite runs timed out here.
+    let completed = ClaudeSetupDetection.runBounded(URL(fileURLWithPath: "/bin/echo"), arguments: ["ok"], timeout: 30)
     #expect(completed?.status == 0)
     #expect(String(data: completed?.output ?? Data(), encoding: .utf8) == "ok\n")
 
     let inventory = #"[{"sessionId":"11111111-1111-4111-8111-111111111111","kind":"interactive","cwd":"/tmp/one","name":"one","status":"idle","startedAt":1}]"#
     for _ in 0..<20 {
         let result = ClaudeSetupDetection.runBounded(URL(fileURLWithPath: "/usr/bin/printf"),
-                                                     arguments: ["%s", inventory])
+                                                     arguments: ["%s", inventory], timeout: 30)
         #expect(result?.status == 0)
         #expect(String(data: result?.output ?? Data(), encoding: .utf8) == inventory)
     }
