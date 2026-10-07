@@ -30,7 +30,7 @@ private func observation(
     serverStartedAt: Double = 50,
     session herdrSession: HerdrSessionName = .defaultSession,
     clients: [HerdrClientObservation] = [HerdrClientObservation(processID: 93954, ancestryReachesGhostty: true)],
-    integrations: [HerdrAgentKind: HerdrIntegrationStatus] = [.codex: .current(version: 8), .claude: .current(version: 10)],
+    integrations: [HerdrAgentKind: HerdrIntegrationState] = [.codex: .current(version: 8), .claude: .current(version: 10)],
     panes: [HerdrPaneObservation] = [pane(), pane("w1:p2", agent: nil, session: nil)]
 ) -> HerdrObservation {
     HerdrObservation(

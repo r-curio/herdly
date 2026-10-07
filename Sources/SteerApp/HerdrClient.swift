@@ -42,13 +42,16 @@ struct HerdrClient: Sendable {
     let configuration: Configuration
     private let run: Runner
     private let ancestry: @Sendable (Int32) -> [HerdrProcessAncestor]
+    private let startTime: @Sendable (Int32) -> Double?
 
     init(configuration: Configuration = Configuration(),
          run: @escaping Runner = HerdrSubprocess.run(executable:arguments:timeout:limit:),
-         ancestry: @escaping @Sendable (Int32) -> [HerdrProcessAncestor] = HerdrProcessTree.ancestry(of:)) {
+         ancestry: @escaping @Sendable (Int32) -> [HerdrProcessAncestor] = HerdrProcessTree.ancestry(of:),
+         startTime: @escaping @Sendable (Int32) -> Double? = HerdrProcessTree.startTime(of:)) {
         self.configuration = configuration
         self.run = run
         self.ancestry = ancestry
+        self.startTime = startTime
     }
 
     // MARK: - Socket requests
@@ -110,18 +113,30 @@ struct HerdrClient: Sendable {
     /// Lists unix sockets with lsof and applies the client verdict. A failed or unreadable lsof is a
     /// scan failure; a wrong count or non-Ghostty client is a verdict.
     func attachedClient() -> Result<Result<HerdrAttachedClient, HerdrUnavailableReason>, HerdrUnavailableReason> {
+        clientListing().map { HerdrAttachedClient.verdict(listing: $0, ancestry: ancestry) }
+    }
+
+    private func clientListing() -> Result<HerdrClientListing, HerdrUnavailableReason> {
         run(configuration.lsofPath, ["-nP", "-U", "-F", "pfdn"], configuration.subprocessTimeout,
             HerdrClientListing.maximumOutput).flatMap { output in
             guard let listing = HerdrClientListing.parse(lsof: output, clientSocketPath: configuration.clientSocketPath)
             else { return .failure(.malformedReply) }
-            return .success(HerdrAttachedClient.verdict(listing: listing, ancestry: ancestry))
+            return .success(listing)
         }
+    }
+
+    /// The start time of the listing's one server process, the server identity for ADR 0008's
+    /// restart check; nil for zero or several server processes.
+    private func serverStartedAt(_ listing: HerdrClientListing) -> Double? {
+        guard listing.serverPIDs.count == 1, let pid = listing.serverPIDs.first else { return nil }
+        return startTime(pid)
     }
 
     // MARK: - Scan
 
     /// One full read: socket trust, `ping` and its protocol, a snapshot, integration status, then
-    /// the attached clients. The first scan-wide failure stops the scan and is its one reason.
+    /// the attached clients and the server's start time. The first scan-wide failure stops the
+    /// scan and is its one reason.
     func scan() -> HerdrScanOutcome {
         if case .failure(let reason) = ping() { return .unavailable(reason) }
         let snapshot: HerdrSnapshot
@@ -134,8 +149,11 @@ struct HerdrClient: Sendable {
         case .success(let value): integration = value
         case .failure(let reason): return .unavailable(reason)
         }
-        switch attachedClient() {
-        case .success(let client): return .available(HerdrScan(snapshot: snapshot, integration: integration, client: client))
+        switch clientListing() {
+        case .success(let listing):
+            return .available(HerdrScan(snapshot: snapshot, integration: integration,
+                                        client: HerdrAttachedClient.verdict(listing: listing, ancestry: ancestry),
+                                        serverStartedAt: serverStartedAt(listing)))
         case .failure(let reason): return .unavailable(reason)
         }
     }
@@ -299,6 +317,19 @@ enum HerdrProcessTree {
             current = parent
         }
         return chain
+    }
+
+    /// When `pid` started, in seconds since 1970; nil when the process cannot be read.
+    @Sendable static func startTime(of pid: Int32) -> Double? {
+        guard pid > 0 else { return nil }
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0,
+              info.kp_proc.p_pid == pid else { return nil }
+        let started = info.kp_proc.p_un.__p_starttime
+        guard started.tv_sec > 0 else { return nil }
+        return Double(started.tv_sec) + Double(started.tv_usec) / 1_000_000
     }
 
     private static func command(of pid: Int32, info: kinfo_proc) -> String {
