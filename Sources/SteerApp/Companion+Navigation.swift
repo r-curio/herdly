@@ -72,6 +72,16 @@ extension Companion {
             refresh()
             return
         }
+        let herdrKey = HerdrSessionKey(agent: .claude, sessionID: identity.session)
+        if herdrBinding(for: herdrKey) != .notInHerdr {
+            // ADR 0011: an actionable approval is handed back before the herdr pane is opened.
+            if let approval,
+               let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: { $0.id == approval.id }) {
+                handBackClaudeApproval(current)
+            }
+            openHerdr(herdrKey, subject: .claude(identity))
+            return
+        }
         openingTask = true
         navigationMessage = "Finding the matching Claude tab…"
         let configuredRoots = configuredClaudeNavigationRoots()
@@ -132,6 +142,13 @@ extension Companion {
     func openCLI(_ session: UUID) {
         guard !openingTask else { return }
         guard ghosttyEnabled else { showControls(); return }
+        // A session in herdr never falls back to the title route. An approval reaching here through
+        // `openApprovalInCodex` was already handed back (ADR 0011).
+        let herdrKey = HerdrSessionKey(agent: .codex, sessionID: session.uuidString)
+        if herdrBinding(for: herdrKey) != .notInHerdr {
+            openHerdr(herdrKey, subject: .codex(session))
+            return
+        }
         openingTask = true
         navigationMessage = "Finding the matching Ghostty tab…"
         let live = liveCLI
@@ -182,5 +199,142 @@ extension Companion {
             openingTask = false
             refresh()
         }
+    }
+}
+
+// MARK: - herdr Open (ADR 0011)
+
+/// What an Open in a herdr pane acknowledges on success: Codex CLI completions in `queue`, or
+/// Claude outcomes in `agentQueue`.
+enum HerdrOpenSubject {
+    case codex(UUID)
+    case claude(AgentSessionIdentity)
+}
+
+/// herdr Open state held by `HerdrSessionBindings`. Main-actor only.
+@MainActor
+final class HerdrOpenState {
+    /// The typed reason of each session's latest unavailable herdr Open, cleared by a later Opened.
+    /// For diagnostics and for the card's grouped reason line (docs/product.md, "Agreed herdr presentation").
+    fileprivate(set) var failures: [HerdrSessionKey: HerdrOpenFailure] = [:]
+    /// The previous scheduled scan, for ADR 0009's visit interval.
+    fileprivate var previousFocus: HerdrFocusObservation?
+    fileprivate var checkingVisit = false
+}
+
+extension Companion {
+    /// The typed reason the latest herdr Open for `session` was unavailable, or nil when none failed
+    /// since the last Opened.
+    func herdrOpenFailure(for session: HerdrSessionKey) -> HerdrOpenFailure? {
+        herdr.open.failures[session]
+    }
+
+    static func herdrOpenUnavailableMessage(_ agent: HerdrAgentKind) -> String {
+        "Open in \(agent == .claude ? "Claude" : "Codex") is unavailable until Steer can verify the exact herdr pane."
+    }
+
+    /// Runs ADR 0011's sequence for a session in herdr. The completion or reminder is retained on
+    /// every failure; only completions that arrived before the pre-Open scan are acknowledged on success.
+    fileprivate func openHerdr(_ key: HerdrSessionKey, subject: HerdrOpenSubject) {
+        openingTask = true
+        navigationMessage = "Finding the matching herdr pane…"
+        let client = herdr.client
+        let effects = HerdrOpenEffects(
+            now: { Date().timeIntervalSince1970 },
+            ttySupport: { await Task.detached { GhosttyScriptingSupport.ttySupport() }.value },
+            revalidate: { [weak self] in
+                guard let self else { return (.unavailable(.notScanned), nil) }
+                return await self.revalidateHerdrBinding(for: key)
+            },
+            ghosttySnapshot: { await Task.detached { GhosttyNavigation.snapshot() }.value },
+            focus: { pane in await Task.detached { client.focusAgent(target: pane) }.value },
+            select: { target, tty in await Task.detached { GhosttyNavigation.selectHerdrTab(target: target, tty: tty) }.value })
+        Task { @MainActor in
+            let result = await HerdrOpenSequence.run(effects)
+            switch result {
+            case .opened:
+                herdr.open.failures[key] = nil
+                navigationMessage = "Opened the matching herdr pane."
+                acknowledgeHerdrCompletions(HerdrOpenAcknowledgment.afterOpen(herdrCompletions(subject), result: result),
+                                            subject: subject)
+            case .unavailable(let failure):
+                herdr.open.failures[key] = failure
+                navigationMessage = Self.herdrOpenUnavailableMessage(key.agent)
+            }
+            openingTask = false
+            refresh()
+        }
+    }
+
+    /// Called after each scheduled herdr scan. When focus moved to a pane bound to a session with
+    /// queued completions, takes one fresh Ghostty inventory and applies ADR 0011's manual-visit rule.
+    func observeHerdrVisit(_ outcome: HerdrScanOutcome) {
+        guard let startedAt = herdr.monitor.latestStartedAt else { return }
+        // The scan's start on the completions' clock: conservative, as the snapshot was read after it.
+        let takenAt = Date().timeIntervalSince1970 - max(0, ProcessInfo.processInfo.systemUptime - startedAt)
+        let previous = herdr.open.previousFocus
+        let current = HerdrFocusObservation.from(outcome, takenAt: takenAt)
+        herdr.open.previousFocus = current
+        guard let previous, let current, let pane = current.focusedPaneID, previous.focusedPaneID != pane,
+              !herdr.open.checkingVisit, !openingTask else { return }
+        let subjects = herdrVisitSubjects(boundTo: pane)
+        guard !subjects.isEmpty else { return }
+        herdr.open.checkingVisit = true
+        Task { @MainActor in
+            let ghosttyTakenAt = Date().timeIntervalSince1970
+            let observed = await Task.detached { () -> (GhosttyTTYSupport, GhosttySnapshot?) in
+                let support = GhosttyScriptingSupport.ttySupport()
+                // Without a TTY join only Dismiss acknowledges, so no inventory is needed.
+                return (support, support == .supported ? GhosttyNavigation.snapshot() : nil)
+            }.value
+            herdr.open.checkingVisit = false
+            guard ghosttyEnabled else { return }
+            for subject in subjects {
+                acknowledgeHerdrCompletions(HerdrOpenAcknowledgment.manualVisit(
+                    herdrCompletions(subject), boundPaneID: pane, previous: previous, current: current,
+                    support: observed.0, ghostty: observed.1, ghosttyTakenAt: ghosttyTakenAt), subject: subject)
+            }
+            refresh()
+        }
+    }
+
+    /// Sessions with queued completions whose current binding is `pane`.
+    private func herdrVisitSubjects(boundTo pane: String) -> [HerdrOpenSubject] {
+        let codex = Set(cliItems.map(\.session)).sorted { $0.uuidString < $1.uuidString }.filter {
+            herdrBinding(for: HerdrSessionKey(agent: .codex, sessionID: $0.uuidString)).target?.paneID == pane
+        }.map(HerdrOpenSubject.codex)
+        let claudeSessions = Set(agentQueue.snapshot.outcomes.map(\.session).filter {
+            $0.source == .claude && $0.surface == .cli
+        })
+        let claude = claudeSessions.sorted { $0.session < $1.session }.filter {
+            herdrBinding(for: HerdrSessionKey(agent: .claude, sessionID: $0.session)).target?.paneID == pane
+        }.map(HerdrOpenSubject.claude)
+        return codex + claude
+    }
+
+    private func herdrCompletions(_ subject: HerdrOpenSubject) -> [HerdrCompletionCandidate<String>] {
+        switch subject {
+        case .codex(let session):
+            return cliItems.filter { $0.session == session }
+                .map { HerdrCompletionCandidate(id: $0.turn.uuidString, arrivedAt: $0.arrivedAt) }
+        case .claude(let identity):
+            return agentQueue.snapshot.outcomes.filter { $0.session == identity }
+                .map { HerdrCompletionCandidate(id: $0.turn, arrivedAt: $0.arrivedAt) }
+        }
+    }
+
+    private func acknowledgeHerdrCompletions(_ turns: Set<String>, subject: HerdrOpenSubject) {
+        guard !turns.isEmpty else { return }
+        switch subject {
+        case .codex(let session):
+            for item in cliItems where item.session == session && turns.contains(item.turn.uuidString) {
+                queue.dismiss(.completion(item.id))
+            }
+        case .claude(let identity):
+            for outcome in agentQueue.snapshot.outcomes where outcome.session == identity && turns.contains(outcome.turn) {
+                agentQueue.dismiss(.outcome(outcome.id))
+            }
+        }
+        saveCompletions()
     }
 }
