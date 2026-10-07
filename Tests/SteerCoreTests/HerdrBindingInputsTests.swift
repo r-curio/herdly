@@ -244,3 +244,20 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .codex, paneID: 
     #expect(gone.cache["/nowhere.json"] == nil)
     #expect(HerdrHookRecordReader.read(directories: [directory.appendingPathComponent("missing")]).records.isEmpty)
 }
+
+// MARK: - Codex guard (#144)
+
+@Test func herdrInputsWithholdABoundCodexSessionUntilItsPaneIsVerified() {
+    let bound = HerdrSessionBinding.bound(HerdrPaneTarget(sessionID: session, agent: .codex, paneID: "w1:p1"))
+    #expect(HerdrBindingInputs.withholdingUnverifiedCodex(bound, for: codexKey) == .unavailable(.codexPaneUnverified))
+    #expect(HerdrPresentation.group(HerdrSessionUnavailable.codexPaneUnverified) == .generic)
+}
+
+@Test func herdrInputsCodexGuardLeavesOtherResultsAndClaudeUnchanged() {
+    let claudeKey = HerdrSessionKey(agent: .claude, sessionID: otherSession)
+    let claudeBound = HerdrSessionBinding.bound(HerdrPaneTarget(sessionID: otherSession, agent: .claude, paneID: "w1:p2"))
+    #expect(HerdrBindingInputs.withholdingUnverifiedCodex(claudeBound, for: claudeKey) == claudeBound)
+    #expect(HerdrBindingInputs.withholdingUnverifiedCodex(.notInHerdr, for: codexKey) == .notInHerdr)
+    #expect(HerdrBindingInputs.withholdingUnverifiedCodex(.unavailable(.notScanned), for: codexKey)
+        == .unavailable(.notScanned))
+}

@@ -131,7 +131,7 @@ public enum HerdrPresentation {
 
     public static func group(_ reason: HerdrSessionUnavailable) -> HerdrReasonGroup {
         switch reason {
-        case .ghosttyControlsOff, .notScanned, .serverIdentityUnknown: .generic
+        case .ghosttyControlsOff, .notScanned, .serverIdentityUnknown, .codexPaneUnverified: .generic
         case .herdr(let reason): group(reason)
         case .binding(let reason): group(reason)
         }

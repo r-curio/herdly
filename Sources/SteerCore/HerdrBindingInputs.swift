@@ -51,6 +51,11 @@ public enum HerdrSessionUnavailable: Equatable, Hashable, Sendable {
     case serverIdentityUnknown
     /// ADR 0008's rules did not hold for the session.
     case binding(HerdrBindingUnavailable)
+    /// The session is Codex, and its binding is withheld. Codex can run hooks inside a shared
+    /// app-server daemon, so the hook's `HERDR_PANE_ID` and herdr's `agent_session` can both name
+    /// the pane of whichever CLI started the daemon (docs/evidence/herdr-daemon-hook-env.md).
+    /// Temporary until issue #144 decides an independent signal.
+    case codexPaneUnverified
 }
 
 public enum HerdrBindingInputs {
@@ -209,6 +214,15 @@ public enum HerdrBindingInputs {
     /// - Returns: `notInHerdr` when the session's newest hook event carried no pane ID; otherwise
     ///   `bound` only when Ghostty controls are on, the scan succeeded with a server start time,
     ///   and `HerdrBindingRules` bound the session.
+    /// Withholds a Codex session's `bound` result (`codexPaneUnverified`); every other result is
+    /// returned unchanged. Apply it wherever the app hands out a binding, before Open or relay
+    /// reads it. Temporary until issue #144.
+    public static func withholdingUnverifiedCodex(_ binding: HerdrSessionBinding,
+                                                  for session: HerdrSessionKey) -> HerdrSessionBinding {
+        guard session.agent == .codex, case .bound = binding else { return binding }
+        return .unavailable(.codexPaneUnverified)
+    }
+
     public static func binding(
         for session: HerdrSessionKey,
         liveness: HerdrSessionLiveness,
