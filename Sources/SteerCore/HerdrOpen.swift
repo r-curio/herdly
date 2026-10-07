@@ -31,10 +31,11 @@ public enum HerdrOpenFailure: Error, Equatable, Sendable {
     /// The Ghostty bundle does not declare a terminal `tty` (Ghostty 1.3.1). Checked before any herdr
     /// request, so none is sent.
     case ghosttyTTYUnsupported
-    /// The session's newest hook event no longer records a herdr pane. Open does not fall back to the
+    /// The fresh scan no longer puts the session in herdr: for Claude Code its newest hook event
+    /// records no pane, for Codex no pane shows its title (ADR 0012). Open does not fall back to the
     /// Ghostty title route from a herdr click.
     case sessionNotInHerdr
-    /// The fresh scan's binding is unavailable (ADR 0008 and ADR 0009 reasons, including the gate).
+    /// The fresh scan's binding is unavailable (ADR 0008 or ADR 0012 and ADR 0009 reasons, including the gate).
     case binding(HerdrSessionUnavailable)
     /// The single attached client's TTY could not be read or is not a `/dev/ttysNNN` device.
     case clientTTYUnknown

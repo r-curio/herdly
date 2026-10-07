@@ -271,14 +271,19 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
     #expect(row.problems.isEmpty)
 }
 
-@Test func herdrSettingsRowListsIntegrationsOnlyForAgentsSeen() {
+@Test func herdrSettingsRowListsClaudesIntegrationOnlyWhenClaudeWasSeen() {
     let outcome = scan(integration: [.codex: .notInstalled, .claude: .outdated])
+    // Codex needs no herdr integration (ADR 0012), so its state is never a problem.
     let codexOnly = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true, outcome: outcome,
                                                   agentsSeen: [.codex], ttySupport: .supported)
-    #expect(codexOnly.badge == .needsAttention)
-    #expect(codexOnly.badge?.title == "Needs attention")
-    #expect(codexOnly.problems == [.integration(.codex)])
-    #expect(codexOnly.problems.first?.command == "herdr integration install codex")
+    #expect(codexOnly.badge == .ready)
+    #expect(codexOnly.problems.isEmpty)
+    let claude = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true, outcome: outcome,
+                                               agentsSeen: [.claude], ttySupport: .supported)
+    #expect(claude.badge == .needsAttention)
+    #expect(claude.badge?.title == "Needs attention")
+    #expect(claude.problems == [.integration(.claude)])
+    #expect(claude.problems.first?.command == "herdr integration install claude")
 }
 
 @Test func herdrSettingsRowListsEveryIndependentProblem() {
@@ -286,8 +291,8 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
     let row = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true, outcome: outcome,
                                             agentsSeen: [.codex, .claude], ttySupport: .unsupported)
     #expect(row.badge == .needsAttention)
-    #expect(row.problems == [.integration(.claude), .integration(.codex), .ghosttyCannotIdentifyTab])
-    #expect(row.problems.map(\.command) == ["herdr integration install claude", "herdr integration install codex", nil])
+    #expect(row.problems == [.integration(.claude), .ghosttyCannotIdentifyTab])
+    #expect(row.problems.map(\.command) == ["herdr integration install claude", nil])
 }
 
 @Test func herdrSettingsRowListsHerdrUnavailableAndGhosttyTogether() {
