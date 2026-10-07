@@ -160,7 +160,12 @@ arrived before Steer restarted is uncertain and silent. After five minutes, an u
 outcome moves into Earlier while retaining its to-check count and Dismiss action; Codex retains Open
 in Codex, while Claude keeps the unavailable return explanation. This is
 presentation decay, not deletion or acknowledgment. Claude has no trustworthy read receipt; only
-explicit dismissal or a later verified exact-tab visit can acknowledge its outcome.
+explicit dismissal, a later verified exact-tab visit, or a reply can acknowledge its outcome. Agreed
+on 2026-10-08: a prompt submitted in a Claude session (its `UserPromptSubmit`) acknowledges that
+session's outcomes from other turns that arrived strictly before the prompt. An outcome arriving at
+or after the prompt, and outcomes of other sessions or roots, stay queued. Steer cannot tell a typed
+prompt from one injected by a script (for example `herdr agent prompt`), so such a prompt also
+acknowledges; the user accepted that.
 
 ## Agreed approval experience
 

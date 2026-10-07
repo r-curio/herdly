@@ -218,6 +218,9 @@ public enum AgentObservation: Equatable, Sendable {
     case outcome(AgentOutcome)
     case running(AgentRunning)
     case provisionalStop(AgentProvisionalStop)
+    /// The user submitted prompt `turn` at `submittedAt`. Replying in a session is evidence the user saw
+    /// that session's earlier outcomes, so it acknowledges outcomes of other turns that arrived before it.
+    case replied(AgentTurnIdentity, submittedAt: Double)
     case resolved(AgentAttentionID)
 }
 
@@ -238,6 +241,8 @@ public struct AgentAttentionQueue: Sendable {
     private var ambiguousClaudeSessions: Set<AgentSessionIdentity> = []
     private var resolved: Set<AgentAttentionID> = []
     private var acknowledged: Set<AgentTurnIdentity>
+    /// Each session's latest prompt submission, so an outcome observed after the reply is still acknowledged.
+    private var latestReplies: [AgentSessionIdentity: (turn: String, at: Double)] = [:]
     private var now: Double = 0
 
     public init(acknowledged: Set<AgentTurnIdentity> = []) {
@@ -352,6 +357,10 @@ public struct AgentAttentionQueue: Sendable {
                let active = running[outcome.session], active.id == outcome.id, active.arrivedAt > outcome.arrivedAt {
                 return
             }
+            if let reply = latestReplies[outcome.session], Self.reply(reply, acknowledges: outcome) {
+                dismiss(.outcome(outcome.id))
+                return
+            }
             outcomes[outcome.id] = outcome
             let turn = outcome.id
             for identity in approvals.keys where identity.session == turn.session
@@ -382,6 +391,15 @@ public struct AgentAttentionQueue: Sendable {
             guard outcomes[stop.identity] == nil else { return }
             if let current = provisionalStops[stop.identity.session], current.arrivedAt >= stop.arrivedAt { return }
             provisionalStops[stop.identity.session] = stop
+        case let .replied(prompt, submittedAt):
+            guard submittedAt.isFinite else { return }
+            if let current = latestReplies[prompt.session], current.at >= submittedAt { return }
+            let reply = (turn: prompt.turn, at: submittedAt)
+            latestReplies[prompt.session] = reply
+            for outcome in outcomes.values where outcome.session == prompt.session
+                && Self.reply(reply, acknowledges: outcome) {
+                dismiss(.outcome(outcome.id))
+            }
         case let .resolved(id):
             dismiss(id)
         }
@@ -492,6 +510,12 @@ public struct AgentAttentionQueue: Sendable {
         case let .unavailable(identity):
             ambiguousClaudeSessions.remove(identity)
         }
+    }
+
+    /// A reply acknowledges an outcome of another turn that arrived strictly before it was submitted. An
+    /// outcome arriving after the prompt (a turn still finishing when the user typed) stays queued.
+    private static func reply(_ reply: (turn: String, at: Double), acknowledges outcome: AgentOutcome) -> Bool {
+        outcome.turn != reply.turn && outcome.arrivedAt.isFinite && outcome.arrivedAt < reply.at
     }
 
     private static func older(_ lhs: AgentOutcome, _ rhs: AgentOutcome) -> Bool {
