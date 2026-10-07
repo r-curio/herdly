@@ -289,6 +289,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The value `ghosttyChanged` last acted on. Code that sets `ghosttyEnabled` and calls it also
     /// fires the Settings toggle's `onChange`; the repeat call is a no-op.
     private var appliedGhosttyEnabled = false
+    private var ghosttyStartupRetries = 0
     static let ghosttyEnabledKey = "ghosttyControlsEnabled"
     static let ghosttyOfferedKey = "ghosttyFirstRunOffered"
 
@@ -689,11 +690,22 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             probingGhosttyAccess = false
             // The user switched controls while the check was open, or Ghostty launched during a
             // check that found it absent: check again for the current state.
-            if generation != ghosttyAccessGeneration
-                || (access == .ghosttyNotRunning && GhosttyAutomationPermission.ghosttyIsRunning) {
+            if generation != ghosttyAccessGeneration {
                 probeGhosttyAccess()
                 return
             }
+            if access == .ghosttyNotRunning, GhosttyAutomationPermission.ghosttyIsRunning,
+               ghosttyStartupRetries < 10 {
+                // Ghostty is listed before it accepts Apple Events; retry once a second, ten times
+                // at most, then wait for the next launch or toggle.
+                ghosttyStartupRetries += 1
+                probingGhosttyAccess = true   // tab scans keep waiting through the pause
+                try? await Task.sleep(for: .seconds(1))
+                probingGhosttyAccess = false
+                probeGhosttyAccess()
+                return
+            }
+            ghosttyStartupRetries = 0
             applyGhosttyAccess(access)
             refresh()
         }
@@ -1934,29 +1946,37 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                     for id in acknowledged { agentQueue.dismiss(.outcome(id)) }
                 }
                 saveCompletions()
-            } else if ghosttyEnabled, case let generation = ghosttyAccessGeneration,
-                      case let access = await Task.detached(operation: { GhosttyAutomationPermission.check(askIfNeeded: false) }).value,
-                      generation == ghosttyAccessGeneration, access == .denied || access == .ghosttyNotRunning {
-                // A denial switches controls off and remembers it; Ghostty not running keeps them on
-                // and waits for its launch instead of polling. A result from before the user switched
-                // controls applies to nothing.
-                applyGhosttyAccess(access)
             } else if ghosttyEnabled {
-                // Unexplained native failure: off for this launch only; the remembered choice stays.
-                ghosttyFocusState = .unknown
-                ghosttyUnavailable = true
-                ghosttyEnabled = false
-                appliedGhosttyEnabled = false
-                ghosttyPermissionVerified = false
-                hasGhosttySelectionBaseline = false
-                lastGhosttySelection = nil
-                lastGhosttySnapshotAt = nil
-                lastGhosttyVisitAfter = nil
-                navigationMessage = "Ghostty controls unavailable. Check Automation permission before enabling them again."
+                let generation = ghosttyAccessGeneration
+                let access = await Task.detached { GhosttyAutomationPermission.check(askIfNeeded: false) }.value
+                if generation == ghosttyAccessGeneration, ghosttyEnabled {
+                    // A denial switches controls off and remembers it; Ghostty not running keeps them
+                    // on and waits for its launch instead of polling. Anything else is an unexplained
+                    // native failure. A result from before the user switched controls applies to nothing.
+                    if access == .denied || access == .ghosttyNotRunning {
+                        applyGhosttyAccess(access)
+                    } else {
+                        disableGhosttyForLaunch()
+                    }
+                }
             }
             checkingGhostty = false
             refresh()
         }
+    }
+
+    /// Off for this launch only after an unexplained native failure; the remembered choice stays.
+    private func disableGhosttyForLaunch() {
+        ghosttyFocusState = .unknown
+        ghosttyUnavailable = true
+        ghosttyEnabled = false
+        appliedGhosttyEnabled = false
+        ghosttyPermissionVerified = false
+        hasGhosttySelectionBaseline = false
+        lastGhosttySelection = nil
+        lastGhosttySnapshotAt = nil
+        lastGhosttyVisitAfter = nil
+        navigationMessage = "Ghostty controls unavailable. Check Automation permission before enabling them again."
     }
     /// Opens the whole queue from the strip (a click or VoiceOver activation); it stays open while
     /// the panel has the pointer or keyboard focus.
@@ -2027,6 +2047,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if !enabled && ghosttyUnavailable { return }
         guard enabled != appliedGhosttyEnabled else { return }
         appliedGhosttyEnabled = enabled
+        ghosttyStartupRetries = 0
         UserDefaults.standard.set(enabled, forKey: Companion.ghosttyEnabledKey)
         ghosttyAccessGeneration += 1
         // A denial stays visible after controls switch off; enabling checks again.
