@@ -8,7 +8,13 @@ public struct GhosttyTarget: Codable, Equatable, Sendable {
 public struct GhosttySnapshot: Decodable, Sendable {
     public struct Window: Decodable, Sendable {
         public struct Tab: Decodable, Sendable {
-            public struct Terminal: Decodable, Sendable { let id: String; let name: String }
+            public struct Terminal: Decodable, Sendable {
+                let id: String
+                let name: String
+                /// Present only in inventories taken with `tty` support (ADR 0011); "" when Ghostty
+                /// cannot report it for this terminal.
+                let tty: String?
+            }
             let id: String
             let terminals: [Terminal]
         }

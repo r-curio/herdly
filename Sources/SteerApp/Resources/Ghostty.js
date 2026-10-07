@@ -3,9 +3,17 @@ function run(argv) {
     const request = JSON.parse(argv[0]);
     const app = Application('com.mitchellh.ghostty');
     if (!app.running()) return JSON.stringify({status: 'unavailable'});
+    // `tty` is read only when the app's dictionary check found it declared (ADR 0011); Ghostty 1.3.1
+    // lacks it, and its inventory stays exactly as before.
+    const withTTY = request.tty === true;
+    function terminal(p) {
+        const value = {id: p.id(), name: p.name()};
+        if (withTTY) value.tty = p.tty();
+        return value;
+    }
     function inventory() {
         return app.windows().map(w => ({id: w.id(), tabs: w.tabs().map(t => ({
-            id: t.id(), terminals: t.terminals().map(p => ({id: p.id(), name: p.name()}))
+            id: t.id(), terminals: t.terminals().map(terminal)
         }))}));
     }
     function selected() {
