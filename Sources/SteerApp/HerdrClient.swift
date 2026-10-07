@@ -324,11 +324,14 @@ enum HerdrSubprocess {
             box.bytes = try? reader.read(upToCount: limit + 1)
             drained.signal()
         }
-        guard exited.wait(timeout: .now() + max(0, timeout)) == .success else {
+        let deadline = DispatchTime.now() + max(0, timeout)
+        guard exited.wait(timeout: deadline) == .success else {
             process.terminate()
             return .failure(.timeout)
         }
-        guard drained.wait(timeout: .now() + 1) == .success else { return .failure(.timeout) }
+        // The drain runs at utility priority, which heavy load can starve after the child exits, so it
+        // may use what is left of the deadline, and at least one second.
+        guard drained.wait(timeout: max(deadline, .now() + 1)) == .success else { return .failure(.timeout) }
         guard process.terminationStatus == 0, let bytes = box.bytes,
               bytes.count <= limit else { return .failure(.malformedReply) }
         return .success(String(decoding: bytes, as: UTF8.self))
