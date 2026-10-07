@@ -223,6 +223,13 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
     #expect(HerdrPresentation.keyDestination(for: .relayUnavailable(.leftHerdr)) == ("the Ghostty tab", "tab"))
 }
 
+@Test func herdrPresentationDoesNotAskForGhosttyControlsWhenTheRelayIsUnavailable() {
+    #expect(HerdrPresentation.relayUnavailableLine(for: .binding(.notScanned))
+        == "Steer can't answer this from here. Answer in Codex, or open its pane.")
+    #expect(HerdrPresentation.relayUnavailableLine(for: .daemonAnswerInProgress)
+        == "Steer can't answer this from here. Answer in Codex.")
+}
+
 // MARK: - Open availability
 
 @Test func herdrPresentationOpenAvailabilityFollowsBindingThenGhostty() {
