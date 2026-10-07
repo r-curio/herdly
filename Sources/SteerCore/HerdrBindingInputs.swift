@@ -140,10 +140,11 @@ public enum HerdrBindingInputs {
         }.compactMap(\.paneID))
     }
 
-    /// The Codex half of the gate (ADR 0012): a live Codex session's title is in no terminal of a
-    /// known Ghostty inventory, and herdr's default socket passes ADR 0009's trust check.
+    /// The Codex half of the gate (ADR 0012): a Ghostty inventory is known, a live Codex session
+    /// renders a title, and herdr's default socket passes ADR 0009's trust check. A title already in
+    /// Ghostty still opens it, so a scan can find the same title in herdr before either route acts.
     public static func codexGateOpens(_ codex: HerdrCodexTitles, defaultSocketTrusted: Bool) -> Bool {
-        defaultSocketTrusted && !codex.outsideGhostty.isEmpty
+        defaultSocketTrusted && codex.ghostty != nil && !codex.liveTitles.isEmpty
     }
 
     /// Steer may contact herdr only while Ghostty controls are on and either a live Claude session's
@@ -226,6 +227,8 @@ public enum HerdrBindingInputs {
     ///   - hookRecords: Steer's hook records for every herdr-capable session it read, any order.
     ///     Only Claude Code records are read.
     ///   - ghosttyControlsEnabled: Ghostty controls in this launch.
+    ///   - gateOpen: whether ADR 0009's gate holds, so a nil `outcome` is a scan still pending rather
+    ///     than herdr not being contacted.
     ///   - outcome: the latest herdr scan, nil when none has completed since the gate opened.
     ///   - defaultSocketPath: herdr's default socket as the client resolves it.
     ///   - codex: live Codex sessions and Ghostty titles, read only for a Codex session.
@@ -237,13 +240,14 @@ public enum HerdrBindingInputs {
         liveness: HerdrSessionLiveness,
         hookRecords: [HerdrHookPaneRecord],
         ghosttyControlsEnabled: Bool,
+        gateOpen: Bool,
         outcome: HerdrScanOutcome?,
         defaultSocketPath: String,
         codex: HerdrCodexTitles
     ) -> HerdrSessionBinding {
         if session.agent == .codex {
             return codexBinding(for: session, liveness: liveness, ghosttyControlsEnabled: ghosttyControlsEnabled,
-                                outcome: outcome, codex: codex)
+                                gateOpen: gateOpen, outcome: outcome, codex: codex)
         }
         let hookRecords = hookRecords.map(normalized).filter { $0.agent == .claude }
         let newest = newestRecords(hookRecords).filter {
@@ -269,19 +273,30 @@ public enum HerdrBindingInputs {
     /// A Codex session's binding and route (ADR 0012). The title decides the route:
     /// - in a pane of a successful scan and in no Ghostty terminal: `HerdrCodexBindingRules`;
     /// - in both: unavailable, because the route is unknown;
-    /// - otherwise `notInHerdr`, and the Ghostty tab rules apply. With Ghostty controls off, no
-    ///   known Ghostty inventory, no scan or a failed scan, herdr counts as not showing the title.
+    /// - in no pane of a successful scan: `notInHerdr`, and the Ghostty tab rules apply.
+    ///
+    /// While the gate holds without a successful scan, herdr cannot be ruled out, so the session is
+    /// unavailable; only `notRunning` counts as herdr showing nothing, since no server holds a pane.
+    /// With Ghostty controls off, no known Ghostty inventory, or the gate closed, herdr counts as not
+    /// showing the title.
     public static func codexBinding(
         for session: HerdrSessionKey,
         liveness: HerdrSessionLiveness,
         ghosttyControlsEnabled: Bool,
+        gateOpen: Bool,
         outcome: HerdrScanOutcome?,
         codex: HerdrCodexTitles
     ) -> HerdrSessionBinding {
         guard session.agent == .codex, ghosttyControlsEnabled, let ghostty = codex.ghostty,
-              case .available(let scan)? = outcome,
-              let title = HerdrCodexBindingRules.title(forSession: session.sessionID),
-              scan.snapshot.panes.contains(where: { $0.terminalTitle == title }) else { return .notInHerdr }
+              let title = HerdrCodexBindingRules.title(forSession: session.sessionID) else { return .notInHerdr }
+        let scan: HerdrScan
+        switch outcome {
+        case .available(let value)?: scan = value
+        case .unavailable(.notRunning)?: return .notInHerdr
+        case .unavailable(let reason)?: return .unavailable(.herdr(reason))
+        case nil: return gateOpen ? .unavailable(.notScanned) : .notInHerdr
+        }
+        guard scan.snapshot.panes.contains(where: { $0.terminalTitle == title }) else { return .notInHerdr }
         guard !ghostty.contains(title) else { return .unavailable(.binding(.titleInHerdrAndGhostty)) }
         switch HerdrCodexBindingRules.evaluate(sessionID: session.sessionID, liveness: liveness,
                                                liveSessions: codex.liveSessions, scan: scan) {
