@@ -39,6 +39,14 @@ public enum CodexSetupLimits {
     public static let maximumFileSize = 20 * 1024 * 1024
 }
 
+/// Outcome of keeping Steer's own installed helper in step with the running app's bundled helper.
+/// `skipped` carries why nothing changed; setup status reports any conflict separately.
+public enum HelperRefreshResult: Equatable, Sendable {
+    case current
+    case updated
+    case skipped(String)
+}
+
 public enum CodexSetupRequirements {
     public static let hookEvents = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd"]
     public static let helperSource = "steer-hook-v1"
@@ -793,6 +801,39 @@ public struct CodexSetupInstaller {
         return status(roots: roots, capabilities: capabilities)
     }
 
+    /// Replaces Steer's installed helper with `helper` only while the installed file is exactly the
+    /// one Steer recorded, and records the replacement so status and undo still recognize it. It never
+    /// reads or writes config.toml or hooks.json. A missing or inconsistent record, or a helper that
+    /// differs from the record, changes nothing. A failed write restores the previous helper and record.
+    public func refreshHelper(roots: CodexSetupRoots, helper: Data) throws -> HelperRefreshResult {
+        guard !helper.isEmpty else { return .skipped("The bundled Steer helper is unavailable.") }
+        guard fileManager.fileExists(atPath: roots.stateURL.path) else { return .skipped("Codex setup is not installed.") }
+        guard let originalState = try? readableData(at: roots.stateURL),
+              var state = try? JSONDecoder().decode(InstallState.self, from: originalState),
+              UUID(uuidString: state.installationID) != nil,
+              let recorded = Data(base64Encoded: state.helper) else {
+            return .skipped("Steer setup state is unreadable or inconsistent.")
+        }
+        guard let installed = try? readableData(at: roots.helperURL) else { return .skipped("Steer's helper is missing or unreadable.") }
+        guard installed == recorded else { return .skipped("Steer's helper differs from the one it installed.") }
+        guard installed != helper else { return .current }
+        state.helper = helper.base64EncodedString()
+        let updatedState = try JSONEncoder().encode(state)
+        do {
+            try atomicWriteExecutable(helper, to: roots.helperURL)
+            try atomicWrite(updatedState, to: roots.stateURL)
+        } catch let error {
+            do {
+                try atomicWriteExecutable(installed, to: roots.helperURL)
+                try atomicWrite(originalState, to: roots.stateURL)
+            } catch let rollbackError {
+                throw CodexSetupError.rollbackIncomplete("Helper update failed (\(error)); rollback also failed (\(rollbackError)). Check Steer's helper before retrying.")
+            }
+            throw CodexSetupError.failed("The helper update was not completed; the previous helper was restored.")
+        }
+        return .updated
+    }
+
     public func status(roots: CodexSetupRoots, capabilities: CodexCapabilities) -> CodexConnectionStatus {
         guard capabilities.supported, capabilities.cli || capabilities.desktop else {
             return .unsupported(capabilities.unsupportedReason ?? "No supported Codex runtime was detected.")
@@ -1110,6 +1151,30 @@ public struct CodexSetupInstaller {
         if let data { try atomicWrite(data, to: url) }
         else if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
     }
+
+    /// Writes an executable beside `url` and renames it into place, so a hook starting meanwhile
+    /// runs either the old helper or the new one, never a partial or non-executable file.
+    private func atomicWriteExecutable(_ data: Data, to url: URL) throws {
+        try beforeWrite?(url)
+        try SetupFileWriter.replaceExecutable(data, at: url, fileManager: fileManager)
+    }
+}
+
+/// Shared executable replacement for the Codex and Claude installers.
+enum SetupFileWriter {
+    static func replaceExecutable(_ data: Data, at url: URL, fileManager: FileManager) throws {
+        let temp = url.deletingLastPathComponent().appendingPathComponent(".steer-" + UUID().uuidString)
+        do {
+            try data.write(to: temp)
+            try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: temp.path)
+            guard rename(temp.path, url.path) == 0 else {
+                throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
+            }
+        } catch {
+            try? fileManager.removeItem(at: temp)
+            throw error
+        }
+    }
 }
 
 private struct OwnedArtifact {
@@ -1122,7 +1187,7 @@ private struct BackupSnapshot {
 }
 
 private struct InstallState: Codable {
-    let helper: String
+    var helper: String
     let command: String
     let installationID: String
     let backupDirectory: String?
