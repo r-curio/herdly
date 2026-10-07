@@ -10,6 +10,8 @@ colors:
   well: "#2a2a2a"
   sprite: "#22c55e"
   sprite-light: "#4cdc80"
+  usage-codex: "#3b82f6"
+  usage-claude: "#d97757"
   seam: "rgba(255, 255, 255, 0.08)"
 typography:
   title:
@@ -122,18 +124,22 @@ This is not the glossy dynamic island. It refuses glow, gradient, glass, the pul
 **Key Characteristics:**
 - One black shape fused to the menu bar: flat top, concave 8pt ears, deep 18pt bottom radii, no window shadow
 - One monospaced face (SF Mono via the system monospaced design) at 10, 11, and 12pt; semibold only for titles and the emphasized action
-- One color: the green sprite body and its lighter highlight; every other value is a gray on black
+- One color: the green sprite body and its lighter highlight; every other value is a gray on black, except the fills of the strip's usage bars, which name their source
 - Dark-gray wells (#2a2a2a) for the badge and every control; a pressed control inverts to light ink with black text
 - Dense, left-aligned rows separated by whitespace, not lines; the single seam is the only rule drawn
 - Motion carries meaning: a 0.5 s sprite step means working, a 0.18 s ease-out resize means the panel changed size
 
 ## Colors
 
-An achromatic ladder on pure black with a single green, reserved for the sprite.
+An achromatic ladder on pure black with a single green, reserved for the sprite, and two source hues reserved for the fills of the strip's usage bars.
 
 ### Primary
-- **Sprite Green** (`{colors.sprite}`): the sprite's body cells, and nothing else. It is the only chroma in the world; it appears in the strip, and again at the head of a "working" row in the open queue.
+- **Sprite Green** (`{colors.sprite}`): the sprite's body cells, and nothing else. It is the only chroma outside the usage bars; it appears in the strip, and again at the head of a "working" row in the open queue.
 - **Sprite Highlight** (`{colors.sprite-light}`): the sprite's ear and eye cells. A lighter green that gives the 6x4 bitmap its read at two points per cell.
+
+### Usage
+- **Codex Blue** (`{colors.usage-codex}`): the fill of Codex's usage bars (`NotchStyle.codexUsage`), and nothing else.
+- **Claude Orange** (`{colors.usage-claude}`): the fill of Claude's usage bars (`NotchStyle.claudeUsage`), and nothing else.
 
 ### Neutral
 - **Ground** (`{colors.ground}`): the panel itself, pure black so it fuses with the menu bar and the camera housing. Also the text color of a pressed control.
@@ -172,7 +178,7 @@ An achromatic ladder on pure black with a single green, reserved for the sprite.
 
 ## Layout
 
-The panel is one column, left-aligned, centered on the display. On a display with a camera housing the collapsed strip is the housing row itself: exactly the housing height, anchored to the top edge of the screen, with one sprite per session (at most three, each in its own color), the "+N" overflow mark, and the count in a 112pt wing left of the housing and the Codex weekly limit readout (a 4pt by 14pt vertical bar, well track filled in Codex blue from the bottom, with the percent in ink beside it; an empty track and a dim dash when unknown) in a 60pt wing right of it (the name is read in the open queue); while Codex also reports a five-hour window, the same readout with a dim "5h" caption sits 8pt ahead of the weekly one and that wing is 112pt, the left wing unmoved; while a Claude root reports current windows, the newest reading's "5h" and "7d" readouts, filled in Claude orange, sit ahead of Codex's, 12pt from the Codex group, and the wing grows 52pt per readout; the open queue grows downward from that row. Elsewhere the strip is inline with the menu bar row, as tall as the bar and anchored to the top edge, or, on an external monitor showing no menu bar (a full-screen app), 40pt tall and tucked above the screen edge and slid in only while the pointer touches the top edge, the panel is hovered or focused, or a new item is spotlit. Its frame is the body width plus two 8pt ears. Collapsed, the body is the two wings plus the housing width (never narrower than 200pt); open, it widens to 380pt and becomes exactly as tall as its content, capped at 480pt with the queue scrolling inside. On a display without a housing the same shape appears as a compact top-center strip.
+The panel is one column, left-aligned, centered on the display. On a display with a camera housing the collapsed strip is the housing row itself: exactly the housing height, anchored to the top edge of the screen, with one sprite per session (at most three, each in its own color), the "+N" overflow mark, and the count in a 112pt wing left of the housing and the Codex weekly limit readout (a 4pt by 14pt vertical bar, well track filled in Codex blue from the bottom, with the percent in ink beside it; an empty track and a dim dash when unknown) in a 60pt wing right of it (the name is read in the open queue); while Codex also reports a five-hour window, the same readout with a dim "5h" caption sits 8pt ahead of the weekly one and that wing is 112pt, the left wing unmoved; while a Claude root reports current windows, the newest reading's "5h" and "7d" readouts, filled in Claude orange, sit ahead of Codex's, 12pt from the Codex group, and the wing grows 62pt per Claude readout (room for "100%") plus that 4pt group gap (`UsageStripReadouts.wingWidth`); the open queue grows downward from that row. Elsewhere the strip is inline with the menu bar row, as tall as the bar and anchored to the top edge, or, on an external monitor showing no menu bar (a full-screen app), 40pt tall and tucked above the screen edge and slid in only while the pointer touches the top edge, the panel is hovered or focused, or a new item is spotlit. Its frame is the body width plus two 8pt ears. Collapsed, the body is the two wings plus the housing width (never narrower than 200pt); open, it widens to 380pt (or keeps the collapsed width when the wings are already wider) and becomes exactly as tall as its content, capped at 480pt with the queue scrolling inside. On a display without a housing the same shape appears as a compact top-center strip.
 
 Content is inset 16pt from each side of the frame (ear plus 8pt). In the strip the first sprite sits 4pt in from the inset, the sprites, overflow mark, and badge follow at 6pt gaps, and the usage readouts are pushed to the right edge of their wing. The open queue begins with the seam, 12pt above the first row. Rows stack at 14pt; inside a row, the title line, any sentence, the detail table, and the control row stack at 8pt; the detail table's own lines sit at 3pt. Detail labels occupy a fixed 58pt column with an 8pt gutter, so values align as a grid. Controls sit in a row at 6pt gaps. A 14pt bottom pad closes the queue.
 
