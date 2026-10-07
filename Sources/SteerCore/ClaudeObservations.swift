@@ -16,7 +16,6 @@ public struct ClaudeObservationScan: Equatable, Sendable {
 /// Reads only Steer's normalized Claude records. A malformed record is ignored; an unreadable
 /// directory makes the whole root unavailable so it cannot clear another root's state.
 public enum ClaudeObservationReader {
-    public static let maximumEntries = 4096
     public static let maximumRecordSize = 128 * 1024
     public static let maximumIdentifier = 256
     public static let maximumToolFreshness: Double = 30
@@ -62,11 +61,10 @@ public enum ClaudeObservationReader {
                             now: Double = Date().timeIntervalSince1970) -> ClaudeObservationScan {
         let scope = normalizedScope(sourceScope)
         guard isDirectory(events),
-              let urls = try? FileManager.default.contentsOfDirectory(at: events, includingPropertiesForKeys: nil),
-              urls.count <= maximumEntries else {
+              let entries = HookEventListing.entries(in: events) else {
             return ClaudeObservationScan(sourceScope: scope, available: false)
         }
-        let records = urls.filter { $0.pathExtension == "json" }
+        let records = HookEventListing.newestRecords(entries)
             .compactMap { record(at: $0, installationID: installationID, observingSince: observingSince) }
             .sorted {
                 if $0.capturedAt != $1.capturedAt { return $0.capturedAt < $1.capturedAt }

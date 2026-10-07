@@ -264,13 +264,7 @@ public enum ReminderReader {
                             knownCLISessions: Set<UUID> = [], daemonThreads: Set<UUID> = []) -> ReminderScan {
         let cliTitles = ghostty?.titles ?? []
         var result = ReminderScan()
-        guard let files = try? FileManager.default.contentsOfDirectory(at: events, includingPropertiesForKeys: [.creationDateKey]),
-              files.count <= 4096 else { return result }
-        let ordered = files.sorted {
-            let a = (try? $0.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-            let b = (try? $1.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-            return a == b ? $0.lastPathComponent < $1.lastPathComponent : a < b
-        }
+        guard let ordered = HookEventListing.entries(in: events) else { return result }
         var probes: [UUID: [ApprovalResolutionProbe]] = [:]
         for url in ordered where url.pathExtension == "approval" {
             if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(ApprovalRequest.self, from: bytes),
@@ -328,9 +322,23 @@ public enum ReminderReader {
             let turn_id: UUID?
             let received_at: String
         }
-        let hooks = ordered.filter { $0.pathExtension == "json" }.compactMap { url -> Hook? in
+        func hook(_ url: URL) -> Hook? {
             guard let bytes = bounded(url, limit: 65536) else { return nil }
             return try? JSONDecoder().decode(Hook.self, from: bytes)
+        }
+        let window = HookEventListing.newestRecords(ordered)
+        var hooks = window.compactMap(hook)
+        // Request files are always read, but their session's end can be older than the window. A
+        // handed-back reminder resolves from it, so look further back, newest first and bounded,
+        // only for SessionEnd records of sessions that still hold a request.
+        let waiting = Set(result.attentionRequests.map(\.session))
+            .subtracting(hooks.filter { $0.hook_event_name == "SessionEnd" }.map(\.session_id))
+        if !waiting.isEmpty {
+            let older = ordered.filter { $0.pathExtension == "json" }.dropLast(window.count)
+            let ends = older.reversed().prefix(HookEventListing.maximumRecords).compactMap(hook).filter {
+                $0.hook_event_name == "SessionEnd" && waiting.contains($0.session_id)
+            }
+            hooks.insert(contentsOf: ends.reversed(), at: 0)
         }
         for hook in hooks where hook.hook_event_name == "SessionEnd" {
             guard let ended = RolloutTimestamp.parse(hook.received_at) else { continue }
