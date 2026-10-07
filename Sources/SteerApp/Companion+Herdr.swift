@@ -57,6 +57,15 @@ extension Companion {
     /// The latest herdr scan outcome for settings (also published by `herdr.scanOutcome`).
     var herdrScanOutcome: HerdrScanOutcome? { herdr.scanOutcome }
 
+    /// Agents with a live session whose newest hook event reported a herdr pane, for the settings
+    /// row's integration problems (#127). Reading this never contacts herdr.
+    var herdrAgentsSeen: Set<HerdrAgentKind> {
+        let live = herdrLiveSessions()
+        return Set(HerdrBindingInputs.newestRecords(herdr.hookRecords).filter {
+            $0.paneID != nil && live.contains(HerdrSessionKey(agent: $0.agent, sessionID: $0.sessionID))
+        }.map(\.agent))
+    }
+
     // MARK: - Scan
 
     /// Called once per completed hook scan. Reads the newest hook records off the main actor, then
