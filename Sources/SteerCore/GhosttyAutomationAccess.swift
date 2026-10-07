@@ -45,9 +45,9 @@ public enum GhosttyControlsPolicy {
         }
     }
 
-    /// Offer Ghostty controls once, only before the user has ever chosen, and never in preview
-    /// or smoke-test launches.
-    public static func shouldOfferFirstRun(offeredBefore: Bool, storedPreference: Bool?, interactiveLaunch: Bool) -> Bool {
-        interactiveLaunch && !offeredBefore && storedPreference == nil
+    /// Offer Ghostty controls once, only before the user has ever chosen. Callers skip preview and
+    /// probe launches before asking.
+    public static func shouldOfferFirstRun(offeredBefore: Bool, storedPreference: Bool?) -> Bool {
+        !offeredBefore && storedPreference == nil
     }
 }

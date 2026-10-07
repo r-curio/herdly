@@ -18,9 +18,8 @@ import Testing
 }
 
 @Test func firstRunOfferAppearsOnceBeforeAnyChoice() {
-    #expect(GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: false, storedPreference: nil, interactiveLaunch: true))
-    #expect(!GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: true, storedPreference: nil, interactiveLaunch: true))
-    #expect(!GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: false, storedPreference: true, interactiveLaunch: true))
-    #expect(!GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: false, storedPreference: false, interactiveLaunch: true))
-    #expect(!GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: false, storedPreference: nil, interactiveLaunch: false))
+    #expect(GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: false, storedPreference: nil))
+    #expect(!GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: true, storedPreference: nil))
+    #expect(!GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: false, storedPreference: true))
+    #expect(!GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: false, storedPreference: false))
 }
