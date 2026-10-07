@@ -72,8 +72,8 @@ public struct HerdrPaneObservation: Equatable, Hashable, Sendable {
 }
 
 /// Everything read from herdr in one scan: the socket's protocol and snapshot, the server's start
-/// identity, `lsof` client checks, and integration status per agent. `protocolVersion` is `nil`
-/// when the reply did not report one.
+/// identity, `lsof` client checks, integration status per agent, and `pane.process_info` per pane
+/// the scan asked about. `protocolVersion` is `nil` when the reply did not report one.
 public struct HerdrObservation: Equatable, Sendable {
     public let protocolVersion: Int?
     public let server: HerdrServerInstance
@@ -81,6 +81,8 @@ public struct HerdrObservation: Equatable, Sendable {
     public let clients: [HerdrClientObservation]
     public let integrations: [HerdrAgentKind: HerdrIntegrationState]
     public let panes: [HerdrPaneObservation]
+    /// Absent for a pane the scan did not ask about.
+    public let processInfo: [String: Result<HerdrProcessInfo, HerdrUnavailableReason>]
 
     public init(
         protocolVersion: Int?,
@@ -88,7 +90,8 @@ public struct HerdrObservation: Equatable, Sendable {
         session: HerdrSessionName,
         clients: [HerdrClientObservation],
         integrations: [HerdrAgentKind: HerdrIntegrationState],
-        panes: [HerdrPaneObservation]
+        panes: [HerdrPaneObservation],
+        processInfo: [String: Result<HerdrProcessInfo, HerdrUnavailableReason>]
     ) {
         self.protocolVersion = protocolVersion
         self.server = server
@@ -96,6 +99,7 @@ public struct HerdrObservation: Equatable, Sendable {
         self.clients = clients
         self.integrations = integrations
         self.panes = panes
+        self.processInfo = processInfo
     }
 }
 
@@ -201,7 +205,8 @@ public enum HerdrBindingRules {
     ///     (ADR 0012), so a Codex session never binds here.
     ///   - defaultSocketPath: herdr's default socket (`~/.config/herdr/herdr.sock`) as resolved by
     ///     the caller.
-    /// - Returns: `.bound` only when every ADR 0008 rule holds; otherwise the first failing reason.
+    /// - Returns: `.bound` only when every ADR 0008 rule holds, including a foreground process named
+    ///   for the agent (`claude`) in the pane's `pane.process_info`; otherwise the first failing reason.
     ///   The result depends only on the inputs, not on their order.
     public static func evaluate(
         sessionID: String,
@@ -259,6 +264,13 @@ public enum HerdrBindingRules {
         default: return .unavailable(.multipleClients(clients.count))
         }
         guard clients.first?.ancestryReachesGhostty == true else { return .unavailable(.nonGhosttyClient) }
+
+        // The agent must still be in the pane's foreground: `agent_session` can linger after it
+        // exits. Checked on every scan, including Open's revalidation.
+        if let veto = HerdrForegroundProcess.veto(observation.processInfo[paneID], paneID: paneID, agent: record.agent,
+                                                  accepts: { $0 >= 1 }) {
+            return .unavailable(veto)
+        }
 
         return .bound(HerdrPaneTarget(sessionID: sessionID, agent: record.agent, paneID: paneID))
     }

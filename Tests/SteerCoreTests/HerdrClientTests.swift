@@ -525,3 +525,22 @@ private final class RequestLog: @unchecked Sendable {
     #expect(await monitor.revalidate(fresh) == .unavailable(.notRunning))
     #expect(log.requests == [codex, fresh])
 }
+
+@Test func herdrClaudeScanReadsProcessInfoForTheRecordedPane() throws {
+    let lab = try HerdrLab()
+    defer { lab.remove() }
+    let processes = #"[{"pid":83378,"name":"claude","argv":["claude"]}]"#
+    let server = try FakeHerdrServer(path: lab.socketPath) { method, id, params in
+        method == "pane.process_info"
+            ? .line(herdrProcessInfoReply(id: id, pane: params["pane_id"] as? String ?? "", processes: processes))
+            : healthyHerdr(method: method, id: id, params: params)
+    }
+    defer { server.stop() }
+    // Integration status is covered elsewhere; skipping its subprocess keeps this about process info.
+    let request = HerdrScanRequest(includeIntegration: false, processInfoPaneIDs: ["w1:p2", "w9:p9"])
+    let scan = try #require(lab.client().scan(request).scan)
+    // w9:p9 is not in the snapshot, so it is not asked about.
+    #expect(scan.processInfo.keys.sorted() == ["w1:p2"])
+    #expect((try? scan.processInfo["w1:p2"]?.get())?.foregroundProcesses.map(\.name) == ["claude"])
+    #expect(server.requests.compactMap { ($0["params"] as? [String: Any])?["pane_id"] as? String } == ["w1:p2"])
+}
