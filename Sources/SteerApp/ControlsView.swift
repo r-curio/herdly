@@ -463,7 +463,7 @@ private struct TerminalControls: View {
                 Divider()
                 SettingsRow(title: "Automation permission", detail: automationDetail) {
                     if model.ghosttyAccess == .denied {
-                        Button("Open Automation Settings") { NSWorkspace.shared.open(GhosttyAutomationPermission.settingsURL) }
+                        Button("Open Automation Settings", action: GhosttyAutomationPermission.openSettings)
                     }
                     StatusBadge(title: automationBadge, color: model.ghosttyPermissionVerified ? .green : .orange)
                 }
@@ -484,7 +484,7 @@ private struct TerminalControls: View {
     private var automationDetail: String {
         if model.ghosttyPermissionVerified { return "Granted in System Settings." }
         switch model.ghosttyAccess {
-        case .denied: return "Not allowed. Turn on Steer › Ghostty in System Settings › Privacy & Security › Automation."
+        case .denied: return "Not allowed. " + GhosttyAutomationPermission.deniedGuidance
         case .ghosttyNotRunning: return "Waiting for Ghostty to open; macOS asks then."
         default: return model.ghosttyEnabled ? "Waiting for macOS to confirm access." : "Enable Ghostty to let macOS request access."
         }

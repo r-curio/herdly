@@ -9,6 +9,14 @@ enum GhosttyAutomationPermission {
     static let bundleIdentifier = "com.mitchellh.ghostty"
     static let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
 
+    static let deniedGuidance = "Turn on Steer › Ghostty in System Settings › Privacy & Security › Automation."
+
+    static var ghosttyIsRunning: Bool {
+        !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty
+    }
+
+    static func openSettings() { NSWorkspace.shared.open(settingsURL) }
+
     static func check(askIfNeeded: Bool) -> GhosttyAutomationAccess {
         let target = NSAppleEventDescriptor(bundleIdentifier: bundleIdentifier)
         guard let desc = target.aeDesc else { return .unknown(-1) }
