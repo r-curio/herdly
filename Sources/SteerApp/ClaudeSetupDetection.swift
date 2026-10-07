@@ -401,15 +401,25 @@ final class ClaudeSetupModel: ObservableObject {
         let support = applicationSupport
         let usagePaths = usageOptInPaths
         Task { @MainActor in
-            let snapshots = await Task.detached(priority: .utility) {
+            let (snapshots, updatedHelpers) = await Task.detached(priority: .utility) {
                 let caps = ClaudeSetupDetection.capabilities()
-                return paths.map { path in
+                var updated = 0
+                let snapshots = paths.map { path in
                     let root = URL(fileURLWithPath: path, isDirectory: true)
+                    // Only Steer's own unchanged helper is replaced; settings.json is never touched here.
+                    if let helper = BundledHelper.validated,
+                       (try? ClaudeSetupInstaller().refreshHelper(
+                           roots: ClaudeSetupDetection.setupRoots(configDirectory: root, applicationSupport: support),
+                           helper: helper)) == .updated {
+                        updated += 1
+                    }
                     return ClaudeSetupDetection.setupSnapshot(root: root, applicationSupport: support, capabilities: caps,
                                                               usageEnabled: usagePaths.contains(root.standardizedFileURL.path))
                 }
+                return (snapshots, updated)
             }.value
             guard token == refreshToken else { return }
+            if updatedHelpers > 0 { message = "Updated Steer's Claude helper to match this version of Steer." }
             roots = snapshots.map { snapshot in
                 Root(url: snapshot.root, capabilities: snapshot.capabilities, plan: snapshot.plan, status: snapshot.status,
                      helperPath: snapshot.helperPath, eventsPath: snapshot.eventsPath,
