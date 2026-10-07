@@ -1,0 +1,19 @@
+# Talk to herdr over its socket and poll snapshots
+
+Accepted with the user on 2026-10-07 (issue #103). Steer sends every herdr API request (`ping`, `session.snapshot`, focus, `agent.send_keys`) directly to herdr's default JSON socket, opening one short connection per request. It reads state by polling snapshots on its existing 2-second scan and never subscribes to events. The socket reports the running server's protocol and is the only route to herdr's API. herdr's event stream drops events under load, cannot replay, and has no ordering relative to snapshots, so it can only invalidate state that Steer must re-read anyway.
+
+## Rules
+
+- **Gate:** Steer contacts herdr only while Ghostty controls are enabled in this launch and at least one live session's newest Steer hook event carries `HERDR_PANE_ID`. The hook helper records that variable and `HERDR_SOCKET_PATH`, and never contacts herdr itself.
+- **Socket trust:** Steer connects only to `~/.config/herdr/herdr.sock`, and only when the file is a Unix socket owned by the current user with no group or other permission bits. The parent directory may be wider: herdr creates `~/.config/herdr` with mode `0755`, and the socket's own mode is what protects it. Steer sends no credential.
+- **Subprocesses:** these are limited to `herdr integration status` (ADR 0008) and `lsof` for counting attached clients and checking their Ghostty ancestry. Both run on every herdr scan and again immediately before every Open or relay. `herdr` is resolved from fixed locations (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`), never from `PATH`.
+- **Bounds:** each socket request has a 1-second total deadline from connect to the newline-terminated reply, a 2 MiB reply limit, and must receive a reply with the matching `id`. Each subprocess has a 2-second deadline, after which Steer terminates it, and its output is capped. A failed poll waits for the next scan. Focus and `send_keys` are never retried, because a retried key could answer twice.
+- **Freshness:** Steer re-reads the snapshot and client checks immediately before every focus or key. Acknowledgment uses the Ghostty interval rule: Steer counts a visit only when the exact pane's focus changes between two snapshots, both taken with exactly one Ghostty-hosted client, after the outcome arrived.
+- **Placement:** SteerCore decodes replies and command output within fixed bounds and applies the protocol allowlist, the client verdict, and ADR 0008's binding rules as pure functions of the snapshot, hook records, observations, and time. SteerApp owns the socket client, the subprocess runner, path resolution, and scheduling off the main actor.
+- **Failures:** each failure produces one typed unavailable reason, for example not running, untrusted socket, unsupported protocol, integration not current, wrong client count, non-Ghostty client, split, named session, void binding, timeout, or malformed reply. Every reason makes the target unavailable. No reason clears attention, grants a decision, or falls back to another pane, and hook notifications continue. Which reasons Steer shows to the user, and where, is decided separately.
+
+## Considered options
+
+- **The `herdr` CLI for every request:** this adds a binary to locate, a process per request, and a schema that describes the client build rather than the running server. ADR 0007 rejected the same extra layer in front of the Codex daemon socket.
+- **Subscribing to events:** this would mean a long-lived second connection with its own resubscribe-then-snapshot recovery. Every action would still need a fresh read. The option can be revisited if acknowledgment timing turns out to need finer resolution than the scan interval.
+- **Requiring a private socket directory, as ADR 0007 does:** herdr's default `0755` directory would make herdr unavailable everywhere, while the socket's `0600` mode already restricts who can connect.
