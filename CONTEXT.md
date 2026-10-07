@@ -22,7 +22,7 @@ The terminal environment that contains a CLI session's terminal: an unsplit Ghos
 _Avoid_: Terminal app, multiplexer, window
 
 **Pane binding**:
-The association between a CLI session and the one herdr pane running it. It holds only while the companion's own record of that pane and herdr's report of the pane's session agree, and is void once the session ends, herdr's report changes, or herdr restarts.
+The association between a CLI session and the one herdr pane running it. For Claude Code it holds only while the companion's own record of that pane and herdr's report of the pane's session agree, and is void once the session ends, herdr's report changes, or herdr restarts. For Codex it holds only while exactly one pane runs a Codex process in its foreground and shows the session's shortened identifier as its title, and is void once either stops holding or the session ends.
 _Avoid_: Pane mapping, pane match
 
 **Thread name**:

@@ -80,6 +80,8 @@ If the hook recorded its ancestor PIDs (with process start times, to guard again
 
 ## Answers to the issue's questions, as far as evidence goes
 
+Decided afterwards with the user in [ADR 0012](../adr/0012-bind-codex-herdr-panes-by-title-and-foreground-process.md): Codex binds by title and foreground process, Claude keeps ADR 0008 with a foreground-process check, and the hook-ancestry proposal below was not adopted.
+
 | Question | What the evidence shows | Still open |
 | --- | --- | --- |
 | Independent signal for the pane | `pane.process_info` proves which pane runs a Codex CLI process. Under the daemon, only the pane title ties that pane to a session. Codex exposes no client identity. | Whether a title, with a foreground Codex process and uniqueness checks, may bind (today it only vetoes). |
