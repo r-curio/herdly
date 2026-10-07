@@ -247,3 +247,23 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     #expect((installed["statusLine"] as? [String: Any])?["command"] as? String == "sleep 2 & exit 0")
     #expect(FileManager.default.fileExists(atPath: setupRoots.helperURL.path))
 }
+
+@Test func stripShowsTheNewestCurrentClaudeReadingAcrossRoots() {
+    func reading(_ scope: String, observedAt: Double, resetsAt: Double = 1_000) -> ClaudeUsageReading {
+        ClaudeUsageReading(sourceScope: scope, sessionID: sessionA,
+                           fiveHour: ClaudeUsageWindow(usedPercentage: 10, resetsAt: resetsAt),
+                           sevenDay: ClaudeUsageWindow(usedPercentage: 20, resetsAt: resetsAt), observedAt: observedAt)
+    }
+    let older = reading("/a", observedAt: 100)
+    let newer = reading("/b", observedAt: 200)
+    #expect(ClaudeUsageReading.newest([older, newer], now: 500)?.sourceScope == "/b")
+    // A newer reading whose windows have reset never hides an older one that is still current.
+    let expired = reading("/c", observedAt: 300, resetsAt: 400)
+    #expect(ClaudeUsageReading.newest([older, expired], now: 500)?.sourceScope == "/a")
+    #expect(ClaudeUsageReading.newest([expired], now: 500) == nil)
+    #expect(ClaudeUsageReading.newest([ClaudeUsageReading](), now: 500) == nil)
+    // Equal observation times pick the same root whatever the input order.
+    let twin = reading("/a2", observedAt: 200)
+    #expect(ClaudeUsageReading.newest([newer, twin], now: 500)?.sourceScope == "/a2")
+    #expect(ClaudeUsageReading.newest([twin, newer], now: 500)?.sourceScope == "/a2")
+}

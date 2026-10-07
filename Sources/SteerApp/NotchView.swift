@@ -37,6 +37,9 @@ enum NotchStyle {
     static let sprite = Color(red: 0.133, green: 0.773, blue: 0.369)    // #22c55e body
     static let spriteLight = Color(red: 0.298, green: 0.863, blue: 0.502) // #4cdc80 highlight
     static let seam = Color.white.opacity(0.08)
+    /// Usage bar fills name their source: Codex blue, Claude orange. Nothing else uses these.
+    static let codexUsage = Color(red: 0.231, green: 0.510, blue: 0.965)  // #3b82f6
+    static let claudeUsage = Color(red: 0.851, green: 0.467, blue: 0.341) // #d97757
 
     /// Sprite colors by session, body and highlight; index 0 is the original green.
     static let spriteColors: [(body: Color, light: Color)] = [
@@ -146,28 +149,44 @@ struct Badge: View {
     }
 }
 
-/// One of Codex's usage limits as a vertical bar: a dark-well track filled in ink from the bottom
-/// to the used share, with the percent beside it; an empty track and a dash while Steer has no
-/// current reading. A dim caption ahead of the bar names a second window ("5h") when two readouts
-/// share the strip; the weekly readout carries none, as it always has. Gray only, per the One
-/// Color Rule. Hidden from VoiceOver; the strip label speaks it.
+/// One usage limit as a vertical bar: a dark-well track filled from the bottom to the used share in
+/// its source's hue (Codex blue, Claude orange), with the percent beside it in gray; an empty track
+/// and a dash while Steer has no current reading. A dim caption ahead of the bar names the window
+/// ("5h", "7d"); Codex's weekly readout carries none, as it always has. Hidden from VoiceOver; the
+/// strip label speaks it.
 struct UsageLimitReading: View {
-    var limit: CodexUsageWindow?
+    var percent: Double?
+    var percentText: String?
     var caption: String? = nil
+    var tint: Color
     static let barWidth: CGFloat = 4
     static let barHeight: CGFloat = 14
 
-    private var fraction: CGFloat { CGFloat(min(100, max(0, limit?.usedPercent ?? 0)) / 100) }
+    init(limit: CodexUsageWindow?, caption: String? = nil) {
+        percent = limit?.usedPercent
+        percentText = limit?.percentText
+        self.caption = caption
+        tint = NotchStyle.codexUsage
+    }
+
+    init(limit: ClaudeUsageWindow, caption: String) {
+        percent = limit.usedPercentage
+        percentText = limit.percentText
+        self.caption = caption
+        tint = NotchStyle.claudeUsage
+    }
+
+    private var fraction: CGFloat { CGFloat(min(100, max(0, percent ?? 0)) / 100) }
 
     var body: some View {
         HStack(spacing: 5) {
             if let caption { Text(caption).foregroundStyle(NotchStyle.dim) }
             ZStack(alignment: .bottom) {
                 Capsule().fill(NotchStyle.well)
-                Capsule().fill(NotchStyle.ink).frame(height: Self.barHeight * fraction)
+                Capsule().fill(tint).frame(height: Self.barHeight * fraction)
             }
             .frame(width: Self.barWidth, height: Self.barHeight)
-            Text(limit?.percentText ?? "—").foregroundStyle(limit == nil ? NotchStyle.dim : NotchStyle.ink).monospacedDigit()
+            Text(percentText ?? "—").foregroundStyle(percentText == nil ? NotchStyle.dim : NotchStyle.ink).monospacedDigit()
         }
         .font(NotchStyle.mono(11, .medium))
         .accessibilityHidden(true)
@@ -1086,9 +1105,13 @@ struct Notch: View {
         if sessions > 1 { parts.append("\(sessions) sessions") }
         if summary.working { parts.append("working") }
         if summary.toCheck > 0 { parts.append("\(summary.toCheck) to check") }
-        if let limit = model.currentFiveHourLimit { parts.append("five-hour limit \(limit.percentText) used") }
-        if let limit = model.currentWeeklyLimit { parts.append("weekly limit \(limit.percentText) used") }
-        else { parts.append("weekly limit unknown") }
+        if let claude = model.currentClaudeUsage {
+            if let limit = claude.fiveHour { parts.append("Claude five-hour limit \(limit.percentText) used") }
+            if let limit = claude.sevenDay { parts.append("Claude seven-day limit \(limit.percentText) used") }
+        }
+        if let limit = model.currentFiveHourLimit { parts.append("Codex five-hour limit \(limit.percentText) used") }
+        if let limit = model.currentWeeklyLimit { parts.append("Codex weekly limit \(limit.percentText) used") }
+        else { parts.append("Codex weekly limit unknown") }
         return parts.joined(separator: ", ")
     }
 
@@ -1097,8 +1120,9 @@ struct Notch: View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: model.expand) {
                 // One sprite per session (at most three), the overflow mark, and the to-check count
-                // sit together in the wing left of the housing; the weekly limit reading sits in the
-                // wing right of it, with the five-hour reading ahead of it while Codex reports one.
+                // sit together in the wing left of the housing; Codex's weekly limit reading sits in the
+                // wing right of it, with its five-hour reading ahead of it while Codex reports one, and
+                // Claude's current five-hour and seven-day readings (orange) ahead of Codex's (blue).
                 // The gap between them is the housing itself. The name is read from
                 // the open queue and the accessibility label, never from the strip. The 8pt content
                 // inset on each side comes out of the wings.
@@ -1125,6 +1149,15 @@ struct Notch: View {
                     Color.clear.frame(width: layout.gap)
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
+                        if let claude = model.currentClaudeUsage {
+                            if let fiveHour = claude.fiveHour {
+                                UsageLimitReading(limit: fiveHour, caption: "5h").padding(.trailing, 8)
+                            }
+                            if let sevenDay = claude.sevenDay {
+                                UsageLimitReading(limit: sevenDay, caption: "7d").padding(.trailing, 8)
+                            }
+                            Color.clear.frame(width: 4)
+                        }
                         if let fiveHour = model.currentFiveHourLimit {
                             UsageLimitReading(limit: fiveHour, caption: "5h").padding(.trailing, 8)
                         }
