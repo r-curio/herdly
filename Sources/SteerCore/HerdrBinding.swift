@@ -4,15 +4,8 @@ import Foundation
 // for the session names that `HERDR_PANE_ID` and herdr's fresh snapshot shows exactly that one
 // pane reporting the session as its `agent_session`. Everything here is a pure function of the
 // values passed in; SteerApp owns the socket, subprocesses, and scheduling (ADR 0009). The
-// inputs are deliberately plain so they can be filled from the hook record and snapshot models
-// once those land.
-
-/// The agent a herdr integration reports for a pane, and the agent whose integration must be
-/// current for a session.
-public enum HerdrAgentKind: String, Codable, Hashable, Sendable {
-    case codex
-    case claude
-}
+// inputs are deliberately plain so they can be filled from the hook record and snapshot models.
+// `HerdrAgentKind` comes from HerdrSnapshot.swift.
 
 /// Steer's own record from a session's newest hook event. `paneID` is `HERDR_PANE_ID` and
 /// `socketPath` is `HERDR_SOCKET_PATH`, each `nil` when the event did not carry it.
