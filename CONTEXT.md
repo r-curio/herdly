@@ -21,6 +21,10 @@ An individual Codex conversation in the desktop app or CLI, distinct from its ho
 The terminal environment that contains a CLI session's terminal: an unsplit Ghostty tab directly, or a single-pane herdr tab whose herdr client runs in Ghostty.
 _Avoid_: Terminal app, multiplexer, window
 
+**Pane binding**:
+The association between a CLI session and the one herdr pane running it. It holds only while the companion's own record of that pane and herdr's report of the pane's session agree, and is void once the session ends, herdr's report changes, or herdr restarts.
+_Avoid_: Pane mapping, pane match
+
 **Thread name**:
 The name Codex desktop gives a Codex session and shows in its sidebar. The companion displays it when Codex has recorded one and never invents a substitute; a session without one is labelled by its shortened identifier.
 
