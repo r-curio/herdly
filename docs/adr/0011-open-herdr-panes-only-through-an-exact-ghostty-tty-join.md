@@ -4,7 +4,7 @@ Accepted with the user on 2026-10-07 (issue #105). Open in Codex or Open in Clau
 
 ## Sequence
 
-1. **Revalidate.** Re-read the herdr snapshot, integration status, and `lsof`, plus a fresh Ghostty inventory. Apply ADR 0008's pane binding and target checks and ADR 0009's protocol and socket checks. Require exactly one Ghostty terminal whose `tty` equals the single client's TTY, in an unsplit tab in the current Ghostty window.
+1. **Revalidate.** Re-read the herdr snapshot, `pane.process_info` for the bound pane, integration status (Claude only), and `lsof`, plus a fresh Ghostty inventory. Apply the session's pane binding and target checks (ADR 0008 for Claude, ADR 0012 for Codex) and ADR 0009's protocol and socket checks. Require exactly one Ghostty terminal whose `tty` equals the single client's TTY, in an unsplit tab in the current Ghostty window.
 2. **Focus herdr.** Send `agent focus` with the bound pane ID, once and never retried. This also marks the agent seen in herdr, which follows from the user's explicit Open.
 3. **Verify herdr.** A fresh snapshot must show exactly the bound pane focused, with the binding and client checks still holding.
 4. **Raise Ghostty.** Select the matched tab and activate Ghostty.
