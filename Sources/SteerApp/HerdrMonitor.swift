@@ -3,7 +3,7 @@ import SteerCore
 
 /// Polls herdr on the 2-second scan, and only while the gate in ADR 0009 holds: Ghostty controls
 /// are on in this launch and either a live Claude Code session's newest Steer hook event recorded
-/// a `HERDR_PANE_ID` or a live Codex session's title is in no Ghostty terminal while herdr's
+/// a `HERDR_PANE_ID` or a live Codex session exists beside a known Ghostty inventory while herdr's
 /// default socket is trusted (ADR 0012). Outside the gate Steer does not contact herdr and the
 /// last scan is dropped.
 ///

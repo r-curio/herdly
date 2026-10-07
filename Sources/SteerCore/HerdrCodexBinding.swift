@@ -83,10 +83,15 @@ public struct HerdrCodexTitles: Equatable, Sendable {
 
     public static let none = HerdrCodexTitles(liveSessions: [], ghostty: nil)
 
-    /// The titles of live sessions that no Ghostty terminal shows: the ones herdr may host, and the
+    /// The titles live sessions render.
+    public var liveTitles: Set<String> {
+        Set(liveSessions.compactMap(HerdrCodexBindingRules.title(forSession:)))
+    }
+
+    /// The titles of live sessions that no Ghostty terminal shows: the ones herdr may bind, and the
     /// ones each scan asks `pane.process_info` about. Empty while no Ghostty inventory is known.
     public var outsideGhostty: Set<String> {
         guard let ghostty else { return [] }
-        return Set(liveSessions.compactMap(HerdrCodexBindingRules.title(forSession:))).subtracting(ghostty)
+        return liveTitles.subtracting(ghostty)
     }
 }

@@ -55,7 +55,7 @@ private func binding(_ key: HerdrSessionKey = claudeKey, liveness: HerdrSessionL
                      records: [HerdrHookPaneRecord] = [record()], ghostty: Bool = true,
                      outcome: HerdrScanOutcome? = scan()) -> HerdrSessionBinding {
     HerdrBindingInputs.binding(for: key, liveness: liveness, hookRecords: records, ghosttyControlsEnabled: ghostty,
-                               outcome: outcome, defaultSocketPath: socket, codex: .none)
+                               gateOpen: ghostty, outcome: outcome, defaultSocketPath: socket, codex: .none)
 }
 
 private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID: "w1:p1")

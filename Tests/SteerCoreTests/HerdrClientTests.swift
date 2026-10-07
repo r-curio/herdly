@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 import Testing
 @testable import SteerCore
 @testable import SteerApp
@@ -351,10 +352,36 @@ codex: current (v8) (/home/.codex/herdr-agent-state.sh)
     #expect(scan.processInfo.keys.sorted() == ["w1:p1"])
     #expect((try? scan.processInfo["w1:p1"]?.get())?.foregroundProcesses.map(\.name) == ["codex"])
     #expect(scan.integration.states.isEmpty)
-    #expect(server.requests.map { $0["method"] as? String } == ["ping", "session.snapshot", "pane.process_info"])
+    // The second snapshot confirms the title the process info was read under (#153).
+    #expect(server.requests.map { $0["method"] as? String }
+        == ["ping", "session.snapshot", "pane.process_info", "session.snapshot"])
     // Without a title to ask about, no process info is requested; a Claude scan still needs herdr.
     #expect(lab.client().scan(HerdrScanRequest(includeIntegration: false)).scan?.processInfo.isEmpty == true)
     #expect(lab.client().scan(HerdrScanRequest(includeIntegration: true)) == .unavailable(.herdrNotFound))
+}
+
+@Test func herdrTitleChangedDuringProcessInfoMakesThatPaneUnavailable() throws {
+    let lab = try HerdrLab()
+    defer { lab.remove() }
+    let title = String(herdrCodexSession.prefix(29)) + "..."
+    let snapshots = OSAllocatedUnfairLock(initialState: 0)
+    // The pane shows another session's title once its process info has been read.
+    let server = try FakeHerdrServer(path: lab.socketPath) { method, id, params in
+        switch method {
+        case "pane.process_info":
+            return .line(herdrProcessInfoReply(id: id, pane: params["pane_id"] as? String ?? ""))
+        case "session.snapshot":
+            let count = snapshots.withLock { $0 += 1; return $0 }
+            let reply = herdrSnapshotReply(id: id)
+            return .line(count == 1 ? reply : reply.replacingOccurrences(of: title, with: "9f3c2b10-1111-4222-8333-44445..."))
+        default:
+            return healthyHerdr(method: method, id: id, params: params)
+        }
+    }
+    defer { server.stop() }
+    let scan = try #require(lab.client().scan(HerdrScanRequest(includeIntegration: false, processInfoTitles: [title])).scan)
+    #expect(scan.processInfo["w1:p1"] == .failure(.paneChangedDuringScan))
+    #expect(scan.snapshot.panes.first { $0.paneID == "w1:p1" }?.terminalTitle == title)
 }
 
 @Test func herdrFailedProcessInfoIsThatPanesReasonNotTheScans() throws {
