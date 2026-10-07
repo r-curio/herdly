@@ -39,9 +39,11 @@ extension Companion {
     /// is not enough to act on: call `revalidateHerdrBinding(for:)` immediately before any focus
     /// or key. Reading this never contacts herdr.
     func herdrBinding(for session: HerdrSessionKey) -> HerdrSessionBinding {
-        HerdrBindingInputs.binding(for: session, liveness: herdrLiveness(of: session), hookRecords: herdr.hookRecords,
-                                   ghosttyControlsEnabled: ghosttyEnabled, outcome: herdr.scanOutcome,
-                                   defaultSocketPath: herdr.defaultSocketPath)
+        HerdrBindingInputs.withholdingUnverifiedCodex(
+            HerdrBindingInputs.binding(for: session, liveness: herdrLiveness(of: session), hookRecords: herdr.hookRecords,
+                                       ghosttyControlsEnabled: ghosttyEnabled, outcome: herdr.scanOutcome,
+                                       defaultSocketPath: herdr.defaultSocketPath),
+            for: session)
     }
 
     /// A fresh herdr scan, off the main actor, and the session's binding against it, for an Open or
@@ -56,7 +58,7 @@ extension Companion {
                                                  hookRecords: herdr.hookRecords,
                                                  ghosttyControlsEnabled: ghosttyEnabled,
                                                  outcome: outcome, defaultSocketPath: herdr.defaultSocketPath)
-        return (binding, outcome)
+        return (HerdrBindingInputs.withholdingUnverifiedCodex(binding, for: session), outcome)
     }
 
     /// The latest herdr scan outcome for settings (also published by `herdr.scanOutcome`).
