@@ -27,6 +27,32 @@ function run(argv) {
     }
     if (request.action === 'snapshot')
         return JSON.stringify({status: 'ok', windows: inventory(), front_window_id: frontWindowID(), selected: selected()});
+    if (request.action === 'select_tty') {
+        // herdr Open (ADR 0011): the tab is identified only by its terminal's `tty`, never by title.
+        // Recheck that exactly one terminal has the TTY, alone in its tab, in the front window, and
+        // that it is still the target; then select it and activate Ghostty. No input is sent.
+        const tty = v => (typeof v === 'string' && /^(\/dev\/)?ttys[0-9]{1,12}$/.test(v))
+            ? (v.indexOf('/dev/') === 0 ? v : '/dev/' + v) : null;
+        const wanted = tty(request.tty), target = request.target;
+        if (!wanted || !target) return JSON.stringify({status: 'unknown'});
+        const found = [];
+        app.windows().forEach(w => w.tabs().forEach(t => {
+            const terminals = t.terminals();
+            terminals.forEach(p => {
+                if (tty(p.tty()) === wanted) found.push({window_id: w.id(), tab_id: t.id(),
+                    terminal_id: p.id(), count: terminals.length});
+            });
+        }));
+        if (found.length !== 1 || found[0].count !== 1) return JSON.stringify({status: 'unknown'});
+        const f = found[0], front = app.frontWindow();
+        if (f.window_id !== target.window_id || f.tab_id !== target.tab_id || f.terminal_id !== target.terminal_id
+            || !front || front.id() !== target.window_id) return JSON.stringify({status: 'unknown'});
+        const w = app.windows.byId(target.window_id);
+        app.activateWindow(w);
+        app.selectTab(w.tabs.byId(target.tab_id));
+        app.activate();
+        return JSON.stringify({status: 'ok'});
+    }
     if (request.action !== 'select' && request.action !== 'answer') return JSON.stringify({status: 'unknown'});
     // Recheck the entire inventory immediately before any selection or key.
     const matches = [];
@@ -54,8 +80,8 @@ function run(argv) {
     const keys = Array.isArray(request.keys) ? request.keys : [];
     if (keys.length < 1 || keys.length > 2 || !keys.every(k => /^([1-9]|enter)$/.test(k)))
         return JSON.stringify({status: 'unknown'});
-    const terminal = t.terminals().find(p => p.id() === target.terminal_id);
-    if (!terminal || terminal.name() !== request.title) return JSON.stringify({status: 'unknown'});
-    for (const k of keys) app.sendKey(k, {to: terminal});
+    const recipient = t.terminals().find(p => p.id() === target.terminal_id);
+    if (!recipient || recipient.name() !== request.title) return JSON.stringify({status: 'unknown'});
+    for (const k of keys) app.sendKey(k, {to: recipient});
     return JSON.stringify({status: 'ok', sent: keys});
 }
