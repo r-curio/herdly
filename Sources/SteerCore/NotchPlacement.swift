@@ -12,15 +12,22 @@ public struct NotchDisplay: Equatable, Sendable {
     public let menuBarHeight: CGFloat
     /// True for the Mac's own display; false for an external monitor.
     public let isBuiltIn: Bool
+    /// The display's UUID, stable across reboots and reconnects where `id` is not; nil when the
+    /// system cannot report one, in which case the display cannot be pinned.
+    public let persistentID: String?
+    /// The name macOS gives the display, for the display picker; nil when it reports none.
+    public let name: String?
 
     public init(id: UInt32, frame: CGRect, topInset: CGFloat, housingWidth: CGFloat = 0, menuBarHeight: CGFloat = 0,
-                isBuiltIn: Bool = false) {
+                isBuiltIn: Bool = false, persistentID: String? = nil, name: String? = nil) {
         self.id = id
         self.frame = frame
         self.topInset = topInset
         self.housingWidth = housingWidth
         self.menuBarHeight = menuBarHeight
         self.isBuiltIn = isBuiltIn
+        self.persistentID = persistentID
+        self.name = name
     }
 
     public var hasPhysicalNotch: Bool { topInset > 0 }
@@ -37,19 +44,139 @@ public struct NotchDisplay: Equatable, Sendable {
     }
 }
 
+/// A display the user pinned the notch to. `name` is kept so the choice can still be labeled while
+/// that display is not connected.
+public struct NotchDisplayPin: Equatable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+/// Where the user wants the notch: following the pointer (the default), or pinned to one display.
+public enum NotchDisplayPreference: Equatable, Hashable, Sendable {
+    case followPointer
+    case pinned(NotchDisplayPin)
+
+    /// The preference from stored values. A missing or empty identifier means no pin; a missing
+    /// name is labeled generically rather than invented.
+    public static func restored(id: String?, name: String?) -> NotchDisplayPreference {
+        guard let id, !id.isEmpty else { return .followPointer }
+        let name = name.flatMap { $0.isEmpty ? nil : $0 } ?? "Pinned display"
+        return .pinned(NotchDisplayPin(id: id, name: name))
+    }
+
+    public var pin: NotchDisplayPin? {
+        if case let .pinned(pin) = self { return pin }
+        return nil
+    }
+
+    /// The attached display a pin names, matched by identifier; nil without a pin or while that
+    /// display is not attached.
+    public func pinnedDisplay(in displays: [NotchDisplay]) -> NotchDisplay? {
+        guard let pin else { return nil }
+        return displays.first { $0.persistentID == pin.id }
+    }
+}
+
 /// Active-display rule for the single shared panel.
 ///
 /// 1. While the user is interacting with the panel (pointer over it or keyboard focus in it), keep
 ///    the display it is already on, so controls never move away mid-action.
-/// 2. Otherwise use the display under the pointer.
-/// 3. If the pointer is on no display, keep the current display.
-/// 4. Otherwise the first attached display.
+/// 2. With a pin, the pinned display wherever the pointer is; while it is not attached, the
+///    built-in display, returning to the pinned one when it reconnects. With neither attached the
+///    rules below apply.
+/// 3. Otherwise use the display under the pointer.
+/// 4. If the pointer is on no display, keep the current display.
+/// 5. Otherwise the first attached display.
 /// A display that has disconnected is never chosen, even while interacting.
 public enum NotchDisplaySelection {
-    public static func choose(displays: [NotchDisplay], pointer: CGPoint, current: UInt32?, interacting: Bool) -> NotchDisplay? {
+    public static func choose(displays: [NotchDisplay], pointer: CGPoint, current: UInt32?, interacting: Bool,
+                              preference: NotchDisplayPreference = .followPointer) -> NotchDisplay? {
         let currentDisplay = displays.first { $0.id == current }
         if interacting, let currentDisplay { return currentDisplay }
+        if preference.pin != nil {
+            if let pinned = preference.pinnedDisplay(in: displays) { return pinned }
+            if let builtIn = displays.first(where: \.isBuiltIn) { return builtIn }
+        }
         return displays.first { $0.frame.contains(pointer) } ?? currentDisplay ?? displays.first
+    }
+}
+
+/// One entry in the notch display picker.
+public struct NotchDisplayOption: Equatable, Hashable, Sendable, Identifiable {
+    public let preference: NotchDisplayPreference
+    public let label: String
+
+    public var id: NotchDisplayPreference { preference }
+
+    public init(preference: NotchDisplayPreference, label: String) {
+        self.preference = preference
+        self.label = label
+    }
+}
+
+/// Everything the controls window and the menu bar item show for the notch display setting,
+/// computed together so the checked entry and the detail line always name the same display.
+public struct NotchDisplayChoices: Equatable, Sendable {
+    /// "Follow pointer" first, then each attached display that can be pinned, left to right. Two
+    /// displays with the same name (two monitors of one model) are numbered in that order. A saved
+    /// pin whose display is not attached stays listed, marked not connected, so the current choice
+    /// is always visible.
+    public let options: [NotchDisplayOption]
+    /// The entry for the saved preference. A pin matches its display by identifier, so a stored
+    /// name that has gone out of date still checks the right display.
+    public let selected: NotchDisplayOption
+    /// One sentence describing where the notch is shown.
+    public let detail: String
+
+    public init(displays: [NotchDisplay], preference: NotchDisplayPreference) {
+        let followPointer = NotchDisplayOption(preference: .followPointer, label: "Follow pointer")
+        let pinnable = displays.filter { $0.persistentID != nil }
+            .sorted { ($0.frame.minX, $0.frame.minY) < ($1.frame.minX, $1.frame.minY) }
+        var nameCounts: [String: Int] = [:]
+        for display in pinnable { nameCounts[Self.displayName(display), default: 0] += 1 }
+        var seen: [String: Int] = [:]
+        var options = [followPointer]
+        var selected = followPointer
+        for display in pinnable {
+            guard let id = display.persistentID else { continue }
+            let name = Self.displayName(display)
+            var label = name
+            if nameCounts[name, default: 0] > 1 {
+                seen[name, default: 0] += 1
+                label = "\(name) (\(seen[name, default: 0]))"
+            }
+            // The pin stores the shown label so a disconnected twin is still told apart.
+            let option = NotchDisplayOption(preference: .pinned(NotchDisplayPin(id: id, name: label)), label: label)
+            options.append(option)
+            if id == preference.pin?.id { selected = option }
+        }
+        let detail: String
+        if let pin = preference.pin {
+            if preference.pinnedDisplay(in: pinnable) != nil {
+                detail = "Stays on \(selected.label)."
+            } else {
+                selected = NotchDisplayOption(preference: preference, label: "\(pin.name) (not connected)")
+                options.append(selected)
+                detail = displays.contains(where: \.isBuiltIn)
+                    ? "\(pin.name) isn't connected. Showing on the built-in display."
+                    : "\(pin.name) isn't connected. Following the pointer."
+            }
+        } else {
+            detail = "Follows the pointer to the display you're using."
+        }
+        self.options = options
+        self.selected = selected
+        self.detail = detail
+    }
+
+    private static func displayName(_ display: NotchDisplay) -> String {
+        if let name = display.name, !name.isEmpty { return name }
+        return display.isBuiltIn ? "Built-in display" : "Display"
     }
 }
 
