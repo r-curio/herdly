@@ -321,6 +321,8 @@ struct Notch: View {
     @State private var drafts: [String: String] = [:]
     /// Multi-select labels are kept in the view until the user presses Send.
     @State private var claudeSelections: [ClaudeQuestionViewStateKey: Set<Int>] = [:]
+    /// Ghostty's `tty` support for herdr Open availability; refreshed off the main actor.
+    @ObservedObject private var ghosttyTTY = GhosttyTTYSupportMonitor.shared
 
     private func draft(_ key: String) -> Binding<String> {
         Binding(get: { drafts[key] ?? "" }, set: { drafts[key] = $0 })
@@ -804,6 +806,7 @@ struct Notch: View {
     private func attentionRow(_ item: AgentAttentionItem) -> some View {
         let spotlightDetails = isSpotlight(item) ? model.spotlightDetails(for: item) : nil
         let subject = rowSubject(item)
+        let herdr = herdrOpen(item.session)
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 if item.kind == .running || item.kind == .waiting || item.kind == .question {
@@ -843,7 +846,7 @@ struct Notch: View {
                 Text("Handed back with no decision. Continue in \(item.session.source == .claude ? "Claude" : "Codex") to decide.")
                     .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
                 if item.session.source == .claude {
-                    claudeReturnMessage(item.session)
+                    claudeReturnMessage(item)
                 }
             case .actionableApproval:
                 if item.session.source == .claude {
@@ -851,7 +854,7 @@ struct Notch: View {
                         Text("Claude's native permission prompt remains available.")
                             .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
                     }
-                    claudeReturnMessage(item.session)
+                    claudeReturnMessage(item)
                 }
             case .outcome, .earlierOutcome:
                 if item.outcome?.uncertain == true {
@@ -866,14 +869,14 @@ struct Notch: View {
                     }
                 }
                 if item.session.source == .claude {
-                    claudeReturnMessage(item.session)
+                    claudeReturnMessage(item)
                 }
             case .question:
                 if let question = item.question { agentQuestionBody(question, subject: subject) }
                 if item.session.source == .claude {
-                    claudeReturnMessage(item.session)
+                    claudeReturnMessage(item)
                 }
-                if item.session.source == .claude, let question = item.question,
+                if item.session.source == .claude, herdr == .notInHerdr, let question = item.question,
                    !model.isBackgroundClaudeSession(item.session),
                    !model.canAnswerAgentQuestion(question) {
                     Text("The exact Claude tab cannot be opened until Steer can verify it; continue in Claude.")
@@ -897,11 +900,14 @@ struct Notch: View {
                     }
                 }
                 if item.session.source == .claude {
-                    claudeReturnMessage(item.session)
+                    claudeReturnMessage(item)
                 }
             case .statusUnavailable:
                 Text(item.unavailableReason ?? "Status unavailable. Continue in Claude to inspect the session.")
                     .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+            }
+            if item.session.source == .codex, case let .unavailable(cause) = herdr {
+                herdrReasonLine(item, cause: cause)
             }
             HStack(spacing: 6) {
                 switch item.kind {
@@ -922,7 +928,7 @@ struct Notch: View {
                             .accessibilityLabel("Deny: \(subject)")
                             .accessibilityHint("Denies this Claude Bash request.")
                     }
-                    if item.session.source == .codex {
+                    if item.session.source == .codex, herdr.offersOpen {
                         NotchButton(title: "Open in Codex") {
                             if let approval = item.approval { model.openAgentApproval(approval) }
                         }
@@ -932,7 +938,7 @@ struct Notch: View {
                     }
                     claudeReturnControl(item, subject: subject)
                 case .handedBackApproval:
-                    if item.session.source == .codex {
+                    if item.session.source == .codex, herdr.offersOpen {
                         NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
                             .disabled(model.openingTask)
                             .accessibilityLabel("Open in Codex: \(subject)")
@@ -940,7 +946,7 @@ struct Notch: View {
                     }
                     claudeReturnControl(item, subject: subject)
                 case .statusUnavailable:
-                    if item.session.source == .codex {
+                    if item.session.source == .codex, herdr.offersOpen {
                         NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
                             .disabled(model.openingTask)
                             .accessibilityLabel("Open in Codex: \(subject)")
@@ -953,7 +959,7 @@ struct Notch: View {
                         NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
                             .accessibilityLabel("Set up Ghostty: \(subject)")
                             .accessibilityHint("Opens Steer controls to enable Ghostty controls.")
-                    } else {
+                    } else if herdr.offersOpen {
                         NotchButton(title: "Open in Codex", emphasized: true) { model.openAgent(item.session) }
                             .disabled(model.openingTask)
                             .accessibilityLabel("Open in Codex: \(subject)")
@@ -964,7 +970,7 @@ struct Notch: View {
                             .accessibilityLabel("Dismiss question: \(subject)")
                     }
                 case .outcome, .earlierOutcome:
-                    if item.session.source == .codex {
+                    if item.session.source == .codex, herdr.offersOpen {
                         NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
                             .disabled(model.openingTask)
                             .accessibilityLabel("Open in Codex: \(subject)")
@@ -974,7 +980,7 @@ struct Notch: View {
                     NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
                         .accessibilityLabel("Dismiss completion: \(subject)")
                 case .waiting, .running:
-                    if item.session.source == .codex {
+                    if item.session.source == .codex, herdr.offersOpen {
                         NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
                             .disabled(model.openingTask)
                             .accessibilityLabel("Open in Codex: \(subject)")
@@ -1002,9 +1008,36 @@ struct Notch: View {
         .accessibilityLabel("\(rowTitle(item)), \(subject)")
     }
 
+    /// A herdr session's Open availability for this card. With Ghostty controls off the card keeps
+    /// its Set up Ghostty path, so that reason is presented as the Ghostty rules present it.
+    private func herdrOpen(_ session: AgentSessionIdentity) -> HerdrOpenAvailability {
+        let availability = model.herdrOpenAvailability(session, ttySupport: ghosttyTTY.support)
+        if case .unavailable(.session(.ghosttyControlsOff)) = availability { return .notInHerdr }
+        return availability
+    }
+
+    /// The one line that replaces Open for a herdr session (product.md, "Agreed herdr
+    /// presentation"). A Codex question whose options cannot be relayed gets "Answer this in
+    /// Codex." ahead of Open's reason. The exact reason stays in settings diagnostics.
     @ViewBuilder
-    private func claudeReturnMessage(_ session: AgentSessionIdentity) -> some View {
-        if !model.isBackgroundClaudeSession(session), !model.canOpenClaude(session) {
+    private func herdrReasonLine(_ item: AgentAttentionItem, cause: HerdrUnavailableCause) -> some View {
+        let agent: HerdrAgentKind = item.session.source == .claude ? .claude : .codex
+        let unrelayed = item.kind == .question && item.session.source == .codex
+            && !(item.question.map(model.canAnswerAgentQuestion) ?? false)
+        let line = unrelayed ? HerdrPresentation.unrelayedQuestionLine(openCause: cause)
+            : HerdrPresentation.cardLine(for: cause, agent: agent)
+        Text(line)
+            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+    }
+
+    @ViewBuilder
+    private func claudeReturnMessage(_ item: AgentAttentionItem) -> some View {
+        let session = item.session
+        let herdr = herdrOpen(session)
+        if case let .unavailable(cause) = herdr {
+            herdrReasonLine(item, cause: cause)
+        } else if herdr == .notInHerdr, !model.isBackgroundClaudeSession(session), !model.canOpenClaude(session) {
             Text(model.claudeReturnUnavailableMessage)
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
         }
@@ -1013,7 +1046,8 @@ struct Notch: View {
     @ViewBuilder
     private func claudeReturnControl(_ item: AgentAttentionItem, subject: String, emphasized: Bool = false) -> some View {
         if item.session.source == .claude {
-            if model.canOpenClaude(item.session) {
+            let herdr = herdrOpen(item.session)
+            if herdr == .available || (herdr == .notInHerdr && model.canOpenClaude(item.session)) {
                 NotchButton(title: "Open in Claude", emphasized: emphasized) {
                     if let approval = item.approval {
                         model.openAgentApproval(approval)
@@ -1024,7 +1058,7 @@ struct Notch: View {
                     .disabled(model.openingTask)
                     .accessibilityLabel("Open in Claude: \(subject)")
                     .accessibilityHint("Open the exact Claude Ghostty tab for this session.")
-            } else if !model.ghosttyEnabled {
+            } else if herdr == .notInHerdr, !model.ghosttyEnabled {
                 NotchButton(title: "Set up Ghostty", emphasized: emphasized, action: model.showControls)
                     .accessibilityLabel("Set up Ghostty: \(subject)")
                     .accessibilityHint("Opens Steer controls to enable Ghostty controls.")
@@ -1141,5 +1175,15 @@ struct Notch: View {
         .background(NotchStyle.ground, in: NotchShape())
         .preferredColorScheme(.dark)
         .onHover(perform: model.setHovering)
+        .onAppear { ghosttyTTY.refreshIfStale() }
+        .onChange(of: model.herdrScanOutcome) { _, _ in ghosttyTTY.refreshIfStale() }
+    }
+}
+
+private extension HerdrOpenAvailability {
+    /// Open stays on the card unless herdr's binding or Ghostty's `tty` support rules it out.
+    var offersOpen: Bool {
+        if case .unavailable = self { return false }
+        return true
     }
 }
