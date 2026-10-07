@@ -242,7 +242,7 @@ The [first desktop investigation](codex-desktop-investigation.md) found private 
 - Validate the proposed module boundaries and transport in [architecture.md](architecture.md) against the required integration checks.
 
 
-CLI lab completions now enter the shared notch after matching session/turn completion evidence. Ghostty navigation is opt-in per app launch during this investigation; uncertain targeting retains the notification. See [CLI integration](cli-notch-integration.md).
+CLI lab completions now enter the shared notch after matching session/turn completion evidence. Ghostty navigation is opt-in once and remembered across launches; the first launch offers it before macOS asks for Automation access; uncertain targeting retains the notification. See [CLI integration](cli-notch-integration.md).
 
 
 A handed-back approval reminder clears when the exact originating session/turn completes or is explicitly canceled. Cancellation does not create a successful-completion notification. Missing logs and application focus alone do not clear approval reminders.
