@@ -4,7 +4,8 @@ import SteerCore
 
 let arguments = CommandLine.arguments
 
-func writeEvent(_ object: [String: Any], to directory: URL, installationID: String) -> Bool {
+func writeEvent(_ object: [String: Any], to directory: URL, installationID: String,
+                environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
     guard let event = object["hook_event_name"] as? String, !event.isEmpty,
           let session = object["session_id"] as? String, UUID(uuidString: session) != nil else { return false }
     let now = Date()
@@ -23,6 +24,7 @@ func writeEvent(_ object: [String: Any], to directory: URL, installationID: Stri
         }
         if !kept.isEmpty { record["tool_input"] = kept }
     }
+    HerdrPaneID.record(from: environment, into: &record)
     guard JSONSerialization.isValidJSONObject(record),
           let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
           (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil else { return false }
@@ -39,7 +41,8 @@ func writeEvent(_ object: [String: Any], to directory: URL, installationID: Stri
 }
 
 func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID: String,
-                      helperRequestID: String? = nil) -> Bool {
+                      helperRequestID: String? = nil,
+                      environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
     guard let event = boundedClaudeString(object["hook_event_name"], limit: 256),
           let session = boundedClaudeString(object["session_id"], limit: 256),
           boundedClaudeString(installationID, limit: 256) != nil else { return false }
@@ -68,6 +71,7 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
         let kept = boundedClaudeToolInput(input)
         if !kept.isEmpty { record["tool_input"] = kept }
     }
+    HerdrPaneID.record(from: environment, into: &record)
     guard JSONSerialization.isValidJSONObject(record),
           let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
           (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil else { return false }
@@ -314,6 +318,20 @@ func selfTest() -> Int32 {
             .compactMap({ try? Data(contentsOf: $0) }).compactMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
           let stored = records.first(where: { $0["tool_use_id"] as? String == "tool-1" }),
           (stored["tool_input"] as? [String: String]) == ["command": "swift test"], stored["tool_response"] == nil else { return 1 }
+    let paneDirectory = directory.appendingPathComponent("herdr", isDirectory: true)
+    let paneEvent: [String: Any] = ["hook_event_name": "SessionStart", "session_id": session.uuidString]
+    guard writeEvent(paneEvent, to: paneDirectory, installationID: "self-test", environment: ["HERDR_PANE_ID": "w1:p1"]),
+          writeClaudeEvent(paneEvent, to: paneDirectory, installationID: UUID().uuidString,
+                           environment: ["HERDR_PANE_ID": "w1:p1"]),
+          writeEvent(paneEvent, to: paneDirectory, installationID: "self-test", environment: ["HERDR_PANE_ID": "w1:p1\n"]),
+          writeEvent(paneEvent, to: paneDirectory, installationID: "self-test", environment: [:]),
+          let paneRecords = (try? FileManager.default.contentsOfDirectory(at: paneDirectory, includingPropertiesForKeys: nil))?
+            .compactMap({ try? Data(contentsOf: $0) })
+            .compactMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }),
+          paneRecords.count == 4,
+          paneRecords.filter({ HerdrPaneID.recorded(in: $0) == "w1:p1" }).count == 2,
+          paneRecords.filter({ $0[HerdrPaneID.recordKey] != nil }).count == 2 else { return 1 }
+    try? FileManager.default.removeItem(at: paneDirectory)
     let request = ApprovalRequest(requestID: UUID(), sessionID: session, turnID: turn,
                                   details: ApprovalDetails(command: "touch marker"), receivedAt: 100)
     let bashPayload: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": session.uuidString,
