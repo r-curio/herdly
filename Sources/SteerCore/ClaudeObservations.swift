@@ -267,12 +267,15 @@ public enum ClaudeObservationReader {
             if $0.startedAt != $1.startedAt { return $0.startedAt < $1.startedAt }
             return $0.prompt < $1.prompt
         }.flatMap { turn -> [AgentObservation] in
-            let isCurrentPrompt = sessionPrompts[turn.session] == turn.prompt
-            guard ((!endedSessions.contains(turn.session) && (turn.closedAt == nil || isCurrentPrompt))
-                   || turn.terminal != nil) else { return [] }
             let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                 session: turn.session, surface: .cli)
-            var result: [AgentObservation] = []
+            // Every submitted prompt is a reply, including one in a session that has since ended.
+            let replied = AgentObservation.replied(AgentTurnIdentity(session: identity, turn: turn.prompt),
+                                                   submittedAt: turn.startedAt)
+            let isCurrentPrompt = sessionPrompts[turn.session] == turn.prompt
+            guard ((!endedSessions.contains(turn.session) && (turn.closedAt == nil || isCurrentPrompt))
+                   || turn.terminal != nil) else { return [replied] }
+            var result: [AgentObservation] = [replied]
             if let terminal = turn.terminal {
                 result.append(.outcome(terminal))
             } else {
@@ -381,7 +384,7 @@ public extension AgentAttentionQueue {
             case let .question(value): return .question(value.id)
             case let .outcome(value): return .outcome(value.id)
             case let .running(value): return .running(value.id)
-            case .provisionalStop: return nil
+            case .provisionalStop, .replied: return nil
             case .resolved: return nil
             }
         })
