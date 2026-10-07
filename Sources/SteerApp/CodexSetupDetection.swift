@@ -2,6 +2,20 @@ import AppKit
 import Foundation
 import SteerCore
 
+/// The running app's bundled helper, read and self-tested once per launch, used to keep Steer's own
+/// unchanged installed helpers in step with this app. Nil when it is unreadable, fails its self-test,
+/// or Steer runs a smoke test or preview queue, so those runs never touch installed helpers.
+enum BundledHelper {
+    static let validated: Data? = {
+        let arguments = CommandLine.arguments
+        guard !arguments.contains("--smoke-test"), !arguments.contains("--preview-queue") else { return nil }
+        let url = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/SteerHook")
+        guard let data = CodexSetupDetection.boundedRegularData(at: url, maximum: CodexSetupLimits.maximumFileSize),
+              CodexSetupDetection.validateHelper(url) else { return nil }
+        return data
+    }()
+}
+
 enum CodexSetupDetection {
     private enum DesktopSelection {
         case none

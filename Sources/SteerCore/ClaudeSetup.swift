@@ -610,7 +610,7 @@ public enum ClaudeSetupError: Error, Equatable, CustomStringConvertible, Localiz
 
 private struct ClaudeInstallState: Codable {
     let rootPath: String
-    let helper: Data
+    var helper: Data
     let installationID: String
     let ownedHooks: [ClaudeOwnedHook]
     let ownedEnvironment: [String: String]
@@ -740,7 +740,9 @@ public struct ClaudeSetupInstaller {
         guard current == plan.originalSettings else {
             throw ClaudeSetupError.conflict("Claude settings changed after the preview. Review setup again.")
         }
-        if let existingHelper = try readableData(at: roots.helperURL), existingHelper != helper {
+        // A helper Steer installed earlier, still unchanged, may be replaced by this app's helper.
+        if let existingHelper = try readableData(at: roots.helperURL), existingHelper != helper,
+           existingHelper != existingState?.helper {
             throw ClaudeSetupError.conflict("A different file already exists at Steer's Claude helper path.")
         }
         for directory in [roots.configDirectory, roots.helperDirectory, roots.eventsDirectory, roots.usageDirectory]
@@ -792,6 +794,41 @@ public struct ClaudeSetupInstaller {
             throw ClaudeSetupError.failed("Setup was not completed; the original configuration was restored.")
         }
         return status(roots: roots, capabilities: capabilities)
+    }
+
+    /// Replaces this root's installed helper with `helper` only while the installed file is exactly the
+    /// one Steer recorded, and records the replacement so status and undo still recognize it. It never
+    /// reads or writes settings.json. A missing or inconsistent record, or a helper that differs from
+    /// the record, changes nothing. A failed write restores the previous helper and record.
+    public func refreshHelper(roots: ClaudeSetupRoots, helper: Data) throws -> HelperRefreshResult {
+        guard !helper.isEmpty else { return .skipped("The bundled Steer helper is unavailable.") }
+        guard fileManager.fileExists(atPath: roots.stateURL.path) else { return .skipped("Claude setup is not installed.") }
+        guard let originalState = try? readableData(at: roots.stateURL),
+              var state = try? JSONDecoder().decode(ClaudeInstallState.self, from: originalState),
+              state.rootPath == roots.configDirectory.path,
+              UUID(uuidString: state.installationID) != nil else {
+            return .skipped("Steer Claude setup state is missing or inconsistent.")
+        }
+        guard let installed = try? readableData(at: roots.helperURL) else {
+            return .skipped("Steer's Claude helper is missing or unreadable.")
+        }
+        guard installed == state.helper else { return .skipped("Steer's Claude helper differs from the one it installed.") }
+        guard installed != helper else { return .current }
+        state.helper = helper
+        let updatedState = try JSONEncoder().encode(state)
+        do {
+            try SetupFileWriter.replaceExecutable(helper, at: roots.helperURL, fileManager: fileManager)
+            try atomicWrite(updatedState, to: roots.stateURL)
+        } catch let error {
+            do {
+                try SetupFileWriter.replaceExecutable(installed, at: roots.helperURL, fileManager: fileManager)
+                try atomicWrite(originalState, to: roots.stateURL)
+            } catch let rollbackError {
+                throw ClaudeSetupError.rollbackIncomplete("Helper update failed (\(error)); rollback also failed (\(rollbackError)). Check Steer's Claude helper before retrying.")
+            }
+            throw ClaudeSetupError.failed("The helper update was not completed; the previous helper was restored.")
+        }
+        return .updated
     }
 
     public func status(roots: ClaudeSetupRoots, capabilities: ClaudeCapabilities) -> ClaudeConnectionStatus {

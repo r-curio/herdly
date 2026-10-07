@@ -539,3 +539,76 @@ func setupMigratesLegacySteerTimeoutWithoutAddingDuplicateHandlers(legacyTimeout
     #expect(!after.contains(":stop:1:0"))
     #expect(after.contains("model = \"x\""))
 }
+
+@Test func setupRefreshesItsOwnUnchangedHelperWithoutTouchingCodexFiles() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let configRoot = root.appendingPathComponent("codex")
+    let helperRoot = root.appendingPathComponent("Steer")
+    try FileManager.default.createDirectory(at: configRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("[tui]\n".utf8).write(to: configRoot.appendingPathComponent("config.toml"))
+    try Data("{}".utf8).write(to: configRoot.appendingPathComponent("hooks.json"))
+    let roots = CodexSetupRoots(configDirectory: configRoot, helperDirectory: helperRoot, eventsDirectory: helperRoot.appendingPathComponent("events"))
+    let capabilities = CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true)
+    let installer = CodexSetupInstaller()
+    #expect(try installer.refreshHelper(roots: roots, helper: Data("helper-v2".utf8)) == .skipped("Codex setup is not installed."))
+    let plan = CodexSetupPlanner.plan(capabilities: capabilities, config: "[tui]\n", hooks: Data("{}".utf8),
+                                      helperPath: roots.helperURL, eventsPath: roots.eventsDirectory, hooksPath: roots.hooksURL)
+    _ = try installer.install(plan, roots: roots, helper: Data("helper-v1".utf8), capabilities: capabilities)
+    let event: [String: Any] = ["hook_event_name": "SessionStart", "session_id": UUID().uuidString, "source": CodexSetupRequirements.helperSource,
+                                "installation_id": plan.installationID, "received_at": "2026-10-08T00:00:00Z", "captured_at": Date().timeIntervalSince1970 + 1]
+    try JSONSerialization.data(withJSONObject: event).write(to: roots.eventsDirectory.appendingPathComponent("event.json"))
+    #expect(installer.status(roots: roots, capabilities: capabilities) == .connected)
+    let config = try Data(contentsOf: roots.configURL)
+    let hooks = try Data(contentsOf: roots.hooksURL)
+
+    #expect(try installer.refreshHelper(roots: roots, helper: Data("helper-v1".utf8)) == .current)
+    #expect(try installer.refreshHelper(roots: roots, helper: Data("helper-v2".utf8)) == .updated)
+    #expect(try Data(contentsOf: roots.helperURL) == Data("helper-v2".utf8))
+    #expect(((try FileManager.default.attributesOfItem(atPath: roots.helperURL.path)[.posixPermissions] as? NSNumber)?.intValue ?? 0) == 0o755)
+    #expect(installer.status(roots: roots, capabilities: capabilities) == .connected)
+    #expect(try Data(contentsOf: roots.configURL) == config)
+    #expect(try Data(contentsOf: roots.hooksURL) == hooks)
+    #expect(try installer.refreshHelper(roots: roots, helper: Data("helper-v2".utf8)) == .current)
+    // Configure again with the same helper is still a no-op after the refresh.
+    #expect(try installer.install(plan, roots: roots, helper: Data("helper-v2".utf8), capabilities: capabilities) == .connected)
+
+    // A helper changed by someone else is left alone, and status keeps reporting the conflict.
+    try Data("user-edited".utf8).write(to: roots.helperURL)
+    #expect(try installer.refreshHelper(roots: roots, helper: Data("helper-v3".utf8))
+            == .skipped("Steer's helper differs from the one it installed."))
+    #expect(try Data(contentsOf: roots.helperURL) == Data("user-edited".utf8))
+    try Data("helper-v2".utf8).write(to: roots.helperURL)
+
+    #expect(try installer.undo(roots: roots) == .notConfigured)
+    #expect(!FileManager.default.fileExists(atPath: roots.helperURL.path))
+    #expect(try String(contentsOf: roots.configURL) == "[tui]\n")
+}
+
+@Test func setupHelperRefreshRollsBackWhenTheRecordCannotBeWritten() throws {
+    struct Failure: Error {}
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let configRoot = root.appendingPathComponent("codex")
+    let helperRoot = root.appendingPathComponent("Steer")
+    try FileManager.default.createDirectory(at: configRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("[tui]\n".utf8).write(to: configRoot.appendingPathComponent("config.toml"))
+    try Data("{}".utf8).write(to: configRoot.appendingPathComponent("hooks.json"))
+    let roots = CodexSetupRoots(configDirectory: configRoot, helperDirectory: helperRoot, eventsDirectory: helperRoot.appendingPathComponent("events"))
+    let capabilities = CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true)
+    let plan = CodexSetupPlanner.plan(capabilities: capabilities, config: "[tui]\n", hooks: Data("{}".utf8),
+                                      helperPath: roots.helperURL, eventsPath: roots.eventsDirectory, hooksPath: roots.hooksURL)
+    _ = try CodexSetupInstaller().install(plan, roots: roots, helper: Data("helper-v1".utf8), capabilities: capabilities)
+    let state = try Data(contentsOf: roots.stateURL)
+    var failed = false
+    let installer = CodexSetupInstaller { url in
+        if url == roots.stateURL && !failed { failed = true; throw Failure() }
+    }
+    #expect(throws: CodexSetupError.failed("The helper update was not completed; the previous helper was restored.")) {
+        _ = try installer.refreshHelper(roots: roots, helper: Data("helper-v2".utf8))
+    }
+    #expect(try Data(contentsOf: roots.helperURL) == Data("helper-v1".utf8))
+    #expect(try Data(contentsOf: roots.stateURL) == state)
+    #expect(installer.status(roots: roots, capabilities: capabilities)
+            == .configuredAwaitingRestart("Configured; start a new Codex session to verify delivery. Existing sessions keep running without Steer's hooks."))
+}
