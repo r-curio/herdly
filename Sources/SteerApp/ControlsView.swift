@@ -533,14 +533,24 @@ private struct HerdrControls: View {
         }
     }
 
-    /// The scan's exact reason and each queued herdr session's exact reason.
+    /// The scan's exact reason and each queued herdr session's exact reasons: Open's availability,
+    /// its latest failed click-time Open, and why each queued Codex question cannot be relayed.
     private var diagnostics: [String] {
         var lines: [String] = []
         if case .unavailable(let reason) = model.herdrScanOutcome { lines.append("scan: \(reason)") }
         var seen: Set<AgentSessionIdentity> = []
-        for item in model.orderedAgentAttentionItems where seen.insert(item.session).inserted {
+        for item in model.orderedAgentAttentionItems {
+            let label = "\(item.session.source.rawValue) \(item.session.session.prefix(8))"
+            if let question = item.question.flatMap(model.codexQuestion(for:)),
+               let reason = model.herdrRelayUnavailable(for: question) {
+                lines.append("\(label) question \(question.callID): \(HerdrUnavailableCause.relay(reason).diagnostic)")
+            }
+            guard seen.insert(item.session).inserted else { continue }
             if case .unavailable(let cause) = model.herdrOpenAvailability(item.session, ttySupport: tty.support) {
-                lines.append("\(item.session.source.rawValue) \(item.session.session.prefix(8)): \(cause.diagnostic)")
+                lines.append("\(label): \(cause.diagnostic)")
+            }
+            if let key = model.herdrSessionKey(item.session), let failure = model.herdrOpenFailure(for: key) {
+                lines.append("\(label): \(HerdrUnavailableCause.open(failure).diagnostic)")
             }
         }
         return lines
