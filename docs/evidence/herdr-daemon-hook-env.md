@@ -36,6 +36,7 @@ Run on 2026-10-07 for [Prove the herdr items not yet shown live](https://github.
 - **ADR 0008 is unsafe as written:** agreement between the hook's `HERDR_PANE_ID` and herdr's `agent_session` does not prove the pane when Codex runs hooks in a shared managed daemon, which is the default in Codex 0.160.1. Both signals come from the same inherited environment, so they are not independent.
 - **Before acceptance:** binding, Open and the question relay for Codex sessions in herdr must stay unavailable until a decision replaces or strengthens the rule.
 - **Claude Code:** not exercised. Whether Claude runs hooks in a shared process is unknown.
+- **Decision:** [ADR 0012](../adr/0012-bind-codex-herdr-panes-by-title-and-foreground-process.md) (issue #144) replaces ADR 0008 for Codex: a Codex session binds by its pane's title and foreground process. Claude Code keeps ADR 0008 with an added foreground-process check. Supporting observations are in [the #144 evidence](herdr-daemon-pane-signals.md).
 
 ## Cleanup
 
