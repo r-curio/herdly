@@ -13,7 +13,11 @@ final class HerdrSessionBindings: ObservableObject {
     @Published fileprivate(set) var inUse = false
 
     let monitor: HerdrMonitor
+    /// The same client the monitor scans with, for the one-shot focus of an Open (#125).
+    let client: HerdrClient
     let defaultSocketPath: String
+    /// Open's typed failures and manual-visit tracking (Companion+Navigation.swift).
+    let open = HerdrOpenState()
     /// Each session's newest hook records from the last read.
     fileprivate var hookRecords: [HerdrHookPaneRecord] = []
     fileprivate var recordCache: [String: HerdrHookPaneRecord?] = [:]
@@ -21,6 +25,7 @@ final class HerdrSessionBindings: ObservableObject {
 
     init(client: HerdrClient = HerdrClient()) {
         monitor = HerdrMonitor(client: client)
+        self.client = client
         defaultSocketPath = client.configuration.socketPath
     }
 }
@@ -90,7 +95,10 @@ extension Companion {
     private func tickHerdrMonitor(paneIDs: Set<String>) {
         let monitor = herdr.monitor
         if monitor.onScan == nil {
-            monitor.onScan = { [weak self] outcome in self?.publishHerdrScan(outcome) }
+            monitor.onScan = { [weak self] outcome in
+                self?.publishHerdrScan(outcome)
+                self?.observeHerdrVisit(outcome)
+            }
         }
         monitor.tick(now: ProcessInfo.processInfo.systemUptime, ghosttyControlsEnabled: ghosttyEnabled,
                      herdrPaneIDs: paneIDs)
