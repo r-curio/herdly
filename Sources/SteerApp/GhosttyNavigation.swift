@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SteerCore
 
@@ -26,8 +27,12 @@ enum GhosttyNavigation {
               bytes.count <= 2 * 1024 * 1024 else { return nil }
         return bytes
     }
+    /// Takes a fresh inventory. Each terminal's `tty` is read only when the installed Ghostty's
+    /// dictionary declares it, so a Ghostty without it gets exactly the same request as before.
     static func snapshot() -> GhosttySnapshot? {
-        guard let data = request(["action": "snapshot"]) else { return nil }
+        var value: [String: Any] = ["action": "snapshot"]
+        if GhosttyScriptingSupport.ttySupport() == .supported { value["tty"] = true }
+        guard let data = request(value) else { return nil }
         return try? JSONDecoder().decode(GhosttySnapshot.self, from: data)
     }
     /// Sends the given key names (digits, optionally Enter) to the session's unique unsplit terminal
@@ -80,5 +85,28 @@ enum GhosttyNavigation {
             return (false, "Sent the tab selection, but could not verify the foreground tab. The reminder is retained.")
         }
         return (true, "Opened the matching Ghostty tab.")
+    }
+}
+
+/// Reads the scripting dictionary of the Ghostty bundle Steer drives, without Apple Events or a
+/// version comparison (ADR 0011). Read fresh each time, so an update while Steer runs is noticed;
+/// any unreadable or malformed file counts as unsupported.
+enum GhosttyScriptingSupport {
+    static let bundleIdentifier = "com.mitchellh.ghostty"
+
+    /// The running Ghostty's bundle, falling back to the one Launch Services would open.
+    static func bundleURL() -> URL? {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).first?.bundleURL
+            ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
+    }
+
+    static func ttySupport(bundle: URL? = bundleURL()) -> GhosttyTTYSupport {
+        guard let bundle else { return .unsupported }
+        let contents = bundle.appendingPathComponent("Contents", isDirectory: true)
+        guard let plist = SafeFile.read(contents.appendingPathComponent("Info.plist"), limit: GhosttyScriptingDictionary.maximumFileSize),
+              let name = GhosttyScriptingDictionary.definitionName(infoPlist: plist) else { return .unsupported }
+        let dictionary = SafeFile.read(contents.appendingPathComponent("Resources", isDirectory: true).appendingPathComponent(name),
+                                       limit: GhosttyScriptingDictionary.maximumFileSize)
+        return GhosttyScriptingDictionary.ttySupport(dictionary: dictionary)
     }
 }
