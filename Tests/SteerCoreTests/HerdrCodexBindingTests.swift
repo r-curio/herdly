@@ -54,11 +54,11 @@ private func evaluate(_ sessionID: String = session, liveness: HerdrSessionLiven
 }
 
 private func binding(_ key: HerdrSessionKey = codexKey, liveness: HerdrSessionLiveness = .live,
-                     records: [HerdrHookPaneRecord] = [], ghosttyControls: Bool = true,
+                     records: [HerdrHookPaneRecord] = [], ghosttyControls: Bool = true, gateOpen: Bool = true,
                      ghostty: Set<String>? = [otherTitle], live: Set<String> = [session, otherSession],
                      outcome: HerdrScanOutcome? = .available(scan())) -> HerdrSessionBinding {
     HerdrBindingInputs.binding(for: key, liveness: liveness, hookRecords: records, ghosttyControlsEnabled: ghosttyControls,
-                               outcome: outcome, defaultSocketPath: socket,
+                               gateOpen: gateOpen, outcome: outcome, defaultSocketPath: socket,
                                codex: HerdrCodexTitles(liveSessions: live, ghostty: ghostty))
 }
 
@@ -183,11 +183,21 @@ private func binding(_ key: HerdrSessionKey = codexKey, liveness: HerdrSessionLi
     #expect(GhosttyMatch.target(title: title, live: [title], snapshot: ghosttySnapshot(titles: [])) == nil)
 }
 
-@Test func herdrCodexIsNotInHerdrWithoutAScanOrGhosttyInventory() {
-    #expect(binding(outcome: nil) == .notInHerdr)
-    #expect(binding(outcome: .unavailable(.notRunning)) == .notInHerdr)
+@Test func herdrCodexIsNotInHerdrWhileTheGateIsClosedOrHerdrIsNotRunning() {
+    #expect(binding(gateOpen: false, outcome: nil) == .notInHerdr)
+    // No server holds a pane, so herdr shows nothing.
+    #expect(binding(ghostty: [title], outcome: .unavailable(.notRunning)) == .notInHerdr)
     #expect(binding(ghosttyControls: false) == .notInHerdr)
     #expect(binding(ghostty: nil) == .notInHerdr)
+}
+
+@Test func herdrCodexInGhosttyIsUnavailableWhileAnOpenGateHasNoScan() {
+    // herdr cannot be ruled out, so neither route may act (#153).
+    #expect(binding(ghostty: [title], outcome: nil) == .unavailable(.notScanned))
+    for reason in [HerdrUnavailableReason.timeout, .malformedReply, .untrustedSocket, .unsupportedProtocol(23)] {
+        #expect(binding(ghostty: [title], outcome: .unavailable(reason)) == .unavailable(.herdr(reason)))
+        #expect(binding(ghostty: [], outcome: .unavailable(reason)) == .unavailable(.herdr(reason)))
+    }
 }
 
 @Test func herdrCodexBindingFailuresAreUnavailableNotNotInHerdr() {
@@ -202,16 +212,38 @@ private func binding(_ key: HerdrSessionKey = codexKey, liveness: HerdrSessionLi
 
 // MARK: - Gate and scan request
 
-@Test func herdrCodexGateOpensForATitleOutsideGhosttyWithATrustedSocket() {
+@Test func herdrCodexGateOpensForAnyLiveSessionWithATrustedSocket() {
     let codex = HerdrCodexTitles(liveSessions: [session.uppercased(), otherSession], ghostty: [otherTitle])
     #expect(codex.outsideGhostty == [title])
     #expect(HerdrBindingInputs.codexGateOpens(codex, defaultSocketTrusted: true))
     #expect(!HerdrBindingInputs.codexGateOpens(codex, defaultSocketTrusted: false))
+    // Titles already in Ghostty still open it, so a scan can find the same title in herdr (#153).
     let allInGhostty = HerdrCodexTitles(liveSessions: [session], ghostty: [title, otherTitle])
-    #expect(!HerdrBindingInputs.codexGateOpens(allInGhostty, defaultSocketTrusted: true))
-    // Without a known Ghostty inventory nothing is known to be outside it.
+    #expect(HerdrBindingInputs.codexGateOpens(allInGhostty, defaultSocketTrusted: true))
+    #expect(binding(ghostty: [title, otherTitle]) == .unavailable(.binding(.titleInHerdrAndGhostty)))
+    // Without a known Ghostty inventory no route can be decided.
     #expect(!HerdrBindingInputs.codexGateOpens(HerdrCodexTitles(liveSessions: [session], ghostty: nil), defaultSocketTrusted: true))
+    #expect(!HerdrBindingInputs.codexGateOpens(HerdrCodexTitles(liveSessions: ["not-a-uuid"], ghostty: []), defaultSocketTrusted: true))
     #expect(!HerdrBindingInputs.codexGateOpens(.none, defaultSocketTrusted: true))
+}
+
+@Test func herdrProcessInfoCountsOnlyWhileTheCodexTitleStaysOnItsPane() {
+    let request = HerdrScanRequest(includeIntegration: false, processInfoTitles: [title], processInfoPaneIDs: ["w1:p9"])
+    let before = scan(panes: [pane(), pane("w1:p9", tab: "w1:t2", agent: "claude", title: "Claude")]).snapshot
+    let replies = ["w1:p1": info(), "w1:p9": info("w1:p9", [process("claude")])]
+    #expect(request.confirmingTitles(replies, before: before, after: before) == replies)
+    // A Claude pane's own title may change: only Codex-titled panes are confirmed.
+    let retitled = scan(panes: [pane(title: otherTitle), pane("w1:p9", tab: "w1:t2", agent: "claude", title: "Other")]).snapshot
+    let confirmed = request.confirmingTitles(replies, before: before, after: retitled)
+    #expect(confirmed["w1:p1"] == .failure(.paneChangedDuringScan))
+    #expect(confirmed["w1:p9"] == replies["w1:p9"])
+    #expect(evaluate(scan: scan(processInfo: confirmed)) == .unavailable(.processInfoUnavailable(.paneChangedDuringScan)))
+    // A pane gone by the second read, or listed twice with different titles, counts as changed.
+    let gone = scan(panes: [pane("w1:p9", tab: "w1:t2", agent: "claude", title: "Claude")]).snapshot
+    #expect(request.confirmingTitles(replies, before: before, after: gone)["w1:p1"] == .failure(.paneChangedDuringScan))
+    let doubled = scan(panes: [pane(), pane(title: otherTitle)]).snapshot
+    #expect(request.confirmingTitles(replies, before: before, after: doubled)["w1:p1"] == .failure(.paneChangedDuringScan))
+    #expect(HerdrPresentation.group(HerdrUnavailableReason.paneChangedDuringScan) == .generic)
 }
 
 @Test func herdrScanRequestReadsIntegrationForClaudeAndProcessInfoForCodexTitles() {

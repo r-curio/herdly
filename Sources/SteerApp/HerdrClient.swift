@@ -159,9 +159,11 @@ struct HerdrClient: Sendable {
     // MARK: - Scan
 
     /// One full read: socket trust, `ping` and its protocol, a snapshot, integration status when
-    /// `request` asks for it, then the attached clients and the server's start time, and last
-    /// `pane.process_info` for the panes `request` selects. The first scan-wide failure stops the
-    /// scan and is its one reason; a failed `pane.process_info` is kept as that pane's reason.
+    /// `request` asks for it, then the attached clients and the server's start time, then
+    /// `pane.process_info` for the panes `request` selects, and last, when any of those panes carried
+    /// a Codex title, a second snapshot that must show the same titles. The first scan-wide failure
+    /// stops the scan and is its one reason; a failed `pane.process_info`, or a title that changed
+    /// meanwhile, is kept as that pane's reason.
     func scan(_ request: HerdrScanRequest = HerdrScanRequest()) -> HerdrScanOutcome {
         if case .failure(let reason) = ping() { return .unavailable(reason) }
         let snapshot: HerdrSnapshot
@@ -183,6 +185,15 @@ struct HerdrClient: Sendable {
         }
         var processInfo: [String: Result<HerdrProcessInfo, HerdrUnavailableReason>] = [:]
         for paneID in request.processInfoPanes(in: snapshot) { processInfo[paneID] = self.processInfo(paneID: paneID) }
+        if snapshot.panes.contains(where: {
+            processInfo[$0.paneID] != nil && $0.terminalTitle.map(request.processInfoTitles.contains) == true
+        }) {
+            // ADR 0012: a Codex title and its pane's foreground process must describe one pane state.
+            switch self.snapshot() {
+            case .success(let after): processInfo = request.confirmingTitles(processInfo, before: snapshot, after: after)
+            case .failure(let reason): return .unavailable(reason)
+            }
+        }
         return .available(HerdrScan(snapshot: snapshot, integration: integration,
                                     client: HerdrAttachedClient.verdict(listing: listing, ancestry: ancestry),
                                     serverStartedAt: serverStartedAt(listing), processInfo: processInfo))

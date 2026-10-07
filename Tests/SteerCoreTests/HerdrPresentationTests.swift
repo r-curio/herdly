@@ -304,6 +304,17 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
     #expect(!row.problems.contains { $0.message.contains("untrustedSocket") })
 }
 
+@Test func herdrSettingsRowIsNotInUseWhileOnlyCodexOpenedTheGateAndHerdrIsNotRunning() {
+    // A stale socket opens ADR 0012's Codex gate; with no server nothing runs in herdr.
+    let codexOnly = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true,
+                                                  outcome: .unavailable(.notRunning), agentsSeen: [], ttySupport: .supported)
+    #expect(codexOnly.badge == .notInUse)
+    #expect(codexOnly.problems.isEmpty)
+    let claude = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true,
+                                               outcome: .unavailable(.notRunning), agentsSeen: [.claude], ttySupport: .supported)
+    #expect(claude.problems == [.herdrUnavailable])
+}
+
 @Test func herdrSettingsRowMapsAScanLevelIntegrationFailureToItsCommand() {
     let row = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true,
                                             outcome: .unavailable(.integrationNotCurrent(.claude)),

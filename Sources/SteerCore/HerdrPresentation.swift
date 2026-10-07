@@ -144,7 +144,7 @@ public enum HerdrPresentation {
         case .wrongClientCount(let count): count > 1 ? .layoutNotSupported : .generic
         case .split, .namedSession: .layoutNotSupported
         case .herdrNotFound, .notRunning, .untrustedSocket, .unsupportedProtocol, .nonGhosttyClient,
-             .voidBinding, .timeout, .malformedReply, .requestRefused: .generic
+             .voidBinding, .timeout, .malformedReply, .paneChangedDuringScan, .requestRefused: .generic
         }
     }
 
@@ -272,14 +272,18 @@ public enum HerdrPresentation {
     ///
     /// - Parameters:
     ///   - inUse: the ADR 0009 gate is open (Ghostty controls on, and a live Claude session reported a
-    ///     pane or a live Codex title is outside Ghostty with herdr's socket trusted).
+    ///     pane or a live Codex session exists beside a known Ghostty inventory with herdr's socket
+    ///     trusted).
     ///   - outcome: the latest scan, nil before the first scan after the gate opened.
     ///   - agentsSeen: agents whose live sessions' newest hook event reported running in herdr;
     ///     an integration problem is listed only for Claude Code, and only when it is among these.
     ///   - ttySupport: whether Ghostty declares `tty`; nil while unknown, which lists no problem.
     public static func settingsRow(inUse: Bool, ghosttyControlsEnabled: Bool, outcome: HerdrScanOutcome?,
                                    agentsSeen: Set<HerdrAgentKind>, ttySupport: GhosttyTTYSupport?) -> HerdrSettingsRow {
-        guard inUse else {
+        // A Codex session opens the gate whenever herdr's socket is trusted (ADR 0012); with no
+        // server and no Claude session reporting a pane, nothing runs in herdr.
+        let nothingInHerdr = outcome == .unavailable(.notRunning) && !agentsSeen.contains(.claude)
+        guard inUse, !nothingInHerdr else {
             let detail = ghosttyControlsEnabled ? "No herdr sessions seen." : "Works only while Ghostty controls are on."
             return HerdrSettingsRow(badge: .notInUse, detail: detail, problems: [])
         }

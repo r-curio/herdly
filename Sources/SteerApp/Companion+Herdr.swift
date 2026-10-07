@@ -8,7 +8,8 @@ import SteerCore
 final class HerdrSessionBindings: ObservableObject {
     /// The latest herdr scan for settings; nil before the first scan and whenever the ADR 0009 gate
     /// is closed (Ghostty controls off, or neither a live Claude session's newest hook event
-    /// recorded a pane nor a live Codex title is outside Ghostty with herdr's socket trusted).
+    /// recorded a pane nor a live Codex session exists beside a known Ghostty inventory with
+    /// herdr's socket trusted).
     @Published fileprivate(set) var scanOutcome: HerdrScanOutcome?
     /// True while the gate is open, so settings can tell "not in use" from "waiting for a scan".
     @Published fileprivate(set) var inUse = false
@@ -45,8 +46,9 @@ extension Companion {
     /// contacts herdr.
     func herdrBinding(for session: HerdrSessionKey) -> HerdrSessionBinding {
         HerdrBindingInputs.binding(for: session, liveness: herdrLiveness(of: session), hookRecords: herdr.hookRecords,
-                                   ghosttyControlsEnabled: ghosttyEnabled, outcome: herdr.scanOutcome,
-                                   defaultSocketPath: herdr.defaultSocketPath, codex: herdrCodexTitles())
+                                   ghosttyControlsEnabled: ghosttyEnabled, gateOpen: herdr.monitor.isGateOpen,
+                                   outcome: herdr.scanOutcome, defaultSocketPath: herdr.defaultSocketPath,
+                                   codex: herdrCodexTitles())
     }
 
     /// A fresh herdr scan, off the main actor, and the session's binding against it, for an Open or
@@ -54,18 +56,29 @@ extension Companion {
     /// whole rule runs again for a Codex session. `outcome` is nil, and no request is made, when the
     /// gate is closed; a Claude session in herdr is then `unavailable(.notScanned)` or
     /// `.ghosttyControlsOff`, and a Codex session is `notInHerdr`. Claude hook records are those of
-    /// the last scheduled read (at most one scan interval old); Codex sessions and Ghostty titles
-    /// are Steer's current ones. The fresh outcome does not replace the published one.
+    /// the last scheduled read (at most one scan interval old); Codex sessions are Steer's current
+    /// ones. For a Codex session a fresh Ghostty inventory is read first, so ADR 0012's route is
+    /// decided against Ghostty and herdr as of this action; an unreadable inventory leaves the
+    /// session `notInHerdr`, which no herdr action accepts. The fresh outcome does not replace the
+    /// published one.
     func revalidateHerdrBinding(for session: HerdrSessionKey) async -> (binding: HerdrSessionBinding,
                                                                        outcome: HerdrScanOutcome?) {
-        let codex = herdrCodexTitles()
+        var ghostty: Set<String>?
+        if session.agent == .codex, ghosttyEnabled {
+            let snapshot = await Task.detached(priority: .userInitiated) { GhosttyNavigation.snapshot() }.value
+            ghostty = snapshot?.status == "ok" ? snapshot?.terminalNames : nil
+        } else {
+            ghostty = herdrCodexTitles().ghostty
+        }
         let outcome = await herdr.monitor.revalidate(
-            HerdrBindingInputs.scanRequest(paneIDs: herdr.claudePaneIDs, codex: codex))
+            HerdrBindingInputs.scanRequest(paneIDs: herdr.claudePaneIDs, codex: herdrCodexTitles(ghostty: ghostty)))
+        // Sessions are re-read: one may have ended while herdr and Ghostty were read.
         let binding = HerdrBindingInputs.binding(for: session, liveness: herdrLiveness(of: session),
                                                  hookRecords: herdr.hookRecords,
                                                  ghosttyControlsEnabled: ghosttyEnabled,
-                                                 outcome: outcome, defaultSocketPath: herdr.defaultSocketPath,
-                                                 codex: herdrCodexTitles())
+                                                 gateOpen: herdr.monitor.isGateOpen, outcome: outcome,
+                                                 defaultSocketPath: herdr.defaultSocketPath,
+                                                 codex: herdrCodexTitles(ghostty: ghostty))
         return (binding, outcome)
     }
 
@@ -99,7 +112,8 @@ extension Companion {
         herdr.reading = true
         let cache = herdr.recordCache
         let socketPath = herdr.defaultSocketPath
-        let checkSocket = ghosttyEnabled && !herdrCodexTitles().outsideGhostty.isEmpty
+        let titles = herdrCodexTitles()
+        let checkSocket = titles.ghostty != nil && !titles.liveTitles.isEmpty
         Task { @MainActor in
             let result = await Task.detached(priority: .utility) {
                 (records: directories.isEmpty ? HerdrHookRecordReader.Result.empty
@@ -156,8 +170,13 @@ extension Companion {
 
     /// Live Codex sessions and the titles of the latest complete Ghostty inventory (ADR 0012).
     private func herdrCodexTitles() -> HerdrCodexTitles {
+        herdrCodexTitles(ghostty: knownGhosttySnapshot?.terminalNames)
+    }
+
+    /// Live Codex sessions and `ghostty`'s titles, or none while Ghostty controls are off.
+    private func herdrCodexTitles(ghostty: Set<String>?) -> HerdrCodexTitles {
         HerdrCodexTitles(liveSessions: Set(liveCLI.subtracting(endedSessions).map(\.uuidString)),
-                         ghostty: ghosttyEnabled ? knownGhosttySnapshot?.terminalNames : nil)
+                         ghostty: ghosttyEnabled ? ghostty : nil)
     }
 
     private func herdrLiveness(of session: HerdrSessionKey) -> HerdrSessionLiveness {
