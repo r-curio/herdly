@@ -219,7 +219,7 @@ private func binding(_ key: HerdrSessionKey = codexKey, liveness: HerdrSessionLi
     let codexOnly = HerdrBindingInputs.scanRequest(paneIDs: [], codex: codex)
     #expect(codexOnly == HerdrScanRequest(includeIntegration: false, processInfoTitles: [title]))
     #expect(HerdrBindingInputs.scanRequest(paneIDs: ["w3:p1"], codex: .none)
-        == HerdrScanRequest(includeIntegration: true, processInfoTitles: []))
+        == HerdrScanRequest(includeIntegration: true, processInfoTitles: [], processInfoPaneIDs: ["w3:p1"]))
     let snapshot = scan(panes: [pane("w1:p3", tab: "w1:t2"), pane(), pane("w1:p2", title: otherTitle), pane("w1:p4", title: nil)]).snapshot
     #expect(codexOnly.processInfoPanes(in: snapshot) == ["w1:p1", "w1:p3"])
     #expect(HerdrScanRequest().processInfoPanes(in: snapshot).isEmpty)

@@ -31,7 +31,8 @@ private func observation(
     session herdrSession: HerdrSessionName = .defaultSession,
     clients: [HerdrClientObservation] = [HerdrClientObservation(processID: 93954, ancestryReachesGhostty: true)],
     integrations: [HerdrAgentKind: HerdrIntegrationState] = [.claude: .current(version: 8), .codex: .current(version: 10)],
-    panes: [HerdrPaneObservation] = [pane(), pane("w1:p2", agent: nil, session: nil)]
+    panes: [HerdrPaneObservation] = [pane(), pane("w1:p2", agent: nil, session: nil)],
+    processInfo: [String: Result<HerdrProcessInfo, HerdrUnavailableReason>]? = nil
 ) -> HerdrObservation {
     HerdrObservation(
         protocolVersion: protocolVersion,
@@ -39,8 +40,19 @@ private func observation(
         session: herdrSession,
         clients: clients,
         integrations: integrations,
-        panes: panes
+        panes: panes,
+        // By default every listed pane runs Claude in its foreground.
+        processInfo: processInfo ?? Dictionary(panes.map { ($0.paneID, claudeInForeground($0.paneID)) }) { first, _ in first }
     )
+}
+
+private func claudeInForeground(_ paneID: String, _ names: [String] = ["claude"])
+    -> Result<HerdrProcessInfo, HerdrUnavailableReason> {
+    .success(HerdrProcessInfo(paneID: paneID, shellPID: 100, foregroundProcessGroupID: 83378,
+                              foregroundProcesses: names.enumerated().map {
+                                  HerdrForegroundProcess(pid: Int32(83378 + $0.offset), name: $0.element, argv: [$0.element],
+                                                         cwd: "/lab")
+                              }))
 }
 
 private func evaluate(
@@ -202,4 +214,41 @@ private let bound = HerdrBinding.bound(HerdrPaneTarget(sessionID: session, agent
         == .bound(HerdrPaneTarget(sessionID: otherSession, agent: .claude, paneID: "w1:p1")))
     #expect(evaluate(records: records, observation: observation(panes: [pane(session: otherSession)]))
         == .unavailable(.paneReusedBySession(otherSession)))
+}
+
+// MARK: - Foreground process (ADR 0008, #148)
+
+@Test func herdrClaudeBindsWithClaudeInThePanesForeground() {
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": claudeInForeground("w1:p1")])) == bound)
+    // Its MCP children or several claude processes in the group do not matter.
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": claudeInForeground("w1:p1", ["claude", "node", "claude"])]))
+        == bound)
+}
+
+@Test func herdrClaudeBindingIsVoidWhenClaudeLeftTheForegroundButAgentSessionLingers() {
+    // herdr still reports the session as the pane's agent_session, but Claude has exited to the shell.
+    for names in [[], ["zsh"], ["node"], ["Claude"], ["claude-code"]] {
+        #expect(evaluate(observation: observation(processInfo: ["w1:p1": claudeInForeground("w1:p1", names)]))
+            == .unavailable(.foregroundProcesses(.claude, count: 0)))
+    }
+    // An argv that merely mentions claude is not Claude.
+    let wrapped = HerdrProcessInfo(paneID: "w1:p1", shellPID: 1, foregroundProcessGroupID: 2,
+                                   foregroundProcesses: [HerdrForegroundProcess(pid: 2, name: "zsh", argv: ["zsh", "-c", "claude"],
+                                                                                cwd: nil)])
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": .success(wrapped)]))
+        == .unavailable(.foregroundProcesses(.claude, count: 0)))
+}
+
+@Test func herdrClaudeBindingIsVoidWithoutUsableProcessInfo() {
+    #expect(evaluate(observation: observation(processInfo: [:])) == .unavailable(.processInfoUnavailable(nil)))
+    for reason in [HerdrUnavailableReason.timeout, .malformedReply, .requestRefused(code: "pane_not_found"), .notRunning] {
+        #expect(evaluate(observation: observation(processInfo: ["w1:p1": .failure(reason)]))
+            == .unavailable(.processInfoUnavailable(reason)))
+    }
+    // A reply about another pane is not this pane's.
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": claudeInForeground("w1:p2")]))
+        == .unavailable(.processInfoUnavailable(.malformedReply)))
+    // Another pane's Claude does not stand in for this one.
+    #expect(evaluate(observation: observation(processInfo: ["w1:p2": claudeInForeground("w1:p2")]))
+        == .unavailable(.processInfoUnavailable(nil)))
 }
