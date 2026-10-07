@@ -305,15 +305,69 @@ codex: current (v8) (/home/.codex/herdr-agent-state.sh)
     let lab = try HerdrLab()
     defer { lab.remove() }
     try lab.installHerdr(integration: """
-    claude: current (v10) (/home/.claude/hooks/herdr-agent-state.sh)
-    codex: outdated (v7 < v8) (/home/.codex/herdr-agent-state.sh)
+    claude: outdated (v9 < v10) (/home/.claude/hooks/herdr-agent-state.sh)
+    codex: current (v8) (/home/.codex/herdr-agent-state.sh)
     """)
     let server = try FakeHerdrServer(path: lab.socketPath, respond: healthyHerdr)
     defer { server.stop() }
     let outcome = lab.client().scan()
     #expect(outcome.scan != nil)
-    #expect(outcome.targetReason(for: .codex) == .integrationNotCurrent(.codex))
-    #expect(outcome.targetReason(for: .claude) == nil)
+    #expect(outcome.targetReason(for: .claude) == .integrationNotCurrent(.claude))
+    // Codex needs no herdr integration (ADR 0012), whatever its state.
+    #expect(outcome.targetReason(for: .codex) == nil)
+}
+
+@Test func herdrProcessInfoAsksAboutOnePaneAndChecksTheReply() throws {
+    let lab = try HerdrLab()
+    defer { lab.remove() }
+    let server = try FakeHerdrServer(path: lab.socketPath) { method, id, params in
+        switch params["pane_id"] as? String {
+        case "w1:p8": return .line(herdrProcessInfoReply(id: id, pane: "w1:p8"))
+        case "w1:p9": return .line(herdrProcessInfoReply(id: id, pane: "w1:p8"))   // answers about another pane
+        default: return .line(#"{"id":"\#(id)","error":{"code":"pane_not_found","message":"no"}}"#)
+        }
+    }
+    defer { server.stop() }
+    let client = lab.client()
+    #expect(client.processInfo(paneID: "w1:p8").map(\.foregroundProcesses.count) == .success(1))
+    #expect(client.processInfo(paneID: "w1:p9") == .failure(.malformedReply))
+    #expect(client.processInfo(paneID: "w1:p2") == .failure(.requestRefused(code: "pane_not_found")))
+    #expect(server.requests.map { $0["method"] as? String } == Array(repeating: "pane.process_info", count: 3))
+    #expect(server.requests.map { ($0["params"] as? [String: Any])?["pane_id"] as? String } == ["w1:p8", "w1:p9", "w1:p2"])
+}
+
+@Test func herdrScanReadsProcessInfoForRequestedTitlesAndSkipsIntegrationForCodex() throws {
+    let lab = try HerdrLab()
+    defer { lab.remove() }
+    // No `herdr` binary: a Codex-only scan never runs `herdr integration status`.
+    let server = try FakeHerdrServer(path: lab.socketPath) { method, id, params in
+        method == "pane.process_info" ? .line(herdrProcessInfoReply(id: id, pane: params["pane_id"] as? String ?? ""))
+            : healthyHerdr(method: method, id: id, params: params)
+    }
+    defer { server.stop() }
+    let title = String(herdrCodexSession.prefix(29)) + "..."
+    let request = HerdrScanRequest(includeIntegration: false, processInfoTitles: [title, "absent..."])
+    let scan = try #require(lab.client().scan(request).scan)
+    #expect(scan.processInfo.keys.sorted() == ["w1:p1"])
+    #expect((try? scan.processInfo["w1:p1"]?.get())?.foregroundProcesses.map(\.name) == ["codex"])
+    #expect(scan.integration.states.isEmpty)
+    #expect(server.requests.map { $0["method"] as? String } == ["ping", "session.snapshot", "pane.process_info"])
+    // Without a title to ask about, no process info is requested; a Claude scan still needs herdr.
+    #expect(lab.client().scan(HerdrScanRequest(includeIntegration: false)).scan?.processInfo.isEmpty == true)
+    #expect(lab.client().scan(HerdrScanRequest(includeIntegration: true)) == .unavailable(.herdrNotFound))
+}
+
+@Test func herdrFailedProcessInfoIsThatPanesReasonNotTheScans() throws {
+    let lab = try HerdrLab()
+    defer { lab.remove() }
+    let server = try FakeHerdrServer(path: lab.socketPath) { method, id, params in
+        method == "pane.process_info" ? .line("{not json") : healthyHerdr(method: method, id: id, params: params)
+    }
+    defer { server.stop() }
+    let request = HerdrScanRequest(includeIntegration: false,
+                                   processInfoTitles: [String(herdrCodexSession.prefix(29)) + "..."])
+    let scan = try #require(lab.client().scan(request).scan)
+    #expect(scan.processInfo["w1:p1"] == .failure(.malformedReply))
 }
 
 @Test func herdrMissingFromTheFixedLocationsIsNotFound() throws {
@@ -390,7 +444,7 @@ final class ScanCounter: @unchecked Sendable {
 
 @MainActor @Test func herdrMonitorScansOnlyInsideTheGateOnTheTwoSecondScan() async {
     let counter = ScanCounter()
-    let monitor = HerdrMonitor { counter.increment(); return .unavailable(.notRunning) }
+    let monitor = HerdrMonitor { _ in counter.increment(); return .unavailable(.notRunning) }
     var delivered: [HerdrScanOutcome] = []
     monitor.onScan = { delivered.append($0) }
 
@@ -422,7 +476,7 @@ final class ScanCounter: @unchecked Sendable {
 
 @MainActor @Test func herdrMonitorDropsAScanThatFinishesAfterTheGateCloses() async {
     let gate = DispatchSemaphore(value: 0)
-    let monitor = HerdrMonitor { gate.wait(); return .unavailable(.timeout) }
+    let monitor = HerdrMonitor { _ in gate.wait(); return .unavailable(.timeout) }
     let task = monitor.tick(now: 0, ghosttyControlsEnabled: true, herdrPaneIDs: ["w1:p1"])
     #expect(task != nil)
     // While one scan is in flight no second scan starts.
@@ -449,4 +503,25 @@ final class ScanCounter: @unchecked Sendable {
     #expect(started <= now)
     #expect(started > now - ProcessInfo.processInfo.systemUptime - 1)
     #expect(HerdrProcessTree.startTime(of: 0) == nil)
+}
+
+/// Records each scan request a monitor hands its scanner.
+private final class RequestLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [HerdrScanRequest] = []
+    func append(_ request: HerdrScanRequest) { lock.lock(); recorded.append(request); lock.unlock() }
+    var requests: [HerdrScanRequest] { lock.lock(); defer { lock.unlock() }; return recorded }
+}
+
+@MainActor @Test func herdrMonitorOpensForTheCodexGateAndScansWithTheGivenRequest() async {
+    let log = RequestLog()
+    let monitor = HerdrMonitor { request in log.append(request); return .unavailable(.notRunning) }
+    let codex = HerdrScanRequest(includeIntegration: false, processInfoTitles: ["01a1151d-4e9d-7e53-a0b0-10d6e..."])
+    #expect(monitor.tick(now: 0, ghosttyControlsEnabled: false, herdrPaneIDs: [], codexGate: true, request: codex) == nil)
+    #expect(monitor.tick(now: 0, ghosttyControlsEnabled: true, herdrPaneIDs: [], codexGate: false, request: codex) == nil)
+    await monitor.tick(now: 1, ghosttyControlsEnabled: true, herdrPaneIDs: [], codexGate: true, request: codex)?.value
+    #expect(monitor.isGateOpen)
+    let fresh = HerdrScanRequest(includeIntegration: false, processInfoTitles: ["9f3c2b10-1111-4222-8333-44445..."])
+    #expect(await monitor.revalidate(fresh) == .unavailable(.notRunning))
+    #expect(log.requests == [codex, fresh])
 }

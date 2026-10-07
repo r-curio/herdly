@@ -2,8 +2,10 @@ import Foundation
 import SteerCore
 
 /// Polls herdr on the 2-second scan, and only while the gate in ADR 0009 holds: Ghostty controls
-/// are on in this launch and at least one live session's newest Steer hook event recorded a
-/// `HERDR_PANE_ID`. Outside the gate Steer does not contact herdr and the last scan is dropped.
+/// are on in this launch and either a live Claude Code session's newest Steer hook event recorded
+/// a `HERDR_PANE_ID` or a live Codex session's title is in no Ghostty terminal while herdr's
+/// default socket is trusted (ADR 0012). Outside the gate Steer does not contact herdr and the
+/// last scan is dropped.
 ///
 /// Scans run off the main actor; at most one is in flight, and a failed scan simply waits for the
 /// next interval. The monitor holds only the latest outcome: binding sessions to panes, presenting
@@ -21,27 +23,29 @@ final class HerdrMonitor {
     /// Called on the main actor after each scheduled scan completes inside the gate.
     var onScan: ((HerdrScanOutcome) -> Void)?
 
-    private let scanner: @Sendable () -> HerdrScanOutcome
+    private let scanner: @Sendable (HerdrScanRequest) -> HerdrScanOutcome
     private var nextScan: Double = 0
     private var inFlight = false
     /// Bumped whenever the gate closes, so a scan that finishes afterwards is discarded.
     private var generation = 0
     private(set) var isGateOpen = false
 
-    init(scanner: @escaping @Sendable () -> HerdrScanOutcome) {
+    init(scanner: @escaping @Sendable (HerdrScanRequest) -> HerdrScanOutcome) {
         self.scanner = scanner
     }
 
     convenience init(client: HerdrClient = HerdrClient()) {
-        self.init(scanner: { client.scan() })
+        self.init(scanner: { client.scan($0) })
     }
 
-    /// Called on every refresh with the monotonic `now` in seconds. Starts a scan when the gate is
-    /// open, none is in flight, and the interval has passed, and returns its task so callers and
-    /// tests can await completion; otherwise nil.
+    /// Called on every refresh with the monotonic `now` in seconds. Starts a scan reading `request`
+    /// when the gate is open, none is in flight, and the interval has passed, and returns its task
+    /// so callers and tests can await completion; otherwise nil.
     @discardableResult
-    func tick(now: Double, ghosttyControlsEnabled: Bool, herdrPaneIDs: Set<String>) -> Task<Void, Never>? {
-        let gate = HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: ghosttyControlsEnabled, paneIDs: herdrPaneIDs)
+    func tick(now: Double, ghosttyControlsEnabled: Bool, herdrPaneIDs: Set<String>, codexGate: Bool = false,
+              request: HerdrScanRequest = HerdrScanRequest()) -> Task<Void, Never>? {
+        let gate = HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: ghosttyControlsEnabled, paneIDs: herdrPaneIDs,
+                                                    codexGate: codexGate)
         guard gate else {
             if isGateOpen || latest != nil {
                 generation += 1
@@ -58,17 +62,18 @@ final class HerdrMonitor {
         nextScan = now + Self.scanInterval
         let generation = generation, scanner = scanner
         return Task { [weak self] in
-            let outcome = await Task.detached(priority: .utility) { scanner() }.value
+            let outcome = await Task.detached(priority: .utility) { scanner(request) }.value
             self?.finish(outcome, startedAt: now, generation: generation)
         }
     }
 
-    /// A fresh scan off the main actor for an Open or relay about to act, independent of the
-    /// schedule. Nil when the gate is closed, because then Steer must not contact herdr.
-    func revalidate() async -> HerdrScanOutcome? {
+    /// A fresh scan reading `request` off the main actor for an Open or relay about to act,
+    /// independent of the schedule. Nil when the gate is closed, because then Steer must not
+    /// contact herdr.
+    func revalidate(_ request: HerdrScanRequest = HerdrScanRequest()) async -> HerdrScanOutcome? {
         guard isGateOpen else { return nil }
         let scanner = scanner
-        return await Task.detached(priority: .userInitiated) { scanner() }.value
+        return await Task.detached(priority: .userInitiated) { scanner(request) }.value
     }
 
     private func finish(_ outcome: HerdrScanOutcome, startedAt: Double, generation: Int) {

@@ -9,7 +9,7 @@ import Foundation
 /// card offers Open in Codex (ADR 0010 "Failure"). Which words the user sees follows
 /// `docs/product.md` ("Agreed herdr presentation"); `message` is the generic wording until then.
 public enum HerdrQuestionRelayUnavailable: Error, Equatable, Hashable, Sendable {
-    /// The session runs in herdr but its pane binding does not hold (ADR 0008/0009).
+    /// The session runs in herdr but its pane binding does not hold (ADR 0012/0009).
     case binding(HerdrSessionUnavailable)
     /// A fresh scan no longer shows the session in herdr. A call routed to herdr keys never falls
     /// back to Ghostty keys partway.
@@ -236,7 +236,7 @@ public enum HerdrQuestionRelay {
     }
 
     /// The whole fresh check immediately before the key (ADR 0010): the rollout as just re-read,
-    /// the binding against a fresh scan (ADR 0008 target checks), the same pane as the click
+    /// the binding against a fresh scan and fresh `pane.process_info` (ADR 0012), the same pane as the click
     /// spent, and herdr reporting that pane's agent as `blocked`. Returns the pane to address.
     public static func preSendCheck(question: AttentionQuestion, evidence: ReminderReader.RolloutEvidence,
                                     binding: HerdrSessionBinding, outcome: HerdrScanOutcome?,
