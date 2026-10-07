@@ -540,6 +540,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     private var scanning = false
     private var nextScan: Double = 0
+    private var pruningEvents = false
+    private var nextEventPrune: Double = 0
     var orderedAttentionItems: [AttentionItem] { queue.items }
     var orderedAgentAttentionItems: [AgentAttentionItem] { agentQueue.items(at: Date().timeIntervalSince1970) }
     var count: Int { orderedAgentAttentionItems.count + (attention.pending ? 1 : 0) }
@@ -1101,6 +1103,29 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
     }
 
+    /// Hook records accumulate without bound, so Steer deletes expired ones itself: at launch and
+    /// then every ten minutes, off the main actor. Frequent passes keep hour-old tool records from
+    /// crowding the readers' newest-record window (see docs/event-retention.md). Readers stay correct while a
+    /// pass runs; a record deleted mid-scan is simply not read.
+    func pruneEventRecords() {
+        let now = ProcessInfo.processInfo.systemUptime
+        guard previewMode == nil, !CommandLine.arguments.contains("--smoke-test"),
+              !pruningEvents, now >= nextEventPrune else { return }
+        // Every configured root, connected or not, so one does not overflow while disconnected.
+        let directories = ([eventsPath] + claude.roots.map(\.eventsPath))
+            .filter { !$0.isEmpty }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        guard !directories.isEmpty else { return }
+        pruningEvents = true
+        nextEventPrune = now + 10 * 60
+        Task { @MainActor in
+            await Task.detached(priority: .utility) {
+                for directory in directories { HookEventRetention.prune(directory) }
+            }.value
+            pruningEvents = false
+        }
+    }
+
     func scanReminders() {
         let now = ProcessInfo.processInfo.systemUptime
         let hasClaudeInventoryRoot = claude.roots.contains { $0.capabilities.supported }
@@ -1408,6 +1433,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
 
     func refresh() {
         scanReminders()
+        pruneEventRecords()
         queue.expire(at: Date().timeIntervalSince1970)
         pruneAnswerProgress()
         pruneReplyProgress()

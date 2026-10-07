@@ -148,10 +148,11 @@ public enum DesktopEventReader {
         return data
     }
 
+    /// Replays only the newest `HookEventListing.maximumRecords` records; an overgrown or
+    /// unreadable directory yields no events.
     public static func read(from directory: URL) -> [DesktopEvent] {
-        guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil),
-              files.count <= 4096 else { return [] }
-        return files.filter { $0.pathExtension == "json" }
+        guard let entries = HookEventListing.entries(in: directory) else { return [] }
+        return HookEventListing.newestRecords(entries)
             .compactMap { url -> (Record, String)? in
                 guard let data = bounded(url, limit: maximumRecordSize),
                       let record = try? JSONDecoder().decode(Record.self, from: data) else { return nil }
