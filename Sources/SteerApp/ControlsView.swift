@@ -227,6 +227,25 @@ private struct GeneralControls: View {
                 }
             }
 
+            Text("Notch").font(.headline).foregroundStyle(.secondary)
+            SettingsCard {
+                SettingsRow(title: "Notch display", detail: model.notchDisplayChoices.detail) {
+                    Picker("Notch display", selection: Binding(
+                        get: { model.notchDisplayChoices.selected.preference },
+                        set: { preference in model.setNotchDisplayPreference(preference) }
+                    )) {
+                        ForEach(model.notchDisplayChoices.options) { option in
+                            Text(option.label).tag(option.preference)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .accessibilityLabel("Notch display")
+                    .accessibilityHint(model.notchDisplayChoices.detail)
+                }
+            }
+
             Text("Startup").font(.headline).foregroundStyle(.secondary)
             SettingsCard {
                 SettingsRow(title: "Launch at login", detail: model.launchAtLogin.detail) {
