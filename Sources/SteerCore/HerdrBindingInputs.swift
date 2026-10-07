@@ -1,7 +1,8 @@
 import Foundation
 
-// Builds ADR 0008's binding inputs from what Steer already has: a herdr scan (HerdrSnapshot.swift)
-// and Steer's own hook records carrying `herdr_pane_id`/`herdr_socket_path` (HookEventRecords.swift).
+// Builds a CLI session's herdr binding from what Steer already has: a herdr scan (HerdrSnapshot.swift),
+// Steer's own hook records carrying `herdr_pane_id`/`herdr_socket_path` (HookEventRecords.swift) for
+// Claude Code (ADR 0008), and its live Codex sessions and Ghostty titles for Codex (ADR 0012).
 // Everything but `HerdrHookRecordReader` is a pure function of its inputs. SteerApp owns the
 // monitor, the scan schedule and the session liveness it passes in (Companion+Herdr.swift).
 
@@ -20,10 +21,13 @@ public struct HerdrSessionKey: Hashable, Sendable {
 
 /// A CLI session's herdr binding, as Open, question relay and presentation consume it.
 ///
-/// - `notInHerdr`: the session's newest Steer hook event carried no `HERDR_PANE_ID` (or Steer has
-///   no hook event for it). herdr has nothing to say about it; the Ghostty tab rules apply.
-/// - `bound`: every ADR 0008 rule held against the latest scan. Before any focus or key, the
-///   caller must still revalidate against a fresh scan (ADR 0009 freshness).
+/// - `notInHerdr`: herdr has nothing to say about the session; the Ghostty tab rules apply. For
+///   Claude Code, its newest Steer hook event carried no `HERDR_PANE_ID` (or Steer has no hook
+///   event for it). For Codex, no successful scan shows its title in a pane: herdr was not
+///   contacted, the scan failed, or the title is in no pane, in which case the Ghostty rules find
+///   no tab either and the session stays unavailable (ADR 0012 "Route").
+/// - `bound`: every ADR 0008 (Claude) or ADR 0012 (Codex) rule held against the latest scan. Before
+///   any focus or key, the caller must still revalidate against a fresh scan (ADR 0009 freshness).
 /// - `unavailable`: the session runs in herdr, but Steer cannot target its pane. Open and relay
 ///   are disabled; attention is never cleared and no other pane is used.
 public enum HerdrSessionBinding: Equatable, Sendable {
@@ -49,13 +53,8 @@ public enum HerdrSessionUnavailable: Equatable, Hashable, Sendable {
     /// The scan could not identify one herdr server process and its start time, so a restart since
     /// the hook record cannot be ruled out.
     case serverIdentityUnknown
-    /// ADR 0008's rules did not hold for the session.
+    /// The session's binding rules (ADR 0008 or ADR 0012) did not hold.
     case binding(HerdrBindingUnavailable)
-    /// The session is Codex, and its binding is withheld. Codex can run hooks inside a shared
-    /// app-server daemon, so the hook's `HERDR_PANE_ID` and herdr's `agent_session` can both name
-    /// the pane of whichever CLI started the daemon (docs/evidence/herdr-daemon-hook-env.md).
-    /// Temporary until issue #144 decides an independent signal.
-    case codexPaneUnverified
 }
 
 public enum HerdrBindingInputs {
@@ -132,17 +131,31 @@ public enum HerdrBindingInputs {
 
     // MARK: - Contact gate (ADR 0009)
 
-    /// The pane IDs recorded by live sessions' newest hook events: the gate's second input.
+    /// The pane IDs recorded by live Claude Code sessions' newest hook events: the hook-record half
+    /// of the gate. Codex records never open it, because under the shared daemon their pane
+    /// belongs to another CLI (ADR 0012).
     public static func gatePaneIDs(records: [HerdrHookPaneRecord], liveSessions: Set<HerdrSessionKey>) -> Set<String> {
         Set(newestRecords(records).filter {
-            liveSessions.contains(HerdrSessionKey(agent: $0.agent, sessionID: $0.sessionID))
+            $0.agent == .claude && liveSessions.contains(HerdrSessionKey(agent: $0.agent, sessionID: $0.sessionID))
         }.compactMap(\.paneID))
     }
 
-    /// Steer may contact herdr only while Ghostty controls are on and at least one live session's
-    /// newest hook event recorded a pane ID.
-    public static func allowsContact(ghosttyControlsEnabled: Bool, paneIDs: Set<String>) -> Bool {
-        ghosttyControlsEnabled && !paneIDs.isEmpty
+    /// The Codex half of the gate (ADR 0012): a live Codex session's title is in no terminal of a
+    /// known Ghostty inventory, and herdr's default socket passes ADR 0009's trust check.
+    public static func codexGateOpens(_ codex: HerdrCodexTitles, defaultSocketTrusted: Bool) -> Bool {
+        defaultSocketTrusted && !codex.outsideGhostty.isEmpty
+    }
+
+    /// Steer may contact herdr only while Ghostty controls are on and either a live Claude session's
+    /// newest hook event recorded a pane ID or the Codex half of the gate holds.
+    public static func allowsContact(ghosttyControlsEnabled: Bool, paneIDs: Set<String>, codexGate: Bool = false) -> Bool {
+        ghosttyControlsEnabled && (!paneIDs.isEmpty || codexGate)
+    }
+
+    /// What a scan inside the gate reads: Claude's integration status only when a Claude pane opened
+    /// the gate, and process info for panes showing a live Codex title outside Ghostty.
+    public static func scanRequest(paneIDs: Set<String>, codex: HerdrCodexTitles) -> HerdrScanRequest {
+        HerdrScanRequest(includeIntegration: !paneIDs.isEmpty, processInfoTitles: codex.outsideGhostty)
     }
 
     // MARK: - Observation
@@ -195,7 +208,7 @@ public enum HerdrBindingInputs {
     /// Every pane in the tab, including panes hidden by a zoomed split: the largest of herdr's own
     /// count, the layout's panes and the snapshot's panes in that tab. A tab missing from the
     /// snapshot counts as zero, which the rules treat as unusable.
-    private static func panesInTab(_ tabID: String, snapshot: HerdrSnapshot) -> Int {
+    static func panesInTab(_ tabID: String, snapshot: HerdrSnapshot) -> Int {
         guard let tab = snapshot.tab(tabID) else { return 0 }
         let layout = snapshot.layouts.filter { $0.tabID == tabID }.map(\.paneIDs.count).max() ?? 0
         let listed = snapshot.panes.filter { $0.tabID == tabID }.count
@@ -208,30 +221,28 @@ public enum HerdrBindingInputs {
     ///
     /// - Parameters:
     ///   - hookRecords: Steer's hook records for every herdr-capable session it read, any order.
+    ///     Only Claude Code records are read.
     ///   - ghosttyControlsEnabled: Ghostty controls in this launch.
     ///   - outcome: the latest herdr scan, nil when none has completed since the gate opened.
     ///   - defaultSocketPath: herdr's default socket as the client resolves it.
-    /// - Returns: `notInHerdr` when the session's newest hook event carried no pane ID; otherwise
-    ///   `bound` only when Ghostty controls are on, the scan succeeded with a server start time,
-    ///   and `HerdrBindingRules` bound the session.
-    /// Withholds a Codex session's `bound` result (`codexPaneUnverified`); every other result is
-    /// returned unchanged. Apply it wherever the app hands out a binding, before Open or relay
-    /// reads it. Temporary until issue #144.
-    public static func withholdingUnverifiedCodex(_ binding: HerdrSessionBinding,
-                                                  for session: HerdrSessionKey) -> HerdrSessionBinding {
-        guard session.agent == .codex, case .bound = binding else { return binding }
-        return .unavailable(.codexPaneUnverified)
-    }
-
+    ///   - codex: live Codex sessions and Ghostty titles, read only for a Codex session.
+    /// - Returns: for Claude Code, `notInHerdr` when the session's newest hook event carried no pane
+    ///   ID; otherwise `bound` only when Ghostty controls are on, the scan succeeded with a server
+    ///   start time, and `HerdrBindingRules` bound the session. For Codex, see `codexBinding`.
     public static func binding(
         for session: HerdrSessionKey,
         liveness: HerdrSessionLiveness,
         hookRecords: [HerdrHookPaneRecord],
         ghosttyControlsEnabled: Bool,
         outcome: HerdrScanOutcome?,
-        defaultSocketPath: String
+        defaultSocketPath: String,
+        codex: HerdrCodexTitles
     ) -> HerdrSessionBinding {
-        let hookRecords = hookRecords.map(normalized)
+        if session.agent == .codex {
+            return codexBinding(for: session, liveness: liveness, ghosttyControlsEnabled: ghosttyControlsEnabled,
+                                outcome: outcome, codex: codex)
+        }
+        let hookRecords = hookRecords.map(normalized).filter { $0.agent == .claude }
         let newest = newestRecords(hookRecords).filter {
             $0.agent == session.agent && $0.sessionID == session.sessionID
         }
@@ -251,6 +262,30 @@ public enum HerdrBindingInputs {
         case .unavailable(let reason): return .unavailable(.binding(reason))
         }
     }
+
+    /// A Codex session's binding and route (ADR 0012). The title decides the route:
+    /// - in a pane of a successful scan and in no Ghostty terminal: `HerdrCodexBindingRules`;
+    /// - in both: unavailable, because the route is unknown;
+    /// - otherwise `notInHerdr`, and the Ghostty tab rules apply. With Ghostty controls off, no
+    ///   known Ghostty inventory, no scan or a failed scan, herdr counts as not showing the title.
+    public static func codexBinding(
+        for session: HerdrSessionKey,
+        liveness: HerdrSessionLiveness,
+        ghosttyControlsEnabled: Bool,
+        outcome: HerdrScanOutcome?,
+        codex: HerdrCodexTitles
+    ) -> HerdrSessionBinding {
+        guard session.agent == .codex, ghosttyControlsEnabled, let ghostty = codex.ghostty,
+              case .available(let scan)? = outcome,
+              let title = HerdrCodexBindingRules.title(forSession: session.sessionID),
+              scan.snapshot.panes.contains(where: { $0.terminalTitle == title }) else { return .notInHerdr }
+        guard !ghostty.contains(title) else { return .unavailable(.binding(.titleInHerdrAndGhostty)) }
+        switch HerdrCodexBindingRules.evaluate(sessionID: session.sessionID, liveness: liveness,
+                                               liveSessions: codex.liveSessions, scan: scan) {
+        case .bound(let target): return .bound(target)
+        case .unavailable(let reason): return .unavailable(.binding(reason))
+        }
+    }
 }
 
 /// Reads the newest window of Steer's hook event records for the herdr binding. Each record file
@@ -265,6 +300,9 @@ public enum HerdrHookRecordReader {
         public let records: [HerdrHookPaneRecord]
         /// Pass back into the next read.
         public let cache: [String: HerdrHookPaneRecord?]
+
+        /// No directories to read.
+        public static let empty = Result(records: [], cache: [:])
     }
 
     /// Unreadable or overgrown directories contribute nothing, as with the other hook readers.

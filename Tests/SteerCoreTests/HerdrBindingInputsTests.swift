@@ -5,19 +5,19 @@ import Testing
 private let session = "01a1142d-7a21-7383-a6aa-40030c90d7cf"
 private let otherSession = "9f3c2b10-1111-4222-8333-444455556666"
 private let socket = "/Users/test/.config/herdr/herdr.sock"
-private let codexKey = HerdrSessionKey(agent: .codex, sessionID: session)
+private let claudeKey = HerdrSessionKey(agent: .claude, sessionID: session)
 
 // Explicit clock, in seconds since 1970: herdr's server started at 1_000, hooks arrive later.
 private let serverStart = 1_000.0
 
-private func record(_ sessionID: String = session, agent: HerdrAgentKind = .codex, pane: String? = "w1:p1",
+private func record(_ sessionID: String = session, agent: HerdrAgentKind = .claude, pane: String? = "w1:p1",
                     socket socketPath: String? = socket, at recordedAt: Double = 1_100) -> HerdrHookPaneRecord {
     HerdrHookPaneRecord(sessionID: sessionID, agent: agent, paneID: pane,
                         socketPath: pane == nil ? nil : socketPath, recordedAt: recordedAt)
 }
 
-private func herdrPane(_ paneID: String = "w1:p1", tab: String = "w1:t1", agent: String? = "codex",
-                       session agentSession: HerdrAgentSession? = HerdrAgentSession(source: "herdr:codex", agent: "codex",
+private func herdrPane(_ paneID: String = "w1:p1", tab: String = "w1:t1", agent: String? = "claude",
+                       session agentSession: HerdrAgentSession? = HerdrAgentSession(source: "herdr:claude", agent: "claude",
                                                                                      kind: "id", value: session),
                        title: String? = nil) -> HerdrPane {
     HerdrPane(paneID: paneID, tabID: tab, workspaceID: "w1", focused: true, agent: agent, agentStatus: .idle,
@@ -28,8 +28,8 @@ private func scan(panes: [HerdrPane] = [herdrPane()],
                   tabs: [HerdrTab] = [HerdrTab(tabID: "w1:t1", workspaceID: "w1", focused: true, paneCount: 1)],
                   layouts: [HerdrLayout] = [HerdrLayout(tabID: "w1:t1", zoomed: false, paneIDs: ["w1:p1"])],
                   protocolVersion: Int = 22,
-                  integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex: .current(version: 8),
-                                                                         .claude: .current(version: 10)],
+                  integration: [HerdrAgentKind: HerdrIntegrationState] = [.claude: .current(version: 8),
+                                                                         .codex: .current(version: 10)],
                   client: Result<HerdrAttachedClient, HerdrUnavailableReason>
                       = .success(HerdrAttachedClient(pid: 93954, tty: "ttys015", serverPID: 900)),
                   serverStartedAt: Double? = serverStart) -> HerdrScanOutcome {
@@ -40,14 +40,14 @@ private func scan(panes: [HerdrPane] = [herdrPane()],
                          serverStartedAt: serverStartedAt))
 }
 
-private func binding(_ key: HerdrSessionKey = codexKey, liveness: HerdrSessionLiveness = .live,
+private func binding(_ key: HerdrSessionKey = claudeKey, liveness: HerdrSessionLiveness = .live,
                      records: [HerdrHookPaneRecord] = [record()], ghostty: Bool = true,
                      outcome: HerdrScanOutcome? = scan()) -> HerdrSessionBinding {
     HerdrBindingInputs.binding(for: key, liveness: liveness, hookRecords: records, ghosttyControlsEnabled: ghostty,
-                               outcome: outcome, defaultSocketPath: socket)
+                               outcome: outcome, defaultSocketPath: socket, codex: .none)
 }
 
-private let target = HerdrPaneTarget(sessionID: session, agent: .codex, paneID: "w1:p1")
+private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID: "w1:p1")
 
 // MARK: - Agreement
 
@@ -56,33 +56,32 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .codex, paneID: 
     #expect(binding().target == target)
 }
 
-@Test func herdrInputsLowercaseCodexSessionsOnBothSides() {
-    let upper = session.uppercased()
-    let pane = herdrPane(session: HerdrAgentSession(source: "herdr:codex", agent: "codex", kind: "id", value: upper))
-    let key = HerdrSessionKey(agent: .codex, sessionID: upper)
-    #expect(key == codexKey)
-    #expect(binding(key, records: [record(upper)], outcome: scan(panes: [pane])) == .bound(target))
-}
-
 @Test func herdrInputsKeepClaudeSessionsAsWritten() {
     let claude = "Claude-Session-A"
     let key = HerdrSessionKey(agent: .claude, sessionID: claude)
     #expect(key.sessionID == claude)
-    let pane = herdrPane(agent: "claude",
-                         session: HerdrAgentSession(source: "herdr:claude", agent: "claude", kind: "id", value: claude))
-    #expect(binding(key, records: [record(claude, agent: .claude)], outcome: scan(panes: [pane]))
+    let pane = herdrPane(session: HerdrAgentSession(source: "herdr:claude", agent: "claude", kind: "id", value: claude))
+    #expect(binding(key, records: [record(claude)], outcome: scan(panes: [pane]))
         == .bound(HerdrPaneTarget(sessionID: claude, agent: .claude, paneID: "w1:p1")))
     #expect(binding(HerdrSessionKey(agent: .claude, sessionID: claude.lowercased()),
-                    records: [record(claude, agent: .claude)], outcome: scan(panes: [pane])) == .notInHerdr)
+                    records: [record(claude)], outcome: scan(panes: [pane])) == .notInHerdr)
+}
+
+@Test func herdrInputsIgnoreCodexHookRecordsForClaude() {
+    // ADR 0012: a Codex record naming this Claude pane later must not void the Claude binding.
+    #expect(binding(records: [record(), record(otherSession, agent: .codex, at: 1_200)]) == .bound(target))
+    // Nor does a Codex record put a Codex session in herdr: Codex binds only by title.
+    let codexKey = HerdrSessionKey(agent: .codex, sessionID: otherSession)
+    #expect(binding(codexKey, records: [record(otherSession, agent: .codex, at: 1_200)]) == .notInHerdr)
 }
 
 @Test func herdrInputsDisagreementIsUnavailableNotNotInHerdr() {
-    let other = herdrPane(session: HerdrAgentSession(source: "herdr:codex", agent: "codex", kind: "id", value: otherSession))
+    let other = herdrPane(session: HerdrAgentSession(source: "herdr:claude", agent: "claude", kind: "id", value: otherSession))
     #expect(binding(outcome: scan(panes: [other])) == .unavailable(.binding(.agentSessionMismatch)))
     #expect(binding(outcome: scan(panes: [herdrPane(session: nil)])) == .unavailable(.binding(.agentSessionNull)))
-    let path = herdrPane(session: HerdrAgentSession(source: "herdr:codex", agent: "codex", kind: "path", value: session))
+    let path = herdrPane(session: HerdrAgentSession(source: "herdr:claude", agent: "claude", kind: "path", value: session))
     #expect(binding(outcome: scan(panes: [path])) == .unavailable(.binding(.agentSessionMismatch)))
-    let wrongAgent = herdrPane(session: HerdrAgentSession(source: "herdr:claude", agent: "claude", kind: "id", value: session))
+    let wrongAgent = herdrPane(session: HerdrAgentSession(source: "herdr:codex", agent: "codex", kind: "id", value: session))
     #expect(binding(outcome: scan(panes: [wrongAgent])) == .unavailable(.binding(.agentSessionMismatch)))
     #expect(binding(liveness: .ended) == .unavailable(.binding(.sessionEnded)))
 }
@@ -127,17 +126,17 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .codex, paneID: 
 // MARK: - Integration status
 
 @Test func herdrInputsPassEveryIntegrationStateToTheRules() {
-    #expect(binding(outcome: scan(integration: [.codex: .current(version: 8)])) == .bound(target))
+    #expect(binding(outcome: scan(integration: [.claude: .current(version: 8)])) == .bound(target))
     for state in [HerdrIntegrationState.outdated, .notInstalled, .unparseable] {
-        #expect(binding(outcome: scan(integration: [.codex: state, .claude: .current(version: 10)]))
-            == .unavailable(.binding(.integrationNotCurrent(.codex, state))))
+        #expect(binding(outcome: scan(integration: [.claude: state, .codex: .current(version: 10)]))
+            == .unavailable(.binding(.integrationNotCurrent(.claude, state))))
     }
-    #expect(binding(outcome: scan(integration: [.claude: .current(version: 10)]))
-        == .unavailable(.binding(.integrationNotCurrent(.codex, nil))))
+    #expect(binding(outcome: scan(integration: [.codex: .current(version: 10)]))
+        == .unavailable(.binding(.integrationNotCurrent(.claude, nil))))
     // Parsed output reaches the rules unchanged.
-    let parsed = HerdrIntegrationReport(parsing: "codex: outdated (v7 < v8) (/x)\nclaude: current (v10) (/y)\n")
+    let parsed = HerdrIntegrationReport(parsing: "claude: outdated (v7 < v8) (/x)\ncodex: current (v10) (/y)\n")
     #expect(binding(outcome: scan(integration: parsed.states))
-        == .unavailable(.binding(.integrationNotCurrent(.codex, .outdated))))
+        == .unavailable(.binding(.integrationNotCurrent(.claude, .outdated))))
 }
 
 // MARK: - Scan-level states
@@ -171,25 +170,26 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .codex, paneID: 
 
 // MARK: - Gate
 
-@Test func herdrGateRequiresGhosttyControlsAndARecordedPane() {
+@Test func herdrGateRequiresGhosttyControlsAndARecordedPaneOrTheCodexGate() {
     #expect(HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: true, paneIDs: ["w1:p1"]))
     #expect(!HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: false, paneIDs: ["w1:p1"]))
     #expect(!HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: true, paneIDs: []))
+    #expect(HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: true, paneIDs: [], codexGate: true))
+    #expect(!HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: false, paneIDs: [], codexGate: true))
 }
 
-@Test func herdrGatePaneIDsComeFromLiveSessionsNewestEvents() {
-    let claudeKey = HerdrSessionKey(agent: .claude, sessionID: "claude-a")
+@Test func herdrGatePaneIDsComeFromLiveClaudeSessionsNewestEvents() {
+    let codexKey = HerdrSessionKey(agent: .codex, sessionID: "9f3c2b10-0000-4222-8333-444455556666")
     let records = [
         record(at: 1_100),
         record(otherSession, pane: "w2:p1", at: 1_100),
         record(otherSession, pane: nil, at: 1_200),   // newest event left herdr
-        record("claude-a", agent: .claude, pane: "w3:p1"),
-        record("ended-claude", agent: .claude, pane: "w4:p1"),
+        record(codexKey.sessionID, agent: .codex, pane: "w3:p1"),   // Codex records never open the gate
+        record("ended-claude", pane: "w4:p1"),
     ]
-    let live: Set = [codexKey, HerdrSessionKey(agent: .codex, sessionID: otherSession), claudeKey]
-    #expect(HerdrBindingInputs.gatePaneIDs(records: records, liveSessions: live) == ["w1:p1", "w3:p1"])
+    let live: Set = [claudeKey, HerdrSessionKey(agent: .claude, sessionID: otherSession), codexKey]
+    #expect(HerdrBindingInputs.gatePaneIDs(records: records, liveSessions: live) == ["w1:p1"])
     #expect(HerdrBindingInputs.gatePaneIDs(records: records, liveSessions: []).isEmpty)
-    #expect(HerdrBindingInputs.gatePaneIDs(records: [record(session.uppercased())], liveSessions: [codexKey]) == ["w1:p1"])
 }
 
 // MARK: - Hook records
@@ -198,7 +198,7 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .codex, paneID: 
     let codex: [String: Any] = ["hook_event_name": "Stop", "session_id": session.uppercased(), "source": "steer-hook-v1",
                                 "captured_at": 1_100.5, HerdrPaneID.recordKey: "w1:p1",
                                 HerdrSocketPath.recordKey: socket]
-    #expect(HerdrBindingInputs.hookRecord(from: codex) == record(at: 1_100.5))
+    #expect(HerdrBindingInputs.hookRecord(from: codex) == record(agent: .codex, at: 1_100.5))
     let claude: [String: Any] = ["hook_event_name": "Stop", "session_id": "Claude-A", "source": "steer-claude-hook-v1",
                                  "received_at": "2026-10-07T12:00:00Z"]
     let decoded = HerdrBindingInputs.hookRecord(from: claude)
@@ -230,34 +230,17 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .codex, paneID: 
     try Data("not json".utf8).write(to: directory.appendingPathComponent("broken.json"))
 
     let first = HerdrHookRecordReader.read(directories: [directory])
-    #expect(first.records == [record(pane: "w1:p2", at: 1_200)])
+    #expect(first.records == [record(agent: .codex, pane: "w1:p2", at: 1_200)])
     #expect(first.cache.count == 4)
     #expect(first.cache.values.compactMap { $0 }.count == 2)
 
     // A cached path is not decoded again: a stand-in cache entry wins over the file.
     var stale = first.cache
     let newestPath = try #require(first.cache.first { $0.value?.paneID == "w1:p2" }?.key)
-    stale[newestPath] = .some(record(pane: "w9:p9", at: 1_200))
-    #expect(HerdrHookRecordReader.read(directories: [directory], cache: stale).records == [record(pane: "w9:p9", at: 1_200)])
+    stale[newestPath] = .some(record(agent: .codex, pane: "w9:p9", at: 1_200))
+    #expect(HerdrHookRecordReader.read(directories: [directory], cache: stale).records == [record(agent: .codex, pane: "w9:p9", at: 1_200)])
     // Paths no longer listed drop out of the cache.
     let gone = HerdrHookRecordReader.read(directories: [directory], cache: ["/nowhere.json": record()])
     #expect(gone.cache["/nowhere.json"] == nil)
     #expect(HerdrHookRecordReader.read(directories: [directory.appendingPathComponent("missing")]).records.isEmpty)
-}
-
-// MARK: - Codex guard (#144)
-
-@Test func herdrInputsWithholdABoundCodexSessionUntilItsPaneIsVerified() {
-    let bound = HerdrSessionBinding.bound(HerdrPaneTarget(sessionID: session, agent: .codex, paneID: "w1:p1"))
-    #expect(HerdrBindingInputs.withholdingUnverifiedCodex(bound, for: codexKey) == .unavailable(.codexPaneUnverified))
-    #expect(HerdrPresentation.group(HerdrSessionUnavailable.codexPaneUnverified) == .generic)
-}
-
-@Test func herdrInputsCodexGuardLeavesOtherResultsAndClaudeUnchanged() {
-    let claudeKey = HerdrSessionKey(agent: .claude, sessionID: otherSession)
-    let claudeBound = HerdrSessionBinding.bound(HerdrPaneTarget(sessionID: otherSession, agent: .claude, paneID: "w1:p2"))
-    #expect(HerdrBindingInputs.withholdingUnverifiedCodex(claudeBound, for: claudeKey) == claudeBound)
-    #expect(HerdrBindingInputs.withholdingUnverifiedCodex(.notInHerdr, for: codexKey) == .notInHerdr)
-    #expect(HerdrBindingInputs.withholdingUnverifiedCodex(.unavailable(.notScanned), for: codexKey)
-        == .unavailable(.notScanned))
 }

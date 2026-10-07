@@ -1,8 +1,10 @@
 import Foundation
 
-// ADR 0008: a CLI session in herdr binds to a pane only when Steer's own newest hook record
+// ADR 0008: a Claude Code session in herdr binds to a pane only when Steer's own newest hook record
 // for the session names that `HERDR_PANE_ID` and herdr's fresh snapshot shows exactly that one
-// pane reporting the session as its `agent_session`. Everything here is a pure function of the
+// pane reporting the session as its `agent_session`. Codex CLI sessions bind by title and
+// foreground process instead (ADR 0012, HerdrCodexBinding.swift), and their hook records are
+// ignored here: under Codex's shared daemon they name another pane. Everything here is a pure function of the
 // values passed in; SteerApp owns the socket, subprocesses, and scheduling (ADR 0009). The
 // inputs are deliberately plain so they can be filled from the hook record and snapshot models.
 // `HerdrAgentKind` comes from HerdrSnapshot.swift.
@@ -160,6 +162,24 @@ public enum HerdrBindingUnavailable: Equatable, Hashable, Sendable {
     case multipleClients(Int)
     /// The one attached client's ancestry does not reach Ghostty.
     case nonGhosttyClient
+
+    // ADR 0012 (Codex CLI sessions).
+    /// No pane in the snapshot has the session's shortened identifier as its title.
+    case titleNotInHerdr
+    /// Several panes, listed by ID, have the session's title.
+    case duplicateTitles([String])
+    /// Not exactly one live tracked session renders this shortened identifier; `count` do.
+    case sessionPrefixNotUnique(Int)
+    /// The title is both a herdr pane's and a Ghostty terminal's, so the route is unknown.
+    case titleInHerdrAndGhostty
+    /// herdr detected another agent in the pane; its name, truncated.
+    case detectedAgent(String)
+    /// `pane.process_info` for the pane failed with this reason, or named another pane
+    /// (`malformedReply`); nil when the scan did not ask about the pane.
+    case processInfoUnavailable(HerdrUnavailableReason?)
+    /// The pane's foreground processes include `count` named for the agent, not the number its
+    /// rule requires.
+    case foregroundProcesses(HerdrAgentKind, count: Int)
 }
 
 /// The result of ADR 0008's binding rules for one session.
@@ -177,7 +197,8 @@ public enum HerdrBindingRules {
     /// - Parameters:
     ///   - hookRecords: Steer's hook records for every live herdr-capable session, newest event
     ///     per session or more, in any order. Records for other sessions are needed to detect a
-    ///     pane whose newest event belongs to a different session.
+    ///     pane whose newest event belongs to a different session. Codex records are ignored
+    ///     (ADR 0012), so a Codex session never binds here.
     ///   - defaultSocketPath: herdr's default socket (`~/.config/herdr/herdr.sock`) as resolved by
     ///     the caller.
     /// - Returns: `.bound` only when every ADR 0008 rule holds; otherwise the first failing reason.
@@ -191,7 +212,7 @@ public enum HerdrBindingRules {
     ) -> HerdrBinding {
         if liveness == .ended { return .unavailable(.sessionEnded) }
 
-        let newestBySession: [String: NewestRecord] = newestRecords(hookRecords)
+        let newestBySession: [String: NewestRecord] = newestRecords(hookRecords.filter { $0.agent != .codex })
         guard let newest = newestBySession[sessionID] else { return .unavailable(.noHookRecord) }
         guard case .unique(let record) = newest else { return .unavailable(.conflictingHookRecords) }
         guard let paneID = record.paneID else { return .unavailable(.notInHerdr) }

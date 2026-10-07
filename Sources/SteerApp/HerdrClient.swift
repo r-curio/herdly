@@ -3,7 +3,7 @@ import Foundation
 import SteerCore
 
 /// Steer's only route to herdr (ADR 0009): one short connection to herdr's default JSON socket per
-/// request, plus two subprocesses, `herdr integration status` and `lsof`. Every call blocks for at
+/// request, plus two subprocesses, `herdr integration status` (for Claude Code) and `lsof`. Every call blocks for at
 /// most its deadline and must run off the main actor. Nothing here retries: a failed read waits for
 /// the next scan, and a focus or key is sent at most once because a retried key could answer twice.
 /// Steer never starts, stops or configures herdr and sends no credential.
@@ -63,6 +63,15 @@ struct HerdrClient: Sendable {
     func snapshot() -> Result<HerdrSnapshot, HerdrUnavailableReason> {
         request(method: "session.snapshot", params: [:]).flatMap { reply in
             if case .snapshot(let snapshot) = reply { return .success(snapshot) }
+            return .failure(.malformedReply)
+        }
+    }
+
+    /// `pane.process_info` for one pane: its foreground processes as herdr reads them from the
+    /// pane's terminal (ADR 0012). A reply about another pane is malformed.
+    func processInfo(paneID: String) -> Result<HerdrProcessInfo, HerdrUnavailableReason> {
+        request(method: "pane.process_info", params: ["pane_id": paneID]).flatMap { reply in
+            if case .processInfo(let info) = reply, info.paneID == paneID { return .success(info) }
             return .failure(.malformedReply)
         }
     }
@@ -149,28 +158,34 @@ struct HerdrClient: Sendable {
 
     // MARK: - Scan
 
-    /// One full read: socket trust, `ping` and its protocol, a snapshot, integration status, then
-    /// the attached clients and the server's start time. The first scan-wide failure stops the
-    /// scan and is its one reason.
-    func scan() -> HerdrScanOutcome {
+    /// One full read: socket trust, `ping` and its protocol, a snapshot, integration status when
+    /// `request` asks for it, then the attached clients and the server's start time, and last
+    /// `pane.process_info` for the panes `request` selects. The first scan-wide failure stops the
+    /// scan and is its one reason; a failed `pane.process_info` is kept as that pane's reason.
+    func scan(_ request: HerdrScanRequest = HerdrScanRequest()) -> HerdrScanOutcome {
         if case .failure(let reason) = ping() { return .unavailable(reason) }
         let snapshot: HerdrSnapshot
         switch self.snapshot() {
         case .success(let value): snapshot = value
         case .failure(let reason): return .unavailable(reason)
         }
-        let integration: HerdrIntegrationReport
-        switch integrationStatus() {
-        case .success(let value): integration = value
-        case .failure(let reason): return .unavailable(reason)
+        var integration = HerdrIntegrationReport(states: [:])
+        if request.includeIntegration {
+            switch integrationStatus() {
+            case .success(let value): integration = value
+            case .failure(let reason): return .unavailable(reason)
+            }
         }
+        let listing: HerdrClientListing
         switch clientListing() {
-        case .success(let listing):
-            return .available(HerdrScan(snapshot: snapshot, integration: integration,
-                                        client: HerdrAttachedClient.verdict(listing: listing, ancestry: ancestry),
-                                        serverStartedAt: serverStartedAt(listing)))
+        case .success(let value): listing = value
         case .failure(let reason): return .unavailable(reason)
         }
+        var processInfo: [String: Result<HerdrProcessInfo, HerdrUnavailableReason>] = [:]
+        for paneID in request.processInfoPanes(in: snapshot) { processInfo[paneID] = self.processInfo(paneID: paneID) }
+        return .available(HerdrScan(snapshot: snapshot, integration: integration,
+                                    client: HerdrAttachedClient.verdict(listing: listing, ancestry: ancestry),
+                                    serverStartedAt: serverStartedAt(listing), processInfo: processInfo))
     }
 }
 

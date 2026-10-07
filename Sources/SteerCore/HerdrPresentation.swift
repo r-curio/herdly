@@ -116,7 +116,8 @@ public struct HerdrSettingsRow: Equatable, Sendable {
     /// Nil only while the first scan after the gate opened is still running.
     public let badge: HerdrReadinessBadge?
     public let detail: String
-    /// Every applicable problem, one per line: integrations (Claude, then Codex), Ghostty, herdr.
+    /// Every applicable problem, one per line: Claude's integration, Ghostty, herdr. Codex needs no
+    /// herdr integration (ADR 0012).
     public let problems: [HerdrSettingsProblem]
 
     public init(badge: HerdrReadinessBadge?, detail: String, problems: [HerdrSettingsProblem]) {
@@ -131,7 +132,7 @@ public enum HerdrPresentation {
 
     public static func group(_ reason: HerdrSessionUnavailable) -> HerdrReasonGroup {
         switch reason {
-        case .ghosttyControlsOff, .notScanned, .serverIdentityUnknown, .codexPaneUnverified: .generic
+        case .ghosttyControlsOff, .notScanned, .serverIdentityUnknown: .generic
         case .herdr(let reason): group(reason)
         case .binding(let reason): group(reason)
         }
@@ -154,7 +155,8 @@ public enum HerdrPresentation {
         case .sessionEnded, .noHookRecord, .notInHerdr, .conflictingHookRecords, .unsupportedProtocol,
              .socketUnknown, .herdrRestarted, .paneReusedBySession, .conflictingPaneObservations,
              .duplicateMatches, .paneMissing, .agentSessionNull, .agentSessionMismatch, .conflictingTitle,
-             .noClient, .nonGhosttyClient: .generic
+             .noClient, .nonGhosttyClient, .titleNotInHerdr, .duplicateTitles, .sessionPrefixNotUnique,
+             .titleInHerdrAndGhostty, .detectedAgent, .processInfoUnavailable, .foregroundProcesses: .generic
         }
     }
 
@@ -272,7 +274,7 @@ public enum HerdrPresentation {
     ///   - inUse: the ADR 0009 gate is open (Ghostty controls on and a live session reported a pane).
     ///   - outcome: the latest scan, nil before the first scan after the gate opened.
     ///   - agentsSeen: agents whose live sessions' newest hook event reported running in herdr;
-    ///     integration problems are listed only for these.
+    ///     an integration problem is listed only for Claude Code, and only when it is among these.
     ///   - ttySupport: whether Ghostty declares `tty`; nil while unknown, which lists no problem.
     public static func settingsRow(inUse: Bool, ghosttyControlsEnabled: Bool, outcome: HerdrScanOutcome?,
                                    agentsSeen: Set<HerdrAgentKind>, ttySupport: GhosttyTTYSupport?) -> HerdrSettingsRow {
@@ -287,11 +289,11 @@ public enum HerdrPresentation {
         var herdrUnavailable = false
         switch outcome {
         case .available(let scan):
-            for agent in HerdrAgentKind.allCases where agentsSeen.contains(agent) {
-                if scan.integration.reason(for: agent) != nil { problems.append(.integration(agent)) }
+            if agentsSeen.contains(.claude), scan.integration.reason(for: .claude) != nil {
+                problems.append(.integration(.claude))
             }
-        case .unavailable(.integrationNotCurrent(let agent)):
-            problems.append(.integration(agent))
+        case .unavailable(.integrationNotCurrent(.claude)):
+            problems.append(.integration(.claude))
         case .unavailable:
             herdrUnavailable = true
         }

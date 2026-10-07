@@ -326,7 +326,7 @@ extension Companion {
 
     /// One click on a herdr-bound session (ADR 0010): one `agent.send_keys` carrying only the
     /// option's digit, to the bound pane, never Enter. The key is spent before anything is sent.
-    /// Immediately before it, a fresh scan re-runs ADR 0008's target checks and herdr must report
+    /// Immediately before it, a fresh scan re-runs ADR 0012's whole binding rule and herdr must report
     /// the pane's agent `blocked`, then the rollout is re-read. A key that may have been written
     /// counts as sent and is never resent; nothing is sent on a timer, retry, restart or error.
     private func answerThroughHerdr(_ question: AttentionQuestion, question index: Int, option: Int) {
