@@ -218,6 +218,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     var fiveHourShown: Bool { currentFiveHourLimit != nil }
     /// Claude readings remain keyed by their selected configuration root; values are never merged.
     @Published var claudeUsage: [String: ClaudeUsageReading] = [:]
+    /// The strip's usage bars, Claude's then Codex's, from one clock reading so the bars drawn and
+    /// the wing laid out for them agree.
+    var usageStripReadouts: [UsageStripReadout] {
+        let now = Date().timeIntervalSince1970
+        return UsageStripReadouts.make(codex: usage?.current(now: now),
+                                       claude: ClaudeUsageReading.newest(claudeUsage.values, now: now))
+    }
     /// `--reminder-rollouts <path>` points lab runs at a copy of Codex's sessions tree.
     nonisolated static var rolloutRoot: URL {
         argumentValue(for: "--reminder-rollouts").map { URL(fileURLWithPath: $0) }
@@ -652,9 +659,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             "display_preference": notchDisplayPreference.pin.map { ["pinned_id": $0.id, "pinned_name": $0.name] as Any } ?? "follow_pointer",
             "pointer": ["x": pointer.x, "y": pointer.y],
             "chosen_display": chosen.map { Int($0.id) } ?? NSNull(),
-            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false, fiveHourShown: fiveHourShown)) } ?? NSNull(),
-            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false, fiveHourShown: fiveHourShown)) } ?? NSNull(),
+            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts))) } ?? NSNull(),
+            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts))) } ?? NSNull(),
             "five_hour_shown": fiveHourShown,
+            "usage_readouts": usageStripReadouts.count,
             "panel_frame": rect(panel.frame),
             "codex_foreground": desktopForeground,
             "panel": ["level": panel.level.rawValue, "nonactivating": panel.styleMask.contains(.nonactivatingPanel),
@@ -1362,13 +1370,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                          preference: notchDisplayPreference)
         else { panel.orderOut(nil); currentDisplayID = nil; return }
         currentDisplayID = display.id
-        let layout = NotchPlacement.strip(on: display, expanded: expanded, fiveHourShown: fiveHourShown)
+        let layout = NotchPlacement.strip(on: display, expanded: expanded, wing: UsageStripReadouts.wingWidth(usageStripReadouts))
         if stripLayout != layout { stripLayout = layout }
         let rows = presentationMode.showsAll ? orderedAgentAttentionItems.count : (spotlightItem == nil ? 0 : 1)
         var frame = contentHeight > 0
-            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, fiveHourShown: fiveHourShown)
+            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, wing: UsageStripReadouts.wingWidth(usageStripReadouts))
             : NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
-                                   extraRows: attention.pending && (presentationMode.showsAll || spotlightItem == nil), fiveHourShown: fiveHourShown)
+                                   extraRows: attention.pending && (presentationMode.showsAll || spotlightItem == nil), wing: UsageStripReadouts.wingWidth(usageStripReadouts))
         // With no menu bar and no housing the strip rests above the screen edge and slides in for
         // the pointer at the top edge or an open panel, so it does not cover a full-screen app.
         if NotchTuck.isTucked(display: display, pointer: NSEvent.mouseLocation, interacting: interacting, open: expanded) {
@@ -1895,6 +1903,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let now = Date().timeIntervalSince1970
         usage = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 37, resetsAt: now + 3 * 86400),
                                   fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: now + 2 * 3600))
+        claudeUsage = ["~/.claude": ClaudeUsageReading(sourceScope: "~/.claude", sessionID: "00000000-0000-4000-8000-000000000001",
+                                                       fiveHour: ClaudeUsageWindow(usedPercentage: 62, resetsAt: now + 3 * 3600),
+                                                       sevenDay: ClaudeUsageWindow(usedPercentage: 18, resetsAt: now + 5 * 86400),
+                                                       observedAt: now)]
         let working = UUID(uuidString: "01A0916C-337B-4E2A-9D11-0000000000A1")!
         let finished = UUID(uuidString: "7C2F5D10-88AA-4B7E-8E0B-0000000000B2")!
         let asking = UUID(uuidString: "3E9D1B44-51C3-4F0A-9A77-0000000000C3")!
