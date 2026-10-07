@@ -165,7 +165,8 @@ struct HerdrLab {
                 ancestry: @escaping @Sendable (Int32) -> [HerdrProcessAncestor] = { pid in
                     [HerdrProcessAncestor(pid: pid, command: "herdr", tty: "ttys015"),
                      HerdrProcessAncestor(pid: 828, command: "ghostty", tty: nil)]
-                }) -> HerdrClient {
+                },
+                startTime: @escaping @Sendable (Int32) -> Double? = { $0 == 900 ? 1_000 : nil }) -> HerdrClient {
         var configuration = HerdrClient.Configuration(home: home, herdrDirectories: [bin])
         configuration.requestTimeout = requestTimeout
         configuration.subprocessTimeout = subprocessTimeout
@@ -175,7 +176,7 @@ struct HerdrLab {
         return HerdrClient(configuration: configuration, run: { executable, arguments, timeout, limit in
             if executable == lsofPath { return .success(lsof) }
             return HerdrSubprocess.run(executable: executable, arguments: arguments, timeout: timeout, limit: limit)
-        }, ancestry: ancestry)
+        }, ancestry: ancestry, startTime: startTime)
     }
 
     func remove() { try? FileManager.default.removeItem(at: home) }
@@ -207,6 +208,8 @@ codex: current (v8) (/home/.codex/herdr-agent-state.sh)
     #expect(scan.snapshot.pane("w1:p1")?.agentSession?.value == herdrCodexSession)
     #expect(scan.integration.states == [.claude: .current(version: 10), .codex: .current(version: 8)])
     #expect(scan.client == .success(HerdrAttachedClient(pid: 93954, tty: "ttys015", serverPID: 900)))
+    // The one server process's start time is the server identity for the restart check.
+    #expect(scan.serverStartedAt == 1_000)
     #expect(outcome.targetReason(for: .codex) == nil)
     // One connection per request: ping first, then the snapshot.
     #expect(server.requests.map { $0["method"] as? String } == ["ping", "session.snapshot"])
@@ -350,6 +353,9 @@ codex: current (v8) (/home/.codex/herdr-agent-state.sh)
     defer { server.stop() }
     #expect(lab.client(lsofClients: [1, 2]).scan().targetReason(for: .codex) == .wrongClientCount(2))
     #expect(lab.client(lsofClients: []).scan().targetReason(for: .codex) == .wrongClientCount(0))
+    // The server is identified independently of the client verdict.
+    #expect(lab.client(lsofClients: [1, 2]).scan().scan?.serverStartedAt == 1_000)
+    #expect(lab.client(startTime: { _ in nil }).scan().scan?.serverStartedAt == nil)
     let terminal = lab.client(ancestry: { pid in [HerdrProcessAncestor(pid: pid, command: "herdr", tty: "ttys002"),
                                                   HerdrProcessAncestor(pid: 1, command: "Terminal", tty: nil)] })
     #expect(terminal.scan().targetReason(for: .codex) == .nonGhosttyClient)
@@ -435,4 +441,12 @@ final class ScanCounter: @unchecked Sendable {
     #expect(chain.count <= HerdrProcessTree.maximumDepth)
     #expect(Set(chain.map(\.pid)).count == chain.count)
     #expect(HerdrProcessTree.ancestry(of: 0).isEmpty)
+}
+
+@Test func herdrProcessTreeReadsAProcessStartTimeOnTheWallClock() throws {
+    let started = try #require(HerdrProcessTree.startTime(of: getpid()))
+    let now = Date().timeIntervalSince1970
+    #expect(started <= now)
+    #expect(started > now - ProcessInfo.processInfo.systemUptime - 1)
+    #expect(HerdrProcessTree.startTime(of: 0) == nil)
 }

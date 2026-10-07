@@ -41,7 +41,7 @@ final class HerdrMonitor {
     /// tests can await completion; otherwise nil.
     @discardableResult
     func tick(now: Double, ghosttyControlsEnabled: Bool, herdrPaneIDs: Set<String>) -> Task<Void, Never>? {
-        let gate = ghosttyControlsEnabled && !herdrPaneIDs.isEmpty
+        let gate = HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: ghosttyControlsEnabled, paneIDs: herdrPaneIDs)
         guard gate else {
             if isGateOpen || latest != nil {
                 generation += 1

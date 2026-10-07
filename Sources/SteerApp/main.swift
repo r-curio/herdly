@@ -258,6 +258,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var knownCLISessions: Set<UUID> = []
     /// Complete root inventories used to prove which canonical Claude sessions are live. Memory only.
     var liveClaudeSessions: [String: [String]] = [:]
+    /// herdr monitor, hook pane records and latest scan (Companion+Herdr.swift).
+    let herdr = HerdrSessionBindings()
     var claudeInventoryAvailable: [String: Bool] = [:]
     var claudeInventories: [String: ClaudeInventoryScan] = [:]
     /// Unix time of the inventory in `ghosttyFocusState`, for dating a session end at the tab's absence.
@@ -1060,6 +1062,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             else if !freshAgentQuestions.isEmpty { questionPresentation.enqueue() }
             else if !newAgentQuestions.isEmpty, !questionPresentation.pending { questionPresentation = Attention(restored: true) }
             saveCompletions()
+            scanHerdr()
             scanning = false
             claude.refreshUsage()
             completedAScan = true
