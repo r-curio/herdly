@@ -76,23 +76,38 @@ struct HerdrClient: Sendable {
     /// `agent.send_keys`, sent once and never retried. Success means herdr queued the bytes, not
     /// that the agent read them. Callers own every check ADR 0010 requires before this.
     func sendKeys(target: String, keys: [String]) -> Result<HerdrReply, HerdrUnavailableReason> {
-        request(method: "agent.send_keys", params: ["target": target, "keys": keys])
+        trackedRequest(method: "agent.send_keys", params: ["target": target, "keys": keys]).result
+    }
+
+    /// `sendKeys` classified for ADR 0010: a failure after the write began counts as possibly sent.
+    func sendKeysOnce(target: String, keys: [String]) -> HerdrKeyDelivery {
+        let outcome = trackedRequest(method: "agent.send_keys", params: ["target": target, "keys": keys])
+        return HerdrKeyDelivery.classify(outcome.result, writeAttempted: outcome.writeAttempted)
     }
 
     /// One request on one new connection: the socket trust check, connect, one request line, and
     /// one reply line with the matching id, all within `requestTimeout`.
     func request(method: String, params: [String: Any]) -> Result<HerdrReply, HerdrUnavailableReason> {
+        trackedRequest(method: method, params: params).result
+    }
+
+    /// `request`, also reporting whether any byte of the request line could have been written.
+    private func trackedRequest(method: String, params: [String: Any])
+        -> (result: Result<HerdrReply, HerdrUnavailableReason>, writeAttempted: Bool) {
         let path = configuration.socketPath
-        if let reason = HerdrSocketTrust.reason(at: path) { return .failure(reason) }
+        if let reason = HerdrSocketTrust.reason(at: path) { return (.failure(reason), false) }
         let id = UUID().uuidString
         guard let line = HerdrWire.requestLine(id: id, method: method, params: params) else {
-            return .failure(.malformedReply)
+            return (.failure(.malformedReply), false)
         }
         let deadline = DispatchTime.now().uptimeNanoseconds
             + UInt64(max(0, configuration.requestTimeout) * 1_000_000_000)
-        return HerdrSocket.exchange(path: path, request: line, deadline: deadline).flatMap {
+        var writeAttempted = false
+        let result = HerdrSocket.exchange(path: path, request: line, deadline: deadline,
+                                          writeAttempted: &writeAttempted).flatMap {
             HerdrWire.decodeReply($0, expectedID: id)
         }
+        return (result, writeAttempted)
     }
 
     // MARK: - Subprocesses
@@ -167,6 +182,14 @@ enum HerdrSocket {
     /// A refused or vanished socket is `notRunning`; the deadline is `timeout`; a reply over the
     /// limit, or a connection closed before the newline, is `malformedReply`.
     static func exchange(path: String, request: Data, deadline: UInt64) -> Result<Data, HerdrUnavailableReason> {
+        var writeAttempted = false
+        return exchange(path: path, request: request, deadline: deadline, writeAttempted: &writeAttempted)
+    }
+
+    /// `exchange`, setting `writeAttempted` once the first `write` is issued: from then on a
+    /// failure cannot rule out that herdr received some or all of the request.
+    static func exchange(path: String, request: Data, deadline: UInt64,
+                         writeAttempted: inout Bool) -> Result<Data, HerdrUnavailableReason> {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return .failure(.notRunning) }
         defer { close(fd) }
@@ -207,6 +230,7 @@ enum HerdrSocket {
 
         var offset = 0
         while offset < request.count {
+            writeAttempted = true
             let written = request.withUnsafeBytes { raw in
                 write(fd, raw.baseAddress!.advanced(by: offset), request.count - offset)
             }

@@ -176,6 +176,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// returns every question as plain pending and nothing is ever re-sent.
     @Published var answerProgress: [QuestionIdentity: QuestionAnswerProgress] = [:]
     var answering = false
+    /// The keys Steer may have sent per call and question index, and the last relay failure per call.
+    @Published var relayLedger = QuestionRelayLedger()
     /// Steer's own bookkeeping of the one reply each completion card sent. Memory only, and a card
     /// that has sent one never sends another.
     @Published var replyProgress: [CompletionIdentity: SessionReplyProgress] = [:]
