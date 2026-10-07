@@ -1,0 +1,251 @@
+import Foundation
+
+// The agreed herdr presentation (docs/product.md, "Agreed herdr presentation"; issue #127).
+// Every typed reason Open or question relay can be unavailable for a herdr session maps to exactly
+// one of four groups the user can act on, each with one fixed card line. The exact reason is kept
+// for diagnostics only and never reaches the card.
+
+/// The four user-actionable groups of herdr unavailable reasons.
+public enum HerdrReasonGroup: Equatable, Hashable, Sendable {
+    /// Ghostty does not expose each terminal's `tty`, so herdr's tab cannot be identified.
+    case ghosttyTooOld
+    /// herdr's integration for this agent is missing or not current.
+    case integration(HerdrAgentKind)
+    /// A split, several herdr clients, a named herdr session, or a Ghostty tab in another window.
+    case layoutNotSupported
+    /// Everything else.
+    case generic
+}
+
+/// One reason a herdr session's Open (or relay) is unavailable, from any of the typed sources.
+///
+/// Extension point: when Open (#125) or question relay (#126) gains its own typed failure enum,
+/// add one case wrapping it here and one case in `group`'s switch. `diagnostic` needs no change;
+/// it describes the wrapped value as is. Callers then route the failure through
+/// `HerdrPresentation.cardLine(for:agent:)` like any other reason.
+public enum HerdrUnavailableCause: Equatable, Sendable {
+    /// The scan-time binding of the session (`Companion.herdrBinding(for:)`).
+    case session(HerdrSessionUnavailable)
+    /// ADR 0011's join of herdr's client TTY to one Ghostty terminal. `matched` is not a reason
+    /// and maps to `generic` only so the switch stays total; callers never present it.
+    case ghosttyTTY(GhosttyTTYJoin)
+    /// The Ghostty bundle's scripting dictionary does not declare `tty`.
+    case ghosttyTTYUnsupported
+
+    public var group: HerdrReasonGroup {
+        switch self {
+        case .session(let reason): HerdrPresentation.group(reason)
+        case .ghosttyTTY(let join): HerdrPresentation.group(join)
+        case .ghosttyTTYUnsupported: .ghosttyTooOld
+        }
+    }
+
+    /// The exact internal reason, for diagnostics only. Never shown on a card.
+    public var diagnostic: String {
+        switch self {
+        case .session(let reason): "herdr session: \(reason)"
+        case .ghosttyTTY(let join): "Ghostty tty join: \(join)"
+        case .ghosttyTTYUnsupported: "Ghostty tty: unsupported"
+        }
+    }
+}
+
+/// Whether a herdr session's Open can be offered right now, as the notch presents it.
+public enum HerdrOpenAvailability: Equatable, Sendable {
+    /// The session is not in herdr; the Ghostty tab rules apply unchanged.
+    case notInHerdr
+    /// The scan bound the session and Ghostty can report `tty`; Open is offered and rechecks.
+    case available
+    /// Open is replaced by the cause's grouped reason line.
+    case unavailable(HerdrUnavailableCause)
+}
+
+/// The settings row's badge. The row shows none while the first scan after the gate opened runs.
+public enum HerdrReadinessBadge: Equatable, Sendable {
+    case notInUse
+    case ready
+    case needsAttention
+
+    public var title: String {
+        switch self {
+        case .notInUse: "Not in use"
+        case .ready: "Ready"
+        case .needsAttention: "Needs attention"
+        }
+    }
+}
+
+/// One independent fix listed on the settings row.
+public enum HerdrSettingsProblem: Equatable, Hashable, Sendable {
+    /// herdr's integration for an agent Steer has seen in herdr is missing or not current.
+    case integration(HerdrAgentKind)
+    /// Ghostty does not expose each terminal's `tty`.
+    case ghosttyCannotIdentifyTab
+    /// herdr itself could not be used (not found, not running, protocol, socket, and similar).
+    case herdrUnavailable
+
+    public var message: String {
+        switch self {
+        case .integration(let agent):
+            "Install or update herdr's \(HerdrPresentation.agentName(agent)) integration. Steer never runs this or edits herdr's configuration."
+        case .ghosttyCannotIdentifyTab:
+            "Ghostty cannot identify herdr's tab. Update Ghostty."
+        case .herdrUnavailable:
+            "herdr is unavailable. Check that herdr is installed and running."
+        }
+    }
+
+    /// The exact command to copy, when the fix is one.
+    public var command: String? {
+        if case .integration(let agent) = self { return HerdrPresentation.installCommand(agent) }
+        return nil
+    }
+}
+
+/// The read-only herdr row under Ghostty in settings.
+public struct HerdrSettingsRow: Equatable, Sendable {
+    /// Nil only while the first scan after the gate opened is still running.
+    public let badge: HerdrReadinessBadge?
+    public let detail: String
+    /// Every applicable problem, one per line: integrations (Claude, then Codex), Ghostty, herdr.
+    public let problems: [HerdrSettingsProblem]
+
+    public init(badge: HerdrReadinessBadge?, detail: String, problems: [HerdrSettingsProblem]) {
+        self.badge = badge
+        self.detail = detail
+        self.problems = problems
+    }
+}
+
+public enum HerdrPresentation {
+    // MARK: - Grouping
+
+    public static func group(_ reason: HerdrSessionUnavailable) -> HerdrReasonGroup {
+        switch reason {
+        case .ghosttyControlsOff, .notScanned, .serverIdentityUnknown: .generic
+        case .herdr(let reason): group(reason)
+        case .binding(let reason): group(reason)
+        }
+    }
+
+    public static func group(_ reason: HerdrUnavailableReason) -> HerdrReasonGroup {
+        switch reason {
+        case .integrationNotCurrent(let agent): .integration(agent)
+        case .wrongClientCount(let count): count > 1 ? .layoutNotSupported : .generic
+        case .split, .namedSession: .layoutNotSupported
+        case .herdrNotFound, .notRunning, .untrustedSocket, .unsupportedProtocol, .nonGhosttyClient,
+             .voidBinding, .timeout, .malformedReply, .requestRefused: .generic
+        }
+    }
+
+    public static func group(_ reason: HerdrBindingUnavailable) -> HerdrReasonGroup {
+        switch reason {
+        case .integrationNotCurrent(let agent, _): .integration(agent)
+        case .split, .namedSession, .multipleClients: .layoutNotSupported
+        case .sessionEnded, .noHookRecord, .notInHerdr, .conflictingHookRecords, .unsupportedProtocol,
+             .socketUnknown, .herdrRestarted, .paneReusedBySession, .conflictingPaneObservations,
+             .duplicateMatches, .paneMissing, .agentSessionNull, .agentSessionMismatch, .conflictingTitle,
+             .noClient, .nonGhosttyClient: .generic
+        }
+    }
+
+    public static func group(_ join: GhosttyTTYJoin) -> HerdrReasonGroup {
+        switch join {
+        case .ttyUnsupported: .ghosttyTooOld
+        case .split, .otherWindow: .layoutNotSupported
+        case .matched, .inventoryUnavailable, .invalidClientTTY, .noMatch, .emptyValue, .multipleMatches: .generic
+        }
+    }
+
+    // MARK: - Card wording
+
+    /// The one line that replaces Open on a card. `agent` is the card's own agent; an integration
+    /// group names the agent whose integration is not current.
+    public static func cardLine(for group: HerdrReasonGroup, agent: HerdrAgentKind) -> String {
+        switch group {
+        case .ghosttyTooOld:
+            "Update Ghostty to return to herdr panes."
+        case .integration(let integrationAgent):
+            "Run \(installCommand(integrationAgent)) to return to herdr panes."
+        case .layoutNotSupported:
+            "Steer returns only to a single-pane herdr tab in one Ghostty window."
+        case .generic:
+            "\(openTitle(agent)) is unavailable until Steer can verify the exact herdr pane."
+        }
+    }
+
+    public static func cardLine(for cause: HerdrUnavailableCause, agent: HerdrAgentKind) -> String {
+        cardLine(for: cause.group, agent: agent)
+    }
+
+    /// The single line for a Codex question that cannot be relayed while Open is also unavailable.
+    public static func unrelayedQuestionLine(openCause: HerdrUnavailableCause) -> String {
+        "Answer this in Codex. " + cardLine(for: openCause, agent: .codex)
+    }
+
+    public static func openTitle(_ agent: HerdrAgentKind) -> String { "Open in \(agentName(agent))" }
+
+    public static func agentName(_ agent: HerdrAgentKind) -> String {
+        switch agent {
+        case .codex: "Codex"
+        case .claude: "Claude"
+        }
+    }
+
+    public static func installCommand(_ agent: HerdrAgentKind) -> String {
+        "herdr integration install \(agent.rawValue)"
+    }
+
+    // MARK: - Open availability
+
+    /// Whether the notch offers Open for a session, from its scan-time binding and the Ghostty
+    /// bundle's `tty` support. Unknown support (not yet read) does not block Open; the click-time
+    /// recheck still applies. A binding reason takes precedence over the Ghostty one.
+    public static func openAvailability(binding: HerdrSessionBinding,
+                                        ttySupport: GhosttyTTYSupport?) -> HerdrOpenAvailability {
+        switch binding {
+        case .notInHerdr: return .notInHerdr
+        case .unavailable(let reason): return .unavailable(.session(reason))
+        case .bound:
+            return ttySupport == .unsupported ? .unavailable(.ghosttyTTYUnsupported) : .available
+        }
+    }
+
+    // MARK: - Settings row
+
+    /// The settings row model.
+    ///
+    /// - Parameters:
+    ///   - inUse: the ADR 0009 gate is open (Ghostty controls on and a live session reported a pane).
+    ///   - outcome: the latest scan, nil before the first scan after the gate opened.
+    ///   - agentsSeen: agents whose live sessions' newest hook event reported running in herdr;
+    ///     integration problems are listed only for these.
+    ///   - ttySupport: whether Ghostty declares `tty`; nil while unknown, which lists no problem.
+    public static func settingsRow(inUse: Bool, ghosttyControlsEnabled: Bool, outcome: HerdrScanOutcome?,
+                                   agentsSeen: Set<HerdrAgentKind>, ttySupport: GhosttyTTYSupport?) -> HerdrSettingsRow {
+        guard inUse else {
+            let detail = ghosttyControlsEnabled ? "No herdr sessions seen." : "Works only while Ghostty controls are on."
+            return HerdrSettingsRow(badge: .notInUse, detail: detail, problems: [])
+        }
+        guard let outcome else {
+            return HerdrSettingsRow(badge: nil, detail: "Checking herdr…", problems: [])
+        }
+        var problems: [HerdrSettingsProblem] = []
+        var herdrUnavailable = false
+        switch outcome {
+        case .available(let scan):
+            for agent in HerdrAgentKind.allCases where agentsSeen.contains(agent) {
+                if scan.integration.reason(for: agent) != nil { problems.append(.integration(agent)) }
+            }
+        case .unavailable(.integrationNotCurrent(let agent)):
+            problems.append(.integration(agent))
+        case .unavailable:
+            herdrUnavailable = true
+        }
+        if ttySupport == .unsupported { problems.append(.ghosttyCannotIdentifyTab) }
+        if herdrUnavailable { problems.append(.herdrUnavailable) }
+        return HerdrSettingsRow(badge: problems.isEmpty ? .ready : .needsAttention,
+                                detail: problems.isEmpty ? "herdr is reachable and its integrations are current." : "Fix each item below.",
+                                problems: problems)
+    }
+}
