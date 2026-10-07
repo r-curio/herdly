@@ -29,7 +29,7 @@ sh scripts/package-app.sh
 - `Steer-<version>+<build>-<label>.zip.sha256`, its checksum, checkable with `shasum -a 256 -c`;
 - `Steer-<version>+<build>-<label>.manifest.json`, the commit, toolchain, host macOS, signing mode, Gatekeeper result, and per-executable hashes.
 
-The build number is the commit count on the checked-out branch, so two people building the same commit get the same bundle version. The CI workflow ([.github/workflows/macos.yml](../.github/workflows/macos.yml)) runs the same script on a clean `macos-15` runner, smoke-tests the packaged app, prints the checksum, and uploads the zip, checksum and manifest as the `Steer-unsigned-dev` artifact.
+The build number is the commit count on the checked-out branch, so two people building the same commit get the same bundle version. The CI workflow ([.github/workflows/macos.yml](../.github/workflows/macos.yml)) runs the same script on a clean `macos-15` runner, smoke-tests the packaged app, prints the checksum, and uploads the zip, checksum and manifest as the `Steer-unsigned-dev` artifact. CI is optional; a local clean-checkout package with its smoke check, helper self-test and checksum is the required evidence.
 
 The [mixed-source package record](evidence/claude-release-candidate-package.json)
 lists the automated checks and exact artifact. Integrated live behavior has not

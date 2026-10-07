@@ -88,7 +88,7 @@ Use `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `won
 
 ## Checks and evidence
 
-Run from the repository root. [CI](.github/workflows/macos.yml) is the authoritative automated pipeline.
+Run from the repository root. The local checks below are the required gate for merges and release candidates. [CI](.github/workflows/macos.yml) is optional: when a run is available, report its result accurately, but an unavailable or unstarted run does not block work.
 
 | Purpose | Command |
 | --- | --- |
