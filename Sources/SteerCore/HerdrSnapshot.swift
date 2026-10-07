@@ -211,6 +211,33 @@ public struct HerdrForegroundProcess: Equatable, Sendable {
     public static func count(named name: String, in processes: [HerdrForegroundProcess]) -> Int {
         processes.filter { $0.name == name }.count
     }
+
+    /// The executable name each agent runs under in a pane's foreground. `argv` is never consulted:
+    /// a shell, script or editor whose arguments mention the agent is not the agent.
+    public static func processName(of agent: HerdrAgentKind) -> String {
+        switch agent {
+        case .claude: "claude"
+        case .codex: "codex"
+        }
+    }
+
+    /// The binding rules' foreground-process check for `paneID` (ADR 0008 for Claude, ADR 0012 for
+    /// Codex): nil when the pane's `pane.process_info` reply is about that pane and `accepts` the
+    /// number of processes named for `agent`. A missing reply, a failed one, or one about another
+    /// pane (`malformedReply`) is `processInfoUnavailable`; a rejected count is `foregroundProcesses`.
+    public static func veto(_ reply: Result<HerdrProcessInfo, HerdrUnavailableReason>?, paneID: String,
+                            agent: HerdrAgentKind, accepts: (Int) -> Bool) -> HerdrBindingUnavailable? {
+        switch reply {
+        case nil:
+            return .processInfoUnavailable(nil)
+        case .failure(let reason)?:
+            return .processInfoUnavailable(reason)
+        case .success(let info)?:
+            guard info.paneID == paneID else { return .processInfoUnavailable(.malformedReply) }
+            let count = count(named: processName(of: agent), in: info.foregroundProcesses)
+            return accepts(count) ? nil : .foregroundProcesses(agent, count: count)
+        }
+    }
 }
 
 /// One `pane.process_info` result. herdr reports it from the pane's terminal, not from any agent
@@ -591,25 +618,35 @@ public struct HerdrAttachedClient: Equatable, Sendable {
 /// What one scan reads beyond `ping`, the snapshot and `lsof`, decided by the caller from the gate
 /// inputs (ADR 0009). `herdr integration status` concerns Claude Code only (ADR 0008), so it runs
 /// only when a Claude session opened the gate. `pane.process_info` is requested for each pane whose
-/// title is one of `processInfoTitles`, the shortened identifiers of live Codex sessions (ADR 0012).
+/// title is one of `processInfoTitles`, the shortened identifiers of live Codex sessions (ADR 0012),
+/// and for each pane in `processInfoPaneIDs`, the panes live Claude sessions' newest hook events
+/// recorded (ADR 0008's foreground-process rule).
 public struct HerdrScanRequest: Equatable, Hashable, Sendable {
     /// At most this many `pane.process_info` requests per scan, each with ADR 0009's deadline.
     public static let maximumProcessInfoRequests = 16
 
     public let includeIntegration: Bool
     public let processInfoTitles: Set<String>
+    public let processInfoPaneIDs: Set<String>
 
-    public init(includeIntegration: Bool = true, processInfoTitles: Set<String> = []) {
+    public init(includeIntegration: Bool = true, processInfoTitles: Set<String> = [],
+                processInfoPaneIDs: Set<String> = []) {
         self.includeIntegration = includeIntegration
         self.processInfoTitles = processInfoTitles
+        self.processInfoPaneIDs = processInfoPaneIDs
     }
 
-    /// The panes to ask about, in pane ID order, at most `maximumProcessInfoRequests`. A pane past
-    /// the bound gets no reply, which leaves any binding to it unavailable rather than guessed.
+    /// The snapshot's panes to ask about, at most `maximumProcessInfoRequests` shared by both kinds:
+    /// recorded Claude panes first, then panes with a Codex title, each in pane ID order. A pane past
+    /// the bound gets no reply, which leaves any binding to it unavailable rather than guessed; so
+    /// does a requested pane ID the snapshot does not list.
     public func processInfoPanes(in snapshot: HerdrSnapshot) -> [String] {
-        guard !processInfoTitles.isEmpty else { return [] }
-        let panes = Set(snapshot.panes.filter { $0.terminalTitle.map(processInfoTitles.contains) == true }.map(\.paneID))
-        return Array(panes.sorted().prefix(Self.maximumProcessInfoRequests))
+        guard !processInfoTitles.isEmpty || !processInfoPaneIDs.isEmpty else { return [] }
+        let listed = Set(snapshot.panes.map(\.paneID))
+        let recorded = processInfoPaneIDs.intersection(listed)
+        let titled = Set(snapshot.panes.filter { $0.terminalTitle.map(processInfoTitles.contains) == true }.map(\.paneID))
+            .subtracting(recorded)
+        return Array((recorded.sorted() + titled.sorted()).prefix(Self.maximumProcessInfoRequests))
     }
 }
 

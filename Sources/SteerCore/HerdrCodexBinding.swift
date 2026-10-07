@@ -8,9 +8,8 @@ import Foundation
 // scheduling and the Ghostty inventory (ADR 0009).
 
 public enum HerdrCodexBindingRules {
-    /// The only foreground process name that counts as Codex. `argv` is never consulted: a script
-    /// or editor whose arguments mention codex is not Codex.
-    public static let processName = "codex"
+    /// The only foreground process name that counts as Codex.
+    public static let processName = HerdrForegroundProcess.processName(of: .codex)
 
     /// The title Codex renders for a session with `tui.terminal_title = ["session-id"]` (ADR 0005),
     /// or nil when `sessionID` is not a UUID.
@@ -53,15 +52,9 @@ public enum HerdrCodexBindingRules {
         case .failure: return .unavailable(.noClient)
         }
 
-        switch scan.processInfo[paneID] {
-        case nil:
-            return .unavailable(.processInfoUnavailable(nil))
-        case .failure(let reason)?:
-            return .unavailable(.processInfoUnavailable(reason))
-        case .success(let info)?:
-            guard info.paneID == paneID else { return .unavailable(.processInfoUnavailable(.malformedReply)) }
-            let count = HerdrForegroundProcess.count(named: processName, in: info.foregroundProcesses)
-            guard count == 1 else { return .unavailable(.foregroundProcesses(.codex, count: count)) }
+        if let veto = HerdrForegroundProcess.veto(scan.processInfo[paneID], paneID: paneID, agent: .codex,
+                                                  accepts: { $0 == 1 }) {
+            return .unavailable(veto)
         }
         return .bound(HerdrPaneTarget(sessionID: sessionID, agent: .codex, paneID: paneID))
     }

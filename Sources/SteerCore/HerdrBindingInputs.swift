@@ -152,10 +152,12 @@ public enum HerdrBindingInputs {
         ghosttyControlsEnabled && (!paneIDs.isEmpty || codexGate)
     }
 
-    /// What a scan inside the gate reads: Claude's integration status only when a Claude pane opened
-    /// the gate, and process info for panes showing a live Codex title outside Ghostty.
+    /// What a scan inside the gate reads: Claude's integration status and process info for the panes
+    /// live Claude sessions recorded, only when a Claude pane opened the gate, and process info for
+    /// panes showing a live Codex title outside Ghostty.
     public static func scanRequest(paneIDs: Set<String>, codex: HerdrCodexTitles) -> HerdrScanRequest {
-        HerdrScanRequest(includeIntegration: !paneIDs.isEmpty, processInfoTitles: codex.outsideGhostty)
+        HerdrScanRequest(includeIntegration: !paneIDs.isEmpty, processInfoTitles: codex.outsideGhostty,
+                         processInfoPaneIDs: paneIDs)
     }
 
     // MARK: - Observation
@@ -189,7 +191,8 @@ public enum HerdrBindingInputs {
         }
         return HerdrObservation(protocolVersion: snapshot.protocolVersion,
                                 server: HerdrServerInstance(startedAt: startedAt), session: .defaultSession,
-                                clients: clients, integrations: scan.integration.states, panes: panes)
+                                clients: clients, integrations: scan.integration.states, panes: panes,
+                                processInfo: scan.processInfo)
     }
 
     private static func agent(of pane: HerdrPane) -> HerdrAgentKind? {

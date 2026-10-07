@@ -32,12 +32,23 @@ private func scan(panes: [HerdrPane] = [herdrPane()],
                                                                          .codex: .current(version: 10)],
                   client: Result<HerdrAttachedClient, HerdrUnavailableReason>
                       = .success(HerdrAttachedClient(pid: 93954, tty: "ttys015", serverPID: 900)),
-                  serverStartedAt: Double? = serverStart) -> HerdrScanOutcome {
+                  serverStartedAt: Double? = serverStart,
+                  processInfo: [String: Result<HerdrProcessInfo, HerdrUnavailableReason>] = ["w1:p1": foreground()])
+    -> HerdrScanOutcome {
     .available(HerdrScan(snapshot: HerdrSnapshot(version: "0.9.3", protocolVersion: protocolVersion,
                                                  focusedWorkspaceID: "w1", focusedTabID: "w1:t1",
                                                  focusedPaneID: "w1:p1", tabs: tabs, panes: panes, layouts: layouts),
                          integration: HerdrIntegrationReport(states: integration), client: client,
-                         serverStartedAt: serverStartedAt))
+                         serverStartedAt: serverStartedAt, processInfo: processInfo))
+}
+
+/// `pane.process_info` for `paneID` listing processes with these names.
+private func foreground(_ paneID: String = "w1:p1", _ names: [String] = ["claude"])
+    -> Result<HerdrProcessInfo, HerdrUnavailableReason> {
+    .success(HerdrProcessInfo(paneID: paneID, shellPID: 100, foregroundProcessGroupID: 83378,
+                              foregroundProcesses: names.enumerated().map {
+                                  HerdrForegroundProcess(pid: Int32(83378 + $0.offset), name: $0.element, argv: nil, cwd: nil)
+                              }))
 }
 
 private func binding(_ key: HerdrSessionKey = claudeKey, liveness: HerdrSessionLiveness = .live,
@@ -243,4 +254,66 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID:
     let gone = HerdrHookRecordReader.read(directories: [directory], cache: ["/nowhere.json": record()])
     #expect(gone.cache["/nowhere.json"] == nil)
     #expect(HerdrHookRecordReader.read(directories: [directory.appendingPathComponent("missing")]).records.isEmpty)
+}
+
+// MARK: - Foreground process (ADR 0008, #148)
+
+@Test func herdrInputsBindClaudeOnlyWhileClaudeIsInThePanesForeground() {
+    #expect(binding(outcome: scan(processInfo: ["w1:p1": foreground()])) == .bound(target))
+    // agent_session still names the session, but Claude has exited to the shell.
+    #expect(binding(outcome: scan(processInfo: ["w1:p1": foreground("w1:p1", ["zsh"])]))
+        == .unavailable(.binding(.foregroundProcesses(.claude, count: 0))))
+    #expect(binding(outcome: scan(processInfo: ["w1:p1": .failure(.malformedReply)]))
+        == .unavailable(.binding(.processInfoUnavailable(.malformedReply))))
+    #expect(binding(outcome: scan(processInfo: ["w1:p1": .failure(.timeout)]))
+        == .unavailable(.binding(.processInfoUnavailable(.timeout))))
+    #expect(binding(outcome: scan(processInfo: [:])) == .unavailable(.binding(.processInfoUnavailable(nil))))
+    // Every reason lands in the generic group and keeps its exact text for diagnostics.
+    let cause = HerdrUnavailableCause.session(.binding(.foregroundProcesses(.claude, count: 0)))
+    #expect(cause.group == .generic)
+    #expect(cause.diagnostic.contains("foregroundProcesses"))
+}
+
+@Test func herdrScanRequestAsksAboutTheClaudePanesThatOpenedTheGate() {
+    let request = HerdrBindingInputs.scanRequest(paneIDs: ["w1:p1", "w9:p9"], codex: .none)
+    #expect(request.includeIntegration)
+    #expect(request.processInfoPaneIDs == ["w1:p1", "w9:p9"])
+    // A recorded pane missing from the snapshot is not asked about.
+    let snapshot = scan(panes: [herdrPane(), herdrPane("w1:p2", tab: "w1:t2")]).scan!.snapshot
+    #expect(request.processInfoPanes(in: snapshot) == ["w1:p1"])
+}
+
+@MainActor @Test func herdrClaudeOpenFailsWhenTheRecheckFindsClaudeGoneAfterTheScanPassed() async {
+    let key = claudeKey
+    func fresh(_ outcome: HerdrScanOutcome) -> HerdrSessionBinding {
+        binding(key, outcome: outcome)
+    }
+    // The scheduled scan bound the session, so the card offered Open.
+    #expect(fresh(scan()) == .bound(target))
+    // By the click, Claude has exited in the pane: Open's revalidation re-reads process info and fails
+    // before any herdr focus or Ghostty request.
+    let gone = scan(processInfo: ["w1:p1": foreground("w1:p1", ["zsh"])])
+    var calls: [String] = []
+    let effects = HerdrOpenEffects(
+        now: { 5_000 },
+        ttySupport: { calls.append("ttySupport"); return .supported },
+        revalidate: { calls.append("revalidate"); return (fresh(gone), gone) },
+        ghosttySnapshot: { calls.append("ghostty"); return nil },
+        focus: { pane in calls.append("focus \(pane)"); return .success(.accepted(type: "agent_focused")) },
+        select: { _, _ in calls.append("select"); return true })
+    let result = await HerdrOpenSequence.run(effects)
+    #expect(result == .unavailable(.binding(.binding(.foregroundProcesses(.claude, count: 0)))))
+    #expect(calls == ["ttySupport", "revalidate"])
+    #expect(HerdrPresentation.group(result.failure!) == .generic)
+}
+
+@Test func herdrScanRequestAsksAboutRecordedClaudePanesBeforeCodexTitlesUnderTheCap() {
+    let codexTitle = "01a1151d-4e9d-7e53-a0b0-10d6e..."
+    let titled = (0..<20).map { herdrPane(String(format: "w1:p%02d", $0), title: codexTitle) }
+    let snapshot = scan(panes: titled + [herdrPane("w9:p1")]).scan!.snapshot
+    let request = HerdrScanRequest(includeIntegration: true, processInfoTitles: [codexTitle], processInfoPaneIDs: ["w9:p1"])
+    let panes = request.processInfoPanes(in: snapshot)
+    #expect(panes.count == HerdrScanRequest.maximumProcessInfoRequests)
+    #expect(panes.first == "w9:p1")
+    #expect(Array(panes.dropFirst()) == Array(titled.map(\.paneID).sorted().prefix(HerdrScanRequest.maximumProcessInfoRequests - 1)))
 }
