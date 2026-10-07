@@ -115,7 +115,9 @@ import Testing
 
     let scan = scanClaude(root)
 
-    #expect(scan.observations.isEmpty)
+    // Only the prompt's reply evidence remains; no running row or outcome is invented.
+    #expect(scan.observations == [.replied(AgentTurnIdentity(session: AgentSessionIdentity(
+        source: .claude, sourceScope: root.path, session: "session-1", surface: .cli), turn: "p1"), submittedAt: 1)])
 }
 
 @Test func claudeStopFailureResolvesPendingRequestsAndStopCannotReopenItsTurn() throws {
@@ -133,8 +135,9 @@ import Testing
 
     let scan = scanClaude(root)
 
-    #expect(scan.observations.count == 1)
-    guard case let .outcome(outcome) = scan.observations[0] else {
+    let observations = scan.observations.filter { if case .replied = $0 { return false }; return true }
+    #expect(observations.count == 1)
+    guard case let .outcome(outcome) = observations[0] else {
         Issue.record("StopFailure should be the only observation for its terminal turn")
         return
     }
@@ -337,8 +340,9 @@ import Testing
     try appendClaudeEvent(claudeRecord("StopFailure", at: 5, promptID: "p1"), to: root)
     queue.apply(scanClaude(root, now: 20))
 
-    #expect(queue.items.filter { $0.session.source == .claude }.map(\.kind) == [.outcome, .running])
-    #expect(queue.items.first?.outcome?.status == .failed)
+    // The failure happened before the user submitted p2, so that reply acknowledges it; p2 keeps running.
+    #expect(queue.items.filter { $0.session.source == .claude }.map(\.kind) == [.running])
+    #expect(queue.snapshot.acknowledgedOutcomes.map(\.turn) == ["p1"])
     #expect(queue.items.compactMap(\.running).first?.identity.turn == "p2")
 }
 
@@ -418,6 +422,95 @@ import Testing
     #expect(observations.contains { if case .question = $0 { return true }; return false } == false)
     #expect(observations.contains { if case .approval = $0 { return true }; return false } == false)
     #expect(observations.contains { if case .outcome = $0 { return true }; return false } == false)
+}
+
+// Replying in a Claude session is evidence the user saw that session's earlier outcomes.
+@Test func claudeReplyAcknowledgesEarlierOutcomesOfThatSessionOnly() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "root", session: "s", surface: .cli)
+    let other = AgentSessionIdentity(source: .claude, sourceScope: "root", session: "other", surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.outcome(AgentOutcome(session: identity, turn: "p1", status: .finished, arrivedAt: 10)))
+    queue.apply(.outcome(AgentOutcome(session: identity, turn: "p2", status: .finished, arrivedAt: 20)))
+    queue.apply(.outcome(AgentOutcome(session: other, turn: "o1", status: .finished, arrivedAt: 5)))
+
+    queue.apply(.replied(AgentTurnIdentity(session: identity, turn: "p3"), submittedAt: 25))
+
+    #expect(queue.items.compactMap { $0.outcome?.id } == [AgentTurnIdentity(session: other, turn: "o1")])
+    #expect(queue.snapshot.acknowledgedOutcomes.contains(AgentTurnIdentity(session: identity, turn: "p1")))
+    #expect(queue.snapshot.acknowledgedOutcomes.contains(AgentTurnIdentity(session: identity, turn: "p2")))
+}
+
+@Test func claudeReplyKeepsOutcomesThatArriveAfterItAndItsOwnTurn() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "root", session: "s", surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.replied(AgentTurnIdentity(session: identity, turn: "p2"), submittedAt: 20))
+    // An earlier turn still finishing when the user typed, and the reply's own turn finishing later.
+    queue.apply(.outcome(AgentOutcome(session: identity, turn: "p1", status: .finished, arrivedAt: 21)))
+    queue.apply(.outcome(AgentOutcome(session: identity, turn: "p2", status: .finished, arrivedAt: 30)))
+    // The boundary: an outcome arriving at the submission instant is not before it.
+    queue.apply(.outcome(AgentOutcome(session: identity, turn: "p0", status: .finished, arrivedAt: 20)))
+
+    #expect(Set(queue.items.compactMap { $0.outcome?.turn }) == ["p0", "p1", "p2"])
+}
+
+@Test func claudeReplyObservedBeforeAnOlderOutcomeStillAcknowledgesIt() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "root", session: "s", surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.replied(AgentTurnIdentity(session: identity, turn: "p2"), submittedAt: 20))
+    queue.apply(.replied(AgentTurnIdentity(session: identity, turn: "p1"), submittedAt: 5))
+    queue.apply(.outcome(AgentOutcome(session: identity, turn: "p1", status: .finished, arrivedAt: 10)))
+
+    #expect(queue.items.compactMap { $0.outcome }.isEmpty)
+    #expect(queue.snapshot.acknowledgedOutcomes.contains(AgentTurnIdentity(session: identity, turn: "p1")))
+}
+
+@Test func claudeReplyWithANonFiniteTimeAcknowledgesNothing() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "root", session: "s", surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.outcome(AgentOutcome(session: identity, turn: "p1", status: .finished, arrivedAt: 10)))
+    queue.apply(.replied(AgentTurnIdentity(session: identity, turn: "p2"), submittedAt: .infinity))
+    queue.apply(.replied(AgentTurnIdentity(session: identity, turn: "p2"), submittedAt: .nan))
+
+    #expect(queue.items.compactMap { $0.outcome?.turn } == ["p1"])
+}
+
+@Test func claudeScanReplyClearsTheRestoredOutcomeTheUserAnswered() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "First"),
+        claudeRecord("StopFailure", at: 2, promptID: "p1"),
+        claudeRecord("UserPromptSubmit", at: 3, promptID: "p2", prompt: "Second"),
+        claudeRecord("StopFailure", at: 4, promptID: "p2")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let scan = scanClaude(root)
+    var queue = AgentAttentionQueue()
+    queue.apply(scan, now: 10)
+
+    // p1 was answered by p2; p2's outcome has no later reply yet.
+    #expect(queue.items.compactMap { $0.outcome?.turn } == ["p2"])
+    #expect(scan.observations.contains { if case .replied(let prompt, 3) = $0 { return prompt.turn == "p2" }; return false })
+
+    // Rescanning the same records (as every poll does) cannot bring p1 back.
+    queue.apply(scanClaude(root), now: 11)
+    #expect(queue.items.compactMap { $0.outcome?.turn } == ["p2"])
+
+    // The acknowledgment survives a restart from the persisted snapshot.
+    var restored = AgentAttentionQueue(snapshot: queue.snapshot)
+    restored.apply(scanClaude(root), now: 12)
+    #expect(restored.items.compactMap { $0.outcome?.turn } == ["p2"])
+}
+
+@Test func claudeReplyInAnotherRootOrSourceCannotAcknowledge() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "root", session: "s", surface: .cli)
+    let otherRoot = AgentSessionIdentity(source: .claude, sourceScope: "alternate", session: "s", surface: .cli)
+    let codex = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "s", surface: .desktop)
+    var queue = AgentAttentionQueue()
+    queue.apply(.outcome(AgentOutcome(session: identity, turn: "p1", status: .finished, arrivedAt: 10)))
+    queue.apply(.outcome(AgentOutcome(session: codex, turn: "c1", status: .finished, arrivedAt: 10)))
+    queue.apply(.replied(AgentTurnIdentity(session: otherRoot, turn: "p2"), submittedAt: 20))
+
+    #expect(queue.items.compactMap { $0.outcome }.count == 2)
 }
 
 private func makeClaudeEvents(_ records: [[String: Any]], installationID: String = "install") throws -> URL {

@@ -20,6 +20,12 @@ event cannot clear a newer call. If Claude denies or interrupts a call without a
 `Stop` or `SessionEnd` clears the tool detail without inventing a finished outcome. `StopFailure`
 records a failed outcome; `Stop` alone never records a terminal outcome.
 
+Each `UserPromptSubmit` also yields reply evidence for its exact session and root, timed at the
+prompt's earliest capture. The queue acknowledges that session's outcomes from other turns that
+arrived strictly before it, whichever of the two is observed first, and records them as acknowledged
+so rescans and restart recovery cannot restore them. Reply evidence never creates a row and never
+touches another session, root, or source ([product](product.md), 2026-10-08).
+
 An unmatched pre-tool action is considered fresh for 30 seconds from its captured timestamp. After
 that bound, the reader falls back to the general running prompt until newer evidence supplies a
 current action.
