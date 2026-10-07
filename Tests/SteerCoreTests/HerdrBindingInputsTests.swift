@@ -306,3 +306,14 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID:
     #expect(calls == ["ttySupport", "revalidate"])
     #expect(HerdrPresentation.group(result.failure!) == .generic)
 }
+
+@Test func herdrScanRequestAsksAboutRecordedClaudePanesBeforeCodexTitlesUnderTheCap() {
+    let codexTitle = "01a1151d-4e9d-7e53-a0b0-10d6e..."
+    let titled = (0..<20).map { herdrPane(String(format: "w1:p%02d", $0), title: codexTitle) }
+    let snapshot = scan(panes: titled + [herdrPane("w9:p1")]).scan!.snapshot
+    let request = HerdrScanRequest(includeIntegration: true, processInfoTitles: [codexTitle], processInfoPaneIDs: ["w9:p1"])
+    let panes = request.processInfoPanes(in: snapshot)
+    #expect(panes.count == HerdrScanRequest.maximumProcessInfoRequests)
+    #expect(panes.first == "w9:p1")
+    #expect(Array(panes.dropFirst()) == Array(titled.map(\.paneID).sorted().prefix(HerdrScanRequest.maximumProcessInfoRequests - 1)))
+}
