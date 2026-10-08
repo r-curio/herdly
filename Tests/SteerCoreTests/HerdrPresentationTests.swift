@@ -243,6 +243,21 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
         == .unavailable(.session(.binding(.split))))
 }
 
+@Test func herdrPresentationOffersOpenWithoutTTYOnlyForTheSoleTerminal() {
+    let target = HerdrPaneTarget(sessionID: "s", agent: .claude, paneID: "w1:p1")
+    let sole = GhosttyTarget(window_id: "w", tab_id: "t", terminal_id: "p")
+    func availability(_ join: GhosttyTTYJoin?) -> HerdrOpenAvailability {
+        HerdrPresentation.openAvailability(binding: .bound(target), ttySupport: .unsupported, soleTerminal: join)
+    }
+    #expect(availability(.matched(sole)) == .available)
+    #expect(availability(nil) == .unavailable(.ghosttyTTYUnsupported))
+    #expect(availability(.ttyUnsupported) == .unavailable(.ghosttyTTYUnsupported))
+    #expect(availability(.split) == .unavailable(.ghosttyTTY(.split)))
+    #expect(availability(.otherWindow) == .unavailable(.ghosttyTTY(.otherWindow)))
+    // With `tty` the sole-terminal join is never consulted.
+    #expect(HerdrPresentation.openAvailability(binding: .bound(target), ttySupport: .supported, soleTerminal: .split) == .available)
+}
+
 // MARK: - Settings row
 
 @Test func herdrSettingsRowIsNotInUseUntilASessionReportsHerdr() {
