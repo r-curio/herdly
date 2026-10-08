@@ -73,14 +73,14 @@ public enum ApprovalResolutionReader {
     private enum Terminal { case running(cell: String?), resolved(ApprovalResolutionKind), unrecognized }
 
     public static func resolutions(in data: Data, session: UUID, probes: [ApprovalResolutionProbe]) -> [ApprovalResolution] {
-        guard !probes.isEmpty, data.count <= 32 * 1024 * 1024 else { return [] }
+        guard !probes.isEmpty, data.count <= ReminderReader.maximumRolloutSize else { return [] }
         var lines = data.split(separator: 10, omittingEmptySubsequences: false)
         if data.last != 10 { lines = lines.dropLast() }
         var calls: [Call] = []
         var followUps: [FollowUp] = []
         var outputs: [String: Output] = [:]
         for (index, line) in lines.enumerated() {
-            guard line.count <= 1024 * 1024, !line.isEmpty,
+            guard line.count <= ReminderReader.maximumRecordSize, !line.isEmpty,
                   let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                   let payload = event["payload"] as? [String: Any] else { if index == 0 { return [] } else { continue } }
             if index == 0 {
