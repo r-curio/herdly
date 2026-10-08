@@ -189,9 +189,13 @@ public struct SpotlightRequest: Equatable, Sendable {
         guard let input else { return true }
         return input.contains { key, value in
             switch key {
-            case "command": return (value as? String) != command
+            // A value that is not a string is never what the card shows, even when its field is empty.
+            case "command":
+                guard let value = value as? String else { return true }
+                return value != command
             case "description", "justification":
-                return (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) != ask
+                guard let value = value as? String else { return true }
+                return value.trimmingCharacters(in: .whitespacesAndNewlines) != ask
             default: return true
             }
         }
@@ -204,6 +208,14 @@ public struct SpotlightRequest: Equatable, Sendable {
     private static func nonEmpty(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Codex's task name for the card's place line, or nil when there is none or the session label
+    /// already names exactly that task (`"<Source> · <task>"`). Only an exact name hides it, so a task
+    /// that merely appears inside a longer label is still shown.
+    public func task(besides sessionLabel: String) -> String? {
+        guard let task else { return nil }
+        return sessionLabel.hasSuffix(" · " + task) ? nil : task
     }
 
     /// A compact elapsed time for a status line: "just now", "4m ago", "2h ago", "3d ago".
