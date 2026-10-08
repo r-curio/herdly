@@ -51,6 +51,12 @@ extension Companion {
                                    codex: herdrCodexTitles())
     }
 
+    /// Whether `pane` is the current binding of a live session, so a completion may yet arrive there
+    /// (ADR 0011's dwell rule). Reading this never contacts herdr.
+    func herdrPaneHostsLiveSession(_ pane: String) -> Bool {
+        herdrLiveSessions().contains { herdrBinding(for: $0).target?.paneID == pane }
+    }
+
     /// A fresh herdr scan, off the main actor, and the session's binding against it, for an Open or
     /// relay about to act (ADR 0009 freshness). The scan re-reads `pane.process_info`, so ADR 0012's
     /// whole rule runs again for a Codex session. `outcome` is nil, and no request is made, when the
