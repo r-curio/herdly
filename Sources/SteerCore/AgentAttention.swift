@@ -499,6 +499,22 @@ public struct AgentAttentionQueue: Sendable {
         }
     }
 
+    /// Drops the desktop copy of a finished Codex turn that also has a terminal outcome, for
+    /// sessions known to be terminal ones (`AttentionQueue.dropDesktopDuplicates`). Outcomes are
+    /// kept across launches here rather than re-derived, so copies restored from a snapshot taken
+    /// before Steer knew the session's surface are merged here too. The terminal outcome stays.
+    @discardableResult
+    public mutating func dropDesktopDuplicates(codexTerminalSessions sessions: Set<String>) -> [AgentTurnIdentity] {
+        let terminalTurns = Set(outcomes.keys.filter { $0.session.source == .codex && $0.session.surface == .cli }
+            .map { "\($0.session.sourceScope)|\($0.session.session)|\($0.turn)" })
+        let duplicates = outcomes.keys.filter {
+            $0.session.source == .codex && $0.session.surface == .desktop && sessions.contains($0.session.session)
+                && terminalTurns.contains("\($0.session.sourceScope)|\($0.session.session)|\($0.turn)")
+        }
+        for id in duplicates { dismiss(.outcome(id)) }
+        return Array(duplicates)
+    }
+
     public mutating func dismiss(_ id: AgentAttentionID) {
         switch id {
         case let .approval(identity):
@@ -545,6 +561,18 @@ public enum CodexAttentionAdapter {
 
     public static func session(_ id: UUID, surface: AgentSurface) -> AgentSessionIdentity {
         AgentSessionIdentity(source: .codex, sourceScope: sourceScope, session: id.uuidString, surface: surface)
+    }
+
+    /// Whether a Codex card belongs to a terminal session, so Open takes the terminal route (ADR 0012
+    /// "Surface"). A card filed as desktop counts once its session is among `cliSessions`, the
+    /// sessions now known to be terminal ones: a daemon-run TUI labels its rollout like the desktop
+    /// app (`source: vscode`), so its cards were filed as desktop before the daemon or its pane
+    /// proved otherwise. A desktop session is never in `cliSessions`. A Claude card is never a Codex
+    /// terminal session.
+    public static func isTerminalSession(_ identity: AgentSessionIdentity, cliSessions: Set<UUID>) -> Bool {
+        guard identity.source == .codex else { return false }
+        if identity.surface == .cli { return true }
+        return UUID(uuidString: identity.session).map(cliSessions.contains) == true
     }
 
     public static func outcome(from completion: AttentionCompletion, status: AgentOutcomeStatus? = nil) -> AgentOutcome {

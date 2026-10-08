@@ -358,6 +358,106 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     let shown = ReminderReader.scan(events: events, rollouts: rollouts,
                                     ghostty: GhosttyInventory(titles: [GhosttyMatch.title(session)], takenAt: started + 100), daemonThreads: [session])
     #expect(shown.cliState.liveSessions == [session] && shown.titledCLISessions == [session] && shown.sessionEnds.isEmpty)
+    // In herdr (ADR 0012) its title is on a herdr pane, not a Ghostty tab: still live after the grace,
+    // and not Ghostty-titled. Without the daemon, the pane title alone proves it a CLI session.
+    let inHerdr = ReminderReader.scan(events: events, rollouts: rollouts,
+                                      ghostty: GhosttyInventory(titles: ["herdr"], takenAt: started + 100),
+                                      daemonThreads: [session], herdrTitles: .known([GhosttyMatch.title(session), "zsh"]))
+    #expect(inHerdr.cliSessions == [session] && inHerdr.cliState.liveSessions == [session] && inHerdr.sessionEnds.isEmpty)
+    #expect(inHerdr.titledCLISessions.isEmpty && inHerdr.endedSessions.isEmpty)
+    let paneOnly = ReminderReader.scan(events: events, rollouts: rollouts, herdrTitles: .known([GhosttyMatch.title(session)]))
+    #expect(paneOnly.cliSessions == [session])
+    // Another session's pane title does not stand in for this one.
+    let otherPane = ReminderReader.scan(events: events, rollouts: rollouts,
+                                        ghostty: GhosttyInventory(titles: ["herdr"], takenAt: started + 100),
+                                        daemonThreads: [session], herdrTitles: .known([GhosttyMatch.title(UUID())]))
+    #expect(otherPane.cliState.liveSessions.isEmpty && otherPane.endedSessions == [session])
+    // herdr in use but its scan failed: a pane may still show the title, so nothing is ended.
+    let herdrFailed = ReminderReader.scan(events: events, rollouts: rollouts,
+                                          ghostty: GhosttyInventory(titles: ["herdr"], takenAt: started + 100),
+                                          daemonThreads: [session], herdrTitles: .unknown)
+    #expect(herdrFailed.cliState.liveSessions == [session] && herdrFailed.endedSessions.isEmpty)
+
+    // Ended, then resumed: live again, and a tab that later disappears ends it again after the grace.
+    let resumedAt = "2026-09-15T05:00:00Z"
+    for (name, at) in [("SessionEnd", "2026-09-14T03:00:00Z"), ("SessionStart", resumedAt)] {
+        let hook = "{\"hook_event_name\":\"\(name)\",\"session_id\":\"\(session)\",\"received_at\":\"\(at)\"}"
+        try hook.write(to: events.appendingPathComponent("\(UUID().uuidString).json"), atomically: true, encoding: .utf8)
+    }
+    let resumed = RolloutTimestamp.parse(resumedAt)!
+    let afterResume = ReminderReader.scan(events: events, rollouts: rollouts,
+                                          ghostty: GhosttyInventory(titles: ["zsh"], takenAt: resumed + ReminderReader.surfaceGrace - 1),
+                                          daemonThreads: [session])
+    #expect(afterResume.cliState.liveSessions == [session] && afterResume.endedSessions.isEmpty)
+    let closedAfterResume = ReminderReader.scan(events: events, rollouts: rollouts,
+                                                ghostty: GhosttyInventory(titles: ["zsh"], takenAt: resumed + ReminderReader.surfaceGrace),
+                                                daemonThreads: [session])
+    #expect(closedAfterResume.endedSessions == [session] && closedAfterResume.cliState.liveSessions.isEmpty)
+    #expect(closedAfterResume.sessionEnds[session] == resumed + ReminderReader.surfaceGrace)
+}
+
+@Test func aDaemonSessionWithoutAGhosttyTabIsNotEndedWhileHerdrTitlesAreUnknown() throws {
+    // A daemon-run TUI whose only surface is a herdr pane, past the grace, with a pending question.
+    let session = UUID(), turn = UUID()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-question-\(UUID().uuidString)")
+    let events = root.appendingPathComponent("events"), rollouts = root.appendingPathComponent("sessions")
+    try FileManager.default.createDirectory(at: events, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: rollouts, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let startedAt = "2026-09-14T02:20:00Z"
+    for (name, turnID) in [("SessionStart", ""), ("UserPromptSubmit", "\"turn_id\":\"\(turn)\",")] {
+        let hook = "{\"hook_event_name\":\"\(name)\",\"session_id\":\"\(session)\",\(turnID)\"received_at\":\"\(startedAt)\"}"
+        try hook.write(to: events.appendingPathComponent("\(UUID().uuidString).json"), atomically: true, encoding: .utf8)
+    }
+    let rollout = rollouts.appendingPathComponent("rollout-2026-09-14T02-20-00-\(session.uuidString.lowercased()).jsonl")
+    let header = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session)\",\"source\":\"vscode\",\"originator\":\"steer\"}}\n"
+    try (header + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample)).write(to: rollout, atomically: true, encoding: .utf8)
+    let inventory = GhosttyInventory(titles: ["herdr"], takenAt: RolloutTimestamp.parse(startedAt)! + 100)
+    func scan(_ herdrTitles: HerdrPaneTitles) -> ReminderScan {
+        ReminderReader.scan(events: events, rollouts: rollouts, ghostty: inventory, daemonThreads: [session], herdrTitles: herdrTitles)
+    }
+    let question = QuestionIdentity(source: .cli, session: session, callID: "call_1")
+    var queue = AttentionQueue()
+    // The first scan to see a Ghostty inventory runs before herdr's gate has opened, with herdr's
+    // socket trusted; then the gate opens and the first herdr scan fails. Neither ends the session.
+    for titles in [HerdrPaneTitles.from(gateOpen: false, outcome: nil, defaultSocketTrusted: true),
+                   .from(gateOpen: true, outcome: nil, defaultSocketTrusted: true),
+                   .from(gateOpen: true, outcome: .unavailable(.timeout), defaultSocketTrusted: true)] {
+        #expect(titles == .unknown)
+        let unknown = scan(titles)
+        #expect(unknown.cliState.liveSessions == [session] && unknown.endedSessions.isEmpty && unknown.sessionEnds.isEmpty)
+        _ = queue.apply(scan: unknown, desktopEvents: [], now: inventory.takenAt)
+        #expect(queue.items.contains { $0.question?.id == question })
+    }
+    // A successful scan without its title, or no herdr in use, ends it as the Ghostty rules do.
+    for titles in [HerdrPaneTitles.known(["zsh"]), .from(gateOpen: false, outcome: nil, defaultSocketTrusted: false)] {
+        let ended = scan(titles)
+        #expect(ended.endedSessions == [session] && ended.sessionEnds[session] == inventory.takenAt)
+    }
+}
+
+@Test func aSessionResumedAfterItsEndIsNotEnded() throws {
+    let session = UUID()
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-resume-\(UUID().uuidString)")
+    let events = root.appendingPathComponent("events"), rollouts = root.appendingPathComponent("sessions")
+    try FileManager.default.createDirectory(at: events, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: rollouts, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    func hook(_ name: String, _ at: String) throws {
+        let line = "{\"hook_event_name\":\"\(name)\",\"session_id\":\"\(session)\",\"received_at\":\"\(at)\"}"
+        try line.write(to: events.appendingPathComponent("\(UUID().uuidString).json"), atomically: true, encoding: .utf8)
+    }
+    let rollout = rollouts.appendingPathComponent("rollout-2026-09-14T02-20-00-\(session.uuidString.lowercased()).jsonl")
+    try meta(session, source: "cli").write(to: rollout, atomically: true, encoding: .utf8)
+    try hook("SessionStart", "2026-09-14T02:20:00Z")
+    try hook("SessionEnd", "2026-09-14T03:00:00Z")
+    let ended = ReminderReader.scan(events: events, rollouts: rollouts)
+    #expect(ended.endedSessions == [session] && ended.cliState.liveSessions.isEmpty)
+    // Resumed later: live again. Its end time is kept for request resolution, but it is not ended.
+    try hook("SessionStart", "2026-09-15T01:00:00Z")
+    let resumed = ReminderReader.scan(events: events, rollouts: rollouts)
+    #expect(resumed.cliState.liveSessions == [session])
+    #expect(resumed.sessionEnds[session] != nil && resumed.endedSessions.isEmpty)
 }
 
 @Test func aTurnTheRolloutEndedStopsRunningWithoutAStopHook() throws {

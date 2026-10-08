@@ -11,11 +11,17 @@ extension Companion {
         if identity.source == .claude {
             openClaude(identity)
         } else if let session = codexSession(identity) {
-            if identity.surface == .cli { openCLI(session) } else { openDesktop(session) }
+            if isCodexTerminalSession(identity) { openCLI(session) } else { openDesktop(session) }
         } else {
             navigationMessage = "Open Session is unavailable until Steer can verify the exact session."
             refresh()
         }
+    }
+
+    /// Whether a Codex card belongs to a terminal session, against the sessions now known to be
+    /// terminal ones (`CodexAttentionAdapter.isTerminalSession`).
+    func isCodexTerminalSession(_ identity: AgentSessionIdentity) -> Bool {
+        CodexAttentionAdapter.isTerminalSession(identity, cliSessions: cliSessions)
     }
 
     func canOpenClaude(_ identity: AgentSessionIdentity) -> Bool {
