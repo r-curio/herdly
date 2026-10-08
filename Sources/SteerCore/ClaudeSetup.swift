@@ -689,6 +689,10 @@ public struct ClaudeSetupInstaller {
 
     public init(fileManager: FileManager = .default) { self.fileManager = fileManager }
 
+    /// Event-directory entries the connection check inspects before reporting the directory
+    /// unreadable: the bound every hook reader shares, far above what retention leaves.
+    static let connectionScanLimit = HookEventListing.maximumEntries
+
     public func install(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots, helper: Data,
                         capabilities: ClaudeCapabilities) throws -> ClaudeConnectionStatus {
         guard case .ready = plan.status else { throw ClaudeSetupError.failed("Setup preview is not ready.") }
@@ -887,12 +891,19 @@ public struct ClaudeSetupInstaller {
             return .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Steer's hooks.")
         }
         let files: [URL]
-        do { files = try boundedContents(of: roots.eventsDirectory) }
+        // The same bound as every other hook reader (`HookEventListing`): busy sessions keep more than
+        // 4,096 tool records inside their one-hour retention, and the smaller bound flipped a
+        // connected root to unavailable whenever they did. This scan stops at its first proof.
+        do { files = try boundedContents(of: roots.eventsDirectory, limit: Self.connectionScanLimit) }
         catch {
             return .unavailable("Steer's Claude events directory is not readable.")
         }
         let now = Date().timeIntervalSince1970
-        return files.contains(where: { validEvent($0, installationID: state.installationID, installedAt: state.installedAt, now: now) })
+        // Oldest first: startup records outlive the hourly tool-record retention, so the first valid
+        // one is usually near the front and the scan stops there.
+        return files.map { (url: $0, created: HookEventListing.created($0)) }
+            .sorted { $0.created < $1.created }.map(\.url)
+            .contains(where: { validEvent($0, installationID: state.installationID, installedAt: state.installedAt, now: now) })
             ? .connected
             : .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Steer's hooks.")
     }
@@ -1168,11 +1179,14 @@ public struct ClaudeSetupInstaller {
         return true
     }
 
-    private func boundedContents(of url: URL) throws -> [URL] {
+    /// - Parameter limit: entries past which the directory is not inspected. Readers that decode every
+    ///   entry keep the original 4,096; the connection check, which stops at its first proof, uses
+    ///   `HookEventListing.maximumEntries` (see `status(roots:capabilities:)`).
+    private func boundedContents(of url: URL, limit: Int = 4096) throws -> [URL] {
         guard fileManager.fileExists(atPath: url.path) else { return [] }
         guard isDirectory(at: url) else { throw ClaudeSetupError.conflict("\(url.lastPathComponent) is not a directory.") }
-        let files = try fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
-        guard files.count <= 4096 else { throw ClaudeSetupError.conflict("\(url.lastPathComponent) contains too many entries to inspect safely.") }
+        let files = try fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: [.creationDateKey])
+        guard files.count <= limit else { throw ClaudeSetupError.conflict("\(url.lastPathComponent) contains too many entries to inspect safely.") }
         return files
     }
 
