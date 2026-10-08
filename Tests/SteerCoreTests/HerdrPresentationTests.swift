@@ -4,8 +4,8 @@ import Testing
 
 private let ghosttyLine = "Update Ghostty to return to herdr panes."
 private let layoutLine = "Steer returns only to a single-pane herdr tab in one Ghostty window."
-private let genericCodex = "Open in Codex is unavailable until Steer can verify the exact herdr pane."
-private let genericClaude = "Open in Claude is unavailable until Steer can verify the exact herdr pane."
+private let genericCodex = "Open Session is unavailable until Steer can verify the exact herdr pane."
+private let genericClaude = "Open Session is unavailable until Steer can verify the exact herdr pane."
 
 private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex: .current(version: 8),
                                                                          .claude: .current(version: 10)])
@@ -82,6 +82,9 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
         (.noClient, .generic),
         (.multipleClients(2), .layoutNotSupported),
         (.nonGhosttyClient, .generic),
+        (.foregroundProcesses(.claude, count: 0), .generic),
+        (.agentProcessNotInForeground(.claude), .generic),
+        (.agentProcessAmbiguous(.claude), .generic),
     ]
     for (reason, group) in cases {
         #expect(HerdrPresentation.group(reason) == group, "\(reason)")
@@ -241,6 +244,21 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
         == .unavailable(.ghosttyTTYUnsupported))
     #expect(HerdrPresentation.openAvailability(binding: .unavailable(.binding(.split)), ttySupport: .unsupported)
         == .unavailable(.session(.binding(.split))))
+}
+
+@Test func herdrPresentationOffersOpenWithoutTTYOnlyForTheSoleTerminal() {
+    let target = HerdrPaneTarget(sessionID: "s", agent: .claude, paneID: "w1:p1")
+    let sole = GhosttyTarget(window_id: "w", tab_id: "t", terminal_id: "p")
+    func availability(_ join: GhosttyTTYJoin?) -> HerdrOpenAvailability {
+        HerdrPresentation.openAvailability(binding: .bound(target), ttySupport: .unsupported, soleTerminal: join)
+    }
+    #expect(availability(.matched(sole)) == .available)
+    #expect(availability(nil) == .unavailable(.ghosttyTTYUnsupported))
+    #expect(availability(.ttyUnsupported) == .unavailable(.ghosttyTTYUnsupported))
+    #expect(availability(.split) == .unavailable(.ghosttyTTY(.split)))
+    #expect(availability(.otherWindow) == .unavailable(.ghosttyTTY(.otherWindow)))
+    // With `tty` the sole-terminal join is never consulted.
+    #expect(HerdrPresentation.openAvailability(binding: .bound(target), ttySupport: .supported, soleTerminal: .split) == .available)
 }
 
 // MARK: - Settings row

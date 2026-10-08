@@ -29,11 +29,17 @@ enum GhosttyNavigation {
     }
     /// Takes a fresh inventory. Each terminal's `tty` is read only when the installed Ghostty's
     /// dictionary declares it, so a Ghostty without it gets exactly the same request as before.
+    /// Without it, the surfaces' TTYs are read from Ghostty's child processes for the sole-terminal
+    /// rule (ADR 0011), after the inventory so a surface opened in between is still counted.
     static func snapshot() -> GhosttySnapshot? {
         var value: [String: Any] = ["action": "snapshot"]
-        if GhosttyScriptingSupport.ttySupport() == .supported { value["tty"] = true }
-        guard let data = request(value) else { return nil }
-        return try? JSONDecoder().decode(GhosttySnapshot.self, from: data)
+        let supported = GhosttyScriptingSupport.ttySupport() == .supported
+        if supported { value["tty"] = true }
+        guard let data = request(value), var snapshot = try? JSONDecoder().decode(GhosttySnapshot.self, from: data) else {
+            return nil
+        }
+        if !supported { snapshot.surface_ttys = GhosttySurfaces.ttys() }
+        return snapshot
     }
     /// Sends the given key names (digits, optionally Enter) to the session's unique unsplit terminal
     /// without activating it. Confirmation is the rollout's recorded answer, not this result.
@@ -57,10 +63,19 @@ enum GhosttyNavigation {
     /// exactly one terminal reports `tty`, alone in its tab in the front window, and that it is still
     /// `target`, then selects it and activates Ghostty. True only when Ghostty reported ok; the caller
     /// verifies the result with a fresh inventory. Sends no input.
+    ///
+    /// Without `tty` (ADR 0011's sole-terminal rule) Ghostty's child processes must still hold exactly
+    /// the one surface with `tty`, and Ghostty rechecks that `target` is its only scripted terminal.
     static func selectHerdrTab(target: GhosttyTarget, tty: String) -> Bool {
+        let supported = GhosttyScriptingSupport.ttySupport() == .supported
+        if !supported {
+            guard let surfaces = GhosttySurfaces.ttys(), surfaces.count == 1,
+                  GhosttyTTYMatch.normalizedTTY(surfaces[0]) == GhosttyTTYMatch.normalizedTTY(tty) else { return false }
+        }
         guard let bytes = try? JSONEncoder().encode(target),
               let object = try? JSONSerialization.jsonObject(with: bytes),
-              let response = request(["action": "select_tty", "tty": tty, "target": object]),
+              let response = request(supported ? ["action": "select_tty", "tty": tty, "target": object]
+                                               : ["action": "select_sole", "target": object]),
               let value = try? JSONSerialization.jsonObject(with: response) as? [String: Any] else { return false }
         return value["status"] as? String == "ok"
     }
@@ -119,5 +134,61 @@ enum GhosttyScriptingSupport {
         let dictionary = SafeFile.read(contents.appendingPathComponent("Resources", isDirectory: true).appendingPathComponent(name),
                                        limit: GhosttyScriptingDictionary.maximumFileSize)
         return GhosttyScriptingDictionary.ttySupport(dictionary: dictionary)
+    }
+}
+
+/// The TTYs of the running Ghostty's terminal surfaces, read from its child processes (ADR 0011's
+/// sole-terminal rule). Ghostty starts each surface's command (normally `/usr/bin/login`) as a
+/// direct child holding that surface's TTY, so this counts every surface, including the quick
+/// terminal that scripting may not list. Read-only: it inspects the process table and sends nothing.
+///
+/// Ghostty's own process is found in the same table, by its executable's enclosing bundle
+/// identifier, not through `NSRunningApplication`: snapshots run off the main thread, where that
+/// list was observed to come back empty intermittently.
+enum GhosttySurfaces {
+    /// Each surface TTY as `/dev/ttysNNN`, one entry per child holding a terminal; nil when Ghostty is
+    /// not running or the process table could not be read.
+    static func ttys() -> [String]? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
+        var size = 0
+        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return nil }
+        // Room for processes started between the two calls.
+        size += 64 * MemoryLayout<kinfo_proc>.stride
+        var processes = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
+        guard sysctl(&mib, u_int(mib.count), &processes, &size, nil, 0) == 0 else { return nil }
+        let table = processes.prefix(size / MemoryLayout<kinfo_proc>.stride)
+        // The short process name narrows the path lookups; the bundle identifier decides.
+        let parents = Set(table.filter { commandName($0) == "ghostty" }.map(\.kp_proc.p_pid).filter(isGhostty))
+        guard !parents.isEmpty else { return nil }
+        var result: [String] = []
+        for process in table where parents.contains(process.kp_eproc.e_ppid) {
+            let device = process.kp_eproc.e_tdev
+            guard device != -1 else { continue }
+            // `devname_r`: snapshots run from several tasks at once, and `devname` shares one buffer.
+            var buffer = [CChar](repeating: 0, count: 64)
+            guard devname_r(device, S_IFCHR, &buffer, Int32(buffer.count)) != nil else { return nil }
+            result.append("/dev/" + String(cString: buffer))
+        }
+        return result
+    }
+
+    private static func commandName(_ process: kinfo_proc) -> String {
+        withUnsafeBytes(of: process.kp_proc.p_comm) { raw in
+            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        }
+    }
+
+    /// Whether `pid` runs the executable of an app bundle whose identifier is Ghostty's.
+    private static func isGhostty(_ pid: pid_t) -> Bool {
+        guard pid > 0 else { return false }
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return false }
+        let executable = URL(fileURLWithPath: String(cString: buffer))
+        let macOS = executable.deletingLastPathComponent()
+        guard macOS.lastPathComponent == "MacOS", macOS.deletingLastPathComponent().lastPathComponent == "Contents" else {
+            return false
+        }
+        let bundle = macOS.deletingLastPathComponent().deletingLastPathComponent()
+        return Bundle(url: bundle)?.bundleIdentifier == GhosttyScriptingSupport.bundleIdentifier
     }
 }

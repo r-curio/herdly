@@ -936,27 +936,27 @@ struct Notch: View {
                             .accessibilityHint("Denies this Claude Bash request.")
                     }
                     if item.session.source == .codex, herdr.offersOpen {
-                        NotchButton(title: "Open in Codex") {
+                        NotchButton(title: "Open Session") {
                             if let approval = item.approval { model.openAgentApproval(approval) }
                         }
                         .disabled(model.openingTask)
-                        .accessibilityLabel("Open in Codex: \(subject)")
+                        .accessibilityLabel("Open Session: \(subject)")
                         .accessibilityHint("Hands this request back to Codex's own prompt.")
                     }
                     claudeReturnControl(item, subject: subject)
                 case .handedBackApproval:
                     if item.session.source == .codex, herdr.offersOpen {
-                        NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
+                        NotchButton(title: "Open Session") { model.openAgent(item.session) }
                             .disabled(model.openingTask)
-                            .accessibilityLabel("Open in Codex: \(subject)")
+                            .accessibilityLabel("Open Session: \(subject)")
                             .accessibilityHint("Open this session in Codex.")
                     }
                     claudeReturnControl(item, subject: subject)
                 case .statusUnavailable:
                     if item.session.source == .codex, herdr.offersOpen {
-                        NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
+                        NotchButton(title: "Open Session") { model.openAgent(item.session) }
                             .disabled(model.openingTask)
-                            .accessibilityLabel("Open in Codex: \(subject)")
+                            .accessibilityLabel("Open Session: \(subject)")
                             .accessibilityHint("Open this session in Codex.")
                     }
                 case .question:
@@ -967,9 +967,9 @@ struct Notch: View {
                             .accessibilityLabel("Set up Ghostty: \(subject)")
                             .accessibilityHint("Opens Steer controls to enable Ghostty controls.")
                     } else if herdr.offersOpen {
-                        NotchButton(title: "Open in Codex", emphasized: true) { model.openAgent(item.session) }
+                        NotchButton(title: "Open Session", emphasized: true) { model.openAgent(item.session) }
                             .disabled(model.openingTask)
-                            .accessibilityLabel("Open in Codex: \(subject)")
+                            .accessibilityLabel("Open Session: \(subject)")
                             .accessibilityHint("Answer the question in Codex's own panel.")
                     }
                     if item.session.source == .codex {
@@ -978,9 +978,9 @@ struct Notch: View {
                     }
                 case .outcome, .earlierOutcome:
                     if item.session.source == .codex, herdr.offersOpen {
-                        NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
+                        NotchButton(title: "Open Session") { model.openAgent(item.session) }
                             .disabled(model.openingTask)
-                            .accessibilityLabel("Open in Codex: \(subject)")
+                            .accessibilityLabel("Open Session: \(subject)")
                             .accessibilityHint("Open this session in Codex.")
                     }
                     claudeReturnControl(item, subject: subject)
@@ -988,9 +988,9 @@ struct Notch: View {
                         .accessibilityLabel("Dismiss completion: \(subject)")
                 case .waiting, .running:
                     if item.session.source == .codex, herdr.offersOpen {
-                        NotchButton(title: "Open in Codex") { model.openAgent(item.session) }
+                        NotchButton(title: "Open Session") { model.openAgent(item.session) }
                             .disabled(model.openingTask)
-                            .accessibilityLabel("Open in Codex: \(subject)")
+                            .accessibilityLabel("Open Session: \(subject)")
                             .accessibilityHint("Open this session in Codex.")
                     }
                     claudeReturnControl(item, subject: subject)
@@ -1055,7 +1055,7 @@ struct Notch: View {
         if item.session.source == .claude {
             let herdr = herdrOpen(item.session)
             if herdr == .available || (herdr == .notInHerdr && model.canOpenClaude(item.session)) {
-                NotchButton(title: "Open in Claude", emphasized: emphasized) {
+                NotchButton(title: "Open Session", emphasized: emphasized) {
                     if let approval = item.approval {
                         model.openAgentApproval(approval)
                     } else {
@@ -1063,7 +1063,7 @@ struct Notch: View {
                     }
                 }
                     .disabled(model.openingTask)
-                    .accessibilityLabel("Open in Claude: \(subject)")
+                    .accessibilityLabel("Open Session: \(subject)")
                     .accessibilityHint("Open the exact Claude Ghostty tab for this session.")
             } else if herdr == .notInHerdr, !model.ghosttyEnabled {
                 NotchButton(title: "Set up Ghostty", emphasized: emphasized, action: model.showControls)
