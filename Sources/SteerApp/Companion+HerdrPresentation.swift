@@ -29,7 +29,7 @@ final class GhosttyTTYSupportMonitor: ObservableObject {
 extension Companion {
     /// The herdr session key of a CLI session, or nil for any other surface.
     func herdrSessionKey(_ identity: AgentSessionIdentity) -> HerdrSessionKey? {
-        guard identity.surface == .cli else { return nil }
+        guard identity.surface == .cli || isCodexTerminalSession(identity) else { return nil }
         let agent: HerdrAgentKind = switch identity.source {
         case .codex: .codex
         case .claude: .claude

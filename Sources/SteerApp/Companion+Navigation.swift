@@ -11,11 +11,20 @@ extension Companion {
         if identity.source == .claude {
             openClaude(identity)
         } else if let session = codexSession(identity) {
-            if identity.surface == .cli { openCLI(session) } else { openDesktop(session) }
+            if isCodexTerminalSession(identity) { openCLI(session) } else { openDesktop(session) }
         } else {
             navigationMessage = "Open in Codex is unavailable until Steer can verify the exact session."
             refresh()
         }
+    }
+
+    /// Whether a Codex card belongs to a terminal session. A card recorded as desktop counts when
+    /// the session is now known to be a terminal one: a daemon-run TUI labels its rollout like the
+    /// desktop app (`source: vscode`) and was filed as desktop before the daemon or its pane proved
+    /// otherwise. A desktop session is never in `cliSessions`.
+    func isCodexTerminalSession(_ identity: AgentSessionIdentity) -> Bool {
+        guard identity.source == .codex else { return false }
+        return identity.surface == .cli || codexSession(identity).map { cliSessions.contains($0) } == true
     }
 
     func canOpenClaude(_ identity: AgentSessionIdentity) -> Bool {
