@@ -96,7 +96,7 @@ final class AppServerDaemonClient {
         case .idle, .failed:
             guard now >= nextRetry else { return }
             nextRetry = now + Self.retryInterval
-            problem = AppServerSocketCheck.problem(at: socketPath)
+            problem = AppServerSocketCheck.problem(at: socketPath, followsPrivateLink: true)
             guard problem == nil else { if case .failed = state { state = .idle }; return }
             connect(now: now)
         }
@@ -159,6 +159,14 @@ final class AppServerDaemonClient {
             let code = errno
             close(socketFD)
             state = .failed("could not connect to \(socketPath) (\(String(cString: strerror(code)))).")
+            return
+        }
+        // The path is checked before connecting, but its symlink target lives in /tmp (ADR 0007):
+        // confirm the process that accepted is this user's, or talk to nothing.
+        var peerUID: uid_t = 0, peerGID: gid_t = 0
+        guard getpeereid(socketFD, &peerUID, &peerGID) == 0, peerUID == getuid() else {
+            close(socketFD)
+            state = .failed("refusing \(socketPath); the process behind it is not yours.")
             return
         }
         _ = fcntl(socketFD, F_SETFL, fcntl(socketFD, F_GETFL) | O_NONBLOCK)
