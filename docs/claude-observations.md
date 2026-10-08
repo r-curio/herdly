@@ -6,7 +6,11 @@ is bounded before it reaches the shared `AgentAttentionQueue`.
 
 The helper retains event and session identity, source and installation markers, timestamps, a bounded
 prompt fallback (240 characters), and only the scalar command or path fields needed for a current
-action. An `AskUserQuestion` record retains bounded question text and option labels so the notch can
+action. A longer prompt keeps its first 240 characters with an ellipsis and a `prompt_shortened`
+mark instead of being dropped, so its working row still shows it; the row's disclosure then says the
+text is shortened and the full prompt is in Claude. Helpers before 2026-10-08 dropped any prompt over
+240 bytes, so a working row started under one has no prompt text.
+An `AskUserQuestion` record retains bounded question text and option labels so the notch can
 show the same choices Claude is showing. The separate live request carries the helper invocation
 identity, the normalized Claude configuration root, and the separate normalized event directory; its
 helper-owned liveness marker is refreshed only while the hook waits, and a delivery acknowledgment

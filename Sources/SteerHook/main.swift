@@ -58,11 +58,13 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
     if let helperRequestID = boundedClaudeString(helperRequestID, limit: 256) {
         record["helper_request_id"] = helperRequestID
     }
-    for key in ["prompt_id", "prompt", "tool_name", "tool_use_id"] {
-        let limit = key == "prompt" ? QuestionPrompt.maximumQuestion : 256
-        if let value = boundedClaudeString(object[key], limit: limit, allowNewline: key == "prompt") {
-            record[key] = value
-        }
+    for key in ["prompt_id", "tool_name", "tool_use_id"] {
+        if let value = boundedClaudeString(object[key], limit: 256) { record[key] = value }
+    }
+    // A long prompt keeps its start, marked shortened, so the working row still has its text.
+    if let prompt = ClaudeObservationReader.promptFallback(object["prompt"] as? String) {
+        record["prompt"] = prompt.text
+        if prompt.shortened { record[ClaudeObservationReader.promptShortenedKey] = true }
     }
     if let requestID = boundedClaudeString(object["approval_request_id"], limit: 256) {
         record["approval_request_id"] = requestID
@@ -362,6 +364,17 @@ func selfTest() -> Int32 {
             == "\u{1b}]2;\(ClaudeSetupRequirements.titlePrefix)\(session.uuidString)\u{7}",
           terminalSequence(for: session.uuidString, reset: true).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: String] })?["terminalSequence"]
             == "\u{1b}]2;\u{7}" else { return 1 }
+    let promptDirectory = directory.appendingPathComponent("claude-prompt", isDirectory: true)
+    let longPrompt = String(repeating: "Explain why the queue keeps this order. ", count: 12)
+    guard writeClaudeEvent(["hook_event_name": "UserPromptSubmit", "session_id": session.uuidString,
+                            "prompt_id": "prompt-2", "prompt": longPrompt],
+                           to: promptDirectory, installationID: UUID().uuidString),
+          let promptRecord = (try? FileManager.default.contentsOfDirectory(at: promptDirectory, includingPropertiesForKeys: nil))?
+            .compactMap({ try? Data(contentsOf: $0) })
+            .compactMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }).first,
+          let shortened = ClaudeObservationReader.promptFallback(longPrompt), shortened.shortened,
+          promptRecord["prompt"] as? String == shortened.text,
+          promptRecord[ClaudeObservationReader.promptShortenedKey] as? Bool == true else { return 1 }
     return 0
 }
 
