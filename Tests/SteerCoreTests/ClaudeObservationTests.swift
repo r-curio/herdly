@@ -291,6 +291,34 @@ import Testing
     #expect(queue.items.compactMap { $0.outcome }.isEmpty)
 }
 
+@Test func claudeToolActivityKeepsRunningSessionsInTurnArrivalOrder() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", session: "session-1"),
+        claudeRecord("UserPromptSubmit", at: 2, promptID: "p2", session: "session-2")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var queue = AgentAttentionQueue()
+    queue.apply(scanClaude(root, now: 3))
+    #expect(queue.items.map(\.session.session) == ["session-1", "session-2"])
+
+    // Each tool event is newer evidence for its turn, but neither moves its session in the queue.
+    try appendClaudeEvent(claudeRecord("PreToolUse", at: 4, promptID: "p1", toolName: "Bash", toolUseID: "t1",
+                                       toolInput: ["command": "first"], session: "session-1"), to: root)
+    queue.apply(scanClaude(root, now: 5))
+    #expect(queue.items.map(\.session.session) == ["session-1", "session-2"])
+    #expect(queue.items.first?.running?.fullAction == "first")
+
+    try appendClaudeEvent(claudeRecord("PreToolUse", at: 6, promptID: "p2", toolName: "Bash", toolUseID: "t2",
+                                       toolInput: ["command": "second"], session: "session-2"), to: root)
+    try appendClaudeEvent(claudeRecord("PostToolUse", at: 7, promptID: "p1", toolUseID: "t1",
+                                       session: "session-1"), to: root)
+    queue.apply(scanClaude(root, now: 8))
+    #expect(queue.items.map(\.session.session) == ["session-1", "session-2"])
+    #expect(queue.items.map { $0.running?.arrivedAt } == [1, 2])
+    #expect(queue.items.map { $0.running?.updatedAt } == [7, 6])
+    #expect(queue.items.last?.running?.fullAction == "second")
+}
+
 @Test func claudeDelayedStopFailureCannotClearNewerActivityDuringReplay() throws {
     let root = try makeClaudeEvents([
         claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Keep working"),
@@ -540,8 +568,9 @@ private func scanClaude(_ root: URL, now: Double = 10) -> ClaudeObservationScan 
 private func claudeRecord(_ event: String, at capturedAt: Double, promptID: String? = nil,
                           prompt: String? = nil, toolName: String? = nil, toolUseID: String? = nil,
                           helperRequestID: String? = nil,
-                          toolInput: [String: Any] = [:], approvalRequestID: String? = nil) -> [String: Any] {
-    var record: [String: Any] = ["hook_event_name": event, "session_id": "session-1", "captured_at": capturedAt]
+                          toolInput: [String: Any] = [:], approvalRequestID: String? = nil,
+                          session: String = "session-1") -> [String: Any] {
+    var record: [String: Any] = ["hook_event_name": event, "session_id": session, "captured_at": capturedAt]
     if let promptID { record["prompt_id"] = promptID }
     if let prompt { record["prompt"] = prompt }
     if let toolName { record["tool_name"] = toolName }
