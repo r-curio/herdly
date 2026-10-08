@@ -78,13 +78,30 @@ public struct DesktopCompletion: Equatable, Identifiable, Sendable {
     public var id: TurnIdentity { TurnIdentity(session: session, turn: turn) }
 }
 
+/// Codex's own background jobs, which are not the user's work. Codex runs memory consolidation as a
+/// session of its own with the user's hooks: it reports SessionStart, UserPromptSubmit and tool
+/// events like any session, but writes no rollout and was seen shutting down without Stop or
+/// SessionEnd, so its row would stay working. Codex submits the prompt itself, and this heading is
+/// a constant in every installed Codex checked (CLI 0.154 to 0.161 and the desktop bundle). If Codex
+/// changes it, the job shows as working again rather than hiding a user's session.
+public enum CodexBackgroundJob {
+    static let memoryConsolidationHeading = "## Memory Writing Agent: Phase 2 (Consolidation)"
+
+    public static func isBackgroundJob(prompt: String?) -> Bool {
+        prompt?.hasPrefix(memoryConsolidationHeading) == true
+    }
+}
+
 public struct DesktopState: Sendable {
     public private(set) var running: [DesktopRunningTurn] = []
     public private(set) var completed: [DesktopCompletion] = []
+    /// Sessions identified as Codex's background jobs; their later events add nothing.
+    private var backgroundJobs: Set<UUID> = []
 
     public init() {}
 
     public mutating func apply(_ event: DesktopEvent) {
+        guard !backgroundJobs.contains(event.session) else { return }
         switch event {
         case let .sessionStarted(session, _):
             running.removeAll { $0.session == session }
@@ -93,6 +110,10 @@ public struct DesktopState: Sendable {
             running.append(DesktopRunningTurn(session: session, turn: turn, startedAt: receivedAt))
         case let .promptSubmitted(session, turn, prompt, receivedAt):
             running.removeAll { $0.session == session }
+            if CodexBackgroundJob.isBackgroundJob(prompt: prompt) {
+                backgroundJobs.insert(session)
+                return
+            }
             running.append(DesktopRunningTurn(session: session, turn: turn, startedAt: receivedAt, prompt: prompt))
         case let .toolStarted(session, turn, useID, action, _):
             guard let index = running.firstIndex(where: { $0.session == session && $0.turn == turn }) else { return }

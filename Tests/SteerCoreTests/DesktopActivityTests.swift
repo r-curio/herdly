@@ -226,3 +226,62 @@ import Testing
         }
     }
 }
+
+@Test func codexMemoryConsolidationIsNeverShownAsTheUsersWork() {
+    let job = UUID(), jobTurn = UUID(), user = UUID(), userTurn = UUID()
+    let memoryPrompt = "## Memory Writing Agent: Phase 2 (Consolidation)\n\nYou are a Memory Writing Agent."
+    var state = DesktopState()
+
+    state.apply(.sessionStarted(session: job, receivedAt: "01"))
+    state.apply(.promptSubmitted(session: job, turn: jobTurn, prompt: memoryPrompt, receivedAt: "02"))
+    state.apply(.promptSubmitted(session: user, turn: userTurn, prompt: "Fix the notch", receivedAt: "03"))
+    state.apply(.toolStarted(session: job, turn: jobTurn, useID: "tool-1",
+                             action: ToolAction(name: "Bash", input: ["command": "ls"]), capturedAt: 4))
+    #expect(state.running.map(\.session) == [user])
+
+    // A later Stop for the job is not a completion for the user to check.
+    state.apply(.turnCompleted(session: job, turn: jobTurn, receivedAt: "05"))
+    #expect(state.completed.isEmpty)
+    #expect(state.running.map(\.session) == [user])
+}
+
+@Test func onlyAPromptThatOpensWithTheMemoryHeadingIsTreatedAsCodexsOwn() {
+    let session = UUID(), turn = UUID()
+    var state = DesktopState()
+    state.apply(.promptSubmitted(session: session, turn: turn,
+                                 prompt: "Why does Steer show ## Memory Writing Agent: Phase 2 (Consolidation)?",
+                                 receivedAt: "01"))
+    #expect(state.running.map(\.session) == [session])
+}
+
+@Test func aMemoryJobThatNeverSendsStopOrSessionEndIsNotLeftWorking() throws {
+    // The shapes recorded on 2026-10-08 for session 01a11757-16e6-7c91-b937-4e67f83d3163: Codex shut the
+    // job down at 01:17:18 local time without a Stop or SessionEnd hook, and wrote no rollout for it.
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = UUID(), turn = UUID()
+    let common: [String: Any] = ["session_id": session.uuidString, "source": "steer-hook-v1",
+                                 "installation_id": "CBC31D11-FAD7-4AC0-992A-166F8DF81FBA",
+                                 "herdr_pane_id": "w1:p2"]
+    let records: [[String: Any]] = [
+        ["hook_event_name": "SessionStart", "received_at": "2026-10-07T17:09:08Z", "captured_at": 1_791_392_948.786],
+        ["hook_event_name": "UserPromptSubmit", "received_at": "2026-10-07T17:09:08Z", "captured_at": 1_791_392_948.854,
+         "turn_id": turn.uuidString,
+         "prompt": "## Memory Writing Agent: Phase 2 (Consolidation)\n\nYou are a Memory Writing Agent.\n"],
+        ["hook_event_name": "PreToolUse", "received_at": "2026-10-07T17:16:58Z", "captured_at": 1_791_393_418.807,
+         "turn_id": turn.uuidString, "tool_name": "Bash", "tool_use_id": "exec-1", "tool_input": ["command": "git status"]],
+        ["hook_event_name": "PostToolUse", "received_at": "2026-10-07T17:16:59Z", "captured_at": 1_791_393_419.010,
+         "turn_id": turn.uuidString, "tool_name": "Bash", "tool_use_id": "exec-1"]
+    ]
+    for (index, record) in records.enumerated() {
+        try JSONSerialization.data(withJSONObject: record.merging(common) { own, _ in own })
+            .write(to: root.appendingPathComponent("\(index).json"))
+    }
+
+    var queue = AttentionQueue(observingSince: 0)
+    queue.apply(scan: ReminderScan(), desktopEvents: DesktopEventReader.read(from: root), now: 1_791_393_440)
+    #expect(queue.workingCount == 0)
+    #expect(queue.toCheckCount == 0)
+    #expect(!queue.items.contains { $0.session == session })
+}
