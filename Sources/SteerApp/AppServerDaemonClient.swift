@@ -96,7 +96,7 @@ final class AppServerDaemonClient {
         case .idle, .failed:
             guard now >= nextRetry else { return }
             nextRetry = now + Self.retryInterval
-            problem = AppServerSocketCheck.problem(at: socketPath)
+            problem = AppServerSocketCheck.problem(at: socketPath, followsPrivateLink: true)
             guard problem == nil else { if case .failed = state { state = .idle }; return }
             connect(now: now)
         }
