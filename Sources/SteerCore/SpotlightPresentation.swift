@@ -210,12 +210,12 @@ public struct SpotlightRequest: Equatable, Sendable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// Codex's task name for the card's place line, or nil when there is none or the session label
-    /// already names exactly that task (`"<Source> · <task>"`). Only an exact name hides it, so a task
-    /// that merely appears inside a longer label is still shown.
-    public func task(besides sessionLabel: String) -> String? {
+    /// Codex's task name for the card's place line, or nil when there is none or the session's own
+    /// name (which its label already shows) is exactly that task. A task that merely appears inside a
+    /// longer name, or beside an unnamed session, is still shown.
+    public func task(besidesSessionName name: String?) -> String? {
         guard let task else { return nil }
-        return sessionLabel.hasSuffix(" · " + task) ? nil : task
+        return name == task ? nil : task
     }
 
     /// A compact elapsed time for a status line: "just now", "4m ago", "2h ago", "3d ago".
