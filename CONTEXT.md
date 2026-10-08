@@ -56,7 +56,7 @@ The action that returns the user to the Codex session associated with a notch no
 The ordered collection of Codex activity presented in the shared notch, with approval requests ahead of other activity. Its order determines presentation, not when Codex sessions execute.
 
 **Acknowledged completion**:
-A particular completion cleared by explicit dismissal; for a supported CLI surface, also by a verified visit after completion or by its herdr pane staying visible for five seconds after it arrived. Desktop app visibility never acknowledges a completion; the desktop app's own cleared unread flag, read from its state file after the completion, does (see [desktop read state](docs/desktop-read-state.md). This does not mean every result in the session has been read.
+A particular completion cleared by explicit dismissal; for a supported CLI surface, also by a verified visit after completion or, when it arrives while its herdr pane is already in front, by that pane staying visible for five seconds after it arrived. Desktop app visibility never acknowledges a completion; the desktop app's own cleared unread flag, read from its state file after the completion, does (see [desktop read state](docs/desktop-read-state.md). This does not mean every result in the session has been read.
 
 **Uncertain completion**:
 A completion that arrived while the companion was not observing. The user may have viewed it unobserved, so it is retained without a sound and offered for opening or dismissal; it is never described as unread.
