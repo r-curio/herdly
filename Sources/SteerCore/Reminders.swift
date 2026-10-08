@@ -102,6 +102,43 @@ public enum ReminderReader {
         return bytes
     }
 
+    /// A rollout as `evidence(in:session:owner:)` reads it. Image tool outputs make rollouts large, so
+    /// the file is streamed: each line over `maximumRecordSize` is replaced by `skippedRecordMarker`
+    /// without being held, at most `maximumRolloutFileSize` bytes are read from disk, and at most
+    /// `maximumRolloutSize` bytes are kept. nil when the file cannot be read or exceeds either bound.
+    /// A last line still being written keeps the result without a final newline, as on disk.
+    static func compactedRollout(_ url: URL) -> Data? {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? file.close() }
+        var result = Data(), line = Data(), read = 0, skipping = false
+        while true {
+            // `read` returns nil at the end of the file and throws on a read error.
+            let chunk: Data
+            do { chunk = try file.read(upToCount: 1024 * 1024) ?? Data() } catch { return nil }
+            if chunk.isEmpty { break }
+            read += chunk.count
+            guard read <= maximumRolloutFileSize else { return nil }
+            var start = chunk.startIndex
+            while start < chunk.endIndex {
+                let newline = chunk[start...].firstIndex(of: 10)
+                let piece = chunk[start..<(newline ?? chunk.endIndex)]
+                if !skipping {
+                    line.append(piece)
+                    if line.count > maximumRecordSize { skipping = true; line.removeAll() }
+                }
+                guard let newline else { break }
+                result.append(skipping ? skippedRecordMarker : line)
+                result.append(10)
+                guard result.count <= maximumRolloutSize else { return nil }
+                line.removeAll(keepingCapacity: true)
+                skipping = false
+                start = chunk.index(after: newline)
+            }
+        }
+        result.append(skipping ? skippedRecordMarker : line)
+        return result.count <= maximumRolloutSize ? result : nil
+    }
+
     /// The first line of a rollout, read without loading the file; nil when it is longer than `limit`.
     private static func firstLine(_ url: URL, limit: Int) -> Data? {
         guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
@@ -144,21 +181,41 @@ public enum ReminderReader {
 
     static let userInputTool = "request_user_input"
     static let maximumCallID = 256
+    /// Rollout lines longer than this are skipped (see `evidence(in:session:owner:)`).
+    static let maximumRecordSize = 1024 * 1024
+    /// Bytes of a rollout kept for `evidence(in:session:owner:)`, after oversized lines are dropped.
+    static let maximumRolloutSize = 32 * 1024 * 1024
+    /// Bytes `compactedRollout(_:)` reads from disk, so a rescan stays bounded however many images a
+    /// session produced.
+    static let maximumRolloutFileSize = 256 * 1024 * 1024
+    /// What `compactedRollout(_:)` writes in place of a line over `maximumRecordSize`.
+    static let skippedRecordMarker = Data(#"{"steer_skipped_record":true}"#.utf8)
 
     /// Fails closed as a whole: any line that cannot be read yields empty evidence, which the queue
-    /// treats as "nothing new this scan", never as resolution or as a new question.
+    /// treats as "nothing new this scan", never as resolution or as a new question. The exception is
+    /// a line over `maximumRecordSize` after the header, which is skipped; a question asked before it
+    /// is then neither pending nor answered.
     /// `owner` is the thread that owns this rollout when it is a sub-agent's: Codex writes the
     /// child's own id as `id` and the parent's id as `session_id`.
     public static func evidence(in data: Data, session: UUID, owner: UUID? = nil) -> RolloutEvidence {
-        guard data.last == 10, data.count <= 32 * 1024 * 1024 else { return RolloutEvidence() }
+        guard data.last == 10, data.count <= maximumRolloutSize else { return RolloutEvidence() }
         var result = RolloutEvidence()
         var calls: [String: AttentionQuestion] = [:]
         var outputs: Set<String> = []
         var workingDirectory: String?
         var prompts: [UUID: String] = [:]
         var activeTurn: UUID?
+        // Image generation and `view_image` write tool outputs of several MiB on one line. Such a line
+        // is skipped rather than discarding the whole rollout, which hid every turn's end; the header
+        // must still be readable. A question asked before a skipped line may have its answer in it.
+        var callIndices: [String: Int] = [:]
+        var lastSkipped: Int?
         for (index, line) in data.split(separator: 10, omittingEmptySubsequences: false).dropLast().enumerated() {
-            guard line.count <= 1024 * 1024,
+            if line.count > maximumRecordSize || line.elementsEqual(skippedRecordMarker), index > 0 {
+                lastSkipped = index
+                continue
+            }
+            guard line.count <= maximumRecordSize,
                   let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
                   let payload = event["payload"] as? [String: Any] else { return RolloutEvidence() }
             if index == 0 {
@@ -210,10 +267,14 @@ public enum ReminderReader {
                 let parsed = (payload["arguments"] as? String).flatMap(QuestionPrompt.parseCall(arguments:))
                 calls[callID] = AttentionQuestion(source: .desktop, session: session, turn: turn, callID: callID,
                                                   arrivedAt: at, prompts: parsed?.prompts ?? [], questionCount: parsed?.count)
+                callIndices[callID] = index
             }
         }
         for (callID, question) in calls {
             if outputs.contains(callID) { result.answeredQuestions.insert(question.id) }
+            // Unknown, not pending: a skipped line after the call may hold its answer, and a pending
+            // question can be answered from the notch.
+            else if let lastSkipped, let asked = callIndices[callID], asked < lastSkipped { continue }
             else { result.pendingQuestions.append(question) }
         }
         result.pendingQuestions.sort { $0.arrivedAt == $1.arrivedAt ? $0.callID < $1.callID : $0.arrivedAt < $1.arrivedAt }
@@ -240,7 +301,7 @@ public enum ReminderReader {
     /// The rollout's evidence as of right now, for the pre-send check before a key is relayed.
     /// Empty when the file cannot be found or read, which the caller treats as "not pending".
     public static func currentEvidence(for session: UUID, in rollouts: URL) -> RolloutEvidence {
-        guard let url = rolloutURL(for: session, in: rollouts), let bytes = bounded(url, limit: 32 * 1024 * 1024) else {
+        guard let url = rolloutURL(for: session, in: rollouts), let bytes = compactedRollout(url) else {
             return RolloutEvidence()
         }
         return evidence(in: bytes, session: session)
@@ -402,7 +463,7 @@ public enum ReminderReader {
                 headReads += 1
                 if headReads > maximumChildProbes { break }
                 guard let head = rolloutParent(url), head.parent == session,
-                      let bytes = bounded(url, limit: 32 * 1024 * 1024) else { continue }
+                      let bytes = compactedRollout(url) else { continue }
                 let child = evidence(in: bytes, session: head.session, owner: session)
                 result.completed.formUnion(child.completed.map { TurnIdentity(session: session, turn: $0.turn) })
                 result.canceled.formUnion(child.canceled.map { TurnIdentity(session: session, turn: $0.turn) })
@@ -410,7 +471,7 @@ public enum ReminderReader {
         }
         // ponytail: bounded full rereads every two seconds; use cursors if histories grow.
         for (session, urls) in paths where urls.count == 1 {
-            if let bytes = bounded(urls[0], limit: 32 * 1024 * 1024) {
+            if let bytes = compactedRollout(urls[0]) {
                 let terminal = evidence(in: bytes, session: session)
                 let finished = terminal.completed
                 result.completed.formUnion(finished)

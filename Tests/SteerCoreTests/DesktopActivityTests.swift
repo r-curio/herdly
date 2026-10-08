@@ -283,3 +283,60 @@ import Testing
     #expect(queue.toCheckCount == 0)
     #expect(!queue.items.contains { $0.session == session })
 }
+
+@Test func anInterruptedDesktopTurnStopsWorkingWhenItsRolloutHoldsImages() throws {
+    // The shapes recorded on 2026-10-08 for an image-generating desktop session. The user
+    // interrupted a turn (no Stop hook); the next turn sent tool events and Stop but no
+    // UserPromptSubmit, so only the rollout's turn_aborted ends the interrupted one. Image outputs
+    // made several rollout lines larger than 1 MiB, and the rollout itself larger than 32 MiB.
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let events = root.appendingPathComponent("events"), rollouts = root.appendingPathComponent("sessions")
+    try FileManager.default.createDirectory(at: events, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: rollouts, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = UUID(), finished = UUID(), interrupted = UUID(), later = UUID()
+    let common: [String: Any] = ["session_id": session.uuidString, "source": "steer-hook-v1"]
+    let records: [[String: Any]] = [
+        ["hook_event_name": "SessionStart", "received_at": "2026-10-08T06:10:52Z", "captured_at": 1_791_439_852.0],
+        ["hook_event_name": "UserPromptSubmit", "received_at": "2026-10-08T06:10:54Z", "captured_at": 1_791_439_854.0,
+         "turn_id": finished.uuidString, "prompt": "Draw some icons"],
+        ["hook_event_name": "Stop", "received_at": "2026-10-08T06:11:40Z", "captured_at": 1_791_439_900.0,
+         "turn_id": finished.uuidString],
+        ["hook_event_name": "UserPromptSubmit", "received_at": "2026-10-08T06:16:10Z", "captured_at": 1_791_440_170.0,
+         "turn_id": interrupted.uuidString, "prompt": "Make them larger"],
+        ["hook_event_name": "PreToolUse", "received_at": "2026-10-08T06:55:19Z", "captured_at": 1_791_442_519.0,
+         "turn_id": later.uuidString, "tool_name": "Bash", "tool_use_id": "exec-1", "tool_input": ["command": "ls"]],
+        ["hook_event_name": "PostToolUse", "received_at": "2026-10-08T06:55:20Z", "captured_at": 1_791_442_520.0,
+         "turn_id": later.uuidString, "tool_name": "Bash", "tool_use_id": "exec-1"],
+        ["hook_event_name": "Stop", "received_at": "2026-10-08T06:57:01Z", "captured_at": 1_791_442_621.0,
+         "turn_id": later.uuidString]
+    ]
+    for (index, record) in records.enumerated() {
+        try JSONSerialization.data(withJSONObject: record.merging(common) { own, _ in own })
+            .write(to: events.appendingPathComponent("\(index).json"))
+    }
+    func event(_ kind: String, _ turn: UUID, _ at: String) -> String {
+        "{\"timestamp\":\"\(at)\",\"type\":\"event_msg\",\"payload\":{\"type\":\"\(kind)\",\"turn_id\":\"\(turn.uuidString.lowercased())\"}}\n"
+    }
+    let image = try JSONSerialization.data(withJSONObject: [
+        "timestamp": "2026-10-08T06:16:14.850Z", "type": "response_item",
+        // Larger than the 32 MiB a rollout may keep, so the scan must stream and drop it.
+        "payload": ["type": "custom_tool_call_output", "call_id": "image-1", "output": String(repeating: "A", count: 34 * 1024 * 1024)]
+    ])
+    let header = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session.uuidString.lowercased())\",\"source\":\"vscode\",\"originator\":\"Codex Desktop\"}}\n"
+    let rollout = header + event("task_started", finished, "2026-10-08T06:10:54.055Z")
+        + event("task_complete", finished, "2026-10-08T06:11:40.285Z")
+        + event("task_started", interrupted, "2026-10-08T06:16:10.015Z")
+        + String(decoding: image, as: UTF8.self) + "\n"
+        + event("turn_aborted", interrupted, "2026-10-08T06:16:19.218Z")
+        + event("task_started", later, "2026-10-08T06:54:49.089Z")
+        + event("task_complete", later, "2026-10-08T06:57:02.001Z")
+    try rollout.write(to: rollouts.appendingPathComponent("rollout-2026-10-08T14-10-52-\(session.uuidString.lowercased()).jsonl"),
+                      atomically: true, encoding: .utf8)
+
+    var queue = AttentionQueue(observingSince: 0)
+    queue.apply(scan: ReminderReader.scan(events: events, rollouts: rollouts),
+                desktopEvents: DesktopEventReader.read(from: events), now: 1_791_445_200)
+    #expect(!queue.items.contains { $0.session == session && $0.kind == .running })
+    #expect(queue.workingCount == 0)
+}
