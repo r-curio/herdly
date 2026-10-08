@@ -53,6 +53,26 @@ function run(argv) {
         app.activate();
         return JSON.stringify({status: 'ok'});
     }
+    if (request.action === 'select_sole') {
+        // herdr Open without `tty` (ADR 0011's sole-terminal rule): Steer has checked Ghostty's child
+        // processes hold one surface, on herdr's client TTY. Recheck that `target` is still Ghostty's
+        // only scripted terminal, in the front window; then select it and activate Ghostty. No input.
+        const target = request.target;
+        if (!target) return JSON.stringify({status: 'unknown'});
+        const all = [];
+        app.windows().forEach(w => w.tabs().forEach(t => t.terminals().forEach(p => {
+            all.push({window_id: w.id(), tab_id: t.id(), terminal_id: p.id()});
+        })));
+        const front = app.frontWindow();
+        if (all.length !== 1 || all[0].window_id !== target.window_id || all[0].tab_id !== target.tab_id
+            || all[0].terminal_id !== target.terminal_id || !front || front.id() !== target.window_id)
+            return JSON.stringify({status: 'unknown'});
+        const w = app.windows.byId(target.window_id);
+        app.activateWindow(w);
+        app.selectTab(w.tabs.byId(target.tab_id));
+        app.activate();
+        return JSON.stringify({status: 'ok'});
+    }
     if (request.action !== 'select' && request.action !== 'answer') return JSON.stringify({status: 'unknown'});
     // Recheck the entire inventory immediately before any selection or key.
     const matches = [];
