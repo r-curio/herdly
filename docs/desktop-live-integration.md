@@ -50,6 +50,29 @@ configuration; reversible connection/setup is tracked separately in #5. A
 fresh real-session UI check still requires the permitted human route described
 there.
 
+## Codex background jobs (2026-10-08)
+
+Codex runs memory consolidation as a session of its own, with the user's hooks.
+Session `01a11757-16e6-7c91-b937-4e67f83d3163` sent `SessionStart`,
+`UserPromptSubmit` and 51 tool records. They carried herdr pane `w1:p2`, the
+pane in the managed app-server daemon's environment. Codex wrote no rollout for
+it. Its log shows the thread shutting down at 01:17:18 local time with no `Stop`
+or `SessionEnd` hook. Steer therefore kept a desktop working row with no end. An
+earlier run on 2026-10-07 did send `SessionEnd`, also without `Stop`.
+
+`DesktopState` treats a session whose submitted prompt opens with Codex's
+built-in heading `## Memory Writing Agent: Phase 2 (Consolidation)` as Codex's
+own. That prompt adds no running row, and the session's later events add no
+row or completion. Approvals and questions do not pass through `DesktopState`,
+so they still appear. The heading is a constant in Codex CLI 0.154.0, 0.160.1
+and 0.161.0 and in the desktop app's bundled CLI. If Codex changes it, the job
+shows as working again rather than hiding a user's session. Codex 0.161's hook
+schemas also offer optional `agent_id` and `agent_type` fields on
+`UserPromptSubmit` and tool hooks. Their values for this job are not recorded,
+so Steer does not rely on them. Covered by
+`aMemoryJobThatNeverSendsStopOrSessionEndIsNotLeftWorking` and its neighbours in
+`DesktopActivityTests.swift`.
+
 ## Completion notification demonstration (#8)
 
 The controllable-clock tests cover a completion staying queued while Codex is

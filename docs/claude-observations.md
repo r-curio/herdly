@@ -39,8 +39,9 @@ missing acknowledgment leaves delivery uncertain and never claims that Bash exec
 malformed, late, repeated, or cross-root records are ignored. A missing receipt, helper crash,
 restart, interruption, expiry, or handoff emits no decision and leaves Claude's native prompt
 available. A root that cannot be read is unavailable for reconciliation, so it cannot clear another
-root's attention. The root-scoped `claude agents --json` inventory is a weaker
-source: a valid interactive `busy`/`waiting` row may add only a generic running row; background
+root's attention. The root-scoped inventory (Claude's session registry,
+`<CLAUDE_CONFIG_DIR>/sessions/<pid>.json`, read first, with `claude agents --json` as the
+fallback; see [Claude setup](claude-setup.md)) is a weaker source: a valid interactive `busy`/`waiting` row may add only a generic running row; background
 lifecycle rows alone do not create queue items. Idle and background terminal states remove only
 inventory-derived rows.
 An unavailable or duplicate inventory leaves both inventory and hook evidence untouched. A later

@@ -341,11 +341,44 @@ public enum AppServerSocketCheck {
         return nil
     }
 
-    /// Inspects the file at `path` without connecting.
-    public static func problem(at path: String) -> Problem? {
+    /// Inspects the file at `path` without connecting. A symlink is refused as `notASocket` unless
+    /// `followsPrivateLink` is set; only the Codex daemon's control socket sets it (ADR 0007), and
+    /// herdr's socket keeps ADR 0009's rule of a socket file at the path itself.
+    ///
+    /// Codex 0.161 replaced its control socket with a symlink to a socket in a per-user directory
+    /// (`/private/tmp/codex-daemon-<uid>/<hash>`). With `followsPrivateLink`, one level of symlink is
+    /// followed only when the link itself is owned by this user and its absolute target is a socket
+    /// that passes every check above, inside a directory owned by this user that no one else can
+    /// enter or change (mode `0700` or stricter). Nothing else, not a relative target, a second link,
+    /// or a looser directory, is accepted: the target directory sits in world-writable `/tmp`, so its
+    /// own mode is what keeps another user from substituting the socket.
+    public static func problem(at path: String, followsPrivateLink: Bool = false) -> Problem? {
         var info = stat()
         guard lstat(path, &info) == 0 else { return .missing }
-        return problem(exists: true, isSocket: (info.st_mode & S_IFMT) == S_IFSOCK, owner: info.st_uid,
-                       mode: info.st_mode & 0o777, me: getuid())
+        guard followsPrivateLink, (info.st_mode & S_IFMT) == S_IFLNK else {
+            return problem(exists: true, isSocket: (info.st_mode & S_IFMT) == S_IFSOCK, owner: info.st_uid,
+                           mode: info.st_mode & 0o777, me: getuid())
+        }
+        guard info.st_uid == getuid() else { return .notOwnedByUser }
+        guard let target = linkTarget(path), target.hasPrefix("/") else { return .notASocket }
+        var targetInfo = stat()
+        guard lstat(target, &targetInfo) == 0 else { return .missing }
+        if let problem = problem(exists: true, isSocket: (targetInfo.st_mode & S_IFMT) == S_IFSOCK,
+                                 owner: targetInfo.st_uid, mode: targetInfo.st_mode & 0o777, me: getuid()) {
+            return problem
+        }
+        var directory = stat()
+        let parent = (target as NSString).deletingLastPathComponent
+        guard lstat(parent, &directory) == 0, (directory.st_mode & S_IFMT) == S_IFDIR else { return .notASocket }
+        guard directory.st_uid == getuid() else { return .notOwnedByUser }
+        guard directory.st_mode & 0o077 == 0 else { return .sharedPermissions }
+        return nil
+    }
+
+    private static func linkTarget(_ path: String) -> String? {
+        var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) + 1)
+        let count = readlink(path, &buffer, buffer.count - 1)
+        guard count > 0, count < buffer.count - 1 else { return nil }
+        return String(decoding: buffer.prefix(count).map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 }

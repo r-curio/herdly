@@ -145,3 +145,54 @@ private func dictionary(terminalProperties: String, classCode: String = "Gtrm") 
     #expect(GhosttyScriptingSupport.ttySupport(bundle: root.appendingPathComponent("missing.app")) == .unsupported)
     #expect(GhosttyScriptingSupport.ttySupport(bundle: nil) == .unsupported)
 }
+
+// MARK: - Sole-terminal rule (Ghostty without `tty`)
+
+private func soleInventory(windows: [[String: Any]], front: String? = "w1", surfaces: [String]?) throws -> GhosttySnapshot {
+    var object: [String: Any] = ["status": "ok", "windows": windows]
+    if let front { object["front_window_id"] = front }
+    var snapshot = try JSONDecoder().decode(GhosttySnapshot.self, from: JSONSerialization.data(withJSONObject: object))
+    snapshot.surface_ttys = surfaces
+    return snapshot
+}
+
+private func window(_ id: String, tabs: [[String]]) -> [String: Any] {
+    ["id": id, "tabs": tabs.enumerated().map { index, terminals in
+        ["id": "\(id)-t\(index)", "terminals": terminals.map { ["id": $0, "name": "herdr"] }] as [String: Any]
+    }]
+}
+
+@Test func soleTerminalJoinNeedsOneSurfaceByProcessAndByScripting() throws {
+    let one = [window("w1", tabs: [["p1"]])]
+    func join(_ snapshot: GhosttySnapshot, client: String = "ttys014") -> GhosttyTTYJoin {
+        GhosttyTTYMatch.join(clientTTY: client, support: .unsupported, snapshot: snapshot)
+    }
+    let matched = GhosttyTTYJoin.matched(GhosttyTarget(window_id: "w1", tab_id: "w1-t0", terminal_id: "p1"))
+    #expect(join(try soleInventory(windows: one, surfaces: ["/dev/ttys014"])) == matched)
+    #expect(join(try soleInventory(windows: one, surfaces: ["ttys014"]), client: "/dev/ttys014") == matched)
+
+    // Surfaces unread, none, several (including a quick terminal scripting omits), or not the client's.
+    #expect(join(try soleInventory(windows: one, surfaces: nil)) == .ttyUnsupported)
+    #expect(join(try soleInventory(windows: one, surfaces: [])) == .ttyUnsupported)
+    #expect(join(try soleInventory(windows: one, surfaces: ["/dev/ttys014", "/dev/ttys020"])) == .ttyUnsupported)
+    #expect(join(try soleInventory(windows: one, surfaces: ["/dev/ttys014", "/dev/ttys014"])) == .ttyUnsupported)
+    #expect(join(try soleInventory(windows: one, surfaces: ["/dev/ttys020"])) == .noMatch)
+    #expect(join(try soleInventory(windows: one, surfaces: [""])) == .emptyValue)
+    #expect(join(try soleInventory(windows: one, surfaces: ["/dev/ttys014"]), client: "console") == .invalidClientTTY)
+
+    // Scripting must agree: exactly one terminal, unsplit, in the front window.
+    #expect(join(try soleInventory(windows: [window("w1", tabs: [["p1"], ["p2"]])], surfaces: ["/dev/ttys014"])) == .ttyUnsupported)
+    #expect(join(try soleInventory(windows: [window("w1", tabs: [["p1"]]), window("w2", tabs: [["p2"]])],
+                                   surfaces: ["/dev/ttys014"])) == .ttyUnsupported)
+    #expect(join(try soleInventory(windows: [window("w1", tabs: [])], surfaces: ["/dev/ttys014"])) == .ttyUnsupported)
+    #expect(join(try soleInventory(windows: [window("w1", tabs: [["p1", "p2"]])], surfaces: ["/dev/ttys014"])) == .ttyUnsupported)
+    #expect(join(try soleInventory(windows: one, front: "w9", surfaces: ["/dev/ttys014"])) == .otherWindow)
+    #expect(join(try soleInventory(windows: one, front: nil, surfaces: ["/dev/ttys014"])) == .otherWindow)
+    #expect(join(try soleInventory(windows: [window("", tabs: [["p1"]])], surfaces: ["/dev/ttys014"])) == .inventoryUnavailable)
+}
+
+@Test func soleTerminalJoinIsNeverUsedWithTTYSupport() throws {
+    // A Ghostty with `tty` keeps the exact join, whatever `surface_ttys` says.
+    let snapshot = try soleInventory(windows: [window("w1", tabs: [["p1"]])], surfaces: ["/dev/ttys014"])
+    #expect(GhosttyTTYMatch.join(clientTTY: "ttys014", support: .supported, snapshot: snapshot) == .ttyUnsupported)
+}
