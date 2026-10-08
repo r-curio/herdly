@@ -208,7 +208,8 @@ public enum SessionReplyRequest {
 }
 
 /// One Send, decided in one place: what to do and the params to write, if any. Sending changes
-/// nothing about the completion itself, which is acknowledged only by dismissal or a verified visit.
+/// nothing about the completion itself; the turn start Codex records for it acknowledges
+/// (`CodexReplyAcknowledgment`).
 public enum SessionReplySending {
     public enum Outcome: Equatable, Sendable {
         case refused(SessionReplyPolicy.Rejection)

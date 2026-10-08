@@ -546,6 +546,12 @@ public enum CodexAttentionAdapter {
                      uncertain: completion.uncertain)
     }
 
+    /// The shared-queue outcome a Codex completion is mirrored as, for acknowledging it in both queues.
+    public static func outcomeID(for completion: CompletionIdentity) -> AgentTurnIdentity {
+        AgentTurnIdentity(session: session(completion.session, surface: completion.source == .cli ? .cli : .desktop),
+                          turn: completion.turn.uuidString)
+    }
+
     public static func approval(from request: AttentionRequest) -> AgentApproval {
         AgentApproval(session: session(request.session, surface: request.source == .cli ? .cli : .desktop),
                       turn: request.turn.uuidString, call: request.id.uuidString, arrivedAt: request.arrivedAt,
