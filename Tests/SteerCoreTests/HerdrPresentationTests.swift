@@ -82,6 +82,9 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
         (.noClient, .generic),
         (.multipleClients(2), .layoutNotSupported),
         (.nonGhosttyClient, .generic),
+        (.foregroundProcesses(.claude, count: 0), .generic),
+        (.agentProcessNotInForeground(.claude), .generic),
+        (.agentProcessAmbiguous(.claude), .generic),
     ]
     for (reason, group) in cases {
         #expect(HerdrPresentation.group(reason) == group, "\(reason)")

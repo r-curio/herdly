@@ -38,7 +38,8 @@ public struct ClaudeInventorySession: Equatable, Sendable {
     public let startedAt: Double
     public let lifecycle: ClaudeInventoryLifecycle
     /// The live process holding the session, when the source identifies it (Claude's session
-    /// registry, with its start time verified). nil from `claude agents --json`.
+    /// registry, with its start time verified when Claude recorded `procStart`). nil from
+    /// `claude agents --json`.
     public let pid: Int32?
 
     public init(sessionID: String, name: String = "", kind: ClaudeInventoryKind, startedAt: Double,

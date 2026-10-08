@@ -321,11 +321,91 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID:
 @Test func herdrInputsPassTheRegistryPIDToTheForegroundRule() {
     // A native-installer Claude: pid 83378 is named for its version.
     let outcome = scan(processInfo: ["w1:p1": foreground("w1:p1", ["2.1.293", "node"])])
-    func bind(_ pid: Int32?) -> HerdrSessionBinding {
+    func bind(_ process: ClaudeSessionProcess) -> HerdrSessionBinding {
         HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: [record()], ghosttyControlsEnabled: true,
-                                   gateOpen: true, outcome: outcome, defaultSocketPath: socket, codex: .none, claudePID: pid)
+                                   gateOpen: true, outcome: outcome, defaultSocketPath: socket, codex: .none,
+                                   claudeProcess: process)
     }
-    #expect(bind(83378) == .bound(target))
-    #expect(bind(99999) == .unavailable(.binding(.foregroundProcesses(.claude, count: 0))))
-    #expect(bind(nil) == .unavailable(.binding(.foregroundProcesses(.claude, count: 0))))
+    #expect(bind(.identified(pid: 83378)) == .bound(target))
+    #expect(bind(.identified(pid: 99999)) == .unavailable(.binding(.agentProcessNotInForeground(.claude))))
+    #expect(bind(.unidentified) == .unavailable(.binding(.foregroundProcesses(.claude, count: 0))))
+    #expect(bind(.ambiguous) == .unavailable(.binding(.agentProcessAmbiguous(.claude))))
+    // Both new reasons land in the generic group and keep their exact text for diagnostics.
+    for reason in [HerdrBindingUnavailable.agentProcessNotInForeground(.claude), .agentProcessAmbiguous(.claude)] {
+        let cause = HerdrUnavailableCause.session(.binding(reason))
+        #expect(cause.group == .generic)
+        #expect(cause.diagnostic.contains("\(reason)"))
+    }
+}
+
+// MARK: - The session's process from every root's inventory
+
+private func inventory(_ root: String, _ sessions: [(id: String, pid: Int32?)],
+                       kind: ClaudeInventoryKind = .interactive) -> ClaudeInventoryScan {
+    ClaudeInventoryScan(sourceScope: root, observedAt: 10, sessions: sessions.map {
+        ClaudeInventorySession(sessionID: $0.id, kind: kind, startedAt: 1,
+                               lifecycle: kind == .interactive ? .interactive(status: "busy") : .background(state: "working"),
+                               pid: $0.pid)
+    })
+}
+
+@Test func claudeSessionProcessIsIdentifiedByTheOneRegistryThatListsIt() {
+    let identified = ClaudeSessionProcess(sessionID: session, inventories: [
+        inventory("/tmp/one", [(session, 83378), (otherSession, 83400)]),
+        inventory("/tmp/two", [("5b2e9c40-2222-4333-8444-555566667777", 83500)]),
+        // A root that cannot be read lists nothing.
+        .unavailable(sourceScope: "/tmp/three", observedAt: 10, reason: ClaudeInventoryDecoder.invalidMessage),
+    ])
+    #expect(identified == .identified(pid: 83378))
+    // A background holder of the session elsewhere is not a second interactive one.
+    #expect(ClaudeSessionProcess(sessionID: session, inventories: [
+        inventory("/tmp/one", [(session, 83378)]), inventory("/tmp/two", [(session, 83600)], kind: .background),
+    ]) == .identified(pid: 83378))
+}
+
+@Test func claudeSessionProcessIsUnidentifiedWithoutARegistryPID() {
+    // No inventory lists the session, or the one that does is `claude agents --json`'s, with no PID.
+    #expect(ClaudeSessionProcess(sessionID: session, inventories: []) == .unidentified)
+    #expect(ClaudeSessionProcess(sessionID: session, inventories: [inventory("/tmp/one", [(otherSession, 83400)])])
+        == .unidentified)
+    #expect(ClaudeSessionProcess(sessionID: session, inventories: [inventory("/tmp/one", [(session, nil)])])
+        == .unidentified)
+    // Claude session IDs are compared exactly, as `HerdrSessionKey` keeps them.
+    #expect(ClaudeSessionProcess(sessionID: session.uppercased(), inventories: [inventory("/tmp/one", [(session, 83378)])])
+        == .unidentified)
+}
+
+@Test func claudeSessionProcessIsAmbiguousWhenSeveralRootsListTheSession() {
+    // Whatever each root's source, and even when both name the same PID.
+    let pids: [(Int32?, Int32?)] = [(83378, 83600), (83378, 83378), (83378, nil), (nil, nil)]
+    for (first, second) in pids {
+        #expect(ClaudeSessionProcess(sessionID: session, inventories: [
+            inventory("/tmp/one", [(session, first)]), inventory("/tmp/two", [(session, second)]),
+        ]) == .ambiguous, "\(String(describing: first)), \(String(describing: second))")
+    }
+    // A root whose inventory found two interactive holders of the session is unavailable, and ambiguous.
+    #expect(ClaudeSessionProcess(sessionID: session, inventories: [
+        inventory("/tmp/one", [(session, 83378)]),
+        .unavailable(sourceScope: "/tmp/two", observedAt: 10, reason: ClaudeInventoryDecoder.incompleteMessage,
+                     ambiguousSessionIDs: [session]),
+    ]) == .ambiguous)
+}
+
+@Test func herdrClaudeBindingFollowsTheSessionProcessSelectedFromInventories() {
+    // The pane runs the session's native-installer process, 83378, named for its version.
+    let outcome = scan(processInfo: ["w1:p1": foreground("w1:p1", ["2.1.293", "node"])])
+    func bind(_ inventories: [ClaudeInventoryScan], records: [HerdrHookPaneRecord] = [record()]) -> HerdrSessionBinding {
+        HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: records, ghosttyControlsEnabled: true,
+                                   gateOpen: true, outcome: outcome, defaultSocketPath: socket, codex: .none,
+                                   claudeProcess: ClaudeSessionProcess(sessionID: session, inventories: inventories))
+    }
+    // One root's registry names it: bound by PID.
+    #expect(bind([inventory("/tmp/one", [(session, 83378)])]) == .bound(target))
+    // No registry PID: the name rule applies, and `2.1.293` is not `claude`.
+    #expect(bind([inventory("/tmp/one", [(session, nil)])]) == .unavailable(.binding(.foregroundProcesses(.claude, count: 0))))
+    // Two roots list the session: unavailable, even though one of them names the pane's process.
+    let twoRoots = [inventory("/tmp/one", [(session, 83378)]), inventory("/tmp/two", [(session, 83600)])]
+    #expect(bind(twoRoots) == .unavailable(.binding(.agentProcessAmbiguous(.claude))))
+    // A session whose newest hook event carried no pane is still not in herdr, so the Ghostty rules apply.
+    #expect(bind(twoRoots, records: [record(pane: nil)]) == .notInHerdr)
 }

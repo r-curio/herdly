@@ -156,7 +156,8 @@ public enum HerdrPresentation {
              .socketUnknown, .herdrRestarted, .paneReusedBySession, .conflictingPaneObservations,
              .duplicateMatches, .paneMissing, .agentSessionNull, .agentSessionMismatch, .conflictingTitle,
              .noClient, .nonGhosttyClient, .titleNotInHerdr, .duplicateTitles, .sessionPrefixNotUnique,
-             .titleInHerdrAndGhostty, .detectedAgent, .processInfoUnavailable, .foregroundProcesses: .generic
+             .titleInHerdrAndGhostty, .detectedAgent, .processInfoUnavailable, .foregroundProcesses,
+             .agentProcessNotInForeground, .agentProcessAmbiguous: .generic
         }
     }
 

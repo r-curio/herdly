@@ -60,7 +60,7 @@ private func evaluate(
     liveness: HerdrSessionLiveness = .live,
     records: [HerdrHookPaneRecord] = [record()],
     observation: HerdrObservation = observation(),
-    agentPID: Int32? = nil
+    agentProcess: ClaudeSessionProcess = .unidentified
 ) -> HerdrBinding {
     HerdrBindingRules.evaluate(
         sessionID: sessionID,
@@ -68,7 +68,7 @@ private func evaluate(
         hookRecords: records,
         observation: observation,
         defaultSocketPath: defaultSocket,
-        agentPID: agentPID
+        agentProcess: agentProcess
     )
 }
 
@@ -268,22 +268,42 @@ private func versionedClaude(_ paneID: String = "w1:p1", pids: [Int32] = [85396,
 }
 
 @Test func herdrClaudeBindsByRegistryPIDWhateverTheExecutableIsNamed() {
-    #expect(evaluate(observation: observation(processInfo: ["w1:p1": versionedClaude()]), agentPID: 85396) == bound)
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": versionedClaude()]), agentProcess: .identified(pid: 85396))
+        == bound)
     // Without a registry PID the name rule applies, and a versioned executable is not `claude`.
     #expect(evaluate(observation: observation(processInfo: ["w1:p1": versionedClaude()]))
         == .unavailable(.foregroundProcesses(.claude, count: 0)))
 }
 
 @Test func herdrClaudeRegistryPIDMustBeInThisPanesForeground() {
+    let registry = ClaudeSessionProcess.identified(pid: 85396)
     // The session's process is elsewhere (or exited): a `claude`-named process in the pane does not stand in for it.
-    #expect(evaluate(observation: observation(processInfo: ["w1:p1": versionedClaude(pids: [85563])]), agentPID: 85396)
-        == .unavailable(.foregroundProcesses(.claude, count: 0)))
-    #expect(evaluate(observation: observation(processInfo: ["w1:p1": claudeInForeground("w1:p1")]), agentPID: 85396)
-        == .unavailable(.foregroundProcesses(.claude, count: 0)))
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": versionedClaude(pids: [85563])]), agentProcess: registry)
+        == .unavailable(.agentProcessNotInForeground(.claude)))
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": claudeInForeground("w1:p1")]), agentProcess: registry)
+        == .unavailable(.agentProcessNotInForeground(.claude)))
     // Process-info failures are reported exactly as for the name rule.
-    #expect(evaluate(observation: observation(processInfo: [:]), agentPID: 85396) == .unavailable(.processInfoUnavailable(nil)))
-    #expect(evaluate(observation: observation(processInfo: ["w1:p1": versionedClaude("w1:p2")]), agentPID: 85396)
+    #expect(evaluate(observation: observation(processInfo: [:]), agentProcess: registry)
+        == .unavailable(.processInfoUnavailable(nil)))
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": versionedClaude("w1:p2")]), agentProcess: registry)
         == .unavailable(.processInfoUnavailable(.malformedReply)))
-    #expect(evaluate(observation: observation(processInfo: ["w1:p1": .failure(.timeout)]), agentPID: 85396)
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": .failure(.timeout)]), agentProcess: registry)
         == .unavailable(.processInfoUnavailable(.timeout)))
+}
+
+@Test func herdrClaudeAmbiguousProcessFailsClosedInsteadOfUsingTheNameRule() {
+    // Neither a `claude`-named process nor a versioned one in the foreground stands in for a
+    // process the inventories do not agree on.
+    for info in [claudeInForeground("w1:p1"), versionedClaude()] {
+        #expect(evaluate(observation: observation(processInfo: ["w1:p1": info]), agentProcess: .ambiguous)
+            == .unavailable(.agentProcessAmbiguous(.claude)))
+    }
+    // Without usable process info it is still ambiguous: the veto needs no reply.
+    #expect(evaluate(observation: observation(processInfo: [:]), agentProcess: .ambiguous)
+        == .unavailable(.agentProcessAmbiguous(.claude)))
+    // Earlier rules keep their reasons, so a session whose hook carried no pane stays out of herdr.
+    #expect(evaluate(records: [record(pane: nil)], agentProcess: .ambiguous) == .unavailable(.notInHerdr))
+    #expect(evaluate(liveness: .ended, agentProcess: .ambiguous) == .unavailable(.sessionEnded))
+    #expect(evaluate(observation: observation(panes: [pane(panesInTab: 2)]), agentProcess: .ambiguous)
+        == .unavailable(.split))
 }
