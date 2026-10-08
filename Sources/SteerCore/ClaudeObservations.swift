@@ -284,7 +284,8 @@ public enum ClaudeObservationReader {
                           now - tool.at <= maximumToolFreshness else { return nil }
                     return tool
                 }
-                result.append(.running(AgentRunning(session: identity, turn: turn.prompt, arrivedAt: turn.updatedAt,
+                result.append(.running(AgentRunning(session: identity, turn: turn.prompt, arrivedAt: turn.startedAt,
+                                                    updatedAt: turn.updatedAt,
                                                     prompt: turn.promptText, toolName: freshTool?.name,
                                                     toolInput: freshTool?.input ?? [:])))
                 if let question = turn.question { result.append(.question(question)) }

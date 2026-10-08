@@ -106,6 +106,20 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
     #expect(ClaudeInventoryDecoder.decode(data, sourceScope: "/tmp/root", observedAt: 1).available == false)
 }
 
+@Test func inventoryRescanKeepsTheRunningRowAtItsFirstSighting() {
+    let hooked = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "hooked", surface: .cli)
+    let busy = ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 0,
+                                      lifecycle: .interactive(status: "busy"))
+    var queue = AgentAttentionQueue()
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 1, sessions: [busy]))
+    queue.apply(.running(AgentRunning(session: hooked, turn: "prompt", arrivedAt: 2)))
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 3, sessions: [busy]))
+
+    #expect(queue.items.map(\.session.session) == [interactiveID, "hooked"])
+    #expect(queue.items.first?.running?.arrivedAt == 1)
+    #expect(queue.items.first?.running?.updatedAt == 3)
+}
+
 @Test func inventoryCannotClearHookEvidenceAndIdleConfirmsStop() throws {
     let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
     var queue = AgentAttentionQueue()
