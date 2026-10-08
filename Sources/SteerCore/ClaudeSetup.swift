@@ -689,10 +689,6 @@ public struct ClaudeSetupInstaller {
 
     public init(fileManager: FileManager = .default) { self.fileManager = fileManager }
 
-    /// Event-directory entries the connection check inspects before reporting the directory
-    /// unreadable: the bound every hook reader shares, far above what retention leaves.
-    static let connectionScanLimit = HookEventListing.maximumEntries
-
     public func install(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots, helper: Data,
                         capabilities: ClaudeCapabilities) throws -> ClaudeConnectionStatus {
         guard case .ready = plan.status else { throw ClaudeSetupError.failed("Setup preview is not ready.") }
@@ -891,10 +887,11 @@ public struct ClaudeSetupInstaller {
             return .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Steer's hooks.")
         }
         let files: [URL]
-        // The same bound as every other hook reader (`HookEventListing`): busy sessions keep more than
-        // 4,096 tool records inside their one-hour retention, and the smaller bound flipped a
-        // connected root to unavailable whenever they did. This scan stops at its first proof.
-        do { files = try boundedContents(of: roots.eventsDirectory, limit: Self.connectionScanLimit) }
+        // The same listing bound as every other hook reader (`HookEventListing`): busy sessions keep
+        // more than 4,096 tool records inside their one-hour retention, and the smaller bound flipped a
+        // connected root to unavailable whenever they did. This scan stops at its first proof; with
+        // none it decodes every listed entry, off the main actor.
+        do { files = try boundedContents(of: roots.eventsDirectory, limit: HookEventListing.maximumEntries) }
         catch {
             return .unavailable("Steer's Claude events directory is not readable.")
         }

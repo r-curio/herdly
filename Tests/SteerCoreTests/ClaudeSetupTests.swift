@@ -334,17 +334,16 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     try eventData.write(to: first.eventsDirectory.appendingPathComponent("event.json"))
     #expect(installer.status(roots: first, capabilities: capabilities) == .connected)
     // Busy sessions keep thousands of tool records inside their one-hour retention (4,785 were seen
-    // live); a connected root stays connected past 4,096 entries, where it once flipped to
-    // unavailable. The bound is checked directly: thousands of fixture files slow the whole suite.
-    #expect(ClaudeSetupInstaller.connectionScanLimit == HookEventListing.maximumEntries)
-    #expect(ClaudeSetupInstaller.connectionScanLimit >= 16 * 4096)
-    // Newer tool records around the startup proof do not hide it.
+    // live). Newer tool records past the old 4,096-entry cap do not hide the startup proof, where the
+    // root once flipped to unavailable.
     let toolRecord = Data(#"{"hook_event_name":"PreToolUse","source":"steer-claude-hook-v1"}"#.utf8)
-    for index in 0..<50 {
+    let toolCount = 4096
+    for index in 0..<toolCount {
         try toolRecord.write(to: first.eventsDirectory.appendingPathComponent("tool-\(index).json"))
     }
+    #expect(try FileManager.default.contentsOfDirectory(atPath: first.eventsDirectory.path).count > 4096)
     #expect(installer.status(roots: first, capabilities: capabilities) == .connected)
-    for index in 0..<50 {
+    for index in 0..<toolCount {
         try FileManager.default.removeItem(at: first.eventsDirectory.appendingPathComponent("tool-\(index).json"))
     }
 
