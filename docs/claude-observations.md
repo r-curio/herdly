@@ -30,6 +30,12 @@ arrived strictly before it, whichever of the two is observed first, and records 
 so rescans and restart recovery cannot restore them. Reply evidence never creates a row and never
 touches another session, root, or source ([product](product.md), 2026-10-08).
 
+After `Stop`, the reader keeps reporting the session's current prompt as running so the inventory
+can confirm it. Once the user acknowledges that turn's outcome, those rescans no longer restore it as
+a working row, whether the inventory still lists the session as idle or has dropped it (a parked
+entry). Only hook activity in that turn newer than the acknowledged outcome reopens it; the
+acknowledgment then no longer applies, so the turn's next confirmed completion is queued again.
+
 An unmatched pre-tool action is considered fresh for 30 seconds from its captured timestamp. After
 that bound, the reader falls back to the general running prompt until newer evidence supplies a
 current action.
@@ -79,7 +85,8 @@ out-of-order empty snapshot cannot erase newer generic lifecycle state.
 - **Automated checks:** `ClaudeObservationTests` covers exact post cleanup, late and ambiguous calls,
 session-end uncertainty, installation/root isolation, and late outcomes. `ClaudeInventoryTests`
 covers separate interactive/background lifecycle fields, duplicate and unavailable polls, root
-isolation, weaker inventory evidence, and provisional `Stop` confirmation. The helper self-test also
+isolation, weaker inventory evidence, provisional `Stop` confirmation, and an acknowledged turn
+staying cleared across rescans unless newer activity reopens it. The helper self-test also
 checks bounded Claude metadata and tool input. `ClaudeQuestionTests` covers unchanged `updatedInput`,
 single-select, multi-select, typed answers, exact identity rejection, one-shot writes, and the
 receipt/answer rendezvous. `ClaudeApprovalTests` covers the one-winner deadline,
