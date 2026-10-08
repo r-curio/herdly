@@ -501,6 +501,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var freshAgentCompletionIDs: Set<AgentAttentionID> = []
     private var freshAgentQuestionIDs: Set<AgentAttentionID> = []
     private var previewSpotlightAgent: AgentAttentionID?
+    /// `--preview-queue` modes that open the sample item in the spotlight.
+    static let spotlightPreviewModes: Set<String> = ["spotlight", "spotlight-approval", "spotlight-handed-back"]
     private var targetFrame: CGRect = .zero
     /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|expanded>` seeds in-memory sample items for screenshots.
     /// It never scans Codex events, never saves, and never releases approvals.
@@ -1475,13 +1477,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if selectedPresentationWasFresh, let id = selectedFreshAgent {
             notchPresentation.present(id, now: now)
         }
-        if let mode = previewMode, mode.hasPrefix("spotlight"), let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
+        if let mode = previewMode, Self.spotlightPreviewModes.contains(mode), let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
         let resolvedPresentation = notchPresentation.update(interacting: interacting, now: now, legacyPopup: attention.expanded)
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
         case "expanded": presentationMode = .queue
         case "collapsed": presentationMode = .collapsed
-        case "spotlight", "spotlight-approval", "spotlight-handed-back":
+        case _ where Self.spotlightPreviewModes.contains(previewMode ?? ""):
             presentationMode = spotlightItem.map(NotchPresentationMode.agentSpotlight) ?? .collapsed
         default:
             presentationMode = resolvedPresentation
@@ -2122,7 +2124,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                          expiresAt: handedBack ? now - 100 : now + 26,
                                          state: handedBack ? .handedBack : .actionable,
                                          details: ApprovalDetails(taskName: "Pull from remote main",
-                                                                  project: NSHomeDirectory() + "/bscale/strata",
+                                                                  project: NSHomeDirectory() + "/Developer/steer",
                                                                   action: "Bash", command: "git fetch origin", longText: input))
             queue.recordReceipts([fetch], now: now)
             syncAgentQueueWithCodex(now: now)

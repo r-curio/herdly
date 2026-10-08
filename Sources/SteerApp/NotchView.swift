@@ -577,7 +577,7 @@ struct Notch: View {
             .accessibilityElement(children: .combine)
             if request.task != nil || request.directory != nil {
                 let place = request.directory.map { "in \($0.display)" }
-                let task = request.task.flatMap { sessionLabel(item.session).contains($0) ? nil : $0 }
+                let task = request.task(besides: sessionLabel(item.session))
                 Text([task, place].compactMap { $0 }.joined(separator: " · "))
                     .foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
                     .help(request.directory?.full ?? "")
@@ -586,13 +586,6 @@ struct Notch: View {
             }
         }
         .font(NotchStyle.mono(11))
-        if let full = request.fullRequest {
-            NotchDisclosure(title: "Show full request", expanded: disclosure("request:\(item.session.session)")) {
-                Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .accessibilityLabel("Show full request for \(subject)")
-        }
         if item.kind == .handedBackApproval {
             // Steer records when the request arrived, not when it was handed back, so the elapsed
             // time names the arrival.
@@ -603,6 +596,13 @@ struct Notch: View {
         } else {
             Text("Decide by \(Date(timeIntervalSince1970: request.expiresAt).formatted(date: .omitted, time: .standard))")
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+        }
+        if let full = request.fullRequest {
+            NotchDisclosure(title: "Show full request", expanded: disclosure("request:\(item.session.session)")) {
+                Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityLabel("Show full request for \(subject)")
         }
     }
 

@@ -357,6 +357,18 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     #expect(restoredDetails.response == .unavailable("Response preview unavailable after restart."))
 }
 
+@Test func spotlightRequestHidesATaskOnlyWhenTheSessionLabelNamesIt() {
+    let request = AttentionRequest(id: UUID(), source: .cli, session: UUID(), turn: UUID(), arrivedAt: 0, expiresAt: 30,
+                                   details: ApprovalDetails(taskName: "test", action: "Bash", command: "swift test"))
+    var queue = AttentionQueue(); queue.apply(requests: [request], now: 0)
+    let card = SpotlightDetails.make(item: queue.items[0], context: nil, response: nil).request
+    #expect(card?.task(besides: "Codex · test") == nil)
+    // A task that only appears inside a longer label, or a label without a name, still shows.
+    #expect(card?.task(besides: "Codex · latest docs") == "test")
+    #expect(card?.task(besides: "Codex session 5b1e7a20") == "test")
+    #expect(card?.task(besides: "Codex · test runner") == "test")
+}
+
 @Test func spotlightRequestLiftsTheAskAndHidesARawRequestItAlreadyShows() {
     func card(reason: String? = nil, command: String? = "git fetch origin", long: String?) -> SpotlightRequest? {
         let request = AttentionRequest(id: UUID(), source: .cli, session: UUID(), turn: UUID(), arrivedAt: 0, expiresAt: 30,
@@ -365,6 +377,9 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
         var queue = AttentionQueue(); queue.apply(requests: [request], now: 0)
         return SpotlightDetails.make(item: queue.items[0], context: nil, response: nil, home: "/Users/me").request
     }
+    // A command Codex sent as a list is not what the card shows: the raw request stays reachable.
+    #expect(card(command: nil, long: #"{"command":["git","fetch"]}"#)?.fullRequest == #"{"command":["git","fetch"]}"#)
+    #expect(card(command: nil, long: #"{"description":["a"]}"#)?.fullRequest != nil)
     let covered = #"{"command":"git fetch origin","description":"  Allow fetching remote main?  "}"#
     #expect(card(long: covered)?.ask == "Allow fetching remote main?")
     #expect(card(long: covered)?.fullRequest == nil)
