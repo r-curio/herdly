@@ -149,6 +149,8 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     /// The latest evidence for the turn; decides which observation wins. Defaults to `arrivedAt`.
     public let updatedAt: Double
     public let prompt: String?
+    /// True when Steer kept only the start of the prompt; the full text stays in the agent.
+    public let promptShortened: Bool
     public let toolName: String?
     public let toolInput: [String: String]
     public let status: AgentRunningStatus
@@ -163,12 +165,13 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     public var fullPrompt: String? { prompt }
 
     public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double, updatedAt: Double? = nil,
-                prompt: String? = nil, toolName: String? = nil, toolInput: [String: String] = [:],
-                status: AgentRunningStatus = .working) {
+                prompt: String? = nil, promptShortened: Bool = false, toolName: String? = nil,
+                toolInput: [String: String] = [:], status: AgentRunningStatus = .working) {
         self.identity = AgentTurnIdentity(session: session, turn: turn)
         self.arrivedAt = arrivedAt
         self.updatedAt = updatedAt ?? arrivedAt
         self.prompt = prompt
+        self.promptShortened = promptShortened
         self.toolName = toolName
         self.toolInput = toolInput
         self.status = status

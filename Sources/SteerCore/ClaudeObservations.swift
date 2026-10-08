@@ -18,6 +18,11 @@ public struct ClaudeObservationScan: Equatable, Sendable {
 public enum ClaudeObservationReader {
     public static let maximumRecordSize = 128 * 1024
     public static let maximumIdentifier = 256
+    /// Claude's prompt is kept only as the working row's fallback text, so at most this many
+    /// characters of it are stored. A longer prompt is shortened, never dropped.
+    public static let maximumPrompt = 240
+    /// The record key the helper sets when it stored only the start of the prompt.
+    public static let promptShortenedKey = "prompt_shortened"
     public static let maximumToolFreshness: Double = 30
 
     private struct Record {
@@ -27,6 +32,7 @@ public enum ClaudeObservationReader {
         let capturedAt: Double
         let promptID: String?
         let prompt: String?
+        let promptShortened: Bool
         let toolName: String?
         let toolUseID: String?
         let helperRequestID: String?
@@ -45,6 +51,7 @@ public enum ClaudeObservationReader {
         let session: String
         let prompt: String
         var promptText: String?
+        var promptShortened: Bool
         var startedAt: Double
         var updatedAt: Double
         var tool: Tool?
@@ -130,12 +137,18 @@ public enum ClaudeObservationReader {
                     if existing.terminal == nil, let closedAt = existing.closedAt, record.capturedAt > closedAt {
                         existing.closedAt = nil
                     }
-                    if existing.promptText == nil { existing.promptText = boundedText(record.prompt) }
+                    if existing.promptText == nil, let prompt = promptFallback(record.prompt) {
+                        existing.promptText = prompt.text
+                        existing.promptShortened = record.promptShortened || prompt.shortened
+                    }
                     existing.startedAt = min(existing.startedAt, record.capturedAt)
                     turns[turnID] = existing
                 } else {
+                    let prompt = promptFallback(record.prompt)
                     turns[turnID] = Turn(session: record.session, prompt: promptID,
-                                         promptText: boundedText(record.prompt), startedAt: record.capturedAt,
+                                         promptText: prompt?.text,
+                                         promptShortened: prompt.map { record.promptShortened || $0.shortened } ?? false,
+                                         startedAt: record.capturedAt,
                                          updatedAt: record.capturedAt, tool: nil, tools: [:], question: nil,
                                          approval: nil, terminal: nil, provisionalStopAt: nil, closedAt: nil)
                 }
@@ -286,7 +299,8 @@ public enum ClaudeObservationReader {
                 }
                 result.append(.running(AgentRunning(session: identity, turn: turn.prompt, arrivedAt: turn.startedAt,
                                                     updatedAt: turn.updatedAt,
-                                                    prompt: turn.promptText, toolName: freshTool?.name,
+                                                    prompt: turn.promptText, promptShortened: turn.promptShortened,
+                                                    toolName: freshTool?.name,
                                                     toolInput: freshTool?.input ?? [:])))
                 if let question = turn.question { result.append(.question(question)) }
                 if let approval = turn.approval { result.append(.approval(approval)) }
@@ -315,6 +329,7 @@ public enum ClaudeObservationReader {
               captured.isFinite, captured >= observingSince else { return nil }
         return Record(fileName: url.lastPathComponent, event: event, session: session, capturedAt: captured,
                       promptID: object["prompt_id"] as? String, prompt: object["prompt"] as? String,
+                      promptShortened: object[promptShortenedKey] as? Bool ?? false,
                       toolName: object["tool_name"] as? String, toolUseID: object["tool_use_id"] as? String,
                       helperRequestID: valid(object["helper_request_id"] as? String),
                       hookRequestID: valid(object["approval_request_id"] as? String),
@@ -346,6 +361,15 @@ public enum ClaudeObservationReader {
         guard let value, !value.isEmpty, value.utf8.count <= limit,
               !value.contains(where: { $0.isNewline || $0 == "\u{1b}" || $0 == "\u{7}" }) else { return nil }
         return value
+    }
+
+    /// The prompt as the helper stores it and the reader shows it: trimmed and, past
+    /// `maximumPrompt` characters, cut to that many plus an ellipsis. Nil when empty or when the
+    /// prompt holds a character a terminal could act on.
+    public static func promptFallback(_ value: String?) -> (text: String, shortened: Bool)? {
+        guard let value, !value.contains(where: { $0 == "\u{1b}" || $0 == "\u{7}" || $0 == "\u{0}" }),
+              let text = QuestionPrompt.display(value, limit: maximumPrompt) else { return nil }
+        return (text, QuestionPrompt.displayIsTruncated(value, limit: maximumPrompt))
     }
 
     private static func boundedText(_ value: String?, limit: Int = maximumIdentifier) -> String? {
