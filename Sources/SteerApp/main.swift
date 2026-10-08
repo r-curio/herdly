@@ -501,8 +501,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var freshAgentCompletionIDs: Set<AgentAttentionID> = []
     private var freshAgentQuestionIDs: Set<AgentAttentionID> = []
     private var previewSpotlightAgent: AgentAttentionID?
+    /// `--preview-queue` modes that open the sample item in the spotlight.
+    static let spotlightPreviewModes: Set<String> = ["spotlight", "spotlight-approval", "spotlight-handed-back"]
     private var targetFrame: CGRect = .zero
-    /// `--preview-queue <collapsed|spotlight|expanded>` seeds in-memory sample items for screenshots.
+    /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|expanded>` seeds in-memory sample items for screenshots.
     /// It never scans Codex events, never saves, and never releases approvals.
     let previewMode = Companion.argumentValue(for: "--preview-queue")
     private var status: NSStatusItem!
@@ -1475,13 +1477,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if selectedPresentationWasFresh, let id = selectedFreshAgent {
             notchPresentation.present(id, now: now)
         }
-        if let mode = previewMode, mode == "spotlight", let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
+        if let mode = previewMode, Self.spotlightPreviewModes.contains(mode), let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
         let resolvedPresentation = notchPresentation.update(interacting: interacting, now: now, legacyPopup: attention.expanded)
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
         case "expanded": presentationMode = .queue
         case "collapsed": presentationMode = .collapsed
-        case "spotlight": presentationMode = spotlightItem.map(NotchPresentationMode.agentSpotlight) ?? .collapsed
+        case _ where Self.spotlightPreviewModes.contains(previewMode ?? ""):
+            presentationMode = spotlightItem.map(NotchPresentationMode.agentSpotlight) ?? .collapsed
         default:
             presentationMode = resolvedPresentation
         }
@@ -1820,9 +1823,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func spotlightDetails(for item: AttentionItem) -> SpotlightDetails {
         let context = spotlightContexts[item.id]
         let response = item.completion.flatMap { completionPreviews[$0.id] }
-        return SpotlightDetails.make(item: item, context: context, response: response) {
-            Date(timeIntervalSince1970: $0).formatted(date: .abbreviated, time: .standard)
-        }
+        return SpotlightDetails.make(item: item, context: context, response: response, home: NSHomeDirectory())
     }
 
     func spotlightDetails(for item: AgentAttentionItem) -> SpotlightDetails? {
@@ -2112,7 +2113,23 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         questionPresentation = Attention(restored: true)
         syncAgentQueueWithCodex(now: now)
         previewSpotlightAgent = .outcome(CodexAttentionAdapter.outcome(from: completion).id)
-        _ = mode
+        if mode == "spotlight-approval" || mode == "spotlight-handed-back" {
+            // One request in the spotlight's own reading order: Codex's ask lifted from its tool input,
+            // a command the card already shows, and a home-relative working directory.
+            let handedBack = mode == "spotlight-handed-back"
+            let fetching = UUID(uuidString: "5B1E7A20-6C4D-4F8E-A3B9-0000000000D4")!
+            let input = #"{"command":"git fetch origin","description":"Allow fetching remote main so I can update this checkout?"}"#
+            let fetch = AttentionRequest(id: UUID(), source: .cli, session: fetching, turn: UUID(),
+                                         arrivedAt: handedBack ? now - 130 : now - 4,
+                                         expiresAt: handedBack ? now - 100 : now + 26,
+                                         state: handedBack ? .handedBack : .actionable,
+                                         details: ApprovalDetails(taskName: "Pull from remote main",
+                                                                  project: NSHomeDirectory() + "/Developer/steer",
+                                                                  action: "Bash", command: "git fetch origin", longText: input))
+            queue.recordReceipts([fetch], now: now)
+            syncAgentQueueWithCodex(now: now)
+            previewSpotlightAgent = .approval(CodexAttentionAdapter.approval(from: fetch).id)
+        }
     }
 
     func desktopReadStateChanged(_ enabled: Bool) {
