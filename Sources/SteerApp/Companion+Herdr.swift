@@ -48,16 +48,14 @@ extension Companion {
         HerdrBindingInputs.binding(for: session, liveness: herdrLiveness(of: session), hookRecords: herdr.hookRecords,
                                    ghosttyControlsEnabled: ghosttyEnabled, gateOpen: herdr.monitor.isGateOpen,
                                    outcome: herdr.scanOutcome, defaultSocketPath: herdr.defaultSocketPath,
-                                   codex: herdrCodexTitles(), claudePID: claudeSessionPID(session))
+                                   codex: herdrCodexTitles(), claudeProcess: claudeSessionProcess(session))
     }
 
-    /// The PID Claude's session registry names for a live interactive Claude session, from the latest
-    /// inventory; nil for Codex, or when no complete registry inventory identifies exactly one.
-    private func claudeSessionPID(_ session: HerdrSessionKey) -> Int32? {
-        guard session.agent == .claude else { return nil }
-        let matches = claudeInventories.values.filter(\.available).flatMap(\.sessions)
-            .filter { $0.kind == .interactive && $0.sessionID == session.sessionID }
-        return matches.count == 1 ? matches[0].pid : nil
+    /// The process Claude's latest inventories name for a Claude session (ADR 0008); unidentified
+    /// for Codex, which binds by ADR 0012 instead.
+    private func claudeSessionProcess(_ session: HerdrSessionKey) -> ClaudeSessionProcess {
+        guard session.agent == .claude else { return .unidentified }
+        return ClaudeSessionProcess(sessionID: session.sessionID, inventories: Array(claudeInventories.values))
     }
 
     /// A fresh herdr scan, off the main actor, and the session's binding against it, for an Open or
@@ -88,7 +86,7 @@ extension Companion {
                                                  gateOpen: herdr.monitor.isGateOpen, outcome: outcome,
                                                  defaultSocketPath: herdr.defaultSocketPath,
                                                  codex: herdrCodexTitles(ghostty: ghostty),
-                                                 claudePID: claudeSessionPID(session))
+                                                 claudeProcess: claudeSessionProcess(session))
         return (binding, outcome)
     }
 

@@ -202,3 +202,41 @@ public enum ClaudeSessionRegistry {
         return Process(pid: pid, procStart: procStart)
     }
 }
+
+/// The process Claude's inventories name for one session, as ADR 0008's foreground rule requires it
+/// in a herdr pane. Kept separate from "no inventory" so an ambiguous session never falls back to
+/// the weaker name rule.
+public enum ClaudeSessionProcess: Equatable, Hashable, Sendable {
+    /// No inventory names the session's process: none lists it as interactive, or the one that
+    /// does came from `claude agents --json`, which carries no PID. The foreground rule falls back
+    /// to a process named `claude`.
+    case unidentified
+    /// Exactly one available inventory lists the session as interactive, and its registry names
+    /// this live process.
+    case identified(pid: Int32)
+    /// Several available inventories list the session as interactive, or an inventory reports it
+    /// held by two interactive processes, whether from a registry or `claude agents --json`. No one
+    /// process can be required, so the binding fails closed.
+    case ambiguous
+
+    /// Selects the session's process from every configured root's latest inventory.
+    ///
+    /// - Parameters:
+    ///   - sessionID: compared exactly, as `HerdrSessionKey` keeps Claude session IDs. herdr's pane
+    ///     binding carries no root, so every root is searched rather than one.
+    ///   - inventories: the latest scan of each root, available or not. Only available scans list
+    ///     sessions; an unavailable one counts only through its `ambiguousSessionIDs`.
+    public init(sessionID: String, inventories: [ClaudeInventoryScan]) {
+        if inventories.contains(where: { $0.ambiguousSessionIDs.contains(sessionID) }) {
+            self = .ambiguous
+            return
+        }
+        let holders = inventories.filter(\.available).flatMap(\.sessions)
+            .filter { $0.kind == .interactive && $0.sessionID == sessionID }
+        switch holders.count {
+        case 0: self = .unidentified
+        case 1: self = holders[0].pid.map { .identified(pid: $0) } ?? .unidentified
+        default: self = .ambiguous
+        }
+    }
+}
