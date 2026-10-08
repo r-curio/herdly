@@ -20,7 +20,7 @@ The build script produces an ad-hoc signed local app. It is not notarized or a d
 
 Sending another test replaces the single test item. This prototype does not implement a multi-item queue. Its pending flag and mute preference are stored under `dev.rcurio.steer.prototype`, separate from Codex settings.
 
-Display selection follows the pointer's screen and stays on the current screen while hovered. `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|expanded>` seeds in-memory sample items for screenshots (the two approval modes show a live and a handed-back request in the spotlight); it ignores Codex activation, never scans events, and never saves. This is a prototype placement rule; full-screen, multi-display and accessibility release checks remain outstanding. Automatic presentation does not activate Steer. The menu offers a keyboard-accessible dismissal path.
+Display selection follows the pointer's screen and stays on the current screen while hovered. `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|expanded>` seeds in-memory sample items for screenshots (the two approval modes show a live and a handed-back request in the spotlight), and `empty-collapsed`, `empty-expanded`, and `empty-not-connected` show the empty notch; it ignores Codex activation, never scans events, and never saves. This is a prototype placement rule; full-screen, multi-display and accessibility release checks remain outstanding. Automatic presentation does not activate Steer. The menu offers a keyboard-accessible dismissal path.
 
 ## Evidence
 
