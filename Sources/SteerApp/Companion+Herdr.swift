@@ -92,6 +92,23 @@ extension Companion {
         herdr.claudePaneIDs.isEmpty ? [] : [.claude]
     }
 
+    /// Every pane title in the latest herdr snapshot, nil before one: a Codex TUI's surface when
+    /// it runs in herdr (`ReminderReader.scan`).
+    var herdrPaneTitles: Set<String>? {
+        herdr.scanOutcome?.scan.map { Set($0.snapshot.panes.compactMap(\.terminalTitle)) }
+    }
+
+    /// True while herdr is in use (the gate is open) but no successful scan says which titles its
+    /// panes show: the latest scan failed or has not completed. A server that is not running shows
+    /// none, which is known.
+    var herdrPaneTitlesUnknown: Bool {
+        guard herdr.monitor.isGateOpen else { return false }
+        switch herdr.scanOutcome {
+        case .available?, .unavailable(.notRunning)?: return false
+        default: return true
+        }
+    }
+
     // MARK: - Scan
 
     /// Called once per completed hook scan. Reads the newest hook records and checks herdr's
@@ -102,7 +119,7 @@ extension Companion {
         guard previewMode == nil, !CommandLine.arguments.contains("--smoke-test"), !herdr.reading else { return }
         let live = herdrLiveSessions()
         let directories = herdrEventDirectories()
-        guard !live.isEmpty else {
+        guard !live.isEmpty || !daemonCLISessions.isEmpty else {
             herdr.hookRecords = []
             herdr.recordCache = [:]
             herdr.claudePaneIDs = []
@@ -112,7 +129,7 @@ extension Companion {
         herdr.reading = true
         let cache = herdr.recordCache
         let socketPath = herdr.defaultSocketPath
-        let titles = herdrCodexTitles()
+        let titles = herdrGateCodexTitles()
         let checkSocket = titles.ghostty != nil && !titles.liveTitles.isEmpty
         Task { @MainActor in
             let result = await Task.detached(priority: .utility) {
@@ -124,7 +141,7 @@ extension Companion {
             herdr.hookRecords = result.records.records
             herdr.recordCache = result.records.cache
             // Liveness and titles are re-read here: sessions may have ended while the records were read.
-            let codex = herdrCodexTitles()
+            let codex = herdrGateCodexTitles()
             let paneIDs = HerdrBindingInputs.gatePaneIDs(records: result.records.records, liveSessions: herdrLiveSessions())
             herdr.claudePaneIDs = paneIDs
             tickHerdrMonitor(paneIDs: paneIDs,
@@ -166,6 +183,15 @@ extension Companion {
             HerdrSessionKey(agent: .claude, sessionID: $0)
         }
         return Set(codex).union(claude)
+    }
+
+    /// The Codex half of the gate and its scan request: live sessions plus the daemon's terminal
+    /// sessions not yet proved live, whose herdr pane title is what proves them. Bindings still use
+    /// live sessions only (`herdrCodexTitles()`).
+    private func herdrGateCodexTitles() -> HerdrCodexTitles {
+        let ghostty = knownGhosttySnapshot?.terminalNames
+        let sessions = liveCLI.subtracting(endedSessions).union(daemonCLISessions)
+        return HerdrCodexTitles(liveSessions: Set(sessions.map(\.uuidString)), ghostty: ghosttyEnabled ? ghostty : nil)
     }
 
     /// Live Codex sessions and the titles of the latest complete Ghostty inventory (ADR 0012).

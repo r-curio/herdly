@@ -270,6 +270,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     let launchAtLoginCoordinator = LaunchAtLoginCoordinator(service: LaunchAtLoginService())
     let desktopAdapter = DesktopAdapter()
     var cliSessions: Set<UUID> = []
+    /// Terminal sessions Codex's app-server daemon has loaded (a TUI, not the desktop), live or not:
+    /// the Codex half of herdr's gate counts them, so a session whose only surface is a herdr pane
+    /// can be found there before it is proved live (ADR 0012).
+    var daemonCLISessions: Set<UUID> = []
     var liveCLI: Set<UUID> = []
     /// Sessions a Ghostty inventory proved CLI by their session-id title, this launch. They stay CLI
     /// after the tab closes, and that closing ends them (`ReminderReader.scan`). Memory only.
@@ -1018,6 +1022,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }()
         let known = knownCLISessions
         let daemonThreads = daemonClient.loadedThreads
+        let herdrTitles = herdrPaneTitles
+        let herdrTitlesUnknown = herdrPaneTitlesUnknown
         let observingSince = Companion.launchedAt
         let observationNow = Date().timeIntervalSince1970
         let claudeRoots = claude.roots.compactMap { root -> (scope: String, events: URL, installationID: String)? in
@@ -1036,7 +1042,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         Task { @MainActor in
             let result = await Task.detached {
                 (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
-                                     daemonThreads: daemonThreads), DesktopEventReader.read(from: events),
+                                     daemonThreads: daemonThreads, herdrTitles: herdrTitles,
+                                     herdrTitlesUnknown: herdrTitlesUnknown), DesktopEventReader.read(from: events),
                  readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
                  CodexUsageReader.latest(root: rolloutRoot),
                  SessionDiscovery.candidates(root: rolloutRoot, now: Date().timeIntervalSince1970),
@@ -1154,8 +1161,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                            sessionEnds: scan.sessionEnds)
             let discovered = SessionDiscovery.running(candidates, liveness: liveness)
             let discoveredCLI = Set(discovered.filter { $0.source == .cli }.map(\.session))
-            endedSessions = Set(scan.sessionEnds.keys)
+            endedSessions = scan.endedSessions
             cliSessions = scan.cliSessions.union(discoveredCLI)
+            daemonCLISessions = scan.cliSessions.intersection(daemonThreads)
             liveCLI = scan.cliState.liveSessions.union(discoveredCLI)
             knownCLISessions.formUnion(scan.titledCLISessions)
             let previous = Set(queue.items.map(\.id))
@@ -1172,7 +1180,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let receipted = ApprovalReceipts.issue(scan.awaitingReceipt, in: events, cliSessions: scan.cliSessions,
                                                    now: Date().timeIntervalSince1970)
             if !receipted.isEmpty { queue.recordReceipts(receipted, now: Date().timeIntervalSince1970) }
+            queue.dropDesktopDuplicates(terminalSessions: cliSessions)
             syncAgentQueueWithCodex(now: Date().timeIntervalSince1970)
+            agentQueue.dropDesktopDuplicates(codexTerminalSessions: Set(cliSessions.map(\.uuidString)))
             let current = queue.items
             let currentAgent = agentQueue.items(at: Date().timeIntervalSince1970)
             let newAgentItems = currentAgent.filter { !previousAgent.contains($0.id) }
