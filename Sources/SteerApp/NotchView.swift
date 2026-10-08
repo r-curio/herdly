@@ -968,11 +968,17 @@ struct Notch: View {
                         }
                         .accessibilityLabel("Show full action for \(subject)")
                     } else if let full = running.fullPrompt, full != row {
-                        NotchDisclosure(title: "Show full prompt", expanded: disclosure("prompt:\(item.session.session)")) {
+                        // A shortened prompt is only its start; the disclosure must not call it full.
+                        let title = running.promptShortened ? "Show more of prompt" : "Show full prompt"
+                        NotchDisclosure(title: title, expanded: disclosure("prompt:\(item.session.session)")) {
                             Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
+                            if running.promptShortened {
+                                Text("Shortened; the full prompt is in \(item.session.source == .claude ? "Claude" : "Codex").")
+                                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                            }
                         }
-                        .accessibilityLabel("Show full prompt for \(subject)")
+                        .accessibilityLabel("\(title) for \(subject)")
                     }
                 }
                 if item.session.source == .claude {

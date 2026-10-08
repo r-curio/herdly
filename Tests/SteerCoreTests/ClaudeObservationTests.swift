@@ -25,6 +25,61 @@ import Testing
     #expect(scan.observations.contains { if case .outcome = $0 { return true }; return false } == false)
 }
 
+@Test func claudeLongPromptIsShortenedForTheWorkingRowInsteadOfDropped() throws {
+    let long = String(repeating: "Refactor the queue so ", count: 30) + "it stays ordered."
+    let wide = String(repeating: "整理", count: 100)
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: long, session: "long"),
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: wide, session: "wide"),
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Inspect", session: "short")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let running = Dictionary(uniqueKeysWithValues: scanClaude(root).observations.compactMap { observation -> (String, AgentRunning)? in
+        if case let .running(value) = observation { return (value.identity.session.session, value) }
+        return nil
+    })
+
+    let longRow = try #require(running["long"])
+    #expect(longRow.prompt == String(long.prefix(ClaudeObservationReader.maximumPrompt)) + "…")
+    #expect(longRow.promptShortened)
+    #expect(longRow.rowText == String(long.prefix(160)) + "…")
+    // 200 characters but 600 bytes: within the character cap, so kept whole.
+    #expect(running["wide"]?.prompt == wide)
+    #expect(running["wide"]?.promptShortened == false)
+    #expect(running["short"]?.prompt == "Inspect")
+    #expect(running["short"]?.promptShortened == false)
+}
+
+@Test func claudeHelperShortenedPromptKeepsItsTextAndMark() throws {
+    let stored = try #require(ClaudeObservationReader.promptFallback(String(repeating: "a", count: 500)))
+    #expect(stored.shortened)
+    #expect(stored.text.count == ClaudeObservationReader.maximumPrompt + 1)
+    var record = claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: stored.text)
+    record[ClaudeObservationReader.promptShortenedKey] = true
+    let root = try makeClaudeEvents([record])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let running = try #require(scanClaude(root).observations.compactMap { observation -> AgentRunning? in
+        if case let .running(value) = observation { return value }
+        return nil
+    }.first)
+
+    #expect(running.prompt == stored.text)
+    #expect(running.promptShortened)
+}
+
+@Test func claudePromptFallbackKeepsBoundedTextAndRejectsTerminalControls() {
+    let exact = String(repeating: "b", count: ClaudeObservationReader.maximumPrompt)
+    #expect(ClaudeObservationReader.promptFallback(exact)?.text == exact)
+    #expect(ClaudeObservationReader.promptFallback(exact)?.shortened == false)
+    #expect(ClaudeObservationReader.promptFallback(exact + "c")?.text == exact + "…")
+    #expect(ClaudeObservationReader.promptFallback(exact + "c")?.shortened == true)
+    #expect(ClaudeObservationReader.promptFallback("First line\nsecond line")?.text == "First line\nsecond line")
+    #expect(ClaudeObservationReader.promptFallback("  \n ") == nil)
+    #expect(ClaudeObservationReader.promptFallback("clear \u{1b}[2J") == nil)
+}
+
 @Test func claudeLatePostCannotClearNewerToolAndAmbiguousApprovalIsIgnored() throws {
     let root = try makeClaudeEvents([
         claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
