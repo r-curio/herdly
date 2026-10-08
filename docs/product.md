@@ -128,7 +128,7 @@ is issue #82; mixed source presentation and counts in the existing notch are iss
 ## Agreed mixed-source notch behavior
 
 The notch presents Codex and Claude observations in one priority queue. Every row names its
-source explicitly. Codex actions say Open in Codex. Claude cards explain when returning to the exact
+source explicitly. Open in Codex and Open in Claude share one button label, "Open Session" (agreed 2026-10-08); the row already names the source. Claude cards explain when returning to the exact
 tab is unavailable and show Open in Claude only after Ghostty controls, a complete live Claude
 inventory, and one exact unsplit target are verified. Claude
 uses its supplied session name for display when available and otherwise shows a shortened session
@@ -218,7 +218,7 @@ Agreed with the user on 2026-10-07 (issue #114). This covers how herdr readiness
 - Ghostty too old: "Update Ghostty to return to herdr panes."
 - Integration missing or not current (Claude only; Codex needs no herdr integration): run `herdr integration install claude`.
 - Layout not supported (a split, several herdr clients, a named herdr session, a Ghostty tab in another window): "Steer returns only to a single-pane herdr tab in one Ghostty window."
-- Everything else: "Open in Codex (or Claude) is unavailable until Steer can verify the exact herdr pane."
+- Everything else: "Open Session is unavailable until Steer can verify the exact herdr pane."
 
 The exact internal reason goes to diagnostics, not to the card. Every action whose own route still works stays on the card while Open is unavailable: Dismiss, details, CLI approve or deny through the hook, and question options when ADR 0010's checks pass. If Open passes the scan but fails its recheck at click time, the same grouped reason appears in the navigation message, the item is retained, and the card swaps Open for the reason line on the next scan. When a Codex question cannot be relayed and Open is also unavailable, the card shows one line: "Answer this in Codex." followed by Open's grouped reason. Why the relay failed goes to diagnostics.
 
