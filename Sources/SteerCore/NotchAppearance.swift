@@ -1,0 +1,182 @@
+import Foundation
+
+/// The kind of display the notch sits on. Each kind keeps its own appearance choices because the
+/// camera housing changes what fits in the strip.
+public enum DisplayProfile: String, CaseIterable, Identifiable, Sendable {
+    case macBookNotch
+    case externalDisplay
+
+    public var id: String { rawValue }
+
+    public init(hasCameraHousing: Bool) {
+        self = hasCameraHousing ? .macBookNotch : .externalDisplay
+    }
+}
+
+/// What the strip's left wing shows.
+public enum StripLeftWing: String, CaseIterable, Sendable {
+    case spritesAndCount
+    case countOnly
+    case none
+}
+
+/// The one-line label between the wings. Only drawn where no camera housing covers that space.
+public enum StripCenterLabel: String, CaseIterable, Sendable {
+    case taskName
+    case sessionName
+    case off
+}
+
+public enum UsageDisplay: String, CaseIterable, Sendable {
+    case compact
+    case hidden
+}
+
+/// The mark that leads each row of the open queue. Every style uses the session's colour and the
+/// sprite's 0.5 s step; none fades or pulses.
+public enum SessionIndicatorStyle: String, CaseIterable, Sendable {
+    case sprite
+    case dot
+    case bar
+    case tint
+}
+
+public enum QueueSort: String, CaseIterable, Sendable {
+    /// Queue priority, oldest arrival first within each group.
+    case needsAttention
+    /// Live approvals and waiting questions stay first; every other row is newest event first.
+    case lastUpdate
+}
+
+public enum QueueGrouping: String, CaseIterable, Sendable {
+    case none
+    case state
+    case agent
+    case project
+}
+
+/// How long an unacknowledged outcome stays current before it is listed under "Earlier".
+/// Moving is presentation decay only; it never acknowledges.
+public enum EarlierDelay: String, CaseIterable, Sendable {
+    case twoMinutes
+    case fiveMinutes
+    case tenMinutes
+    case twentyMinutes
+    case never
+
+    /// Seconds after arrival, or nil when outcomes never move.
+    public var seconds: Double? {
+        switch self {
+        case .twoMinutes: 2 * 60
+        case .fiveMinutes: 5 * 60
+        case .tenMinutes: 10 * 60
+        case .twentyMinutes: 20 * 60
+        case .never: nil
+        }
+    }
+}
+
+/// One display profile's strip and queue choices. The standard value is the instrument described in
+/// DESIGN.md, so a user who changes nothing sees no difference.
+public struct NotchAppearance: Equatable, Sendable {
+    public var leftWing: StripLeftWing
+    public var centerLabel: StripCenterLabel
+    public var usage: UsageDisplay
+    public var indicator: SessionIndicatorStyle
+    public var sort: QueueSort
+    public var grouping: QueueGrouping
+    public var earlier: EarlierDelay
+
+    public static let standard = NotchAppearance(leftWing: .spritesAndCount, centerLabel: .taskName, usage: .compact,
+                                                 indicator: .sprite, sort: .needsAttention, grouping: .none,
+                                                 earlier: .fiveMinutes)
+
+    public init(leftWing: StripLeftWing, centerLabel: StripCenterLabel, usage: UsageDisplay,
+                indicator: SessionIndicatorStyle, sort: QueueSort, grouping: QueueGrouping, earlier: EarlierDelay) {
+        self.leftWing = leftWing
+        self.centerLabel = centerLabel
+        self.usage = usage
+        self.indicator = indicator
+        self.sort = sort
+        self.grouping = grouping
+        self.earlier = earlier
+    }
+
+    /// The camera housing covers the centre of the strip, so the label is never drawn there.
+    public func effectiveCenterLabel(on profile: DisplayProfile) -> StripCenterLabel {
+        profile == .macBookNotch ? .off : centerLabel
+    }
+
+    /// Reads one profile through `value(key)`. A missing or unrecognised value keeps the standard choice.
+    public static func load(profile: DisplayProfile, value: (String) -> String?) -> NotchAppearance {
+        func read<T: RawRepresentable>(_ field: String, _ fallback: T) -> T where T.RawValue == String {
+            value(key(profile, field)).flatMap(T.init(rawValue:)) ?? fallback
+        }
+        let standard = NotchAppearance.standard
+        return NotchAppearance(leftWing: read("leftWing", standard.leftWing),
+                               centerLabel: read("centerLabel", standard.centerLabel),
+                               usage: read("usage", standard.usage),
+                               indicator: read("indicator", standard.indicator),
+                               sort: read("sort", standard.sort),
+                               grouping: read("grouping", standard.grouping),
+                               earlier: read("earlier", standard.earlier))
+    }
+
+    public func save(profile: DisplayProfile, write: (String, String) -> Void) {
+        write(Self.key(profile, "leftWing"), leftWing.rawValue)
+        write(Self.key(profile, "centerLabel"), centerLabel.rawValue)
+        write(Self.key(profile, "usage"), usage.rawValue)
+        write(Self.key(profile, "indicator"), indicator.rawValue)
+        write(Self.key(profile, "sort"), sort.rawValue)
+        write(Self.key(profile, "grouping"), grouping.rawValue)
+        write(Self.key(profile, "earlier"), earlier.rawValue)
+    }
+
+    static func key(_ profile: DisplayProfile, _ field: String) -> String {
+        "appearance.\(profile.rawValue).\(field)"
+    }
+}
+
+/// A run of queue rows under one optional heading.
+public struct QueueGroup: Equatable, Sendable {
+    public let heading: String?
+    public let items: [AgentAttentionItem]
+}
+
+public enum QueueGroups {
+    /// Splits already-ordered rows into headed groups. Groups appear in the order of their first row,
+    /// so the group holding the highest-priority item leads, and rows keep their order inside a group.
+    /// `project` returns a session's working folder when known.
+    public static func make(_ items: [AgentAttentionItem], grouping: QueueGrouping,
+                            project: (AgentAttentionItem) -> String?) -> [QueueGroup] {
+        guard grouping != .none else { return items.isEmpty ? [] : [QueueGroup(heading: nil, items: items)] }
+        var order: [String] = []
+        var members: [String: [AgentAttentionItem]] = [:]
+        for item in items {
+            let heading = heading(for: item, grouping: grouping, project: project)
+            if members[heading] == nil { order.append(heading) }
+            members[heading, default: []].append(item)
+        }
+        return order.map { QueueGroup(heading: $0, items: members[$0] ?? []) }
+    }
+
+    private static func heading(for item: AgentAttentionItem, grouping: QueueGrouping,
+                                project: (AgentAttentionItem) -> String?) -> String {
+        switch grouping {
+        case .none:
+            return ""
+        case .state:
+            switch item.kind {
+            case .outcome, .earlierOutcome: return "Done"
+            case .running: return "Working"
+            case .actionableApproval, .question, .handedBackApproval, .waiting, .statusUnavailable: return "Needs you"
+            }
+        case .agent:
+            return item.session.source == .codex ? "Codex" : "Claude"
+        case .project:
+            guard let folder = project(item)?.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+                  let name = folder.split(separator: "/").last, !name.isEmpty else { return "Other" }
+            return String(name)
+        }
+    }
+}

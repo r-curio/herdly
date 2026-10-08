@@ -53,7 +53,7 @@ A follow-up prompt the user types on a completion card and sends to that finishe
 The action that returns the user to the Codex session associated with a notch notification. Its button reads "Open Session", the same for Claude's equivalent (Open in Claude); the docs keep the source-specific names for the action.
 
 **Attention queue**:
-The ordered collection of Codex activity presented in the shared notch, with approval requests ahead of other activity. Its order determines presentation, not when Codex sessions execute.
+The ordered collection of Codex activity presented in the shared notch, with approval requests ahead of other activity. Its order determines presentation, not when Codex sessions execute. The user may sort the remaining rows by last update; live approvals and waiting questions stay first either way.
 
 **Acknowledged completion**:
 A particular completion cleared by explicit dismissal; for a supported CLI surface, also by a verified visit after completion; when it arrives while its herdr pane is already in front, by that pane staying visible for five seconds after it arrived; or by a later prompt submitted in the same session. Desktop app visibility never acknowledges a completion; the desktop app's own cleared unread flag, read from its state file after the completion, does (see [desktop read state](docs/desktop-read-state.md). This does not mean every result in the session has been read.

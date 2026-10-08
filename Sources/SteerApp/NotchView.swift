@@ -142,6 +142,80 @@ struct Sprite: View {
     }
 }
 
+/// The mark leading a queue row in the user's chosen style. Dot and bar step between the session's
+/// body and highlight on the sprite's 0.5 s beat while working and hold still otherwise; tint is
+/// drawn behind the row header by `SessionTint`, so it has no mark of its own.
+struct SessionMark: View {
+    var style: SessionIndicatorStyle
+    var working: Bool
+    var reduceMotion: Bool
+    var color: Int
+
+    var body: some View {
+        switch style {
+        case .sprite:
+            Sprite(working: working, reduceMotion: reduceMotion, color: color)
+        case .dot, .bar:
+            Group {
+                if working && !reduceMotion {
+                    TimelineView(.periodic(from: .now, by: 0.5)) { context in
+                        shape(lit: Int(context.date.timeIntervalSinceReferenceDate * 2) & 1 == 1)
+                    }
+                } else {
+                    shape(lit: working)
+                }
+            }
+            .frame(width: Sprite.cell * 6, height: style == .bar ? 12 : Sprite.cell * 4)
+            .accessibilityHidden(true)
+        case .tint:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func shape(lit: Bool) -> some View {
+        let tone = NotchStyle.spriteColor(color)
+        let fill = lit ? tone.light : tone.body
+        if style == .bar {
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous).fill(fill).frame(width: 3, height: 12)
+        } else {
+            Circle().fill(fill).frame(width: 6, height: 6)
+        }
+    }
+}
+
+/// The tint style: the row header sits on a well of the session's body colour, stepping from 18% to
+/// 26% on the sprite's beat while working.
+struct SessionTint: ViewModifier {
+    var active: Bool
+    var working: Bool
+    var reduceMotion: Bool
+    var color: Int
+
+    func body(content: Content) -> some View {
+        if active {
+            content
+                .padding(.horizontal, 6).padding(.vertical, 3)
+                .background {
+                    if working && !reduceMotion {
+                        TimelineView(.periodic(from: .now, by: 0.5)) { context in
+                            well(Int(context.date.timeIntervalSinceReferenceDate * 2) & 1 == 1 ? 0.26 : 0.18)
+                        }
+                    } else {
+                        well(working ? 0.26 : 0.18)
+                    }
+                }
+                .padding(.horizontal, -6)
+        } else {
+            content
+        }
+    }
+
+    private func well(_ opacity: Double) -> some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous).fill(NotchStyle.spriteColor(color).body.opacity(opacity))
+    }
+}
+
 /// The count of items that need the user; hidden at zero by the caller.
 struct Badge: View {
     var count: Int
@@ -377,6 +451,22 @@ struct Notch: View {
         AgentStripSummary.make(items: model.orderedAgentAttentionItems,
                                testPending: model.attention.pending && !model.desktopForeground,
                                names: sessionNames)
+    }
+
+    /// The open queue's rows under their group headings; a spotlight card is never grouped.
+    private var visibleGroups: [QueueGroup] {
+        let grouping = model.presentationMode.showsAll ? model.appearance.grouping : .none
+        return QueueGroups.make(visibleItems, grouping: grouping, project: model.projectFolder(for:))
+    }
+
+    /// The strip's center label, when the profile shows one and the layout has room for it.
+    private var centerLabel: String? {
+        guard model.stripLayout.gap > 0 else { return nil }
+        switch model.appearance.effectiveCenterLabel(on: model.activeProfile) {
+        case .off: return nil
+        case .taskName: return strip.sessions.isEmpty && strip.toCheck == 0 ? nil : strip.subject
+        case .sessionName: return model.orderedAgentAttentionItems.first.map { sessionLabel($0.session) }
+        }
     }
 
     private func rowTitle(_ item: AgentAttentionItem) -> String {
@@ -912,10 +1002,13 @@ struct Notch: View {
         let subject = rowSubject(item)
         let herdr = herdrOpen(item.session)
         VStack(alignment: .leading, spacing: 8) {
+            let marked = item.kind == .running || item.kind == .waiting || item.kind == .question
+            let indicator = model.appearance.indicator
+            let working = item.running?.status == .working
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if item.kind == .running || item.kind == .waiting || item.kind == .question {
-                    Sprite(working: item.running?.status == .working, reduceMotion: model.reduceMotion,
-                           color: spriteColor(for: item.session)).offset(y: -1)
+                if marked && indicator != .tint {
+                    SessionMark(style: indicator, working: working, reduceMotion: model.reduceMotion,
+                                color: spriteColor(for: item.session)).offset(y: -1)
                 }
                 Text(rowTitle(item)).font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
                     .accessibilityAddTraits(.isHeader)
@@ -923,6 +1016,8 @@ struct Notch: View {
                 Text(rowTrailing(item) ?? "").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                     .lineLimit(1).truncationMode(.tail)
             }
+            .modifier(SessionTint(active: marked && indicator == .tint, working: working,
+                                  reduceMotion: model.reduceMotion, color: spriteColor(for: item.session)))
             if let request = spotlightDetails?.request {
                 spotlightRequest(request, item: item, subject: subject)
             } else if let directory = spotlightDetails?.directory {
@@ -1198,30 +1293,49 @@ struct Notch: View {
                 // sit together in the wing left of the housing; Codex's weekly limit reading sits in the
                 // wing right of it, with its five-hour reading ahead of it while Codex reports one, and
                 // Claude's current five-hour and seven-day readings (orange) ahead of Codex's (blue).
-                // The gap between them is the housing itself. The name is read from
-                // the open queue and the accessibility label, never from the strip. The 8pt content
-                // inset on each side comes out of the wings.
+                // The gap between them is the housing itself. On a display without a housing the
+                // gap holds the optional center label instead; otherwise the name is read from the
+                // open queue and the accessibility label. The 8pt content inset on each side comes
+                // out of the wings. What each wing shows follows the active display profile.
                 let layout = model.stripLayout
+                let leftWing = model.appearance.leftWing
                 HStack(spacing: 0) {
                     HStack(spacing: 6) {
-                        if summary.sessions.isEmpty {
-                            Sprite(working: false, reduceMotion: model.reduceMotion, unlit: true)
+                        switch leftWing {
+                        case .spritesAndCount:
+                            if summary.sessions.isEmpty {
+                                Sprite(working: false, reduceMotion: model.reduceMotion, unlit: true)
+                            }
+                            ForEach(summary.sessions, id: \.session) { session in
+                                Sprite(working: session.working, reduceMotion: model.reduceMotion, color: session.color)
+                            }
+                        case .countOnly:
+                            // One stepping sprite keeps the working signal when sessions are hidden.
+                            if let busy = summary.sessions.first(where: \.working) {
+                                Sprite(working: true, reduceMotion: model.reduceMotion, color: busy.color)
+                            }
+                        case .none:
+                            EmptyView()
                         }
-                        ForEach(summary.sessions, id: \.session) { session in
-                            Sprite(working: session.working, reduceMotion: model.reduceMotion, color: session.color)
-                        }
-                        if summary.overflow > 0 {
+                        if leftWing == .spritesAndCount && summary.overflow > 0 {
                             Text("+\(summary.overflow)")
                                 .font(NotchStyle.mono(11, .medium)).monospacedDigit()
                                 .foregroundStyle(NotchStyle.text).lineLimit(1).fixedSize()
                                 .accessibilityLabel("\(summary.overflow) more sessions")
                         }
-                        if summary.toCheck > 0 { Badge(count: summary.toCheck) }
+                        if leftWing != .none && summary.toCheck > 0 { Badge(count: summary.toCheck) }
                         Spacer(minLength: 0)
                     }
                     .padding(.leading, 4)
                     .frame(width: max(0, layout.leading - 8))
-                    Color.clear.frame(width: layout.gap)
+                    if let label = centerLabel {
+                        // Only laid out where no housing covers the centre; see `NotchPlacement.strip`.
+                        Text(label).font(NotchStyle.mono(12)).foregroundStyle(NotchStyle.text)
+                            .lineLimit(1).truncationMode(.tail)
+                            .frame(width: layout.gap)
+                    } else {
+                        Color.clear.frame(width: layout.gap)
+                    }
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
                         let readouts = model.usageStripReadouts
@@ -1252,11 +1366,19 @@ struct Notch: View {
                 Rectangle().fill(NotchStyle.seam).frame(height: 1).padding(.bottom, 12)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, item in
-                            if item.kind == .earlierOutcome && (index == 0 || visibleItems[index - 1].kind != .earlierOutcome) {
-                                Text("Earlier").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.dim)
+                        ForEach(Array(visibleGroups.enumerated()), id: \.offset) { _, group in
+                            if let heading = group.heading {
+                                // Group headings: 10pt dim caption, 6pt above the group's first row.
+                                Text(heading).font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
+                                    .accessibilityAddTraits(.isHeader)
+                                    .padding(.bottom, -8)
                             }
-                            attentionRow(item)
+                            ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
+                                if item.kind == .earlierOutcome && (index == 0 || group.items[index - 1].kind != .earlierOutcome) {
+                                    Text("Earlier").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.dim)
+                                }
+                                attentionRow(item)
+                            }
                         }
                         if model.presentationMode.showsAll && visibleItems.isEmpty && !showsTestRow {
                             emptyQueueRow(model.emptyQueueReading)

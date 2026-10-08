@@ -217,6 +217,10 @@ public struct AgentAttentionItem: Identifiable, Equatable, Sendable {
     public let outcome: AgentOutcome?
     public let running: AgentRunning?
     public let unavailableReason: String?
+
+    /// The latest evidence for this row: a running turn's newest observation, otherwise its arrival.
+    /// Used only by the optional "Last update" sort.
+    public var lastUpdate: Double { running?.updatedAt ?? arrivedAt }
 }
 
 public enum AgentObservation: Equatable, Sendable {
@@ -236,6 +240,7 @@ public typealias AgentAttentionSnapshot = AttentionSnapshot
 /// One source-qualified queue. Native adapters only need to emit observations; ordering and
 /// deadline/decay rules stay here.
 public struct AgentAttentionQueue: Sendable {
+    /// The default "Earlier" delay; the user can choose another `EarlierDelay`.
     public static let earlierAfter: Double = 5 * 60
 
     private var approvals: [AgentCallIdentity: AgentApproval] = [:]
@@ -291,7 +296,10 @@ public struct AgentAttentionQueue: Sendable {
         AgentAttentionSnapshot(outcomes: outcomes.values.sorted(by: Self.older), acknowledged: acknowledged)
     }
 
-    public func items(at now: Double) -> [AgentAttentionItem] {
+    /// Rows in display order. `earlier` decides when outcomes move under "Earlier"; `sort` chooses
+    /// between queue priority and newest activity for everything below live approvals and questions.
+    public func items(at now: Double, earlier: EarlierDelay = .fiveMinutes,
+                      sort: QueueSort = .needsAttention) -> [AgentAttentionItem] {
         let approvalItems = approvals.values.map { approval in
             let expired = approval.state == .actionable && approval.expiresAt <= now
             let current = expired ? approval.with(state: .handedBack) : approval
@@ -306,8 +314,8 @@ public struct AgentAttentionQueue: Sendable {
                                unavailableReason: nil)
         }
         let outcomeItems = outcomes.values.map { outcome in
-            let earlier = now - outcome.arrivedAt >= Self.earlierAfter
-            return AgentAttentionItem(id: .outcome(outcome.id), kind: earlier ? .earlierOutcome : .outcome,
+            let isEarlier = earlier.seconds.map { now - outcome.arrivedAt >= $0 } ?? false
+            return AgentAttentionItem(id: .outcome(outcome.id), kind: isEarlier ? .earlierOutcome : .outcome,
                                       session: outcome.session, arrivedAt: outcome.arrivedAt,
                                       approval: nil, question: nil, outcome: outcome, running: nil, unavailableReason: nil)
         }
@@ -327,11 +335,20 @@ public struct AgentAttentionQueue: Sendable {
                                arrivedAt: active.arrivedAt, approval: nil, question: nil, outcome: nil, running: active,
                                unavailableReason: nil)
         }
-        return (approvalItems + questionItems + outcomeItems + unavailableItems + activeItems).sorted {
+        let byPriority = (approvalItems + questionItems + outcomeItems + unavailableItems + activeItems).sorted {
             if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
             if $0.arrivedAt != $1.arrivedAt { return $0.arrivedAt < $1.arrivedAt }
             return Self.sortKey($0.id) < Self.sortKey($1.id)
         }
+        guard sort == .lastUpdate else { return byPriority }
+        // A live request keeps its place while its deadline runs, so newer activity cannot bury it.
+        let pinned = byPriority.filter { $0.kind == .actionableApproval || $0.kind == .question }
+        let rest = byPriority.filter { $0.kind != .actionableApproval && $0.kind != .question }.sorted {
+            if $0.lastUpdate != $1.lastUpdate { return $0.lastUpdate > $1.lastUpdate }
+            if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
+            return Self.sortKey($0.id) < Self.sortKey($1.id)
+        }
+        return pinned + rest
     }
 
     public mutating func apply(_ observation: AgentObservation, now: Double? = nil) {
