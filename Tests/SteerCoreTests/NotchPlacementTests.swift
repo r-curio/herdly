@@ -362,11 +362,12 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
                                    details: ApprovalDetails(taskName: "test", action: "Bash", command: "swift test"))
     var queue = AttentionQueue(); queue.apply(requests: [request], now: 0)
     let card = SpotlightDetails.make(item: queue.items[0], context: nil, response: nil).request
-    #expect(card?.task(besides: "Codex · test") == nil)
-    // A task that only appears inside a longer label, or a label without a name, still shows.
-    #expect(card?.task(besides: "Codex · latest docs") == "test")
-    #expect(card?.task(besides: "Codex session 5b1e7a20") == "test")
-    #expect(card?.task(besides: "Codex · test runner") == "test")
+    #expect(card?.task(besidesSessionName: "test") == nil)
+    // A task inside a longer name, a name that only ends with it, or an unnamed session still shows it.
+    #expect(card?.task(besidesSessionName: "latest docs") == "test")
+    #expect(card?.task(besidesSessionName: "foo · test") == "test")
+    #expect(card?.task(besidesSessionName: "test runner") == "test")
+    #expect(card?.task(besidesSessionName: nil) == "test")
 }
 
 @Test func spotlightRequestLiftsTheAskAndHidesARawRequestItAlreadyShows() {

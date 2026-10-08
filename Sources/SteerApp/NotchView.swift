@@ -575,9 +575,9 @@ struct Notch: View {
             }
             .fixedSize(horizontal: false, vertical: true)
             .accessibilityElement(children: .combine)
-            if request.task != nil || request.directory != nil {
+            let task = request.task(besidesSessionName: sessionNames[item.session])
+            if task != nil || request.directory != nil {
                 let place = request.directory.map { "in \($0.display)" }
-                let task = request.task(besides: sessionLabel(item.session))
                 Text([task, place].compactMap { $0 }.joined(separator: " · "))
                     .foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
                     .help(request.directory?.full ?? "")
