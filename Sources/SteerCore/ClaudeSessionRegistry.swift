@@ -15,8 +15,9 @@ import Foundation
 /// - Only `interactive` entries (or entries with no `kind`, which Claude treats as interactive)
 ///   become inventory rows. Other holders of a session are not duplicates: a `bg` entry only marks
 ///   its session as background, and `daemon`, `daemon-worker`, and parked-job entries are skipped.
-///   An unknown kind makes the scan unavailable. The `shell` status (a shell command running in the
-///   session) is reported as `busy`.
+///   An unknown kind makes the scan unavailable. Claude writes the `shell` status when the prompt is
+///   idle while a background Bash task (a dev server, say) is still running, so it is reported as
+///   `idle`: the turn has ended.
 ///
 /// Remaining rows are validated by `ClaudeInventoryDecoder`, so an unknown status, a malformed
 /// identity, or two live interactive entries for one session make the scan unavailable rather than
@@ -110,7 +111,7 @@ public enum ClaudeSessionRegistry {
                 // Claude treats a missing kind as interactive.
                 var normalized = row
                 normalized["kind"] = "interactive"
-                if row["status"] as? String == "shell" { normalized["status"] = "busy" }
+                if row["status"] as? String == "shell" { normalized["status"] = "idle" }
                 rows.append(normalized)
                 // A duplicate session ID makes the decoder reject the scan, so this pid is never misattributed.
                 if let sessionID = (row["sessionId"] as? String).flatMap(UUID.init(uuidString:)) {

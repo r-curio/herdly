@@ -291,7 +291,7 @@ private func decodeRegistry(_ entries: [ClaudeSessionRegistry.Entry],
                      .init(pid: 30, procStart: nil), .init(pid: 30, procStart: nil)])
 }
 
-@Test func claudeSessionRegistrySkipsOtherHoldersAndMapsShellToBusy() throws {
+@Test func claudeSessionRegistrySkipsOtherHoldersAndMapsShellToIdle() throws {
     let scan = decodeRegistry([
         entry(20, try registryRow(pid: 20, sessionID: interactiveID, status: "shell")),
         entry(21, try registryRow(pid: 21, sessionID: interactiveID, kind: "bg", status: "idle")),
@@ -301,10 +301,43 @@ private func decodeRegistry(_ entries: [ClaudeSessionRegistry.Entry],
     ])
     #expect(scan.available)
     #expect(scan.sessions.map(\.sessionID) == [interactiveID])
-    #expect(scan.sessions[0].lifecycle == .interactive(status: "busy"))
+    #expect(scan.sessions[0].lifecycle == .interactive(status: "idle"))
     // A session with an interactive row is not background, even with a background holder.
     #expect(!scan.isBackgroundSession(interactiveID))
     #expect(!scan.isBackgroundSession(backgroundID))
+}
+
+@Test func claudeShellStatusIsAnIdleSessionWithABackgroundShell() throws {
+    // Claude writes `shell` when the prompt is idle while a background Bash task, such as a dev
+    // server, keeps running. The turn has ended, so it confirms Stop and adds no working row.
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-registry-shell-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    for (index, event) in [
+        ["hook_event_name": "UserPromptSubmit", "session_id": interactiveID, "prompt_id": "prompt", "captured_at": 1],
+        ["hook_event_name": "Stop", "session_id": interactiveID, "prompt_id": "prompt", "captured_at": 2]
+    ].enumerated() {
+        var event = event
+        event["source"] = ClaudeSetupRequirements.helperSource
+        event["installation_id"] = "install"
+        try JSONSerialization.data(withJSONObject: event).write(to: root.appendingPathComponent("event-\(index).json"))
+    }
+    let shell = decodeRegistry([entry(20, try registryRow(pid: 20, sessionID: interactiveID, status: "shell"))])
+    #expect(shell.sessions.map(\.lifecycle) == [.interactive(status: "idle")])
+
+    var queue = AgentAttentionQueue()
+    queue.apply(ClaudeObservationReader.scan(events: root, sourceScope: "/tmp/root", installationID: "install", now: 3), now: 3)
+    queue.apply(shell, now: 10)
+    #expect(queue.items.compactMap(\.outcome).map(\.status) == [.finished])
+    #expect(queue.items.compactMap(\.running).isEmpty)
+    #expect(queue.workingCount == 0)
+
+    // Without hook evidence, such as after `/clear` starts a new session, it adds no row at all.
+    let cleared = "33333333-3333-4333-8333-333333333333"
+    var empty = AgentAttentionQueue()
+    empty.apply(decodeRegistry([entry(20, try registryRow(pid: 20, sessionID: cleared, status: "shell"))]), now: 10)
+    #expect(empty.items.isEmpty)
+    #expect(empty.workingCount == 0)
 }
 
 @Test func claudeSessionRegistryBackgroundHolderMarksSessionBackground() throws {
