@@ -495,3 +495,84 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     _ = queue.apply(scan: scan, desktopEvents: DesktopEventReader.read(from: events), now: RolloutTimestamp.parse("2026-09-14T02:22:00Z")!)
     #expect(queue.workingCount == 0)
 }
+
+/// A tool output carrying an image, the way image generation and `view_image` write them: one line
+/// well over the 1 MiB per-record bound.
+private func oversizedToolOutput(at: String) -> String {
+    let payload: [String: Any] = ["type": "custom_tool_call_output", "call_id": "image-1",
+                                  "output": String(repeating: "A", count: 1_100_000)]
+    let bytes = try! JSONSerialization.data(withJSONObject: ["timestamp": at, "type": "response_item", "payload": payload])
+    return String(decoding: bytes, as: UTF8.self) + "\n"
+}
+
+@Test func anOversizedImageLineDoesNotHideHowTurnsEnded() {
+    let session = UUID(), finished = UUID(), aborted = UUID()
+    let data = Data((meta(session) + turnEvent("task_started", turn: finished, at: "2026-10-08T06:10:54.055Z")
+        + oversizedToolOutput(at: "2026-10-08T06:11:36.197Z")
+        + turnEvent("task_complete", turn: finished, at: "2026-10-08T06:11:40.285Z")
+        + turnEvent("task_started", turn: aborted, at: "2026-10-08T06:16:10.015Z")
+        + oversizedToolOutput(at: "2026-10-08T06:16:14.850Z")
+        + turnEvent("turn_aborted", turn: aborted, at: "2026-10-08T06:16:19.218Z")).utf8)
+    let evidence = ReminderReader.evidence(in: data, session: session)
+    #expect(evidence.completed == [TurnIdentity(session: session, turn: finished)])
+    #expect(evidence.canceled == [TurnIdentity(session: session, turn: aborted)])
+}
+
+@Test func aQuestionAskedBeforeASkippedLineIsNeitherPendingNorAnswered() {
+    let session = UUID(), turn = UUID()
+    // The skipped line may hold the answer, so call_1 is unknown: never offered for a relay.
+    let data = Data((meta(session) + turnEvent("task_started", turn: turn, at: "2026-09-14T02:20:14.383Z")
+        + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample)
+        + oversizedToolOutput(at: "2026-09-14T02:21:00.000Z")
+        + questionCall(turn: turn, call: "call_2", at: answeredAt, arguments: sample)).utf8)
+    let evidence = ReminderReader.evidence(in: data, session: session)
+    #expect(evidence.pendingQuestions.map(\.callID) == ["call_2"])
+    #expect(evidence.answeredQuestions.isEmpty)
+}
+
+@Test func aLineOfExactlyTheBoundIsStillRead() {
+    let session = UUID(), turn = UUID()
+    // Pad a tool output so its whole line, without the newline, is exactly the bound.
+    func output(padding: Int) -> String {
+        let payload: [String: Any] = ["type": "custom_tool_call_output", "call_id": "image-1",
+                                      "output": String(repeating: "A", count: padding)]
+        let bytes = try! JSONSerialization.data(withJSONObject: ["timestamp": "2026-10-08T06:16:14.850Z", "type": "response_item", "payload": payload])
+        return String(decoding: bytes, as: UTF8.self)
+    }
+    let line = output(padding: ReminderReader.maximumRecordSize - output(padding: 0).utf8.count)
+    #expect(line.utf8.count == ReminderReader.maximumRecordSize)
+    // A question before an exactly-bound line is still pending: nothing was skipped.
+    let data = Data((meta(session) + turnEvent("task_started", turn: turn, at: "2026-09-14T02:20:14.383Z")
+        + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample) + line + "\n").utf8)
+    #expect(ReminderReader.evidence(in: data, session: session).pendingQuestions.map(\.callID) == ["call_1"])
+}
+
+@Test func anOversizedFirstLineStillRejectsTheRollout() {
+    let session = UUID(), turn = UUID()
+    let data = Data((oversizedToolOutput(at: "2026-10-08T06:10:00.000Z")
+        + turnEvent("turn_aborted", turn: turn, at: "2026-10-08T06:16:19.218Z")).utf8)
+    #expect(ReminderReader.evidence(in: data, session: session) == ReminderReader.RolloutEvidence())
+}
+
+@Test func aCompactedRolloutDropsOversizedLinesWhileStreaming() throws {
+    let session = UUID(), turn = UUID()
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("rollout-\(UUID().uuidString).jsonl")
+    defer { try? FileManager.default.removeItem(at: url) }
+    // Three image outputs of 14 MiB each: 42 MiB on disk, more than a rollout may keep in memory.
+    let image = oversizedToolOutput(at: "2026-10-08T06:16:14.850Z").replacingOccurrences(
+        of: String(repeating: "A", count: 1_100_000), with: String(repeating: "A", count: 14 * 1024 * 1024))
+    let text = meta(session) + turnEvent("task_started", turn: turn, at: "2026-10-08T06:16:10.015Z")
+        + image + image + image + turnEvent("turn_aborted", turn: turn, at: "2026-10-08T06:16:19.218Z")
+    try text.write(to: url, atomically: true, encoding: .utf8)
+    let compacted = try #require(ReminderReader.compactedRollout(url))
+    #expect(compacted.count < 4096)
+    #expect(ReminderReader.evidence(in: compacted, session: session).canceled == [TurnIdentity(session: session, turn: turn)])
+
+    // An image output still being written stays unfinished, so the rollout yields nothing this scan.
+    let partial = meta(session) + turnEvent("task_started", turn: turn, at: "2026-10-08T06:16:10.015Z")
+        + String(image.dropLast())
+    try partial.write(to: url, atomically: true, encoding: .utf8)
+    let unfinished = try #require(ReminderReader.compactedRollout(url))
+    #expect(unfinished.last != 10)
+    #expect(ReminderReader.evidence(in: unfinished, session: session) == ReminderReader.RolloutEvidence())
+}
