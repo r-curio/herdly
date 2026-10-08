@@ -257,13 +257,23 @@ public enum HerdrPresentation {
     /// Whether the notch offers Open for a session, from its scan-time binding and the Ghostty
     /// bundle's `tty` support. Unknown support (not yet read) does not block Open; the click-time
     /// recheck still applies. A binding reason takes precedence over the Ghostty one.
-    public static func openAvailability(binding: HerdrSessionBinding,
-                                        ttySupport: GhosttyTTYSupport?) -> HerdrOpenAvailability {
+    ///
+    /// - Parameter soleTerminal: without `tty`, the sole-terminal join of the client's TTY against the
+    ///   latest Ghostty inventory (`GhosttyTTYMatch.join`), nil when either is unknown. Open is offered
+    ///   only when it matched; otherwise its reason is shown, or "update Ghostty" when Ghostty has
+    ///   several surfaces.
+    public static func openAvailability(binding: HerdrSessionBinding, ttySupport: GhosttyTTYSupport?,
+                                        soleTerminal: GhosttyTTYJoin? = nil) -> HerdrOpenAvailability {
         switch binding {
         case .notInHerdr: return .notInHerdr
         case .unavailable(let reason): return .unavailable(.session(reason))
         case .bound:
-            return ttySupport == .unsupported ? .unavailable(.ghosttyTTYUnsupported) : .available
+            guard ttySupport == .unsupported else { return .available }
+            switch soleTerminal {
+            case .matched?: return .available
+            case nil, .ttyUnsupported?: return .unavailable(.ghosttyTTYUnsupported)
+            case let join?: return .unavailable(.ghosttyTTY(join))
+            }
         }
     }
 
