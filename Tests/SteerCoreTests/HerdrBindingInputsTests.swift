@@ -317,3 +317,15 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID:
     #expect(panes.first == "w9:p1")
     #expect(Array(panes.dropFirst()) == Array(titled.map(\.paneID).sorted().prefix(HerdrScanRequest.maximumProcessInfoRequests - 1)))
 }
+
+@Test func herdrInputsPassTheRegistryPIDToTheForegroundRule() {
+    // A native-installer Claude: pid 83378 is named for its version.
+    let outcome = scan(processInfo: ["w1:p1": foreground("w1:p1", ["2.1.293", "node"])])
+    func bind(_ pid: Int32?) -> HerdrSessionBinding {
+        HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: [record()], ghosttyControlsEnabled: true,
+                                   gateOpen: true, outcome: outcome, defaultSocketPath: socket, codex: .none, claudePID: pid)
+    }
+    #expect(bind(83378) == .bound(target))
+    #expect(bind(99999) == .unavailable(.binding(.foregroundProcesses(.claude, count: 0))))
+    #expect(bind(nil) == .unavailable(.binding(.foregroundProcesses(.claude, count: 0))))
+}
