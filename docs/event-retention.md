@@ -29,6 +29,7 @@ The helper is unchanged: hooks stay fast and Codex-compatible output stays clean
 - Pruning runs every ten minutes and tool records expire after an hour, so the 4,096-record window normally spans days of session and turn records.
 - If sessions together write more than 4,096 records in roughly 70 minutes, older records can still fall out of the window, though they remain on disk. Those records include a running turn's prompt, a CLI session's start, or a waiting Claude question's `PreToolUse`. That item then stops showing until newer records arrive.
 - The session-end look-back repeats on every scan while a reminded session is still running. A scan then decodes up to 8,192 records.
+- The Claude setup connection check (`ClaudeSetupInstaller.status`) lists entries within the same 65,536 bound but does not use the 4,096-record window. It decodes oldest first and stops at the first startup record that proves delivery, which normally sits near the front because startup records outlive tool-record retention. With no such record it decodes every listed entry. It runs off the main actor. Setup undo and the delivered-session scan still refuse a directory of more than 4,096 entries.
 - Restart recovery is unaffected. Completions are restored from the attention snapshot, not from old hook records (see [restart recovery](restart-recovery.md)), and Claude readers ignore records captured before launch.
 
 ## Automated checks
