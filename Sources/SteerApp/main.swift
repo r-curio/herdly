@@ -250,6 +250,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             .appendingPathComponent(".codex", isDirectory: true))
     }
     @Published var setupStatus: CodexConnectionStatus = .notConfigured
+    /// False until the first Codex setup detection lands; `setupStatus` is only a default before then.
+    @Published var setupChecked = false
     @Published var setupCapabilities = CodexCapabilities(cli: false, desktop: false, ghostty: false, supported: false)
     @Published var setupPlan: CodexSetupPlan?
     @Published var setupMessage = ""
@@ -504,7 +506,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// `--preview-queue` modes that open the sample item in the spotlight.
     static let spotlightPreviewModes: Set<String> = ["spotlight", "spotlight-approval", "spotlight-handed-back"]
     private var targetFrame: CGRect = .zero
-    /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|expanded>` seeds in-memory sample items for screenshots.
+    /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|expanded>` seeds in-memory sample items for screenshots;
+    /// `empty-collapsed`, `empty-expanded`, and `empty-not-connected` seed only the usage readouts, to show the empty notch.
     /// It never scans Codex events, never saves, and never releases approvals.
     let previewMode = Companion.argumentValue(for: "--preview-queue")
     private var status: NSStatusItem!
@@ -597,7 +600,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         panel.level = .statusBar
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView: Notch(model: self))
+        panel.contentView = NSHostingView(rootView: Notch(model: self, claudeSetup: claude))
         panel.onEscape = { [weak self] in self?.collapse() }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -1481,8 +1484,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let resolvedPresentation = notchPresentation.update(interacting: interacting, now: now, legacyPopup: attention.expanded)
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
-        case "expanded": presentationMode = .queue
-        case "collapsed": presentationMode = .collapsed
+        case "expanded", "empty-expanded", "empty-not-connected": presentationMode = .queue
+        case "collapsed", "empty-collapsed": presentationMode = .collapsed
         case _ where Self.spotlightPreviewModes.contains(previewMode ?? ""):
             presentationMode = spotlightItem.map(NotchPresentationMode.agentSpotlight) ?? .collapsed
         default:
@@ -2071,6 +2074,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                        fiveHour: ClaudeUsageWindow(usedPercentage: 62, resetsAt: now + 3 * 3600),
                                                        sevenDay: ClaudeUsageWindow(usedPercentage: 18, resetsAt: now + 5 * 86400),
                                                        observedAt: now)]
+        if mode.hasPrefix("empty") { return }
         let working = UUID(uuidString: "01A0916C-337B-4E2A-9D11-0000000000A1")!
         let finished = UUID(uuidString: "7C2F5D10-88AA-4B7E-8E0B-0000000000B2")!
         let asking = UUID(uuidString: "3E9D1B44-51C3-4F0A-9A77-0000000000C3")!

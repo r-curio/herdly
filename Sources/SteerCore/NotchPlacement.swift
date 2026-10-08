@@ -530,3 +530,36 @@ public struct AgentStripSummary: Equatable, Sendable {
                     overflow: max(0, seen.count - maximumSprites))
     }
 }
+
+/// What the open queue says while it holds nothing. It reads "Nothing running" and names each
+/// source whose setup is connected; it reads "Not connected" only once both setups have been
+/// checked and neither is connected. While a check is pending it names no source and claims no
+/// missing connection, so a launch never reports a gap it has not looked for.
+public enum EmptyQueueReading: Equatable, Sendable {
+    case nothingRunning(listening: [AgentSource])
+    case notConnected
+
+    /// `nil` means that source's setup has not been checked yet.
+    public static func make(codexConnected: Bool?, claudeConnected: Bool?) -> Self {
+        if codexConnected == false && claudeConnected == false { return .notConnected }
+        let listening: [AgentSource] = (codexConnected == true ? [.codex] : []) + (claudeConnected == true ? [.claude] : [])
+        return .nothingRunning(listening: listening)
+    }
+
+    public var title: String {
+        switch self {
+        case .nothingRunning: "Nothing running"
+        case .notConnected: "Not connected"
+        }
+    }
+
+    /// The line under the title: the sources Steer hears from, or why the queue cannot fill.
+    public var sentence: String? {
+        switch self {
+        case .nothingRunning(let listening) where listening.isEmpty: nil
+        case .nothingRunning(let listening):
+            "Listening for " + listening.map { $0 == .claude ? "Claude" : "Codex" }.joined(separator: " and ") + "."
+        case .notConnected: "Codex and Claude aren’t reporting to Steer yet."
+        }
+    }
+}

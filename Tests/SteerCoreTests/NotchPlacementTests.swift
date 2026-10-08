@@ -429,6 +429,26 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     #expect(StripSummary.make(items: [], testPending: false) == StripSummary(subject: "idle", working: false, toCheck: 0))
 }
 
+@Test func emptyQueueNamesConnectedSourcesAndClaimsNoGapBeforeBothSetupsAreChecked() {
+    let both = EmptyQueueReading.make(codexConnected: true, claudeConnected: true)
+    #expect(both == .nothingRunning(listening: [.codex, .claude]))
+    #expect(both.title == "Nothing running" && both.sentence == "Listening for Codex and Claude.")
+    #expect(EmptyQueueReading.make(codexConnected: false, claudeConnected: true).sentence == "Listening for Claude.")
+    #expect(EmptyQueueReading.make(codexConnected: true, claudeConnected: nil).sentence == "Listening for Codex.")
+
+    // A pending check never reads as a missing connection, even when the other setup is absent.
+    for pending in [EmptyQueueReading.make(codexConnected: nil, claudeConnected: nil),
+                    EmptyQueueReading.make(codexConnected: false, claudeConnected: nil),
+                    EmptyQueueReading.make(codexConnected: nil, claudeConnected: false)] {
+        #expect(pending == .nothingRunning(listening: []))
+        #expect(pending.title == "Nothing running" && pending.sentence == nil)
+    }
+
+    let neither = EmptyQueueReading.make(codexConnected: false, claudeConnected: false)
+    #expect(neither == .notConnected && neither.title == "Not connected")
+    #expect(neither.sentence == "Codex and Claude aren’t reporting to Steer yet.")
+}
+
 @Test func stripShowsAtMostThreeSessionsInDistinctColorsAndCountsTheRest() {
     var completions: [AttentionCompletion] = []
     for i in 1...5 {

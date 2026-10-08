@@ -379,6 +379,8 @@ final class ClaudeSetupModel: ObservableObject {
     }
 
     @Published private(set) var roots: [Root] = []
+    /// False until the first detection pass lands; until then `roots` holds a placeholder.
+    @Published private(set) var checked = false
     @Published var message = ""
     private let applicationSupport: URL
     private let defaultRoot: URL
@@ -435,6 +437,7 @@ final class ClaudeSetupModel: ObservableObject {
                      usageStatus: snapshot.usageStatus, usageInstalled: snapshot.usageInstalled,
                      activeSessionStatus: snapshot.activeSessionStatus)
             }
+            checked = true
         }
     }
 
