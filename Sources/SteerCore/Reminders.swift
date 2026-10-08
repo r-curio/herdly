@@ -68,6 +68,10 @@ public struct ReminderScan: Sendable {
     public var cliSessions: Set<UUID> = []
     public var liveCLISessions: Set<UUID> = []
     public var cliState = CLIState()
+    /// Sessions that ended and did not start again. `sessionEnds` keeps a session's latest end even
+    /// after a resume (`codex resume`, or the TUI reopening a thread) starts it again, because a
+    /// request received before that end still cannot be pending; liveness must not use it alone.
+    public var endedSessions: Set<UUID> { Set(sessionEnds.keys).subtracting(cliState.liveSessions) }
     /// Sessions whose session-id title was in this scan's Ghostty inventory. The app remembers them
     /// across scans so a session stays CLI, and can end, after its tab is gone.
     public var titledCLISessions: Set<UUID> = []
@@ -242,6 +246,19 @@ public enum ReminderReader {
         return evidence(in: bytes, session: session)
     }
 
+    /// How long after its SessionStart a daemon-loaded terminal session may go without a tab title
+    /// in a Ghostty inventory before `scan` ends it, so a new tab can be inventoried first.
+    public static let surfaceGrace: Double = 15
+    public static let desktopOriginator = "Codex Desktop"
+
+    /// True when the session's latest end is at or after its latest SessionStart: it is already
+    /// ended. A resume after an end makes this false, so a closed tab can end it again.
+    private static func endedSinceLatestStart(_ end: Double?, latestStart: Double?) -> Bool {
+        guard let end else { return false }
+        guard let latestStart else { return true }
+        return end >= latestStart
+    }
+
     /// `ghostty` is Ghostty's current terminal-title inventory and `knownCLISessions` the sessions an
     /// earlier inventory already proved. A session is a CLI session when its rollout header says
     /// `source: cli`, when its session-id title is in the inventory, or when it was proved before: a
@@ -257,12 +274,24 @@ public enum ReminderReader {
     /// is a terminal session on the daemon (a TUI, or `codex agents`): CLI, even before or after
     /// Ghostty shows its title. Such a session with no tab title in an inventory taken at least
     /// `surfaceGrace` seconds after its SessionStart has no surface, and ends.
-    public static let surfaceGrace: Double = 15
-    public static let desktopOriginator = "Codex Desktop"
-
+    ///
+    /// `herdrTitles` says what herdr's panes show (ADR 0012, `HerdrPaneTitles`). A Codex TUI titles
+    /// its terminal with its shortened session ID, so that title on a herdr pane proves a CLI
+    /// session with a live surface, exactly as a Ghostty tab title does; such a session is not
+    /// ended for lacking a Ghostty tab. It does not make the session Ghostty-titled
+    /// (`titledCLISessions`): its tab is herdr's, not its own. While the titles are `unknown`, a
+    /// session may be on a pane Steer cannot see, so none is ended for lacking a Ghostty tab.
     public static func scan(events: URL, rollouts: URL, ghostty: GhosttyInventory? = nil,
-                            knownCLISessions: Set<UUID> = [], daemonThreads: Set<UUID> = []) -> ReminderScan {
+                            knownCLISessions: Set<UUID> = [], daemonThreads: Set<UUID> = [],
+                            herdrTitles: HerdrPaneTitles = .notInUse) -> ReminderScan {
         let cliTitles = ghostty?.titles ?? []
+        // The titles herdr's panes show, and whether a session lacking a Ghostty tab may end: not
+        // while herdr may show its title on a pane Steer cannot read.
+        let (paneTitles, tablessMayEnd): (Set<String>, Bool) = switch herdrTitles {
+        case .notInUse: ([], true)
+        case .unknown: ([], false)
+        case .known(let titles): (titles, true)
+        }
         var result = ReminderScan()
         guard let ordered = HookEventListing.entries(in: events) else { return result }
         var probes: [UUID: [ApprovalResolutionProbe]] = [:]
@@ -399,17 +428,23 @@ public enum ReminderReader {
                       let meta = event["payload"] as? [String: Any],
                       (meta["id"] as? String).flatMap(UUID.init(uuidString:)) == session,
                       meta["source"] as? String == "cli" || cliTitles.contains(GhosttyMatch.title(session))
+                        || paneTitles.contains(GhosttyMatch.title(session))
                         || knownCLISessions.contains(session)
                         || (daemonThreads.contains(session) && meta["originator"] as? String != desktopOriginator) else { continue }
                 result.cliSessions.insert(session)
                 let sessionHooks = hooks.filter { $0.session_id == session }.sorted { $0.received_at < $1.received_at }
                 if cliTitles.contains(GhosttyMatch.title(session)) {
                     result.titledCLISessions.insert(session)
-                } else if let ghostty, result.sessionEnds[session] == nil, meta["source"] as? String != "cli" {
+                } else if paneTitles.contains(GhosttyMatch.title(session)) {
+                    // Its surface is a herdr pane; the herdr snapshot is its tab inventory.
+                } else if let ghostty, tablessMayEnd, meta["source"] as? String != "cli",
+                          case let started = sessionHooks.last(where: { $0.hook_event_name == "SessionStart" })
+                            .flatMap({ RolloutTimestamp.parse($0.received_at) }),
+                          !endedSinceLatestStart(result.sessionEnds[session], latestStart: started) {
                     // No tab shows this session. Proved by title earlier: its tab closed. Known only
                     // from the daemon: give a new session time for its tab to be inventoried first.
-                    let started = sessionHooks.first { $0.hook_event_name == "SessionStart" }
-                        .flatMap { RolloutTimestamp.parse($0.received_at) }
+                    // Timed from the latest start, so a resumed session gets the same grace. While
+                    // herdr's titles are unknown, a pane may still show the title: no end.
                     let ended = knownCLISessions.contains(session)
                         || (daemonThreads.contains(session) && started.map { ghostty.takenAt - $0 >= surfaceGrace } == true)
                     if ended {

@@ -424,6 +424,22 @@ public struct AttentionQueue: Sendable {
         }
     }
 
+    /// Drops the desktop copy of a finished turn that also has a terminal completion, for sessions
+    /// known to be terminal ones. A daemon-run Codex TUI labels its rollout like the desktop app
+    /// (`source: vscode`), so before Steer knew it was a terminal session the same turn could be
+    /// queued once under each source. Only an exact duplicate (same session and turn) is dropped;
+    /// the terminal completion stays queued, so no turn loses its card.
+    @discardableResult
+    public mutating func dropDesktopDuplicates(terminalSessions: Set<UUID>) -> [CompletionIdentity] {
+        let terminalTurns = Set(completions.keys.filter { $0.source == .cli }.map { TurnIdentity(session: $0.session, turn: $0.turn) })
+        let duplicates = completions.keys.filter {
+            $0.source == .desktop && terminalSessions.contains($0.session)
+                && terminalTurns.contains(TurnIdentity(session: $0.session, turn: $0.turn))
+        }
+        for id in duplicates { dismiss(.completion(id)) }
+        return Array(duplicates)
+    }
+
     public mutating func dismiss(_ id: AttentionItemID) {
         switch id {
         case let .request(id):

@@ -140,8 +140,9 @@ public enum HerdrBindingInputs {
         }.compactMap(\.paneID))
     }
 
-    /// The Codex half of the gate (ADR 0012): a Ghostty inventory is known, a live Codex session
-    /// renders a title, and herdr's default socket passes ADR 0009's trust check. A title already in
+    /// The Codex half of the gate (ADR 0012): a Ghostty inventory is known, a Codex session in
+    /// `codex.liveSessions` (live, or loaded by the daemon as a terminal session) renders a title, and
+    /// herdr's default socket passes ADR 0009's trust check. A title already in
     /// Ghostty still opens it, so a scan can find the same title in herdr before either route acts.
     public static func codexGateOpens(_ codex: HerdrCodexTitles, defaultSocketTrusted: Bool) -> Bool {
         defaultSocketTrusted && codex.ghostty != nil && !codex.liveTitles.isEmpty
@@ -155,7 +156,8 @@ public enum HerdrBindingInputs {
 
     /// What a scan inside the gate reads: Claude's integration status and process info for the panes
     /// live Claude sessions recorded, only when a Claude pane opened the gate, and process info for
-    /// panes showing a live Codex title outside Ghostty.
+    /// panes showing the title of a Codex session in `codex.liveSessions` (live, or loaded by the
+    /// daemon as a terminal session) outside Ghostty.
     public static func scanRequest(paneIDs: Set<String>, codex: HerdrCodexTitles) -> HerdrScanRequest {
         HerdrScanRequest(includeIntegration: !paneIDs.isEmpty, processInfoTitles: codex.outsideGhostty,
                          processInfoPaneIDs: paneIDs)

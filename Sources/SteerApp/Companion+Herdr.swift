@@ -8,8 +8,8 @@ import SteerCore
 final class HerdrSessionBindings: ObservableObject {
     /// The latest herdr scan for settings; nil before the first scan and whenever the ADR 0009 gate
     /// is closed (Ghostty controls off, or neither a live Claude session's newest hook event
-    /// recorded a pane nor a live Codex session exists beside a known Ghostty inventory with
-    /// herdr's socket trusted).
+    /// recorded a pane nor a live or daemon-loaded Codex terminal session exists beside a known Ghostty
+    /// inventory with herdr's socket trusted).
     @Published fileprivate(set) var scanOutcome: HerdrScanOutcome?
     /// True while the gate is open, so settings can tell "not in use" from "waiting for a scan".
     @Published fileprivate(set) var inUse = false
@@ -106,6 +106,17 @@ extension Companion {
         herdr.claudePaneIDs.isEmpty ? [] : [.claude]
     }
 
+    /// What herdr's panes show, for `ReminderReader.scan` (`HerdrPaneTitles.from`, ADR 0012). The
+    /// gate and the latest scan are read now, on the main actor; the returned closure checks herdr's
+    /// default socket, so call it off the main actor with the rest of the scan.
+    func herdrPaneTitlesReader() -> @Sendable () -> HerdrPaneTitles {
+        let gateOpen = herdr.monitor.isGateOpen, outcome = herdr.scanOutcome, socketPath = herdr.defaultSocketPath
+        return {
+            HerdrPaneTitles.from(gateOpen: gateOpen, outcome: outcome,
+                                 defaultSocketTrusted: HerdrSocketTrust.reason(at: socketPath) == nil)
+        }
+    }
+
     // MARK: - Scan
 
     /// Called once per completed hook scan. Reads the newest hook records and checks herdr's
@@ -116,7 +127,7 @@ extension Companion {
         guard previewMode == nil, !CommandLine.arguments.contains("--smoke-test"), !herdr.reading else { return }
         let live = herdrLiveSessions()
         let directories = herdrEventDirectories()
-        guard !live.isEmpty else {
+        guard !live.isEmpty || !daemonCLISessions.isEmpty else {
             herdr.hookRecords = []
             herdr.recordCache = [:]
             herdr.claudePaneIDs = []
@@ -126,7 +137,7 @@ extension Companion {
         herdr.reading = true
         let cache = herdr.recordCache
         let socketPath = herdr.defaultSocketPath
-        let titles = herdrCodexTitles()
+        let titles = herdrGateCodexTitles()
         let checkSocket = titles.ghostty != nil && !titles.liveTitles.isEmpty
         Task { @MainActor in
             let result = await Task.detached(priority: .utility) {
@@ -138,7 +149,7 @@ extension Companion {
             herdr.hookRecords = result.records.records
             herdr.recordCache = result.records.cache
             // Liveness and titles are re-read here: sessions may have ended while the records were read.
-            let codex = herdrCodexTitles()
+            let codex = herdrGateCodexTitles()
             let paneIDs = HerdrBindingInputs.gatePaneIDs(records: result.records.records, liveSessions: herdrLiveSessions())
             herdr.claudePaneIDs = paneIDs
             tickHerdrMonitor(paneIDs: paneIDs,
@@ -180,6 +191,15 @@ extension Companion {
             HerdrSessionKey(agent: .claude, sessionID: $0)
         }
         return Set(codex).union(claude)
+    }
+
+    /// The Codex half of the gate and its scan request: live sessions plus the daemon's terminal
+    /// sessions not yet proved live, whose herdr pane title is what proves them. Bindings still use
+    /// live sessions only (`herdrCodexTitles()`).
+    private func herdrGateCodexTitles() -> HerdrCodexTitles {
+        let ghostty = knownGhosttySnapshot?.terminalNames
+        let sessions = liveCLI.subtracting(endedSessions).union(daemonCLISessions)
+        return HerdrCodexTitles(liveSessions: Set(sessions.map(\.uuidString)), ghostty: ghosttyEnabled ? ghostty : nil)
     }
 
     /// Live Codex sessions and the titles of the latest complete Ghostty inventory (ADR 0012).

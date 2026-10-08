@@ -226,3 +226,42 @@ import Testing
     #expect(AgentPresentationSelection.highestPriority(in: items, candidates: remainingOutcomes)
             == items.first { $0.outcome?.turn == "first" }?.id)
 }
+
+@Test func aTerminalCodexSessionsDesktopOutcomeCopyIsDropped() {
+    let session = UUID(), other = UUID(), turn = UUID(), soloTurn = UUID()
+    func outcome(_ source: AttentionSource, _ session: UUID, _ turn: UUID) -> AgentObservation {
+        .outcome(CodexAttentionAdapter.outcome(from: AttentionCompletion(source: source, session: session, turn: turn, arrivedAt: 10)))
+    }
+    var queue = AgentAttentionQueue()
+    queue.apply([outcome(.cli, session, turn), outcome(.desktop, session, turn), outcome(.desktop, session, soloTurn),
+                 outcome(.cli, other, turn), outcome(.desktop, other, turn)], now: 20)
+    let dropped = queue.dropDesktopDuplicates(codexTerminalSessions: [session.uuidString])
+    #expect(dropped == [AgentTurnIdentity(session: CodexAttentionAdapter.session(session, surface: .desktop), turn: turn.uuidString)])
+    let left = Set(queue.items(at: 20).compactMap(\.outcome).map { "\($0.session.surface)-\($0.session.session == session.uuidString)-\($0.turn == turn.uuidString)" })
+    #expect(left == ["cli-true-true", "desktop-true-false", "cli-false-true", "desktop-false-true"])
+}
+
+@Test func aCodexCardIsATerminalSessionByItsSurfaceOrAKnownTerminalSession() {
+    let terminal = UUID(), desktop = UUID()
+    let cliSessions: Set = [terminal]
+    // Filed as CLI: terminal, known or not.
+    #expect(CodexAttentionAdapter.isTerminalSession(CodexAttentionAdapter.session(desktop, surface: .cli), cliSessions: []))
+    // Filed as desktop before the daemon or its pane proved it a terminal session: terminal now.
+    #expect(CodexAttentionAdapter.isTerminalSession(CodexAttentionAdapter.session(terminal, surface: .desktop),
+                                                    cliSessions: cliSessions))
+    #expect(CodexAttentionAdapter.isTerminalSession(
+        AgentSessionIdentity(source: .codex, sourceScope: CodexAttentionAdapter.sourceScope,
+                             session: terminal.uuidString.lowercased(), surface: .desktop), cliSessions: cliSessions))
+    // A desktop session is never among the terminal ones.
+    #expect(!CodexAttentionAdapter.isTerminalSession(CodexAttentionAdapter.session(desktop, surface: .desktop),
+                                                     cliSessions: cliSessions))
+    #expect(!CodexAttentionAdapter.isTerminalSession(
+        AgentSessionIdentity(source: .codex, sourceScope: CodexAttentionAdapter.sourceScope, session: "not-a-uuid",
+                             surface: .desktop), cliSessions: cliSessions))
+    // A Claude card is never a Codex terminal session, even with a matching ID.
+    for surface in [AgentSurface.cli, .desktop] {
+        #expect(!CodexAttentionAdapter.isTerminalSession(
+            AgentSessionIdentity(source: .claude, sourceScope: "/claude", session: terminal.uuidString, surface: surface),
+            cliSessions: cliSessions))
+    }
+}

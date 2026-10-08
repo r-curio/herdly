@@ -213,3 +213,26 @@ private func question(_ session: UUID = UUID(), turn: UUID = UUID(), source: Att
     queue.dismiss(.question(QuestionIdentity(source: .desktop, session: session, callID: "call_1")))
     #expect(queue.items.filter { $0.kind == .running }.count == 2)
 }
+
+@Test func aTerminalSessionsDesktopCopyOfATurnIsDropped() {
+    let session = UUID(), other = UUID(), turn = UUID(), soloTurn = UUID()
+    var queue = AttentionQueue()
+    queue.apply(completions: [
+        AttentionCompletion(source: .cli, session: session, turn: turn, arrivedAt: 10),
+        AttentionCompletion(source: .desktop, session: session, turn: turn, arrivedAt: 10),
+        // A desktop turn with no terminal twin, and another session's duplicate pair, stay.
+        AttentionCompletion(source: .desktop, session: session, turn: soloTurn, arrivedAt: 11),
+        AttentionCompletion(source: .cli, session: other, turn: turn, arrivedAt: 12),
+        AttentionCompletion(source: .desktop, session: other, turn: turn, arrivedAt: 12),
+    ])
+    let dropped = queue.dropDesktopDuplicates(terminalSessions: [session])
+    #expect(dropped == [CompletionIdentity(source: .desktop, session: session, turn: turn)])
+    let left = Set(queue.items.compactMap(\.completion).map(\.id))
+    #expect(left == [CompletionIdentity(source: .cli, session: session, turn: turn),
+                     CompletionIdentity(source: .desktop, session: session, turn: soloTurn),
+                     CompletionIdentity(source: .cli, session: other, turn: turn),
+                     CompletionIdentity(source: .desktop, session: other, turn: turn)])
+    // Dropped for good: a later scan reporting the desktop copy again does not bring it back.
+    queue.apply(completions: [AttentionCompletion(source: .desktop, session: session, turn: turn, arrivedAt: 10)])
+    #expect(!queue.items.contains { $0.completion?.id == CompletionIdentity(source: .desktop, session: session, turn: turn) })
+}
