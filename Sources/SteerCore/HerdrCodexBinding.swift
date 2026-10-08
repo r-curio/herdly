@@ -70,8 +70,10 @@ public enum HerdrCodexBindingRules {
     }
 }
 
-/// What the Codex rules need from Steer besides the herdr scan: its live Codex sessions and the
-/// terminal titles of the latest complete Ghostty inventory (nil when none is known).
+/// What the Codex rules need from Steer besides the herdr scan: its Codex sessions and the terminal
+/// titles of the latest complete Ghostty inventory (nil when none is known). Bindings pass live
+/// sessions only; the gate and its scan request also pass the daemon's terminal sessions not yet
+/// proved live (ADR 0012), whose herdr pane title is what proves them.
 public struct HerdrCodexTitles: Equatable, Sendable {
     public let liveSessions: Set<String>
     public let ghostty: Set<String>?
