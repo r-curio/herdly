@@ -82,8 +82,9 @@ public struct DesktopCompletion: Equatable, Identifiable, Sendable {
 /// session of its own with the user's hooks: it reports SessionStart, UserPromptSubmit and tool
 /// events like any session, but writes no rollout and was seen shutting down without Stop or
 /// SessionEnd, so its row would stay working. Codex submits the prompt itself, and this heading is
-/// a constant in every installed Codex checked (CLI 0.154 to 0.161 and the desktop bundle). If Codex
-/// changes it, the job shows as working again rather than hiding a user's session.
+/// a constant in each Codex checked (CLI 0.154.0, 0.160.1 and 0.161.0, and the desktop app's
+/// bundled CLI). If Codex changes it, the job shows as working again rather than hiding a user's
+/// session.
 public enum CodexBackgroundJob {
     static let memoryConsolidationHeading = "## Memory Writing Agent: Phase 2 (Consolidation)"
 

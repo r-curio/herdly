@@ -56,9 +56,8 @@ Codex runs memory consolidation as a session of its own, with the user's hooks.
 Session `01a11757-16e6-7c91-b937-4e67f83d3163` sent `SessionStart`,
 `UserPromptSubmit` and 51 tool records. They carried herdr pane `w1:p2`, the
 pane in the managed app-server daemon's environment. Codex wrote no rollout for
-it. Its log
-shows the thread shutting down at 01:17:18 local time with no `Stop` or
-`SessionEnd` hook. Steer therefore kept a desktop working row with no end. An
+it. Its log shows the thread shutting down at 01:17:18 local time with no `Stop`
+or `SessionEnd` hook. Steer therefore kept a desktop working row with no end. An
 earlier run on 2026-10-07 did send `SessionEnd`, also without `Stop`.
 
 `DesktopState` treats a session whose submitted prompt opens with Codex's
