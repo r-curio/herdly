@@ -253,6 +253,9 @@ enum HerdrSocket {
                 return .failure(.notRunning)
             }
         }
+        // The socket's owner was checked before connecting; confirm the accepting process is this user's.
+        var peerUID: uid_t = 0, peerGID: gid_t = 0
+        guard getpeereid(fd, &peerUID, &peerGID) == 0, peerUID == getuid() else { return .failure(.untrustedSocket) }
 
         var offset = 0
         while offset < request.count {
