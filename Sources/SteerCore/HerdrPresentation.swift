@@ -284,8 +284,8 @@ public enum HerdrPresentation {
     ///
     /// - Parameters:
     ///   - inUse: the ADR 0009 gate is open (Ghostty controls on, and a live Claude session reported a
-    ///     pane or a live Codex session exists beside a known Ghostty inventory with herdr's socket
-    ///     trusted).
+    ///     pane or a live or daemon-loaded Codex terminal session exists beside a known Ghostty
+    ///     inventory with herdr's socket trusted).
     ///   - outcome: the latest scan, nil before the first scan after the gate opened.
     ///   - agentsSeen: agents whose live sessions' newest hook event reported running in herdr;
     ///     an integration problem is listed only for Claude Code, and only when it is among these.

@@ -638,7 +638,7 @@ public struct HerdrAttachedClient: Equatable, Sendable {
 /// What one scan reads beyond `ping`, the snapshot and `lsof`, decided by the caller from the gate
 /// inputs (ADR 0009). `herdr integration status` concerns Claude Code only (ADR 0008), so it runs
 /// only when a Claude session opened the gate. `pane.process_info` is requested for each pane whose
-/// title is one of `processInfoTitles`, the shortened identifiers of live Codex sessions (ADR 0012),
+/// title is one of `processInfoTitles`, the shortened identifiers of live or daemon-loaded Codex terminal sessions (ADR 0012),
 /// and for each pane in `processInfoPaneIDs`, the panes live Claude sessions' newest hook events
 /// recorded (ADR 0008's foreground-process rule).
 public struct HerdrScanRequest: Equatable, Hashable, Sendable {
