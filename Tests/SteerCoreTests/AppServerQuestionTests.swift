@@ -333,33 +333,37 @@ private func bindSocket(_ path: String) throws -> Int32 {
     try fm.createSymbolicLink(atPath: link, withDestinationPath: target)
 
     // Codex 0.161's layout: a link owned by the user to a private socket in a private directory.
-    #expect(AppServerSocketCheck.problem(at: link) == nil)
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == nil)
     #expect(AppServerSocketCheck.problem(at: target) == nil)
+    // Only the Codex daemon follows the link: herdr's socket must be a socket file itself (ADR 0009).
+    #expect(AppServerSocketCheck.problem(at: link) == .notASocket)
+    #expect(HerdrSocketTrust.reason(at: link) == .untrustedSocket)
+    #expect(HerdrSocketTrust.reason(at: target) == nil)
 
     // The target's directory open to others: another user could substitute the socket.
     chmod(root + "/d", 0o755)
-    #expect(AppServerSocketCheck.problem(at: link) == .sharedPermissions)
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .sharedPermissions)
     chmod(root + "/d", 0o700)
 
     // A relative target, a second link, a regular file, or a missing target is refused.
     try fm.removeItem(atPath: link)
     try fm.createSymbolicLink(atPath: link, withDestinationPath: "../d/s")
-    #expect(AppServerSocketCheck.problem(at: link) == .notASocket)
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .notASocket)
     try fm.removeItem(atPath: link)
     try fm.createSymbolicLink(atPath: root + "/d/hop", withDestinationPath: target)
     try fm.createSymbolicLink(atPath: link, withDestinationPath: root + "/d/hop")
-    #expect(AppServerSocketCheck.problem(at: link) == .notASocket)
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .notASocket)
     try fm.removeItem(atPath: link)
     fm.createFile(atPath: root + "/d/file", contents: Data(), attributes: [.posixPermissions: 0o600])
     try fm.createSymbolicLink(atPath: link, withDestinationPath: root + "/d/file")
-    #expect(AppServerSocketCheck.problem(at: link) == .notASocket)
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .notASocket)
     try fm.removeItem(atPath: link)
     try fm.createSymbolicLink(atPath: link, withDestinationPath: root + "/d/missing")
-    #expect(AppServerSocketCheck.problem(at: link) == .missing)
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .missing)
 
     // A shared socket behind a private link is still refused.
     try fm.removeItem(atPath: link)
     try fm.createSymbolicLink(atPath: link, withDestinationPath: target)
     chmod(target, 0o666)
-    #expect(AppServerSocketCheck.problem(at: link) == .sharedPermissions)
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .sharedPermissions)
 }

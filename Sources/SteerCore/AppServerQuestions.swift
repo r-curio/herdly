@@ -341,19 +341,21 @@ public enum AppServerSocketCheck {
         return nil
     }
 
-    /// Inspects the file at `path` without connecting.
+    /// Inspects the file at `path` without connecting. A symlink is refused as `notASocket` unless
+    /// `followsPrivateLink` is set; only the Codex daemon's control socket sets it (ADR 0007), and
+    /// herdr's socket keeps ADR 0009's rule of a socket file at the path itself.
     ///
     /// Codex 0.161 replaced its control socket with a symlink to a socket in a per-user directory
-    /// (`/private/tmp/codex-daemon-<uid>/<hash>`). One level of symlink is followed only when the
-    /// link itself is owned by this user and its absolute target is a socket that passes every check
-    /// above, inside a directory owned by this user that no one else can enter or change (mode
-    /// `0700` or stricter). Nothing else, not a relative target, a second link, or a looser
-    /// directory, is accepted: the target directory sits in world-writable `/tmp`, so its own mode
-    /// is what keeps another user from substituting the socket.
-    public static func problem(at path: String) -> Problem? {
+    /// (`/private/tmp/codex-daemon-<uid>/<hash>`). With `followsPrivateLink`, one level of symlink is
+    /// followed only when the link itself is owned by this user and its absolute target is a socket
+    /// that passes every check above, inside a directory owned by this user that no one else can
+    /// enter or change (mode `0700` or stricter). Nothing else, not a relative target, a second link,
+    /// or a looser directory, is accepted: the target directory sits in world-writable `/tmp`, so its
+    /// own mode is what keeps another user from substituting the socket.
+    public static func problem(at path: String, followsPrivateLink: Bool = false) -> Problem? {
         var info = stat()
         guard lstat(path, &info) == 0 else { return .missing }
-        guard (info.st_mode & S_IFMT) == S_IFLNK else {
+        guard followsPrivateLink, (info.st_mode & S_IFMT) == S_IFLNK else {
             return problem(exists: true, isSocket: (info.st_mode & S_IFMT) == S_IFSOCK, owner: info.st_uid,
                            mode: info.st_mode & 0o777, me: getuid())
         }

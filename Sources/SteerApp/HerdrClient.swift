@@ -206,7 +206,8 @@ struct HerdrClient: Sendable {
 enum HerdrSocket {
     /// Connects to `path`, writes `request`, and returns the reply line without its newline.
     /// A refused or vanished socket is `notRunning`; the deadline is `timeout`; a reply over the
-    /// limit, or a connection closed before the newline, is `malformedReply`.
+    /// limit, or a connection closed before the newline, is `malformedReply`. A socket whose accepting
+    /// process runs as another user is `untrustedSocket`, and nothing is written to it.
     static func exchange(path: String, request: Data, deadline: UInt64) -> Result<Data, HerdrUnavailableReason> {
         var writeAttempted = false
         return exchange(path: path, request: request, deadline: deadline, writeAttempted: &writeAttempted)
