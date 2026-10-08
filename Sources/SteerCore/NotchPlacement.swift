@@ -210,9 +210,15 @@ public enum NotchPlacement {
     /// the housing or menu bar height.
     public static let collapsedHeight: CGFloat = 40
     public static let maximumExpandedHeight: CGFloat = 480
+    /// Room the optional center label takes between the wings on a display without a housing.
+    public static let centerLabelWidth: CGFloat = 160
 
-    public static func bodyWidth(on display: NotchDisplay, expanded: Bool, wing: CGFloat = trailingWing) -> CGFloat {
-        let collapsed = max(display.housingWidth + leadingWing + max(trailingWing, wing), minimumBodyWidth)
+    /// `centerLabel` is the label's width; it only widens a display without a housing, because the
+    /// housing covers that space.
+    public static func bodyWidth(on display: NotchDisplay, expanded: Bool, wing: CGFloat = trailingWing,
+                                 centerLabel: CGFloat = 0) -> CGFloat {
+        let center = display.hasPhysicalNotch ? 0 : centerLabel
+        let collapsed = max(display.housingWidth + leadingWing + max(trailingWing, wing) + center, minimumBodyWidth)
         return expanded ? max(collapsed + expandedGrowth, expandedBodyWidth) : collapsed
     }
 
@@ -226,11 +232,13 @@ public enum NotchPlacement {
     /// How the strip's content is split around the housing. Extra width when the panel is open is
     /// shared equally by both wings so the housing stays centered in the gap. `wing` is the trailing
     /// wing's width for the usage readouts shown (`UsageStripReadouts.wingWidth`); the leading wing never moves for it.
-    public static func strip(on display: NotchDisplay, expanded: Bool, wing: CGFloat = trailingWing) -> StripLayout {
-        let body = bodyWidth(on: display, expanded: expanded, wing: wing)
+    public static func strip(on display: NotchDisplay, expanded: Bool, wing: CGFloat = trailingWing,
+                             centerLabel: CGFloat = 0) -> StripLayout {
+        let body = bodyWidth(on: display, expanded: expanded, wing: wing, centerLabel: centerLabel)
         let trailing = max(trailingWing, wing)
         guard display.hasPhysicalNotch else {
-            return StripLayout(leading: body - trailing, gap: 0, trailing: trailing, height: stripHeight(on: display))
+            return StripLayout(leading: body - trailing - centerLabel, gap: centerLabel, trailing: trailing,
+                               height: stripHeight(on: display))
         }
         let extra = (body - display.housingWidth - leadingWing - trailing) / 2
         return StripLayout(leading: leadingWing + extra, gap: display.housingWidth, trailing: trailing + extra,
@@ -238,16 +246,18 @@ public enum NotchPlacement {
     }
 
     /// Estimated frame from a row count, used before the content has been measured.
-    public static func frame(on display: NotchDisplay, expanded: Bool, rows: Int, extraRows: Bool, wing: CGFloat = trailingWing) -> CGRect {
+    public static func frame(on display: NotchDisplay, expanded: Bool, rows: Int, extraRows: Bool, wing: CGFloat = trailingWing,
+                             centerLabel: CGFloat = 0) -> CGRect {
         let estimate = stripHeight(on: display) + 28 + CGFloat(rows) * 64 + (extraRows ? 56 : 0)
-        return frame(on: display, expanded: expanded, contentHeight: estimate, wing: wing)
+        return frame(on: display, expanded: expanded, contentHeight: estimate, wing: wing, centerLabel: centerLabel)
     }
 
     /// Frame for a measured content height (strip included): the open panel is exactly as tall as
     /// what it shows, growing downward and capped for long queues.
-    public static func frame(on display: NotchDisplay, expanded: Bool, contentHeight: CGFloat, wing: CGFloat = trailingWing) -> CGRect {
-        let layout = strip(on: display, expanded: expanded, wing: wing)
-        let width = bodyWidth(on: display, expanded: expanded, wing: wing) + 2 * earRadius
+    public static func frame(on display: NotchDisplay, expanded: Bool, contentHeight: CGFloat, wing: CGFloat = trailingWing,
+                             centerLabel: CGFloat = 0) -> CGRect {
+        let layout = strip(on: display, expanded: expanded, wing: wing, centerLabel: centerLabel)
+        let width = bodyWidth(on: display, expanded: expanded, wing: wing, centerLabel: centerLabel) + 2 * earRadius
         let height = expanded ? min(maximumExpandedHeight, max(layout.height + 24, contentHeight.rounded(.up))) : layout.height
         // The panel starts at the very top of the screen on every display: its gap over the housing
         // where there is one, otherwise centered in the menu bar row.

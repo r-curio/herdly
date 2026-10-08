@@ -207,6 +207,26 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         name: UserDefaults.standard.string(forKey: "notchDisplayPinName"))
     /// The display picker's entries, checked entry, and detail line; see `updateNotchDisplayChoices`.
     @Published private(set) var notchDisplayChoices = NotchDisplayChoices(displays: [], preference: .followPointer)
+    /// Strip and queue choices for each kind of display, edited in the Notch settings pane.
+    @Published private(set) var appearances: [DisplayProfile: NotchAppearance] = Dictionary(
+        uniqueKeysWithValues: DisplayProfile.allCases.map { profile in
+            (profile, NotchAppearance.load(profile: profile) { key in UserDefaults.standard.string(forKey: key) })
+        })
+    /// The kind of display the notch is on now; `refresh` follows the panel between displays.
+    @Published private(set) var activeProfile = DisplayProfile(hasCameraHousing: !NSScreen.screens.filter {
+        $0.safeAreaInsets.top > 0 }.isEmpty)
+    var appearance: NotchAppearance { appearances[activeProfile] ?? .standard }
+    /// The macOS system sound played when a completion or question card opens.
+    @Published private(set) var completionSound = UserDefaults.standard.string(forKey: "completionSound") ?? Companion.defaultSound
+    nonisolated static let defaultSound = "Glass"
+    /// Keep a new card open until the user acts on it instead of closing after three seconds.
+    @Published var keepCardsOpen = UserDefaults.standard.bool(forKey: "keepCardsOpen") {
+        didSet { UserDefaults.standard.set(keepCardsOpen, forKey: "keepCardsOpen") }
+    }
+    /// A light haptic tap when the pointer enters the strip, on trackpads that support it.
+    @Published var hapticFeedback = UserDefaults.standard.bool(forKey: "hapticFeedback") {
+        didSet { UserDefaults.standard.set(hapticFeedback, forKey: "hapticFeedback") }
+    }
     /// Codex's own thread names by session, refreshed every scan; unknown sessions keep their identifier.
     @Published var threadNames: [UUID: String] = [:]
     /// Codex's usage windows from the newest rollout, refreshed every scan; nil until one is read.
@@ -224,6 +244,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The strip's usage bars, Claude's then Codex's, from one clock reading so the bars drawn and
     /// the wing laid out for them agree.
     var usageStripReadouts: [UsageStripReadout] {
+        guard appearance.usage == .compact else { return [] }
         let now = Date().timeIntervalSince1970
         return UsageStripReadouts.make(codex: usage?.current(now: now),
                                        claude: ClaudeUsageReading.newest(claudeUsage.values, now: now))
@@ -475,7 +496,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// on the next refresh instead of waiting out another directory's interval.
     private var eventPruneDue: [String: Double] = [:]
     var orderedAttentionItems: [AttentionItem] { queue.items }
-    var orderedAgentAttentionItems: [AgentAttentionItem] { agentQueue.items(at: Date().timeIntervalSince1970) }
+    var orderedAgentAttentionItems: [AgentAttentionItem] {
+        agentQueue.items(at: Date().timeIntervalSince1970, earlier: appearance.earlier, sort: appearance.sort)
+    }
     var count: Int { orderedAgentAttentionItems.count + (attention.pending ? 1 : 0) }
     var workingCount: Int { agentQueue.workingCount }
     var toCheckCount: Int { agentQueue.toCheckCount + (attention.pending ? 1 : 0) }
@@ -631,7 +654,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if CommandLine.arguments.contains("--smoke-test") {
             showControls()
             precondition(controls?.isVisible == true && controls?.contentView != nil)
-            precondition(controls?.title == "Steer" && controls?.styleMask.contains(.resizable) == true)
+            // The title follows the selected pane (DESIGN.md, Settings Window) and starts as "Steer".
+            precondition(controls?.title.isEmpty == false && controls?.styleMask.contains(.resizable) == true)
             precondition(controls?.frame.width ?? 0 >= 720 && controls?.frame.height ?? 0 >= 540)
             precondition(status.button?.title == "S" && status.menu?.items.count == 7)
             precondition(status.menu?.item(withTitle: "Show notch on")?.submenu === notchDisplayMenu.menu)
@@ -861,10 +885,20 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         refreshLaunchAtLogin()
         updateNotchDisplayChoices()
         if controls == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 620),
-                                  styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 780),
+                                  styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+                                  backing: .buffered, defer: false)
             window.title = "Steer"
-            window.minSize = NSSize(width: 720, height: 540)
+            // Each pane draws its own title row beside the traffic lights, as in System Settings;
+            // the window title stays set for the Window menu and VoiceOver.
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.backgroundColor = SettingsStyle.windowBackground
+            // An empty unified toolbar gives the title bar its full 52pt height, so the window
+            // buttons line up with each pane's title row.
+            window.toolbar = NSToolbar(identifier: "SteerSettings")
+            window.toolbarStyle = .unified
+            window.minSize = NSSize(width: 720, height: 600)
             window.isReleasedWhenClosed = false
             window.delegate = self
             window.contentView = NSHostingView(rootView: Controls(model: self))
@@ -1478,7 +1512,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             || (selectedCompletion != nil && firstCompletionPresentation)
             || (selectedQuestion != nil && firstQuestionPresentation)
         if selectedPresentationWasFresh, let id = selectedFreshAgent {
-            notchPresentation.present(id, now: now)
+            notchPresentation.present(id, now: now, holdUntilInteraction: keepCardsOpen)
         }
         if let mode = previewMode, Self.spotlightPreviewModes.contains(mode), let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
         let resolvedPresentation = notchPresentation.update(interacting: interacting, now: now, legacyPopup: attention.expanded)
@@ -1497,7 +1531,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let selectedAgentSound = (selectedCompletion != nil && firstCompletionPresentation)
             || (selectedQuestion != nil && firstQuestionPresentation)
         if CompletionSound.shouldPlay(firstPresentation: selectedAgentSound, muted: muted) {
-            NSSound(named: "Glass")?.play()
+            NSSound(named: completionSound)?.play()
         }
         guard DesktopVisibility.isVisible(hasActivity: count > 0, codexForeground: codexForeground) else {
             panel.orderOut(nil)
@@ -1515,13 +1549,18 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                          preference: notchDisplayPreference)
         else { panel.orderOut(nil); currentDisplayID = nil; return }
         currentDisplayID = display.id
-        let layout = NotchPlacement.strip(on: display, expanded: expanded, wing: UsageStripReadouts.wingWidth(usageStripReadouts))
+        let profile = DisplayProfile(hasCameraHousing: display.hasPhysicalNotch)
+        if activeProfile != profile { activeProfile = profile }
+        let wing = UsageStripReadouts.wingWidth(usageStripReadouts)
+        let center = appearance.effectiveCenterLabel(on: profile) == .off ? 0 : NotchPlacement.centerLabelWidth
+        let layout = NotchPlacement.strip(on: display, expanded: expanded, wing: wing, centerLabel: center)
         if stripLayout != layout { stripLayout = layout }
         let rows = presentationMode.showsAll ? orderedAgentAttentionItems.count : (spotlightItem == nil ? 0 : 1)
         var frame = contentHeight > 0
-            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, wing: UsageStripReadouts.wingWidth(usageStripReadouts))
+            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, wing: wing, centerLabel: center)
             : NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
-                                   extraRows: attention.pending && (presentationMode.showsAll || spotlightItem == nil), wing: UsageStripReadouts.wingWidth(usageStripReadouts))
+                                   extraRows: attention.pending && (presentationMode.showsAll || spotlightItem == nil),
+                                   wing: wing, centerLabel: center)
         // With no menu bar and no housing the strip rests above the screen edge and slides in for
         // the pointer at the top edge or an open panel, so it does not cover a full-screen app.
         if NotchTuck.isTucked(display: display, pointer: NSEvent.mouseLocation, interacting: interacting, open: expanded) {
@@ -1546,7 +1585,33 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
 
     /// React to pointer entry without waiting for the background polling interval. Pointer exit
     /// keeps the core hover grace, then refreshes exactly when that grace expires.
+    /// Saves one display kind's strip and queue choices and redraws the notch with them.
+    func setAppearance(_ appearance: NotchAppearance, for profile: DisplayProfile) {
+        guard appearances[profile] != appearance else { return }
+        appearances[profile] = appearance
+        appearance.save(profile: profile) { key, value in UserDefaults.standard.set(value, forKey: key) }
+        refresh()
+    }
+
+    /// Chooses the card sound and plays it once so the choice is heard.
+    func setCompletionSound(_ name: String) {
+        completionSound = name
+        UserDefaults.standard.set(name, forKey: "completionSound")
+        NSSound(named: name)?.play()
+    }
+
+    /// The system sounds offered in Settings, by name, sorted.
+    nonisolated static var systemSoundNames: [String] {
+        let folder = URL(fileURLWithPath: "/System/Library/Sounds")
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        let names = files.map { $0.deletingPathExtension().lastPathComponent }
+        return names.isEmpty ? [defaultSound] : names.sorted()
+    }
+
     func setHovering(_ hovering: Bool) {
+        if hovering && !self.hovering && hapticFeedback {
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        }
         self.hovering = hovering
         hoverExitTask?.cancel()
         hoverExitTask = nil
@@ -1827,6 +1892,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let context = spotlightContexts[item.id]
         let response = item.completion.flatMap { completionPreviews[$0.id] }
         return SpotlightDetails.make(item: item, context: context, response: response, home: NSHomeDirectory())
+    }
+
+    /// The folder a row's session works in, when Steer has seen one; used only to group the queue
+    /// by project. Rows without one are grouped under "Other".
+    func projectFolder(for item: AgentAttentionItem) -> String? {
+        if let project = item.approval?.details?.project, !project.isEmpty { return project }
+        return spotlightDetails(for: item)?.directory?.full
     }
 
     func spotlightDetails(for item: AgentAttentionItem) -> SpotlightDetails? {
