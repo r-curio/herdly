@@ -39,7 +39,7 @@ Enter in the field or the Send button sends once. The policy is re-applied again
 
 - **sending** — the request is in flight; the field and button are disabled.
 - **sent** — the daemon accepted it: "Sent “now add tests”. Waiting for Codex to record the turn."
-- **working** — Codex started a turn on the session, and a late turn still counts. That turn start also acknowledges the completion (below), so the card leaves the queue in the same scan and the session's working row is the confirmation the user sees; the card's own sentence ("Codex started a turn; this session is working again.") is not shown. The phase stays recorded, so the card never sends again.
+- **working** — Codex started a turn on the session, and a late turn still counts. That turn start also acknowledges the completion (below), so the card leaves the queue in the same scan and the session's working row is the confirmation the user sees; the card's own sentence ("Codex started a turn; this session is working again.") is not shown. The card still never sends again: the acknowledged completion is off the queue, so another send is refused as no longer on the queue.
 - **unconfirmed** — ten seconds passed with no turn: "Check Codex; Steer will not resend."
 - **failed** — the daemon refused the request or the write never left: the reason, and "Steer will not retry."
 
