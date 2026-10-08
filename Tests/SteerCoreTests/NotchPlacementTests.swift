@@ -324,29 +324,89 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     #expect(CompletionPreview("  \n ") == nil)
 }
 
-@Test func spotlightDetailsHaveStableCompleteAndPartialFieldOrdering() {
+@Test func spotlightDetailsReadARequestAsAskCommandAndPlace() {
     let session = UUID(), turn = UUID(), requestID = UUID()
     let request = AttentionRequest(id: requestID, source: .cli, session: session, turn: turn, arrivedAt: 10,
-                                   expiresAt: 40, details: ApprovalDetails(taskName: "Ship", project: "/repo",
+                                   expiresAt: 40, details: ApprovalDetails(taskName: "Ship", project: "/Users/me/repo",
                                        action: "Run", command: "swift test", reason: "Verify", longText: "full"))
     var queue = AttentionQueue(); queue.apply(requests: [request], now: 10)
-    let item = queue.items[0]
-    let details = SpotlightDetails.make(item: item, context: nil, response: nil) { "t\(Int($0))" }
-    #expect(details.context.map(\.label) == ["task", "working directory", "action", "command", "reason",
-                                             "full request", "deadline"])
+    let details = SpotlightDetails.make(item: queue.items[0], context: nil, response: nil, home: "/Users/me")
+    let card = details.request
+    #expect(card?.ask == "Verify")
+    #expect(card?.action == "Run")
+    #expect(card?.command == "swift test")
+    #expect(card?.task == "Ship")
+    #expect(card?.directory?.display == "~/repo")
+    #expect(card?.directory?.full == "/Users/me/repo")
+    #expect(card?.fullRequest == "full")  // Not JSON: Steer cannot prove the card already shows it.
+    #expect(card?.arrivedAt == 10 && card?.expiresAt == 40)
+    #expect(details.directory == nil)
 
     let completion = AttentionCompletion(source: .desktop, session: session, turn: turn, arrivedAt: 20)
     var completions = AttentionQueue(); completions.apply(completions: [completion], now: 20)
-    let partial = SpotlightDetails.make(item: completions.items[0], context: nil,
-                                        response: nil, timestamp: { _ in "time" })
-    #expect(partial.context.isEmpty)
+    let partial = SpotlightDetails.make(item: completions.items[0], context: nil, response: nil)
+    #expect(partial.request == nil && partial.directory == nil)
     #expect(partial.response == .unavailable("Response preview is unavailable."))
+    let located = SpotlightDetails.make(item: completions.items[0], context: SpotlightRecordContext(workingDirectory: "/Users/me"),
+                                        response: nil, home: "/Users/me/")
+    #expect(located.directory?.display == "~")
 
     let restored = AttentionCompletion(source: .desktop, session: session, turn: UUID(), arrivedAt: 21, uncertain: true)
     var restoredQueue = AttentionQueue(); restoredQueue.apply(completions: [restored], now: 21)
-    let restoredDetails = SpotlightDetails.make(item: restoredQueue.items[0], context: nil,
-                                                 response: nil, timestamp: { _ in "time" })
+    let restoredDetails = SpotlightDetails.make(item: restoredQueue.items[0], context: nil, response: nil)
     #expect(restoredDetails.response == .unavailable("Response preview unavailable after restart."))
+}
+
+@Test func spotlightRequestHidesATaskOnlyWhenTheSessionLabelNamesIt() {
+    let request = AttentionRequest(id: UUID(), source: .cli, session: UUID(), turn: UUID(), arrivedAt: 0, expiresAt: 30,
+                                   details: ApprovalDetails(taskName: "test", action: "Bash", command: "swift test"))
+    var queue = AttentionQueue(); queue.apply(requests: [request], now: 0)
+    let card = SpotlightDetails.make(item: queue.items[0], context: nil, response: nil).request
+    #expect(card?.task(besidesSessionName: "test") == nil)
+    // A task inside a longer name, a name that only ends with it, or an unnamed session still shows it.
+    #expect(card?.task(besidesSessionName: "latest docs") == "test")
+    #expect(card?.task(besidesSessionName: "foo · test") == "test")
+    #expect(card?.task(besidesSessionName: "test runner") == "test")
+    #expect(card?.task(besidesSessionName: nil) == "test")
+}
+
+@Test func spotlightRequestLiftsTheAskAndHidesARawRequestItAlreadyShows() {
+    func card(reason: String? = nil, command: String? = "git fetch origin", long: String?) -> SpotlightRequest? {
+        let request = AttentionRequest(id: UUID(), source: .cli, session: UUID(), turn: UUID(), arrivedAt: 0, expiresAt: 30,
+                                       details: ApprovalDetails(project: "/Users/mesa/x", action: "Bash", command: command,
+                                                                reason: reason, longText: long))
+        var queue = AttentionQueue(); queue.apply(requests: [request], now: 0)
+        return SpotlightDetails.make(item: queue.items[0], context: nil, response: nil, home: "/Users/me").request
+    }
+    // A command Codex sent as a list is not what the card shows: the raw request stays reachable.
+    #expect(card(command: nil, long: #"{"command":["git","fetch"]}"#)?.fullRequest == #"{"command":["git","fetch"]}"#)
+    #expect(card(command: nil, long: #"{"description":["a"]}"#)?.fullRequest != nil)
+    let covered = #"{"command":"git fetch origin","description":"  Allow fetching remote main?  "}"#
+    #expect(card(long: covered)?.ask == "Allow fetching remote main?")
+    #expect(card(long: covered)?.fullRequest == nil)
+    // A prefix that is not a whole path component is not the home folder.
+    #expect(card(long: covered)?.directory?.display == "/Users/mesa/x")
+    #expect(card(long: #"{"justification":"Needs network"}"#)?.ask == "Needs network")
+
+    // Codex's own reason outranks the lifted sentence, so a differing description is still shown in full.
+    let differing = card(reason: "Update checkout", long: covered)
+    #expect(differing?.ask == "Update checkout")
+    #expect(differing?.fullRequest == covered)
+    // Extra keys, a different command, or no ask at all keep the raw request.
+    #expect(card(long: #"{"command":"git fetch origin","timeout_ms":5000}"#)?.fullRequest != nil)
+    #expect(card(long: #"{"command":"rm -rf build"}"#)?.fullRequest != nil)
+    let bare = card(command: nil, long: #"{"description":"   "}"#)
+    #expect(bare?.ask == nil && bare?.command == nil && bare?.fullRequest != nil)
+    #expect(card(long: nil)?.fullRequest == nil)
+}
+
+@Test func spotlightElapsedTimeIsCompactAndNeverNegative() {
+    #expect(SpotlightRequest.elapsed(since: 100, now: 50) == "just now")
+    #expect(SpotlightRequest.elapsed(since: 0, now: 59) == "just now")
+    #expect(SpotlightRequest.elapsed(since: 0, now: 60) == "1m ago")
+    #expect(SpotlightRequest.elapsed(since: 0, now: 3_599) == "59m ago")
+    #expect(SpotlightRequest.elapsed(since: 0, now: 3_600) == "1h ago")
+    #expect(SpotlightRequest.elapsed(since: 0, now: 86_400 * 3) == "3d ago")
 }
 
 @Test func stripNamesTheTopPriorityItemAndCountsOnlyItemsThatNeedTheUser() {

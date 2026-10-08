@@ -555,6 +555,73 @@ struct Notch: View {
         .font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
     }
 
+    /// A spotlit approval request read top to bottom: Codex's ask, then what it wants to run and
+    /// where, then where the request stands. The raw request appears only behind a disclosure, and
+    /// only when it holds something this card does not already show.
+    @ViewBuilder
+    private func spotlightRequest(_ request: SpotlightRequest, item: AgentAttentionItem, subject: String) -> some View {
+        if let ask = request.ask {
+            Text(ask).font(NotchStyle.mono(12)).foregroundStyle(NotchStyle.ink).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let action = request.action { Text(action).foregroundStyle(NotchStyle.dim) }
+                if let command = request.command {
+                    Text(command).foregroundStyle(NotchStyle.ink).textSelection(.enabled)
+                } else {
+                    Text("Command not provided by Codex").foregroundStyle(NotchStyle.dim)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityElement(children: .combine)
+            let task = request.task(besidesSessionName: sessionNames[item.session])
+            if task != nil || request.directory != nil {
+                let place = request.directory.map { "in \($0.display)" }
+                Text([task, place].compactMap { $0 }.joined(separator: " · "))
+                    .foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    .help(request.directory?.full ?? "")
+                    .accessibilityLabel([task, request.directory.map { "in \($0.full)" }].compactMap { $0 }.joined(separator: ", "))
+                    .contextMenu { if let full = request.directory?.full { copyPathButton(full) } }
+            }
+        }
+        .font(NotchStyle.mono(11))
+        if item.kind == .handedBackApproval {
+            // Steer records when the request arrived, not when it was handed back, so the elapsed
+            // time names the arrival.
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                Text("Handed back with no decision · asked \(SpotlightRequest.elapsed(since: request.arrivedAt, now: context.date.timeIntervalSince1970))")
+                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            Text("Decide by \(Date(timeIntervalSince1970: request.expiresAt).formatted(date: .omitted, time: .standard))")
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+        }
+        if let full = request.fullRequest {
+            NotchDisclosure(title: "Show full request", expanded: disclosure("request:\(item.session.session)")) {
+                Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityLabel("Show full request for \(subject)")
+        }
+    }
+
+    /// The exact turn's working directory, home shortened to `~`; hover and Copy Path give the full path.
+    private func directoryLine(_ directory: SpotlightDirectory) -> some View {
+        Text("in \(directory.display)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+            .fixedSize(horizontal: false, vertical: true)
+            .help(directory.full)
+            .accessibilityLabel("in \(directory.full)")
+            .contextMenu { copyPathButton(directory.full) }
+    }
+
+    private func copyPathButton(_ path: String) -> some View {
+        Button("Copy Path") {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(path, forType: .string)
+        }
+    }
+
     /// One question as Codex's own panel shows it: header with the "1 of N" pager, the question, and
     /// the option labels. Descriptions and the free-text field stay in Codex. With `choose` set the
     /// options are controls for the question Codex is on; `pick` is the one the user chose here.
@@ -826,10 +893,10 @@ struct Notch: View {
                 Text(rowTrailing(item) ?? "").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                     .lineLimit(1).truncationMode(.tail)
             }
-            if let spotlightDetails {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(spotlightDetails.context) { field in detail(field.label, field.value, selectable: true) }
-                }
+            if let request = spotlightDetails?.request {
+                spotlightRequest(request, item: item, subject: subject)
+            } else if let directory = spotlightDetails?.directory {
+                directoryLine(directory)
             }
             if let details = item.approval?.details, spotlightDetails == nil {
                 let missing = item.session.source == .claude ? "Not provided by Claude" : "Not provided by Codex"
@@ -849,6 +916,8 @@ struct Notch: View {
                 }
             }
             switch item.kind {
+            case .handedBackApproval where spotlightDetails?.request != nil:
+                EmptyView()
             case .handedBackApproval:
                 Text("Handed back with no decision. Continue in \(item.session.source == .claude ? "Claude" : "Codex") to decide.")
                     .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
