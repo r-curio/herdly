@@ -4,8 +4,8 @@ import Testing
 
 private let ghosttyLine = "Update Ghostty to return to herdr panes."
 private let layoutLine = "Steer returns only to a single-pane herdr tab in one Ghostty window."
-private let genericCodex = "Open in Codex is unavailable until Steer can verify the exact herdr pane."
-private let genericClaude = "Open in Claude is unavailable until Steer can verify the exact herdr pane."
+private let genericCodex = "Open Session is unavailable until Steer can verify the exact herdr pane."
+private let genericClaude = "Open Session is unavailable until Steer can verify the exact herdr pane."
 
 private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex: .current(version: 8),
                                                                          .claude: .current(version: 10)])
