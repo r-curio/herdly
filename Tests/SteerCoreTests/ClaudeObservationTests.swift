@@ -319,6 +319,25 @@ import Testing
     #expect(queue.items.last?.running?.fullAction == "second")
 }
 
+@Test func claudeFreshnessRulesCompareLatestEvidenceNotArrival() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "root", session: "s", surface: .cli)
+    // The turn arrived at 1 and its latest tool event was at 10: an outcome from 9 is older evidence.
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: identity, turn: "p", arrivedAt: 1, updatedAt: 10)))
+    queue.apply(.outcome(AgentOutcome(session: identity, turn: "p", status: .stopped, arrivedAt: 9)))
+    #expect(queue.items.compactMap { $0.running }.map(\.arrivedAt) == [1])
+    #expect(queue.items.compactMap { $0.outcome }.isEmpty)
+
+    // An outcome at 5 after activity up to 4 stands, and activity at 6 reopens the same turn.
+    var reopened = AgentAttentionQueue()
+    reopened.apply(.running(AgentRunning(session: identity, turn: "p", arrivedAt: 1, updatedAt: 4)))
+    reopened.apply(.outcome(AgentOutcome(session: identity, turn: "p", status: .stopped, arrivedAt: 5)))
+    #expect(reopened.items.compactMap { $0.outcome }.count == 1)
+    reopened.apply(.running(AgentRunning(session: identity, turn: "p", arrivedAt: 1, updatedAt: 6)))
+    #expect(reopened.items.compactMap { $0.running }.map(\.arrivedAt) == [1])
+    #expect(reopened.items.compactMap { $0.outcome }.isEmpty)
+}
+
 @Test func claudeDelayedStopFailureCannotClearNewerActivityDuringReplay() throws {
     let root = try makeClaudeEvents([
         claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Keep working"),
