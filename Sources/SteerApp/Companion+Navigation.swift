@@ -18,13 +18,10 @@ extension Companion {
         }
     }
 
-    /// Whether a Codex card belongs to a terminal session. A card recorded as desktop counts when
-    /// the session is now known to be a terminal one: a daemon-run TUI labels its rollout like the
-    /// desktop app (`source: vscode`) and was filed as desktop before the daemon or its pane proved
-    /// otherwise. A desktop session is never in `cliSessions`.
+    /// Whether a Codex card belongs to a terminal session, against the sessions now known to be
+    /// terminal ones (`CodexAttentionAdapter.isTerminalSession`).
     func isCodexTerminalSession(_ identity: AgentSessionIdentity) -> Bool {
-        guard identity.source == .codex else { return false }
-        return identity.surface == .cli || codexSession(identity).map { cliSessions.contains($0) } == true
+        CodexAttentionAdapter.isTerminalSession(identity, cliSessions: cliSessions)
     }
 
     func canOpenClaude(_ identity: AgentSessionIdentity) -> Bool {

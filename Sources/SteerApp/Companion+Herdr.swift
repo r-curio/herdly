@@ -92,20 +92,14 @@ extension Companion {
         herdr.claudePaneIDs.isEmpty ? [] : [.claude]
     }
 
-    /// Every pane title in the latest herdr snapshot, nil before one: a Codex TUI's surface when
-    /// it runs in herdr (`ReminderReader.scan`).
-    var herdrPaneTitles: Set<String>? {
-        herdr.scanOutcome?.scan.map { Set($0.snapshot.panes.compactMap(\.terminalTitle)) }
-    }
-
-    /// True while herdr is in use (the gate is open) but no successful scan says which titles its
-    /// panes show: the latest scan failed or has not completed. A server that is not running shows
-    /// none, which is known.
-    var herdrPaneTitlesUnknown: Bool {
-        guard herdr.monitor.isGateOpen else { return false }
-        switch herdr.scanOutcome {
-        case .available?, .unavailable(.notRunning)?: return false
-        default: return true
+    /// What herdr's panes show, for `ReminderReader.scan` (`HerdrPaneTitles.from`, ADR 0012). The
+    /// gate and the latest scan are read now, on the main actor; the returned closure checks herdr's
+    /// default socket, so call it off the main actor with the rest of the scan.
+    func herdrPaneTitlesReader() -> @Sendable () -> HerdrPaneTitles {
+        let gateOpen = herdr.monitor.isGateOpen, outcome = herdr.scanOutcome, socketPath = herdr.defaultSocketPath
+        return {
+            HerdrPaneTitles.from(gateOpen: gateOpen, outcome: outcome,
+                                 defaultSocketTrusted: HerdrSocketTrust.reason(at: socketPath) == nil)
         }
     }
 
