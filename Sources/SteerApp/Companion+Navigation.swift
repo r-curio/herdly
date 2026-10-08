@@ -219,6 +219,8 @@ final class HerdrOpenState {
     fileprivate(set) var failures: [HerdrSessionKey: HerdrOpenFailure] = [:]
     /// The previous scheduled scan, for ADR 0009's visit interval.
     fileprivate var previousFocus: HerdrFocusObservation?
+    /// The focused pane's current visible run, for the dwell rule.
+    fileprivate var dwell = HerdrDwell()
     fileprivate var checkingVisit = false
 }
 
@@ -263,8 +265,9 @@ extension Companion {
         }
     }
 
-    /// Called after each scheduled herdr scan. When focus moved to a pane bound to a session with
-    /// queued completions, takes one fresh Ghostty inventory and applies ADR 0011's manual-visit rule.
+    /// Called after each scheduled herdr scan. While the focused pane is bound to a session with queued
+    /// completions, takes one fresh Ghostty inventory and applies ADR 0011's manual-visit rule (focus moved
+    /// to the pane) and the dwell rule (the pane stayed visible after the completion arrived).
     func observeHerdrVisit(_ outcome: HerdrScanOutcome) {
         guard let startedAt = herdr.monitor.latestStartedAt else { return }
         // The scan's start on the completions' clock: conservative, as the snapshot was read after it.
@@ -272,10 +275,12 @@ extension Companion {
         let previous = herdr.open.previousFocus
         let current = HerdrFocusObservation.from(outcome, takenAt: takenAt)
         herdr.open.previousFocus = current
-        guard let previous, let current, let pane = current.focusedPaneID, previous.focusedPaneID != pane,
-              !herdr.open.checkingVisit, !openingTask else { return }
+        // A scan skipped while a check or Open is in flight leaves the run as it was; the next one
+        // restarts it if the gap grew too long.
+        guard !herdr.open.checkingVisit, !openingTask else { return }
+        guard let current, let pane = current.focusedPaneID else { herdr.open.dwell.reset(); return }
         let subjects = herdrVisitSubjects(boundTo: pane)
-        guard !subjects.isEmpty else { return }
+        guard !subjects.isEmpty else { herdr.open.dwell.reset(); return }
         herdr.open.checkingVisit = true
         Task { @MainActor in
             let ghosttyTakenAt = Date().timeIntervalSince1970
@@ -284,11 +289,18 @@ extension Companion {
                 (GhosttyScriptingSupport.ttySupport(), GhosttyNavigation.snapshot())
             }.value
             herdr.open.checkingVisit = false
-            guard ghosttyEnabled else { return }
+            guard ghosttyEnabled else { herdr.open.dwell.reset(); return }
+            let visible = observed.1.map {
+                HerdrOpenAcknowledgment.ghosttyShowsVisit(clientTTY: current.clientTTY, support: observed.0, ghostty: $0)
+            } ?? false
+            herdr.open.dwell.observe(paneID: pane, visible: visible, at: current.takenAt)
             for subject in subjects {
-                acknowledgeHerdrCompletions(HerdrOpenAcknowledgment.manualVisit(
-                    herdrCompletions(subject), boundPaneID: pane, previous: previous, current: current,
-                    support: observed.0, ghostty: observed.1, ghosttyTakenAt: ghosttyTakenAt), subject: subject)
+                let completions = herdrCompletions(subject)
+                let visited = HerdrOpenAcknowledgment.manualVisit(
+                    completions, boundPaneID: pane, previous: previous, current: current,
+                    support: observed.0, ghostty: observed.1, ghosttyTakenAt: ghosttyTakenAt)
+                let dwelled = herdr.open.dwell.acknowledged(completions, boundPaneID: pane, at: current.takenAt)
+                acknowledgeHerdrCompletions(visited.union(dwelled), subject: subject)
             }
             refresh()
         }
