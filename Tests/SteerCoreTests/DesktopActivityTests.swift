@@ -261,9 +261,7 @@ import Testing
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
     let session = UUID(), turn = UUID()
-    let common: [String: Any] = ["session_id": session.uuidString, "source": "steer-hook-v1",
-                                 "installation_id": "CBC31D11-FAD7-4AC0-992A-166F8DF81FBA",
-                                 "herdr_pane_id": "w1:p2"]
+    let common: [String: Any] = ["session_id": session.uuidString, "source": "steer-hook-v1"]
     let records: [[String: Any]] = [
         ["hook_event_name": "SessionStart", "received_at": "2026-10-07T17:09:08Z", "captured_at": 1_791_392_948.786],
         ["hook_event_name": "UserPromptSubmit", "received_at": "2026-10-07T17:09:08Z", "captured_at": 1_791_392_948.854,
