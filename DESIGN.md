@@ -146,7 +146,7 @@ An achromatic ladder on pure black with a single green, reserved for the sprite,
 - **Ink** (`{colors.ink}`): row titles, badge digits, control labels, the focus ring, and the fill of a pressed control. The brightest gray; reserved for what must be read first.
 - **Text** (`{colors.text}`): the task name in the strip, detail values, and explanatory sentences. The reading gray.
 - **Dim** (`{colors.dim}`): session labels, detail-table labels, the "Not provided by Codex" placeholder, the keyboard hint, and the label of a disabled control. Holds 4.7:1 on black, so tertiary never drops below legibility.
-- **Well** (`{colors.well}`): the badge and every control at rest. The only surface tone other than black.
+- **Well** (`{colors.well}`): the badge and every control at rest, and every cell of the unlit sprite. The only surface tone other than black.
 - **Seam** (`{colors.seam}`): a one-point line between the strip and the open queue. White at eight percent is the only edge drawn inside the panel.
 
 ### Named Rules
@@ -178,7 +178,7 @@ An achromatic ladder on pure black with a single green, reserved for the sprite,
 
 ## Layout
 
-The panel is one column, left-aligned, centered on the display. On a display with a camera housing the collapsed strip is the housing row itself: exactly the housing height, anchored to the top edge of the screen, with one sprite per session (at most three, each in its own color), the "+N" overflow mark, and the count in a 112pt wing left of the housing and the Codex weekly limit readout (a 4pt by 14pt vertical bar, well track filled in Codex blue from the bottom, with the percent in ink beside it; an empty track and a dim dash when unknown) in a 60pt wing right of it (the name is read in the open queue); while Codex also reports a five-hour window, the same readout with a dim "5h" caption sits 8pt ahead of the weekly one and that wing is 112pt, the left wing unmoved; while a Claude root reports current windows, the newest reading's "5h" and "7d" readouts, filled in Claude orange, sit ahead of Codex's, 12pt from the Codex group, and the wing grows 62pt per Claude readout (room for "100%") plus that 4pt group gap (`UsageStripReadouts.wingWidth`); the open queue grows downward from that row. Elsewhere the strip is inline with the menu bar row, as tall as the bar and anchored to the top edge, or, on an external monitor showing no menu bar (a full-screen app), 40pt tall and tucked above the screen edge and slid in only while the pointer touches the top edge, the panel is hovered or focused, or a new item is spotlit. Its frame is the body width plus two 8pt ears. Collapsed, the body is the two wings plus the housing width (never narrower than 200pt); open, it is 60pt wider than collapsed, split evenly between the two wings so the housing stays centered (`NotchPlacement.expandedGrowth`; on a display without a housing the left wing takes it), and never narrower than 380pt; it becomes exactly as tall as its content, capped at 480pt with the queue scrolling inside. On a display without a housing the same shape appears as a compact top-center strip.
+The panel is one column, left-aligned, centered on the display. On a display with a camera housing the collapsed strip is the housing row itself: exactly the housing height, anchored to the top edge of the screen, with one sprite per session (at most three, each in its own color; the unlit sprite while there is none), the "+N" overflow mark, and the count in a 112pt wing left of the housing and the Codex weekly limit readout (a 4pt by 14pt vertical bar, well track filled in Codex blue from the bottom, with the percent in ink beside it; an empty track and a dim dash when unknown) in a 60pt wing right of it (the name is read in the open queue); while Codex also reports a five-hour window, the same readout with a dim "5h" caption sits 8pt ahead of the weekly one and that wing is 112pt, the left wing unmoved; while a Claude root reports current windows, the newest reading's "5h" and "7d" readouts, filled in Claude orange, sit ahead of Codex's, 12pt from the Codex group, and the wing grows 62pt per Claude readout (room for "100%") plus that 4pt group gap (`UsageStripReadouts.wingWidth`); the open queue grows downward from that row. Elsewhere the strip is inline with the menu bar row, as tall as the bar and anchored to the top edge, or, on an external monitor showing no menu bar (a full-screen app), 40pt tall and tucked above the screen edge and slid in only while the pointer touches the top edge, the panel is hovered or focused, or a new item is spotlit. Its frame is the body width plus two 8pt ears. Collapsed, the body is the two wings plus the housing width (never narrower than 200pt); open, it is 60pt wider than collapsed, split evenly between the two wings so the housing stays centered (`NotchPlacement.expandedGrowth`; on a display without a housing the left wing takes it), and never narrower than 380pt; it becomes exactly as tall as its content, capped at 480pt with the queue scrolling inside. On a display without a housing the same shape appears as a compact top-center strip.
 
 Content is inset 16pt from each side of the frame (ear plus 8pt). In the strip the first sprite sits 4pt in from the inset, the sprites, overflow mark, and badge follow at 6pt gaps, and the usage readouts are pushed to the right edge of their wing. The open queue begins with the seam, 12pt above the first row. Rows stack at 14pt; inside a row, the title line, any sentence, the detail table, and the control row stack at 8pt; the detail table's own lines sit at 3pt. Detail labels occupy a fixed 58pt column with an 8pt gutter, so values align as a grid. Controls sit in a row at 6pt gaps. A 14pt bottom pad closes the queue.
 
@@ -220,6 +220,7 @@ The one picture in the system and the only working signal.
 - **Form:** a 6-column by 4-row bitmap at 2pt per cell (12x8pt). Body cells in sprite green, ear and eye cells in sprite highlight.
 - **Working:** alternates two frames every 0.5 s (the feet step). Under Reduce Motion it holds frame one and breathes in opacity between 50% and 100% on a 2.4 s cycle.
 - **Idle:** frame one, still. Hidden from accessibility; the strip's label speaks for it.
+- **Unlit:** the mark of an empty notch, shown while no session is listed. Frame one with every cell in well gray, so the eyes close into the body; still, with no step or breathe, and no session's color, so it never reads as a session. It sits where the first sprite would.
 - **Placement:** leads the strip; leads a "working" row title in the open queue (offset up 1pt to sit on the baseline).
 
 ### Strip
@@ -235,6 +236,7 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 - **Disclosure:** "Show full request" in 11pt text gray reveals the long text inline.
 - **Controls:** a row of wells at 6pt gaps beneath the details.
 - **Foot (full queue only):** the keyboard hint in 10pt dim, 2pt above the 14pt bottom pad.
+- **Empty queue:** with nothing listed, the open queue holds one row in the same grammar (`EmptyQueueReading`). The unlit sprite leads a 12pt semibold ink title. "Nothing running" is followed by a dim line naming the connected sources ("Listening for Codex and Claude."), or by no line while setup is still being checked. "Not connected" appears only once both setups are checked and neither is connected; a text-gray line ("Codex and Claude aren’t reporting to Steer yet.") and an Open Controls well follow it. The strip's spoken label reads the same title.
 
 ### Panel motion
 - **Resize:** the frame animates to its new size over 0.18 s with an ease-out curve; no spring, no overshoot. Under Reduce Motion, or before first presentation, the frame is set without animation.
@@ -251,7 +253,7 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 - **Do** show a 1.5pt ink ring at 6pt continuous corners on any control with keyboard focus.
 - **Do** wrap commands and reasons in full; align the detail table on a fixed 58pt label column.
 - **Do** animate frame changes with a 0.18 s ease-out and honor Reduce Motion by dropping the animation and switching the sprite to its breathe.
-- **Do** keep the sprite as the sole working signal: two frames at 0.5 s while working, still when idle.
+- **Do** keep the sprite as the sole working signal: two frames at 0.5 s while working, still when idle, unlit when no session is listed.
 
 ### Don't:
 - **Don't** put green anywhere but the sprite; no green badges, rings, titles, or status dots.
