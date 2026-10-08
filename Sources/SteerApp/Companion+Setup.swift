@@ -65,6 +65,7 @@ extension Companion {
             self.setupCapabilities = snapshot.capabilities
             self.setupPlan = snapshot.plan
             self.setupStatus = snapshot.status
+            self.setupChecked = true
             self.adoptInstalledEventsFolder(roots)
             // Until Codex is delivering events, the controls window is the only way to finish setup,
             // so a launch that finds setup incomplete shows it without waiting for a reopen.
@@ -168,6 +169,18 @@ extension Companion {
                 self.setupMessage = message
                 self.refreshSetup()
             }
+        }
+    }
+
+    /// What the open queue says while it is empty, from both setups' connection status. Preview
+    /// launches fix the reading so screenshots do not depend on this machine's setup.
+    var emptyQueueReading: EmptyQueueReading {
+        switch previewMode {
+        case "empty-not-connected": return .notConnected
+        case "empty-collapsed", "empty-expanded": return .nothingRunning(listening: [.codex, .claude])
+        default:
+            return .make(codexConnected: setupChecked ? setupStatus == .connected : nil,
+                         claudeConnected: claude.checked ? claude.roots.contains { $0.status == .connected } : nil)
         }
     }
 

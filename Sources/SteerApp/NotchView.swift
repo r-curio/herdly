@@ -91,11 +91,14 @@ struct NotchShape: Shape {
 }
 
 /// A 6-by-4 cell creature at two points per cell. It steps between two frames while a session is
-/// working and stands still otherwise; with Reduce Motion it breathes instead of stepping.
+/// working and stands still otherwise; with Reduce Motion it breathes instead of stepping. Unlit, it
+/// is the empty notch's mark: the silhouette in well gray with its eyes shut, still, and no session's
+/// color, so it never reads as a session.
 struct Sprite: View {
     var working: Bool
     var reduceMotion: Bool
     var color: Int = 0
+    var unlit = false
     static let cell: CGFloat = 2
     /// `#` is the body green, `+` the lighter highlight on the ears and eyes.
     static let frames: [[String]] = [
@@ -105,7 +108,9 @@ struct Sprite: View {
 
     var body: some View {
         Group {
-            if working && !reduceMotion {
+            if unlit {
+                bitmap(Sprite.frames[0])
+            } else if working && !reduceMotion {
                 TimelineView(.periodic(from: .now, by: 0.5)) { context in
                     let frame = Int(context.date.timeIntervalSinceReferenceDate * 2) & 1
                     bitmap(Sprite.frames[frame])
@@ -128,7 +133,8 @@ struct Sprite: View {
             for (y, row) in rows.enumerated() {
                 for (x, ch) in row.enumerated() where ch != "." {
                     let rect = CGRect(x: CGFloat(x) * Sprite.cell, y: CGFloat(y) * Sprite.cell, width: Sprite.cell, height: Sprite.cell)
-                    let tone = NotchStyle.spriteColor(color)
+                    // One tone when unlit: the highlight cells fill like the body, so the eyes close.
+                    let tone = unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color)
                     context.fill(Path(rect), with: .color(ch == "+" ? tone.light : tone.body))
                 }
             }
@@ -326,6 +332,8 @@ private struct ContentHeightKey: PreferenceKey {
 
 struct Notch: View {
     @ObservedObject var model: Companion
+    /// Observed so the empty queue's reading follows Claude setup changes; read through `model`.
+    @ObservedObject var claudeSetup: ClaudeSetupModel
     @FocusState private var headerFocused: Bool
     /// Disclosures the user opened, by the item they belong to; cleared when the item leaves.
     @State private var openDisclosures: Set<String> = []
@@ -876,6 +884,28 @@ struct Notch: View {
         }
     }
 
+    /// The open queue with nothing in it, in a row's own grammar: the unlit sprite leads the title,
+    /// one line follows, and Open Controls appears only while no source reports to Steer.
+    @ViewBuilder
+    private func emptyQueueRow(_ reading: EmptyQueueReading) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Sprite(working: false, reduceMotion: model.reduceMotion, unlit: true).offset(y: -1)
+                Text(reading.title).font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            if let sentence = reading.sentence {
+                Text(sentence).font(NotchStyle.mono(11))
+                    .foregroundStyle(reading == .notConnected ? NotchStyle.text : NotchStyle.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if reading == .notConnected {
+                NotchButton(title: "Open Controls", action: model.showControls)
+                    .accessibilityHint("Opens Steer controls to connect Codex or Claude.")
+            }
+        }
+    }
+
     @ViewBuilder
     private func attentionRow(_ item: AgentAttentionItem) -> some View {
         let spotlightDetails = isSpotlight(item) ? model.spotlightDetails(for: item) : nil
@@ -1150,7 +1180,8 @@ struct Notch: View {
 
     private var stripLabel: String {
         let summary = strip
-        var parts: [String] = [summary.subject]
+        let empty = summary.sessions.isEmpty && summary.toCheck == 0
+        var parts: [String] = [empty ? model.emptyQueueReading.title : summary.subject]
         let sessions = summary.sessions.count + summary.overflow
         if sessions > 1 { parts.append("\(sessions) sessions") }
         if summary.working { parts.append("working") }
@@ -1174,7 +1205,7 @@ struct Notch: View {
                 HStack(spacing: 0) {
                     HStack(spacing: 6) {
                         if summary.sessions.isEmpty {
-                            Sprite(working: false, reduceMotion: model.reduceMotion)
+                            Sprite(working: false, reduceMotion: model.reduceMotion, unlit: true)
                         }
                         ForEach(summary.sessions, id: \.session) { session in
                             Sprite(working: session.working, reduceMotion: model.reduceMotion, color: session.color)
@@ -1226,6 +1257,9 @@ struct Notch: View {
                                 Text("Earlier").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.dim)
                             }
                             attentionRow(item)
+                        }
+                        if model.presentationMode.showsAll && visibleItems.isEmpty && !showsTestRow {
+                            emptyQueueRow(model.emptyQueueReading)
                         }
                         if model.presentationMode.showsAll && model.needsGhosttySetup {
                             Text("Enable Ghostty controls in Steer’s controls window to open these sessions.")
