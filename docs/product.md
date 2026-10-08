@@ -104,6 +104,8 @@ Queue priority is: actionable notch approvals, question requests waiting for the
 
 A session already working when the companion launches, or before its first hook event arrives, is shown as working from its rollout when there is liveness evidence for it: the desktop app running for a desktop session, its tab in Ghostty or a Codex CLI process for a CLI session, and no session end recorded since the turn began. Discovery only ever adds a running row; a completion, request, question, or sound still needs its own evidence. See [session discovery](session-discovery.md).
 
+Codex's own background jobs are not the user's work and get no working row or completion. Agreed with the user on 2026-10-08 for memory consolidation, which Codex runs as a session of its own and was seen ending without a turn or session end. Steer recognises it by the prompt Codex itself submits; an approval or question from such a session still appears. See [desktop activity integration](desktop-live-integration.md#codex-background-jobs-2026-10-08).
+
 A working row shows the latest readable `PreToolUse` action until its matching `PostToolUse`, then the last submitted prompt. Shell commands are always labelled as shortened in the row and remain available in full behind the row's disclosure. Missing or malformed tool data adds no action. Tool activity changes presentation only: it never changes attention priority, acknowledgment, or an approval deadline. Actions are not restored across a companion restart; a new tool event must arrive first. The installed payload shapes are recorded in [tool activity evidence](evidence/tool-activity.json).
 
 Claude Code intake follows the same source-scoped attention model. For each configured Claude root,
@@ -128,7 +130,7 @@ is issue #82; mixed source presentation and counts in the existing notch are iss
 ## Agreed mixed-source notch behavior
 
 The notch presents Codex and Claude observations in one priority queue. Every row names its
-source explicitly. Codex actions say Open in Codex. Claude cards explain when returning to the exact
+source explicitly. Open in Codex and Open in Claude share one button label, "Open Session" (agreed 2026-10-08); the row already names the source. Claude cards explain when returning to the exact
 tab is unavailable and show Open in Claude only after Ghostty controls, a complete live Claude
 inventory, and one exact unsplit target are verified. Claude
 uses its supplied session name for display when available and otherwise shows a shortened session
@@ -210,7 +212,7 @@ Agreed with the user on 2026-10-07 (issue #114). This covers how herdr readiness
 **Settings.** The Terminals page shows a read-only herdr row under Ghostty, with no switch of its own. herdr works only while Ghostty controls are on. Until ADR 0009's gate opens (a Claude session has reported running in herdr, or a Codex session is live while herdr's default socket passes ADR 0009's trust check), the row says "No herdr sessions seen", Steer does not contact herdr, and the badge reads Not in use. The row says the same when herdr's server is not running and no Claude session reported a pane. Otherwise the badge reads Ready or Needs attention, and the row lists every problem that applies, one per line, because they are independent fixes:
 
 - herdr's Claude integration missing or not current while Steer has seen Claude in herdr: the exact `herdr integration install claude` command with a Copy button. Steer never runs it or edits herdr's configuration.
-- Ghostty cannot identify herdr's tab: update Ghostty. Steer decides this by checking that Ghostty exposes each terminal's `tty`, not by comparing version numbers. The message names a Ghostty version only once a release has been verified to provide it.
+- Ghostty cannot identify herdr's tab: update Ghostty. Steer decides this by checking that Ghostty exposes each terminal's `tty`, not by comparing version numbers. Without `tty`, Open is still offered while Ghostty has exactly one terminal and it is herdr's client (ADR 0011's sole-terminal rule); a second Ghostty tab, window, or quick terminal brings this guidance back. The message names a Ghostty version only once a release has been verified to provide it.
 - herdr unavailable (not found in the fixed locations, not running, unsupported protocol, untrusted socket, and similar): generic wording.
 
 **Notch.** Rows never label a session as running in herdr. When Open in Codex or Open in Claude is unavailable for a herdr session, the card replaces Open with one reason line and shows no disabled button, as Claude cards do. The internal reasons fall into four groups the user can act on:
@@ -218,7 +220,7 @@ Agreed with the user on 2026-10-07 (issue #114). This covers how herdr readiness
 - Ghostty too old: "Update Ghostty to return to herdr panes."
 - Integration missing or not current (Claude only; Codex needs no herdr integration): run `herdr integration install claude`.
 - Layout not supported (a split, several herdr clients, a named herdr session, a Ghostty tab in another window): "Steer returns only to a single-pane herdr tab in one Ghostty window."
-- Everything else: "Open in Codex (or Claude) is unavailable until Steer can verify the exact herdr pane."
+- Everything else: "Open Session is unavailable until Steer can verify the exact herdr pane."
 
 The exact internal reason goes to diagnostics, not to the card. Every action whose own route still works stays on the card while Open is unavailable: Dismiss, details, CLI approve or deny through the hook, and question options when ADR 0010's checks pass. If Open passes the scan but fails its recheck at click time, the same grouped reason appears in the navigation message, the item is retained, and the card swaps Open for the reason line on the next scan. When a Codex question cannot be relayed and Open is also unavailable, the card shows one line: "Answer this in Codex." followed by Open's grouped reason. Why the relay failed goes to diagnostics.
 

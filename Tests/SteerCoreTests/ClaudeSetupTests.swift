@@ -333,6 +333,19 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
         .replacingOccurrences(of: "PLACEHOLDER", with: installationID).utf8)
     try eventData.write(to: first.eventsDirectory.appendingPathComponent("event.json"))
     #expect(installer.status(roots: first, capabilities: capabilities) == .connected)
+    // Busy sessions keep thousands of tool records inside their one-hour retention (4,785 were seen
+    // live). Newer tool records past the old 4,096-entry cap do not hide the startup proof, where the
+    // root once flipped to unavailable.
+    let toolRecord = Data(#"{"hook_event_name":"PreToolUse","source":"steer-claude-hook-v1"}"#.utf8)
+    let toolCount = 4096
+    for index in 0..<toolCount {
+        try toolRecord.write(to: first.eventsDirectory.appendingPathComponent("tool-\(index).json"))
+    }
+    #expect(try FileManager.default.contentsOfDirectory(atPath: first.eventsDirectory.path).count > 4096)
+    #expect(installer.status(roots: first, capabilities: capabilities) == .connected)
+    for index in 0..<toolCount {
+        try FileManager.default.removeItem(at: first.eventsDirectory.appendingPathComponent("tool-\(index).json"))
+    }
 
     // Removing one exact hook is repairable; a foreign hook remains untouched.
     var changed = try settingsObject(Data(contentsOf: first.settingsURL))

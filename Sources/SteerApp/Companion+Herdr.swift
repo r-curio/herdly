@@ -48,7 +48,14 @@ extension Companion {
         HerdrBindingInputs.binding(for: session, liveness: herdrLiveness(of: session), hookRecords: herdr.hookRecords,
                                    ghosttyControlsEnabled: ghosttyEnabled, gateOpen: herdr.monitor.isGateOpen,
                                    outcome: herdr.scanOutcome, defaultSocketPath: herdr.defaultSocketPath,
-                                   codex: herdrCodexTitles())
+                                   codex: herdrCodexTitles(), claudeProcess: claudeSessionProcess(session))
+    }
+
+    /// The process Claude's latest inventories name for a Claude session (ADR 0008); unidentified
+    /// for Codex, which binds by ADR 0012 instead.
+    private func claudeSessionProcess(_ session: HerdrSessionKey) -> ClaudeSessionProcess {
+        guard session.agent == .claude else { return .unidentified }
+        return ClaudeSessionProcess(sessionID: session.sessionID, inventories: Array(claudeInventories.values))
     }
 
     /// Whether `pane` is the current binding of a live session, so a completion may yet arrive there
@@ -84,7 +91,8 @@ extension Companion {
                                                  ghosttyControlsEnabled: ghosttyEnabled,
                                                  gateOpen: herdr.monitor.isGateOpen, outcome: outcome,
                                                  defaultSocketPath: herdr.defaultSocketPath,
-                                                 codex: herdrCodexTitles(ghostty: ghostty))
+                                                 codex: herdrCodexTitles(ghostty: ghostty),
+                                                 claudeProcess: claudeSessionProcess(session))
         return (binding, outcome)
     }
 
