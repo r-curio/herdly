@@ -62,7 +62,9 @@ public enum SessionReplyPhase: Equatable, Sendable {
     case sending(String)
     /// The daemon accepted the request; waiting for Codex to record the turn.
     case sent(text: String, at: Double)
-    /// Codex started a turn on this session after the reply: the card's own confirmation.
+    /// Codex started a turn on this session after the reply. That turn start also acknowledges the
+    /// completion (`CodexReplyAcknowledgment`), so the card leaves the queue in the same scan; the
+    /// phase stays recorded so the card never sends again.
     case working(text: String)
     /// No turn started inside the confirmation window; the card says so and Steer never resends.
     case unconfirmed(text: String, sentAt: Double)

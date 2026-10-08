@@ -39,7 +39,7 @@ Enter in the field or the Send button sends once. The policy is re-applied again
 
 - **sending** — the request is in flight; the field and button are disabled.
 - **sent** — the daemon accepted it: "Sent “now add tests”. Waiting for Codex to record the turn."
-- **working** — Codex started a turn on the session: "Codex started a turn; this session is working again." This is the card's own confirmation, and a late turn still counts.
+- **working** — Codex started a turn on the session, and a late turn still counts. That turn start also acknowledges the completion (below), so the card leaves the queue in the same scan and the session's working row is the confirmation the user sees; the card's own sentence ("Codex started a turn; this session is working again.") is not shown. The phase stays recorded, so the card never sends again.
 - **unconfirmed** — ten seconds passed with no turn: "Check Codex; Steer will not resend."
 - **failed** — the daemon refused the request or the write never left: the reason, and "Steer will not retry."
 
@@ -53,13 +53,13 @@ Sending leaves the completion exactly where it was: a send Codex never takes ack
 
 Source inspection: the generated schema defines `TurnStartParams` and `UserInput` as used above. Nothing here has been run against a live daemon.
 
-Automated: `Tests/SteerCoreTests/SessionReplyTests.swift` covers the target for a loaded thread, each unavailable reason, the `turn/start` shape, send-once (in flight, after the daemon took it, after it failed), refusal for an absent completion and unusable text, a session blocked on a question counting as in a turn, the waiting-then-confirmed/unconfirmed rule, and that sending acknowledges nothing.
+Automated: `Tests/SteerCoreTests/SessionReplyTests.swift` covers the target for a loaded thread, each unavailable reason, the `turn/start` shape, send-once (in flight, after the daemon took it, after it failed), refusal for an absent completion and unusable text, a session blocked on a question counting as in a turn, the waiting-then-confirmed/unconfirmed rule, and that sending acknowledges nothing. `Tests/SteerCoreTests/CodexReplyAcknowledgmentTests.swift` covers the turn start acknowledging only that session's earlier completions from other turns, and the acknowledgment reaching the shared queue's card.
 
 Automated against the real binary: `scripts/daemon_lab.py` seeds a second, finished session beside the one holding the pending question, and records where each completion card's reply field would send, without sending anything — `daemon(thread: …)` behind a private socket, `unavailable(noDaemon)` with no socket (`docs/evidence/app-server-daemon-lab.json`).
 
 Live walkthrough, once a daemon is running (`codex app-server daemon start`):
 
 1. Finish a turn in a CLI session attached to the daemon and switch away. Expect: the completion card with a live reply field.
-2. Type "now add tests" and press Enter. Expect: "Waiting for Codex to record the turn", then the session shown as working, and that prompt as the next turn in Codex — in that session and no other.
-3. The completion stays on the queue until it is dismissed or its tab is visited.
+2. Type "now add tests" and press Enter. Expect: "Waiting for Codex to record the turn", then the card leaving the queue and the session shown as working, and that prompt as the next turn in Codex — in that session and no other.
+3. If Codex never records the turn, the completion stays on the queue until it is dismissed or its tab is visited.
 4. Stop the daemon and finish another turn. Expect: the field disabled and the card saying no daemon is running.
