@@ -115,11 +115,19 @@ components:
 
 **Creative North Star: "The Instrument in the Housing"**
 
-Steer's only designed surface is a notch panel: a single pure-black shape that grows out of the bottom of the macOS menu bar as if it were part of the camera housing. It is read the way a gauge is read. Three readings sit on one line: a green 8-bit sprite that steps while Codex is working, the name of the task in a gray monospaced face, and a dark-gray count of items that need the user. Everything else lives one hover away and is drawn from the same three materials: black ground, gray type in a single monospaced family, and dark wells for anything pressable.
+Steer has two designed surfaces. The notch panel, described in most of this document, is the instrument. The Settings window, described in its own section near the end, is a native macOS window where the user tunes that instrument. The notch panel is a single pure-black shape that grows out of the bottom of the macOS menu bar as if it were part of the camera housing. It is read the way a gauge is read. Three readings sit on one line: a green 8-bit sprite that steps while Codex is working, the name of the task in a gray monospaced face, and a dark-gray count of items that need the user. Everything else lives one hover away and is drawn from the same three materials: black ground, gray type in a single monospaced family, and dark wells for anything pressable.
 
-The world is deliberately austere. Color belongs to the sprites alone: each session has one of six sprite colors, chosen from its identifier so it stays with the session. There is one typeface, and it is the system monospaced face at 10 to 12 points. Depth is not a shadow; the panel has no window shadow at all, because a shadow rim would outline the shape and break its fusion with the menu bar. The only edge inside the panel is a one-point seam at eight percent white between the strip and the open queue. Motion is a reading, not an ornament: the sprite's two-frame step is the working signal, the frame resize is a short ease-out, and Reduce Motion replaces the step with a slow breathe and removes the resize animation entirely.
+The world is deliberately austere. Color belongs to each session's mark alone: each session has one of six colors, chosen from its identifier so it stays with the session, and its mark is the sprite unless the user picks another indicator style. There is one typeface, and it is the system monospaced face at 10 to 12 points. Depth is not a shadow; the panel has no window shadow at all, because a shadow rim would outline the shape and break its fusion with the menu bar. The only edge inside the panel is a one-point seam at eight percent white between the strip and the open queue. Motion is a reading, not an ornament: the sprite's two-frame step is the working signal, the frame resize is a short ease-out, and Reduce Motion replaces the step with a slow breathe and removes the resize animation entirely.
 
 This is not the glossy dynamic island. It refuses glow, gradient, glass, the pulsing dot, and the spring bounce. It also refuses pictorial chrome: no glyph icons, no logo, no wordmark. The sprite is the one picture in the system.
+
+The instrument is configurable within those materials. In Settings the user chooses:
+- what the strip shows: the left wing, a center label on external displays, and the usage bars;
+- the session indicator style;
+- how the open queue is sorted and grouped;
+- when completions move to "Earlier".
+
+The MacBook notch and external displays each keep their own choices. Every option is drawn from the same black ground, gray ladder, wells, and session colors. An option may change what is shown, but never adds a new material: no glow, no fade-pulse, no gradient. The defaults are the instrument described here: sprites and count, sprite indicator, compact usage, needs-attention order, no grouping, Earlier after 5 minutes.
 
 **Key Characteristics:**
 - One black shape fused to the menu bar: flat top, concave 8pt ears, deep 18pt bottom radii, no window shadow
@@ -150,7 +158,7 @@ An achromatic ladder on pure black with a single green, reserved for the sprite,
 - **Seam** (`{colors.seam}`): a one-point line between the strip and the open queue. White at eight percent is the only edge drawn inside the panel.
 
 ### Named Rules
-**The One Color Rule.** A session's colour belongs to its sprite, and the sprite lends it to exactly one other place: the answer options of that session's question, where the digit is drawn in the session's highlight and the option the user chose fills with the session's body colour under black text. The one exception is the usage bars in the strip: each bar's fill carries a fixed source hue, Codex blue (#3b82f6) and Claude orange (#d97757), so the two subscriptions read apart at a glance; their captions and percents stay gray. No badge, title, ring, or other control carries hue; every other state is spoken through motion and gray. A question row is headed by its session's standing sprite so the colour on the options reads as "this session", never as a category.
+**The One Color Rule.** A session's colour belongs to its mark: the sprite, or the dot, bar, or tint the user chose instead (see Session indicator styles). The mark lends it to exactly one other place: the answer options of that session's question, where the digit is drawn in the session's highlight and the option the user chose fills with the session's body colour under black text. The one exception is the usage bars in the strip: each bar's fill carries a fixed source hue, Codex blue (#3b82f6) and Claude orange (#d97757), so the two subscriptions read apart at a glance; their captions and percents stay gray. No badge, title, ring, or other control carries hue; every other state is spoken through motion and gray. A question row is headed by its session's standing sprite so the colour on the options reads as "this session", never as a category.
 
 **The Gray Ladder Rule.** Emphasis moves down four fixed steps: ink for what is read first, text for what is read, dim for what is there if needed, well for what is pressable. Do not add a fifth gray.
 
@@ -184,6 +192,12 @@ Content is inset 16pt from each side of the frame (ear plus 8pt). In the strip t
 
 No breakpoints and no grid beyond this: the panel is a single fixed-width column on every display.
 
+**Display profiles.** Strip and queue options are stored separately for two profiles:
+- **MacBook notch:** any display with a camera housing.
+- **External display:** any display without one.
+
+The panel uses the profile of the display it is placed on, and switches when it moves to the other kind. Both profiles start with the same defaults.
+
 ## Elevation & Depth
 
 Flat, by construction. The window carries no shadow (`hasShadow = false`) because a shadow rim would outline the panel and undo its fusion with the menu bar; the black shape's edge is read only against the wallpaper below. Inside the panel, depth is tonal and minimal: wells (#2a2a2a) rise from the black ground for pressable things, and a single one-point seam at eight percent white separates the strip from the queue. There are no borders, no glass, no blur, no gradient, and no scroll bar: the open queue scrolls with its indicator hidden.
@@ -216,17 +230,47 @@ The count of items to check, hidden at zero.
 - **State:** none. It counts; it does not blink or change color.
 
 ### Sprite
-The one picture in the system and the only working signal.
+The one picture in the system and the default working signal. The strip always uses sprites when its left wing shows them; the open queue uses the user's chosen indicator style.
 - **Form:** a 6-column by 4-row bitmap at 2pt per cell (12x8pt). Body cells in sprite green, ear and eye cells in sprite highlight.
 - **Working:** alternates two frames every 0.5 s (the feet step). Under Reduce Motion it holds frame one and breathes in opacity between 50% and 100% on a 2.4 s cycle.
 - **Idle:** frame one, still. Hidden from accessibility; the strip's label speaks for it.
 - **Unlit:** the mark of an empty notch, shown while no session is listed. Frame one with every cell in well gray, so the eyes close into the body; still, with no step or breathe, and no session's color, so it never reads as a session. It sits where the first sprite would.
 - **Placement:** leads the strip; leads a "working" row title in the open queue (offset up 1pt to sit on the baseline).
 
+### Session indicator styles
+The mark that leads each row in the open queue. The user picks one style for each display profile. Every style uses the session's colour and follows the sprite's timing: a two-step change every 0.5 s while working, never a fade or pulse.
+- **Sprite (default):** described above.
+- **Dot:** a 6pt circle centred in the sprite's 12pt slot.
+  - Working: steps between body and highlight every 0.5 s.
+  - Idle: holds the body colour.
+  - Unlit: well gray.
+- **Bar:** a 3x12pt rounded bar at the row's leading edge, in the same slot, with the same states as the dot.
+- **Tint:** the row header sits on a 5pt continuous well filled with the session's body colour at 18%.
+  - Working: the tint steps to 26% and back every 0.5 s.
+  - Idle: holds at 18%.
+  - Nothing else in the row changes colour.
+- **Reduce Motion:** the sprite breathes as it does today. Dot, bar, and tint hold their working value still.
+- **Slot:** every style occupies the same 12pt leading slot, or the row header for tint, so titles stay aligned whichever style is chosen.
+
 ### Strip
 The collapsed reading and the header of the open panel.
 - **Layout:** 40pt tall; sprite, then task name 18pt to its right in 12pt regular text gray (one line, tail-truncated), then the badge at the far right.
+- **Left wing** (user option):
+  - **Sprites and count (default):** as described in Layout.
+  - **Count only:** keeps the badge and drops the sprites and the "+N" overflow. While any session is working, one stepping sprite (the first working session's) sits before the badge, so the working signal is never lost.
+  - **None:** leaves the wing empty, so the strip is a quiet black shape. Hovering still opens the queue, and a new item still spotlights.
+- **Center label** (external displays only): Task name (the top-priority item's task name), Session name, or Off.
+  - It is drawn in 12pt regular text gray, one line, tail-truncated, centred between the wings.
+  - On a display with a camera housing it is never drawn, because the housing covers the space.
+- **Usage bars** (user option): Compact (default) or Hidden. Hidden removes the readouts and shrinks the right wing to its minimum width.
 - **Interaction:** the whole strip is a plain button that expands the queue; keyboard focus draws the ink ring around it (6pt corners, 1.5pt, 6pt outside horizontally).
+
+### Group headings
+With grouping on (State, Agent, or Project), the open queue inserts a heading above each group.
+- **Text:** the group name ("Needs you", "Done", "Working"; the agent name; or the project folder's last path component).
+- **Style:** 10pt caption, dim, 6pt above the group's first row. No rule or line is drawn.
+- **Sorting:** groups keep queue priority, so a group holding a live approval comes first. Rows sort inside their group.
+- **"Earlier":** stays a heading inside whichever group holds the older completions.
 
 ### Cards / Containers
 Rows are not cards. There is no card surface, border, or shadow; a row is a left-aligned stack on the black ground, separated from its neighbors by 14pt of whitespace.
@@ -253,7 +297,7 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 - **Do** show a 1.5pt ink ring at 6pt continuous corners on any control with keyboard focus.
 - **Do** wrap commands and reasons in full; align the detail table on a fixed 58pt label column.
 - **Do** animate frame changes with a 0.18 s ease-out and honor Reduce Motion by dropping the animation and switching the sprite to its breathe.
-- **Do** keep the sprite as the sole working signal: two frames at 0.5 s while working, still when idle, unlit when no session is listed.
+- **Do** keep a working signal visible in every configuration: the sprite steps at 0.5 s by default, and dot, bar, and tint step on the same beat. A row is still when idle, and the mark is unlit when no session is listed.
 
 ### Don't:
 - **Don't** put green anywhere but the sprite; no green badges, rings, titles, or status dots.
@@ -263,4 +307,48 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 - **Don't** add glyph icons, a logo, or a wordmark to the panel; controls are text-only wells and the sprite is the only picture.
 - **Don't** truncate a command, reason, or detail with an ellipsis inside the open queue; only the strip name is one line.
 - **Don't** draw rules or dividers between rows; the one seam under the strip is the only line in the panel.
-- **Don't** document or reuse the developer controls window as a designed surface; it is outside this system.
+- **Don't** let a user option introduce a new material: options choose among the existing ground, grays, wells, and session colours; none fades, pulses, glows, or adds a typeface.
+- **Don't** bring the notch's black monospaced materials into the Settings window, or native window chrome into the notch.
+
+## Settings Window
+
+The Settings window follows the native macOS conventions measured on macOS 26 (Tahoe). It does not use the notch's materials. Its reference mockup is the "Steer Settings" Paper file.
+
+- **Opening:**
+  - From "Settings…" (⌘,) in the app menu, and from "Show Steer controls" in the menu bar item.
+  - The window title is the name of the selected pane, and the window reopens on the last pane viewed.
+- **Structure:**
+  - The window opens at 820x780pt, with a minimum of 720x600.
+  - A fixed 210pt sidebar panel, inset 8pt, runs the full window height with 18pt continuous corners. The window buttons sit inside its top edge, and it never collapses.
+  - The title bar is an empty unified toolbar 52pt tall, so the buttons line up with each pane's 15pt semibold title row.
+  - Grouped sections fill the detail area.
+  - Sidebar panes in labeled groups: "Notch" (General, Notch, Notifications), "Connections" (Agents, Terminals), then About on its own. There is no sidebar collapse button.
+  - Each sidebar row is 32pt tall with a 20pt colour tile holding a white SF Symbol: gray gear, black sprite, red bell, purple sparkles, dark terminal, blue info.
+  - The Notch tile shows the green sprite, the one place the notch's colour appears in the window.
+  - The sidebar footer shows the "N working · N to check" status in 11pt secondary text.
+- **Forms:**
+  - `.formStyle(.grouped)` with system fills. Sections have 12pt continuous corners; rows are 36pt, or 40pt with a segmented control. Separators are inset 10pt.
+  - Section headers are 13pt bold. Explanations go in footers, 11pt secondary text.
+- **Controls:**
+  - Mini switches for booleans, menu pickers for lists, and segmented pickers for two or three short choices.
+  - Push buttons for actions. Destructive actions sit alone in the last section, end in an ellipsis, use the destructive role, and confirm first.
+- **Colours:**
+  - **Dark mode:** a near-black tint closer to the notch. The window and pages are 7.5% white (#131313) and sections are 12.5% white (#202020).
+  - **Light mode:** keeps the system values (white window, #F9F9F9 sections).
+- **Behaviour:** every change applies immediately. There is no Apply, OK, or Cancel button.
+- **Motion:** every click answers within half a second.
+  - Pages crossfade and rise 10pt as you switch panes.
+  - The preview, indicator tiles, sound list, and disabled rows ease to their new state over 0.4 s.
+  - Pressed tiles and rows dip to 97%.
+  - Reduce Motion keeps only a 0.15 s crossfade with no movement or scaling.
+  - Unlike the notch, the Settings window may use the system's smooth easing.
+- **Sound:** switching panes, segments, or indicator tiles plays a soft click (the system "Tink" at 30% volume). It follows the macOS "Play user interface sound effects" setting. The notch never clicks.
+- **Notch pane:**
+  - A segmented "MacBook notch | External display" picker in the toolbar chooses which profile is being edited.
+  - A live preview of the strip on a desktop backdrop sits above the sections and redraws as options change.
+  - Options that do not apply to the selected profile, such as Center label on the MacBook notch, are shown disabled with a footer saying why.
+- **Indicator picker:** four tiles in a row, Sprite, Dot, Bar, and Tint. Each tile previews two rows on black, one working and one idle. The selected tile has a 2pt accent ring with a 2pt gap.
+- **Sound picker:**
+  - A list of the macOS system sounds, with a check mark for the selection and a play button to preview it.
+  - Glass is marked Default.
+  - Choosing a sound plays it once.

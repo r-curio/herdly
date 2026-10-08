@@ -548,3 +548,14 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
                                        sevenDay: ClaudeUsageWindow(usedPercentage: 5, resetsAt: 1_000), observedAt: 1)
     #expect(UsageStripReadouts.make(codex: nil, claude: sevenOnly).map(\.caption) == ["7d", nil])
 }
+
+@Test func centerLabelWidensOnlyAStripWithoutAHousing() {
+    let label = NotchPlacement.centerLabelWidth
+
+    #expect(NotchPlacement.strip(on: external, expanded: false, centerLabel: label)
+        == StripLayout(leading: 112, gap: 160, trailing: 60, height: 25))
+    #expect(NotchPlacement.strip(on: builtIn, expanded: false, centerLabel: label)
+        == NotchPlacement.strip(on: builtIn, expanded: false))
+    let framed = NotchPlacement.frame(on: external, expanded: false, rows: 0, extraRows: false, centerLabel: label)
+    #expect(framed.width == 332 + 2 * NotchPlacement.earRadius && framed.midX == external.frame.midX)
+}

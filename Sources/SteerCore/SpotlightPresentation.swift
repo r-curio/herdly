@@ -45,7 +45,11 @@ public struct NotchPresentationController: Equatable, Sendable {
 
     public init() {}
     public mutating func present(_ item: AttentionItemID, now: Double) { spotlight.present(item, now: now) }
-    public mutating func present(_ item: AgentAttentionID, now: Double) { agentSpotlight.present(item, now: now) }
+    /// With `holdUntilInteraction`, the card stays open until the user interacts with it, then closes once
+    /// that interaction ends. Approval deadlines are separate and never move.
+    public mutating func present(_ item: AgentAttentionID, now: Double, holdUntilInteraction: Bool = false) {
+        agentSpotlight.present(item, now: now, holdUntilInteraction: holdUntilInteraction)
+    }
     public func agentSpotlightIsActive(interacting: Bool, now: Double) -> Bool {
         agentSpotlight.isActive(interacting: interacting, now: now)
     }
@@ -65,13 +69,15 @@ private struct AgentSpotlight: Equatable, Sendable {
     private var item: AgentAttentionID?
     private var until: Double = 0
 
-    mutating func present(_ item: AgentAttentionID, now: Double) {
+    mutating func present(_ item: AgentAttentionID, now: Double, holdUntilInteraction: Bool) {
         self.item = item
-        until = now + Spotlight.duration
+        until = holdUntilInteraction ? .infinity : now + Spotlight.duration
     }
 
     mutating func update(interacting: Bool, now: Double) -> AgentAttentionID? {
         guard let item else { return nil }
+        // A held card ends with the user's first interaction rather than at a time.
+        if interacting && until == .infinity { until = now }
         if interacting || now < until { return item }
         clear()
         return nil

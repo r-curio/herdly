@@ -45,12 +45,12 @@ Confirmed capabilities and rules are detailed in the sections below and in the [
 
 Terminology is fixed by the glossary: companion, Codex surface, notch, Codex session, approval request, Open in Codex, attention queue, acknowledged completion, uncertain completion, resolution evidence.
 
-Undecided product facts: the completion sound; a global hotkey for keyboard-only entry to the panel; exact desktop conversation focus; Ghostty split panes; the items listed under Open decisions below.
+Undecided product facts: a global hotkey for keyboard-only entry to the panel; exact desktop conversation focus; Ghostty split panes; the items listed under Open decisions below.
 
 ## Brand Commitments
 
 - The name is Steer and is final.
-- No icon, logo, wordmark, or completion sound exists yet. Future work must produce them rather than assume assets.
+- No icon, logo, or wordmark exists yet; the completion sound is a user-chosen macOS system sound. Future work must produce them rather than assume assets.
 - Distribution is a personal ad-hoc signed build from `scripts/build-app.sh`. No App Store, notarization, or public download is planned.
 
 ## Evidence on Hand
@@ -101,6 +101,8 @@ Use one shared notch for multiple Codex sessions. Its compact state is a black s
 Each approval request has its own 30-second handoff timer starting when the companion receives the request, including while it waits behind other requests. Opening the queue or reaching the request does not restart or extend its timer. Expired requests retain only Open in Codex while permission is still needed.
 
 Queue priority is: actionable notch approvals, question requests waiting for the user's answer, requests handed back to Codex that still need an answer, unknown Claude waiting sessions, unacknowledged completions, then running tasks. Within each group, order by original arrival time, oldest first. A concrete approval or question for a Claude session replaces its generic waiting row so the same session is not counted twice. Expiration moves a request into the handed-back group without restarting its timer.
+
+This priority order is the default, "Sort by: Needs attention". The user can choose "Sort by: Last update" in Steer's settings instead. Even then, actionable notch approvals and question requests waiting for the user's answer stay pinned at the top in the default order, so a request can't drop below newer activity while its timer runs. Every other row is ordered by its most recent event, newest first. The sort setting changes only the order of the open queue. It doesn't change which item the strip names, what is spotlit, the counts, or any approval deadline.
 
 A session already working when the companion launches, or before its first hook event arrives, is shown as working from its rollout when there is liveness evidence for it: the desktop app running for a desktop session, its tab in Ghostty or a Codex CLI process for a CLI session, and no session end recorded since the turn began. Discovery only ever adds a running row; a completion, request, question, or sound still needs its own evidence. See [session discovery](session-discovery.md).
 
@@ -158,7 +160,7 @@ unverified until observed during use; a scripted operator pass is optional.
 
 Each fresh Claude question or outcome can sound and spotlight once for three seconds. Repeated
 observations, discovery, and restart recovery do not replay either presentation. An outcome that
-arrived before Steer restarted is uncertain and silent. After five minutes, an unacknowledged
+arrived before Steer restarted is uncertain and silent. After the Earlier delay (five minutes by default), an unacknowledged
 outcome moves into Earlier while retaining its to-check count and Dismiss action; Codex retains Open
 in Codex, while Claude keeps the unavailable return explanation. This is
 presentation decay, not deletion or acknowledgment. Claude has no trustworthy read receipt; only
@@ -195,7 +197,17 @@ For desktop completions, present the notification while outside the Codex app; f
 
 Agreed on 2026-09-14 (issue #46): a completion card carries a single-line reply field with a Send action, so the user can read a result and send a follow-up prompt to that session without switching applications. Enter sends; Escape still collapses the panel without dismissing the completion. The prompt starts a new turn on that exact thread through the app-server daemon, on the same socket as question answers; the Ghostty relay carries one key and nothing more (ADR 0006), so a session the daemon does not hold has no reply path and the field is disabled with the reason on the card. A session Codex is mid-turn for, including one blocked on a question, is refused the same way: the target is ambiguous. The socket is proven, `turn/start` is not — the capability is claimed only once a live run records a reply Codex took. One card sends one reply: after sending, the card says what was sent and that Steer is waiting for Codex to record the turn, and Steer never sends on a timeout or error and never resends. Sending does not acknowledge the completion; the turn start it causes does (the reply rule agreed on 2026-10-08), and the session then shows as working. Source: [session replies](session-replies.md).
 
-Play a short completion sound as that card opens. Provide a mute control. With Reduce Motion on, the sprite breathes instead of stepping and the panel resizes without animation. Reopening the queue does not replay the sound. The specific sound is not yet selected.
+Play a short completion sound as that card opens. Provide a mute control. With Reduce Motion on, the sprite breathes instead of stepping and the panel resizes without animation. Reopening the queue does not replay the sound.
+
+Notch customization was agreed on 2026-10-09. Settings offers the following options:
+- **Completion sound:** any macOS system sound, Glass by default, with a preview button (issue #57).
+- **Earlier delay:** 2, 5 (default), 10 or 20 minutes, or Never. Completions move into Earlier after this delay. Moving is still presentation decay, not acknowledgment.
+- **Keep new cards open until I act:** off by default. When on, a spotlight card stays open until the user interacts with it or opens the queue, instead of closing after three seconds. It never extends an approval's 30-second deadline.
+- **Haptic feedback when the pointer enters the strip:** off by default.
+- **Strip and queue appearance:** the left wing, a center label on external displays, usage bars, the session indicator style, and queue grouping. Each is kept separately for the MacBook notch and for external displays (see [DESIGN.md](../DESIGN.md)).
+- **Queue sort:** the "Sort by" rule above.
+
+None of these options changes identity, targeting, acknowledgment, or approval rules.
 
 The spotlight is intentionally distilled for quick understanding and action. The existing title and session label identify what happened and where; the body adds only useful context that is not already visible. An approval request leads with Codex's ask (its reason, or a description or justification Codex put in its tool input; never one Steer writes), then the action and full command, then the task and working directory, then its status: a live request shows its deadline; a handed-back request says it was handed back with no decision and how long ago it was asked, since Steer does not record the hand-back time. The raw request stays behind a disclosure, shown only when it holds something the card does not already show; the home folder may read as `~` while the full path stays available. It shows the notification's prompt or question, current user-facing status, and every valid action, but omits technical identifiers, transport routes, and duplicate state or source labels. A fresh completion also shows the exact turn's original prompt when recorded and a plain-text final-response preview capped at five lines or 600 characters. These conversation excerpts exist only in process memory; they are not written to Steer's snapshot. A restored completion says that its preview is unavailable after restart. The full queue remains compact.
 
