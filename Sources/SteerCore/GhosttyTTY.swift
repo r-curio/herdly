@@ -59,7 +59,9 @@ private final class TerminalTTYScan: NSObject, XMLParserDelegate {
 public enum GhosttyTTYJoin: Equatable, Sendable {
     /// Exactly one terminal has the client's TTY, alone in its tab, in the current Ghostty window.
     case matched(GhosttyTarget)
-    /// The Ghostty bundle does not declare `tty`, or the inventory was taken without it.
+    /// The Ghostty bundle does not declare `tty`, or the inventory was taken without it, and the
+    /// sole-terminal rule does not hold (Ghostty has more than one terminal surface, or its surfaces
+    /// could not be read).
     case ttyUnsupported
     /// The inventory is not a complete fresh snapshot (status other than ok, or an empty identifier).
     case inventoryUnavailable
@@ -90,8 +92,9 @@ public enum GhosttyTTYMatch {
 
     /// Joins `clientTTY` (from `lsof`) to the single Ghostty terminal reporting the same TTY in
     /// `snapshot`, which must be a fresh inventory taken with `tty` when `support` is supported.
+    /// Without `tty` (Ghostty 1.3.1) the sole-terminal rule applies instead; see `soleTerminalJoin`.
     public static func join(clientTTY: String, support: GhosttyTTYSupport, snapshot: GhosttySnapshot) -> GhosttyTTYJoin {
-        guard support == .supported else { return .ttyUnsupported }
+        guard support == .supported else { return soleTerminalJoin(clientTTY: clientTTY, snapshot: snapshot) }
         guard snapshot.status == "ok" else { return .inventoryUnavailable }
         guard let client = normalizedTTY(clientTTY) else { return .invalidClientTTY }
         var matches: [(target: GhosttyTarget, terminalsInTab: Int)] = []
@@ -119,5 +122,41 @@ public enum GhosttyTTYMatch {
         guard match.terminalsInTab == 1 else { return .split }
         guard snapshot.front_window_id == match.target.window_id else { return .otherWindow }
         return .matched(match.target)
+    }
+
+    /// ADR 0011's sole-terminal rule for a Ghostty without `tty`. The join holds only when Ghostty
+    /// owns exactly one terminal surface, by both of two independent readings, and that surface's
+    /// TTY is the herdr client's:
+    /// - Ghostty's child processes (`surface_ttys`) hold exactly one TTY, equal to `clientTTY`. This
+    ///   counts every surface, including the quick terminal, which scripting may not list.
+    /// - The scripting inventory lists exactly one terminal, alone in its tab, in the front window.
+    /// More than one surface, or surfaces that could not be read, is `ttyUnsupported`: only a Ghostty
+    /// with `tty` can tell them apart.
+    static func soleTerminalJoin(clientTTY: String, snapshot: GhosttySnapshot) -> GhosttyTTYJoin {
+        guard snapshot.status == "ok" else { return .inventoryUnavailable }
+        guard let client = normalizedTTY(clientTTY) else { return .invalidClientTTY }
+        guard let raw = snapshot.surface_ttys else { return .ttyUnsupported }
+        let surfaces = raw.map(normalizedTTY)
+        guard !surfaces.contains(nil) else { return .emptyValue }
+        guard Set(surfaces.compactMap { $0 }).count == 1, surfaces.count == 1 else { return .ttyUnsupported }
+        guard surfaces[0] == client else { return .noMatch }
+        var terminals: [(target: GhosttyTarget, terminalsInTab: Int)] = []
+        for window in snapshot.windows {
+            guard !window.id.isEmpty else { return .inventoryUnavailable }
+            for tab in window.tabs {
+                guard !tab.id.isEmpty else { return .inventoryUnavailable }
+                for terminal in tab.terminals {
+                    guard !terminal.id.isEmpty else { return .inventoryUnavailable }
+                    terminals.append((GhosttyTarget(window_id: window.id, tab_id: tab.id, terminal_id: terminal.id),
+                                      tab.terminals.count))
+                }
+            }
+        }
+        // One surface by process but not exactly one scripted terminal: the two readings disagree.
+        guard terminals.count == 1 else { return .ttyUnsupported }
+        let only = terminals[0]
+        guard only.terminalsInTab == 1 else { return .split }
+        guard snapshot.front_window_id == only.target.window_id else { return .otherWindow }
+        return .matched(only.target)
     }
 }

@@ -62,7 +62,9 @@ public enum SessionReplyPhase: Equatable, Sendable {
     case sending(String)
     /// The daemon accepted the request; waiting for Codex to record the turn.
     case sent(text: String, at: Double)
-    /// Codex started a turn on this session after the reply: the card's own confirmation.
+    /// Codex started a turn on this session after the reply. That turn start also acknowledges the
+    /// completion (`CodexReplyAcknowledgment`), so the card usually leaves the queue in the same scan
+    /// and its progress is pruned; a further send is then refused as `notInQueue`.
     case working(text: String)
     /// No turn started inside the confirmation window; the card says so and Steer never resends.
     case unconfirmed(text: String, sentAt: Double)
@@ -208,7 +210,8 @@ public enum SessionReplyRequest {
 }
 
 /// One Send, decided in one place: what to do and the params to write, if any. Sending changes
-/// nothing about the completion itself, which is acknowledged only by dismissal or a verified visit.
+/// nothing about the completion itself; the turn start Codex records for it acknowledges
+/// (`CodexReplyAcknowledgment`).
 public enum SessionReplySending {
     public enum Outcome: Equatable, Sendable {
         case refused(SessionReplyPolicy.Rejection)

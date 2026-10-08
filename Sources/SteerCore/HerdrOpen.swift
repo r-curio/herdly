@@ -28,8 +28,9 @@ public enum HerdrOpenStep: Int, CaseIterable, Comparable, Sendable {
 /// diagnostics and for grouping on the card (docs/product.md, "Agreed herdr presentation").
 public enum HerdrOpenFailure: Error, Equatable, Sendable {
     // Step 1: revalidate.
-    /// The Ghostty bundle does not declare a terminal `tty` (Ghostty 1.3.1). Checked before any herdr
-    /// request, so none is sent.
+    /// The Ghostty bundle does not declare a terminal `tty` (Ghostty 1.3.1). No longer produced by
+    /// `HerdrOpen.plan`, which applies the sole-terminal rule instead and reports its failure as
+    /// `ghosttyTab(.ttyUnsupported)`; kept so recorded failures and the card mapping stay total.
     case ghosttyTTYUnsupported
     /// The fresh scan no longer puts the session in herdr: for Claude Code its newest hook event
     /// records no pane, for Codex no pane shows its title (ADR 0012). Open does not fall back to the
@@ -129,7 +130,6 @@ public enum HerdrOpen {
     /// - Parameter snapshotTakenAt: when the herdr scan behind `binding` started, Unix seconds.
     public static func plan(support: GhosttyTTYSupport, binding: HerdrSessionBinding, outcome: HerdrScanOutcome?,
                             ghostty: GhosttySnapshot?, snapshotTakenAt: Double) -> Result<HerdrOpenPlan, HerdrOpenFailure> {
-        guard support == .supported else { return .failure(.ghosttyTTYUnsupported) }
         if let failure = herdrFailure(binding: binding, outcome: outcome) { return .failure(failure) }
         guard let pane = binding.target, let client = attachedClient(outcome), let tty = client.tty else {
             return .failure(.clientTTYUnknown)
@@ -206,8 +206,8 @@ public enum HerdrOpen {
 public struct HerdrOpenEffects {
     /// Unix seconds, read immediately before the pre-Open herdr scan.
     public var now: @MainActor () -> Double
-    /// Whether the installed Ghostty declares a terminal `tty`. Read first: when unsupported, no
-    /// herdr request (not even a scan) is made.
+    /// Whether the installed Ghostty declares a terminal `tty`. Without it the Ghostty half of the
+    /// join uses the sole-terminal rule (`GhosttyTTYMatch.soleTerminalJoin`).
     public var ttySupport: @MainActor () async -> GhosttyTTYSupport
     /// A fresh herdr scan and the session's binding against it.
     public var revalidate: @MainActor () async -> (binding: HerdrSessionBinding, outcome: HerdrScanOutcome?)
@@ -215,7 +215,8 @@ public struct HerdrOpenEffects {
     public var ghosttySnapshot: @MainActor () async -> GhosttySnapshot?
     /// `agent.focus` on the pane ID, sent once.
     public var focus: @MainActor (String) async -> Result<HerdrReply, HerdrUnavailableReason>
-    /// Selects the target tab after rechecking its TTY (normalized `/dev/ttysNNN`) and activates Ghostty.
+    /// Selects the target tab after rechecking its TTY (normalized `/dev/ttysNNN`), or without `tty`
+    /// the sole-terminal rule, and activates Ghostty.
     public var select: @MainActor (GhosttyTarget, String) async -> Bool
 
     public init(now: @escaping @MainActor () -> Double,
@@ -239,7 +240,6 @@ public enum HerdrOpenSequence {
     @MainActor
     public static func run(_ effects: HerdrOpenEffects) async -> HerdrOpenResult {
         let support = await effects.ttySupport()
-        guard support == .supported else { return .unavailable(.ghosttyTTYUnsupported) }
         let takenAt = effects.now()
         let fresh = await effects.revalidate()
         if let failure = HerdrOpen.herdrFailure(binding: fresh.binding, outcome: fresh.outcome) {
@@ -331,15 +331,34 @@ public enum HerdrOpenAcknowledgment {
         ghostty: GhosttySnapshot?,
         ghosttyTakenAt: Double
     ) -> Set<ID> {
-        guard let previous, let current, let ghostty, ghosttyTakenAt.isFinite,
+        guard let current, let ghostty else { return [] }
+        return manualVisit(completions, boundPaneID: boundPaneID, previous: previous, current: current,
+                           ghosttyShowsVisit: ghosttyShowsVisit(clientTTY: current.clientTTY, support: support,
+                                                                ghostty: ghostty),
+                           ghosttyTakenAt: ghosttyTakenAt)
+    }
+
+    /// The same rule with the Ghostty half already decided: `ghosttyShowsVisit` must be
+    /// `ghosttyShowsVisit(clientTTY:support:ghostty:)` for `current`'s client against the inventory taken
+    /// at `ghosttyTakenAt` (false without one), so one inventory serves every session in the pane.
+    public static func manualVisit<ID>(
+        _ completions: [HerdrCompletionCandidate<ID>],
+        boundPaneID: String,
+        previous: HerdrFocusObservation?,
+        current: HerdrFocusObservation,
+        ghosttyShowsVisit: Bool,
+        ghosttyTakenAt: Double
+    ) -> Set<ID> {
+        guard let previous, ghosttyShowsVisit, ghosttyTakenAt.isFinite,
               previous.takenAt < current.takenAt, current.takenAt <= ghosttyTakenAt,
-              previous.focusedPaneID != boundPaneID, current.focusedPaneID == boundPaneID,
-              ghosttyShowsVisit(clientTTY: current.clientTTY, support: support, ghostty: ghostty) else { return [] }
+              previous.focusedPaneID != boundPaneID, current.focusedPaneID == boundPaneID else { return [] }
         return Set(completions.filter { $0.arrivedAt.isFinite && $0.arrivedAt < previous.takenAt }.map(\.id))
     }
 
-    private static func ghosttyShowsVisit(clientTTY: String?, support: GhosttyTTYSupport,
-                                          ghostty: GhosttySnapshot) -> Bool {
+    /// Whether a Ghostty inventory shows the herdr client's tab to the user: with `tty`, the
+    /// TTY-matched tab selected with Ghostty frontmost; without it (interim, issue #155), Ghostty frontmost.
+    public static func ghosttyShowsVisit(clientTTY: String?, support: GhosttyTTYSupport,
+                                         ghostty: GhosttySnapshot) -> Bool {
         switch support {
         case .supported:
             guard let clientTTY,
@@ -350,5 +369,68 @@ public enum HerdrOpenAcknowledgment {
             // `selected` is present only while Ghostty is frontmost (Ghostty.js).
             return ghostty.selected != nil
         }
+    }
+}
+
+/// The dwell rule, agreed with the user on 2026-10-08: a completion that arrives while its bound pane is
+/// already in front is acknowledged once that pane has stayed visible for `required` seconds after the
+/// completion arrived. Visible means herdr reports the pane focused with exactly one Ghostty-hosted
+/// client and a Ghostty inventory shows that client's tab (`HerdrOpenAcknowledgment.ghosttyShowsVisit`).
+/// Visibility is sampled per scan, so a switch away and back between two scans goes unseen; a hidden
+/// or different pane, a failed scan, or a gap longer than `maxGap` between visible scans (sleep, or
+/// scans skipped while a check was slow) restarts the run. A completion that arrived before the run
+/// began is left to the manual-visit rule and dismissal. Steer cannot tell whether the user is looking
+/// at the screen; the user accepted that an unattended pane acknowledges.
+public struct HerdrDwell: Equatable, Sendable {
+    public static let required: Double = 5
+    public static let maxGap: Double = 5
+
+    /// The pane visible on every scan since `since`, or nil when no run is in progress.
+    public private(set) var paneID: String?
+    public private(set) var since: Double = 0
+    private var lastSeenAt: Double = 0
+    /// The scan time of the latest reset. An observation taken at or before it predates the scan
+    /// that ended the run, such as a check still in flight then, and is ignored. A clock set back past
+    /// it only withholds acknowledgment until the clock passes it again.
+    private var resetAt = -Double.infinity
+
+    public init() {}
+
+    /// Records the Ghostty check of the scan taken at `at`. `visible` is false when the pane is focused
+    /// but Ghostty does not show it.
+    public mutating func observe(paneID: String, visible: Bool, at: Double) {
+        guard at.isFinite else { reset(at: at); return }
+        guard at > resetAt else { return }
+        guard visible else { reset(at: at); return }
+        if self.paneID != paneID || at < lastSeenAt || at - lastSeenAt > Self.maxGap { since = at }
+        self.paneID = paneID
+        lastSeenAt = at
+    }
+
+    /// Records a scan taken at `at` that had no Ghostty check because a check or an Open was in flight.
+    /// `pendingPaneID` is the pane an in-flight check is sampling, if any. The scan cannot extend the
+    /// run, so it keeps the run and the pending check only while it shows that pane focused (or, with no
+    /// check in flight, the run's pane). A failed scan (nil) or another pane restarts the run, and the
+    /// pending check, taken before this scan, is then ignored.
+    public mutating func skip(focusedPaneID: String?, pendingPaneID: String?, at: Double) {
+        if focusedPaneID == nil || focusedPaneID != (pendingPaneID ?? paneID) { reset(at: at) }
+    }
+
+    /// Ends the run as of the scan taken at `at`. A non-finite time ends it without ignoring anything.
+    public mutating func reset(at: Double) {
+        paneID = nil
+        since = 0
+        lastSeenAt = 0
+        if at.isFinite { resetAt = max(resetAt, at) }
+    }
+
+    /// Completions for `boundPaneID` that arrived during the current run, at or after its start, and
+    /// have been visible for `required` seconds since arriving by `now`, the latest observed scan.
+    public func acknowledged<ID>(_ completions: [HerdrCompletionCandidate<ID>], boundPaneID: String,
+                                 at now: Double) -> Set<ID> {
+        guard paneID == boundPaneID, now.isFinite, now == lastSeenAt else { return [] }
+        return Set(completions.filter {
+            $0.arrivedAt.isFinite && $0.arrivedAt >= since && $0.arrivedAt + Self.required <= now
+        }.map(\.id))
     }
 }

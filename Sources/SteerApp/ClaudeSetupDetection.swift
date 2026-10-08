@@ -156,17 +156,24 @@ enum ClaudeSetupDetection {
             return .unavailable(sourceScope: root.path, observedAt: observedAt,
                                 reason: "Unavailable: Claude Code is below Steer's tested inventory baseline.")
         }
+        // Claude Code 2.1.292 removed `claude agents --json`; its session registry is read first.
+        // The CLI remains the fallback for a version without a usable registry. When both fail, the
+        // registry's own failure (and any ambiguous session IDs) is reported, not the CLI's.
+        let registry = ClaudeSessionRegistry.read(root: root, observedAt: observedAt)
+        if let registry, registry.available { return registry }
         guard let executable = executable(named: "claude") else {
-            return .unavailable(sourceScope: root.path, observedAt: observedAt,
-                                reason: "Unavailable: the Claude executable was not found.")
+            return registry ?? .unavailable(sourceScope: root.path, observedAt: observedAt,
+                                            reason: "Unavailable: the Claude executable was not found.")
         }
         var environment = ProcessInfo.processInfo.environment
         environment["CLAUDE_CONFIG_DIR"] = root.standardizedFileURL.path
         guard let result = runBounded(executable, arguments: ["agents", "--json"], environment: environment, timeout: 5),
               result.status == 0 else {
-            return .unavailable(sourceScope: root.path, observedAt: observedAt, reason: activeSessionInventoryUnavailable)
+            return registry ?? .unavailable(sourceScope: root.path, observedAt: observedAt,
+                                            reason: activeSessionInventoryUnavailable)
         }
-        return ClaudeInventoryDecoder.decode(result.output, sourceScope: root.path, observedAt: observedAt)
+        let cli = ClaudeInventoryDecoder.decode(result.output, sourceScope: root.path, observedAt: observedAt)
+        return cli.available ? cli : registry ?? cli
     }
 
     static func activeSessionSummary(_ data: Data, installedAt: TimeInterval? = nil,

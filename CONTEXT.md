@@ -47,16 +47,16 @@ A request from Codex for the user's permission to perform an action. Before hand
 A request from Codex for the user's answer to one or more questions, posed in the Codex surface. The companion surfaces it, relays the option the user chose in the notch to a CLI session, and otherwise returns the user to Codex; it never chooses an answer itself.
 
 **Session reply**:
-A follow-up prompt the user types on a completion card and sends to that finished session, which starts its next turn. The companion sends one reply per card, only to the session the card is about, and only through a transport that reaches that exact session; it never resends and never treats the reply as having acknowledged the completion.
+A follow-up prompt the user types on a completion card and sends to that finished session, which starts its next turn. The companion sends one reply per card, only to the session the card is about, and only through a transport that reaches that exact session; it never resends and never treats sending as having acknowledged the completion; the turn start the reply causes acknowledges it like any prompt in that session.
 
 **Open in Codex**:
-The action that returns the user to the Codex session associated with a notch notification.
+The action that returns the user to the Codex session associated with a notch notification. Its button reads "Open Session", the same for Claude's equivalent (Open in Claude); the docs keep the source-specific names for the action.
 
 **Attention queue**:
 The ordered collection of Codex activity presented in the shared notch, with approval requests ahead of other activity. Its order determines presentation, not when Codex sessions execute.
 
 **Acknowledged completion**:
-A particular completion cleared by explicit dismissal; for a supported CLI surface, also by a verified visit after completion. Desktop app visibility never acknowledges a completion; the desktop app's own cleared unread flag, read from its state file after the completion, does (see [desktop read state](docs/desktop-read-state.md). This does not mean every result in the session has been read.
+A particular completion cleared by explicit dismissal; for a supported CLI surface, also by a verified visit after completion; when it arrives while its herdr pane is already in front, by that pane staying visible for five seconds after it arrived; or by a later prompt submitted in the same session. Desktop app visibility never acknowledges a completion; the desktop app's own cleared unread flag, read from its state file after the completion, does (see [desktop read state](docs/desktop-read-state.md). This does not mean every result in the session has been read.
 
 **Uncertain completion**:
 A completion that arrived while the companion was not observing. The user may have viewed it unobserved, so it is retained without a sound and offered for opening or dismissal; it is never described as unread.

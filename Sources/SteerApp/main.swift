@@ -1169,6 +1169,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // back and, when a real helper receipt exists, a no-decision record releases it to Codex at once.
             let unverified = queue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970)
             queue.apply(discovered: discovered)
+            acknowledgeCodexCompletions(Array(CodexReplyAcknowledgment.acknowledged(
+                queue.items.compactMap(\.completion), events: scan.cliEvents)))
             applyDesktopReadState(readState, enabled: readStateURL != nil)
             for request in unverified where ApprovalReceipts.existing(for: request.id, in: events) != nil {
                 _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision,
@@ -1633,7 +1635,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         let queued = queue.items.compactMap(\.completion)
         let acknowledged = DesktopReadAcknowledgment.acknowledged(queued, snapshot: snapshot)
-        for id in acknowledged { queue.dismiss(.completion(id)) }
+        acknowledgeCodexCompletions(Array(acknowledged))
         let written = Date(timeIntervalSince1970: snapshot.modifiedAt).formatted(date: .omitted, time: .standard)
         let tested = CodexSetupRequirements.minimumDesktopVersion
         let version = setupCapabilities.desktopVersion ?? "unknown"
@@ -1648,6 +1650,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let snapshot = agentQueue.snapshot
         guard snapshot != savedSnapshot else { return }
         if AttentionSnapshotStore.save(snapshot, to: Companion.snapshotURL) { savedSnapshot = snapshot }
+    }
+
+    /// Acknowledges Codex completions in both queues. `agentQueue` keeps outcomes through
+    /// `syncAgentQueueWithCodex`, so dismissing them from `queue` alone leaves their cards showing.
+    func acknowledgeCodexCompletions(_ ids: [CompletionIdentity]) {
+        for id in ids {
+            queue.dismiss(.completion(id))
+            agentQueue.dismiss(.outcome(CodexAttentionAdapter.outcomeID(for: id)))
+        }
     }
 
     func codexSession(_ identity: AgentSessionIdentity) -> UUID? {
@@ -1987,9 +1998,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 lastGhosttySnapshotAt = observedAt
                 for session in Set(queued.map(\.session)) {
                     if let target = GhosttyMatch.target(session: session, live: liveCLI, snapshot: snapshot), snapshot.selected == target {
-                        for item in queued where item.session == session {
-                            queue.dismiss(.completion(CompletionIdentity(source: .cli, session: item.session, turn: item.turn)))
-                        }
+                        acknowledgeCodexCompletions(queued.filter { $0.session == session }.map(\.id))
                     }
                 }
                 let liveByScope = Dictionary(uniqueKeysWithValues: result.1.map { scan in

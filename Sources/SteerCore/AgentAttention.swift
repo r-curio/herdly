@@ -144,7 +144,10 @@ public struct AgentQuestion: Identifiable, Equatable, Sendable {
 
 public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     public let identity: AgentTurnIdentity
+    /// When the turn first arrived; orders the queue, so later activity never moves the row.
     public let arrivedAt: Double
+    /// The latest evidence for the turn; decides which observation wins. Defaults to `arrivedAt`.
+    public let updatedAt: Double
     public let prompt: String?
     public let toolName: String?
     public let toolInput: [String: String]
@@ -159,11 +162,12 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     public var fullAction: String? { action?.fullText }
     public var fullPrompt: String? { prompt }
 
-    public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double, prompt: String? = nil,
-                toolName: String? = nil, toolInput: [String: String] = [:],
+    public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double, updatedAt: Double? = nil,
+                prompt: String? = nil, toolName: String? = nil, toolInput: [String: String] = [:],
                 status: AgentRunningStatus = .working) {
         self.identity = AgentTurnIdentity(session: session, turn: turn)
         self.arrivedAt = arrivedAt
+        self.updatedAt = updatedAt ?? arrivedAt
         self.prompt = prompt
         self.toolName = toolName
         self.toolInput = toolInput
@@ -354,7 +358,7 @@ public struct AgentAttentionQueue: Sendable {
             if outcome.session.source == .claude,
                let current = outcomes[outcome.id], current.arrivedAt > outcome.arrivedAt { return }
             if outcome.session.source == .claude,
-               let active = running[outcome.session], active.id == outcome.id, active.arrivedAt > outcome.arrivedAt {
+               let active = running[outcome.session], active.id == outcome.id, active.updatedAt > outcome.arrivedAt {
                 return
             }
             if let reply = latestReplies[outcome.session], Self.reply(reply, acknowledges: outcome) {
@@ -377,11 +381,11 @@ public struct AgentAttentionQueue: Sendable {
         case let .running(active):
             guard !resolved.contains(.running(active.id)) else { return }
             if let outcome = outcomes[active.id] {
-                guard active.identity.session.source == .claude, active.arrivedAt > outcome.arrivedAt else { return }
+                guard active.identity.session.source == .claude, active.updatedAt > outcome.arrivedAt else { return }
                 outcomes.removeValue(forKey: active.id)
             }
             if let current = running[active.identity.session] {
-                guard active.arrivedAt > current.arrivedAt || (active.id == current.id && active != current) else { return }
+                guard active.updatedAt > current.updatedAt || (active.id == current.id && active != current) else { return }
             }
             running[active.identity.session] = active
             inventoryRunning.removeValue(forKey: active.identity.session)
@@ -466,7 +470,10 @@ public struct AgentAttentionQueue: Sendable {
             case .interactive(status: "waiting"), .background(state: "blocked"): .waiting
             default: .working
             }
-            inventoryRunning[identity] = AgentRunning(session: identity, turn: "", arrivedAt: scan.observedAt, status: status)
+            // Keep the first sighting so each scan does not move the row to the end of its group.
+            inventoryRunning[identity] = AgentRunning(session: identity, turn: "",
+                                                      arrivedAt: inventoryRunning[identity]?.arrivedAt ?? scan.observedAt,
+                                                      updatedAt: scan.observedAt, status: status)
         }
         if let now { self.now = now }
     }
@@ -572,6 +579,12 @@ public enum CodexAttentionAdapter {
         AgentOutcome(session: session(completion.session, surface: completion.source == .cli ? .cli : .desktop),
                      turn: completion.turn.uuidString, status: status ?? completion.status, arrivedAt: completion.arrivedAt,
                      uncertain: completion.uncertain)
+    }
+
+    /// The shared-queue outcome a Codex completion is mirrored as, for acknowledging it in both queues.
+    public static func outcomeID(for completion: CompletionIdentity) -> AgentTurnIdentity {
+        AgentTurnIdentity(session: session(completion.session, surface: completion.source == .cli ? .cli : .desktop),
+                          turn: completion.turn.uuidString)
     }
 
     public static func approval(from request: AttentionRequest) -> AgentApproval {

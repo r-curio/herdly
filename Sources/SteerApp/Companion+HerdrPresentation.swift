@@ -45,6 +45,12 @@ extension Companion {
     func herdrOpenAvailability(_ identity: AgentSessionIdentity,
                                ttySupport: GhosttyTTYSupport?) -> HerdrOpenAvailability {
         guard let key = herdrSessionKey(identity) else { return .notInHerdr }
-        return HerdrPresentation.openAvailability(binding: herdrBinding(for: key), ttySupport: ttySupport)
+        var soleTerminal: GhosttyTTYJoin?
+        if ttySupport == .unsupported, let snapshot = knownGhosttySnapshot,
+           let tty = HerdrOpen.attachedClient(herdr.scanOutcome)?.tty {
+            soleTerminal = GhosttyTTYMatch.join(clientTTY: tty, support: .unsupported, snapshot: snapshot)
+        }
+        return HerdrPresentation.openAvailability(binding: herdrBinding(for: key), ttySupport: ttySupport,
+                                                  soleTerminal: soleTerminal)
     }
 }

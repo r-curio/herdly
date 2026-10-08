@@ -232,6 +232,8 @@ public enum HerdrBindingInputs {
     ///   - outcome: the latest herdr scan, nil when none has completed since the gate opened.
     ///   - defaultSocketPath: herdr's default socket as the client resolves it.
     ///   - codex: live Codex sessions and Ghostty titles, read only for a Codex session.
+    ///   - claudeProcess: the Claude session's live interactive process as Claude's inventories name
+    ///     it (`ClaudeSessionProcess(sessionID:inventories:)`); see `HerdrBindingRules.evaluate`.
     /// - Returns: for Claude Code, `notInHerdr` when the session's newest hook event carried no pane
     ///   ID; otherwise `bound` only when Ghostty controls are on, the scan succeeded with a server
     ///   start time, and `HerdrBindingRules` bound the session. For Codex, see `codexBinding`.
@@ -243,7 +245,8 @@ public enum HerdrBindingInputs {
         gateOpen: Bool,
         outcome: HerdrScanOutcome?,
         defaultSocketPath: String,
-        codex: HerdrCodexTitles
+        codex: HerdrCodexTitles,
+        claudeProcess: ClaudeSessionProcess = .unidentified
     ) -> HerdrSessionBinding {
         if session.agent == .codex {
             return codexBinding(for: session, liveness: liveness, ghosttyControlsEnabled: ghosttyControlsEnabled,
@@ -263,7 +266,8 @@ public enum HerdrBindingInputs {
         }
         guard let observation = observation(from: scan) else { return .unavailable(.serverIdentityUnknown) }
         switch HerdrBindingRules.evaluate(sessionID: session.sessionID, liveness: liveness, hookRecords: hookRecords,
-                                          observation: observation, defaultSocketPath: defaultSocketPath) {
+                                          observation: observation, defaultSocketPath: defaultSocketPath,
+                                          agentProcess: claudeProcess) {
         case .bound(let target): return .bound(target)
         case .unavailable(.notInHerdr), .unavailable(.noHookRecord): return .notInHerdr
         case .unavailable(let reason): return .unavailable(.binding(reason))

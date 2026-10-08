@@ -201,7 +201,11 @@ public enum NotchPlacement {
     public static let cornerRadius: CGFloat = 18
     /// Narrowest body a display without a housing gets.
     public static let minimumBodyWidth: CGFloat = 200
+    /// Narrowest body the open panel gets.
     public static let expandedBodyWidth: CGFloat = 380
+    /// Width opening always adds to the collapsed body, so hovering visibly widens the strip even
+    /// when its usage readouts already make it wider than `expandedBodyWidth`.
+    public static let expandedGrowth: CGFloat = 60
     /// Strip height on a display showing neither a housing nor a menu bar; otherwise the strip is
     /// the housing or menu bar height.
     public static let collapsedHeight: CGFloat = 40
@@ -209,7 +213,7 @@ public enum NotchPlacement {
 
     public static func bodyWidth(on display: NotchDisplay, expanded: Bool, wing: CGFloat = trailingWing) -> CGFloat {
         let collapsed = max(display.housingWidth + leadingWing + max(trailingWing, wing), minimumBodyWidth)
-        return expanded ? max(collapsed, expandedBodyWidth) : collapsed
+        return expanded ? max(collapsed + expandedGrowth, expandedBodyWidth) : collapsed
     }
 
     /// Height of the collapsed strip: the housing row on a display with a camera housing, the menu
