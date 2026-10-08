@@ -238,7 +238,8 @@ public enum HerdrPresentation {
         return "Steer can't answer this from here. Answer in Codex."
     }
 
-    public static func openTitle(_ agent: HerdrAgentKind) -> String { "Open in \(agentName(agent))" }
+    /// The Open button's title, the same for every agent.
+    public static func openTitle(_ agent: HerdrAgentKind) -> String { "Open Session" }
 
     public static func agentName(_ agent: HerdrAgentKind) -> String {
         switch agent {

@@ -204,7 +204,7 @@ Inside, every corner is continuous (SwiftUI `.continuous` style) and small: 4pt 
 ### Buttons
 Text-only wells in the panel's own vocabulary. No icons.
 - **Shape:** continuous 5pt corners; 4pt vertical and 8pt horizontal padding.
-- **Default (`button-notch`):** well background, ink label, 11pt regular. Used for "Open in Codex", "Deny", "Dismiss".
+- **Default (`button-notch`):** well background, ink label, 11pt regular. Used for "Open Session", "Deny", "Dismiss".
 - **Emphasized (`button-notch-emphasized`):** same well, label in 11pt semibold. Used once per approval row, on "Approve once".
 - **Pressed:** background inverts to ink, label to black. No scale, no spring.
 - **Focus:** a 1.5pt ring in ink at 90% opacity, 6pt continuous corners, 2pt outside the control. Visible whenever the control has keyboard focus.
