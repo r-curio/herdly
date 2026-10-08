@@ -227,6 +227,40 @@ private func binding(_ key: HerdrSessionKey = codexKey, liveness: HerdrSessionLi
     #expect(!HerdrBindingInputs.codexGateOpens(.none, defaultSocketTrusted: true))
 }
 
+// MARK: - Pane titles for session surfaces
+
+@Test func herdrPaneTitlesAreKnownFromASuccessfulScanOrAServerThatIsNotRunning() {
+    // Every pane's title, whatever its agent; untitled panes add nothing.
+    let panes = [pane(), pane("w1:p2", tab: "w1:t2", agent: nil, title: "zsh"), pane("w1:p3", tab: "w1:t3", title: nil)]
+    for (gateOpen, trusted) in [(true, true), (false, true), (false, false)] {
+        #expect(HerdrPaneTitles.from(gateOpen: gateOpen, outcome: .available(scan(panes: panes)), defaultSocketTrusted: trusted)
+            == .known([title, "zsh"]))
+        // No server holds a pane, so none shows a title.
+        #expect(HerdrPaneTitles.from(gateOpen: gateOpen, outcome: .unavailable(.notRunning), defaultSocketTrusted: trusted)
+            == .known([]))
+    }
+}
+
+@Test func herdrPaneTitlesAreUnknownWhileTheGateIsOpenWithoutASuccessfulScan() {
+    for trusted in [true, false] {
+        #expect(HerdrPaneTitles.from(gateOpen: true, outcome: nil, defaultSocketTrusted: trusted) == .unknown)
+        for reason in [HerdrUnavailableReason.timeout, .malformedReply, .untrustedSocket, .unsupportedProtocol(23),
+                       .herdrNotFound] {
+            #expect(HerdrPaneTitles.from(gateOpen: true, outcome: .unavailable(reason), defaultSocketTrusted: trusted) == .unknown)
+        }
+    }
+}
+
+@Test func herdrPaneTitlesAreUnknownBeforeTheGateOpensWhileTheDefaultSocketIsTrusted() {
+    // The reminder scan that first sees a Ghostty inventory runs before the Codex half of the gate
+    // can open: herdr may be in use, but nothing has been read yet.
+    #expect(HerdrPaneTitles.from(gateOpen: false, outcome: nil, defaultSocketTrusted: true) == .unknown)
+}
+
+@Test func herdrPaneTitlesAreNotInUseWithTheGateClosedAndNoTrustedSocket() {
+    #expect(HerdrPaneTitles.from(gateOpen: false, outcome: nil, defaultSocketTrusted: false) == .notInUse)
+}
+
 @Test func herdrProcessInfoCountsOnlyWhileTheCodexTitleStaysOnItsPane() {
     let request = HerdrScanRequest(includeIntegration: false, processInfoTitles: [title], processInfoPaneIDs: ["w1:p9"])
     let before = scan(panes: [pane(), pane("w1:p9", tab: "w1:t2", agent: "claude", title: "Claude")]).snapshot

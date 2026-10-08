@@ -556,6 +556,18 @@ public enum CodexAttentionAdapter {
         AgentSessionIdentity(source: .codex, sourceScope: sourceScope, session: id.uuidString, surface: surface)
     }
 
+    /// Whether a Codex card belongs to a terminal session, so Open takes the terminal route (ADR 0012
+    /// "Surface"). A card filed as desktop counts once its session is among `cliSessions`, the
+    /// sessions now known to be terminal ones: a daemon-run TUI labels its rollout like the desktop
+    /// app (`source: vscode`), so its cards were filed as desktop before the daemon or its pane
+    /// proved otherwise. A desktop session is never in `cliSessions`. A Claude card is never a Codex
+    /// terminal session.
+    public static func isTerminalSession(_ identity: AgentSessionIdentity, cliSessions: Set<UUID>) -> Bool {
+        guard identity.source == .codex else { return false }
+        if identity.surface == .cli { return true }
+        return UUID(uuidString: identity.session).map(cliSessions.contains) == true
+    }
+
     public static func outcome(from completion: AttentionCompletion, status: AgentOutcomeStatus? = nil) -> AgentOutcome {
         AgentOutcome(session: session(completion.session, surface: completion.source == .cli ? .cli : .desktop),
                      turn: completion.turn.uuidString, status: status ?? completion.status, arrivedAt: completion.arrivedAt,

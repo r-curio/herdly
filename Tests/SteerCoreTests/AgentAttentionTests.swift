@@ -240,3 +240,28 @@ import Testing
     let left = Set(queue.items(at: 20).compactMap(\.outcome).map { "\($0.session.surface)-\($0.session.session == session.uuidString)-\($0.turn == turn.uuidString)" })
     #expect(left == ["cli-true-true", "desktop-true-false", "cli-false-true", "desktop-false-true"])
 }
+
+@Test func aCodexCardIsATerminalSessionByItsSurfaceOrAKnownTerminalSession() {
+    let terminal = UUID(), desktop = UUID()
+    let cliSessions: Set = [terminal]
+    // Filed as CLI: terminal, known or not.
+    #expect(CodexAttentionAdapter.isTerminalSession(CodexAttentionAdapter.session(desktop, surface: .cli), cliSessions: []))
+    // Filed as desktop before the daemon or its pane proved it a terminal session: terminal now.
+    #expect(CodexAttentionAdapter.isTerminalSession(CodexAttentionAdapter.session(terminal, surface: .desktop),
+                                                    cliSessions: cliSessions))
+    #expect(CodexAttentionAdapter.isTerminalSession(
+        AgentSessionIdentity(source: .codex, sourceScope: CodexAttentionAdapter.sourceScope,
+                             session: terminal.uuidString.lowercased(), surface: .desktop), cliSessions: cliSessions))
+    // A desktop session is never among the terminal ones.
+    #expect(!CodexAttentionAdapter.isTerminalSession(CodexAttentionAdapter.session(desktop, surface: .desktop),
+                                                     cliSessions: cliSessions))
+    #expect(!CodexAttentionAdapter.isTerminalSession(
+        AgentSessionIdentity(source: .codex, sourceScope: CodexAttentionAdapter.sourceScope, session: "not-a-uuid",
+                             surface: .desktop), cliSessions: cliSessions))
+    // A Claude card is never a Codex terminal session, even with a matching ID.
+    for surface in [AgentSurface.cli, .desktop] {
+        #expect(!CodexAttentionAdapter.isTerminalSession(
+            AgentSessionIdentity(source: .claude, sourceScope: "/claude", session: terminal.uuidString, surface: surface),
+            cliSessions: cliSessions))
+    }
+}

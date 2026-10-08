@@ -27,14 +27,17 @@ final class GhosttyTTYSupportMonitor: ObservableObject {
 }
 
 extension Companion {
-    /// The herdr session key of a CLI session, or nil for any other surface.
+    /// The herdr session key of a terminal session: a Claude Code CLI session, or a Codex session
+    /// `isCodexTerminalSession` accepts (including a card first filed as desktop). Nil otherwise.
     func herdrSessionKey(_ identity: AgentSessionIdentity) -> HerdrSessionKey? {
-        guard identity.surface == .cli || isCodexTerminalSession(identity) else { return nil }
-        let agent: HerdrAgentKind = switch identity.source {
-        case .codex: .codex
-        case .claude: .claude
+        switch identity.source {
+        case .codex:
+            guard isCodexTerminalSession(identity) else { return nil }
+            return HerdrSessionKey(agent: .codex, sessionID: identity.session)
+        case .claude:
+            guard identity.surface == .cli else { return nil }
+            return HerdrSessionKey(agent: .claude, sessionID: identity.session)
         }
-        return HerdrSessionKey(agent: agent, sessionID: identity.session)
     }
 
     /// Whether the notch offers Open for a session, from the latest scan and Ghostty's `tty`

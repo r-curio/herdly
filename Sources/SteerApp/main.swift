@@ -1022,8 +1022,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }()
         let known = knownCLISessions
         let daemonThreads = daemonClient.loadedThreads
-        let herdrTitles = herdrPaneTitles
-        let herdrTitlesUnknown = herdrPaneTitlesUnknown
+        let herdrTitles = herdrPaneTitlesReader()
         let observingSince = Companion.launchedAt
         let observationNow = Date().timeIntervalSince1970
         let claudeRoots = claude.roots.compactMap { root -> (scope: String, events: URL, installationID: String)? in
@@ -1042,8 +1041,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         Task { @MainActor in
             let result = await Task.detached {
                 (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
-                                     daemonThreads: daemonThreads, herdrTitles: herdrTitles,
-                                     herdrTitlesUnknown: herdrTitlesUnknown), DesktopEventReader.read(from: events),
+                                     daemonThreads: daemonThreads, herdrTitles: herdrTitles()), DesktopEventReader.read(from: events),
                  readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
                  CodexUsageReader.latest(root: rolloutRoot),
                  SessionDiscovery.candidates(root: rolloutRoot, now: Date().timeIntervalSince1970),

@@ -95,3 +95,39 @@ public struct HerdrCodexTitles: Equatable, Sendable {
         return liveTitles.subtracting(ghostty)
     }
 }
+
+/// What herdr's panes show, for ending a Codex session that lacks a Ghostty tab
+/// (`ReminderReader.scan`, ADR 0012 "Surface"). A Codex TUI titles its terminal with its shortened
+/// session ID, so that title on a herdr pane is the session's surface, as a Ghostty tab title is.
+public enum HerdrPaneTitles: Equatable, Sendable {
+    /// herdr is not in use: the gate is closed and herdr's default socket is missing or fails ADR
+    /// 0009's trust check, so no pane Steer could read holds a session. The Ghostty rules alone decide.
+    case notInUse
+    /// herdr may be in use, but no successful scan says what its panes show: before the first scan,
+    /// or after a failed one. A session may be on a pane Steer cannot see, so none is ended for
+    /// lacking a Ghostty tab (ADR 0012 "Route": herdr cannot be ruled out).
+    case unknown
+    /// The title of every pane in the latest successful scan; empty when herdr's server is not
+    /// running, since no pane can show one.
+    case known(Set<String>)
+
+    /// Maps herdr's state to what its panes show.
+    ///
+    /// - Parameters:
+    ///   - gateOpen: whether ADR 0009's gate holds, so a nil `outcome` is a scan still pending.
+    ///   - outcome: the latest herdr scan, nil when none has completed since the gate opened.
+    ///   - defaultSocketTrusted: herdr's default socket exists and passes `HerdrSocketTrust`. With
+    ///     the gate closed this alone means herdr may be in use: the Codex half of the gate opens
+    ///     only at a herdr tick after a Ghostty inventory is known, so the reminder scan that first
+    ///     sees an inventory (at launch, after Ghostty controls are re-enabled, or after a failed
+    ///     Ghostty check) runs before herdr has been read.
+    /// - Returns: `known` for a successful scan or a server that is not running; otherwise `unknown`
+    ///   while the gate is open or the socket is trusted, and `notInUse` when neither holds.
+    public static func from(gateOpen: Bool, outcome: HerdrScanOutcome?, defaultSocketTrusted: Bool) -> HerdrPaneTitles {
+        switch outcome {
+        case .available(let scan)?: return .known(Set(scan.snapshot.panes.compactMap(\.terminalTitle)))
+        case .unavailable(.notRunning)?: return .known([])
+        case .unavailable?, nil: return gateOpen || defaultSocketTrusted ? .unknown : .notInUse
+        }
+    }
+}
