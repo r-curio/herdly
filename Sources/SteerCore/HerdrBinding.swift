@@ -205,15 +205,19 @@ public enum HerdrBindingRules {
     ///     (ADR 0012), so a Codex session never binds here.
     ///   - defaultSocketPath: herdr's default socket (`~/.config/herdr/herdr.sock`) as resolved by
     ///     the caller.
-    /// - Returns: `.bound` only when every ADR 0008 rule holds, including a foreground process named
-    ///   for the agent (`claude`) in the pane's `pane.process_info`; otherwise the first failing reason.
-    ///   The result depends only on the inputs, not on their order.
+    ///   - agentPID: the process Claude's session registry names as the session's live interactive
+    ///     holder (`ClaudeSessionRegistry`), or nil when no registry identifies it.
+    /// - Returns: `.bound` only when every ADR 0008 rule holds, including the agent in the pane's
+    ///   foreground per `pane.process_info`: exactly `agentPID` when it is known, otherwise a process
+    ///   named for the agent (`claude`); otherwise the first failing reason. The result depends only
+    ///   on the inputs, not on their order.
     public static func evaluate(
         sessionID: String,
         liveness: HerdrSessionLiveness,
         hookRecords: [HerdrHookPaneRecord],
         observation: HerdrObservation,
-        defaultSocketPath: String
+        defaultSocketPath: String,
+        agentPID: Int32? = nil
     ) -> HerdrBinding {
         if liveness == .ended { return .unavailable(.sessionEnded) }
 
@@ -266,11 +270,14 @@ public enum HerdrBindingRules {
         guard clients.first?.ancestryReachesGhostty == true else { return .unavailable(.nonGhosttyClient) }
 
         // The agent must still be in the pane's foreground: `agent_session` can linger after it
-        // exits. Checked on every scan, including Open's revalidation.
-        if let veto = HerdrForegroundProcess.veto(observation.processInfo[paneID], paneID: paneID, agent: record.agent,
-                                                  accepts: { $0 >= 1 }) {
-            return .unavailable(veto)
-        }
+        // exits. Checked on every scan, including Open's revalidation. The session's own process,
+        // when Claude's registry names it, is matched by PID: Claude's native installer runs a
+        // binary named for its version (`2.1.293`), so the executable name alone never matches.
+        let veto = agentPID.map {
+            HerdrForegroundProcess.veto(observation.processInfo[paneID], paneID: paneID, agent: record.agent, pid: $0)
+        } ?? HerdrForegroundProcess.veto(observation.processInfo[paneID], paneID: paneID, agent: record.agent,
+                                         accepts: { $0 >= 1 })
+        if let veto { return .unavailable(veto) }
 
         return .bound(HerdrPaneTarget(sessionID: sessionID, agent: record.agent, paneID: paneID))
     }

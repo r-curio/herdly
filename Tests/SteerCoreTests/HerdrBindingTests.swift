@@ -59,14 +59,16 @@ private func evaluate(
     _ sessionID: String = session,
     liveness: HerdrSessionLiveness = .live,
     records: [HerdrHookPaneRecord] = [record()],
-    observation: HerdrObservation = observation()
+    observation: HerdrObservation = observation(),
+    agentPID: Int32? = nil
 ) -> HerdrBinding {
     HerdrBindingRules.evaluate(
         sessionID: sessionID,
         liveness: liveness,
         hookRecords: records,
         observation: observation,
-        defaultSocketPath: defaultSocket
+        defaultSocketPath: defaultSocket,
+        agentPID: agentPID
     )
 }
 
@@ -251,4 +253,37 @@ private let bound = HerdrBinding.bound(HerdrPaneTarget(sessionID: session, agent
     // Another pane's Claude does not stand in for this one.
     #expect(evaluate(observation: observation(processInfo: ["w1:p2": claudeInForeground("w1:p2")]))
         == .unavailable(.processInfoUnavailable(nil)))
+}
+
+// MARK: - Foreground process by the registry's PID (Claude Code's native installer)
+
+private func versionedClaude(_ paneID: String = "w1:p1", pids: [Int32] = [85396, 85563])
+    -> Result<HerdrProcessInfo, HerdrUnavailableReason> {
+    // As herdr reports a native-installer Claude: the executable is named for its version.
+    .success(HerdrProcessInfo(paneID: paneID, shellPID: 85362, foregroundProcessGroupID: 85396,
+                              foregroundProcesses: pids.map {
+                                  HerdrForegroundProcess(pid: $0, name: $0 == 85396 ? "2.1.293" : "node",
+                                                         argv: [$0 == 85396 ? "claude" : "node"], cwd: "/lab")
+                              }))
+}
+
+@Test func herdrClaudeBindsByRegistryPIDWhateverTheExecutableIsNamed() {
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": versionedClaude()]), agentPID: 85396) == bound)
+    // Without a registry PID the name rule applies, and a versioned executable is not `claude`.
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": versionedClaude()]))
+        == .unavailable(.foregroundProcesses(.claude, count: 0)))
+}
+
+@Test func herdrClaudeRegistryPIDMustBeInThisPanesForeground() {
+    // The session's process is elsewhere (or exited): a `claude`-named process in the pane does not stand in for it.
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": versionedClaude(pids: [85563])]), agentPID: 85396)
+        == .unavailable(.foregroundProcesses(.claude, count: 0)))
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": claudeInForeground("w1:p1")]), agentPID: 85396)
+        == .unavailable(.foregroundProcesses(.claude, count: 0)))
+    // Process-info failures are reported exactly as for the name rule.
+    #expect(evaluate(observation: observation(processInfo: [:]), agentPID: 85396) == .unavailable(.processInfoUnavailable(nil)))
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": versionedClaude("w1:p2")]), agentPID: 85396)
+        == .unavailable(.processInfoUnavailable(.malformedReply)))
+    #expect(evaluate(observation: observation(processInfo: ["w1:p1": .failure(.timeout)]), agentPID: 85396)
+        == .unavailable(.processInfoUnavailable(.timeout)))
 }

@@ -241,6 +241,23 @@ public struct HerdrForegroundProcess: Equatable, Sendable {
             return accepts(count) ? nil : .foregroundProcesses(agent, count: count)
         }
     }
+
+    /// The foreground-process check by exact process: nil when the pane's `pane.process_info` reply
+    /// is about `paneID` and lists `pid` among its foreground processes, whatever its executable
+    /// name. Failures are reported as in `veto(_:paneID:agent:accepts:)`; an absent `pid` is
+    /// `foregroundProcesses(agent, count: 0)`.
+    public static func veto(_ reply: Result<HerdrProcessInfo, HerdrUnavailableReason>?, paneID: String,
+                            agent: HerdrAgentKind, pid: Int32) -> HerdrBindingUnavailable? {
+        switch reply {
+        case nil:
+            return .processInfoUnavailable(nil)
+        case .failure(let reason)?:
+            return .processInfoUnavailable(reason)
+        case .success(let info)?:
+            guard info.paneID == paneID else { return .processInfoUnavailable(.malformedReply) }
+            return info.foregroundProcesses.contains { $0.pid == pid } ? nil : .foregroundProcesses(agent, count: 0)
+        }
+    }
 }
 
 /// One `pane.process_info` result. herdr reports it from the pane's terminal, not from any agent
