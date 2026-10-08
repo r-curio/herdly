@@ -8,8 +8,8 @@ import SteerCore
 final class HerdrSessionBindings: ObservableObject {
     /// The latest herdr scan for settings; nil before the first scan and whenever the ADR 0009 gate
     /// is closed (Ghostty controls off, or neither a live Claude session's newest hook event
-    /// recorded a pane nor a live Codex session exists beside a known Ghostty inventory with
-    /// herdr's socket trusted).
+    /// recorded a pane nor a live or daemon-loaded Codex terminal session exists beside a known Ghostty
+    /// inventory with herdr's socket trusted).
     @Published fileprivate(set) var scanOutcome: HerdrScanOutcome?
     /// True while the gate is open, so settings can tell "not in use" from "waiting for a scan".
     @Published fileprivate(set) var inUse = false

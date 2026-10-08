@@ -156,7 +156,8 @@ public enum HerdrBindingInputs {
 
     /// What a scan inside the gate reads: Claude's integration status and process info for the panes
     /// live Claude sessions recorded, only when a Claude pane opened the gate, and process info for
-    /// panes showing a live Codex title outside Ghostty.
+    /// panes showing the title of a Codex session in `codex.liveSessions` (live, or loaded by the
+    /// daemon as a terminal session) outside Ghostty.
     public static func scanRequest(paneIDs: Set<String>, codex: HerdrCodexTitles) -> HerdrScanRequest {
         HerdrScanRequest(includeIntegration: !paneIDs.isEmpty, processInfoTitles: codex.outsideGhostty,
                          processInfoPaneIDs: paneIDs)
