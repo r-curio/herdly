@@ -297,3 +297,73 @@ private final class FakeClient {
     #expect(drafted.startingSend(question: 1).phase == .sending)
     #expect(drafted.startingSend(question: 0).phase == .ready)
 }
+
+// MARK: - Symlinked control socket (Codex 0.161)
+
+/// Binds a Unix socket at `path` and returns its descriptor (closed by the caller).
+private func bindSocket(_ path: String) throws -> Int32 {
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX)
+    let bytes = Array(path.utf8)
+    try #require(bytes.count < MemoryLayout.size(ofValue: address.sun_path))
+    withUnsafeMutableBytes(of: &address.sun_path) { raw in
+        raw.copyBytes(from: bytes)
+        raw[bytes.count] = 0
+    }
+    let result = withUnsafePointer(to: &address) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+    }
+    try #require(result == 0)
+    return fd
+}
+
+@Test func appServerSocketCheckFollowsOnePrivateSymlink() throws {
+    // Short paths: Unix socket paths are limited to about 104 bytes.
+    let root = "/tmp/st-\(UUID().uuidString.prefix(8))"
+    let fm = FileManager.default
+    try fm.createDirectory(atPath: root + "/d", withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    try fm.createDirectory(atPath: root + "/c", withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    defer { try? fm.removeItem(atPath: root) }
+    let target = root + "/d/s"
+    let fd = try bindSocket(target)
+    defer { close(fd) }
+    chmod(target, 0o600)
+    let link = root + "/c/control.sock"
+    try fm.createSymbolicLink(atPath: link, withDestinationPath: target)
+
+    // Codex 0.161's layout: a link owned by the user to a private socket in a private directory.
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == nil)
+    #expect(AppServerSocketCheck.problem(at: target) == nil)
+    // Only the Codex daemon follows the link: herdr's socket must be a socket file itself (ADR 0009).
+    #expect(AppServerSocketCheck.problem(at: link) == .notASocket)
+    #expect(HerdrSocketTrust.reason(at: link) == .untrustedSocket)
+    #expect(HerdrSocketTrust.reason(at: target) == nil)
+
+    // The target's directory open to others: another user could substitute the socket.
+    chmod(root + "/d", 0o755)
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .sharedPermissions)
+    chmod(root + "/d", 0o700)
+
+    // A relative target, a second link, a regular file, or a missing target is refused.
+    try fm.removeItem(atPath: link)
+    try fm.createSymbolicLink(atPath: link, withDestinationPath: "../d/s")
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .notASocket)
+    try fm.removeItem(atPath: link)
+    try fm.createSymbolicLink(atPath: root + "/d/hop", withDestinationPath: target)
+    try fm.createSymbolicLink(atPath: link, withDestinationPath: root + "/d/hop")
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .notASocket)
+    try fm.removeItem(atPath: link)
+    fm.createFile(atPath: root + "/d/file", contents: Data(), attributes: [.posixPermissions: 0o600])
+    try fm.createSymbolicLink(atPath: link, withDestinationPath: root + "/d/file")
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .notASocket)
+    try fm.removeItem(atPath: link)
+    try fm.createSymbolicLink(atPath: link, withDestinationPath: root + "/d/missing")
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .missing)
+
+    // A shared socket behind a private link is still refused.
+    try fm.removeItem(atPath: link)
+    try fm.createSymbolicLink(atPath: link, withDestinationPath: target)
+    chmod(target, 0o666)
+    #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .sharedPermissions)
+}

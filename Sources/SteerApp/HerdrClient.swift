@@ -206,7 +206,8 @@ struct HerdrClient: Sendable {
 enum HerdrSocket {
     /// Connects to `path`, writes `request`, and returns the reply line without its newline.
     /// A refused or vanished socket is `notRunning`; the deadline is `timeout`; a reply over the
-    /// limit, or a connection closed before the newline, is `malformedReply`.
+    /// limit, or a connection closed before the newline, is `malformedReply`. A socket whose accepting
+    /// process runs as another user is `untrustedSocket`, and nothing is written to it.
     static func exchange(path: String, request: Data, deadline: UInt64) -> Result<Data, HerdrUnavailableReason> {
         var writeAttempted = false
         return exchange(path: path, request: request, deadline: deadline, writeAttempted: &writeAttempted)
@@ -253,6 +254,9 @@ enum HerdrSocket {
                 return .failure(.notRunning)
             }
         }
+        // The socket's owner was checked before connecting; confirm the accepting process is this user's.
+        var peerUID: uid_t = 0, peerGID: gid_t = 0
+        guard getpeereid(fd, &peerUID, &peerGID) == 0, peerUID == getuid() else { return .failure(.untrustedSocket) }
 
         var offset = 0
         while offset < request.count {

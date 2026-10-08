@@ -195,10 +195,11 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     let frame = NotchPlacement.frame(on: builtIn, expanded: true, rows: 40, extraRows: false)
     #expect(frame.height == 480)
     #expect(frame.maxY == CGFloat(982))
-    #expect(frame.width == 396)
+    // Opening adds its growth to the 352pt collapsed body: 412pt plus the two ears.
+    #expect(frame.width == 428)
     // The open panel's extra width is shared by both wings so the gap stays over the housing.
     let layout = NotchPlacement.strip(on: builtIn, expanded: true)
-    #expect(layout == StripLayout(leading: 126, gap: 180, trailing: 74, height: 32))
+    #expect(layout == StripLayout(leading: 142, gap: 180, trailing: 90, height: 32))
     #expect(frame.minX + NotchPlacement.earRadius + layout.leading + layout.gap / 2 == builtIn.frame.midX)
     // A measured height smaller than a strip plus one row still leaves room for one row.
     #expect(NotchPlacement.frame(on: builtIn, expanded: true, contentHeight: 10).height == 56)
@@ -419,9 +420,9 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     let frame = NotchPlacement.frame(on: builtIn, expanded: false, rows: 0, extraRows: false, wing: 112)
     #expect(frame == CGRect(x: 756 - 90 - 112 - 8, y: 982 - 32, width: 420, height: 32))
     #expect(frame.minX + NotchPlacement.earRadius + layout.leading + layout.gap / 2 == builtIn.frame.midX)
-    // The wider body already exceeds the open width, so opening adds nothing to either wing.
-    #expect(NotchPlacement.strip(on: builtIn, expanded: true, wing: 112) == StripLayout(leading: 112, gap: 180, trailing: 112, height: 32))
-    #expect(NotchPlacement.frame(on: builtIn, expanded: true, contentHeight: 200, wing: 112).width == 420)
+    // The wider body already exceeds the open width's floor, and opening still widens it, half to each wing.
+    #expect(NotchPlacement.strip(on: builtIn, expanded: true, wing: 112) == StripLayout(leading: 142, gap: 180, trailing: 142, height: 32))
+    #expect(NotchPlacement.frame(on: builtIn, expanded: true, contentHeight: 200, wing: 112).width == 480)
     // A display without a housing keeps the left wing at its full width and grows the body instead.
     #expect(NotchPlacement.strip(on: external, expanded: false, wing: 112) == StripLayout(leading: 112, gap: 0, trailing: 112, height: 25))
     #expect(NotchPlacement.frame(on: external, expanded: false, rows: 0, extraRows: false, wing: 112)
@@ -433,6 +434,10 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     let two = NotchPlacement.frame(on: builtIn, expanded: false, rows: 0, extraRows: false, wing: 112)
     #expect(four.width - two.width == 128)
     #expect(four.minX == two.minX)
+    // Even with every readout shown, opening widens the panel by the same growth.
+    let fourOpen = NotchPlacement.frame(on: builtIn, expanded: true, contentHeight: 200, wing: 240)
+    #expect(fourOpen.width - four.width == NotchPlacement.expandedGrowth)
+    #expect(fourOpen.midX == four.midX)
     #expect(NotchPlacement.strip(on: external, expanded: false, wing: 240) == StripLayout(leading: 112, gap: 0, trailing: 240, height: 25))
     // A wing narrower than the weekly readout's lays out as that readout's.
     #expect(NotchPlacement.strip(on: builtIn, expanded: false, wing: 0) == StripLayout(leading: 112, gap: 180, trailing: 60, height: 32))

@@ -37,14 +37,19 @@ public struct ClaudeInventorySession: Equatable, Sendable {
     public let kind: ClaudeInventoryKind
     public let startedAt: Double
     public let lifecycle: ClaudeInventoryLifecycle
+    /// The live process holding the session, when the source identifies it (Claude's session
+    /// registry, with its start time verified when Claude recorded `procStart`). nil from
+    /// `claude agents --json`.
+    public let pid: Int32?
 
     public init(sessionID: String, name: String = "", kind: ClaudeInventoryKind, startedAt: Double,
-                lifecycle: ClaudeInventoryLifecycle) {
+                lifecycle: ClaudeInventoryLifecycle, pid: Int32? = nil) {
         self.sessionID = sessionID
         self.name = name
         self.kind = kind
         self.startedAt = startedAt
         self.lifecycle = lifecycle
+        self.pid = pid
     }
 }
 
@@ -55,20 +60,26 @@ public struct ClaudeInventoryScan: Equatable, Sendable {
     public let available: Bool
     public let failure: String?
     public let ambiguousSessionIDs: Set<String>
+    /// Sessions known to run in the background without a lifecycle row: the session registry names
+    /// a live background holder but carries no background state. Never includes a session that also
+    /// has a row.
+    public let backgroundSessionIDs: Set<String>
 
     public func isBackgroundSession(_ sessionID: String) -> Bool {
-        available && sessions.contains { $0.sessionID == sessionID && $0.kind == .background }
+        available && (backgroundSessionIDs.contains(sessionID)
+            || sessions.contains { $0.sessionID == sessionID && $0.kind == .background })
     }
 
     public init(sourceScope: String, observedAt: Double, sessions: [ClaudeInventorySession] = [],
                 available: Bool = true, failure: String? = nil,
-                ambiguousSessionIDs: Set<String> = []) {
+                ambiguousSessionIDs: Set<String> = [], backgroundSessionIDs: Set<String> = []) {
         self.sourceScope = URL(fileURLWithPath: sourceScope).standardizedFileURL.path
         self.observedAt = observedAt
         self.sessions = sessions
         self.available = available
         self.failure = failure
         self.ambiguousSessionIDs = ambiguousSessionIDs
+        self.backgroundSessionIDs = available ? backgroundSessionIDs.subtracting(sessions.map(\.sessionID)) : []
     }
 
     public static func unavailable(sourceScope: String, observedAt: Double, reason: String,
@@ -92,6 +103,11 @@ public enum ClaudeInventoryDecoder {
         guard let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
             return .unavailable(sourceScope: sourceScope, observedAt: observedAt, reason: invalidMessage)
         }
+        return decode(rows: rows, sourceScope: sourceScope, observedAt: observedAt)
+    }
+
+    /// Validates inventory rows already parsed from JSON, with the same rules as `decode(_:)`.
+    static func decode(rows: [[String: Any]], sourceScope: String, observedAt: Double) -> ClaudeInventoryScan {
         var seenKinds: [String: ClaudeInventoryKind] = [:]
         var sessions: [ClaudeInventorySession] = []
         for row in rows {

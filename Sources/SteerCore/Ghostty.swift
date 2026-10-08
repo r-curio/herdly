@@ -25,6 +25,11 @@ public struct GhosttySnapshot: Decodable, Sendable {
     public let windows: [Window]
     public let front_window_id: String?
     public let selected: GhosttyTarget?
+    /// The TTYs of every terminal surface the running Ghostty owns, from its child processes rather
+    /// than its scripting dictionary, so the quick terminal and any surface scripting cannot list
+    /// are included. Filled by Steer only for a Ghostty without `tty` (ADR 0011's sole-terminal
+    /// rule); nil when not read or unreadable. Never part of Ghostty's own reply.
+    public var surface_ttys: [String]?
 
     /// Every terminal title in the inventory. A session whose `GhosttyMatch.title` is among them
     /// is a CLI session, whatever its rollout header says (see `ReminderReader.scan`).
