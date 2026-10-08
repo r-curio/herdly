@@ -338,8 +338,10 @@ public enum HerdrOpenAcknowledgment {
         return Set(completions.filter { $0.arrivedAt.isFinite && $0.arrivedAt < previous.takenAt }.map(\.id))
     }
 
-    private static func ghosttyShowsVisit(clientTTY: String?, support: GhosttyTTYSupport,
-                                          ghostty: GhosttySnapshot) -> Bool {
+    /// Whether a Ghostty inventory shows the herdr client's tab to the user: with `tty`, the
+    /// TTY-matched tab selected with Ghostty frontmost; without it (interim, issue #155), Ghostty frontmost.
+    public static func ghosttyShowsVisit(clientTTY: String?, support: GhosttyTTYSupport,
+                                         ghostty: GhosttySnapshot) -> Bool {
         switch support {
         case .supported:
             guard let clientTTY,
@@ -350,5 +352,48 @@ public enum HerdrOpenAcknowledgment {
             // `selected` is present only while Ghostty is frontmost (Ghostty.js).
             return ghostty.selected != nil
         }
+    }
+}
+
+/// The dwell rule, agreed with the user on 2026-10-08: a completion that arrives while its bound pane is
+/// already in front is acknowledged once that pane has stayed visible for `required` seconds after the
+/// completion arrived. Visible means herdr reports the pane focused with exactly one Ghostty-hosted
+/// client and a Ghostty inventory shows that client's tab (`HerdrOpenAcknowledgment.ghosttyShowsVisit`).
+/// Visibility is sampled per scan, so a switch away and back between two scans goes unseen; a gap
+/// longer than `maxGap` between visible scans (a failed scan, sleep) restarts the run. Steer cannot tell
+/// whether the user is looking at the screen; the user accepted that an unattended pane acknowledges.
+public struct HerdrDwell: Equatable, Sendable {
+    public static let required: Double = 5
+    public static let maxGap: Double = 5
+
+    /// The pane visible on every scan since `since`, or nil when no run is in progress.
+    public private(set) var paneID: String?
+    public private(set) var since: Double = 0
+    private var lastSeenAt: Double = 0
+
+    public init() {}
+
+    /// Records one scan. `visible` is false when the pane is focused but Ghostty does not show it.
+    public mutating func observe(paneID: String, visible: Bool, at: Double) {
+        guard visible, at.isFinite else { reset(); return }
+        if self.paneID != paneID || at < lastSeenAt || at - lastSeenAt > Self.maxGap { since = at }
+        self.paneID = paneID
+        lastSeenAt = at
+    }
+
+    public mutating func reset() {
+        paneID = nil
+        since = 0
+        lastSeenAt = 0
+    }
+
+    /// Completions for `boundPaneID` that have been visible for `required` seconds by `now`: from the
+    /// later of their arrival and the start of the current run.
+    public func acknowledged<ID>(_ completions: [HerdrCompletionCandidate<ID>], boundPaneID: String,
+                                 at now: Double) -> Set<ID> {
+        guard paneID == boundPaneID, now.isFinite, now == lastSeenAt else { return [] }
+        return Set(completions.filter {
+            $0.arrivedAt.isFinite && $0.arrivedAt <= now && max($0.arrivedAt, since) + Self.required <= now
+        }.map(\.id))
     }
 }
