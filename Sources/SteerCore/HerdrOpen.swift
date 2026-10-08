@@ -28,8 +28,9 @@ public enum HerdrOpenStep: Int, CaseIterable, Comparable, Sendable {
 /// diagnostics and for grouping on the card (docs/product.md, "Agreed herdr presentation").
 public enum HerdrOpenFailure: Error, Equatable, Sendable {
     // Step 1: revalidate.
-    /// The Ghostty bundle does not declare a terminal `tty` (Ghostty 1.3.1). Checked before any herdr
-    /// request, so none is sent.
+    /// The Ghostty bundle does not declare a terminal `tty` (Ghostty 1.3.1). No longer produced by
+    /// `HerdrOpen.plan`, which applies the sole-terminal rule instead and reports its failure as
+    /// `ghosttyTab(.ttyUnsupported)`; kept so recorded failures and the card mapping stay total.
     case ghosttyTTYUnsupported
     /// The fresh scan no longer puts the session in herdr: for Claude Code its newest hook event
     /// records no pane, for Codex no pane shows its title (ADR 0012). Open does not fall back to the
@@ -129,7 +130,6 @@ public enum HerdrOpen {
     /// - Parameter snapshotTakenAt: when the herdr scan behind `binding` started, Unix seconds.
     public static func plan(support: GhosttyTTYSupport, binding: HerdrSessionBinding, outcome: HerdrScanOutcome?,
                             ghostty: GhosttySnapshot?, snapshotTakenAt: Double) -> Result<HerdrOpenPlan, HerdrOpenFailure> {
-        guard support == .supported else { return .failure(.ghosttyTTYUnsupported) }
         if let failure = herdrFailure(binding: binding, outcome: outcome) { return .failure(failure) }
         guard let pane = binding.target, let client = attachedClient(outcome), let tty = client.tty else {
             return .failure(.clientTTYUnknown)
@@ -206,8 +206,8 @@ public enum HerdrOpen {
 public struct HerdrOpenEffects {
     /// Unix seconds, read immediately before the pre-Open herdr scan.
     public var now: @MainActor () -> Double
-    /// Whether the installed Ghostty declares a terminal `tty`. Read first: when unsupported, no
-    /// herdr request (not even a scan) is made.
+    /// Whether the installed Ghostty declares a terminal `tty`. Without it the Ghostty half of the
+    /// join uses the sole-terminal rule (`GhosttyTTYMatch.soleTerminalJoin`).
     public var ttySupport: @MainActor () async -> GhosttyTTYSupport
     /// A fresh herdr scan and the session's binding against it.
     public var revalidate: @MainActor () async -> (binding: HerdrSessionBinding, outcome: HerdrScanOutcome?)
@@ -215,7 +215,8 @@ public struct HerdrOpenEffects {
     public var ghosttySnapshot: @MainActor () async -> GhosttySnapshot?
     /// `agent.focus` on the pane ID, sent once.
     public var focus: @MainActor (String) async -> Result<HerdrReply, HerdrUnavailableReason>
-    /// Selects the target tab after rechecking its TTY (normalized `/dev/ttysNNN`) and activates Ghostty.
+    /// Selects the target tab after rechecking its TTY (normalized `/dev/ttysNNN`), or without `tty`
+    /// the sole-terminal rule, and activates Ghostty.
     public var select: @MainActor (GhosttyTarget, String) async -> Bool
 
     public init(now: @escaping @MainActor () -> Double,
@@ -239,7 +240,6 @@ public enum HerdrOpenSequence {
     @MainActor
     public static func run(_ effects: HerdrOpenEffects) async -> HerdrOpenResult {
         let support = await effects.ttySupport()
-        guard support == .supported else { return .unavailable(.ghosttyTTYUnsupported) }
         let takenAt = effects.now()
         let fresh = await effects.revalidate()
         if let failure = HerdrOpen.herdrFailure(binding: fresh.binding, outcome: fresh.outcome) {
