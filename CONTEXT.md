@@ -50,7 +50,7 @@ A request from Codex for the user's answer to one or more questions, posed in th
 A follow-up prompt the user types on a completion card and sends to that finished session, which starts its next turn. The companion sends one reply per card, only to the session the card is about, and only through a transport that reaches that exact session; it never resends and never treats the reply as having acknowledged the completion.
 
 **Open in Codex**:
-The action that returns the user to the Codex session associated with a notch notification.
+The action that returns the user to the Codex session associated with a notch notification. Its button reads "Open Session", the same for Claude's equivalent (Open in Claude); the docs keep the source-specific names for the action.
 
 **Attention queue**:
 The ordered collection of Codex activity presented in the shared notch, with approval requests ahead of other activity. Its order determines presentation, not when Codex sessions execute.

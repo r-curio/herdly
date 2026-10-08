@@ -13,7 +13,7 @@ extension Companion {
         } else if let session = codexSession(identity) {
             if identity.surface == .cli { openCLI(session) } else { openDesktop(session) }
         } else {
-            navigationMessage = "Open in Codex is unavailable until Steer can verify the exact session."
+            navigationMessage = "Open Session is unavailable until Steer can verify the exact session."
             refresh()
         }
     }
@@ -131,7 +131,7 @@ extension Companion {
               let session = codexSession(approval.identity.session),
               let requestID = UUID(uuidString: approval.identity.call),
               let request = queue.items.compactMap(\.request).first(where: { $0.id == requestID }) else {
-            navigationMessage = "Open in Claude is unavailable until Steer can verify the exact Claude tab."
+            navigationMessage = "Open Session is unavailable until Steer can verify the exact Claude tab."
             refresh()
             return
         }
@@ -166,7 +166,7 @@ extension Companion {
         }
     }
     func reminderActionTitle(_ item: Reminder) -> String {
-        cliSessions.contains(item.session_id) && !ghosttyEnabled ? "Set up Ghostty" : "Open in Codex"
+        cliSessions.contains(item.session_id) && !ghosttyEnabled ? "Set up Ghostty" : "Open Session"
     }
     var needsGhosttySetup: Bool {
         !ghosttyEnabled && (!cliItems.isEmpty || visibleReminders.contains { cliSessions.contains($0.session_id) }
