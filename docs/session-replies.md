@@ -47,7 +47,7 @@ No phase but `.ready` sends anything, no timer sends anything, and a failure is 
 
 ## Sending is not acknowledgment
 
-A reply leaves the completion exactly where it was. It is acknowledged only by explicit dismissal or, for a CLI session, a verified visit to its tab — the rules that already govern the queue. The user can send a reply and still see the completion, which is what they asked for: the result is still unread.
+Sending leaves the completion exactly where it was: a send Codex never takes acknowledges nothing. Amended on 2026-10-08: once Codex records the turn the reply started (its `UserPromptSubmit`), that turn start acknowledges the session's earlier completions, as any prompt in a CLI session does ([product behavior](product.md)). The card then leaves the queue and the session shows as working.
 
 ## Verification
 

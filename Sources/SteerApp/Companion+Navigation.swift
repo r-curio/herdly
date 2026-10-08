@@ -158,7 +158,7 @@ extension Companion {
             navigationMessage = result.message
             // A verified visit acknowledges only completions already queued for this session.
             if result.opened {
-                for id in queued { queue.dismiss(.completion(id)) }
+                acknowledgeCodexCompletions(queued)
                 saveCompletions()
             }
             openingTask = false
@@ -323,9 +323,8 @@ extension Companion {
         guard !turns.isEmpty else { return }
         switch subject {
         case .codex(let session):
-            for item in cliItems where item.session == session && turns.contains(item.turn.uuidString) {
-                queue.dismiss(.completion(item.id))
-            }
+            acknowledgeCodexCompletions(cliItems.filter { $0.session == session && turns.contains($0.turn.uuidString) }
+                .map(\.id))
         case .claude(let identity):
             for outcome in agentQueue.snapshot.outcomes where outcome.session == identity && turns.contains(outcome.turn) {
                 agentQueue.dismiss(.outcome(outcome.id))
