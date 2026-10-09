@@ -1087,25 +1087,15 @@ struct Notch: View {
                 if folded {
                     earlierToggle(item, open: earlierOpen)
                 } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
-                            .font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
-                            .lineLimit(1).truncationMode(.tail)
-                        if let tag = QueueRowPresentation.attentionTag(item) { RowTag(text: tag) }
-                    }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(rowHeading(item))
-                    .accessibilityAddTraits(.isHeader)
+                    rowHeader(item)
                 }
                 Spacer(minLength: 8)
+                if !folded { RowTag(text: QueueRowPresentation.sourceTag(item.session)) }
                 rowAge(item)
             }
             .modifier(SessionTint(active: marked && indicator == .tint, working: working,
                                   reduceMotion: model.reduceMotion, color: spriteColor(for: item.session)))
             if !collapsed {
-                if !spotlit {
-                    identityLine(item)
-                }
                 if let request = spotlightDetails?.request {
                     spotlightRequest(request, item: item, subject: subject)
                 } else if let directory = spotlightDetails?.directory {
@@ -1304,9 +1294,12 @@ struct Notch: View {
         .accessibilityLabel("\(rowHeading(item)), \(subject)")
     }
 
-    /// The spoken heading: the session's name, then the full reading the visual tag shortens.
+    /// The spoken heading: the session's name, its place when known, then the full reading the
+    /// visual tag shortens.
     private func rowHeading(_ item: AgentAttentionItem) -> String {
-        "\(QueueRowPresentation.sessionName(item.session, names: sessionNames)), \(rowTitle(item))"
+        let name = QueueRowPresentation.sessionName(item.session, names: sessionNames)
+        let place = model.rowPlace(for: item).map { ", \($0)" } ?? ""
+        return "\(name)\(place), \(rowTitle(item))"
     }
 
     private func earlierKey(_ item: AgentAttentionItem) -> String { "earlier:\(item.id)" }
@@ -1317,19 +1310,24 @@ struct Notch: View {
                     subject: rowSubject(item), reduceMotion: model.reduceMotion, open: open)
     }
 
-    /// Where the row's session works: "project @ branch" when Steer has seen the working directory,
-    /// then the gray source tag. The session's name heads the row above this line. Presentation
-    /// only; nothing here selects a target.
-    private func identityLine(_ item: AgentAttentionItem) -> some View {
+    /// The row's one-line heading: the session's name, then "· project @ branch" when Steer has seen
+    /// the working directory, then the tag saying what the row needs. The place truncates first so
+    /// the name and tag stay whole. Presentation only; nothing here selects a target.
+    private func rowHeader(_ item: AgentAttentionItem) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
+                .font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
+                .lineLimit(1).truncationMode(.tail).layoutPriority(2)
             if let place = model.rowPlace(for: item) {
-                Text(place).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                Text("· \(place)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                     .lineLimit(1).truncationMode(.tail)
                     .help(model.rowDirectory(for: item) ?? place)
             }
-            Spacer(minLength: 8)
-            RowTag(text: QueueRowPresentation.sourceTag(item.session))
+            if let tag = QueueRowPresentation.attentionTag(item) { RowTag(text: tag).layoutPriority(3) }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(rowHeading(item))
+        .accessibilityAddTraits(.isHeader)
     }
 
     /// The trailing age lane: time since the row's latest evidence, refreshed every 30 seconds.
