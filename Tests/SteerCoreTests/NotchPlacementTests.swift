@@ -556,8 +556,10 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
                                     fiveHour: ClaudeUsageWindow(usedPercentage: 1, resetsAt: 1_000),
                                     sevenDay: ClaudeUsageWindow(usedPercentage: 53, resetsAt: 1_000), observedAt: 1)
     let weekly = UsageStripReadouts.make(codex: codex, claude: claude, fiveHour: false)
-    #expect(weekly.map(\.spokenLabel) == ["Claude seven-day limit 53% used", "Codex weekly limit 37% used"])
-    #expect(UsageStripReadouts.wingWidth(weekly) == 126) // 60 + 62 + 4
+    // Every bar left is weekly, so none is captioned; the hue tells the sources apart.
+    #expect(weekly.map(\.caption) == [nil, nil])
+    #expect(weekly.map(\.spokenLabel) == ["Claude weekly limit 53% used", "Codex weekly limit 37% used"])
+    #expect(UsageStripReadouts.wingWidth(weekly) == 108) // 60 + 44 + 4
     let codexOnly = UsageStripReadouts.make(codex: codex, claude: nil, fiveHour: false)
     #expect(UsageStripReadouts.wingWidth(codexOnly) == NotchPlacement.trailingWing)
     // The weekly readout stays, unknown, when nothing is reported.
