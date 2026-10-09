@@ -81,6 +81,7 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
     #expect(appearance.sort == .needsAttention)
     #expect(appearance.grouping == .none)
     #expect(appearance.earlier == .fiveMinutes)
+    #expect(appearance.panelWidth == .standard)
 }
 
 @Test func appearanceStoreRoundTripsEachProfileSeparatelyAndIgnoresUnknownValues() {
@@ -90,8 +91,10 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
     external.sort = .lastUpdate
     external.earlier = .never
     external.usage = .weeklyOnly
+    external.panelWidth = .extraWide
     external.save(profile: .externalDisplay) { stored[$0] = $1 }
     stored["appearance.macBookNotch.indicator"] = "glow"
+    stored["appearance.macBookNotch.panelWidth"] = "huge"
 
     let loadedExternal = NotchAppearance.load(profile: .externalDisplay) { stored[$0] }
     let loadedMacBook = NotchAppearance.load(profile: .macBookNotch) { stored[$0] }
