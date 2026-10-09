@@ -40,6 +40,27 @@ public enum QueueRowPresentation {
         return "session " + String(session.session.prefix(8)).lowercased()
     }
 
+    /// The short tag after a row's session name saying what the row needs from the user, or nil for
+    /// a running row, whose sprite step alone says it is working. A result keeps a failed, stopped,
+    /// or unknown status in its tag so a failure never reads as a plain finish.
+    public static func attentionTag(_ item: AgentAttentionItem) -> String? {
+        switch item.kind {
+        case .actionableApproval: return "approve"
+        case .question: return "answer"
+        case .handedBackApproval: return "handed back"
+        case .waiting: return "waiting"
+        case .statusUnavailable: return "status unknown"
+        case .outcome, .earlierOutcome:
+            switch item.outcome?.status {
+            case .finished: return "check"
+            case .failed: return "failed"
+            case .stopped: return "stopped"
+            case .unavailable, nil: return "status unknown"
+            }
+        case .running: return nil
+        }
+    }
+
     /// "project @ branch" for the identity line, from the session's working directory: the
     /// folder's last component and, when known, its checked-out branch. Nil without a directory.
     public static func place(directory: String?, branch: String?) -> String? {

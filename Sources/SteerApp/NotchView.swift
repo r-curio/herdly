@@ -423,8 +423,10 @@ struct NotchDisclosure<Content: View>: View {
 /// line, details, and controls. While closed the fold is the row's only pressable surface, so Open
 /// Session and Dismiss stay one keypress away for keyboard and VoiceOver users.
 struct EarlierFold: View {
-    let title: String
     let name: String
+    let tag: String?
+    /// The full spoken heading, since the tag is a shortened reading.
+    let spoken: String
     let subject: String
     let reduceMotion: Bool
     @Binding var open: Bool
@@ -439,13 +441,11 @@ struct EarlierFold: View {
                     .rotationEffect(.degrees(open ? 90 : 0))
                     .frame(width: 10)
                     .foregroundStyle(NotchStyle.dim)
-                Text(title)
+                Text(name)
                     .font(NotchStyle.mono(open ? 12 : 11, open ? .semibold : .regular))
                     .foregroundStyle(open ? NotchStyle.ink : NotchStyle.text)
-                if !open {
-                    Text(name).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                        .lineLimit(1).truncationMode(.tail)
-                }
+                    .lineLimit(1).truncationMode(.tail)
+                if let tag { RowTag(text: tag) }
             }
             .contentShape(Rectangle())
         }
@@ -453,10 +453,22 @@ struct EarlierFold: View {
         .focused($focused)
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .stroke(NotchStyle.ink.opacity(focused ? 0.9 : 0), lineWidth: 1.5).padding(.horizontal, -4).padding(.vertical, -2))
-        .accessibilityLabel("\(title), \(subject)")
+        .accessibilityLabel("\(spoken), \(subject)")
         .accessibilityValue(open ? "expanded" : "collapsed")
         .accessibilityHint(open ? "Hides this earlier result's details." : "Shows Open Session and Dismiss for this earlier result.")
         .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A small gray well holding a short reading: a row's source, or what the row needs from the user.
+struct RowTag: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.text)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .fixedSize()
     }
 }
 
@@ -681,7 +693,7 @@ struct Notch: View {
     private var visibleItems: [AgentAttentionItem] {
         switch model.presentationMode {
         case .collapsed: return []
-        case .queue: return model.orderedAgentAttentionItems
+        case .queue: return model.queueAgentAttentionItems
         case .agentSpotlight(let id): return model.orderedAgentAttentionItems.filter { $0.id == id }
         case .spotlight: return []
         }
@@ -1061,7 +1073,10 @@ struct Notch: View {
         let earlierOpen = disclosure(earlierKey(item))
         let collapsed = item.kind == .earlierOutcome && !earlierOpen.wrappedValue && !spotlit
         VStack(alignment: .leading, spacing: 8) {
-            let marked = item.kind == .running || item.kind == .waiting || item.kind == .question
+            // Every row is headed by its session's mark and name; the mark steps only while the
+            // session is working, and the tag says what, if anything, the row needs from the user.
+            let folded = item.kind == .earlierOutcome && !spotlit
+            let marked = !folded
             let indicator = model.appearance.indicator
             let working = item.running?.status == .working
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -1069,20 +1084,21 @@ struct Notch: View {
                     SessionMark(style: indicator, working: working, reduceMotion: model.reduceMotion,
                                 color: spriteColor(for: item.session)).offset(y: -1)
                 }
-                if item.kind == .earlierOutcome && !spotlit {
+                if folded {
                     earlierToggle(item, open: earlierOpen)
                 } else {
-                    Text(rowTitle(item)).font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
-                        .accessibilityAddTraits(.isHeader)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
+                            .font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
+                            .lineLimit(1).truncationMode(.tail)
+                        if let tag = QueueRowPresentation.attentionTag(item) { RowTag(text: tag) }
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(rowHeading(item))
+                    .accessibilityAddTraits(.isHeader)
                 }
                 Spacer(minLength: 8)
-                if spotlit {
-                    // The spotlight is a single-card glance and keeps its session label here.
-                    Text(sessionLabel(item.session)).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                        .lineLimit(1).truncationMode(.tail)
-                } else {
-                    rowAge(item)
-                }
+                rowAge(item)
             }
             .modifier(SessionTint(active: marked && indicator == .tint, working: working,
                                   reduceMotion: model.reduceMotion, color: spriteColor(for: item.session)))
@@ -1285,35 +1301,34 @@ struct Notch: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(rowTitle(item)), \(subject)")
+        .accessibilityLabel("\(rowHeading(item)), \(subject)")
+    }
+
+    /// The spoken heading: the session's name, then the full reading the visual tag shortens.
+    private func rowHeading(_ item: AgentAttentionItem) -> String {
+        "\(QueueRowPresentation.sessionName(item.session, names: sessionNames)), \(rowTitle(item))"
     }
 
     private func earlierKey(_ item: AgentAttentionItem) -> String { "earlier:\(item.id)" }
 
     private func earlierToggle(_ item: AgentAttentionItem, open: Binding<Bool>) -> some View {
-        EarlierFold(title: rowTitle(item), name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
+        EarlierFold(name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
+                    tag: QueueRowPresentation.attentionTag(item), spoken: rowHeading(item),
                     subject: rowSubject(item), reduceMotion: model.reduceMotion, open: open)
     }
 
-    /// Who the row belongs to and where it works: the session's name, then "project @ branch" when
-    /// Steer has seen the working directory, then the gray source tag. The name is kept before the
-    /// place when space runs out. Presentation only; nothing here selects a target.
+    /// Where the row's session works: "project @ branch" when Steer has seen the working directory,
+    /// then the gray source tag. The session's name heads the row above this line. Presentation
+    /// only; nothing here selects a target.
     private func identityLine(_ item: AgentAttentionItem) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
-                .lineLimit(1).truncationMode(.tail).layoutPriority(1)
             if let place = model.rowPlace(for: item) {
-                Text("· \(place)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                Text(place).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                     .lineLimit(1).truncationMode(.tail)
                     .help(model.rowDirectory(for: item) ?? place)
             }
             Spacer(minLength: 8)
-            Text(QueueRowPresentation.sourceTag(item.session))
-                .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.text)
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                .fixedSize()
+            RowTag(text: QueueRowPresentation.sourceTag(item.session))
         }
     }
 
