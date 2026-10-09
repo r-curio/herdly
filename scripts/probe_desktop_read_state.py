@@ -25,7 +25,21 @@ def read_state(path):
         raise ValueError("not a regular file within the size bound")
     with open(path, "rb") as f:
         root = json.load(f)
-    local = root["electron-persisted-atom-state"]["unread-thread-ids-by-host-v1"]["local"]
+    if "electron-thread-read-state-v1" in root:
+        # Desktop 26.930.61225: identity key -> execution host key ("local:<hash>") -> ids.
+        state = root["electron-thread-read-state-v1"]
+        if state["version"] != 1:
+            raise ValueError(f"unknown read-state version {state['version']!r}")
+        identities = state["unreadByIdentity"]
+        if len(identities) != 1:
+            raise ValueError(f"{len(identities)} signed-in identities; Steer needs exactly one")
+        hosts = [key for key in next(iter(identities.values())) if key.startswith("local:")]
+        if len(hosts) != 1:
+            raise ValueError(f"{len(hosts)} local hosts; Steer needs exactly one")
+        local = next(iter(identities.values()))[hosts[0]]
+    else:
+        # Desktop 26.901.51231, before the app migrated to the per-identity layout.
+        local = root["electron-persisted-atom-state"]["unread-thread-ids-by-host-v1"]["local"]
     unread = set()
     for entry in local:
         unread.add(str(uuid.UUID(entry)))
@@ -38,6 +52,17 @@ def load_snapshot(path):
             return json.load(f)
     except (OSError, ValueError):
         return None
+
+
+def desktop_completions(snapshot):
+    """Desktop completions from a version 1 (`completions`) or version 2 (`outcomes`) snapshot."""
+    for completion in snapshot.get("completions", []):
+        if completion.get("source") == "desktop":
+            yield completion
+    for outcome in snapshot.get("outcomes", []):
+        session = outcome["identity"]["session"]
+        if session.get("source") == "codex" and session.get("surface") == "desktop":
+            yield {"session": session["session"], "turn": outcome["identity"]["turn"], "arrivedAt": outcome["arrivedAt"]}
 
 
 def report(codex_home, snapshot_path):
@@ -53,9 +78,7 @@ def report(codex_home, snapshot_path):
     if snapshot is None:
         print(f"no Steer snapshot at {snapshot_path}")
         return 0
-    for completion in snapshot.get("completions", []):
-        if completion.get("source") != "desktop":
-            continue
+    for completion in desktop_completions(snapshot):
         session = str(uuid.UUID(completion["session"]))
         arrived = completion["arrivedAt"]
         if session in unread:
