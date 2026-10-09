@@ -120,3 +120,36 @@ private func temporaryTree() throws -> URL {
     try "gitdir: /nonexistent/steer/worktree\n".write(to: missing.appendingPathComponent(".git"), atomically: true, encoding: .utf8)
     #expect(GitBranchReader.branch(forDirectory: missing.path) == nil)
 }
+
+@Test func attentionTagSaysWhatTheRowNeedsAndLeavesWorkingRowsUntagged() {
+    var queue = AgentAttentionQueue()
+    let live = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "live", surface: .cli)
+    let asked = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "asked", surface: .cli)
+    let done = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "done", surface: .cli)
+    let broke = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "broke", surface: .cli)
+    let halted = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "halted", surface: .cli)
+    let unknown = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "unknown", surface: .cli)
+    let busy = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "busy", surface: .cli)
+    queue.apply(.approval(AgentApproval(session: live, turn: "t1", call: "a1", arrivedAt: 100)))
+    queue.apply(.question(AgentQuestion(session: asked, turn: "t2", call: "q1", arrivedAt: 100)))
+    queue.apply(.outcome(AgentOutcome(session: done, turn: "t3", status: .finished, arrivedAt: 100)))
+    queue.apply(.outcome(AgentOutcome(session: broke, turn: "t4", status: .failed, arrivedAt: 100)))
+    queue.apply(.outcome(AgentOutcome(session: halted, turn: "t5", status: .stopped, arrivedAt: 100)))
+    queue.apply(.outcome(AgentOutcome(session: unknown, turn: "t6", status: .unavailable, arrivedAt: 100)))
+    queue.apply(.running(AgentRunning(session: busy, turn: "t7", arrivedAt: 100)))
+
+    let tags = Dictionary(uniqueKeysWithValues: queue.items(at: 101).map {
+        ($0.session.session, QueueRowPresentation.attentionTag($0))
+    })
+    #expect(tags["live"] == "approve")
+    #expect(tags["asked"] == "answer")
+    #expect(tags["done"] == "check")
+    #expect(tags["broke"] == "failed")
+    #expect(tags["halted"] == "stopped")
+    #expect(tags["unknown"] == "status unknown")
+    #expect(tags["busy"] == .some(nil))
+
+    // Past its deadline the same approval is handed back, and its tag says so.
+    let expired = queue.items(at: 1_000).first { $0.session == live }
+    #expect(expired.flatMap(QueueRowPresentation.attentionTag) == "handed back")
+}

@@ -143,7 +143,7 @@ The MacBook notch and external displays each keep their own choices. Every optio
 An achromatic ladder on pure black with a single green, reserved for the sprite, and two source hues reserved for the fills of the strip's usage bars.
 
 ### Primary
-- **Sprite Green** (`{colors.sprite}`): the sprite's body cells, and nothing else. It is the only chroma outside the usage bars; it appears in the strip, and again at the head of a "working" row in the open queue.
+- **Sprite Green** (`{colors.sprite}`): the sprite's body cells, and nothing else. It is the only chroma outside the usage bars; it appears in the strip, and again at the head of each row in the open queue.
 - **Sprite Highlight** (`{colors.sprite-light}`): the sprite's ear and eye cells. A lighter green that gives the 6x4 bitmap its read at two points per cell.
 
 ### Usage
@@ -172,7 +172,7 @@ An achromatic ladder on pure black with a single green, reserved for the sprite,
 **Character:** One typeface at three sizes. The monospaced face makes the strip read like an instrument readout and lets the detail table align as a grid without rules. Weight, not size, carries hierarchy: 12pt semibold for a row title, 12pt regular for the task name, 11pt for everything the user reads or presses, 10pt for the single keyboard hint.
 
 ### Hierarchy
-- **Title** (600, 12pt): row titles in the open queue ("Permission needed", "Codex desktop finished", or the session name on a working row), the test-notification heading. Ink.
+- **Title** (600, 12pt): row titles in the open queue (the session's name on every row, followed by its tag when the row needs the user), the test-notification heading. Ink.
 - **Label** (400, 12pt): the task name in the collapsed strip. Text gray; single line, tail-truncated. The only truncation in the system.
 - **Body** (400, 11pt): detail values, explanatory sentences, session labels, control labels, the disclosure title. Text gray for values, dim for labels and session identifiers. Wraps in full.
 - **Count** (500, 11pt, tabular digits): the badge number.
@@ -236,7 +236,7 @@ The one picture in the system and the default working signal. The strip always u
 - **Working:** alternates two frames every 0.5 s (the feet step). Under Reduce Motion it holds frame one and breathes in opacity between 50% and 100% on a 2.4 s cycle.
 - **Idle:** frame one, still. Hidden from accessibility; the strip's label speaks for it.
 - **Unlit:** the mark of an empty notch, shown while no session is listed. Frame one with every cell in well gray, so the eyes close into the body; still, with no step or breathe, and no session's color, so it never reads as a session. It sits where the first sprite would.
-- **Placement:** leads the strip; leads a "working" row title in the open queue (offset up 1pt to sit on the baseline).
+- **Placement:** leads the strip; leads every row title in the open queue except a folded Earlier result (offset up 1pt to sit on the baseline). It steps only while that session is working.
 
 ### Session indicator styles
 The mark that leads each row in the open queue. The user picks one style for each display profile. Every style uses the session's colour and follows the sprite's timing: a two-step change every 0.5 s while working, never a fade or pulse.
@@ -272,12 +272,12 @@ With grouping on (State, Agent, or Project), the open queue inserts a heading ab
 - **Style:** 10pt caption, dim, 6pt above the group's first row. No rule or line is drawn.
 - **Sorting:** groups keep queue priority, so a group holding a live approval comes first. Rows sort inside their group.
 - **"Earlier":** stays a heading inside whichever group holds the older completions, followed by the number of Earlier rows in 11pt dim.
-- **Folded Earlier row:** one line: a chevron, the title in 11pt text gray, and the session name in dim, with the age lane on the right. The fold is a plain button with the ink focus ring; opening it restores the 12pt ink title and shows the identity line, details, and controls.
+- **Folded Earlier row:** one line: a chevron, the session name in 11pt text gray, and the result's tag, with the age lane on the right. The fold is a plain button with the ink focus ring; opening it sets the name in the 12pt ink title and shows the identity line, details, and controls.
 
 ### Cards / Containers
 Rows are not cards. There is no card surface, border, or shadow; a row is a left-aligned stack on the black ground, separated from its neighbors by 14pt of whitespace.
-- **Row header:** title in 12pt semibold ink on the left, the age lane in 11pt dim tabular digits on the right (at least 36pt wide, right-aligned, refreshed every 30 s), aligned on the first baseline with 10pt spacing; a working row leads with the sprite. The spotlight keeps its session label in the age lane's place.
-- **Identity line (open queue only):** the session name in 11pt text gray, then "· project @ branch" in 11pt dim, then the source tag pushed right. The name keeps its width first; the place truncates at its tail. The source tag is 10pt text gray on a well with 4pt corners and 5pt by 1pt padding; it carries no hue.
+- **Row header:** the session's mark, then its name in 12pt semibold ink, then, when the row needs the user, a tag at 6pt: 10pt text gray on a well with a 4pt corner, the same material as the source tag ("approve", "answer", "handed back", "waiting", "status unknown", or for a result "check", "failed", "stopped"). A working row has no tag; the mark's step says it is working. The age lane sits on the right in 11pt dim tabular digits (at least 36pt wide, right-aligned, refreshed every 30 s), aligned on the first baseline with 10pt spacing. The spotlight uses the same header.
+- **Identity line (open queue only):** "project @ branch" in 11pt dim, then the source tag pushed right. The place truncates at its tail; the session name heads the row above it. The source tag is 10pt text gray on a well with 4pt corners and 5pt by 1pt padding; it carries no hue.
 - **Sentence (when present):** 11pt text gray, wrapping in full.
 - **Detail table:** label column 58pt wide in dim, values in text gray, 8pt gutter, 3pt line spacing; missing values read "Not provided by Codex" in dim. Command and reason are selectable.
 - **Disclosure:** "Show full request" in 11pt text gray reveals the long text inline.
