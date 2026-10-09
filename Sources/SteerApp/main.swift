@@ -234,20 +234,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The strip's readings: only windows that have not yet reset are shown.
     var currentUsage: CodexUsageReading? { usage?.current(now: Date().timeIntervalSince1970) }
     var currentWeeklyLimit: CodexUsageWindow? { currentUsage?.weekly }
-    /// Shown beside the weekly reading only while Codex reports a five-hour window that is still
-    /// running; the wing right of the housing widens for it and narrows back without it.
-    var currentFiveHourLimit: CodexUsageWindow? { currentUsage?.fiveHour }
-    /// Whether the strip is laying out for the five-hour readout right now.
-    var fiveHourShown: Bool { currentFiveHourLimit != nil }
     /// Claude readings remain keyed by their selected configuration root; values are never merged.
     @Published var claudeUsage: [String: ClaudeUsageReading] = [:]
     /// The strip's usage bars, Claude's then Codex's, from one clock reading so the bars drawn and
     /// the wing laid out for them agree.
     var usageStripReadouts: [UsageStripReadout] {
-        guard appearance.usage == .compact else { return [] }
+        guard appearance.usage != .hidden else { return [] }
         let now = Date().timeIntervalSince1970
         return UsageStripReadouts.make(codex: usage?.current(now: now),
-                                       claude: ClaudeUsageReading.newest(claudeUsage.values, now: now))
+                                       claude: ClaudeUsageReading.newest(claudeUsage.values, now: now),
+                                       fiveHour: appearance.usage == .compact)
     }
     /// `--reminder-rollouts <path>` points lab runs at a copy of Codex's sessions tree.
     nonisolated static var rolloutRoot: URL {
@@ -823,7 +819,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             "chosen_display": chosen.map { Int($0.id) } ?? NSNull(),
             "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts))) } ?? NSNull(),
             "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts))) } ?? NSNull(),
-            "five_hour_shown": fiveHourShown,
+            "five_hour_shown": usageStripReadouts.contains { $0.source == .codex && $0.caption != nil },
             "usage_readouts": usageStripReadouts.count,
             "panel_frame": rect(panel.frame),
             "codex_foreground": desktopForeground,

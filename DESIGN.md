@@ -262,7 +262,7 @@ The collapsed reading and the header of the open panel.
 - **Center label** (external displays only): Task name (the top-priority item's task name), Session name, or Off.
   - It is drawn in 12pt regular text gray, one line, tail-truncated, centred between the wings.
   - On a display with a camera housing it is never drawn, because the housing covers the space.
-- **Usage bars** (user option): Compact (default) or Hidden. Hidden removes the readouts and shrinks the right wing to its minimum width.
+- **Usage bars** (user option): Compact (default), Weekly only, or Hidden. Weekly only drops the "5h" readouts of both sources, keeping Claude's "7d" and Codex's weekly readout, and the right wing narrows to match. Hidden removes the readouts and shrinks the right wing to its minimum width.
 - **Interaction:** the whole strip is a plain button that expands the queue; keyboard focus draws the ink ring around it (6pt corners, 1.5pt, 6pt outside horizontally).
 
 ### Group headings

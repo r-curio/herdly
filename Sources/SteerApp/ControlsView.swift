@@ -1088,7 +1088,7 @@ private struct NotchControls: View {
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
                 SettingsRow(title: "Usage bars", detail: nil) {
                     SlidingSegments(title: "Usage bars", selection: binding(\.usage),
-                                    options: [(UsageDisplay.compact, "Compact"), (UsageDisplay.hidden, "Hidden")])
+                                    options: [(UsageDisplay.compact, "Compact"), (UsageDisplay.weeklyOnly, "Weekly only"), (UsageDisplay.hidden, "Hidden")])
                 }
             }
             SettingsFooter(profile == .macBookNotch
@@ -1185,7 +1185,7 @@ private struct NotchPreview: View {
                 Color.clear.frame(width: 110, height: 1)
                 Spacer(minLength: 12)
             }
-            if appearance.usage == .compact {
+            if appearance.usage != .hidden {
                 RoundedRectangle(cornerRadius: 1).fill(NotchStyle.well).frame(width: 4, height: 12)
                     .overlay(alignment: .bottom) {
                         RoundedRectangle(cornerRadius: 1).fill(NotchStyle.codexUsage).frame(height: 7)
