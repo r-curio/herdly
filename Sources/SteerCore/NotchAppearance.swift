@@ -212,3 +212,35 @@ public enum QueueGroups {
         }
     }
 }
+
+/// The open queue split for reading: rows that need the user first, then the working rows. While
+/// anything needs the user, the working rows sit behind one "N working" fold so they cannot crowd
+/// out a request. The split follows the to-check badge: every row except a running one needs the
+/// user. It changes presentation only, never the order inside either part, a count, or a deadline.
+public struct QueueSections: Equatable, Sendable {
+    public let attention: [QueueGroup]
+    public let working: [QueueGroup]
+    public let workingCount: Int
+
+    /// Working rows fold only when something above them needs the user; otherwise they are the queue.
+    public var foldsWorking: Bool { !attention.isEmpty && workingCount > 0 }
+
+    /// Splits already-ordered rows. While folding, ungrouped requests gain a "Needs you" heading and
+    /// folded working rows drop the State grouping's "Working" heading, since the fold already names
+    /// them; Agent and Project headings stay inside the fold.
+    public static func make(_ items: [AgentAttentionItem], grouping: QueueGrouping,
+                            project: (AgentAttentionItem) -> String?) -> QueueSections {
+        let needsUser = items.filter { $0.kind != .running }
+        let running = items.filter { $0.kind == .running }
+        let folds = !needsUser.isEmpty && !running.isEmpty
+        var attention = QueueGroups.make(needsUser, grouping: grouping, project: project)
+        if folds && grouping == .none {
+            // Without grouping, one heading still separates the requests from the fold below them.
+            attention = [QueueGroup(heading: "Needs you", items: needsUser)]
+        }
+        let workingGrouping: QueueGrouping = folds && grouping == .state ? .none : grouping
+        return QueueSections(attention: attention,
+                             working: QueueGroups.make(running, grouping: workingGrouping, project: project),
+                             workingCount: running.count)
+    }
+}

@@ -272,6 +272,7 @@ With grouping on (State, Agent, or Project), the open queue inserts a heading ab
 - **Style:** 10pt caption, dim, 6pt above the group's first row. No rule or line is drawn.
 - **Sorting:** groups keep queue priority, so a group holding a live approval comes first. Rows sort inside their group.
 - **"Earlier":** stays a heading inside whichever group holds the older completions, followed by the number of Earlier rows in 11pt dim. A "Dismiss all" button sits at the heading's trailing edge and dismisses exactly the rows counted there.
+- **Working fold:** while any row needs the user, running rows sit below them behind one disclosure, "N working" (11pt text gray, chevron, ink focus ring), closed whenever the panel opens. Without grouping the rows above it take a "Needs you" heading; with State grouping the fold stands in for "Working". With nothing needing the user, running rows show unfolded.
 - **Folded Earlier row:** one line: a chevron, the session name in 11pt text gray, and the result's tag, with the age lane on the right. The fold is a plain button with the ink focus ring; opening it restores the full row header and shows the details and controls.
 
 ### Cards / Containers
