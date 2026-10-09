@@ -80,6 +80,10 @@ Follow-up to the report above: even at the top edge the strip covered the tab ro
 
 Reported: with no session the strip still drew a green sprite, which read as a session. The strip now draws the unlit sprite (well gray, eyes shut, still) when no session is listed, and the open queue says why it is empty in one row (`EmptyQueueReading`): "Nothing running", naming the sources whose setup is connected, or "Not connected" with Open Controls once both setup checks have landed and neither source is connected. While either check is pending, the row names no source and claims no missing connection. `emptyQueueNamesConnectedSourcesAndClaimsNoGapBeforeBothSetupsAreChecked` covers the reading. `--preview-queue empty-collapsed|empty-expanded|empty-not-connected` renders the three states; pass `--attention-snapshot` with a scratch path so the preview does not load the real snapshot.
 
+## Hover at the top edge (2026-10-09)
+
+Reported: with the pointer pushed against the top of the screen above the strip, the panel did not expand. Measured on the built-in display, the strip spans Cocoa y 950–982 and the pinned pointer reports y 982 (y 981 one point lower). `CGRect.contains` and AppKit's tracking areas, which drive SwiftUI's hover, both treat `maxY` as outside, so that row never counted as hover. The panel's top edge row now counts as over the panel by geometry (`NotchHover.pointerTouchesTopEdge`), and mouse-move monitors (which need no Accessibility permission) refresh as soon as the pointer reaches or leaves that row instead of waiting for the 0.2 s poll. `pointerPushedAgainstTheTopEdgeCountsAsOverThePanel` covers the rule. A live check of the expansion was not completed.
+
 ## Operator walkthrough (to record before release)
 
 Not performed by the agent: it needs a second display, Mission Control, and the keyboard, which are outside the permitted automation. Run it with Steer connected to an isolated lab as in [restart recovery](restart-recovery.md) and record each line as pass, fail, or uncertain.

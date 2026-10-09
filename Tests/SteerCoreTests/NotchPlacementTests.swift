@@ -608,3 +608,16 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     #expect(NotchPlacement.bodyWidth(on: tiny, expanded: true, width: .extraWide)
             == NotchPlacement.bodyWidth(on: tiny, expanded: true, width: .standard))
 }
+
+@Test func pointerPushedAgainstTheTopEdgeCountsAsOverThePanel() {
+    // The built-in strip measured live: Cocoa y 950–982, and the pinned pointer reports y 982.
+    let strip = CGRect(x: 543, y: 950, width: 421, height: 32)
+
+    #expect(!strip.contains(CGPoint(x: 750, y: 982)))
+    #expect(NotchHover.pointerTouchesTopEdge(of: strip, pointer: CGPoint(x: 750, y: 982)))
+    #expect(NotchHover.pointerTouchesTopEdge(of: strip, pointer: CGPoint(x: 543, y: 982)))
+    #expect(!NotchHover.pointerTouchesTopEdge(of: strip, pointer: CGPoint(x: 964, y: 982)))
+    #expect(!NotchHover.pointerTouchesTopEdge(of: strip, pointer: CGPoint(x: 400, y: 982)))
+    #expect(!NotchHover.pointerTouchesTopEdge(of: strip, pointer: CGPoint(x: 750, y: 981)))
+    #expect(!NotchHover.pointerTouchesTopEdge(of: .zero, pointer: .zero))
+}
