@@ -379,6 +379,7 @@ func selfTest() -> Int32 {
 }
 
 if arguments.contains("--self-test") { exit(selfTest()) }
+if arguments.dropFirst().first == claudeTitleGeneratorMarker { runClaudeTitleGenerator(arguments) }
 if let bridgeIndex = arguments.firstIndex(of: ClaudeStatusLineBridge.marker),
    arguments.indices.contains(bridgeIndex + 1), arguments[bridgeIndex + 1] == "--usage-dir",
    arguments.indices.contains(bridgeIndex + 3), arguments[bridgeIndex + 2].isEmpty == false,
@@ -445,6 +446,9 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
        event == "SessionStart" || event == "SessionEnd",
        let session = object["session_id"] as? String,
        let output = terminalSequence(for: session, reset: event == "SessionEnd") {
+        FileHandle.standardOutput.write(output)
+    }
+    if let output = claudeSessionTitleOutput(object, eventsDirectory: directory) {
         FileHandle.standardOutput.write(output)
     }
     if let approvalRequestID {
