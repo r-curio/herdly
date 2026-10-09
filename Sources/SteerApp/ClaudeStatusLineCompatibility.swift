@@ -9,7 +9,10 @@ enum ClaudeStatusLineCompatibility {
     static let maximumProcessListBytes = 64 * 1024
     static let maximumProcessListRecords = 4096
 
-    static func probe(command: String, timeout: TimeInterval = 0.75) -> Bool {
+    /// `timeout` bounds the command and `processListTimeout` the descendant listing; running out of
+    /// either fails closed.
+    static func probe(command: String, timeout: TimeInterval = 0.75,
+                      processListTimeout: TimeInterval = 0.25) -> Bool {
         let input = Data("{\"session_id\":\"probe\",\"rate_limits\":null}\n\u{1b}[32mprobe\u{1b}[0m\n".utf8)
         let process = Process()
         let stdin = Pipe()
@@ -39,7 +42,7 @@ enum ClaudeStatusLineCompatibility {
             _ = terminateProcessGroup(process.processIdentifier)
             return false
         }
-        guard let remaining = descendants(of: process.processIdentifier) else { return false }
+        guard let remaining = descendants(of: process.processIdentifier, timeout: processListTimeout) else { return false }
         guard remaining.isEmpty else {
             _ = terminateProcesses(remaining)
             return false
@@ -142,7 +145,7 @@ enum ClaudeStatusLineCompatibility {
         kill(-processGroup, 0) == 0 || errno == EPERM
     }
 
-    private static func descendants(of root: pid_t) -> [pid_t]? {
+    private static func descendants(of root: pid_t, timeout: TimeInterval = 0.25) -> [pid_t]? {
         let process = Process()
         let output = Pipe()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
@@ -151,7 +154,7 @@ enum ClaudeStatusLineCompatibility {
         process.standardError = FileHandle.nullDevice
         guard (try? process.run()) != nil else { return nil }
         output.fileHandleForWriting.closeFile()
-        guard wait(for: process, until: Date().addingTimeInterval(0.25)) else {
+        guard wait(for: process, until: Date().addingTimeInterval(timeout)) else {
             terminateAndReapProcess(process)
             return nil
         }

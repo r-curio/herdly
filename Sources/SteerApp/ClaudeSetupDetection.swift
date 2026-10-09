@@ -494,6 +494,23 @@ final class ClaudeSetupModel: ObservableObject {
         refresh()
     }
 
+    /// The opt-in lives as a marker file beside the hook's events, so the hook reads the same
+    /// switch the toggle shows without Claude's settings changing.
+    func sessionTitlesEnabled(for root: Root) -> Bool {
+        ClaudeSessionTitles.isEnabled(eventsDirectory: eventsDirectory(for: root))
+    }
+
+    func setSessionTitlesEnabled(_ enabled: Bool, for root: Root) {
+        objectWillChange.send()
+        if !ClaudeSessionTitles.setEnabled(enabled, eventsDirectory: eventsDirectory(for: root)) {
+            message = "Steer could not \(enabled ? "turn on" : "turn off") session titles for \(root.displayPath)."
+        }
+    }
+
+    private func eventsDirectory(for root: Root) -> URL {
+        ClaudeSetupDetection.setupRoots(configDirectory: root.url, applicationSupport: applicationSupport).eventsDirectory
+    }
+
     func configure(_ root: Root) {
         guard let plan = root.plan, case .ready = plan.status else {
             message = "Claude setup preview is not ready for \(root.displayPath)."
