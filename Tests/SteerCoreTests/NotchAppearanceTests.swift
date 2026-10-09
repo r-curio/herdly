@@ -89,6 +89,7 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
     external.indicator = .tint
     external.sort = .lastUpdate
     external.earlier = .never
+    external.usage = .weeklyOnly
     external.save(profile: .externalDisplay) { stored[$0] = $1 }
     stored["appearance.macBookNotch.indicator"] = "glow"
 

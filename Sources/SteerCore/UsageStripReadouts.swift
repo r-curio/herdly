@@ -33,22 +33,24 @@ public struct UsageStripReadout: Equatable, Sendable {
 /// Which usage bars the strip shows and how wide their wing must be. Claude's current five-hour and
 /// seven-day windows come first, then Codex's five-hour window while it reports one, then Codex's
 /// weekly readout, which is always present (a dash while unknown). Pass readings already filtered
-/// to the present (`current(now:)`) so the bars and the wing width agree.
+/// to the present (`current(now:)`) so the bars and the wing width agree. With `fiveHour` false
+/// both five-hour readouts are left out and the wing narrows to match.
 public enum UsageStripReadouts {
     /// A captioned readout at 11pt mono, its 8pt trailing pad included, with room for "100%".
     public static let captionedReadoutWidth: CGFloat = 62
     /// Extra space between the Claude group and the Codex group (on top of the 8pt pad).
     public static let groupGap: CGFloat = 4
 
-    public static func make(codex: CodexUsageReading?, claude: ClaudeUsageReading?) -> [UsageStripReadout] {
+    public static func make(codex: CodexUsageReading?, claude: ClaudeUsageReading?,
+                            fiveHour: Bool = true) -> [UsageStripReadout] {
         var readouts: [UsageStripReadout] = []
-        if let window = claude?.fiveHour {
+        if fiveHour, let window = claude?.fiveHour {
             readouts.append(UsageStripReadout(source: .claude, caption: "5h", usedPercent: window.usedPercentage, percentText: window.percentText))
         }
         if let window = claude?.sevenDay {
             readouts.append(UsageStripReadout(source: .claude, caption: "7d", usedPercent: window.usedPercentage, percentText: window.percentText))
         }
-        if let window = codex?.fiveHour {
+        if fiveHour, let window = codex?.fiveHour {
             readouts.append(UsageStripReadout(source: .codex, caption: "5h", usedPercent: window.usedPercent, percentText: window.percentText))
         }
         let weekly = codex?.weekly
