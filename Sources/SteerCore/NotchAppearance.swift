@@ -57,6 +57,31 @@ public enum QueueGrouping: String, CaseIterable, Sendable {
     case project
 }
 
+/// How much wider the open panel is than the collapsed strip. Standard is the instrument in DESIGN.md.
+public enum PanelWidth: String, CaseIterable, Sendable {
+    case standard
+    case wide
+    case extraWide
+
+    /// Width opening adds to the collapsed body.
+    public var growth: CGFloat {
+        switch self {
+        case .standard: 60
+        case .wide: 160
+        case .extraWide: 260
+        }
+    }
+
+    /// Narrowest body the open panel gets.
+    public var minimumBody: CGFloat {
+        switch self {
+        case .standard: 380
+        case .wide: 480
+        case .extraWide: 580
+        }
+    }
+}
+
 /// How long an unacknowledged outcome stays current before it is listed under "Earlier".
 /// Moving is presentation decay only; it never acknowledges.
 public enum EarlierDelay: String, CaseIterable, Sendable {
@@ -88,13 +113,15 @@ public struct NotchAppearance: Equatable, Sendable {
     public var sort: QueueSort
     public var grouping: QueueGrouping
     public var earlier: EarlierDelay
+    public var panelWidth: PanelWidth
 
     public static let standard = NotchAppearance(leftWing: .spritesAndCount, centerLabel: .taskName, usage: .compact,
                                                  indicator: .sprite, sort: .needsAttention, grouping: .none,
-                                                 earlier: .fiveMinutes)
+                                                 earlier: .fiveMinutes, panelWidth: .standard)
 
     public init(leftWing: StripLeftWing, centerLabel: StripCenterLabel, usage: UsageDisplay,
-                indicator: SessionIndicatorStyle, sort: QueueSort, grouping: QueueGrouping, earlier: EarlierDelay) {
+                indicator: SessionIndicatorStyle, sort: QueueSort, grouping: QueueGrouping, earlier: EarlierDelay,
+                panelWidth: PanelWidth = .standard) {
         self.leftWing = leftWing
         self.centerLabel = centerLabel
         self.usage = usage
@@ -102,6 +129,7 @@ public struct NotchAppearance: Equatable, Sendable {
         self.sort = sort
         self.grouping = grouping
         self.earlier = earlier
+        self.panelWidth = panelWidth
     }
 
     /// The camera housing covers the centre of the strip, so the label is never drawn there.
@@ -121,7 +149,8 @@ public struct NotchAppearance: Equatable, Sendable {
                                indicator: read("indicator", standard.indicator),
                                sort: read("sort", standard.sort),
                                grouping: read("grouping", standard.grouping),
-                               earlier: read("earlier", standard.earlier))
+                               earlier: read("earlier", standard.earlier),
+                               panelWidth: read("panelWidth", standard.panelWidth))
     }
 
     public func save(profile: DisplayProfile, write: (String, String) -> Void) {
@@ -132,6 +161,7 @@ public struct NotchAppearance: Equatable, Sendable {
         write(Self.key(profile, "sort"), sort.rawValue)
         write(Self.key(profile, "grouping"), grouping.rawValue)
         write(Self.key(profile, "earlier"), earlier.rawValue)
+        write(Self.key(profile, "panelWidth"), panelWidth.rawValue)
     }
 
     static func key(_ profile: DisplayProfile, _ field: String) -> String {

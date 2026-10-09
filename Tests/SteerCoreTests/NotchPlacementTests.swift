@@ -576,3 +576,35 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     let framed = NotchPlacement.frame(on: external, expanded: false, rows: 0, extraRows: false, centerLabel: label)
     #expect(framed.width == 332 + 2 * NotchPlacement.earRadius && framed.midX == external.frame.midX)
 }
+
+@Test func panelWidthWidensOnlyTheOpenPanelAndKeepsTheHousingCentered() {
+    // Collapsed body: housing 180 + wings 112 + 112 = 404.
+    let collapsed = NotchPlacement.frame(on: builtIn, expanded: false, rows: 0, extraRows: false, wing: 112)
+    for (width, body) in [(PanelWidth.standard, 464.0), (.wide, 564), (.extraWide, 664)] {
+        #expect(NotchPlacement.bodyWidth(on: builtIn, expanded: false, wing: 112, width: width) == 404)
+        #expect(NotchPlacement.bodyWidth(on: builtIn, expanded: true, wing: 112, width: width) == CGFloat(body))
+        let open = NotchPlacement.frame(on: builtIn, expanded: true, contentHeight: 200, wing: 112, width: width)
+        #expect(open.width == CGFloat(body) + 2 * NotchPlacement.earRadius)
+        #expect(open.midX == collapsed.midX)
+        let layout = NotchPlacement.strip(on: builtIn, expanded: true, wing: 112, width: width)
+        #expect(layout.leading == layout.trailing)
+    }
+    // A narrow strip still reaches each width's floor.
+    let bare = NotchDisplay(id: 3, frame: CGRect(x: 0, y: 0, width: 1440, height: 900), topInset: 0, housingWidth: 0,
+                            menuBarHeight: 25, isBuiltIn: false)
+    #expect(NotchPlacement.bodyWidth(on: bare, expanded: true, width: .standard) == 380)
+    #expect(NotchPlacement.bodyWidth(on: bare, expanded: true, width: .wide) == 480)
+    #expect(NotchPlacement.bodyWidth(on: bare, expanded: true, width: .extraWide) == 580)
+}
+
+@Test func widePanelNeverRunsPastTheDisplayMarginsOrBelowStandard() {
+    let narrow = NotchDisplay(id: 4, frame: CGRect(x: 0, y: 0, width: 600, height: 800), topInset: 0, housingWidth: 0,
+                              menuBarHeight: 25, isBuiltIn: false)
+    // Room: 600 - 2 * (8 + 16) = 552.
+    #expect(NotchPlacement.bodyWidth(on: narrow, expanded: true, width: .extraWide) == 552)
+    #expect(NotchPlacement.bodyWidth(on: narrow, expanded: true, width: .wide) == 480)
+    let tiny = NotchDisplay(id: 5, frame: CGRect(x: 0, y: 0, width: 400, height: 600), topInset: 0, housingWidth: 0,
+                            menuBarHeight: 25, isBuiltIn: false)
+    #expect(NotchPlacement.bodyWidth(on: tiny, expanded: true, width: .extraWide)
+            == NotchPlacement.bodyWidth(on: tiny, expanded: true, width: .standard))
+}

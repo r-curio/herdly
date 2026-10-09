@@ -205,6 +205,7 @@ Play a short completion sound as that card opens. Provide a mute control. With R
 
 Notch customization was agreed on 2026-10-09. Settings offers the following options:
 - **Completion sound:** any macOS system sound, Glass by default, with a preview button (issue #57).
+- **Panel width** (per display profile, agreed 2026-10-09): Standard (default), Wide, or Extra wide. Opening widens the panel past the collapsed strip by 60, 160, or 260 points, never narrower than 380, 480, or 580 points, and never past 16 points from each side of the display. It changes only geometry, never the queue, counts, or a deadline.
 - **Earlier delay:** 2, 5 (default), 10 or 20 minutes, or Never. Completions move into Earlier after this delay. Moving is still presentation decay, not acknowledgment.
 - **Keep new cards open until I act:** off by default. When on, a spotlight card stays open until the user interacts with it or opens the queue, instead of closing after three seconds. It never extends an approval's 30-second deadline.
 - **Haptic feedback when the pointer enters the strip:** off by default.
