@@ -287,6 +287,7 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 
 ### Panel motion
 - **Resize:** the frame animates to its new size over 0.18 s with an ease-out curve; no spring, no overshoot. Under Reduce Motion, or before first presentation, the frame is set without animation.
+- **Rows:** open-queue rows keep their identity, so a reorder slides each row to its new place over 0.28 s on a smooth curve with no bounce. A new row fades in from 6pt above at 98% scale; a leaving row fades and shrinks toward its top edge while the rows below close the gap. Group headings move with their rows. Under Reduce Motion rows and headings only crossfade over 0.15 s, with no offset or scaling.
 - **Hover hold:** the panel treats the pointer as inside for 0.3 s after it leaves, so a slip off the edge does not snap it shut.
 - **Spotlight:** a new completion or actionable approval opens only its own row for 3 s; interaction holds it open and the original deadline applies afterward.
 
