@@ -29,6 +29,8 @@ public enum StripCenterLabel: String, CaseIterable, Sendable {
 
 public enum UsageDisplay: String, CaseIterable, Sendable {
     case compact
+    /// Every weekly or seven-day readout, without the five-hour ones.
+    case weeklyOnly
     case hidden
 }
 

@@ -549,6 +549,21 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     #expect(UsageStripReadouts.make(codex: nil, claude: sevenOnly).map(\.caption) == ["7d", nil])
 }
 
+@Test func weeklyOnlyUsageDropsBothFiveHourReadoutsAndNarrowsTheWing() {
+    let codex = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 37, resetsAt: 1_000),
+                                  fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: 1_000))
+    let claude = ClaudeUsageReading(sourceScope: "/a", sessionID: nil,
+                                    fiveHour: ClaudeUsageWindow(usedPercentage: 1, resetsAt: 1_000),
+                                    sevenDay: ClaudeUsageWindow(usedPercentage: 53, resetsAt: 1_000), observedAt: 1)
+    let weekly = UsageStripReadouts.make(codex: codex, claude: claude, fiveHour: false)
+    #expect(weekly.map(\.spokenLabel) == ["Claude seven-day limit 53% used", "Codex weekly limit 37% used"])
+    #expect(UsageStripReadouts.wingWidth(weekly) == 126) // 60 + 62 + 4
+    let codexOnly = UsageStripReadouts.make(codex: codex, claude: nil, fiveHour: false)
+    #expect(UsageStripReadouts.wingWidth(codexOnly) == NotchPlacement.trailingWing)
+    // The weekly readout stays, unknown, when nothing is reported.
+    #expect(UsageStripReadouts.make(codex: nil, claude: nil, fiveHour: false).map(\.spokenLabel) == ["Codex weekly limit unknown"])
+}
+
 @Test func centerLabelWidensOnlyAStripWithoutAHousing() {
     let label = NotchPlacement.centerLabelWidth
 
