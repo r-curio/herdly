@@ -129,3 +129,27 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
     #expect(presentation.update(interacting: false, now: 2.9) == .agentSpotlight(id))
     #expect(presentation.update(interacting: false, now: 3) != .agentSpotlight(id))
 }
+
+@Test func lastUpdateSortKeepsEarlierOutcomesTogetherAtTheEnd() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.outcome(AgentOutcome(session: session("old"), turn: "t1", status: .finished, arrivedAt: 0)))
+    queue.apply(.outcome(AgentOutcome(session: session("older"), turn: "t2", status: .failed, arrivedAt: -10)))
+    queue.apply(.running(AgentRunning(session: session("stale"), turn: "t3", arrivedAt: -100, updatedAt: -50)))
+    queue.apply(.outcome(AgentOutcome(session: session("fresh"), turn: "t4", status: .finished, arrivedAt: 590)))
+
+    let latest = queue.items(at: 600, sort: .lastUpdate)
+
+    // The stale running row is older than both earlier outcomes yet stays above them.
+    #expect(latest.map(\.session.session) == ["fresh", "stale", "old", "older"])
+    #expect(latest.map(\.kind) == [.outcome, .running, .earlierOutcome, .earlierOutcome])
+}
+
+@Test func defaultItemsKeepPriorityOrderWhateverTheQueueSort() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(AgentApproval(session: session("handed"), turn: "t1", call: "a1", arrivedAt: 0)))
+    queue.apply(.running(AgentRunning(session: session("busy"), turn: "t2", arrivedAt: 5, updatedAt: 50)))
+
+    // The strip and spotlight read the default order: the handed-back request still leads.
+    #expect(queue.items(at: 60).map(\.kind) == [.handedBackApproval, .running])
+    #expect(queue.items(at: 60, sort: .lastUpdate).map(\.kind) == [.running, .handedBackApproval])
+}

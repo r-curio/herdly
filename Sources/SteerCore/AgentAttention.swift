@@ -342,13 +342,18 @@ public struct AgentAttentionQueue: Sendable {
         }
         guard sort == .lastUpdate else { return byPriority }
         // A live request keeps its place while its deadline runs, so newer activity cannot bury it.
+        // Earlier outcomes stay together at the end so they fold under one "Earlier" heading.
         let pinned = byPriority.filter { $0.kind == .actionableApproval || $0.kind == .question }
-        let rest = byPriority.filter { $0.kind != .actionableApproval && $0.kind != .question }.sorted {
+        let newestFirst: (AgentAttentionItem, AgentAttentionItem) -> Bool = {
             if $0.lastUpdate != $1.lastUpdate { return $0.lastUpdate > $1.lastUpdate }
             if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
             return Self.sortKey($0.id) < Self.sortKey($1.id)
         }
-        return pinned + rest
+        let rest = byPriority.filter {
+            $0.kind != .actionableApproval && $0.kind != .question && $0.kind != .earlierOutcome
+        }.sorted(by: newestFirst)
+        let earlierItems = byPriority.filter { $0.kind == .earlierOutcome }.sorted(by: newestFirst)
+        return pinned + rest + earlierItems
     }
 
     public mutating func apply(_ observation: AgentObservation, now: Double? = nil) {
