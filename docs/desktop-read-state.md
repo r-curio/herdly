@@ -8,11 +8,14 @@ Accepted by the user on 2026-09-14 with the understanding that the format may ch
 
 The app keeps one flag per thread, `hasUnreadTurn`. It raises the flag when a turn completes (unless the turn is a silent heartbeat or a failed-runs-only automation run) and when any approval or user-input request arrives. It clears the flag only when that thread is the selected view in a focused Codex window, when the user chooses Mark as read, or when the thread is archived or deleted. The flag is per thread: it says the thread was open in front after its latest completion or request, not that a particular reply was scrolled to.
 
-The set of flagged ids is persisted in `~/.codex/.codex-global-state.json` under `electron-persisted-atom-state` → `unread-thread-ids-by-host-v1` → `local`, debounced by about 500 ms, and written by temp-file rename so a reader never sees a partial file. Thread ids equal Codex session ids. Observed in desktop 26.901.51231 (`/Applications/ChatGPT.app`).
+The set of flagged ids is persisted in `~/.codex/.codex-global-state.json`, debounced by about 500 ms, and written by temp-file rename so a reader never sees a partial file. Thread ids equal Codex session ids. Two layouts are known (`/Applications/ChatGPT.app`):
+
+- **Desktop 26.930.61225:** `electron-thread-read-state-v1` → `unreadByIdentity` → identity key → execution host key → ids, with `version: 1`. The identity key is a SHA-256 of the signed-in account (kind, account id, user id); the app deletes an identity's entry when it signs out. Host keys are hashed per execution host, prefixed by kind: `local:<hash>` for this Mac's app server, `durable:<hash>` for cloud threads. On first launch the app migrates the older list into this layout (recording it under `legacyMigration`) and deletes the older key.
+- **Desktop 26.901.51231:** `electron-persisted-atom-state` → `unread-thread-ids-by-host-v1` → `local`.
 
 ## Steer's rule
 
-`DesktopReadStateReader` reads the file with the same bounds as other Codex files (regular file, no symlink, at most 20 MB) and returns a snapshot of the local unread set and the file's modification time. Any deviation from the exact key path or an entry that is not a UUID returns no snapshot.
+`DesktopReadStateReader` reads the file with the same bounds as other Codex files (regular file, no symlink, at most 20 MB) and returns a snapshot of the local unread set and the file's modification time. When `electron-thread-read-state-v1` is present it is the only source: Steer cannot recompute either hashed key, so it requires version 1, exactly one identity, and exactly one `local:` host within it, and ignores `durable:` and other hosts. No identity (signed out), two identities, or zero or two local hosts return no snapshot, because an absent list must never read as "every thread is read". Without that key the older layout is read. Any other deviation from the exact key path or an entry that is not a UUID returns no snapshot.
 
 `DesktopReadAcknowledgment` acknowledges a queued desktop completion when all of these hold:
 
@@ -30,7 +33,7 @@ Each two-second scan reads the file off the main actor alongside the hook events
 
 ## Verification
 
-Automated: `Tests/SteerCoreTests/DesktopReadStateTests.swift` covers parsing of the real shape, fail-closed cases (missing key, wrong host shape, non-UUID entry, symlink, oversize), the margin boundary, CLI exclusion, uncertain completions, and persistence of the acknowledgment through rescan and restart.
+Automated: `Tests/SteerCoreTests/DesktopReadStateTests.swift` covers parsing of both real shapes, fail-closed cases (missing key, wrong host shape, no or several identities, no or several local hosts, unknown version, non-UUID entry, symlink, oversize), the margin boundary, CLI exclusion, uncertain completions, and persistence of the acknowledgment through rescan and restart.
 
 Read-only probe: `python3 scripts/probe_desktop_read_state.py [--watch]` prints the file's write time and unread count and applies the rule to the desktop completions in Steer's snapshot, so a human can compare with what the running app cleared.
 
@@ -43,6 +46,10 @@ Live walkthrough to repeat after each desktop update, with two disposable deskto
 5. Quit Steer, complete a turn in B, view B, relaunch Steer. Expect: B's restored uncertain completion clears on the first scan.
 
 Record the desktop version and results in this file. If the status line reports the file unavailable after an update, turn the toggle off and re-run the source inspection described in the investigation document.
+
+### 2026-10-09, desktop 26.930.61225
+
+The desktop update moved the unread set to the per-identity layout above, so the reader returned no snapshot and nothing cleared: one Mac accumulated 103 queued desktop completions across 26 threads between 2026-10-07 and 2026-10-08, every one of them absent from Codex's unread set. Source inspection of the installed `app.asar` (read-only, nothing copied) established the key derivation and the logout and migration behavior. The reader now accepts the new layout; `DesktopReadStateTests` covers it and its ambiguous-host and signed-out cases, and the probe applied to the live file reported all 103 as clearable. The live walkthrough above has not been rerun on this version.
 
 ### 2026-09-14, desktop 26.901.51231
 
