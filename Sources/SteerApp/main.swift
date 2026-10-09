@@ -546,9 +546,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var currentDisplayID: UInt32?
     /// SwiftUI's hover flag can go stale when the panel is re-placed out from under the pointer
     /// (a display disconnect, for example), so it is confirmed against the actual pointer location.
+    /// SwiftUI never reports hover for the row on the screen's top edge (see `NotchHover`), so a
+    /// pointer pushed against the edge above the strip counts by geometry instead.
     private var pointerInsidePanel: Bool {
-        hovering && panel.isVisible && panel.frame.contains(NSEvent.mouseLocation)
+        let pointer = NSEvent.mouseLocation
+        guard panel.isVisible else { return false }
+        return (hovering && panel.frame.contains(pointer)) || NotchHover.pointerTouchesTopEdge(of: panel.frame, pointer: pointer)
     }
+    /// Pointer-move monitors that refresh as soon as the pointer reaches or leaves the top-edge row.
+    private var pointerMonitors: [Any] = []
+    private var pointerOnTopEdge = false
 
     nonisolated static func argumentValue(for flag: String) -> String? {
         guard let index = CommandLine.arguments.firstIndex(of: flag), CommandLine.arguments.indices.contains(index + 1) else { return nil }
@@ -631,6 +638,25 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in self?.updateNotchDisplayChoices(); self?.refresh() } }
+        // Mouse-move monitoring needs no Accessibility permission. Only a change of the top-edge
+        // state refreshes, so ordinary pointer movement elsewhere costs one comparison.
+        let pointerMoved: () -> Void = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                let onEdge = self.panel.isVisible
+                    && NotchHover.pointerTouchesTopEdge(of: self.panel.frame, pointer: NSEvent.mouseLocation)
+                guard onEdge != self.pointerOnTopEdge else { return }
+                self.pointerOnTopEdge = onEdge
+                if onEdge && !self.hovering && self.hapticFeedback {
+                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+                }
+                // Refreshes now and, on leaving, again once the hover grace has passed.
+                self.setHovering(self.hovering)
+            }
+        }
+        pointerMonitors = [NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { _ in pointerMoved() },
+                           NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { event in pointerMoved(); return event }]
+            .compactMap { $0 }
         timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }

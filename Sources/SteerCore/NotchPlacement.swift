@@ -305,6 +305,15 @@ public enum NotchTuck {
     }
 }
 
+/// Whether the pointer is over the panel by geometry alone. The panel's top edge is the screen's
+/// top edge, and a pointer pushed against it reports exactly `maxY`, which `CGRect.contains` and
+/// AppKit's tracking areas both treat as outside; that row still counts as over the panel.
+public enum NotchHover {
+    public static func pointerTouchesTopEdge(of frame: CGRect, pointer: CGPoint) -> Bool {
+        !frame.isEmpty && pointer.y == frame.maxY && pointer.x >= frame.minX && pointer.x < frame.maxX
+    }
+}
+
 /// The strip's content regions, inside the ears: `leading` left of the housing, `gap` over it
 /// (zero without a housing), `trailing` right of it, all `height` tall.
 public struct StripLayout: Equatable, Sendable {
