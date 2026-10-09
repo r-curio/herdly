@@ -229,6 +229,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     /// Codex's own thread names by session, refreshed every scan; unknown sessions keep their identifier.
     @Published var threadNames: [UUID: String] = [:]
+    /// Checked-out branch by working directory, for the queue row's identity line. Read off the
+    /// main actor with each reminder scan; presentation only.
+    @Published private(set) var gitBranches: [String: String] = [:]
     /// Codex's usage windows from the newest rollout, refreshed every scan; nil until one is read.
     @Published var usage: CodexUsageReading?
     /// The strip's readings: only windows that have not yet reset are shown.
@@ -1073,6 +1076,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             guard claude.usageEnabled(for: root), !root.usagePath.isEmpty else { return nil }
             return (root.url.standardizedFileURL.path, URL(fileURLWithPath: root.usagePath, isDirectory: true))
         }
+        let branchDirectories = Set(agentQueue.items(at: observationNow).compactMap(rowDirectory(for:)))
         Task { @MainActor in
             let result = await Task.detached {
                 (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
@@ -1099,6 +1103,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                      if let reading = ClaudeUsageReader.latest(root: root.directory, sourceScope: root.scope, now: observationNow) {
                          result[root.scope] = reading
                      }
+                 },
+                 branchDirectories.reduce(into: [String: String]()) { result, directory in
+                     result[directory] = GitBranchReader.branch(forDirectory: directory)
                  })
             }.value
             let scan = result.0
@@ -1183,6 +1190,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             if threadNames != result.3 { threadNames = result.3 }
             if usage != result.4 { usage = result.4 }
             if claudeUsage != result.10 { claudeUsage = result.10 }
+            if gitBranches != result.11 { gitBranches = result.11 }
             // Sessions already working before their first hook event: shown only with liveness
             // evidence, and only as working (see docs/session-discovery.md).
             let candidates = result.5
@@ -1897,6 +1905,24 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return spotlightDetails(for: item)?.directory?.full
     }
 
+    /// The absolute working directory a row's session reported, for its identity line and branch:
+    /// a request's project or turn directory, otherwise the exact turn's directory. Nil when Steer
+    /// has seen none, or when the value is a name rather than a path.
+    func rowDirectory(for item: AgentAttentionItem) -> String? {
+        let details = spotlightDetails(for: item)
+        let candidates = [item.approval?.details?.project, details?.request?.directory?.full, details?.directory?.full]
+        return candidates.compactMap { $0 }.first { $0.hasPrefix("/") }
+    }
+
+    /// "project @ branch" for a row, when its working directory is known. A request that names its
+    /// project but no path still shows that name, without a branch.
+    func rowPlace(for item: AgentAttentionItem) -> String? {
+        guard let directory = rowDirectory(for: item) else {
+            return QueueRowPresentation.place(directory: item.approval?.details?.project, branch: nil)
+        }
+        return QueueRowPresentation.place(directory: directory, branch: gitBranches[directory])
+    }
+
     func spotlightDetails(for item: AgentAttentionItem) -> SpotlightDetails? {
         guard item.session.source == .codex,
               let session = UUID(uuidString: item.session.session) else { return nil }
@@ -2163,9 +2189,19 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                 prompts: [QuestionPrompt(header: "Storage",
                                                                          question: "Where should the cache live?",
                                                                          options: ["Application Support (Recommended)", "Caches", "Next to the app"])])
+        // The expanded preview also shows an Earlier result and the identity line's place.
+        let earlier = AttentionCompletion(source: .cli, session: UUID(uuidString: "9D3A6E21-4B5C-4D7E-8F90-0000000000E5")!,
+                                          turn: UUID(), arrivedAt: now - 42 * 60)
         queue.recordReceipts([request], now: now)
-        queue.apply(completions: [completion], running: [running], now: now)
+        queue.apply(completions: mode == "expanded" ? [completion, earlier] : [completion], running: [running], now: now)
         queue.apply(questions: [question, desktopQuestion])
+        if mode == "expanded" {
+            let project = NSHomeDirectory() + "/Developer/steer"
+            spotlightContexts[.completion(completion.id)] = SpotlightRecordContext(workingDirectory: project)
+            spotlightContexts[.running(running.id)] = SpotlightRecordContext(workingDirectory: project)
+            gitBranches = [project: "feat/queue-row-identity"]
+            threadNames = [working: "Usage strip tweaks", finished: "Weekly bars"]
+        }
         // The CLI sample is reachable through the daemon in the preview: a seeded request whose
         // second question takes a typed answer, so the card shows both controls.
         _ = daemonBook.apply(message: ["jsonrpc": "2.0", "id": 1, "method": "item/tool/requestUserInput",

@@ -102,6 +102,8 @@ Each approval request has its own 30-second handoff timer starting when the comp
 
 Queue priority is: actionable notch approvals, question requests waiting for the user's answer, requests handed back to Codex that still need an answer, unknown Claude waiting sessions, unacknowledged completions, then running tasks. Within each group, order by original arrival time, oldest first. A concrete approval or question for a Claude session replaces its generic waiting row so the same session is not counted twice. Expiration moves a request into the handed-back group without restarting its timer.
 
+Each open-queue row carries three presentation readings beside its title, agreed with the user on 2026-10-09 after comparing Open Island's rows: an age lane on the right (time since the row's latest evidence, "<1m", "4m", "2h", "3d"), and an identity line under the title with the session name, "project @ branch" when Steer has seen the session's working directory, and the source tag. The branch is read from the working tree's `.git/HEAD` during each scan; a missing, unreadable, or unparseable HEAD shows the project without a branch. None of these readings identifies a navigation target, and the age is not an approval deadline.
+
 This priority order is the default, "Sort by: Needs attention". The user can choose "Sort by: Last update" in Steer's settings instead. Even then, actionable notch approvals and question requests waiting for the user's answer stay pinned at the top in the default order, so a request can't drop below newer activity while its timer runs. Every other row is ordered by its most recent event, newest first. The sort setting changes only the order of the open queue. It doesn't change which item the strip names, what is spotlit, the counts, or any approval deadline.
 
 A session already working when the companion launches, or before its first hook event arrives, is shown as working from its rollout when there is liveness evidence for it: the desktop app running for a desktop session, its tab in Ghostty or a Codex CLI process for a CLI session, and no session end recorded since the turn began. Discovery only ever adds a running row; a completion, request, question, or sound still needs its own evidence. See [session discovery](session-discovery.md).
@@ -136,7 +138,8 @@ source explicitly. Open in Codex and Open in Claude share one button label, "Ope
 tab is unavailable and show Open in Claude only after Ghostty controls, a complete live Claude
 inventory, and one exact unsplit target are verified. Claude
 uses its supplied session name for display when available and otherwise shows a shortened session
-identifier, with the source prefix retained in both cases. The name is presentation metadata and does
+identifier. In the open queue the source is named by the row's gray source tag (Codex app, Codex CLI,
+or Claude) rather than a prefix on the name; the spotlight keeps the prefixed label. The name is presentation metadata and does
 not identify a target or claim who supplied it. Live rows read Working or Waiting. A finished, failed,
 or stopped turn keeps that terminal label; when the current or terminal state cannot be classified,
 the row says Status unavailable.
@@ -162,7 +165,8 @@ Each fresh Claude question or outcome can sound and spotlight once for three sec
 observations, discovery, and restart recovery do not replay either presentation. An outcome that
 arrived before Steer restarted is uncertain and silent. After the Earlier delay (five minutes by default), an unacknowledged
 outcome moves into Earlier while retaining its to-check count and Dismiss action; Codex retains Open
-in Codex, while Claude keeps the unavailable return explanation. This is
+in Codex, while Claude keeps the unavailable return explanation. In the open queue an Earlier row folds to
+one line (its title and session name, with its age); opening the fold shows its identity line, details, and controls. This is
 presentation decay, not deletion or acknowledgment. Claude has no trustworthy read receipt; only
 explicit dismissal, a later verified exact-tab visit, or a reply can acknowledge its outcome. Agreed
 on 2026-10-08: a prompt submitted in a Claude session (its `UserPromptSubmit`) acknowledges that
