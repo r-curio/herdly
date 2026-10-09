@@ -672,6 +672,16 @@ private struct ClaudeAgentControls: View {
                         .accessibilityLabel("Include Claude usage limits for \(root.displayPath)")
                     }
                     Divider().padding(.horizontal, SettingsStyle.rowInset)
+                    SettingsRow(title: "Name sessions with Haiku",
+                                detail: "Replaces a placeholder name like project-a2 with a title from the first prompt, applied on the next prompt") {
+                        Toggle("Name sessions with Haiku", isOn: Binding(
+                            get: { setup.sessionTitlesEnabled(for: root) },
+                            set: { setup.setSessionTitlesEnabled($0, for: root) }
+                        ))
+                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                        .accessibilityLabel("Name Claude sessions with Haiku for \(root.displayPath)")
+                    }
+                    Divider().padding(.horizontal, SettingsStyle.rowInset)
                     PreviewDisclosure(title: "Show setup changes") { previewText(root, plan: plan) }
                     Divider().padding(.horizontal, SettingsStyle.rowInset)
                     ActionRow {
