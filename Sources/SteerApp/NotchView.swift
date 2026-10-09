@@ -1166,19 +1166,28 @@ struct Notch: View {
                     }
                 case .waiting, .running:
                     if let running = item.running, let row = running.rowText {
-                        Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).lineLimit(2).truncationMode(.tail)
+                        // A prompt opens in place: the row's own text grows to the full prompt rather
+                        // than repeating it below. An action keeps its labelled row and shows the full
+                        // command beneath, since the row may not be the command itself.
+                        let promptKey = "prompt:\(item.session.session)"
+                        let expandsPrompt = running.fullAction == nil && running.fullPrompt.map { $0 != row } == true
+                        let promptOpen = expandsPrompt && openDisclosures.contains(promptKey)
+                        if promptOpen, let full = running.fullPrompt {
+                            Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        } else {
+                            Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).lineLimit(2).truncationMode(.tail)
+                        }
                         if let full = running.fullAction {
                             NotchDisclosure(title: "Show full action", expanded: disclosure("action:\(item.session.session)")) {
                                 Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             .accessibilityLabel("Show full action for \(subject)")
-                        } else if let full = running.fullPrompt, full != row {
+                        } else if expandsPrompt {
                             // A shortened prompt is only its start; the disclosure must not call it full.
-                            let title = running.promptShortened ? "Show more of prompt" : "Show full prompt"
-                            NotchDisclosure(title: title, expanded: disclosure("prompt:\(item.session.session)")) {
-                                Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
+                            let title = promptOpen ? "Show less" : running.promptShortened ? "Show more of prompt" : "Show full prompt"
+                            NotchDisclosure(title: title, expanded: disclosure(promptKey)) {
                                 if running.promptShortened {
                                     Text("Shortened; the full prompt is in \(item.session.source == .claude ? "Claude" : "Codex").")
                                         .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
