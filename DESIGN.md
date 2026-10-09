@@ -281,7 +281,7 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 - **Source tag:** "Claude", "Codex app", or "Codex CLI" in the row header, right-aligned before the age. The source tag is 10pt text gray on a well with 4pt corners and 5pt by 1pt padding; it carries no hue.
 - **Sentence (when present):** 11pt text gray, wrapping in full.
 - **Detail table:** label column 58pt wide in dim, values in text gray, 8pt gutter, 3pt line spacing; missing values read "Not provided by Codex" in dim. Command and reason are selectable.
-- **Disclosure:** "Show full request" in 11pt text gray reveals the long text inline.
+- **Disclosure:** "Show full request" in 11pt text gray reveals the long text inline. A working row's "Show full prompt" instead grows the row's own two-line prompt to the full text in place and reads "Show less" while open, so the prompt is never shown twice.
 - **Controls:** a row of wells at 6pt gaps beneath the details.
 - **Foot (full queue only):** the keyboard hint in 10pt dim, 2pt above the 14pt bottom pad.
 - **Empty queue:** with nothing listed, the open queue holds one row in the same grammar (`EmptyQueueReading`). The unlit sprite leads a 12pt semibold ink title. "Nothing running" is followed by a dim line naming the connected sources ("Listening for Codex and Claude."), or by no line while setup is still being checked. "Not connected" appears only once both setups are checked and neither is connected; a text-gray line ("Codex and Claude aren’t reporting to Steer yet.") and an Open Controls well follow it. The strip's spoken label reads the same title.
