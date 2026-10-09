@@ -153,7 +153,7 @@ An achromatic ladder on pure black with a single green, reserved for the sprite,
 - **Ground** (`{colors.ground}`): the panel itself, pure black so it fuses with the menu bar and the camera housing. Also the text color of a pressed control.
 - **Ink** (`{colors.ink}`): row titles, badge digits, control labels, the focus ring, and the fill of a pressed control. The brightest gray; reserved for what must be read first.
 - **Text** (`{colors.text}`): the task name in the strip, detail values, and explanatory sentences. The reading gray.
-- **Dim** (`{colors.dim}`): session labels, detail-table labels, the "Not provided by Codex" placeholder, the keyboard hint, and the label of a disabled control. Holds 4.7:1 on black, so tertiary never drops below legibility.
+- **Dim** (`{colors.dim}`): session labels, row ages, the identity line's project and branch, detail-table labels, the "Not provided by Codex" placeholder, the keyboard hint, and the label of a disabled control. Holds 4.7:1 on black, so tertiary never drops below legibility.
 - **Well** (`{colors.well}`): the badge and every control at rest, and every cell of the unlit sprite. The only surface tone other than black.
 - **Seam** (`{colors.seam}`): a one-point line between the strip and the open queue. White at eight percent is the only edge drawn inside the panel.
 
@@ -270,11 +270,13 @@ With grouping on (State, Agent, or Project), the open queue inserts a heading ab
 - **Text:** the group name ("Needs you", "Done", "Working"; the agent name; or the project folder's last path component).
 - **Style:** 10pt caption, dim, 6pt above the group's first row. No rule or line is drawn.
 - **Sorting:** groups keep queue priority, so a group holding a live approval comes first. Rows sort inside their group.
-- **"Earlier":** stays a heading inside whichever group holds the older completions.
+- **"Earlier":** stays a heading inside whichever group holds the older completions, followed by the number of Earlier rows in 11pt dim.
+- **Folded Earlier row:** one line: a chevron, the title in 11pt text gray, and the session name in dim, with the age lane on the right. The fold is a plain button with the ink focus ring; opening it restores the 12pt ink title and shows the identity line, details, and controls.
 
 ### Cards / Containers
 Rows are not cards. There is no card surface, border, or shadow; a row is a left-aligned stack on the black ground, separated from its neighbors by 14pt of whitespace.
-- **Row header:** title in 12pt semibold ink on the left, session label in 11pt dim on the right, aligned on the first baseline with 10pt spacing; a working row leads with the sprite.
+- **Row header:** title in 12pt semibold ink on the left, the age lane in 11pt dim tabular digits on the right (at least 36pt wide, right-aligned, refreshed every 30 s), aligned on the first baseline with 10pt spacing; a working row leads with the sprite. The spotlight keeps its session label in the age lane's place.
+- **Identity line (open queue only):** the session name in 11pt text gray, then "· project @ branch" in 11pt dim, then the source tag pushed right. The name keeps its width first; the place truncates at its tail. The source tag is 10pt text gray on a well with 4pt corners and 5pt by 1pt padding; it carries no hue.
 - **Sentence (when present):** 11pt text gray, wrapping in full.
 - **Detail table:** label column 58pt wide in dim, values in text gray, 8pt gutter, 3pt line spacing; missing values read "Not provided by Codex" in dim. Command and reason are selectable.
 - **Disclosure:** "Show full request" in 11pt text gray reveals the long text inline.
