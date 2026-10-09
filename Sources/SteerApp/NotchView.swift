@@ -487,6 +487,8 @@ struct Notch: View {
     @State private var openDisclosures: Set<String> = []
     /// Typed answers being composed, by call id and question index; sent only on Return or Send.
     @State private var drafts: [String: String] = [:]
+    /// Whether the user opened the "N working" fold; closed again whenever the panel collapses.
+    @State private var workingOpen = false
     /// Multi-select labels are kept in the view until the user presses Send.
     @State private var claudeSelections: [ClaudeQuestionViewStateKey: Set<Int>] = [:]
     /// Ghostty's `tty` support for herdr Open availability; refreshed off the main actor.
@@ -527,10 +529,11 @@ struct Notch: View {
                                names: sessionNames)
     }
 
-    /// The open queue's rows under their group headings; a spotlight card is never grouped.
-    private var visibleGroups: [QueueGroup] {
+    /// The open queue's rows under their group headings, with working rows folded below anything
+    /// that needs the user; a spotlight card is never grouped.
+    private var visibleSections: QueueSections {
         let grouping = model.presentationMode.showsAll ? model.appearance.grouping : .none
-        return QueueGroups.make(visibleItems, grouping: grouping, project: model.projectFolder(for:))
+        return QueueSections.make(visibleItems, grouping: grouping, project: model.projectFolder(for:))
     }
 
     /// The strip's center label, when the profile shows one and the layout has room for it.
@@ -1419,6 +1422,46 @@ struct Notch: View {
         return parts.joined(separator: ", ")
     }
 
+    /// Rows under their optional group headings, with each run of Earlier rows under its count.
+    @ViewBuilder
+    private func groupRows(_ groups: [QueueGroup]) -> some View {
+        let rowTransition = QueueMotion.rowTransition(reduceMotion: model.reduceMotion)
+        // Groups are identified by heading so a regrouped row moves rather than every
+        // later group redrawing under a new index.
+        ForEach(groups, id: \.heading) { group in
+            if let heading = group.heading {
+                // Group headings: 10pt dim caption, 6pt above the group's first row.
+                Text(heading).font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
+                    .accessibilityAddTraits(.isHeader)
+                    .padding(.bottom, -8)
+                    .transition(rowTransition)
+            }
+            ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
+                if item.kind == .earlierOutcome && (index == 0 || group.items[index - 1].kind != .earlierOutcome) {
+                    // Dismiss all clears exactly the results listed under this heading.
+                    let earlierIDs = group.items[index...].prefix { $0.kind == .earlierOutcome }.map(\.id)
+                    let count = earlierIDs.count
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("Earlier").font(NotchStyle.mono(11, .semibold))
+                            Text("\(count)").font(NotchStyle.mono(11)).monospacedDigit()
+                        }
+                        .foregroundStyle(NotchStyle.dim)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Earlier, \(count) \(count == 1 ? "result" : "results")")
+                        .accessibilityAddTraits(.isHeader)
+                        Spacer(minLength: 8)
+                        NotchButton(title: "Dismiss all") { model.dismissAgents(earlierIDs) }
+                            .accessibilityLabel("Dismiss all \(count) earlier \(count == 1 ? "result" : "results")")
+                    }
+                    .transition(rowTransition)
+                }
+                attentionRow(item)
+                    .transition(rowTransition)
+            }
+        }
+    }
+
     var body: some View {
         let summary = strip
         VStack(alignment: .leading, spacing: 0) {
@@ -1498,43 +1541,17 @@ struct Notch: View {
 
             if model.expanded {
                 Rectangle().fill(NotchStyle.seam).frame(height: 1).padding(.bottom, 12)
-                let groups = visibleGroups
+                let sections = visibleSections
                 let rowTransition = QueueMotion.rowTransition(reduceMotion: model.reduceMotion)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        // Groups are identified by heading so a regrouped row moves rather than every
-                        // later group redrawing under a new index.
-                        ForEach(groups, id: \.heading) { group in
-                            if let heading = group.heading {
-                                // Group headings: 10pt dim caption, 6pt above the group's first row.
-                                Text(heading).font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
-                                    .accessibilityAddTraits(.isHeader)
-                                    .padding(.bottom, -8)
-                                    .transition(rowTransition)
+                        groupRows(sections.attention)
+                        if sections.foldsWorking {
+                            NotchDisclosure(title: "\(sections.workingCount) working", expanded: $workingOpen) {
+                                VStack(alignment: .leading, spacing: 14) { groupRows(sections.working) }
                             }
-                            ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
-                                if item.kind == .earlierOutcome && (index == 0 || group.items[index - 1].kind != .earlierOutcome) {
-                                    // Dismiss all clears exactly the results listed under this heading.
-                                    let earlierIDs = group.items[index...].prefix { $0.kind == .earlierOutcome }.map(\.id)
-                                    let count = earlierIDs.count
-                                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                            Text("Earlier").font(NotchStyle.mono(11, .semibold))
-                                            Text("\(count)").font(NotchStyle.mono(11)).monospacedDigit()
-                                        }
-                                        .foregroundStyle(NotchStyle.dim)
-                                        .accessibilityElement(children: .ignore)
-                                        .accessibilityLabel("Earlier, \(count) \(count == 1 ? "result" : "results")")
-                                        .accessibilityAddTraits(.isHeader)
-                                        Spacer(minLength: 8)
-                                        NotchButton(title: "Dismiss all") { model.dismissAgents(earlierIDs) }
-                                            .accessibilityLabel("Dismiss all \(count) earlier \(count == 1 ? "result" : "results")")
-                                    }
-                                    .transition(rowTransition)
-                                }
-                                attentionRow(item)
-                                    .transition(rowTransition)
-                            }
+                        } else {
+                            groupRows(sections.working)
                         }
                         if model.presentationMode.showsAll && visibleItems.isEmpty && !showsTestRow {
                             emptyQueueRow(model.emptyQueueReading)
@@ -1552,7 +1569,7 @@ struct Notch: View {
                             .transition(rowTransition)
                         }
                     }
-                    .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: QueueMotion.layoutKey(groups))
+                    .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: QueueMotion.layoutKey(sections.attention + sections.working))
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: showsTestRow)
                     .padding(.bottom, 14)
                     .background(GeometryReader { proxy in
@@ -1577,6 +1594,7 @@ struct Notch: View {
         .background(NotchStyle.ground, in: NotchShape())
         .preferredColorScheme(.dark)
         .onHover(perform: model.setHovering)
+        .onChange(of: model.expanded) { _, expanded in if !expanded { workingOpen = false } }
         .onAppear { ghosttyTTY.refreshIfStale() }
         .onChange(of: model.herdrScanOutcome) { _, _ in ghosttyTTY.refreshIfStale() }
     }
