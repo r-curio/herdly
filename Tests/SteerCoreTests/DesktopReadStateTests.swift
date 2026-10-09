@@ -19,6 +19,46 @@ private func globalState(local: [Any]?, extra: [String: Any] = [:]) -> Data {
     #expect(empty.unread.isEmpty)
 }
 
+/// The per-identity layout from desktop 26.930.61225: identity key → execution host key → ids.
+private func identityState(_ identities: [String: [String: Any]], version: Any = 1, legacyLocal: [Any]? = nil) -> Data {
+    var atoms: [String: Any] = ["has-seen-fast-mode-announcement": true]
+    if let legacyLocal { atoms["unread-thread-ids-by-host-v1"] = ["local": legacyLocal] }
+    let state: [String: Any] = [
+        "version": version,
+        "unreadByIdentity": identities,
+        "legacyMigration": ["identityKey": "3430d589", "unreadThreadIdsByHostId": ["local": []], "adoptedHostIds": ["local": "local:092af2cb"]],
+    ]
+    return try! JSONSerialization.data(withJSONObject: ["electron-persisted-atom-state": atoms, "electron-thread-read-state-v1": state])
+}
+
+@Test func readStateParsesTheLocalHostOfTheOnlyIdentity() throws {
+    let a = UUID(), b = UUID(), cloud = UUID()
+    let data = identityState(["3430d589": ["local:092af2cb": [a.uuidString.lowercased(), b.uuidString], "durable:431f7bac": [cloud.uuidString]]])
+    let snapshot = try #require(DesktopReadStateReader.parse(data, modifiedAt: 100))
+    #expect(snapshot.unread == [a, b])
+    let empty = try #require(DesktopReadStateReader.parse(identityState(["3430d589": ["local:092af2cb": []]]), modifiedAt: 5))
+    #expect(empty.unread.isEmpty)
+    // A stale legacy copy beside the current layout is ignored rather than merged.
+    let withLegacy = identityState(["3430d589": ["local:092af2cb": [a.uuidString]]], legacyLocal: [b.uuidString])
+    #expect(try #require(DesktopReadStateReader.parse(withLegacy, modifiedAt: 1)).unread == [a])
+}
+
+@Test func readStateFailsClosedWhenTheLocalHostIsAmbiguous() {
+    let id = UUID().uuidString
+    // No identity (after a logout clears it), or two accounts: Steer cannot tell which is current.
+    #expect(DesktopReadStateReader.parse(identityState([:]), modifiedAt: 1) == nil)
+    #expect(DesktopReadStateReader.parse(identityState(["a": ["local:1": [id]], "b": ["local:1": []]]), modifiedAt: 1) == nil)
+    // No local host, or two: absence must never read as "every local thread is read".
+    #expect(DesktopReadStateReader.parse(identityState(["a": ["durable:1": [id]]]), modifiedAt: 1) == nil)
+    #expect(DesktopReadStateReader.parse(identityState(["a": ["local:1": [id], "local:2": []]]), modifiedAt: 1) == nil)
+    #expect(DesktopReadStateReader.parse(identityState(["a": ["local": [id]]]), modifiedAt: 1) == nil)
+    // A present but unreadable current layout does not fall back to the legacy key.
+    #expect(DesktopReadStateReader.parse(identityState(["a": ["local:1": [id]]], version: 2, legacyLocal: [id]), modifiedAt: 1) == nil)
+    #expect(DesktopReadStateReader.parse(identityState(["a": ["local:1": ["thread-1"]]]), modifiedAt: 1) == nil)
+    let wrongShape = try! JSONSerialization.data(withJSONObject: ["electron-thread-read-state-v1": ["version": 1, "unreadByIdentity": ["a": [id]]]])
+    #expect(DesktopReadStateReader.parse(wrongShape, modifiedAt: 1) == nil)
+}
+
 @Test func readStateFailsClosedOnMissingOrForeignShape() {
     #expect(DesktopReadStateReader.parse(globalState(local: nil), modifiedAt: 1) == nil)
     #expect(DesktopReadStateReader.parse(Data("[]".utf8), modifiedAt: 1) == nil)
