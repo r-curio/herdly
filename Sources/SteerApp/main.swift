@@ -159,6 +159,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var agentQueue = AgentAttentionQueue(snapshot: Companion.launchSnapshot)
     /// Claude names are presentation metadata only; source scope keeps identical session IDs apart.
     @Published private(set) var claudeSessionNames: [AgentSessionIdentity: String] = [:]
+    /// Each Claude session's working directory from its inventory, for the row's "project @ branch".
+    @Published private(set) var claudeSessionDirectories: [AgentSessionIdentity: String] = [:]
     /// Direct Claude controls are valid only for receipts issued by this running companion. A
     /// persisted receipt must not recreate an active decision connection after a restart.
     private var liveClaudeApprovalIDs: Set<String> = []
@@ -1217,6 +1219,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                     let identity = AgentSessionIdentity(source: .claude, sourceScope: inventory.sourceScope,
                                                         session: session.sessionID, surface: .cli)
                     if !session.name.isEmpty { claudeSessionNames[identity] = session.name }
+                    if let directory = session.directory, claudeSessionDirectories[identity] != directory {
+                        claudeSessionDirectories[identity] = directory
+                    }
                 }
             }
             if threadNames != result.3 { threadNames = result.3 }
@@ -1940,11 +1945,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     /// The absolute working directory a row's session reported, for its identity line and branch:
-    /// a request's project or turn directory, otherwise the exact turn's directory. Nil when Steer
-    /// has seen none, or when the value is a name rather than a path.
+    /// a request's project or turn directory, otherwise the exact turn's directory, or for Claude the
+    /// session's directory from its inventory. Nil when Steer has seen none, or when the value is a
+    /// name rather than a path.
     func rowDirectory(for item: AgentAttentionItem) -> String? {
         let details = spotlightDetails(for: item)
-        let candidates = [item.approval?.details?.project, details?.request?.directory?.full, details?.directory?.full]
+        let candidates = [item.approval?.details?.project, details?.request?.directory?.full, details?.directory?.full,
+                          claudeSessionDirectories[item.session]]
         return candidates.compactMap { $0 }.first { $0.hasPrefix("/") }
     }
 
