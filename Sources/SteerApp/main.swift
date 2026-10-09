@@ -1557,14 +1557,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if activeProfile != profile { activeProfile = profile }
         let wing = UsageStripReadouts.wingWidth(usageStripReadouts)
         let center = appearance.effectiveCenterLabel(on: profile) == .off ? 0 : NotchPlacement.centerLabelWidth
-        let layout = NotchPlacement.strip(on: display, expanded: expanded, wing: wing, centerLabel: center)
+        let width = appearance.panelWidth
+        let layout = NotchPlacement.strip(on: display, expanded: expanded, wing: wing, centerLabel: center, width: width)
         if stripLayout != layout { stripLayout = layout }
         let rows = presentationMode.showsAll ? orderedAgentAttentionItems.count : (spotlightItem == nil ? 0 : 1)
         var frame = contentHeight > 0
-            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, wing: wing, centerLabel: center)
+            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, wing: wing, centerLabel: center,
+                                   width: width)
             : NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
                                    extraRows: attention.pending && (presentationMode.showsAll || spotlightItem == nil),
-                                   wing: wing, centerLabel: center)
+                                   wing: wing, centerLabel: center, width: width)
         // With no menu bar and no housing the strip rests above the screen edge and slides in for
         // the pointer at the top edge or an open panel, so it does not cover a full-screen app.
         if NotchTuck.isTucked(display: display, pointer: NSEvent.mouseLocation, interacting: interacting, open: expanded) {
