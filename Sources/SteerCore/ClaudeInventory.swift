@@ -41,15 +41,19 @@ public struct ClaudeInventorySession: Equatable, Sendable {
     /// registry, with its start time verified when Claude recorded `procStart`). nil from
     /// `claude agents --json`.
     public let pid: Int32?
+    /// The session's working directory as Claude reported it. Presentation only (the row's
+    /// "project @ branch"); never used for targeting or identity.
+    public let directory: String?
 
     public init(sessionID: String, name: String = "", kind: ClaudeInventoryKind, startedAt: Double,
-                lifecycle: ClaudeInventoryLifecycle, pid: Int32? = nil) {
+                lifecycle: ClaudeInventoryLifecycle, pid: Int32? = nil, directory: String? = nil) {
         self.sessionID = sessionID
         self.name = name
         self.kind = kind
         self.startedAt = startedAt
         self.lifecycle = lifecycle
         self.pid = pid
+        self.directory = directory
     }
 }
 
@@ -112,7 +116,7 @@ public enum ClaudeInventoryDecoder {
         var sessions: [ClaudeInventorySession] = []
         for row in rows {
             guard let sessionID = canonicalSessionID(row["sessionId"]),
-                  nonempty(row["cwd"] as? String) != nil,
+                  let directory = nonempty(row["cwd"] as? String),
                   let startedAt = timestamp(row["startedAt"]) else {
                 return .unavailable(sourceScope: sourceScope, observedAt: observedAt, reason: incompleteMessage)
             }
@@ -156,7 +160,7 @@ public enum ClaudeInventoryDecoder {
                 lifecycle = .background(state: state)
             }
             sessions.append(ClaudeInventorySession(sessionID: sessionID, name: name, kind: kind,
-                                                   startedAt: startedAt, lifecycle: lifecycle))
+                                                   startedAt: startedAt, lifecycle: lifecycle, directory: directory))
         }
         return ClaudeInventoryScan(sourceScope: sourceScope, observedAt: observedAt, sessions: sessions)
     }
