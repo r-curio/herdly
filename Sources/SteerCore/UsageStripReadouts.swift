@@ -5,7 +5,8 @@ public struct UsageStripReadout: Equatable, Sendable {
     public enum Source: Equatable, Sendable { case codex, claude }
 
     public let source: Source
-    /// Dim label ahead of the bar ("5h", "7d"); Codex's weekly readout has none.
+    /// Dim label ahead of the bar ("5h", "7d"); Codex's weekly readout has none, and neither has any
+    /// readout while the strip shows weekly windows only.
     public let caption: String?
     /// Share used, 0 to 100, or nil while the window is unknown (Codex's weekly readout only).
     public let usedPercent: Double?
@@ -34,10 +35,13 @@ public struct UsageStripReadout: Equatable, Sendable {
 /// seven-day windows come first, then Codex's five-hour window while it reports one, then Codex's
 /// weekly readout, which is always present (a dash while unknown). Pass readings already filtered
 /// to the present (`current(now:)`) so the bars and the wing width agree. With `fiveHour` false
-/// both five-hour readouts are left out and the wing narrows to match.
+/// both five-hour readouts are left out and, since every bar left is then a weekly one, none
+/// carries a caption: the source hue tells Claude's from Codex's. The wing narrows to match.
 public enum UsageStripReadouts {
     /// A captioned readout at 11pt mono, its 8pt trailing pad included, with room for "100%".
     public static let captionedReadoutWidth: CGFloat = 62
+    /// The same readout without its caption and the 5pt gap after it.
+    public static let uncaptionedReadoutWidth: CGFloat = 44
     /// Extra space between the Claude group and the Codex group (on top of the 8pt pad).
     public static let groupGap: CGFloat = 4
 
@@ -48,7 +52,7 @@ public enum UsageStripReadouts {
             readouts.append(UsageStripReadout(source: .claude, caption: "5h", usedPercent: window.usedPercentage, percentText: window.percentText))
         }
         if let window = claude?.sevenDay {
-            readouts.append(UsageStripReadout(source: .claude, caption: "7d", usedPercent: window.usedPercentage, percentText: window.percentText))
+            readouts.append(UsageStripReadout(source: .claude, caption: fiveHour ? "7d" : nil, usedPercent: window.usedPercentage, percentText: window.percentText))
         }
         if fiveHour, let window = codex?.fiveHour {
             readouts.append(UsageStripReadout(source: .codex, caption: "5h", usedPercent: window.usedPercent, percentText: window.percentText))
@@ -60,13 +64,13 @@ public enum UsageStripReadouts {
 
     /// Width of the wing right of the housing for these readouts. Codex's own readouts keep their
     /// established widths (60pt weekly, 52pt more for five-hour); each Claude readout adds a full
-    /// captioned width, plus the gap that sets the two groups apart.
+    /// captioned width, or an uncaptioned one, plus the gap that sets the two groups apart.
     public static func wingWidth(_ readouts: [UsageStripReadout]) -> CGFloat {
         let codexFiveHour = readouts.contains { $0.source == .codex && $0.caption != nil }
-        let claude = readouts.filter { $0.source == .claude }.count
+        let claude = readouts.filter { $0.source == .claude }
         return NotchPlacement.trailingWing
             + (codexFiveHour ? NotchPlacement.readoutWidth : 0)
-            + CGFloat(claude) * captionedReadoutWidth
-            + (claude > 0 ? groupGap : 0)
+            + claude.reduce(0) { $0 + ($1.caption == nil ? uncaptionedReadoutWidth : captionedReadoutWidth) }
+            + (claude.isEmpty ? 0 : groupGap)
     }
 }
