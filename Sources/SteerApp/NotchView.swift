@@ -25,6 +25,27 @@ struct ClaudeQuestionViewStateKey: Hashable, Sendable {
     }
 }
 
+/// How open-queue rows arrive, leave, and change places. Rows keep their identity across
+/// refreshes, so a reorder slides each row to its new place instead of redrawing the list. The
+/// curve has no bounce and runs close to the panel's own resize, so rows and frame settle together.
+/// Under Reduce Motion the change is a 0.15 s crossfade with no offset or scaling.
+enum QueueMotion {
+    static func curve(reduceMotion: Bool) -> Animation {
+        reduceMotion ? .easeInOut(duration: 0.15) : .smooth(duration: 0.28)
+    }
+
+    static func rowTransition(reduceMotion: Bool) -> AnyTransition {
+        reduceMotion ? .opacity : .asymmetric(
+            insertion: .opacity.combined(with: .offset(y: -6)).combined(with: .scale(scale: 0.98, anchor: .top)),
+            removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
+    }
+
+    /// Every row and heading in display order: a change here is an arrival, departure, or reorder.
+    static func layoutKey(_ groups: [QueueGroup]) -> [AnyHashable] {
+        groups.flatMap { group in [AnyHashable(group.heading)] + group.items.map { AnyHashable($0.id) } }
+    }
+}
+
 /// The one visual vocabulary of the notch: pure black fused to the menu bar, one monospaced face,
 /// one green sprite, one dark badge. Nothing here is decoration; every mark is a reading.
 enum NotchStyle {
@@ -1458,14 +1479,19 @@ struct Notch: View {
 
             if model.expanded {
                 Rectangle().fill(NotchStyle.seam).frame(height: 1).padding(.bottom, 12)
+                let groups = visibleGroups
+                let rowTransition = QueueMotion.rowTransition(reduceMotion: model.reduceMotion)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        ForEach(Array(visibleGroups.enumerated()), id: \.offset) { _, group in
+                        // Groups are identified by heading so a regrouped row moves rather than every
+                        // later group redrawing under a new index.
+                        ForEach(groups, id: \.heading) { group in
                             if let heading = group.heading {
                                 // Group headings: 10pt dim caption, 6pt above the group's first row.
                                 Text(heading).font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
                                     .accessibilityAddTraits(.isHeader)
                                     .padding(.bottom, -8)
+                                    .transition(rowTransition)
                             }
                             ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
                                 if item.kind == .earlierOutcome && (index == 0 || group.items[index - 1].kind != .earlierOutcome) {
@@ -1478,12 +1504,15 @@ struct Notch: View {
                                     .accessibilityElement(children: .ignore)
                                     .accessibilityLabel("Earlier, \(count) \(count == 1 ? "result" : "results")")
                                     .accessibilityAddTraits(.isHeader)
+                                    .transition(rowTransition)
                                 }
                                 attentionRow(item)
+                                    .transition(rowTransition)
                             }
                         }
                         if model.presentationMode.showsAll && visibleItems.isEmpty && !showsTestRow {
                             emptyQueueRow(model.emptyQueueReading)
+                                .transition(rowTransition)
                         }
                         if model.presentationMode.showsAll && model.needsGhosttySetup {
                             Text("Enable Ghostty controls in Steer’s controls window to open these sessions.")
@@ -1494,8 +1523,11 @@ struct Notch: View {
                                 Text("Test notification").font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
                                 NotchButton(title: "Dismiss", action: model.dismissTest).accessibilityLabel("Dismiss test notification")
                             }
+                            .transition(rowTransition)
                         }
                     }
+                    .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: QueueMotion.layoutKey(groups))
+                    .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: showsTestRow)
                     .padding(.bottom, 14)
                     .background(GeometryReader { proxy in
                         Color.clear.preference(key: ContentHeightKey.self,
