@@ -480,3 +480,13 @@ private func decodeRegistry(_ entries: [ClaudeSessionRegistry.Entry],
     #expect(mkfifo(sessions.appendingPathComponent("21.json").path, 0o600) == 0)
     #expect(ClaudeSessionRegistry.read(root: root, observedAt: 1, isRunning: live, retryDelay: 0)?.available == false)
 }
+
+@Test func claudeInventoryKeepsEachSessionsWorkingDirectoryFromBothSources() throws {
+    let cli = ClaudeInventoryDecoder.decode(try JSONSerialization.data(withJSONObject: [
+        ["sessionId": interactiveID, "kind": "interactive", "cwd": "/tmp/one", "status": "busy", "startedAt": 1]
+    ]), sourceScope: "/tmp/root", observedAt: 1)
+    #expect(cli.sessions.first?.directory == "/tmp/one")
+
+    let registry = decodeRegistry([entry(20, try registryRow(pid: 20, sessionID: interactiveID))])
+    #expect(registry.sessions.first?.directory == "/tmp/one")
+}

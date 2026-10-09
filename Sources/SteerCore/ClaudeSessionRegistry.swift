@@ -133,7 +133,7 @@ public enum ClaudeSessionRegistry {
         guard scan.available else { return scan }
         let sessions = scan.sessions.map {
             ClaudeInventorySession(sessionID: $0.sessionID, name: $0.name, kind: $0.kind, startedAt: $0.startedAt,
-                                   lifecycle: $0.lifecycle, pid: pids[$0.sessionID])
+                                   lifecycle: $0.lifecycle, pid: pids[$0.sessionID], directory: $0.directory)
         }
         return ClaudeInventoryScan(sourceScope: sourceScope, observedAt: observedAt, sessions: sessions,
                                    backgroundSessionIDs: background)
