@@ -242,6 +242,10 @@ public typealias AgentAttentionSnapshot = AttentionSnapshot
 public struct AgentAttentionQueue: Sendable {
     /// The default "Earlier" delay; the user can choose another `EarlierDelay`.
     public static let earlierAfter: Double = 5 * 60
+    /// How long a hook-observed Claude turn must be quiet before an idle inventory reading ends its
+    /// running row. Claude's registry can still read idle for a moment after a prompt is submitted;
+    /// a session doing long work without hooks reads busy, so it never qualifies.
+    public static let idleRunningGrace: Double = 2 * 60
 
     private var approvals: [AgentCallIdentity: AgentApproval] = [:]
     private var questions: [AgentCallIdentity: AgentQuestion] = [:]
@@ -253,6 +257,10 @@ public struct AgentAttentionQueue: Sendable {
     private var ambiguousClaudeSessions: Set<AgentSessionIdentity> = []
     private var resolved: Set<AgentAttentionID> = []
     private var acknowledged: Set<AgentTurnIdentity>
+    /// Turns whose running row ended without a new card: an acknowledged turn's confirmed Stop, or the
+    /// idle fallback below. Hook events stay on disk, so every scan repeats a turn's running evidence;
+    /// evidence no newer than this cannot reopen the row.
+    private var endedTurns: [AgentTurnIdentity: Double] = [:]
     /// Each session's latest prompt submission, so an outcome observed after the reply is still acknowledged.
     private var latestReplies: [AgentSessionIdentity: (turn: String, at: Double)] = [:]
     private var now: Double = 0
@@ -379,7 +387,16 @@ public struct AgentAttentionQueue: Sendable {
                 current.arrivedAt <= question.arrivedAt ? current : question
             } ?? question
         case let .outcome(outcome):
-            guard !acknowledged.contains(outcome.id), outcome.arrivedAt.isFinite else { return }
+            guard outcome.arrivedAt.isFinite else { return }
+            if acknowledged.contains(outcome.id) {
+                // No new card for an acknowledged turn, but the turn has still ended, so its running row ends too.
+                endedTurns[outcome.id] = max(endedTurns[outcome.id] ?? -.infinity, outcome.arrivedAt)
+                if let active = running[outcome.session], active.id == outcome.id,
+                   active.updatedAt <= outcome.arrivedAt {
+                    running.removeValue(forKey: outcome.session)
+                }
+                return
+            }
             if outcome.session.source == .claude,
                let current = outcomes[outcome.id], current.arrivedAt > outcome.arrivedAt { return }
             if outcome.session.source == .claude,
@@ -405,6 +422,7 @@ public struct AgentAttentionQueue: Sendable {
             inventoryRunning.removeValue(forKey: turn.session)
         case let .running(active):
             guard !resolved.contains(.running(active.id)) else { return }
+            if let endedAt = endedTurns[active.id], active.updatedAt <= endedAt { return }
             if let outcome = outcomes[active.id] {
                 guard active.identity.session.source == .claude, active.updatedAt > outcome.arrivedAt else { return }
                 outcomes.removeValue(forKey: active.id)
@@ -418,6 +436,7 @@ public struct AgentAttentionQueue: Sendable {
         case let .provisionalStop(stop):
             guard stop.arrivedAt.isFinite else { return }
             guard outcomes[stop.identity] == nil else { return }
+            if let endedAt = endedTurns[stop.identity], stop.arrivedAt <= endedAt { return }
             if let current = provisionalStops[stop.identity.session], current.arrivedAt >= stop.arrivedAt { return }
             provisionalStops[stop.identity.session] = stop
         case let .replied(prompt, submittedAt):
@@ -440,7 +459,8 @@ public struct AgentAttentionQueue: Sendable {
     }
 
     /// Applies a valid root inventory as weaker lifecycle evidence. It can add a generic running
-    /// row or confirm a previously observed Stop, but it never clears hook observations.
+    /// row or confirm a previously observed Stop. It clears hook evidence only by ending a running
+    /// row whose session reads idle after `idleRunningGrace` without hooks; it never creates an outcome.
     public mutating func apply(_ scan: ClaudeInventoryScan, now: Double? = nil) {
         guard scan.observedAt.isFinite else { return }
         let scope = scan.sourceScope
@@ -469,6 +489,12 @@ public struct AgentAttentionQueue: Sendable {
                     provisionalStops.removeValue(forKey: identity)
                     apply(.outcome(AgentOutcome(session: identity, turn: stop.identity.turn,
                                                 status: .finished, arrivedAt: scan.observedAt)), now: now)
+                }
+                // Fallback when no Stop can end the row (missed, pruned, or never sent): Claude reports
+                // the session idle and its hooks have been quiet past the grace. No outcome is created.
+                if let active = running[identity], scan.observedAt - active.updatedAt >= Self.idleRunningGrace {
+                    endedTurns[active.id] = max(endedTurns[active.id] ?? -.infinity, active.updatedAt)
+                    running.removeValue(forKey: identity)
                 }
                 inventoryRunning.removeValue(forKey: identity)
                 continue

@@ -179,6 +179,121 @@ private let backgroundID = "22222222-2222-4222-8222-222222222222"
     #expect(queue.items.first?.outcome?.arrivedAt == 4)
 }
 
+private func writeStoppedTurn(to root: URL, prompt: String = "prompt", submittedAt: Double = 1,
+                              stoppedAt: Double = 2) throws {
+    for (index, event) in [
+        ["hook_event_name": "UserPromptSubmit", "session_id": interactiveID, "prompt_id": prompt,
+         "captured_at": submittedAt],
+        ["hook_event_name": "Stop", "session_id": interactiveID, "prompt_id": prompt, "captured_at": stoppedAt]
+    ].enumerated() {
+        var event = event
+        event["source"] = ClaudeSetupRequirements.helperSource
+        event["installation_id"] = "install"
+        try JSONSerialization.data(withJSONObject: event)
+            .write(to: root.appendingPathComponent("event-\(prompt)-\(index).json"))
+    }
+}
+
+private func idleInventory(at observedAt: Double) -> ClaudeInventoryScan {
+    ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: observedAt, sessions: [
+        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: "idle"))
+    ])
+}
+
+@Test func dismissedClaudeResultDoesNotReturnAsRunningOnLaterScans() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-inventory-dismiss-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try writeStoppedTurn(to: root)
+    let scan = ClaudeObservationReader.scan(events: root, sourceScope: "/tmp/root", installationID: "install", now: 3)
+
+    var queue = AgentAttentionQueue()
+    queue.apply(scan)
+    queue.apply(idleInventory(at: 4))
+    let outcome = try #require(queue.items.compactMap(\.outcome).first)
+    queue.dismiss(.outcome(outcome.id))
+
+    // The hook events stay on disk, so each scan repeats the stopped turn's running evidence.
+    for observedAt in [6.0, 8.0] {
+        queue.apply(scan)
+        queue.apply(idleInventory(at: observedAt))
+        #expect(queue.items.isEmpty)
+    }
+}
+
+@Test func restoredAcknowledgedClaudeTurnIsNotShownAsRunning() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-inventory-restore-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try writeStoppedTurn(to: root)
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+
+    var queue = AgentAttentionQueue(acknowledged: [AgentTurnIdentity(session: identity, turn: "prompt")])
+    queue.apply(ClaudeObservationReader.scan(events: root, sourceScope: "/tmp/root", installationID: "install", now: 3))
+    queue.apply(idleInventory(at: 4))
+    #expect(queue.items.isEmpty)
+    #expect(queue.workingCount == 0)
+}
+
+@Test func acknowledgedClaudeTurnThatContinuesAfterStopStillShowsRunning() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    let turn = AgentTurnIdentity(session: identity, turn: "prompt")
+    var queue = AgentAttentionQueue(acknowledged: [turn])
+    queue.apply(.running(AgentRunning(session: identity, turn: "prompt", arrivedAt: 1, updatedAt: 2)))
+    queue.apply(.provisionalStop(AgentProvisionalStop(identity: turn, arrivedAt: 2)))
+    queue.apply(idleInventory(at: 4))
+    #expect(queue.items.isEmpty)
+
+    // A Stop hook can keep the same prompt going; newer tool evidence is live work again.
+    queue.apply(.running(AgentRunning(session: identity, turn: "prompt", arrivedAt: 1, updatedAt: 5)))
+    #expect(queue.items.compactMap(\.running).first?.updatedAt == 5)
+}
+
+private func inventory(_ status: String, at observedAt: Double) -> ClaudeInventoryScan {
+    ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: observedAt, sessions: [
+        ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: status))
+    ])
+}
+
+@Test func quietRunningRowEndsWhenClaudeReportsTheSessionIdle() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    let grace = AgentAttentionQueue.idleRunningGrace
+    var queue = AgentAttentionQueue()
+    // No Stop ever arrives, so there is nothing for inventory to confirm.
+    let stale = AgentRunning(session: identity, turn: "prompt", arrivedAt: 1, updatedAt: 10)
+    queue.apply(.running(stale))
+
+    // A prompt can be submitted just before Claude's registry flips to busy.
+    queue.apply(inventory("idle", at: 10 + grace - 1))
+    #expect(queue.items.compactMap(\.running).count == 1)
+
+    queue.apply(inventory("idle", at: 10 + grace))
+    #expect(queue.items.isEmpty)
+    #expect(queue.workingCount == 0)
+    #expect(queue.toCheckCount == 0)
+
+    // Repeated hook scans carry the same evidence and cannot reopen the row.
+    queue.apply(.running(stale))
+    #expect(queue.items.isEmpty)
+
+    // New activity on the same prompt is live work again.
+    queue.apply(.running(AgentRunning(session: identity, turn: "prompt", arrivedAt: 1, updatedAt: 10 + grace + 5)))
+    #expect(queue.items.compactMap(\.running).first?.updatedAt == 10 + grace + 5)
+}
+
+@Test func quietRunningRowStaysWhileClaudeReportsTheSessionBusyOrWaiting() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: identity, turn: "prompt", arrivedAt: 1, updatedAt: 10)))
+
+    // A long tool call or a long answer fires no hooks while Claude stays busy.
+    queue.apply(inventory("busy", at: 10 + 60 * 60))
+    queue.apply(inventory("waiting", at: 10 + 2 * 60 * 60))
+    #expect(queue.items.compactMap(\.running).count == 1)
+}
+
 @Test func unavailableInventoryPreservesExistingGenericStateAndRootsStaySeparate() {
     let rootB = ClaudeInventorySession(sessionID: backgroundID, kind: .background, startedAt: 1,
                                        lifecycle: .background(state: "working"))
