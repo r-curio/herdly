@@ -46,10 +46,17 @@ available. A root that cannot be read is unavailable for reconciliation, so it c
 root's attention. The root-scoped inventory (Claude's session registry,
 `<CLAUDE_CONFIG_DIR>/sessions/<pid>.json`, read first, with `claude agents --json` as the
 fallback; see [Claude setup](claude-setup.md)) is a weaker source: a valid interactive `busy`/`waiting` row may add only a generic running row; background
-lifecycle rows alone do not create queue items. Idle and background terminal states remove only
-inventory-derived rows.
+lifecycle rows alone do not create queue items. Idle and background terminal states remove
+inventory-derived rows. As a fallback for a Stop that never ends the row (missed, pruned, or not
+sent), an interactive `idle` reading also ends a hook-derived running row once that turn's hooks have
+been quiet for two minutes; it creates no outcome, and only newer hook evidence reopens the row. A
+session reading `busy` or `waiting` keeps its row however long it is quiet, because a long tool call
+or answer fires no hooks.
 An unavailable or duplicate inventory leaves both inventory and hook evidence untouched. A later
-valid interactive `idle` observation confirms a previously observed provisional `Stop`; inventory
+valid interactive `idle` observation confirms a previously observed provisional `Stop`. When that
+turn's result was already acknowledged (dismissed, replied to, or acknowledged before a restart), the
+confirmation creates no new result but still ends the turn's running row, and running evidence no
+newer than the confirmation cannot reopen it; newer tool evidence for the same prompt still can. Inventory
 alone never creates an outcome, tool label, question, approval, sound, or target. Duplicate
 interactive resumes therefore remain one session identity with an explicit unavailable-control signal
 and no unique direct target until a later poll is unique. Older per-root polls are ignored, so an
