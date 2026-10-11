@@ -100,6 +100,10 @@ The user installed Codex's managed standalone package and accepted ADR 0007; `co
 
 Source inspection: the generated schema defines the request, response and resolution shapes above; the rollout's `function_call_output` keys answers by the same question ids. `codex app-server daemon start` exits 1 on this machine because the Homebrew CLI has no managed standalone install; no socket exists and nothing was installed or changed. The desktop app runs its engine as a stdio app-server, not the daemon. Automated checks: `swift test` (163 tests), the daemon lab (10 checks), both probe self-tests, `sh scripts/build-app.sh` with strict codesign verification, the `--preview-queue expanded` render (the CLI sample carries a seeded daemon request, so the card shows option buttons and a typed-answer field), and `--smoke-test`. Live proof steps 1 through 8: not run; they need a person and a daemon.
 
+## Answering on other terminal hosts
+
+Decided on 2026-10-11 in [ADR 0017](adr/0017-type-question-digits-and-replies-into-one-bound-pane.md), not yet built: the same one-digit relay extends to WezTerm, tmux and Zellij panes, each only after a live run shows the digit alone commits there. Terminal.app and iTerm2 get no question keys. Claude questions are never typed.
+
 ## Answering through herdr keys
 
 Implemented for issue #126 per [ADR 0010](adr/0010-relay-codex-question-options-as-herdr-pane-keys.md); not a proven capability until the herdr live proof (#116, #128) records it. Pure rules are in `HerdrQuestionRelay.swift`; the send is `Companion.chooseOption` in `Companion+Questions.swift`.

@@ -15,7 +15,7 @@ Params and shapes follow the schema the installed CLI generates (`codex app-serv
 
 The socket itself is proven: a second client connects, subscribes and receives a real `item/tool/requestUserInput` ([ADR 0007](adr/0007-connect-to-the-codex-daemon-socket-as-the-same-user.md), `docs/evidence/app-server-daemon-live.json`). `turn/start` is not: no run on the installed CLI has yet started a turn from Steer, so this is a source-level finding about the method, not a proven capability. The live walkthrough below is what would establish it.
 
-The Ghostty relay is not a second path. It delivers one key name to a matched tab and was verified for that alone (ADR 0006); nothing proves it can type a whole prompt and a Return into one unsplit tab, so a session the daemon does not hold has no reply path in Steer at all. `turn/steer`, which interjects into a running turn, is not used either: a completion card is about a turn that has ended.
+The Ghostty relay is not a second path. It delivers one key name to a matched tab and was verified for that alone (ADR 0006); nothing proves it can type a whole prompt and a Return into one unsplit tab, so a session the daemon does not hold has no reply path in Steer at all. Amended on 2026-10-11 by [ADR 0017](adr/0017-type-question-digits-and-replies-into-one-bound-pane.md): typing the reply into the session's one bound pane is a second path, used only when the daemon does not hold the thread, on the hosts that ADR lists. It is decided but not yet built, and it is the only reply path for Claude Code sessions. `turn/steer`, which interjects into a running turn, is not used either: a completion card is about a turn that has ended.
 
 ## When the field is offered
 
