@@ -15,9 +15,6 @@ import Testing
     let everywhere = try #require(ClaudeDirectApproval.details(toolName: "Edit", toolInput: [
         "file_path": "/tmp/a", "old_string": "x", "new_string": "", "replace_all": true]))
     #expect(everywhere.longText == "Replace every occurrence of:\nx\n\nWith:\n(empty)")
-    // replace_all is optional in the tool schema; its absence means a single replacement.
-    #expect(ClaudeDirectApproval.details(toolName: "Edit", toolInput: [
-        "file_path": "/tmp/a", "old_string": "x", "new_string": "y"])?.longText?.hasPrefix("Replace:") == true)
 
     let write = try #require(ClaudeDirectApproval.details(toolName: "Write", toolInput: [
         "file_path": "/tmp/lab/created.txt", "content": "lab ."]))
@@ -32,6 +29,9 @@ import Testing
         "notebook_path": "/tmp/nb.ipynb", "cell_id": "c1", "new_source": "print(3)", "cell_type": "code",
         "edit_mode": "insert"]))
     #expect(insert.longText == "Insert a new code cell after cell c1:\nprint(3)")
+    let delete = try #require(ClaudeDirectApproval.details(toolName: "NotebookEdit", toolInput: [
+        "notebook_path": "/tmp/nb.ipynb", "cell_id": "c1", "new_source": "", "edit_mode": "delete"]))
+    #expect(delete.longText == "Delete cell c1")
 
     let read = try #require(ClaudeDirectApproval.details(toolName: "Read", toolInput: ["file_path": "/tmp/outside.txt"]))
     #expect(read.action == "Read file")
@@ -53,14 +53,23 @@ import Testing
         ("Write", ["file_path": "target.txt", "content": "x"]),
         ("Write", ["file_path": "/tmp/a\nb", "content": "x"]),
         ("Write", ["file_path": "/tmp/a", "content": 5]),
+        // replace_all is optional in Claude's schema, but every observed Edit carried it.
+        ("Edit", ["file_path": "/tmp/a", "old_string": "x", "new_string": "y"]),
+        // Leading/trailing whitespace a display could trim, or a bidirectional override that reorders the shown path.
+        ("Write", ["file_path": "/tmp/a ", "content": "x"]),
+        ("Write", ["file_path": "/tmp/\u{202E}txt.exe", "content": "x"]),
         ("NotebookEdit", ["notebook_path": "/tmp/nb.ipynb", "cell_id": "c1", "new_source": "", "edit_mode": "move"]),
-        // Delete never raised a request in the proof, so it is not decidable yet.
-        ("NotebookEdit", ["notebook_path": "/tmp/nb.ipynb", "cell_id": "c1", "new_source": "", "edit_mode": "delete"]),
         ("NotebookEdit", ["notebook_path": "/tmp/nb.ipynb", "new_source": "x", "edit_mode": "replace"]),
+        ("NotebookEdit", ["notebook_path": "/tmp/nb.ipynb", "cell_id": "c1", "new_source": "x", "cell_type": "code",
+                          "edit_mode": "replace"]),
+        // Only code-cell inserts after an existing cell, and deletes with empty source, were observed.
+        ("NotebookEdit", ["notebook_path": "/tmp/nb.ipynb", "new_source": "x", "cell_type": "code", "edit_mode": "insert"]),
         ("NotebookEdit", ["notebook_path": "/tmp/nb.ipynb", "cell_id": "c1", "new_source": "x", "edit_mode": "insert",
-                          "cell_type": "raw"]),
-        ("Read", ["file_path": "/tmp/a", "offset": -1]),
-        ("Read", ["file_path": "/tmp/a", "limit": 1.5]),
+                          "cell_type": "markdown"]),
+        ("NotebookEdit", ["notebook_path": "/tmp/nb.ipynb", "cell_id": "c1", "new_source": "x", "edit_mode": "delete"]),
+        ("Read", ["file_path": "/tmp/a", "offset": 1]),
+        ("Read", ["file_path": "/tmp/a", "offset": -1, "limit": 1]),
+        ("Read", ["file_path": "/tmp/a", "offset": 1, "limit": 1.5]),
         ("Read", ["file_path": "/tmp/a", "pages": "1-2"]),
         // Tools that raised no PermissionRequest, or were never proven.
         ("Grep", ["pattern": "x", "path": "/tmp"]),
