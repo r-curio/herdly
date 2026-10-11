@@ -1,0 +1,860 @@
+{
+ "issue": 205,
+ "run": "tab-group run adopting a user-made Cmd-T tab group, 2026-10-11",
+ "nonce": "cab1c5a2",
+ "steps": [
+  {
+   "step": "version",
+   "at": 0.11,
+   "version": "2.15",
+   "windows": 3,
+   "front": "com.google.Chrome"
+  },
+  {
+   "step": "preexisting",
+   "at": 0.5,
+   "count": 3
+  },
+  {
+   "step": "waiting_for_tabs",
+   "at": 1.73,
+   "window": 9882,
+   "timeout": 5.0
+  },
+  {
+   "step": "tab_group",
+   "at": 2.12,
+   "members": [
+    {
+     "window": 9882,
+     "tty": "/dev/ttys005",
+     "windowTabs": 1,
+     "selected": true,
+     "bounds": {
+      "x": 229,
+      "y": 101,
+      "width": 860,
+      "height": 535
+     }
+    },
+    {
+     "window": 9921,
+     "tty": "/dev/ttys017",
+     "windowTabs": 1,
+     "selected": true,
+     "bounds": {
+      "x": 229,
+      "y": 101,
+      "width": 860,
+      "height": 535
+     }
+    },
+    {
+     "window": 9923,
+     "tty": "/dev/ttys018",
+     "windowTabs": 1,
+     "selected": true,
+     "bounds": {
+      "x": 229,
+      "y": 101,
+      "width": 860,
+      "height": 535
+     }
+    }
+   ]
+  },
+  {
+   "step": "created",
+   "at": 4.84,
+   "windows": [
+    9882,
+    9935
+   ],
+   "tabs": {
+    "T1": "/dev/ttys005",
+    "T2": "/dev/ttys017",
+    "T3": "/dev/ttys018",
+    "B1": "/dev/ttys019"
+   },
+   "window_of": {
+    "/dev/ttys005": 9882,
+    "/dev/ttys017": 9921,
+    "/dev/ttys018": 9923,
+    "/dev/ttys019": 9935
+   },
+   "w2_in_group": false
+  },
+  {
+   "step": "env_clean",
+   "at": 7.5,
+   "leaks": {}
+  },
+  {
+   "step": "titles:after-ready",
+   "at": 17.6,
+   "rows": [
+    {
+     "key": "T1",
+     "selected": true,
+     "customTitle": "01a129b8-e8dd-7821-babb-cdc0e...",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 codex -C ~/Documents/ChatGPT/Steer/output/terminal-lab/project -s read-only -a never Reply with only the word READY. \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": false,
+     "processes": [
+      "login",
+      "codex"
+     ],
+     "ps_foreground": [
+      "login",
+      "codex"
+     ]
+    },
+    {
+     "key": "T2",
+     "selected": true,
+     "customTitle": "Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa",
+     "windowName": "<user> \u2014 Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa \u2014 caffeinate -i -t 300 \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": true,
+     "processes": [
+      "login",
+      "claude",
+      "caffeinate"
+     ],
+     "ps_foreground": [
+      "login",
+      "claude",
+      "caffeinate"
+     ]
+    },
+    {
+     "key": "T3",
+     "selected": true,
+     "customTitle": "Terminal",
+     "windowName": "<user> \u2014 -zsh \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": false,
+     "processes": [
+      "login",
+      "-zsh"
+     ],
+     "ps_foreground": [
+      "-zsh"
+     ]
+    },
+    {
+     "key": "B1",
+     "selected": true,
+     "customTitle": "Terminal",
+     "windowName": "<user> \u2014 -zsh \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": false,
+     "processes": [
+      "login",
+      "-zsh"
+     ],
+     "ps_foreground": [
+      "-zsh"
+     ]
+    }
+   ],
+   "current": {
+    "frontmost": false,
+    "window": 9882,
+    "selectedTty": "/dev/ttys005",
+    "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 codex -C ~/Documents/ChatGPT/Steer/output/terminal-lab/project -s read-only -a never Reply with only the word READY. \u2014 120\u00d730"
+   },
+   "onscreen": []
+  },
+  {
+   "step": "codex_rollout_id",
+   "at": 17.62,
+   "id": "01a129b8-e8dd-7821-babb-cdc0efb2cef6",
+   "expected_title": "01a129b8-e8dd-7821-babb-cdc0e..."
+  },
+  {
+   "step": "claude_hook_events",
+   "at": 17.62,
+   "events": [
+    {
+     "at": 1791701349.814037,
+     "event": "SessionStart",
+     "session_id": "12e2faa8-6707-4877-97e2-ab6ee14acaaa",
+     "env": {
+      "TERM_SESSION_ID": "82247DEC-6797-4376-ABFC-CD0292510CED",
+      "TERM_PROGRAM": "Apple_Terminal",
+      "TERM_PROGRAM_VERSION": "470.2"
+     },
+     "ancestors": [
+      {
+       "tty": "ttys017",
+       "comm": "claude"
+      },
+      {
+       "tty": "ttys017",
+       "comm": "login"
+      },
+      {
+       "tty": "??",
+       "comm": "Terminal"
+      }
+     ]
+    },
+    {
+     "at": 1791701350.0556412,
+     "event": "UserPromptSubmit",
+     "session_id": "12e2faa8-6707-4877-97e2-ab6ee14acaaa",
+     "env": {
+      "TERM_SESSION_ID": "82247DEC-6797-4376-ABFC-CD0292510CED",
+      "TERM_PROGRAM": "Apple_Terminal",
+      "TERM_PROGRAM_VERSION": "470.2"
+     },
+     "ancestors": [
+      {
+       "tty": "ttys017",
+       "comm": "claude"
+      },
+      {
+       "tty": "ttys017",
+       "comm": "login"
+      },
+      {
+       "tty": "??",
+       "comm": "Terminal"
+      }
+     ]
+    },
+    {
+     "at": 1791701351.627648,
+     "event": "Stop",
+     "session_id": "12e2faa8-6707-4877-97e2-ab6ee14acaaa",
+     "env": {
+      "TERM_SESSION_ID": "82247DEC-6797-4376-ABFC-CD0292510CED",
+      "TERM_PROGRAM": "Apple_Terminal",
+      "TERM_PROGRAM_VERSION": "470.2"
+     },
+     "ancestors": [
+      {
+       "tty": "ttys017",
+       "comm": "claude"
+      },
+      {
+       "tty": "ttys017",
+       "comm": "login"
+      },
+      {
+       "tty": "??",
+       "comm": "Terminal"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "step": "titles:selected-T1",
+   "at": 19.88,
+   "rows": [
+    {
+     "key": "T1",
+     "selected": true,
+     "customTitle": "01a129b8-e8dd-7821-babb-cdc0e...",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 codex -C ~/Documents/ChatGPT/Steer/output/terminal-lab/project -s read-only -a never Reply with only the word READY. \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": false,
+     "processes": [
+      "login",
+      "codex"
+     ],
+     "ps_foreground": [
+      "login",
+      "codex"
+     ]
+    },
+    {
+     "key": "T2",
+     "selected": true,
+     "customTitle": "Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa",
+     "windowName": "<user> \u2014 Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa \u2014 caffeinate -i -t 300 \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": true,
+     "processes": [
+      "login",
+      "claude",
+      "caffeinate"
+     ],
+     "ps_foreground": [
+      "login",
+      "claude",
+      "caffeinate"
+     ]
+    },
+    {
+     "key": "T3",
+     "selected": true,
+     "customTitle": "Terminal",
+     "windowName": "<user> \u2014 -zsh \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": false,
+     "processes": [
+      "login",
+      "-zsh"
+     ],
+     "ps_foreground": [
+      "-zsh"
+     ]
+    },
+    {
+     "key": "B1",
+     "selected": true,
+     "customTitle": "Terminal",
+     "windowName": "<user> \u2014 -zsh \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": false,
+     "processes": [
+      "login",
+      "-zsh"
+     ],
+     "ps_foreground": [
+      "-zsh"
+     ]
+    }
+   ],
+   "current": {
+    "frontmost": true,
+    "window": 9882,
+    "selectedTty": "/dev/ttys005",
+    "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 codex -C ~/Documents/ChatGPT/Steer/output/terminal-lab/project -s read-only -a never Reply with only the word READY. \u2014 120\u00d730"
+   },
+   "onscreen": [
+    9882,
+    9935
+   ]
+  },
+  {
+   "step": "titles:selected-T2",
+   "at": 22.1,
+   "rows": [
+    {
+     "key": "T1",
+     "selected": true,
+     "customTitle": "01a129b8-e8dd-7821-babb-cdc0e...",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 codex -C ~/Documents/ChatGPT/Steer/output/terminal-lab/project -s read-only -a never Reply with only the word READY. \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": false,
+     "processes": [
+      "login",
+      "codex"
+     ],
+     "ps_foreground": [
+      "login",
+      "codex"
+     ]
+    },
+    {
+     "key": "T2",
+     "selected": true,
+     "customTitle": "Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa",
+     "windowName": "<user> \u2014 Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa \u2014 caffeinate -i -t 300 \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": true,
+     "processes": [
+      "login",
+      "claude",
+      "caffeinate"
+     ],
+     "ps_foreground": [
+      "login",
+      "claude",
+      "caffeinate"
+     ]
+    },
+    {
+     "key": "T3",
+     "selected": true,
+     "customTitle": "Terminal",
+     "windowName": "<user> \u2014 -zsh \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": false,
+     "processes": [
+      "login",
+      "-zsh"
+     ],
+     "ps_foreground": [
+      "-zsh"
+     ]
+    },
+    {
+     "key": "B1",
+     "selected": true,
+     "customTitle": "Terminal",
+     "windowName": "<user> \u2014 -zsh \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": false,
+     "processes": [
+      "login",
+      "-zsh"
+     ],
+     "ps_foreground": [
+      "-zsh"
+     ]
+    }
+   ],
+   "current": {
+    "frontmost": true,
+    "window": 9921,
+    "selectedTty": "/dev/ttys017",
+    "windowName": "<user> \u2014 Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa \u2014 caffeinate -i -t 300 \u2014 120\u00d730"
+   },
+   "onscreen": [
+    9921,
+    9935
+   ]
+  },
+  {
+   "step": "titles:selected-T3-decoy",
+   "at": 26.51,
+   "rows": [
+    {
+     "key": "T1",
+     "selected": true,
+     "customTitle": "01a129b8-e8dd-7821-babb-cdc0e...",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 codex -C ~/Documents/ChatGPT/Steer/output/terminal-lab/project -s read-only -a never Reply with only the word READY. \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": false,
+     "processes": [
+      "login",
+      "codex"
+     ],
+     "ps_foreground": [
+      "login",
+      "codex"
+     ]
+    },
+    {
+     "key": "T2",
+     "selected": true,
+     "customTitle": "Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa",
+     "windowName": "<user> \u2014 Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa \u2014 git --shallow-file ~/.claude/plugins/cache/temp_git_1791701363374_vruq1h/.git/shallow.lock index-pack --stdin --fix-thin --keep=fetch-pack 35944 on Mac \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": true,
+     "processes": [
+      "login",
+      "claude",
+      "caffeinate",
+      "git",
+      "git",
+      "git-remote-https",
+      "git",
+      "git",
+      "git",
+      "git-remote-https",
+      "git"
+     ],
+     "ps_foreground": [
+      "login",
+      "claude",
+      "caffeinate",
+      "git",
+      "git",
+      "<defunct>",
+      "git",
+      "git-remote-https",
+      "git",
+      "git"
+     ]
+    },
+    {
+     "key": "T3",
+     "selected": true,
+     "customTitle": "01a129b8-e8dd-7821-babb-cdc0e...",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 sleep 3600 \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": true,
+     "processes": [
+      "login",
+      "sleep"
+     ],
+     "ps_foreground": [
+      "login",
+      "sleep"
+     ]
+    },
+    {
+     "key": "B1",
+     "selected": true,
+     "customTitle": "Terminal",
+     "windowName": "<user> \u2014 -zsh \u2014 120\u00d730",
+     "titleDisplaysCustomTitle": true,
+     "busy": false,
+     "processes": [
+      "login",
+      "-zsh"
+     ],
+     "ps_foreground": [
+      "-zsh"
+     ]
+    }
+   ],
+   "current": {
+    "frontmost": true,
+    "window": 9923,
+    "selectedTty": "/dev/ttys018",
+    "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 sleep 3600 \u2014 120\u00d730"
+   },
+   "onscreen": [
+    9923,
+    9935
+   ]
+  },
+  {
+   "step": "select:tab-selected-only",
+   "at": 30.74,
+   "target": "/dev/ttys005",
+   "target_window": 9882,
+   "steps": [
+    "tab"
+   ],
+   "before": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9923,
+     "selectedTty": "/dev/ttys018",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 sleep 3600 \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9923,
+     9935
+    ]
+   },
+   "after": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9923,
+     "selectedTty": "/dev/ttys018",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 sleep 3600 \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9923,
+     9935
+    ]
+   },
+   "matched": false,
+   "elapsed": 3.41
+  },
+  {
+   "step": "select:window-frontmost-only",
+   "at": 31.86,
+   "target": "/dev/ttys005",
+   "target_window": 9882,
+   "steps": [
+    "window"
+   ],
+   "before": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9923,
+     "selectedTty": "/dev/ttys018",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 sleep 3600 \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9923,
+     9935
+    ]
+   },
+   "after": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9882,
+     "selectedTty": "/dev/ttys005",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 codex -C ~/Documents/ChatGPT/Steer/output/terminal-lab/project -s read-only -a never Reply with only the word READY. \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9882,
+     9935
+    ]
+   },
+   "matched": true,
+   "elapsed": 0.3
+  },
+  {
+   "step": "select:index-only",
+   "at": 32.99,
+   "target": "/dev/ttys017",
+   "target_window": 9921,
+   "steps": [
+    "index"
+   ],
+   "before": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9882,
+     "selectedTty": "/dev/ttys005",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 codex -C ~/Documents/ChatGPT/Steer/output/terminal-lab/project -s read-only -a never Reply with only the word READY. \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9882,
+     9935
+    ]
+   },
+   "after": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9921,
+     "selectedTty": "/dev/ttys017",
+     "windowName": "<user> \u2014 Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa \u2014 caffeinate -i -t 300 \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9921,
+     9935
+    ]
+   },
+   "matched": true,
+   "elapsed": 0.3
+  },
+  {
+   "step": "select:window+activate-other-window",
+   "at": 34.15,
+   "target": "/dev/ttys019",
+   "target_window": 9935,
+   "steps": [
+    "window",
+    "activate"
+   ],
+   "before": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9921,
+     "selectedTty": "/dev/ttys017",
+     "windowName": "<user> \u2014 Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa \u2014 caffeinate -i -t 300 \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9921,
+     9935
+    ]
+   },
+   "after": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9935,
+     "selectedTty": "/dev/ttys019",
+     "windowName": "<user> \u2014 -zsh \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9935,
+     9921
+    ]
+   },
+   "matched": true,
+   "elapsed": 0.34
+  },
+  {
+   "step": "select:window+activate-from-finder",
+   "at": 35.33,
+   "target": "/dev/ttys017",
+   "target_window": 9921,
+   "steps": [
+    "window",
+    "activate"
+   ],
+   "before": {
+    "front": "com.apple.finder",
+    "current": {
+     "frontmost": false,
+     "window": 9935,
+     "selectedTty": "/dev/ttys019",
+     "windowName": "<user> \u2014 -zsh \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9935,
+     9921
+    ]
+   },
+   "after": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9921,
+     "selectedTty": "/dev/ttys017",
+     "windowName": "<user> \u2014 Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa \u2014 caffeinate -i -t 300 \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9921,
+     9935
+    ]
+   },
+   "matched": true,
+   "elapsed": 0.31
+  },
+  {
+   "step": "select:index+activate-from-finder",
+   "at": 36.57,
+   "target": "/dev/ttys018",
+   "target_window": 9923,
+   "steps": [
+    "index",
+    "activate"
+   ],
+   "before": {
+    "front": "com.apple.finder",
+    "current": {
+     "frontmost": false,
+     "window": 9921,
+     "selectedTty": "/dev/ttys017",
+     "windowName": "<user> \u2014 Steer Claude 12e2faa8-6707-4877-97e2-ab6ee14acaaa \u2014 caffeinate -i -t 300 \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9921,
+     9935
+    ]
+   },
+   "after": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9923,
+     "selectedTty": "/dev/ttys018",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 sleep 3600 \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9923,
+     9935
+    ]
+   },
+   "matched": true,
+   "elapsed": 0.35
+  },
+  {
+   "step": "select:window+activate-background-tab",
+   "at": 37.76,
+   "target": "/dev/ttys005",
+   "target_window": 9882,
+   "steps": [
+    "window",
+    "activate"
+   ],
+   "before": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9923,
+     "selectedTty": "/dev/ttys018",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 sleep 3600 \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9923,
+     9935
+    ]
+   },
+   "after": {
+    "front": "com.apple.Terminal",
+    "current": {
+     "frontmost": true,
+     "window": 9882,
+     "selectedTty": "/dev/ttys005",
+     "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 codex -C ~/Documents/ChatGPT/Steer/output/terminal-lab/project -s read-only -a never Reply with only the word READY. \u2014 120\u00d730"
+    },
+    "onscreen_lab": [
+     9882,
+     9935
+    ]
+   },
+   "matched": true,
+   "elapsed": 0.37
+  },
+  {
+   "step": "focus:other-app-front",
+   "at": 37.97,
+   "front": "com.apple.finder",
+   "current": {
+    "frontmost": false,
+    "window": 9882,
+    "selectedTty": "/dev/ttys005",
+    "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 codex -C ~/Documents/ChatGPT/Steer/output/terminal-lab/project -s read-only -a never Reply with only the word READY. \u2014 120\u00d730"
+   },
+   "onscreen": [
+    9882,
+    9935
+   ]
+  },
+  {
+   "step": "doScript:shell",
+   "at": 39.77,
+   "front_after": "com.apple.finder",
+   "current_after": {
+    "frontmost": false,
+    "window": 9882,
+    "selectedTty": "/dev/ttys005",
+    "windowName": "<user> \u2014 01a129b8-e8dd-7821-babb-cdc0e... \u2014 codex -C ~/Documents/ChatGPT/Steer/output/terminal-lab/project -s read-only -a never Reply with only the word READY. \u2014 120\u00d730"
+   }
+  },
+  {
+   "step": "doScript:tui-prompt",
+   "at": 86.35,
+   "codex_submitted": false,
+   "claude_submitted": true,
+   "codex_has_text": true,
+   "claude_has_text": true
+  },
+  {
+   "step": "doScript:stale-reference",
+   "at": 92.43,
+   "result": {
+    "ok": true,
+    "result": {
+     "ttyBefore": "/dev/ttys020",
+     "ok": false,
+     "error": "Error: Can't get object.",
+     "windowsAfter": 5
+    }
+   },
+   "windows_before": 5,
+   "windows_after": 5,
+   "unexpected_tabs": [],
+   "probe_file_written": false
+  },
+  {
+   "step": "doScript:landing",
+   "at": 93.6,
+   "tabs": {
+    "/dev/ttys005": {
+     "I1": 0,
+     "stale": 0,
+     "lab": true
+    },
+    "/dev/ttys019": {
+     "I1": 2,
+     "stale": 0,
+     "lab": true
+    },
+    "/dev/ttys017": {
+     "I1": 0,
+     "stale": 0,
+     "lab": true
+    },
+    "/dev/ttys018": {
+     "I1": 0,
+     "stale": 0,
+     "lab": true
+    }
+   },
+   "I1_target": "/dev/ttys019"
+  }
+ ],
+ "supplemental_codex_submit": {
+  "tty": "/dev/ttys005",
+  "ready": true,
+  "leak_count_line": [
+   "     ~/Documents/ChatGPT/Steer/output/terminal-lab/project"
+  ],
+  "text+newline": false,
+  "separate-newline": true
+ }
+}
