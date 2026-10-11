@@ -1,0 +1,886 @@
+{
+  "issue": 71,
+  "recorded": "2026-10-11",
+  "claude_code": "2.1.296 (Claude Code)",
+  "repo_commit": "caa575f",
+  "helper": "scripts/claude-permission-lab/lab_helper.py (lab stand-in mirroring SteerHook's Claude approval file protocol for any tool); not the shipped SteerHook, which decides Bash only",
+  "companion": "scripts/claude-permission-lab/run_case.py writes receipts and decisions; native answers are keystrokes into Claude's own prompt",
+  "decisions": "scripted by the agent at the operator's explicit direction (2026-10-11); not human-clicked",
+  "session_mode": "top-level interactive sessions (the driver clears CLAUDECODE/CLAUDE_CODE_* so a launch from inside Claude Code is not marked nested)",
+  "isolation": "claude --setting-sources project --permission-mode default --model haiku --strict-mcp-config in output/claude-permission-lab/project; user hooks, permission rules and auto mode not loaded; only Write calls creating marker files in the lab project",
+  "cases": [
+    {
+      "case": "allow",
+      "session_id": "b34f067f-f2ff-450e-b51f-b22402a0d783",
+      "prompt_id": "b8905c55-f0fd-4266-b7a5-6f2bbb1827f2",
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "marker_created": true,
+      "records_left": [
+        "decision:66089fdf",
+        "delivery:66089fdf",
+        "receipt:66089fdf",
+        "request:66089fdf"
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": -6.253,
+          "registry_status": "idle",
+          "status_changed": -6.401
+        },
+        {
+          "t": 0.063,
+          "registry_status": "busy",
+          "status_changed": 0.031
+        },
+        {
+          "t": 1.899,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01M8dtMy5BCMSbQSHBoS1KXD",
+          "file": "marker-allow.txt"
+        },
+        {
+          "t": 1.952,
+          "registry_status": "waiting",
+          "status_changed": 1.935
+        },
+        {
+          "t": 2.029,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "66089fdf-bbd2-4529-af35-c3edf92579dc",
+          "file": "marker-allow.txt"
+        },
+        {
+          "t": 2.048,
+          "driver": "request_seen",
+          "request_id": "66089fdf-bbd2-4529-af35-c3edf92579dc",
+          "tool": "Write",
+          "tool_use_id": null
+        },
+        {
+          "t": 2.05,
+          "driver": "companion_receipt",
+          "request_id": "66089fdf-bbd2-4529-af35-c3edf92579dc"
+        },
+        {
+          "t": 4.202,
+          "driver": "companion_decision",
+          "request_id": "66089fdf-bbd2-4529-af35-c3edf92579dc",
+          "decision": "allow"
+        },
+        {
+          "t": 4.218,
+          "hook": "helper_exit",
+          "request_id": "66089fdf-bbd2-4529-af35-c3edf92579dc",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 4.262,
+          "registry_status": "busy",
+          "status_changed": 4.237
+        },
+        {
+          "t": 4.384,
+          "hook": "PostToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01M8dtMy5BCMSbQSHBoS1KXD",
+          "file": "marker-allow.txt"
+        },
+        {
+          "t": 4.501,
+          "hook": "PostToolBatch"
+        },
+        {
+          "t": 5.536,
+          "hook": "Stop"
+        },
+        {
+          "t": 5.593,
+          "registry_status": "idle",
+          "status_changed": 5.561
+        },
+        {
+          "t": 9.154,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "deny",
+      "session_id": "5c7a2507-37c2-4aea-bbf1-c07725973bfd",
+      "prompt_id": "4ad8f46b-00e8-4645-a0a4-3ed3c122b655",
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "marker_created": false,
+      "records_left": [
+        "decision:841c835a",
+        "delivery:841c835a",
+        "receipt:841c835a",
+        "request:841c835a"
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": -6.407,
+          "registry_status": "idle",
+          "status_changed": -6.515
+        },
+        {
+          "t": 0.056,
+          "registry_status": "busy",
+          "status_changed": 0.038
+        },
+        {
+          "t": 1.982,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01LkKyZ7QdFtRBUymfT9S1ub",
+          "file": "marker-deny.txt"
+        },
+        {
+          "t": 2.039,
+          "registry_status": "waiting",
+          "status_changed": 2.019
+        },
+        {
+          "t": 2.145,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "841c835a-ad16-4ccd-9d69-4bad43e2e17b",
+          "file": "marker-deny.txt"
+        },
+        {
+          "t": 2.338,
+          "driver": "request_seen",
+          "request_id": "841c835a-ad16-4ccd-9d69-4bad43e2e17b",
+          "tool": "Write",
+          "tool_use_id": null
+        },
+        {
+          "t": 2.34,
+          "driver": "companion_receipt",
+          "request_id": "841c835a-ad16-4ccd-9d69-4bad43e2e17b"
+        },
+        {
+          "t": 4.475,
+          "driver": "companion_decision",
+          "request_id": "841c835a-ad16-4ccd-9d69-4bad43e2e17b",
+          "decision": "deny"
+        },
+        {
+          "t": 4.553,
+          "hook": "helper_exit",
+          "request_id": "841c835a-ad16-4ccd-9d69-4bad43e2e17b",
+          "outcome": "emitted",
+          "decision": "deny"
+        },
+        {
+          "t": 4.608,
+          "registry_status": "busy",
+          "status_changed": 4.581
+        },
+        {
+          "t": 4.714,
+          "hook": "PostToolBatch"
+        },
+        {
+          "t": 5.561,
+          "hook": "Stop"
+        },
+        {
+          "t": 5.61,
+          "registry_status": "idle",
+          "status_changed": 5.584
+        },
+        {
+          "t": 9.48,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "handoff",
+      "session_id": "aa04f803-9ad4-487b-af17-507761d141b0",
+      "prompt_id": "a03d871c-8d71-4720-b7d3-96373a75e474",
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "marker_created": true,
+      "records_left": [
+        "decision:71a6c976",
+        "receipt:71a6c976",
+        "request:71a6c976"
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": -6.248,
+          "registry_status": "idle",
+          "status_changed": -6.358
+        },
+        {
+          "t": 0.059,
+          "registry_status": "busy",
+          "status_changed": 0.041
+        },
+        {
+          "t": 2.102,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_0144RrhkWBtkTi9b6jNycBuf",
+          "file": "marker-handoff.txt"
+        },
+        {
+          "t": 2.151,
+          "registry_status": "waiting",
+          "status_changed": 2.138
+        },
+        {
+          "t": 2.258,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "71a6c976-f293-43f1-874c-c2f53fd64107",
+          "file": "marker-handoff.txt"
+        },
+        {
+          "t": 2.458,
+          "driver": "request_seen",
+          "request_id": "71a6c976-f293-43f1-874c-c2f53fd64107",
+          "tool": "Write",
+          "tool_use_id": null
+        },
+        {
+          "t": 2.46,
+          "driver": "companion_receipt",
+          "request_id": "71a6c976-f293-43f1-874c-c2f53fd64107"
+        },
+        {
+          "t": 4.601,
+          "driver": "companion_decision",
+          "request_id": "71a6c976-f293-43f1-874c-c2f53fd64107",
+          "decision": "no_decision"
+        },
+        {
+          "t": 4.671,
+          "hook": "helper_exit",
+          "request_id": "71a6c976-f293-43f1-874c-c2f53fd64107",
+          "outcome": "handed_back",
+          "decision": "no_decision"
+        },
+        {
+          "t": 6.776,
+          "driver": "native_key",
+          "key": "native-yes"
+        },
+        {
+          "t": 6.841,
+          "registry_status": "busy",
+          "status_changed": 6.792
+        },
+        {
+          "t": 6.944,
+          "hook": "PostToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_0144RrhkWBtkTi9b6jNycBuf",
+          "file": "marker-handoff.txt"
+        },
+        {
+          "t": 7.079,
+          "hook": "PostToolBatch"
+        },
+        {
+          "t": 8.038,
+          "hook": "Stop"
+        },
+        {
+          "t": 8.098,
+          "registry_status": "idle",
+          "status_changed": 8.061
+        },
+        {
+          "t": 13.435,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "native",
+      "session_id": "46dbcd47-bd1e-42fd-a559-f492a13882b4",
+      "prompt_id": "adb7a2fe-1fe8-4b89-a836-0ab8b8726fec",
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "marker_created": true,
+      "records_left": [
+        "decision:97586428",
+        "delivery:97586428",
+        "receipt:97586428",
+        "request:97586428"
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": -6.305,
+          "registry_status": "idle",
+          "status_changed": -6.429
+        },
+        {
+          "t": 0.073,
+          "registry_status": "busy",
+          "status_changed": 0.042
+        },
+        {
+          "t": 1.644,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01LPHAMiGkRBReWKep4Uffmz",
+          "file": "marker-native.txt"
+        },
+        {
+          "t": 1.714,
+          "registry_status": "waiting",
+          "status_changed": 1.684
+        },
+        {
+          "t": 1.797,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "97586428-aeb8-416f-8312-d70297fb7fa8",
+          "file": "marker-native.txt"
+        },
+        {
+          "t": 2.105,
+          "driver": "request_seen",
+          "request_id": "97586428-aeb8-416f-8312-d70297fb7fa8",
+          "tool": "Write",
+          "tool_use_id": null
+        },
+        {
+          "t": 2.107,
+          "driver": "companion_receipt",
+          "request_id": "97586428-aeb8-416f-8312-d70297fb7fa8"
+        },
+        {
+          "t": 5.183,
+          "driver": "native_key",
+          "key": "native-yes"
+        },
+        {
+          "t": 5.212,
+          "registry_status": "busy",
+          "status_changed": 5.2
+        },
+        {
+          "t": 5.349,
+          "hook": "PostToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01LPHAMiGkRBReWKep4Uffmz",
+          "file": "marker-native.txt"
+        },
+        {
+          "t": 5.495,
+          "hook": "PostToolBatch"
+        },
+        {
+          "t": 6.377,
+          "hook": "Stop"
+        },
+        {
+          "t": 6.422,
+          "registry_status": "idle",
+          "status_changed": 6.401
+        },
+        {
+          "t": 9.18,
+          "driver": "companion_decision",
+          "request_id": "97586428-aeb8-416f-8312-d70297fb7fa8",
+          "decision": "deny"
+        },
+        {
+          "t": 9.221,
+          "hook": "helper_exit",
+          "request_id": "97586428-aeb8-416f-8312-d70297fb7fa8",
+          "outcome": "emitted",
+          "decision": "deny"
+        },
+        {
+          "t": 12.155,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "native-no",
+      "session_id": "b18d8013-61ce-4e65-809b-f2a7f201d907",
+      "prompt_id": "d035d9e0-5347-403f-a7f1-77c2fe0f89bc",
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "marker_created": false,
+      "records_left": [
+        "live:16b07f89",
+        "receipt:16b07f89",
+        "request:16b07f89"
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": -6.512,
+          "registry_status": "idle",
+          "status_changed": -6.637
+        },
+        {
+          "t": 0.068,
+          "registry_status": "busy",
+          "status_changed": 0.037
+        },
+        {
+          "t": 2.003,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_013M6fvJi9GYwRFp2HdMUBxd",
+          "file": "marker-native-no.txt"
+        },
+        {
+          "t": 2.074,
+          "registry_status": "waiting",
+          "status_changed": 2.037
+        },
+        {
+          "t": 2.144,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "16b07f89-c6e1-4f3f-9559-ed2da961a871",
+          "file": "marker-native-no.txt"
+        },
+        {
+          "t": 2.354,
+          "driver": "request_seen",
+          "request_id": "16b07f89-c6e1-4f3f-9559-ed2da961a871",
+          "tool": "Write",
+          "tool_use_id": null
+        },
+        {
+          "t": 2.356,
+          "driver": "companion_receipt",
+          "request_id": "16b07f89-c6e1-4f3f-9559-ed2da961a871"
+        },
+        {
+          "t": 5.425,
+          "driver": "native_key",
+          "key": "native-no-esc"
+        },
+        {
+          "t": 5.548,
+          "registry_status": "idle",
+          "status_changed": 5.508
+        },
+        {
+          "t": 17.558,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "timeout",
+      "session_id": "8d871e97-e7ce-46d0-9eb3-2b04c63dfa54",
+      "prompt_id": "f60cb3c3-3f15-43c1-b1fb-78089f258111",
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "marker_created": false,
+      "records_left": [
+        "receipt:803778bf",
+        "request:803778bf"
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": -6.27,
+          "registry_status": "idle",
+          "status_changed": -6.431
+        },
+        {
+          "t": 0.072,
+          "registry_status": "busy",
+          "status_changed": 0.036
+        },
+        {
+          "t": 2.129,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01KVo5aAP7Rj7tYnCmRiYouQ",
+          "file": "marker-timeout.txt"
+        },
+        {
+          "t": 2.176,
+          "registry_status": "waiting",
+          "status_changed": 2.165
+        },
+        {
+          "t": 2.277,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "803778bf-07ca-49f0-81ee-0b54b6908771",
+          "file": "marker-timeout.txt"
+        },
+        {
+          "t": 2.377,
+          "driver": "request_seen",
+          "request_id": "803778bf-07ca-49f0-81ee-0b54b6908771",
+          "tool": "Write",
+          "tool_use_id": null
+        },
+        {
+          "t": 2.379,
+          "driver": "companion_receipt",
+          "request_id": "803778bf-07ca-49f0-81ee-0b54b6908771"
+        },
+        {
+          "t": 8.287,
+          "hook": "Notification",
+          "notification_type": "permission_prompt"
+        },
+        {
+          "t": 32.434,
+          "hook": "helper_exit",
+          "request_id": "803778bf-07ca-49f0-81ee-0b54b6908771",
+          "outcome": "deadline"
+        },
+        {
+          "t": 35.418,
+          "driver": "native_key",
+          "key": "native-no-esc"
+        },
+        {
+          "t": 35.572,
+          "registry_status": "idle",
+          "status_changed": 35.545
+        },
+        {
+          "t": 53.181,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "helper-loss",
+      "session_id": "55e4fc5b-0041-4e5e-ada9-0f032cf7139a",
+      "prompt_id": "2aa24b4c-b304-401e-8dd8-9dfaaea91aa4",
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "marker_created": false,
+      "records_left": [
+        "live:1502fb2f",
+        "receipt:1502fb2f",
+        "request:1502fb2f"
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": -6.319,
+          "registry_status": "idle",
+          "status_changed": -6.436
+        },
+        {
+          "t": 0.032,
+          "registry_status": "busy",
+          "status_changed": 0.024
+        },
+        {
+          "t": 2.062,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01Cs14NPavcUk9chZetr4tU1",
+          "file": "marker-helper-loss.txt"
+        },
+        {
+          "t": 2.092,
+          "registry_status": "waiting",
+          "status_changed": 2.083
+        },
+        {
+          "t": 2.15,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "1502fb2f-70f4-41f1-a0d4-ce04fd4db3f1",
+          "file": "marker-helper-loss.txt"
+        },
+        {
+          "t": 2.302,
+          "driver": "request_seen",
+          "request_id": "1502fb2f-70f4-41f1-a0d4-ce04fd4db3f1",
+          "tool": "Write",
+          "tool_use_id": null
+        },
+        {
+          "t": 2.303,
+          "driver": "companion_receipt",
+          "request_id": "1502fb2f-70f4-41f1-a0d4-ce04fd4db3f1"
+        },
+        {
+          "t": 5.348,
+          "driver": "helper_killed",
+          "pid": 51343
+        },
+        {
+          "t": 8.204,
+          "hook": "Notification",
+          "notification_type": "permission_prompt"
+        },
+        {
+          "t": 8.418,
+          "driver": "native_key",
+          "key": "native-no-esc"
+        },
+        {
+          "t": 8.527,
+          "registry_status": "idle",
+          "status_changed": 8.497
+        },
+        {
+          "t": 53.267,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "overlap",
+      "session_id": "fc4ec21d-15f9-4cfe-9599-5cf39bb01c32",
+      "prompt_id": "0c55c1a8-af87-4b88-8de4-1df48d1f30af",
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "marker_created": true,
+      "records_left": [
+        "decision:47decb35",
+        "decision:b4931d23",
+        "delivery:47decb35",
+        "delivery:b4931d23",
+        "receipt:47decb35",
+        "receipt:b4931d23",
+        "request:47decb35",
+        "request:b4931d23"
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": -6.392,
+          "registry_status": "idle",
+          "status_changed": -6.498
+        },
+        {
+          "t": 0.076,
+          "registry_status": "busy",
+          "status_changed": 0.04
+        },
+        {
+          "t": 1.986,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01F2C4XU61ZXW1H2FRj2Cy6x",
+          "file": "marker-overlap.txt"
+        },
+        {
+          "t": 2.042,
+          "registry_status": "waiting",
+          "status_changed": 2.01
+        },
+        {
+          "t": 2.087,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "47decb35-c8e7-463c-b3ea-503b094f1042",
+          "file": "marker-overlap.txt"
+        },
+        {
+          "t": 2.318,
+          "driver": "request_seen",
+          "request_id": "47decb35-c8e7-463c-b3ea-503b094f1042",
+          "tool": "Write",
+          "tool_use_id": null
+        },
+        {
+          "t": 2.32,
+          "driver": "companion_receipt",
+          "request_id": "47decb35-c8e7-463c-b3ea-503b094f1042"
+        },
+        {
+          "t": 5.402,
+          "driver": "native_key",
+          "key": "native-yes-first"
+        },
+        {
+          "t": 5.454,
+          "registry_status": "busy",
+          "status_changed": 5.416
+        },
+        {
+          "t": 5.546,
+          "hook": "PostToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01F2C4XU61ZXW1H2FRj2Cy6x",
+          "file": "marker-overlap.txt"
+        },
+        {
+          "t": 5.667,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_014dDhDfh3MxwcJV8fJFC6Ww",
+          "file": "marker-overlap.txt"
+        },
+        {
+          "t": 5.707,
+          "registry_status": "waiting",
+          "status_changed": 5.692
+        },
+        {
+          "t": 5.796,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "b4931d23-3ba8-4c1d-a6e3-2b1ea7459cf8",
+          "file": "marker-overlap.txt"
+        },
+        {
+          "t": 9.287,
+          "driver": "request_seen",
+          "request_id": "b4931d23-3ba8-4c1d-a6e3-2b1ea7459cf8",
+          "tool": "Write",
+          "tool_use_id": null
+        },
+        {
+          "t": 9.289,
+          "driver": "companion_receipt",
+          "request_id": "b4931d23-3ba8-4c1d-a6e3-2b1ea7459cf8"
+        },
+        {
+          "t": 9.291,
+          "driver": "companion_decision",
+          "request_id": "47decb35-c8e7-463c-b3ea-503b094f1042",
+          "decision": "allow"
+        },
+        {
+          "t": 9.367,
+          "hook": "helper_exit",
+          "request_id": "47decb35-c8e7-463c-b3ea-503b094f1042",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 11.808,
+          "hook": "Notification",
+          "notification_type": "permission_prompt"
+        },
+        {
+          "t": 12.364,
+          "driver": "companion_decision",
+          "request_id": "b4931d23-3ba8-4c1d-a6e3-2b1ea7459cf8",
+          "decision": "deny"
+        },
+        {
+          "t": 12.386,
+          "hook": "helper_exit",
+          "request_id": "b4931d23-3ba8-4c1d-a6e3-2b1ea7459cf8",
+          "outcome": "emitted",
+          "decision": "deny"
+        },
+        {
+          "t": 12.459,
+          "registry_status": "busy",
+          "status_changed": 12.407
+        },
+        {
+          "t": 12.548,
+          "hook": "PostToolBatch"
+        },
+        {
+          "t": 13.401,
+          "hook": "Stop"
+        },
+        {
+          "t": 16.384,
+          "hook": "SessionEnd"
+        }
+      ]
+    }
+  ]
+}
