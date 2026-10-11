@@ -2,11 +2,11 @@
   "issue": 72,
   "recorded": "2026-10-11",
   "claude_code": "2.1.296 (Claude Code)",
-  "repo_commit": "1150f6f",
+  "repo_commit": "fee411a",
   "helper": "scripts/claude-permission-lab/lab_helper.py (the #71 stand-in for SteerHook's Claude approval file protocol, any tool); not the shipped SteerHook, which decides Bash only",
-  "companion": "scripts/claude-permission-lab/run_file_case.py writes receipts and decisions; native answers are keystrokes into Claude's own dialog",
+  "companion": "scripts/claude-permission-lab/run_family_case.py writes receipts and decisions; native answers are keystrokes into Claude's own dialog",
   "decisions": "scripted by the agent at the operator's explicit direction (2026-10-11); not human-clicked",
-  "isolation": "claude --setting-sources project --model haiku --strict-mcp-config in <lab>/project with --permission-mode default unless a case sets one; user hooks, rules and auto mode not loaded; every target is a disposable fixture under <lab>",
+  "isolation": "claude --setting-sources project --model haiku --strict-mcp-config in <lab>/project with --permission-mode default unless a case sets one; user hooks, rules and auto mode not loaded; every file target is a disposable fixture under <lab>; web cases fetch only example.com (one via an httpbin.org redirect) and search only for \"example domain\"; MCP cases use scripts/claude-permission-lab/lab_mcp_server.py",
   "cases": [
     {
       "case": "edit-allow",
@@ -33,6 +33,7 @@
           "f2c82decdd71"
         ]
       },
+      "mcp_server_log": [],
       "native_dialog": [
         {
           "at": "before_decision",
@@ -198,6 +199,7 @@
         "transcript_path"
       ],
       "files_changed": {},
+      "mcp_server_log": [],
       "native_dialog": [
         {
           "at": "before_decision",
@@ -346,6 +348,7 @@
         "transcript_path"
       ],
       "files_changed": {},
+      "mcp_server_log": [],
       "native_dialog": [
         {
           "at": "before_decision",
@@ -493,6 +496,7 @@
           "b48a3f60f81e"
         ]
       },
+      "mcp_server_log": [],
       "native_dialog": [
         {
           "at": "before_decision",
@@ -661,6 +665,7 @@
         "transcript_path"
       ],
       "files_changed": {},
+      "mcp_server_log": [],
       "native_dialog": [
         {
           "at": "before_decision",
@@ -844,6 +849,7 @@
           "bf5ac3c51cb5"
         ]
       },
+      "mcp_server_log": [],
       "native_dialog": [
         {
           "at": "before_decision",
@@ -969,6 +975,7 @@
         "transcript_path"
       ],
       "files_changed": {},
+      "mcp_server_log": [],
       "native_dialog": [
         {
           "at": "before_decision",
@@ -1080,6 +1087,7 @@
         "transcript_path"
       ],
       "files_changed": {},
+      "mcp_server_log": [],
       "native_dialog": [
         {
           "at": "before_decision",
@@ -1202,6 +1210,7 @@
         "transcript_path"
       ],
       "files_changed": {},
+      "mcp_server_log": [],
       "native_dialog": [
         {
           "at": "before_decision",
@@ -1311,6 +1320,7 @@
         "transcript_path"
       ],
       "files_changed": {},
+      "mcp_server_log": [],
       "native_dialog": [
         {
           "at": "before_decision",
@@ -1414,6 +1424,7 @@
       "permission_requests": 0,
       "permission_request_keys": null,
       "files_changed": {},
+      "mcp_server_log": [],
       "native_dialog": [],
       "events_seconds_from_prompt": [
         {
@@ -1440,6 +1451,7 @@
       "permission_requests": 0,
       "permission_request_keys": null,
       "files_changed": {},
+      "mcp_server_log": [],
       "native_dialog": [],
       "events_seconds_from_prompt": [
         {
@@ -1488,6 +1500,7 @@
           "f2c82decdd71"
         ]
       },
+      "mcp_server_log": [],
       "native_dialog": [
         {
           "at": "before_decision",
@@ -1647,6 +1660,7 @@
       "permission_requests": 0,
       "permission_request_keys": null,
       "files_changed": {},
+      "mcp_server_log": [],
       "native_dialog": [],
       "events_seconds_from_prompt": [
         {
@@ -1711,6 +1725,7 @@
           "f2c82decdd71"
         ]
       },
+      "mcp_server_log": [],
       "native_dialog": [],
       "events_seconds_from_prompt": [
         {
@@ -1790,6 +1805,710 @@
         },
         {
           "t": 8.677,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "write-overwrite-allow",
+      "companion": "allow",
+      "settings_extra": {},
+      "prompt": "Read target.txt, then use the Write tool exactly once to overwrite target.txt with the exact content lab . Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {
+        "project/target.txt": [
+          "b6a98d9ce9a2",
+          "bf5ac3c51cb5"
+        ]
+      },
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "running PreT olU e hook \u00b7 2s \u00b7 \u2193 249 tokens \u00b7 thinking )",
+            "Read 1 file",
+            "\u23fa Write (target.txt)",
+            "Lollygagging\u2026 thought for 1s)",
+            "2s \u00b7 \u2193 249 t ken \u00b7 thought for 1s)",
+            "Overwrite file",
+            "target.txt",
+            "1 - alpha",
+            "1 + lab .",
+            "2 No newline at end of file",
+            "Do you want to overwrite target.txt ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.63,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01QTFCKuR3EpfZJW9vmRmg98",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 1.714,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01QTFCKuR3EpfZJW9vmRmg98",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 1.787,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.79,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_015aWRJf7xH2er5MDxFrijfD",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "content": "str[5]"
+          }
+        },
+        {
+          "t": 2.87,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "5ca278e1-52e4-409a-9392-98acf8160a75",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "content": "str[5]"
+          }
+        },
+        {
+          "t": 3.031,
+          "driver": "request_seen",
+          "request_id": "5ca278e1-52e4-409a-9392-98acf8160a75",
+          "tool": "Write",
+          "decided_by_companion": true
+        },
+        {
+          "t": 3.032,
+          "driver": "companion_receipt",
+          "request_id": "5ca278e1-52e4-409a-9392-98acf8160a75"
+        },
+        {
+          "t": 5.22,
+          "driver": "companion_decision",
+          "request_id": "5ca278e1-52e4-409a-9392-98acf8160a75",
+          "decision": "allow"
+        },
+        {
+          "t": 5.287,
+          "hook": "helper_exit",
+          "request_id": "5ca278e1-52e4-409a-9392-98acf8160a75",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 5.385,
+          "hook": "PostToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_015aWRJf7xH2er5MDxFrijfD",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "content": "str[5]"
+          }
+        },
+        {
+          "t": 5.454,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 6.204,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.96,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "read-outside-range-allow",
+      "companion": "allow",
+      "settings_extra": {},
+      "prompt": "Use the Read tool exactly once to read <lab>/outside/outside.txt with offset 1 and limit 1. The path is a disposable lab fixture and you are allowed to request access to it. Make the call even though it is outside the current folder. Do not use any other tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u273d \u2026",
+            "g",
+            "\u23bf <lab>/outside/outside.txt",
+            "(running PreToolUse hook \u00b7 1s)",
+            "<lab>/outside/outside.txt",
+            "Shenaniganing\u2026",
+            "Read file",
+            "Read(<lab>/outside/outside.txt \u00b7 lines 1-1)",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. Yes, allow reading from <lab>/outside during this session",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "\u23fa",
+            "\u23fa"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.335,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_011ofMKEZUC3SwWvD5rHhX5F",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/outside.txt",
+            "offset": 1,
+            "limit": 1
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]",
+            "offset": "int",
+            "limit": "int"
+          }
+        },
+        {
+          "t": 1.425,
+          "hook": "PermissionRequest",
+          "tool_name": "Read",
+          "request_id": "5d3d1359-707a-43d8-b41e-d2eb5e088011",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/outside.txt",
+            "offset": 1,
+            "limit": 1
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]",
+            "offset": "int",
+            "limit": "int"
+          }
+        },
+        {
+          "t": 1.67,
+          "driver": "request_seen",
+          "request_id": "5d3d1359-707a-43d8-b41e-d2eb5e088011",
+          "tool": "Read",
+          "decided_by_companion": true
+        },
+        {
+          "t": 1.673,
+          "driver": "companion_receipt",
+          "request_id": "5d3d1359-707a-43d8-b41e-d2eb5e088011"
+        },
+        {
+          "t": 3.94,
+          "driver": "companion_decision",
+          "request_id": "5d3d1359-707a-43d8-b41e-d2eb5e088011",
+          "decision": "allow"
+        },
+        {
+          "t": 3.967,
+          "hook": "helper_exit",
+          "request_id": "5d3d1359-707a-43d8-b41e-d2eb5e088011",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 4.054,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_011ofMKEZUC3SwWvD5rHhX5F",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/outside.txt",
+            "offset": 1,
+            "limit": 1
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]",
+            "offset": "int",
+            "limit": "int"
+          }
+        },
+        {
+          "t": 4.126,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 4.824,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.636,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "notebook-insert-allow",
+      "companion": "allow",
+      "settings_extra": {},
+      "prompt": "Read nb.ipynb, then use the NotebookEdit tool exactly once to insert a new code cell with source print(3) after cell c1 in nb.ipynb. Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {
+        "project/nb.ipynb": [
+          "6eec27c5aa83",
+          "bd2769745800"
+        ]
+      },
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "ought for 1s)",
+            "Edit notebook",
+            "Do you want to insert this cell into nb.ipynb ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "<lab>/project/nb.ipynb",
+            "Insert new cell for cell c1 (code)",
+            "1 print(3)",
+            "Do you want to insert this cell into nb.ipynb ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 4.018,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01QMSk3Ypho6gRJro3WLCfhA",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/nb.ipynb"
+          },
+          "tool_input_shape": {
+            "file_path": "str[78]"
+          }
+        },
+        {
+          "t": 4.102,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01QMSk3Ypho6gRJro3WLCfhA",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/nb.ipynb"
+          },
+          "tool_input_shape": {
+            "file_path": "str[78]"
+          }
+        },
+        {
+          "t": 4.179,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 5.575,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01CbiBbyJk62zyV8hDfu9CPx",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 5.643,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01CbiBbyJk62zyV8hDfu9CPx",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 5.711,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 7.084,
+          "hook": "PreToolUse",
+          "tool_name": "NotebookEdit",
+          "tool_use_id": "toolu_01T8fTg3tUR6dkzCxA4j6Feq",
+          "permission_mode": "default",
+          "targets": {
+            "notebook_path": "<lab>/project/nb.ipynb",
+            "cell_id": "c1",
+            "edit_mode": "insert",
+            "cell_type": "code"
+          },
+          "tool_input_shape": {
+            "notebook_path": "str[78]",
+            "cell_id": "str[2]",
+            "new_source": "str[8]",
+            "cell_type": "str[4]",
+            "edit_mode": "str[6]"
+          }
+        },
+        {
+          "t": 7.166,
+          "hook": "PermissionRequest",
+          "tool_name": "NotebookEdit",
+          "request_id": "262bb216-a3a9-444b-a586-2c9e6b94bfe6",
+          "permission_mode": "default",
+          "targets": {
+            "notebook_path": "<lab>/project/nb.ipynb",
+            "cell_id": "c1",
+            "edit_mode": "insert",
+            "cell_type": "code"
+          },
+          "tool_input_shape": {
+            "notebook_path": "str[78]",
+            "cell_id": "str[2]",
+            "new_source": "str[8]",
+            "cell_type": "str[4]",
+            "edit_mode": "str[6]"
+          }
+        },
+        {
+          "t": 7.431,
+          "driver": "request_seen",
+          "request_id": "262bb216-a3a9-444b-a586-2c9e6b94bfe6",
+          "tool": "NotebookEdit",
+          "decided_by_companion": true
+        },
+        {
+          "t": 7.433,
+          "driver": "companion_receipt",
+          "request_id": "262bb216-a3a9-444b-a586-2c9e6b94bfe6"
+        },
+        {
+          "t": 9.618,
+          "driver": "companion_decision",
+          "request_id": "262bb216-a3a9-444b-a586-2c9e6b94bfe6",
+          "decision": "allow"
+        },
+        {
+          "t": 9.703,
+          "hook": "helper_exit",
+          "request_id": "262bb216-a3a9-444b-a586-2c9e6b94bfe6",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 9.851,
+          "hook": "PostToolUse",
+          "tool_name": "NotebookEdit",
+          "tool_use_id": "toolu_01T8fTg3tUR6dkzCxA4j6Feq",
+          "permission_mode": "default",
+          "targets": {
+            "notebook_path": "<lab>/project/nb.ipynb",
+            "cell_id": "c1",
+            "edit_mode": "insert",
+            "cell_type": "code"
+          },
+          "tool_input_shape": {
+            "notebook_path": "str[78]",
+            "cell_id": "str[2]",
+            "new_source": "str[8]",
+            "cell_type": "str[4]",
+            "edit_mode": "str[6]"
+          }
+        },
+        {
+          "t": 9.923,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 10.73,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 13.412,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "notebook-delete-allow",
+      "companion": "allow",
+      "settings_extra": {},
+      "prompt": "Read nb.ipynb, then use the NotebookEdit tool exactly once to delete cell c1 in nb.ipynb. Do not use any other tool except Read on a file inside the current folder, or ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {
+        "project/nb.ipynb": [
+          "6eec27c5aa83",
+          "8515354cd7c3"
+        ]
+      },
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "u 9 thinking",
+            "S 84 thinking",
+            "\u273b 421 thinking",
+            "\u2736 running PreT olU e hook \u00b7 3s \u00b7 \u2193 446 tokens \u00b7 thinking )",
+            "Read 1 file",
+            "3s \u00b7 \u2193 446 t ken \u00b7 thinking )",
+            "Edit notebook",
+            "<lab>/project/nb.ipynb",
+            "Delete cell for cell c1",
+            "1 print(1)",
+            "Do you want to delete this cell from nb.ipynb ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 2.071,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01UYnUSEMGzgJKkZxgffQyjM",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/nb.ipynb"
+          },
+          "tool_input_shape": {
+            "file_path": "str[78]"
+          }
+        },
+        {
+          "t": 2.161,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01UYnUSEMGzgJKkZxgffQyjM",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/nb.ipynb"
+          },
+          "tool_input_shape": {
+            "file_path": "str[78]"
+          }
+        },
+        {
+          "t": 2.222,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01Ms4eny3nGiNAp6sk5bFUcp",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.297,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01Ms4eny3nGiNAp6sk5bFUcp",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.37,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 3.929,
+          "hook": "PreToolUse",
+          "tool_name": "NotebookEdit",
+          "tool_use_id": "toolu_01SsFPmFv5ay9UkQMvKVxM5f",
+          "permission_mode": "default",
+          "targets": {
+            "notebook_path": "<lab>/project/nb.ipynb",
+            "cell_id": "c1",
+            "edit_mode": "delete"
+          },
+          "tool_input_shape": {
+            "notebook_path": "str[78]",
+            "cell_id": "str[2]",
+            "new_source": "str[0]",
+            "edit_mode": "str[6]"
+          }
+        },
+        {
+          "t": 4.004,
+          "hook": "PermissionRequest",
+          "tool_name": "NotebookEdit",
+          "request_id": "fd8d8ce4-ef4f-4d90-989f-869f7c4cd07a",
+          "permission_mode": "default",
+          "targets": {
+            "notebook_path": "<lab>/project/nb.ipynb",
+            "cell_id": "c1",
+            "edit_mode": "delete"
+          },
+          "tool_input_shape": {
+            "notebook_path": "str[78]",
+            "cell_id": "str[2]",
+            "new_source": "str[0]",
+            "edit_mode": "str[6]"
+          }
+        },
+        {
+          "t": 4.063,
+          "driver": "request_seen",
+          "request_id": "fd8d8ce4-ef4f-4d90-989f-869f7c4cd07a",
+          "tool": "NotebookEdit",
+          "decided_by_companion": true
+        },
+        {
+          "t": 4.064,
+          "driver": "companion_receipt",
+          "request_id": "fd8d8ce4-ef4f-4d90-989f-869f7c4cd07a"
+        },
+        {
+          "t": 6.25,
+          "driver": "companion_decision",
+          "request_id": "fd8d8ce4-ef4f-4d90-989f-869f7c4cd07a",
+          "decision": "allow"
+        },
+        {
+          "t": 6.335,
+          "hook": "helper_exit",
+          "request_id": "fd8d8ce4-ef4f-4d90-989f-869f7c4cd07a",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 6.493,
+          "hook": "PostToolUse",
+          "tool_name": "NotebookEdit",
+          "tool_use_id": "toolu_01SsFPmFv5ay9UkQMvKVxM5f",
+          "permission_mode": "default",
+          "targets": {
+            "notebook_path": "<lab>/project/nb.ipynb",
+            "cell_id": "c1",
+            "edit_mode": "delete"
+          },
+          "tool_input_shape": {
+            "notebook_path": "str[78]",
+            "cell_id": "str[2]",
+            "new_source": "str[0]",
+            "edit_mode": "str[6]"
+          }
+        },
+        {
+          "t": 6.567,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 7.329,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 9.951,
           "hook": "SessionEnd"
         }
       ]

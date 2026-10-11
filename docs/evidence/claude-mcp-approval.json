@@ -1,0 +1,834 @@
+{
+  "issue": 75,
+  "recorded": "2026-10-11",
+  "claude_code": "2.1.296 (Claude Code)",
+  "repo_commit": "fee411a",
+  "helper": "scripts/claude-permission-lab/lab_helper.py (the #71 stand-in for SteerHook's Claude approval file protocol, any tool); not the shipped SteerHook, which decides Bash only",
+  "companion": "scripts/claude-permission-lab/run_family_case.py writes receipts and decisions; native answers are keystrokes into Claude's own dialog",
+  "decisions": "scripted by the agent at the operator's explicit direction (2026-10-11); not human-clicked",
+  "isolation": "claude --setting-sources project --model haiku --strict-mcp-config in <lab>/project with --permission-mode default unless a case sets one; user hooks, rules and auto mode not loaded; every file target is a disposable fixture under <lab>; web cases fetch only example.com (one via an httpbin.org redirect) and search only for \"example domain\"; MCP cases use scripts/claude-permission-lab/lab_mcp_server.py",
+  "cases": [
+    {
+      "case": "mcp-allow",
+      "companion": "allow",
+      "settings_extra": {
+        "mcp": true
+      },
+      "prompt": "Use the lab_echo MCP tool exactly once with text hello. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "mcp_server",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [
+        {
+          "t": 4.909,
+          "event": "call",
+          "pid": null,
+          "tool": "lab_echo",
+          "arguments": {
+            "text": "hello"
+          }
+        }
+      ],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "O smo sing\u2026",
+            "running PreT olU e hook \u00b7 2s \u00b7 \u2193 194 tokens \u00b7 thinking )",
+            "\u2736 smo 7 thinking",
+            "Tool use",
+            "steer-lab \u2014 Lab Echo Tool: (MCP)",
+            "text: \"hello\"",
+            "About the steer-lab \u2014 Lab Echo Tool:",
+            "\u2502 Lab tool: echoes the given short text. Harmless.",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. Yes, and don't ask again for steer-lab \u2014 Lab Echo commands in <lab>/project",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "\u23fa",
+            "\u23fa"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.444,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01DpvmkQ3QgAPdKmgSbEZSec",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[31]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.52,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01DpvmkQ3QgAPdKmgSbEZSec",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[31]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.601,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.507,
+          "hook": "PreToolUse",
+          "tool_name": "mcp__steer-lab__lab_echo",
+          "tool_use_id": "toolu_01CgNVnr6HYr6JJu7D6fLhnK",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 2.581,
+          "hook": "PermissionRequest",
+          "tool_name": "mcp__steer-lab__lab_echo",
+          "request_id": "4996bc4e-e957-4616-b1c1-4b63296d9288",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 2.631,
+          "driver": "request_seen",
+          "request_id": "4996bc4e-e957-4616-b1c1-4b63296d9288",
+          "tool": "mcp__steer-lab__lab_echo",
+          "decided_by_companion": true
+        },
+        {
+          "t": 2.632,
+          "driver": "companion_receipt",
+          "request_id": "4996bc4e-e957-4616-b1c1-4b63296d9288"
+        },
+        {
+          "t": 4.81,
+          "driver": "companion_decision",
+          "request_id": "4996bc4e-e957-4616-b1c1-4b63296d9288",
+          "decision": "allow"
+        },
+        {
+          "t": 4.899,
+          "hook": "helper_exit",
+          "request_id": "4996bc4e-e957-4616-b1c1-4b63296d9288",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 5.003,
+          "hook": "PostToolUse",
+          "tool_name": "mcp__steer-lab__lab_echo",
+          "tool_use_id": "toolu_01CgNVnr6HYr6JJu7D6fLhnK",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 5.084,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 5.992,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.576,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "mcp-deny",
+      "companion": "deny",
+      "settings_extra": {
+        "mcp": true
+      },
+      "prompt": "Use the lab_echo MCP tool exactly once with text hello. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "mcp_server",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "running PreToolUse hook \u00b7 2s \u00b7 \u2193 82 tokens)",
+            "\u2026",
+            "\u23fa",
+            "Tool use",
+            "steer-lab \u2014 Lab Echo Tool: (MCP)",
+            "text: \"hello\"",
+            "About the steer-lab \u2014 Lab Echo Tool:",
+            "\u2502 Lab tool: echoes the given short text. Harmless.",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. Yes, and don't ask again for steer-lab \u2014 Lab Echo commands in <lab>/project",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "\u23fa",
+            "\u23fa"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.308,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_019ECLM1Nq5LKcX84sEjRQsJ",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[31]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.388,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_019ECLM1Nq5LKcX84sEjRQsJ",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[31]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.48,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.401,
+          "hook": "PreToolUse",
+          "tool_name": "mcp__steer-lab__lab_echo",
+          "tool_use_id": "toolu_01EjrkRAL1mfxJ67ZU93WFAg",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 2.493,
+          "hook": "PermissionRequest",
+          "tool_name": "mcp__steer-lab__lab_echo",
+          "request_id": "21eb1f90-5f9d-4cfc-8d17-f3cd8882ec97",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 2.734,
+          "driver": "request_seen",
+          "request_id": "21eb1f90-5f9d-4cfc-8d17-f3cd8882ec97",
+          "tool": "mcp__steer-lab__lab_echo",
+          "decided_by_companion": true
+        },
+        {
+          "t": 2.738,
+          "driver": "companion_receipt",
+          "request_id": "21eb1f90-5f9d-4cfc-8d17-f3cd8882ec97"
+        },
+        {
+          "t": 4.917,
+          "driver": "companion_decision",
+          "request_id": "21eb1f90-5f9d-4cfc-8d17-f3cd8882ec97",
+          "decision": "deny"
+        },
+        {
+          "t": 4.932,
+          "hook": "helper_exit",
+          "request_id": "21eb1f90-5f9d-4cfc-8d17-f3cd8882ec97",
+          "outcome": "emitted",
+          "decision": "deny"
+        },
+        {
+          "t": 5.019,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 5.981,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.752,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "mcp-handoff",
+      "companion": "handoff",
+      "settings_extra": {
+        "mcp": true
+      },
+      "prompt": "Use the lab_echo MCP tool exactly once with text hello. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "mcp_server",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "era",
+            "\u23fa",
+            "Generating\u2026 1",
+            "Tool use",
+            "steer-lab \u2014 Lab Echo Tool: (MCP)",
+            "text: \"hello\"",
+            "About the steer-lab \u2014 Lab Echo Tool:",
+            "\u2502 Lab tool: echoes the given short text. Harmless.",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. Yes, and don't ask again for steer-lab \u2014 Lab Echo commands in <lab>/project",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "\u23fa",
+            "\u23fa"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.462,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01TuRsDbiMKcocE9UPQavkhw",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[31]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.534,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01TuRsDbiMKcocE9UPQavkhw",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[31]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.606,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.466,
+          "hook": "PreToolUse",
+          "tool_name": "mcp__steer-lab__lab_echo",
+          "tool_use_id": "toolu_014aixEtcnWi5Qmz7JGfixuf",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 2.55,
+          "hook": "PermissionRequest",
+          "tool_name": "mcp__steer-lab__lab_echo",
+          "request_id": "30c5006c-6ee6-4c54-a14f-d64efa6702fe",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 2.694,
+          "driver": "request_seen",
+          "request_id": "30c5006c-6ee6-4c54-a14f-d64efa6702fe",
+          "tool": "mcp__steer-lab__lab_echo",
+          "decided_by_companion": true
+        },
+        {
+          "t": 2.696,
+          "driver": "companion_receipt",
+          "request_id": "30c5006c-6ee6-4c54-a14f-d64efa6702fe"
+        },
+        {
+          "t": 5.072,
+          "driver": "companion_decision",
+          "request_id": "30c5006c-6ee6-4c54-a14f-d64efa6702fe",
+          "decision": "no_decision"
+        },
+        {
+          "t": 5.123,
+          "hook": "helper_exit",
+          "request_id": "30c5006c-6ee6-4c54-a14f-d64efa6702fe",
+          "outcome": "handed_back",
+          "decision": "no_decision"
+        },
+        {
+          "t": 8.299,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 13.279,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 18.273,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 23.261,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 28.247,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 33.24,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 38.232,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 43.221,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 48.206,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 53.147,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 58.14,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 63.126,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 68.115,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 73.11,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 76.19,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "mcp-user-interaction-allow",
+      "companion": "allow",
+      "settings_extra": {
+        "mcp": true
+      },
+      "prompt": "Use the lab_confirm MCP tool exactly once with text hello. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "mcp_server",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "nde",
+            "running PreToolUse hook \u00b7 2s \u00b7 \u2193 80 tokens)",
+            "\u2722 nde 2",
+            "Tool use",
+            "steer-lab \u2014 Lab Confirm Tool: (MCP)",
+            "text: \"hello\"",
+            "About the steer-lab \u2014 Lab Confirm Tool:",
+            "\u2502 Lab tool: echoes the given short text after the user confirms. Harmless.",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "\u23fa",
+            "\u23fa",
+            "\u23fa"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.33,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01Tv2MnTismVE5U5c44AoeiW",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[34]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.408,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01Tv2MnTismVE5U5c44AoeiW",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[34]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.484,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.333,
+          "hook": "PreToolUse",
+          "tool_name": "mcp__steer-lab__lab_confirm",
+          "tool_use_id": "toolu_01HAfEKE9KZjX1aVeb4raj34",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 2.407,
+          "hook": "PermissionRequest",
+          "tool_name": "mcp__steer-lab__lab_confirm",
+          "request_id": "7c2bdc64-71f4-45d5-91eb-68e8c6f47bfe",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 2.685,
+          "driver": "request_seen",
+          "request_id": "7c2bdc64-71f4-45d5-91eb-68e8c6f47bfe",
+          "tool": "mcp__steer-lab__lab_confirm",
+          "decided_by_companion": true
+        },
+        {
+          "t": 2.686,
+          "driver": "companion_receipt",
+          "request_id": "7c2bdc64-71f4-45d5-91eb-68e8c6f47bfe"
+        },
+        {
+          "t": 5.02,
+          "driver": "companion_decision",
+          "request_id": "7c2bdc64-71f4-45d5-91eb-68e8c6f47bfe",
+          "decision": "allow"
+        },
+        {
+          "t": 5.053,
+          "hook": "helper_exit",
+          "request_id": "7c2bdc64-71f4-45d5-91eb-68e8c6f47bfe",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 8.261,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 13.237,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 18.218,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 23.197,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 28.197,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 33.188,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 38.2,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 43.199,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 48.199,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 53.171,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 58.141,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 63.117,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 68.089,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 73.083,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 76.169,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "mcp-server-loss-allow",
+      "companion": "allow",
+      "settings_extra": {
+        "mcp": true,
+        "kill_mcp": true
+      },
+      "prompt": "Use the lab_echo MCP tool exactly once with text hello. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "mcp_server",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [
+        {
+          "t": -6.608,
+          "event": "initialize",
+          "pid": 89775
+        },
+        {
+          "t": 5.438,
+          "event": "initialize",
+          "pid": 89882
+        },
+        {
+          "t": 5.44,
+          "event": "call",
+          "pid": 89882,
+          "tool": "lab_echo",
+          "arguments": {
+            "text": "hello"
+          }
+        }
+      ],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u23fa Calling steer-lab\u2026",
+            "Dri zzling\u2026",
+            "running PreT olU e hook \u00b7 2s \u00b7 \u2193 202 tokens \u00b7 thinking )",
+            "Drizzling\u2026 3 thinking",
+            "Tool use",
+            "steer-lab \u2014 Lab Echo Tool: (MCP)",
+            "text: \"hello\"",
+            "About the steer-lab \u2014 Lab Echo Tool:",
+            "\u2502 Lab tool: echoes the given short text. Harmless.",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. Yes, and don't ask again for steer-lab \u2014 Lab Echo commands in <lab>/project",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "Called MCP"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.704,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01NHgRhjnwHrBU6damRdgm63",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[31]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.777,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01NHgRhjnwHrBU6damRdgm63",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[31]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.858,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.738,
+          "hook": "PreToolUse",
+          "tool_name": "mcp__steer-lab__lab_echo",
+          "tool_use_id": "toolu_015vN9uLG5R8oSuyDxzRTJXk",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 2.814,
+          "hook": "PermissionRequest",
+          "tool_name": "mcp__steer-lab__lab_echo",
+          "request_id": "77966eb5-8a49-4b17-9169-897bd2fec96a",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 3.053,
+          "driver": "request_seen",
+          "request_id": "77966eb5-8a49-4b17-9169-897bd2fec96a",
+          "tool": "mcp__steer-lab__lab_echo",
+          "decided_by_companion": true
+        },
+        {
+          "t": 3.054,
+          "driver": "companion_receipt",
+          "request_id": "77966eb5-8a49-4b17-9169-897bd2fec96a"
+        },
+        {
+          "t": 3.083,
+          "driver": "mcp_server_killed"
+        },
+        {
+          "t": 5.287,
+          "driver": "companion_decision",
+          "request_id": "77966eb5-8a49-4b17-9169-897bd2fec96a",
+          "decision": "allow"
+        },
+        {
+          "t": 5.365,
+          "hook": "helper_exit",
+          "request_id": "77966eb5-8a49-4b17-9169-897bd2fec96a",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 5.506,
+          "hook": "PostToolUse",
+          "tool_name": "mcp__steer-lab__lab_echo",
+          "tool_use_id": "toolu_015vN9uLG5R8oSuyDxzRTJXk",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "text": "str[5]"
+          }
+        },
+        {
+          "t": 5.576,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 6.409,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 9.078,
+          "hook": "SessionEnd"
+        }
+      ]
+    }
+  ]
+}

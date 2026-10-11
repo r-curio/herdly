@@ -5,7 +5,8 @@ Tools:
   lab_confirm   same behavior, but marked `_meta["anthropic/requiresUserInteraction"] = true`, which Claude Code
                 2.1.296 reads to decide that one-tap Approve/Deny must not be offered for the tool.
 
-Every tools/call is appended to <log dir>/mcp-calls.jsonl so a run can prove whether the call reached the server.
+Every server start and tools/call is appended to <log dir>/mcp-calls.jsonl, so a run can prove whether a call
+reached the server and whether Claude restarted it.
 
 Usage: python3 -I lab_mcp_server.py <log dir>
 """
@@ -35,6 +36,9 @@ for line in sys.stdin:
     if rid is None:
         continue  # notifications need no reply
     if method == "initialize":
+        # One line per server start, so a run can tell a reconnect from a call that reached a lost server.
+        with open(LOG, "a") as f:
+            f.write(json.dumps({"t": time.time(), "event": "initialize", "pid": os.getpid()}) + "\n")
         send({"jsonrpc": "2.0", "id": rid, "result": {
             "protocolVersion": request.get("params", {}).get("protocolVersion", "2025-06-18"),
             "capabilities": {"tools": {}}, "serverInfo": {"name": "steer-lab", "version": "1"}}})
@@ -43,7 +47,8 @@ for line in sys.stdin:
     elif method == "tools/call":
         params = request.get("params", {})
         with open(LOG, "a") as f:
-            f.write(json.dumps({"t": time.time(), "tool": params.get("name"), "arguments": params.get("arguments")}) + "\n")
+            f.write(json.dumps({"t": time.time(), "event": "call", "pid": os.getpid(), "tool": params.get("name"),
+                                "arguments": params.get("arguments")}) + "\n")
         text = str((params.get("arguments") or {}).get("text", ""))[:64]
         send({"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": "lab: " + text}]}})
     else:

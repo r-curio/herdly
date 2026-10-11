@@ -72,7 +72,9 @@ for name in order:
         "permission_request_keys": perm[0]["keys"] if perm else None,
         "files_changed": {k: [run["files_before"][k], run["files_after"][k]]
                           for k in run["files_before"] if run["files_before"][k] != run["files_after"][k]},
-        "mcp_server_calls": [{"tool": c["tool"], "arguments": c["arguments"]} for c in run.get("mcp_calls", [])],
+        "mcp_server_log": [{"t": round(c["t"] - start, 3), "event": c.get("event", "call"), "pid": c.get("pid"),
+                            **({"tool": c["tool"], "arguments": c["arguments"]} if "tool" in c else {})}
+                           for c in run.get("mcp_calls", [])],
         "native_dialog": [{"at": p["at"], "lines": [l for l in p["lines"] if not re.fullmatch(r"[╌─━ ]+", l)]}
                           for p in run["native_prompts"]][:1],
         "events_seconds_from_prompt": events,
