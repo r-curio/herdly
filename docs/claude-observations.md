@@ -42,7 +42,13 @@ and accepts one allow or deny before the request's 30-second deadline. The helpe
 missing acknowledgment leaves delivery uncertain and never claims that Bash executed. Ambiguous,
 malformed, late, repeated, or cross-root records are ignored. A missing receipt, helper crash,
 restart, interruption, expiry, or handoff emits no decision and leaves Claude's native prompt
-available. A root that cannot be read is unavailable for reconciliation, so it cannot clear another
+available. Claude's native prompt stays open while the helper waits, and answering it there does not
+stop the helper. A native No fires no hook at all. So when the session registry reports a
+`statusUpdatedAt` later than the request's arrival, the request is handed back: Open in Claude only,
+no direct controls, and no claimed outcome. Claude sets `waiting` before the request is captured and
+changes it as soon as the prompt is answered, and it shows one prompt per session at a time
+([evidence](evidence/claude-permission-transport.md)). `claude agents --json` reports no change time,
+so it keeps the 30-second deadline. A root that cannot be read is unavailable for reconciliation, so it cannot clear another
 root's attention. The root-scoped inventory (Claude's session registry,
 `<CLAUDE_CONFIG_DIR>/sessions/<pid>.json`, read first, with `claude agents --json` as the
 fallback; see [Claude setup](claude-setup.md)) is a weaker source: a valid interactive `busy`/`waiting` row may add only a generic running row; background

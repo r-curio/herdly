@@ -605,3 +605,83 @@ private func decodeRegistry(_ entries: [ClaudeSessionRegistry.Entry],
     let registry = decodeRegistry([entry(20, try registryRow(pid: 20, sessionID: interactiveID))])
     #expect(registry.sessions.first?.directory == "/tmp/one")
 }
+
+// MARK: - Prompt answered outside Steer
+
+private func inventory(_ status: String, at observedAt: Double, statusChangedAt: Double?,
+                       session: String = interactiveID) -> ClaudeInventoryScan {
+    ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: observedAt, sessions: [
+        ClaudeInventorySession(sessionID: session, kind: .interactive, startedAt: 1,
+                               lifecycle: .interactive(status: status), statusUpdatedAt: statusChangedAt)
+    ])
+}
+
+private func claudeApproval(_ call: String, arrivedAt: Double, session: String = interactiveID,
+                            scope: String = "/tmp/root") -> AgentApproval {
+    AgentApproval(session: AgentSessionIdentity(source: .claude, sourceScope: scope, session: session, surface: .cli),
+                  turn: "prompt", call: call, arrivedAt: arrivedAt)
+}
+
+private func approvalStates(_ queue: AgentAttentionQueue) -> [String: AgentApprovalState] {
+    Dictionary(uniqueKeysWithValues: queue.items(at: 12).compactMap(\.approval).map { ($0.identity.call, $0.state) })
+}
+
+@Test func claudeApprovalStaysDecidableWhileItsPromptIsOpen() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(claudeApproval("write", arrivedAt: 10)))
+    // Claude marks the session waiting just before the PermissionRequest record is captured.
+    queue.apply(inventory("waiting", at: 11, statusChangedAt: 9.93))
+    #expect(approvalStates(queue) == ["write": .actionable])
+}
+
+@Test(arguments: ["idle", "busy"])
+func claudeApprovalAnsweredInClaudeLosesDirectControls(status: String) {
+    // A native No fires no hook (idle); a native Yes runs the tool (busy) before any post-tool scan.
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(claudeApproval("write", arrivedAt: 10)))
+    queue.apply(inventory(status, at: 11, statusChangedAt: 10.4))
+    #expect(approvalStates(queue) == ["write": .handedBack])
+
+    // The next hook scan still carries the same request; it cannot make it decidable again.
+    queue.apply(.approval(claudeApproval("write", arrivedAt: 10)))
+    #expect(approvalStates(queue) == ["write": .handedBack])
+}
+
+@Test func nextPromptInTheSameSessionHandsBackOnlyTheEarlierRequest() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(claudeApproval("first", arrivedAt: 10)))
+    queue.apply(.approval(claudeApproval("second", arrivedAt: 10.6)))
+    // waiting again for the second prompt, set before the second request arrived
+    queue.apply(inventory("waiting", at: 11, statusChangedAt: 10.5))
+    #expect(approvalStates(queue) == ["first": .handedBack, "second": .actionable])
+}
+
+@Test func statusWithoutAChangeTimeKeepsTodaysApprovalBehavior() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(claudeApproval("write", arrivedAt: 10)))
+    // `claude agents --json` reports no change time.
+    queue.apply(inventory("idle", at: 11, statusChangedAt: nil))
+    #expect(approvalStates(queue) == ["write": .actionable])
+}
+
+@Test func statusChangeLeavesOtherSessionsAndRootsDecidable() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(claudeApproval("other-session", arrivedAt: 10, session: backgroundID)))
+    queue.apply(.approval(claudeApproval("other-root", arrivedAt: 10, scope: "/tmp/other-root")))
+    queue.apply(inventory("idle", at: 11, statusChangedAt: 10.4))
+    #expect(approvalStates(queue) == ["other-session": .actionable, "other-root": .actionable])
+}
+
+@Test func claudeSessionRegistryKeepsTheStatusChangeTime() throws {
+    let scan = decodeRegistry([entry(20, try registryRow(pid: 20, sessionID: interactiveID, status: "waiting",
+                                                         extra: ["statusUpdatedAt": 1_791_650_747_057]))])
+    #expect(scan.sessions.first?.statusUpdatedAt == 1_791_650_747.057)
+
+    // A malformed or missing value is advisory and never makes the inventory unavailable.
+    let malformed = decodeRegistry([entry(20, try registryRow(pid: 20, sessionID: interactiveID,
+                                                              extra: ["statusUpdatedAt": true]))])
+    #expect(malformed.available)
+    #expect(malformed.sessions.first?.statusUpdatedAt == nil)
+    #expect(decodeRegistry([entry(20, try registryRow(pid: 20, sessionID: interactiveID))])
+        .sessions.first?.statusUpdatedAt == nil)
+}
