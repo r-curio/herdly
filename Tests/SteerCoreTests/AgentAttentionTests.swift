@@ -181,6 +181,25 @@ import Testing
     #expect(queue.workingCount == 0)
 }
 
+@Test func statusUnavailableSortsBelowCompletionsByPriorityAndIsNotPinnedByLastUpdate() {
+    let claude = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "claude", surface: .cli)
+    let codex = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "codex", surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.question(AgentQuestion(session: claude, turn: "turn", call: "question", arrivedAt: 2)))
+    queue.apply(.outcome(AgentOutcome(session: codex, turn: "earlier", status: .finished, arrivedAt: 1)))
+    queue.apply(.outcome(AgentOutcome(session: codex, turn: "fresh", status: .finished, arrivedAt: 400)))
+    queue.apply(.unavailable(sourceScope: "/tmp/root", observedAt: 450, reason: "duplicate",
+                             ambiguousSessionIDs: ["11111111-1111-4111-8111-111111111111"]))
+
+    // Agreed 2026-10-11 (#182): Status unavailable stays below every completion, Earlier included.
+    #expect(queue.items(at: 500).map(\.kind) == [.question, .outcome, .earlierOutcome, .statusUnavailable])
+    // Only actionable approvals and questions are pinned; the unavailable row's evidence is the current
+    // reading, so it leads the unpinned rows, and Earlier stays at the end.
+    #expect(queue.items(at: 500, sort: .lastUpdate).map(\.kind)
+                == [.question, .statusUnavailable, .outcome, .earlierOutcome])
+    #expect(queue.toCheckCount == 4)
+}
+
 @Test func freshMixedSourceCardsChooseQueuePriorityForOneSpotlight() {
     let codex = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "codex", surface: .cli)
     let claude = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "claude", surface: .cli)
