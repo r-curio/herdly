@@ -155,6 +155,11 @@ import Testing
         ("WebFetch", ["url": "https://example.com/caf\u{00E9}", "prompt": "t"]),
         ("WebFetch", ["url": "https:///path", "prompt": "t"]),
         ("WebFetch", ["url": "https://.example.com/", "prompt": "t"]),
+        // Hosts a WHATWG parser reads as IPv4 addresses.
+        ("WebFetch", ["url": "https://0x7f.1/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://127.0.0.1/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://2130706433/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://example.0x10/", "prompt": "t"]),
         ("WebFetch", ["url": "https://example.com/a b", "prompt": "t"]),
         ("WebFetch", ["url": "https://exa\u{202E}mple.com/", "prompt": "t"]),
         ("WebFetch", ["url": "https://example.com/", "prompt": 3]),
