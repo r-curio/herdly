@@ -423,6 +423,14 @@ public struct AgentAttentionQueue: Sendable {
         case let .running(active):
             guard !resolved.contains(.running(active.id)) else { return }
             if let endedAt = endedTurns[active.id], active.updatedAt <= endedAt { return }
+            if active.identity.session.source == .claude, acknowledged.contains(active.id),
+               endedTurns[active.id] != nil {
+                // Activity newer than an acknowledged turn's end reopens it, so its next completion is
+                // not already acknowledged.
+                acknowledged.remove(active.id)
+                resolved.remove(.outcome(active.id))
+                endedTurns.removeValue(forKey: active.id)
+            }
             if let outcome = outcomes[active.id] {
                 guard active.identity.session.source == .claude, active.updatedAt > outcome.arrivedAt else { return }
                 outcomes.removeValue(forKey: active.id)
@@ -595,6 +603,11 @@ public struct AgentAttentionQueue: Sendable {
         case let .outcome(identity):
             resolved.insert(id)
             acknowledged.insert(identity)
+            // Claude's reader keeps reporting the prompt as running after `Stop`, and a parked session
+            // never confirms it again, so the acknowledged outcome itself ends the turn.
+            if identity.session.source == .claude, let outcome = outcomes[identity] {
+                endedTurns[identity] = max(endedTurns[identity] ?? -.infinity, outcome.arrivedAt)
+            }
             outcomes.removeValue(forKey: identity)
         case let .running(identity):
             running.removeValue(forKey: identity.session)
