@@ -504,6 +504,7 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(fresh.addsHooks)
     #expect(fresh.ownedHooks.contains { $0.event == "PermissionRequest" && $0.matcher == "Bash" })
     #expect(fresh.ownedHooks.contains { $0.event == "PermissionRequest" && $0.matcher == ClaudeDirectApproval.fileMatcher })
+    #expect(fresh.ownedHooks.contains { $0.event == "PermissionRequest" && $0.matcher == ClaudeDirectApproval.webMatcher })
 
     // Already configured by this release: nothing to add.
     let current = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: fresh.settingsChange, helperPath: helper, eventsPath: events)
@@ -527,6 +528,7 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(upgrade.requiresConfigure)
     let upgraded = try #require(try settingsObject(upgrade.settingsChange)["hooks"] as? [String: Any])
     let permissionGroups = try #require(upgraded["PermissionRequest"] as? [[String: Any]])
-    #expect(permissionGroups.compactMap { $0["matcher"] as? String } == ["Bash", ClaudeDirectApproval.fileMatcher])
+    #expect(permissionGroups.compactMap { $0["matcher"] as? String }
+            == ["Bash", ClaudeDirectApproval.fileMatcher, ClaudeDirectApproval.webMatcher])
     #expect(NSDictionary(dictionary: permissionGroups[0]).isEqual(to: bash[0]))
 }

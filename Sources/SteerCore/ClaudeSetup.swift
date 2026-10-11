@@ -66,9 +66,9 @@ public enum ClaudeSetupRequirements {
     public static let titleDisableEnvironmentValue = "1"
     public static let metadataClockSkew: TimeInterval = 300
 
-    /// The events needed by the observer and the Bash and file decision slices. Other permission
-    /// families stay in Claude's native flow until separately proven. The file family has its own
-    /// `PermissionRequest` entry so an existing install's exact Bash entry stays unchanged.
+    /// The events needed by the observer and the Bash, file, and web decision slices. Other permission
+    /// families stay in Claude's native flow. Each later family has its own `PermissionRequest` entry so
+    /// an existing install's exact earlier entries stay unchanged.
     public static let hookDefinitions = [
         ClaudeHookDefinition(event: "SessionStart", terminalTitle: true),
         ClaudeHookDefinition(event: "UserPromptSubmit"),
@@ -79,6 +79,7 @@ public enum ClaudeSetupRequirements {
         ClaudeHookDefinition(event: "PostToolBatch"),
         ClaudeHookDefinition(event: "PermissionRequest", matcher: "Bash"),
         ClaudeHookDefinition(event: "PermissionRequest", matcher: ClaudeDirectApproval.fileMatcher),
+        ClaudeHookDefinition(event: "PermissionRequest", matcher: ClaudeDirectApproval.webMatcher),
         ClaudeHookDefinition(event: "Stop"),
         ClaudeHookDefinition(event: "StopFailure"),
         ClaudeHookDefinition(event: "SessionEnd", terminalTitle: true),
