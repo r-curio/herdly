@@ -4,4 +4,6 @@ The initial Ghostty integration targets the correct tab and window, with one Cod
 
 Issue #3 must prove two sessions in separate tabs/windows, including the same project, and retain its independent CLI lifecycle/approval checks. Closed, ambiguous or split targets return unavailable/unknown; no input goes to an arbitrary terminal.
 
+Amended 2026-10-11 by [ADR 0015](0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md): Open on an ambiguous or split target raises Ghostty without selecting a tab or pane (an Open fallback). A closed target stays unavailable, and no input goes to a fallback target.
+
 Deferring panes does not establish session-to-tab identity. Stable tab IDs are useful only after a reliable binding is proven. Do not assume cwd or the currently selected tab identifies the originating session. The prerelease PID/TTY path remains research, not an accepted runtime requirement.
