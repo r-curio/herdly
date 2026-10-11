@@ -359,7 +359,6 @@ public enum ClaudeObservationReader {
               let action = details.action, bounded(action) != nil,
               ClaudeDirectApproval.validCommand(details.command, label: details.commandLabel),
               let command = details.command,
-
               (details.longText?.count ?? 0) <= ClaudeDirectApproval.maximumPreview * 2 + 512,
               details.longText?.contains(where: { $0 == "\u{1b}" || $0 == "\u{7}" || $0 == "\u{0}" }) != true
         else { return nil }

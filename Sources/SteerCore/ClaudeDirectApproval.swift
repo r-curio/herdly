@@ -16,7 +16,7 @@ public enum ClaudeDirectApproval {
     public static let fileMatcher = "Edit|Write|NotebookEdit|Read"
     /// The web family's hook matcher, in its own entry so file entries already installed stay exact.
     public static let webMatcher = "WebFetch|WebSearch"
-    /// The longest URL or search query accepted.
+    /// The longest URL or search query accepted, in UTF-8 bytes, within the helper's 4,096-byte kept-input bound.
     public static let maximumURL = 2_048
     public static let maximumQuery = 500
     /// Characters of edited, written, or notebook text shown before the preview is cut.
@@ -81,8 +81,8 @@ public enum ClaudeDirectApproval {
         case "WebFetch":
             // Every new URL, including a redirect target, arrives as its own request (#73), so the URL shown is
             // exactly the one fetched.
-            guard keys(input, required: ["url", "prompt"]), let url = url(input["url"]),
-                  let host = URLComponents(string: url)?.host, let prompt = input["prompt"] as? String else { return nil }
+            guard keys(input, required: ["url", "prompt"]), let url = url(input["url"]), let host = host(of: url),
+                  let prompt = input["prompt"] as? String else { return nil }
             return ApprovalDetails(action: "Fetch web page", command: url,
                                    longText: "Host: \(host)\n\nClaude asks of the page:\n\(preview(prompt))",
                                    commandLabel: "url")
@@ -130,19 +130,35 @@ public enum ClaudeDirectApproval {
         return path
     }
 
-    /// An absolute https URL with a host (the only scheme observed), shown exactly as fetched: no whitespace,
-    /// control, format, or bidirectional characters.
+    /// An absolute https URL in the plain form observed, `https://<host>[/...]`, shown exactly as fetched.
+    ///
+    /// Claude parses URLs the WHATWG way and Foundation does not, and the two disagree on backslashes, userinfo,
+    /// and encoded hosts (`https://evil.com\@example.com/` is example.com to one and evil.com to the other). So
+    /// the host is read here without either parser: the authority must be a plain ASCII hostname, with no
+    /// userinfo, port, or percent-encoding, and the URL may not contain a backslash. Anything else stays native.
     public static func url(_ value: Any?) -> String? {
-        guard let url = value as? String, !url.isEmpty, url.utf8.count <= maximumURL,
-              !url.unicodeScalars.contains(where: { CharacterSet.whitespaces.contains($0) || unsafeForDisplay($0) }),
-              let components = URLComponents(string: url), let scheme = components.scheme?.lowercased(),
-              scheme == "https", let host = components.host, !host.isEmpty else { return nil }
+        guard let url = value as? String, url.utf8.count <= maximumURL, !url.contains("\\"),
+              !url.unicodeScalars.contains(where: { CharacterSet.whitespaces.contains($0) || unsafeForDisplay($0) || !$0.isASCII }),
+              host(of: url) != nil, URLComponents(string: url) != nil else { return nil }
         return url
+    }
+
+    /// The hostname of a plain `https://` URL: the text up to the first `/`, `?`, or `#`, made only of ASCII
+    /// letters, digits, hyphens, and dots. Punycode (`xn--`) is kept as written, never shown decoded.
+    static func host(of url: String) -> String? {
+        let prefix = "https://"
+        guard url.lowercased().hasPrefix(prefix) else { return nil }
+        let rest = url.dropFirst(prefix.count)
+        let host = rest.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+        let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.")
+        guard !host.isEmpty, host.count <= 253, host.allSatisfy(allowed.contains), !host.hasPrefix("."),
+              !host.hasPrefix("-"), !host.contains("..") else { return nil }
+        return String(host)
     }
 
     /// A non-empty single-line query without control, format, or bidirectional characters.
     public static func query(_ value: Any?) -> String? {
-        guard let query = value as? String, !query.isEmpty, query.count <= maximumQuery,
+        guard let query = value as? String, !query.isEmpty, query.utf8.count <= maximumQuery,
               query == query.trimmingCharacters(in: .whitespacesAndNewlines),
               !query.unicodeScalars.contains(where: unsafeForDisplay) else { return nil }
         return query
