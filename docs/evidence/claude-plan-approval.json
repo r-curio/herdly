@@ -1,0 +1,495 @@
+{
+  "issue": 74,
+  "recorded": "2026-10-11",
+  "claude_code": "2.1.296 (Claude Code)",
+  "repo_commit": "fee411a",
+  "helper": "scripts/claude-permission-lab/lab_helper.py (the #71 stand-in for SteerHook's Claude approval file protocol, any tool); not the shipped SteerHook, which decides Bash only",
+  "companion": "scripts/claude-permission-lab/run_family_case.py writes receipts and decisions; native answers are keystrokes into Claude's own dialog",
+  "decisions": "scripted by the agent at the operator's explicit direction (2026-10-11); not human-clicked",
+  "isolation": "claude --setting-sources project --model haiku --strict-mcp-config in <lab>/project with --permission-mode default unless a case sets one; user hooks, rules and auto mode not loaded; every file target is a disposable fixture under <lab>; web cases fetch only example.com (one via an httpbin.org redirect) and search only for \"example domain\"; MCP cases use scripts/claude-permission-lab/lab_mcp_server.py",
+  "cases": [
+    {
+      "case": "plan-allow",
+      "companion": "allow",
+      "settings_extra": {
+        "mode": "plan",
+        "decide_tool": "ExitPlanMode"
+      },
+      "prompt": "Without reading or searching any files, write a one-line plan to create plan.txt containing the word lab, and present it with ExitPlanMode immediately. If the plan is not approved, stop and reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "running PreT olU e hook \u00b7 5s \u00b7 \u2193 295 tokens \u00b7 thought for 1s)",
+            "Channeling\u2026",
+            "\u2736 7",
+            "\u23bf /plan to preview",
+            "\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594",
+            "Ready to code?",
+            "Here is Claude's plan:",
+            "Create plan.txt in the working directory containing the word \"lab\".",
+            "Claude has written up a plan and is ready to execute. Would you like to proceed?",
+            "\u276f 1. Yes, and use auto mode",
+            "2. Yes, manually approve edits",
+            "3. Tell Claude what to change",
+            "shift+tab to approve with this feedback",
+            "ctrl+g to edit in VS Code \u00b7 ~/.claude/plans/wi hout-reading-or-s arching-serene-conway.md"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 3.461,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01MM4qD1xDfpP9ZRJF76eRwv",
+          "permission_mode": "plan",
+          "targets": {
+            "file_path": "~/.claude/plans/without-reading-or-searching-serene-conway.md"
+          },
+          "tool_input_shape": {
+            "file_path": "str[74]",
+            "content": "str[68]"
+          }
+        },
+        {
+          "t": 3.544,
+          "hook": "PostToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01MM4qD1xDfpP9ZRJF76eRwv",
+          "permission_mode": "plan",
+          "targets": {
+            "file_path": "~/.claude/plans/without-reading-or-searching-serene-conway.md"
+          },
+          "tool_input_shape": {
+            "file_path": "str[74]",
+            "content": "str[68]"
+          }
+        },
+        {
+          "t": 3.888,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01RYLrUDVnVyDr4PfAaPMmPj",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 3.954,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01RYLrUDVnVyDr4PfAaPMmPj",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 4.022,
+          "hook": "PostToolBatch",
+          "permission_mode": "plan"
+        },
+        {
+          "t": 5.308,
+          "hook": "PreToolUse",
+          "tool_name": "ExitPlanMode",
+          "tool_use_id": "toolu_015rTzk4c1hxy4PWqaeFtWE6",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "plan": "str[68]",
+            "planFilePath": "str[74]"
+          }
+        },
+        {
+          "t": 5.391,
+          "hook": "PermissionRequest",
+          "tool_name": "ExitPlanMode",
+          "request_id": "174a1c29-340a-45f4-8f6e-67fdce32d8d9",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "plan": "str[68]",
+            "planFilePath": "str[74]"
+          }
+        },
+        {
+          "t": 5.432,
+          "driver": "request_seen",
+          "request_id": "174a1c29-340a-45f4-8f6e-67fdce32d8d9",
+          "tool": "ExitPlanMode",
+          "decided_by_companion": true
+        },
+        {
+          "t": 5.433,
+          "driver": "companion_receipt",
+          "request_id": "174a1c29-340a-45f4-8f6e-67fdce32d8d9"
+        },
+        {
+          "t": 7.627,
+          "driver": "companion_decision",
+          "request_id": "174a1c29-340a-45f4-8f6e-67fdce32d8d9",
+          "decision": "allow"
+        },
+        {
+          "t": 7.722,
+          "hook": "helper_exit",
+          "request_id": "174a1c29-340a-45f4-8f6e-67fdce32d8d9",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 10.748,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 17.807,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "plan-deny",
+      "companion": "deny",
+      "settings_extra": {
+        "mode": "plan",
+        "decide_tool": "ExitPlanMode"
+      },
+      "prompt": "Without reading or searching any files, write a one-line plan to create plan.txt containing the word lab, and present it with ExitPlanMode immediately. If the plan is not approved, stop and reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "running PreT olU e hook \u00b7 6s \u00b7 \u2193 201 tokens)",
+            "Musing\u2026",
+            "\u2736 Musing\u2026 3",
+            "\u23bf /plan to preview",
+            "\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594",
+            "Ready to code?",
+            "Here is Claude's plan:",
+            "Create plan.txt in the working directory containing the word \"lab\".",
+            "Claude has written up a plan and is ready to execute. Would you like to proceed?",
+            "\u276f 1. Yes, and use auto mode",
+            "2. Yes, manually approve edits",
+            "3. Tell Claude what to change",
+            "shift+tab to approve with this feedback",
+            "ctrl+g to edit in VS Code \u00b7 ~/.claude/plans/wi hout-reading-or-s arching-linear-lynx.md"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 2.547,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01L3JWqzFH7TB5VUbiofMTc8",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.624,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01L3JWqzFH7TB5VUbiofMTc8",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.703,
+          "hook": "PostToolBatch",
+          "permission_mode": "plan"
+        },
+        {
+          "t": 4.465,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01LzETZD74ibP8C7NeCa6Jys",
+          "permission_mode": "plan",
+          "targets": {
+            "file_path": "~/.claude/plans/without-reading-or-searching-linear-lynx.md"
+          },
+          "tool_input_shape": {
+            "file_path": "str[72]",
+            "content": "str[68]"
+          }
+        },
+        {
+          "t": 4.556,
+          "hook": "PostToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01LzETZD74ibP8C7NeCa6Jys",
+          "permission_mode": "plan",
+          "targets": {
+            "file_path": "~/.claude/plans/without-reading-or-searching-linear-lynx.md"
+          },
+          "tool_input_shape": {
+            "file_path": "str[72]",
+            "content": "str[68]"
+          }
+        },
+        {
+          "t": 4.788,
+          "hook": "PostToolBatch",
+          "permission_mode": "plan"
+        },
+        {
+          "t": 6.19,
+          "hook": "PreToolUse",
+          "tool_name": "ExitPlanMode",
+          "tool_use_id": "toolu_01VdqrXHK7kkL1aYmG9SwxvM",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "plan": "str[68]",
+            "planFilePath": "str[72]"
+          }
+        },
+        {
+          "t": 6.273,
+          "hook": "PermissionRequest",
+          "tool_name": "ExitPlanMode",
+          "request_id": "9e9b69aa-2f52-41a7-94ee-46a819c406f5",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "plan": "str[68]",
+            "planFilePath": "str[72]"
+          }
+        },
+        {
+          "t": 6.419,
+          "driver": "request_seen",
+          "request_id": "9e9b69aa-2f52-41a7-94ee-46a819c406f5",
+          "tool": "ExitPlanMode",
+          "decided_by_companion": true
+        },
+        {
+          "t": 6.422,
+          "driver": "companion_receipt",
+          "request_id": "9e9b69aa-2f52-41a7-94ee-46a819c406f5"
+        },
+        {
+          "t": 8.605,
+          "driver": "companion_decision",
+          "request_id": "9e9b69aa-2f52-41a7-94ee-46a819c406f5",
+          "decision": "deny"
+        },
+        {
+          "t": 8.698,
+          "hook": "helper_exit",
+          "request_id": "9e9b69aa-2f52-41a7-94ee-46a819c406f5",
+          "outcome": "emitted",
+          "decision": "deny"
+        },
+        {
+          "t": 8.789,
+          "hook": "PostToolBatch",
+          "permission_mode": "plan"
+        },
+        {
+          "t": 9.999,
+          "hook": "Stop",
+          "permission_mode": "plan"
+        },
+        {
+          "t": 12.658,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "plan-handoff",
+      "companion": "handoff",
+      "settings_extra": {
+        "mode": "plan",
+        "decide_tool": "ExitPlanMode"
+      },
+      "prompt": "Without reading or searching any files, write a one-line plan to create plan.txt containing the word lab, and present it with ExitPlanMode immediately. If the plan is not approved, stop and reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u273b Spinning\u2026",
+            "Spi nning\u2026 running PreT olU e hook \u00b7 7s \u00b7 \u2193 349 tokens)",
+            "Spinning\u2026",
+            "\u23bf /plan to preview",
+            "\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594\u2594",
+            "Ready to code?",
+            "Here is Claude's plan:",
+            "Create plan.txt in the working directory containing the single word \"lab\".",
+            "Claude has written up a plan and is ready to execute. Would you like to proceed?",
+            "\u276f 1. Yes, and use auto mode",
+            "2. Yes, manually approve edits",
+            "3. Tell Claude what to change",
+            "shift+tab to approve with this feedback",
+            "ctrl+g to edit in VS Code \u00b7 ~/.claude/plans/wi hout-reading-or-s arching-mutable-nygaard.md"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 3.494,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01UyrP3ukbJ9JwJJB3nePxna",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 3.583,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01UyrP3ukbJ9JwJJB3nePxna",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 3.676,
+          "hook": "PostToolBatch",
+          "permission_mode": "plan"
+        },
+        {
+          "t": 5.764,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01KWna7iCDEt5nRVsFqiE4Lm",
+          "permission_mode": "plan",
+          "targets": {
+            "file_path": "~/.claude/plans/without-reading-or-searching-mutable-nygaard.md"
+          },
+          "tool_input_shape": {
+            "file_path": "str[76]",
+            "content": "str[75]"
+          }
+        },
+        {
+          "t": 5.853,
+          "hook": "PostToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01KWna7iCDEt5nRVsFqiE4Lm",
+          "permission_mode": "plan",
+          "targets": {
+            "file_path": "~/.claude/plans/without-reading-or-searching-mutable-nygaard.md"
+          },
+          "tool_input_shape": {
+            "file_path": "str[76]",
+            "content": "str[75]"
+          }
+        },
+        {
+          "t": 6.073,
+          "hook": "PostToolBatch",
+          "permission_mode": "plan"
+        },
+        {
+          "t": 7.96,
+          "hook": "PreToolUse",
+          "tool_name": "ExitPlanMode",
+          "tool_use_id": "toolu_01Xn7corhYWaanAQAnMvKQZk",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "plan": "str[75]",
+            "planFilePath": "str[76]"
+          }
+        },
+        {
+          "t": 8.061,
+          "hook": "PermissionRequest",
+          "tool_name": "ExitPlanMode",
+          "request_id": "348a39cf-3f43-4932-8f9f-fd2bd4b4d7fc",
+          "permission_mode": "plan",
+          "tool_input_shape": {
+            "plan": "str[75]",
+            "planFilePath": "str[76]"
+          }
+        },
+        {
+          "t": 8.087,
+          "driver": "request_seen",
+          "request_id": "348a39cf-3f43-4932-8f9f-fd2bd4b4d7fc",
+          "tool": "ExitPlanMode",
+          "decided_by_companion": true
+        },
+        {
+          "t": 8.088,
+          "driver": "companion_receipt",
+          "request_id": "348a39cf-3f43-4932-8f9f-fd2bd4b4d7fc"
+        },
+        {
+          "t": 10.281,
+          "driver": "companion_decision",
+          "request_id": "348a39cf-3f43-4932-8f9f-fd2bd4b4d7fc",
+          "decision": "no_decision"
+        },
+        {
+          "t": 10.371,
+          "hook": "helper_exit",
+          "request_id": "348a39cf-3f43-4932-8f9f-fd2bd4b4d7fc",
+          "outcome": "handed_back",
+          "decision": "no_decision"
+        },
+        {
+          "t": 13.397,
+          "driver": "native_no_esc"
+        }
+      ]
+    }
+  ]
+}

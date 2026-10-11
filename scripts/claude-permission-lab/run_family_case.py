@@ -27,7 +27,8 @@ PROJECT = os.path.join(LAB, "project")
 OUTSIDE = os.path.join(LAB, "outside")
 RUNS = os.path.join(LAB, "runs")
 
-ONLY = " Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE."
+ONLY = (" Do not use any other tool except Read on a file inside the current folder, or ToolSearch if you need it to load"
+        " the tool. If it is not permitted, do not retry. Then reply only DONE.")
 ANY = " Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE."
 PLAN = ("Without reading or searching any files, write a one-line plan to create plan.txt containing the word lab, and present it"
         " with ExitPlanMode immediately. If the plan is not approved, stop and reply only DONE.")
@@ -184,8 +185,11 @@ def screen(n=6000):
     return re.sub(rb"\x1b\[[0-9;?<>=]*[A-Za-z]|\x1b\][^\x07]*\x07", b" ", text[-n:]).decode("utf-8", "replace")
 
 prompts_seen = []
+answered_upto = 0  # screen bytes already answered; a dialog drawn before the last Esc is not reopened
 def native_prompt_open():
-    return bool(re.search(r"Do you want|Would you like to proceed|Esc to cancel", screen(2500)))
+    fresh = text[answered_upto:][-2500:]
+    plain = re.sub(rb"\x1b\[[0-9;?<>=]*[A-Za-z]|\x1b\][^\x07]*\x07", b" ", fresh).decode("utf-8", "replace")
+    return bool(re.search(r"Do you want|Would you like to proceed|Esc to cancel", plain))
 
 def capture_prompt(label):
     # The text Claude's own dialog shows, for the display contract.
@@ -231,6 +235,7 @@ try:
             if now - native_since >= 3:
                 capture_prompt("native_before_no")
                 os.write(fd, b"\x1b"); note("native_no_esc"); native_since = None; pump(1.5)
+                answered_upto = len(text)
         else:
             native_since = None
         if any(h["event"] == "Stop" for h in hooks()) and (steps or DECISION == "observe") and now - started > 6:
