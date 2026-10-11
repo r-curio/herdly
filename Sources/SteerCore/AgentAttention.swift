@@ -484,6 +484,9 @@ public struct AgentAttentionQueue: Sendable {
         for session in sessions {
             let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                 session: session.sessionID, surface: .cli)
+            if session.kind == .interactive, let changedAt = session.statusUpdatedAt {
+                handBackAnsweredClaudeApprovals(in: identity, statusChangedAt: changedAt)
+            }
             if session.lifecycle.isIdleInteractive {
                 if let stop = provisionalStops[identity], scan.observedAt > stop.arrivedAt {
                     provisionalStops.removeValue(forKey: identity)
@@ -527,6 +530,21 @@ public struct AgentAttentionQueue: Sendable {
                                                       updatedAt: scan.observedAt, status: status)
         }
         if let now { self.now = now }
+    }
+
+    /// Claude shows one permission prompt per session at a time and sets the registry status to
+    /// `waiting` before the PermissionRequest hook record is captured, then changes it as soon as the
+    /// prompt is answered, by Claude's native dialog or by a hook. A native "No" fires no hook at all,
+    /// so a status change after the request arrived is the only prompt evidence that it is closed.
+    /// It says nothing about the outcome, so the request is handed back (Open in Claude only), never
+    /// resolved. If Claude ever rewrote the status without closing the prompt, direct controls would
+    /// only disappear early while Claude's own prompt stays available.
+    private mutating func handBackAnsweredClaudeApprovals(in session: AgentSessionIdentity, statusChangedAt: Double) {
+        guard statusChangedAt.isFinite else { return }
+        for (id, approval) in approvals where id.session == session && approval.state == .actionable
+            && approval.arrivedAt < statusChangedAt {
+            approvals[id] = approval.with(state: .handedBack)
+        }
     }
 
     /// Drops source-scoped actionable and running state absent from a complete source scan.
