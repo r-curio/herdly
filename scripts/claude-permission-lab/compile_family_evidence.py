@@ -15,6 +15,8 @@ S = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(S, "..", ".."))
 LAB = os.path.join(REPO, "output", "claude-file-lab")
 RUNS = os.path.join(LAB, "runs")
+if len(os.sys.argv) != 2 or os.sys.argv[1] not in ("file", "web", "plan", "mcp"):
+    raise SystemExit(__doc__)
 FAMILY = os.sys.argv[1]
 ISSUE, NAME = {"file": (72, "claude-file-approvals"), "web": (73, "claude-web-approvals"),
                "plan": (74, "claude-plan-approval"), "mcp": (75, "claude-mcp-approval")}[FAMILY]
@@ -84,11 +86,13 @@ report = {
     "issue": ISSUE,
     "recorded": "2026-10-11",
     "claude_code": version,
-    "repo_commit": commit,
+    # The commit checked out when compiling. Individual runs may predate it; each family doc names the script
+    # changes made between runs.
+    "repo_commit_at_compile": commit,
     "helper": "scripts/claude-permission-lab/lab_helper.py (the #71 stand-in for SteerHook's Claude approval file protocol, any tool); not the shipped SteerHook, which decides Bash only",
     "companion": "scripts/claude-permission-lab/run_family_case.py writes receipts and decisions; native answers are keystrokes into Claude's own dialog",
     "decisions": "scripted by the agent at the operator's explicit direction (2026-10-11); not human-clicked",
-    "isolation": "claude --setting-sources project --model haiku --strict-mcp-config in <lab>/project with --permission-mode default unless a case sets one; user hooks, rules and auto mode not loaded; every file target is a disposable fixture under <lab>; web cases fetch only example.com (one via an httpbin.org redirect) and search only for \"example domain\"; MCP cases use scripts/claude-permission-lab/lab_mcp_server.py",
+    "isolation": "claude --setting-sources project --model haiku --strict-mcp-config in <lab>/project with --permission-mode default unless a case sets one; user hooks, rules and auto mode not loaded; every file target is a disposable fixture under <lab>, except that plan cases let Claude write its own plan file to ~/.claude/plans (removed by hand after the runs); web cases fetch only example.com (one via an httpbin.org redirect) and search only for \"example domain\"; MCP cases use scripts/claude-permission-lab/lab_mcp_server.py",
     "cases": cases,
 }
 with open(OUT, "w") as f:
