@@ -534,9 +534,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var freshAgentQuestionIDs: Set<AgentAttentionID> = []
     private var previewSpotlightAgent: AgentAttentionID?
     /// `--preview-queue` modes that open the sample item in the spotlight.
-    static let spotlightPreviewModes: Set<String> = ["spotlight", "spotlight-approval", "spotlight-handed-back"]
+    static let spotlightPreviewModes: Set<String> = ["spotlight", "spotlight-approval", "spotlight-handed-back",
+                                                       "spotlight-question", "spotlight-claude-question"]
     private var targetFrame: CGRect = .zero
-    /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|expanded>` seeds in-memory sample items for screenshots;
+    /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|expanded>`
+    /// seeds in-memory sample items for screenshots;
     /// `empty-collapsed`, `empty-expanded`, and `empty-not-connected` seed only the usage readouts, to show the empty notch.
     /// It never scans Codex events, never saves, and never releases approvals.
     let previewMode = Companion.argumentValue(for: "--preview-queue")
@@ -2268,7 +2270,21 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         reminderPresentation = Attention(restored: true)
         questionPresentation = Attention(restored: true)
         syncAgentQueueWithCodex(now: now)
+        // A Claude call with several questions: Claude's answer control takes one, so the card is
+        // read-only and leads with where to answer it.
+        let claudeSession = AgentSessionIdentity(source: .claude, sourceScope: "~/.claude",
+                                                 session: "00000000-0000-4000-8000-000000000002", surface: .cli)
+        agentQueue.apply(.question(AgentQuestion(session: claudeSession, turn: "preview-turn", call: "toolu_preview", arrivedAt: now - 1,
+                                                 prompts: [QuestionPrompt(header: "Player", question: "Who is the primary player, and when do they play?",
+                                                                          options: ["Curious casual, short break", "Geo-game enthusiast", "Learner / classroom"]),
+                                                           QuestionPrompt(header: "Purpose", question: "What is this prototype for: what does success look like?",
+                                                                          options: ["Portfolio / learning", "User-test the concept", "Seed of a real product"])])),
+                         now: now)
         previewSpotlightAgent = .outcome(CodexAttentionAdapter.outcome(from: completion).id)
+        if mode == "spotlight-question" { previewSpotlightAgent = .question(CodexAttentionAdapter.question(from: question).id) }
+        if mode == "spotlight-claude-question" {
+            previewSpotlightAgent = .question(AgentCallIdentity(session: claudeSession, turn: "preview-turn", call: "toolu_preview"))
+        }
         if mode == "spotlight-approval" || mode == "spotlight-handed-back" {
             // One request in the spotlight's own reading order: Codex's ask lifted from its tool input,
             // a command the card already shows, and a home-relative working directory.
