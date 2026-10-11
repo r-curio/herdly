@@ -153,3 +153,44 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
     #expect(queue.items(at: 60).map(\.kind) == [.handedBackApproval, .running])
     #expect(queue.items(at: 60, sort: .lastUpdate).map(\.kind) == [.running, .handedBackApproval])
 }
+
+@Test func queueSectionsFoldWorkingRowsBelowEverythingThatNeedsTheUser() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: session("busy"), turn: "t1", arrivedAt: 1)))
+    queue.apply(.outcome(AgentOutcome(session: session("done"), turn: "t2", status: .finished, arrivedAt: 2)))
+    queue.apply(.question(AgentQuestion(session: session("question"), turn: "t3", call: "q1", arrivedAt: 3)))
+    queue.apply(.approval(AgentApproval(session: session("approval"), turn: "t4", call: "a1", arrivedAt: 4)))
+    queue.apply(.running(AgentRunning(session: session("other", .claude), turn: "t5", arrivedAt: 5)))
+    let items = queue.items(at: 6)
+
+    let none = QueueSections.make(items, grouping: .none, project: { _ in nil })
+    let byState = QueueSections.make(items, grouping: .state, project: { _ in nil })
+    let byAgent = QueueSections.make(items, grouping: .agent, project: { _ in nil })
+
+    // The split matches the to-check badge and keeps queue order inside each part.
+    #expect(none.foldsWorking && none.workingCount == 2)
+    #expect(none.attention.map(\.heading) == ["Needs you"])
+    #expect(none.attention.flatMap(\.items).map(\.session.session) == ["approval", "question", "done"])
+    #expect(none.working.flatMap(\.items).map(\.session.session) == ["busy", "other"])
+    #expect(none.attention.flatMap(\.items).count == AgentStripSummary.make(items: items).toCheck)
+    // The fold names the working rows, so State grouping drops its own "Working" heading.
+    #expect(byState.attention.map(\.heading) == ["Needs you", "Done"])
+    #expect(byState.working.map(\.heading) == [nil])
+    #expect(byAgent.working.map(\.heading) == ["Codex", "Claude"])
+}
+
+@Test func queueSectionsShowWorkingRowsUnfoldedWhenNothingNeedsTheUser() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: session("busy"), turn: "t1", arrivedAt: 1)))
+    let workingOnly = QueueSections.make(queue.items(at: 2), grouping: .state, project: { _ in nil })
+
+    #expect(!workingOnly.foldsWorking && workingOnly.attention.isEmpty)
+    #expect(workingOnly.working.map(\.heading) == ["Working"])
+
+    var requests = AgentAttentionQueue()
+    requests.apply(.approval(AgentApproval(session: session("approval"), turn: "t1", call: "a1", arrivedAt: 1)))
+    let requestsOnly = QueueSections.make(requests.items(at: 2), grouping: .none, project: { _ in nil })
+
+    #expect(!requestsOnly.foldsWorking && requestsOnly.working.isEmpty)
+    #expect(requestsOnly.attention.map(\.heading) == [nil])
+}
