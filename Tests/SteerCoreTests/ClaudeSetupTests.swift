@@ -497,3 +497,36 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
             == .skipped("Steer Claude setup state is missing or inconsistent."))
     #expect(try Data(contentsOf: paths.helperURL) == Data("helper-v1".utf8))
 }
+
+@Test func claudeSetupAddsTheFileApprovalHookBesideTheExactBashEntry() throws {
+    let helper = URL(fileURLWithPath: "/tmp/SteerHook"), events = URL(fileURLWithPath: "/tmp/events")
+    let fresh = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: Data("{}".utf8), helperPath: helper, eventsPath: events)
+    #expect(fresh.addsHooks)
+    #expect(fresh.ownedHooks.contains { $0.event == "PermissionRequest" && $0.matcher == "Bash" })
+    #expect(fresh.ownedHooks.contains { $0.event == "PermissionRequest" && $0.matcher == ClaudeDirectApproval.fileMatcher })
+
+    // Already configured by this release: nothing to add.
+    let current = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: fresh.settingsChange, helperPath: helper, eventsPath: events)
+    #expect(current.status == .ready)
+    #expect(current.addsHooks == false)
+    #expect(current.requiresConfigure == false)
+
+    // Configured by an earlier release that had only the Bash entry: Configure adds the file entry and
+    // leaves the existing Bash entry exactly as it was.
+    var older = try settingsObject(fresh.settingsChange)
+    var hooks = try #require(older["hooks"] as? [String: Any])
+    let groups = try #require(hooks["PermissionRequest"] as? [[String: Any]])
+    let bash = groups.filter { $0["matcher"] as? String == "Bash" }
+    #expect(bash.count == 1)
+    hooks["PermissionRequest"] = bash
+    older["hooks"] = hooks
+    let olderData = try JSONSerialization.data(withJSONObject: older, options: [.sortedKeys])
+    let upgrade = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: olderData, helperPath: helper, eventsPath: events)
+    #expect(upgrade.status == .ready)
+    #expect(upgrade.addsHooks)
+    #expect(upgrade.requiresConfigure)
+    let upgraded = try #require(try settingsObject(upgrade.settingsChange)["hooks"] as? [String: Any])
+    let permissionGroups = try #require(upgraded["PermissionRequest"] as? [[String: Any]])
+    #expect(permissionGroups.compactMap { $0["matcher"] as? String } == ["Bash", ClaudeDirectApproval.fileMatcher])
+    #expect(NSDictionary(dictionary: permissionGroups[0]).isEqual(to: bash[0]))
+}

@@ -38,6 +38,8 @@ public enum ClaudeObservationReader {
         let helperRequestID: String?
         let hookRequestID: String?
         let toolInput: [String: Any]
+        /// What the helper validated and bounded for a decidable non-Bash request (ClaudeDirectApproval).
+        let approvalDetails: ApprovalDetails?
     }
 
     private struct Tool {
@@ -45,6 +47,8 @@ public enum ClaudeObservationReader {
         let name: String
         let input: [String: String]
         let at: Double
+        /// The absolute file or notebook path the call targets, kept apart from the display-bounded input.
+        var target: String? = nil
     }
 
     private struct Turn {
@@ -170,7 +174,8 @@ public enum ClaudeObservationReader {
                     sessionEndAt.removeValue(forKey: record.session)
                 }
                 let input = stringInput(record.toolInput)
-                let tool = Tool(id: toolID, name: name, input: input, at: record.capturedAt)
+                let tool = Tool(id: toolID, name: name, input: input, at: record.capturedAt,
+                                target: ClaudeDirectApproval.target(toolName: name, toolInput: record.toolInput))
                 turn.tools[toolID] = tool
                 turn.tool = tool
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
@@ -223,17 +228,24 @@ public enum ClaudeObservationReader {
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                 turns[turnID] = turn
             case "PermissionRequest":
-                guard let promptID = valid(record.promptID), let name = bounded(record.toolName), name == "Bash" else { continue }
+                guard let promptID = valid(record.promptID), let name = bounded(record.toolName),
+                      ClaudeDirectApproval.tools.contains(name) else { continue }
+                // A file request is shown only with the helper's validated details, and only for the one
+                // uncompleted call of that tool on the same path. Bash keeps its original rule.
+                let fileDetails = name == "Bash" ? nil : record.approvalDetails
+                guard name == "Bash" || fileDetails?.command != nil else { continue }
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
                 guard var turn = turns[turnID] else { continue }
-                let candidates = turn.tools.values.filter { $0.name == name && $0.at <= record.capturedAt }
+                let candidates = turn.tools.values.filter {
+                    $0.name == name && $0.at <= record.capturedAt && (fileDetails == nil || $0.target == fileDetails?.command)
+                }
                 guard candidates.count == 1, let tool = candidates.first else { continue }
                 let call = AgentCallIdentity(session: identity, turn: promptID, call: tool.id)
                 guard seenApprovals.insert(call).inserted else { continue }
                 let command = tool.input["command"] ?? tool.input["cmd"]
-                let details = ApprovalDetails(action: "Bash", command: command)
+                let details = fileDetails ?? ApprovalDetails(action: "Bash", command: command)
                 turn.approval = AgentApproval(session: identity, turn: promptID, call: tool.id,
                                               arrivedAt: record.capturedAt, details: details,
                                               hookRequestID: record.hookRequestID)
@@ -333,7 +345,25 @@ public enum ClaudeObservationReader {
                       toolName: object["tool_name"] as? String, toolUseID: object["tool_use_id"] as? String,
                       helperRequestID: valid(object["helper_request_id"] as? String),
                       hookRequestID: valid(object["approval_request_id"] as? String),
-                      toolInput: object["tool_input"] as? [String: Any] ?? [:])
+                      toolInput: object["tool_input"] as? [String: Any] ?? [:],
+                      approvalDetails: approvalDetails(object["approval_details"]))
+    }
+
+    /// The helper's display details for a decidable file request, re-bounded: an action, an absolute
+    /// path, and at most a few previews. Anything else is dropped, so the request stays native.
+    private static func approvalDetails(_ value: Any?) -> ApprovalDetails? {
+        guard let object = value as? [String: Any], JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object),
+              let details = try? JSONDecoder().decode(ApprovalDetails.self, from: data),
+              let action = details.action, bounded(action) != nil,
+              let path = details.command, path.hasPrefix("/"), path.utf8.count <= ClaudeDirectApproval.maximumPath,
+              !path.contains(where: { $0.isNewline || $0 == "\u{0}" || $0 == "\u{1b}" || $0 == "\u{7}" }),
+              details.commandLabel == nil || bounded(details.commandLabel) != nil,
+              (details.longText?.count ?? 0) <= ClaudeDirectApproval.maximumPreview * 2 + 512,
+              details.longText?.contains(where: { $0 == "\u{1b}" || $0 == "\u{7}" || $0 == "\u{0}" }) != true
+        else { return nil }
+        return ApprovalDetails(action: action, command: path, longText: details.longText,
+                               commandLabel: details.commandLabel)
     }
 
     private static func question(from record: Record, identity: AgentSessionIdentity, turn: String,
