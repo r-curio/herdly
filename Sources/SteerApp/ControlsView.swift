@@ -114,7 +114,7 @@ struct Controls: View {
         // A fixed sidebar panel that runs the full window height, so the window buttons sit inside
         // it as in System Settings and Raycast. It never collapses.
         HStack(spacing: 0) {
-            ControlsSidebar(selection: $selection, status: "\(model.workingCount) working · \(model.toCheckCount) to check")
+            ControlsSidebar(selection: $selection, status: "\(model.workingCount) working · \(model.currentToCheckCount) to check")
                 .frame(width: 210)
                 .padding(8)
             ZStack {
@@ -466,7 +466,7 @@ private struct GeneralControls: View {
                 SettingsRow(title: "Claude Code", detail: nil) { connection(claudeConnected) }
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
                 SettingsRow(title: "Sessions", detail: nil) {
-                    Text("\(model.workingCount) working · \(model.toCheckCount) to check").foregroundStyle(.secondary)
+                    Text("\(model.workingCount) working · \(model.currentToCheckCount) to check").foregroundStyle(.secondary)
                 }
             }
 

@@ -526,8 +526,12 @@ public struct AgentStripSummary: Equatable, Sendable {
         return "\(source) session " + String(session.session.prefix(8)).lowercased()
     }
 
+    /// Results that have moved under "Earlier" stay in the open queue but leave the strip: they
+    /// are not counted in its badge and give no session a sprite. A session with other rows still
+    /// shows through those rows.
     public static func make(items: [AgentAttentionItem], testPending: Bool = false,
                             names: [AgentSessionIdentity: String] = [:]) -> Self {
+        let items = items.filter { $0.kind != .earlierOutcome }
         let toCheck = items.filter { $0.kind != .running }.count + (testPending ? 1 : 0)
         let working = items.contains { $0.running?.status == .working }
         let subject: String
