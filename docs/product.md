@@ -64,8 +64,8 @@ Undecided product facts: a global hotkey for keyboard-only entry to the panel; e
 
 1. Preserve the Codex workflow: Codex stays fully usable when Steer is closed, and Steer never alters the user's real hook or permission configuration to test itself.
 2. Fail closed: a timeout, error, or uncertainty never approves, never dismisses, and never marks anything read.
-3. Say only what is known: the interface distinguishes verified state from uncertain state and never invents a missing reason, name, or read status.
-4. Exact or unavailable: return the user to the precise session or tab, or say it is unavailable, never to an arbitrary target.
+3. Say only what is known: the interface distinguishes verified state from uncertain state and never invents a missing reason, name, or read status. One agreed exception: an Open fallback looks like any other Open ([ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md)).
+4. Exact, else the app, never arbitrary: return the user to the precise session or tab; when only the session's terminal app can be reached, raise that app (an Open fallback, [ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md)); otherwise say Open is unavailable. Never select an arbitrary tab or pane, and never treat a fallback as a visit or an input target.
 5. Attention, not control: the queue orders what the user sees; it never serializes or supervises Codex execution.
 
 ## Accessibility & Inclusion
@@ -78,7 +78,7 @@ Support the Codex desktop app and Codex CLI running directly in Ghostty first. A
 
 Monitor only Codex sessions running locally on the user's Mac in the first version. Remote Codex sessions, including sessions reached through SSH, are outside the initial scope. No remote session connection layer is required.
 
-For the initial Ghostty scope, support one Codex session in an unsplit tab and return to that exact tab in its window. Multiple panes within a tab are deferred. Split tabs are unsupported for exact targeting and must return unavailable rather than selecting an arbitrary pane. Stable Ghostty remains the baseline; a prerelease is not required merely to support splits. Session-to-tab binding still needs verification, including two tabs in the same project. See ADR 0004.
+For the initial Ghostty scope, support one Codex session in an unsplit tab and return to that exact tab in its window. Multiple panes within a tab are deferred. Split tabs are unsupported for exact targeting; Open raises Ghostty without selecting a pane ([ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md)). Stable Ghostty remains the baseline; a prerelease is not required merely to support splits. Session-to-tab binding still needs verification, including two tabs in the same project. See ADR 0004.
 
 The user's reference to ChatGPT desktop means its Codex work, not regular ChatGPT conversations. The installed /Applications/ChatGPT.app bundle identifies as com.openai.codex; scope remains Codex only. Available runtime integration points still require verification rather than assuming all desktop hosts expose the same capabilities.
 
@@ -243,7 +243,7 @@ Agreed with the user on 2026-10-07 (issue #114). This covers how herdr readiness
 - Ghostty cannot identify herdr's tab: update Ghostty. Steer decides this by checking that Ghostty exposes each terminal's `tty`, not by comparing version numbers. Without `tty`, Open is still offered while Ghostty has exactly one terminal and it is herdr's client (ADR 0011's sole-terminal rule); a second Ghostty tab, window, or quick terminal brings this guidance back. The message names a Ghostty version only once a release has been verified to provide it.
 - herdr unavailable (not found in the fixed locations, not running, unsupported protocol, untrusted socket, and similar): generic wording.
 
-**Notch.** Rows never label a session as running in herdr. When Open in Codex or Open in Claude is unavailable for a herdr session, the card replaces Open with one reason line and shows no disabled button, as Claude cards do. The internal reasons fall into four groups the user can act on:
+**Notch.** Rows never label a session as running in herdr. When Open in Codex or Open in Claude is unavailable for a herdr session, the card replaces Open with one reason line and shows no disabled button, as Claude cards do. Amended 2026-10-11 by [ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md): an old Ghostty, a layout that is not supported, or a missing host-tab join no longer makes Open unavailable when Ghostty is running; Open performs a silent Open fallback that raises Ghostty, with no reason line, and the "Update Ghostty" and layout guidance stays only in the settings row. The groups below apply only to Opens that remain unavailable. The internal reasons fall into four groups the user can act on:
 
 - Ghostty too old: "Update Ghostty to return to herdr panes."
 - Integration missing or not current (Claude only; Codex needs no herdr integration): run `herdr integration install claude`.
