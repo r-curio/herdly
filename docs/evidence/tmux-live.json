@@ -1,0 +1,596 @@
+{
+ "issue": 207,
+ "recorded": "2026-10-11",
+ "run": {
+  "nonce": "73bf4559",
+  "started": 1791702373.59937,
+  "steps": [
+   {
+    "step": "version",
+    "at": 0.15,
+    "tmux": "tmux 3.8",
+    "wezterm": "wezterm 20240203-110809-5046fc22",
+    "socket": "/private/tmp/tmux-503/steerlab",
+    "panes": {
+     "codex": "%0",
+     "claude": "%1",
+     "decoy": "%2",
+     "split_a": "%3",
+     "split_b": "%4"
+    }
+   },
+   {
+    "step": "env_clean",
+    "at": 2.25,
+    "leaks": {}
+   },
+   {
+    "step": "host_attach",
+    "at": 4.37,
+    "host_pane": 3,
+    "host_tty": "/dev/ttys022",
+    "clients": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@3",
+      "pane_id": "%4"
+     }
+    ]
+   },
+   {
+    "step": "codex_title",
+    "at": 6.43,
+    "title": "01a129c8-a7db-7782-94ad-741ab..."
+   },
+   {
+    "step": "claude_title",
+    "at": 67.11,
+    "title": null,
+    "observed": "Mac",
+    "host_title": "tmux"
+   },
+   {
+    "step": "codex_rollout_ids",
+    "at": 67.17,
+    "ids": [
+     "01a129c5-2688-77d3-be59-6d7503c18087",
+     "01a129c8-a7db-7782-94ad-741abb49661f"
+    ]
+   },
+   {
+    "step": "claude_hook_events",
+    "at": 67.17,
+    "events": [
+     {
+      "at": 1791702378.790056,
+      "event": "SessionStart",
+      "session_id": "f119a3c3-7fdf-4bf9-ac69-60acf9ad8321",
+      "env": {
+       "TERM_PROGRAM": "tmux",
+       "TERM_PROGRAM_VERSION": "3.8",
+       "TMUX": "/private/tmp/tmux-503/steerlab,45151,0",
+       "TMUX_PANE": "%1"
+      },
+      "ancestors": [
+       {
+        "tty": "ttys018",
+        "comm": "claude"
+       },
+       {
+        "tty": "??",
+        "comm": "tmux"
+       }
+      ]
+     },
+     {
+      "at": 1791702379.197284,
+      "event": "UserPromptSubmit",
+      "session_id": "f119a3c3-7fdf-4bf9-ac69-60acf9ad8321",
+      "env": {
+       "TERM_PROGRAM": "tmux",
+       "TERM_PROGRAM_VERSION": "3.8",
+       "TMUX": "/private/tmp/tmux-503/steerlab,45151,0",
+       "TMUX_PANE": "%1"
+      },
+      "ancestors": [
+       {
+        "tty": "ttys018",
+        "comm": "claude"
+       },
+       {
+        "tty": "??",
+        "comm": "tmux"
+       }
+      ]
+     },
+     {
+      "at": 1791702380.822829,
+      "event": "Stop",
+      "session_id": "f119a3c3-7fdf-4bf9-ac69-60acf9ad8321",
+      "env": {
+       "TERM_PROGRAM": "tmux",
+       "TERM_PROGRAM_VERSION": "3.8",
+       "TMUX": "/private/tmp/tmux-503/steerlab,45151,0",
+       "TMUX_PANE": "%1"
+      },
+      "ancestors": [
+       {
+        "tty": "ttys018",
+        "comm": "claude"
+       },
+       {
+        "tty": "??",
+        "comm": "tmux"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "step": "inventory",
+    "at": 69.26,
+    "panes": [
+     {
+      "pane_id": "%0",
+      "pane_tty": "/dev/ttys017",
+      "pane_title": "01a129c8-a7db-7782-94ad-741ab...",
+      "pane_current_command": "codex",
+      "pane_pid": "45152",
+      "window_id": "@0",
+      "window_name": "codex",
+      "window_panes": "1",
+      "window_zoomed_flag": "0",
+      "session_name": "lab",
+      "session_attached": "1",
+      "pane_active": "1",
+      "window_active": "0",
+      "pane_in_mode": "0",
+      "ps_foreground": [
+       "codex"
+      ]
+     },
+     {
+      "pane_id": "%1",
+      "pane_tty": "/dev/ttys018",
+      "pane_title": "Mac",
+      "pane_current_command": "2.1.296",
+      "pane_pid": "45155",
+      "window_id": "@1",
+      "window_name": "claude",
+      "window_panes": "1",
+      "window_zoomed_flag": "0",
+      "session_name": "lab",
+      "session_attached": "1",
+      "pane_active": "1",
+      "window_active": "0",
+      "pane_in_mode": "0",
+      "ps_foreground": [
+       "claude"
+      ]
+     },
+     {
+      "pane_id": "%2",
+      "pane_tty": "/dev/ttys019",
+      "pane_title": "01a129c8-a7db-7782-94ad-741ab...",
+      "pane_current_command": "sleep",
+      "pane_pid": "45159",
+      "window_id": "@2",
+      "window_name": "decoy",
+      "window_panes": "1",
+      "window_zoomed_flag": "0",
+      "session_name": "lab",
+      "session_attached": "1",
+      "pane_active": "1",
+      "window_active": "0",
+      "pane_in_mode": "0",
+      "ps_foreground": [
+       "sleep"
+      ]
+     },
+     {
+      "pane_id": "%3",
+      "pane_tty": "/dev/ttys020",
+      "pane_title": "Mac",
+      "pane_current_command": "zsh",
+      "pane_pid": "45164",
+      "window_id": "@3",
+      "window_name": "split",
+      "window_panes": "2",
+      "window_zoomed_flag": "0",
+      "session_name": "lab",
+      "session_attached": "1",
+      "pane_active": "0",
+      "window_active": "1",
+      "pane_in_mode": "0",
+      "ps_foreground": [
+       "-zsh"
+      ]
+     },
+     {
+      "pane_id": "%4",
+      "pane_tty": "/dev/ttys021",
+      "pane_title": "Mac",
+      "pane_current_command": "zsh",
+      "pane_pid": "45169",
+      "window_id": "@3",
+      "window_name": "split",
+      "window_panes": "2",
+      "window_zoomed_flag": "0",
+      "session_name": "lab",
+      "session_attached": "1",
+      "pane_active": "1",
+      "window_active": "1",
+      "pane_in_mode": "0",
+      "ps_foreground": [
+       "-zsh"
+      ]
+     }
+    ],
+    "clients": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@3",
+      "pane_id": "%4"
+     }
+    ],
+    "host_title": "tmux"
+   },
+   {
+    "step": "claude_title_passthrough",
+    "at": 74.44,
+    "pane": "%5",
+    "pane_title": "Mac",
+    "host_title_before": "tmux",
+    "host_title_after": "tmux",
+    "client_window": "@3"
+   },
+   {
+    "step": "switch:other-window",
+    "at": 75.52,
+    "target": "%1",
+    "client": "/dev/ttys022",
+    "exit": 0,
+    "stderr": "",
+    "before": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@3",
+      "pane_id": "%4"
+     }
+    ],
+    "after": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@1",
+      "pane_id": "%1"
+     }
+    ],
+    "matched": true,
+    "elapsed": 0.03,
+    "host_title": "tmux"
+   },
+   {
+    "step": "switch:split-pane-b",
+    "at": 75.57,
+    "target": "%4",
+    "client": "/dev/ttys022",
+    "exit": 0,
+    "stderr": "",
+    "before": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@1",
+      "pane_id": "%1"
+     }
+    ],
+    "after": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@3",
+      "pane_id": "%4"
+     }
+    ],
+    "matched": true,
+    "elapsed": 0.03,
+    "host_title": "tmux"
+   },
+   {
+    "step": "switch:split-pane-a",
+    "at": 75.61,
+    "target": "%3",
+    "client": "/dev/ttys022",
+    "exit": 0,
+    "stderr": "",
+    "before": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@3",
+      "pane_id": "%4"
+     }
+    ],
+    "after": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@3",
+      "pane_id": "%3"
+     }
+    ],
+    "matched": true,
+    "elapsed": 0.03,
+    "host_title": "tmux"
+   },
+   {
+    "step": "switch:back-to-codex",
+    "at": 75.66,
+    "target": "%0",
+    "client": "/dev/ttys022",
+    "exit": 0,
+    "stderr": "",
+    "before": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@3",
+      "pane_id": "%3"
+     }
+    ],
+    "after": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@0",
+      "pane_id": "%0"
+     }
+    ],
+    "matched": true,
+    "elapsed": 0.03,
+    "host_title": "tmux"
+   },
+   {
+    "step": "second_client",
+    "at": 77.8,
+    "host_pane": 4,
+    "host_tty": "/dev/ttys023",
+    "clients": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@0",
+      "pane_id": "%0"
+     },
+     {
+      "client_tty": "/dev/ttys023",
+      "client_pid": "46108",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@0",
+      "pane_id": "%0"
+     }
+    ],
+    "session_attached": "2"
+   },
+   {
+    "step": "switch:two-clients-switch-h1",
+    "at": 77.87,
+    "target": "%2",
+    "client": "/dev/ttys022",
+    "exit": 0,
+    "stderr": "",
+    "before": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@0",
+      "pane_id": "%0"
+     },
+     {
+      "client_tty": "/dev/ttys023",
+      "client_pid": "46108",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@0",
+      "pane_id": "%0"
+     }
+    ],
+    "after": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@2",
+      "pane_id": "%2"
+     },
+     {
+      "client_tty": "/dev/ttys023",
+      "client_pid": "46108",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@2",
+      "pane_id": "%2"
+     }
+    ],
+    "matched": true,
+    "elapsed": 0.04,
+    "host_title": "tmux"
+   },
+   {
+    "step": "two-clients-after",
+    "at": 77.88,
+    "clients": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@2",
+      "pane_id": "%2"
+     },
+     {
+      "client_tty": "/dev/ttys023",
+      "client_pid": "46108",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@2",
+      "pane_id": "%2"
+     }
+    ]
+   },
+   {
+    "step": "second_client_detached",
+    "at": 77.9,
+    "clients": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@2",
+      "pane_id": "%2"
+     }
+    ]
+   },
+   {
+    "step": "focus-flag",
+    "at": 83.27,
+    "off_front": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@2",
+      "pane_id": "%2"
+     }
+    ],
+    "off_back": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@2",
+      "pane_id": "%2"
+     }
+    ],
+    "on_front": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@2",
+      "pane_id": "%2"
+     }
+    ],
+    "on_back": [
+     {
+      "client_tty": "/dev/ttys022",
+      "client_pid": "45245",
+      "client_session": "lab",
+      "client_flags": "attached,focused,UTF-8",
+      "window_id": "@2",
+      "pane_id": "%2"
+     }
+    ],
+    "front": "com.apple.finder"
+   },
+   {
+    "step": "send:copy-mode",
+    "at": 93.92,
+    "exit": "timeout after 8 s",
+    "elapsed": 8.0,
+    "pane_in_mode_after": "1",
+    "ran": false,
+    "typed": false
+   },
+   {
+    "step": "send:unknown-pane",
+    "at": 93.93,
+    "exit": 1,
+    "stderr": "can't find pane: %999"
+   },
+   {
+    "step": "send:tui-prompt",
+    "at": 144.49,
+    "results": {
+     "codex": {
+      "literal text+CR in one send-keys": false,
+      "separate Enter": true
+     },
+     "claude": {
+      "literal text+CR in one send-keys": true
+     }
+    }
+   },
+   {
+    "step": "send:landing",
+    "at": 144.58,
+    "panes": {
+     "%0": {
+      "I1": 0,
+      "COPY": 0,
+      "bad": 0
+     },
+     "%1": {
+      "I1": 0,
+      "COPY": 0,
+      "bad": 0
+     },
+     "%2": {
+      "I1": 0,
+      "COPY": 0,
+      "bad": 0
+     },
+     "%3": {
+      "I1": 1,
+      "COPY": 0,
+      "bad": 0
+     },
+     "%4": {
+      "I1": 0,
+      "COPY": 0,
+      "bad": 0
+     }
+    },
+    "I1_target": "%3"
+   }
+  ],
+  "finished": 1791702518.174737
+ },
+ "manual_passthrough_check": {
+  "note": "Before the final run, Claude was started by hand in a tmux window created without -d (so the attached client displayed it) with allow-passthrough on; within 5 s the host WezTerm pane's title became 'Steer Claude e9ca0f71-f1ee-44cc-8ca5-d54469a5cb24' while tmux pane_title stayed 'Mac'. A raw OSC 2 printed in a shell pane set pane_title; a tmux-passthrough-wrapped OSC 2 with allow-passthrough off changed nothing."
+ }
+}
