@@ -1,0 +1,1187 @@
+{
+  "issue": 73,
+  "recorded": "2026-10-11",
+  "claude_code": "2.1.296 (Claude Code)",
+  "repo_commit_at_compile": "503501a",
+  "helper": "scripts/claude-permission-lab/lab_helper.py (the #71 stand-in for SteerHook's Claude approval file protocol, any tool); not the shipped SteerHook, which decides Bash only",
+  "companion": "scripts/claude-permission-lab/run_family_case.py writes receipts and decisions; native answers are keystrokes into Claude's own dialog",
+  "decisions": "scripted by the agent at the operator's explicit direction (2026-10-11); not human-clicked",
+  "isolation": "claude --setting-sources project --model haiku --strict-mcp-config in <lab>/project with --permission-mode default unless a case sets one; user hooks, rules and auto mode not loaded; every file target is a disposable fixture under <lab>, except that plan cases let Claude write its own plan file to ~/.claude/plans (removed by hand after the runs); web cases fetch only example.com (one via an httpbin.org redirect) and search only for \"example domain\"; MCP cases use scripts/claude-permission-lab/lab_mcp_server.py",
+  "cases": [
+    {
+      "case": "webfetch-allow",
+      "companion": "allow",
+      "settings_extra": {},
+      "prompt": "Use the WebFetch tool exactly once to fetch https://example.com/ and report its title. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u2722 Crystallizing\u2026 50",
+            "Crysta lli zing\u2026 3",
+            "\u2733 a i 75",
+            "\u2736 94",
+            "\u23fa Fetch (https://example.com/)",
+            "running PreT olU e hook \u00b7 3s \u00b7 \u2193 294 tokens \u00b7 thought for 1s)",
+            "\u273b Cryst izing\u2026 319",
+            "Fetch",
+            "Claude wants to fetch content from example.com",
+            "url: https://example.com/",
+            "prompt: What is the title of this page? Reply with the exact title text only.",
+            "Do you want to allow Claude to fetch this content?",
+            "\u276f 1. Yes",
+            "2. Yes, and don't ask again for example.com",
+            "3. No, and tell Claude what to do differently (esc)"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 2.037,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01PoCvy7sPPqnsdALVSxZEqG",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[15]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.104,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01PoCvy7sPPqnsdALVSxZEqG",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[15]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.171,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 3.304,
+          "hook": "PreToolUse",
+          "tool_name": "WebFetch",
+          "tool_use_id": "toolu_01MKaQkC7kmwtwEmuq3gBPFf",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[20]",
+            "prompt": "str[69]"
+          }
+        },
+        {
+          "t": 3.376,
+          "hook": "PermissionRequest",
+          "tool_name": "WebFetch",
+          "request_id": "5cfbaf98-42bd-4425-88fd-a9b007e50898",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[20]",
+            "prompt": "str[69]"
+          }
+        },
+        {
+          "t": 3.632,
+          "driver": "request_seen",
+          "request_id": "5cfbaf98-42bd-4425-88fd-a9b007e50898",
+          "tool": "WebFetch",
+          "decided_by_companion": true
+        },
+        {
+          "t": 3.634,
+          "driver": "companion_receipt",
+          "request_id": "5cfbaf98-42bd-4425-88fd-a9b007e50898"
+        },
+        {
+          "t": 5.825,
+          "driver": "companion_decision",
+          "request_id": "5cfbaf98-42bd-4425-88fd-a9b007e50898",
+          "decision": "allow"
+        },
+        {
+          "t": 5.901,
+          "hook": "helper_exit",
+          "request_id": "5cfbaf98-42bd-4425-88fd-a9b007e50898",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 7.229,
+          "hook": "PostToolUse",
+          "tool_name": "WebFetch",
+          "tool_use_id": "toolu_01MKaQkC7kmwtwEmuq3gBPFf",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[20]",
+            "prompt": "str[69]"
+          }
+        },
+        {
+          "t": 7.297,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 9.369,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 11.931,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "webfetch-deny",
+      "companion": "deny",
+      "settings_extra": {},
+      "prompt": "Use the WebFetch tool exactly once to fetch https://example.com/ and report its title. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u2736 6",
+            "Combo ating\u2026",
+            "\u273b o l 8",
+            "9",
+            "\u23fa Fetch (https://example.com/)",
+            "running PreT olU e hook \u00b7 3s \u00b7 \u2193 289 tokens \u00b7 thought for 1s)",
+            "Combobulating\u2026",
+            "Fetch",
+            "Claude wants to fetch content from example.com",
+            "url: https://example.com/",
+            "prompt: What is the title of this page? Reply with the title only.",
+            "Do you want to allow Claude to fetch this content?",
+            "\u276f 1. Yes",
+            "2. Yes, and don't ask again for example.com",
+            "3. No, and tell Claude what to do differently (esc)"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 2.079,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01Tr8eqn1bYUzA7kNYTxEL6i",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[15]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.149,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01Tr8eqn1bYUzA7kNYTxEL6i",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[15]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.222,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 3.709,
+          "hook": "PreToolUse",
+          "tool_name": "WebFetch",
+          "tool_use_id": "toolu_01PcQdLngxJBpti3j8que3QL",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[20]",
+            "prompt": "str[58]"
+          }
+        },
+        {
+          "t": 3.782,
+          "hook": "PermissionRequest",
+          "tool_name": "WebFetch",
+          "request_id": "8fa925e0-1370-4db5-9eeb-0235227b4121",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[20]",
+            "prompt": "str[58]"
+          }
+        },
+        {
+          "t": 4.035,
+          "driver": "request_seen",
+          "request_id": "8fa925e0-1370-4db5-9eeb-0235227b4121",
+          "tool": "WebFetch",
+          "decided_by_companion": true
+        },
+        {
+          "t": 4.036,
+          "driver": "companion_receipt",
+          "request_id": "8fa925e0-1370-4db5-9eeb-0235227b4121"
+        },
+        {
+          "t": 6.224,
+          "driver": "companion_decision",
+          "request_id": "8fa925e0-1370-4db5-9eeb-0235227b4121",
+          "decision": "deny"
+        },
+        {
+          "t": 6.303,
+          "hook": "helper_exit",
+          "request_id": "8fa925e0-1370-4db5-9eeb-0235227b4121",
+          "outcome": "emitted",
+          "decision": "deny"
+        },
+        {
+          "t": 6.381,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.407,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 10.923,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "webfetch-handoff",
+      "companion": "handoff",
+      "settings_extra": {},
+      "prompt": "Use the WebFetch tool exactly once to fetch https://example.com/ and report its title. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u2733 Proofing\u2026 3 50",
+            "\u2736 Proofing\u2026 75",
+            "\u273b 313",
+            "24",
+            "\u23fa Fetch (https://example.com/)",
+            "running PreT olU e hook \u00b7 3s \u00b7 \u2193 324 tokens \u00b7 thought for 1s)",
+            "Proofing\u2026",
+            "Fetch",
+            "Claude wants to fetch content from example.com",
+            "url: https://example.com/",
+            "prompt: What is the title of this page? Reply with the exact title text only.",
+            "Do you want to allow Claude to fetch this content?",
+            "\u276f 1. Yes",
+            "2. Yes, and don't ask again for example.com",
+            "3. No, and tell Claude what to do differently (esc)"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 2.375,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_012TNL99CDxeBinL9Kk3BsBi",
+          "permission_mode": "default",
+          "targets": {
+            "query": "select:WebFetch"
+          },
+          "tool_input_shape": {
+            "query": "str[15]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.447,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_012TNL99CDxeBinL9Kk3BsBi",
+          "permission_mode": "default",
+          "targets": {
+            "query": "select:WebFetch"
+          },
+          "tool_input_shape": {
+            "query": "str[15]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.522,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 3.528,
+          "hook": "PreToolUse",
+          "tool_name": "WebFetch",
+          "tool_use_id": "toolu_01UYeSnEZ1zcSM7DVyozsBzT",
+          "permission_mode": "default",
+          "targets": {
+            "url": "https://example.com/"
+          },
+          "tool_input_shape": {
+            "url": "str[20]",
+            "prompt": "str[69]"
+          }
+        },
+        {
+          "t": 3.603,
+          "hook": "PermissionRequest",
+          "tool_name": "WebFetch",
+          "request_id": "84407e56-1403-4416-a621-ce09325cd480",
+          "permission_mode": "default",
+          "targets": {
+            "url": "https://example.com/"
+          },
+          "tool_input_shape": {
+            "url": "str[20]",
+            "prompt": "str[69]"
+          }
+        },
+        {
+          "t": 3.752,
+          "driver": "request_seen",
+          "request_id": "84407e56-1403-4416-a621-ce09325cd480",
+          "tool": "WebFetch",
+          "decided_by_companion": true
+        },
+        {
+          "t": 3.752,
+          "driver": "companion_receipt",
+          "request_id": "84407e56-1403-4416-a621-ce09325cd480"
+        },
+        {
+          "t": 5.949,
+          "driver": "companion_decision",
+          "request_id": "84407e56-1403-4416-a621-ce09325cd480",
+          "decision": "no_decision"
+        },
+        {
+          "t": 6.038,
+          "hook": "helper_exit",
+          "request_id": "84407e56-1403-4416-a621-ce09325cd480",
+          "outcome": "handed_back",
+          "decision": "no_decision"
+        },
+        {
+          "t": 9.055,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 16.136,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "webfetch-redirect-allow",
+      "companion": "allow",
+      "settings_extra": {},
+      "prompt": "Use the WebFetch tool to fetch https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com%2F and report the final page title. If WebFetch reports a redirect, fetch the redirect target once with WebFetch. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 2,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "Hy perspacing\u2026",
+            "\u273b 300",
+            "\u2736 y 25",
+            "\u2733 63",
+            "\u23fa Fetch (https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com%2F)",
+            "H running PreT olU e hook \u00b7 3s \u00b7 \u2193 363 tokens \u00b7 thought for 2s)",
+            "\u2722 88",
+            "Fetch",
+            "Claude wants to fetch content from httpbin.org",
+            "url: https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com%2F",
+            "\u2502 prompt: What is the title of this page? If it is a redirect, state the redirect target URL.",
+            "Do you want to allow Claude to fetch this content?",
+            "\u276f 1. Yes",
+            "2. Yes, and don't ask again for httpbin.org",
+            "3. No, and tell Claude what to do differently (esc)"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 2.552,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01WzHXzASBnrRRB4yUGPEt6F",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[15]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.623,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01WzHXzASBnrRRB4yUGPEt6F",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[15]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 2.701,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 3.896,
+          "hook": "PreToolUse",
+          "tool_name": "WebFetch",
+          "tool_use_id": "toolu_01B5o1zzqd58V3u53iHSETV6",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[64]",
+            "prompt": "str[83]"
+          }
+        },
+        {
+          "t": 3.965,
+          "hook": "PermissionRequest",
+          "tool_name": "WebFetch",
+          "request_id": "f157e776-076e-40ea-a490-81d995ddbf5c",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[64]",
+            "prompt": "str[83]"
+          }
+        },
+        {
+          "t": 4.121,
+          "driver": "request_seen",
+          "request_id": "f157e776-076e-40ea-a490-81d995ddbf5c",
+          "tool": "WebFetch",
+          "decided_by_companion": true
+        },
+        {
+          "t": 4.123,
+          "driver": "companion_receipt",
+          "request_id": "f157e776-076e-40ea-a490-81d995ddbf5c"
+        },
+        {
+          "t": 6.306,
+          "driver": "companion_decision",
+          "request_id": "f157e776-076e-40ea-a490-81d995ddbf5c",
+          "decision": "allow"
+        },
+        {
+          "t": 6.408,
+          "hook": "helper_exit",
+          "request_id": "f157e776-076e-40ea-a490-81d995ddbf5c",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 7.724,
+          "hook": "PostToolUse",
+          "tool_name": "WebFetch",
+          "tool_use_id": "toolu_01B5o1zzqd58V3u53iHSETV6",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[64]",
+            "prompt": "str[83]"
+          }
+        },
+        {
+          "t": 7.793,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.86,
+          "hook": "PreToolUse",
+          "tool_name": "WebFetch",
+          "tool_use_id": "toolu_01VNbGjrYb39oW2MAD7Sn5kF",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[20]",
+            "prompt": "str[83]"
+          }
+        },
+        {
+          "t": 8.935,
+          "hook": "PermissionRequest",
+          "tool_name": "WebFetch",
+          "request_id": "169f0d63-766d-454f-b80e-8b77539a9f52",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[20]",
+            "prompt": "str[83]"
+          }
+        },
+        {
+          "t": 8.98,
+          "driver": "request_seen",
+          "request_id": "169f0d63-766d-454f-b80e-8b77539a9f52",
+          "tool": "WebFetch",
+          "decided_by_companion": true
+        },
+        {
+          "t": 8.981,
+          "driver": "companion_receipt",
+          "request_id": "169f0d63-766d-454f-b80e-8b77539a9f52"
+        },
+        {
+          "t": 11.191,
+          "driver": "companion_decision",
+          "request_id": "169f0d63-766d-454f-b80e-8b77539a9f52",
+          "decision": "allow"
+        },
+        {
+          "t": 11.248,
+          "hook": "helper_exit",
+          "request_id": "169f0d63-766d-454f-b80e-8b77539a9f52",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 13.421,
+          "hook": "PostToolUse",
+          "tool_name": "WebFetch",
+          "tool_use_id": "toolu_01VNbGjrYb39oW2MAD7Sn5kF",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[20]",
+            "prompt": "str[83]"
+          }
+        },
+        {
+          "t": 13.486,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 14.175,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 16.916,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "webfetch-domain-deny-rule",
+      "companion": "observe",
+      "settings_extra": {
+        "permissions": {
+          "deny": [
+            "WebFetch(domain:example.com)"
+          ]
+        }
+      },
+      "prompt": "Use the WebFetch tool exactly once to fetch https://example.com/ and report its title. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 0,
+      "permission_request_keys": null,
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.42,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_0198QtQtMGXABpGpMrA3N95v",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[15]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.496,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_0198QtQtMGXABpGpMrA3N95v",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[15]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.568,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.53,
+          "hook": "PreToolUse",
+          "tool_name": "WebFetch",
+          "tool_use_id": "toolu_01MKKQ1uoGPwiuR5BK13nmA5",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "url": "str[20]",
+            "prompt": "str[58]"
+          }
+        },
+        {
+          "t": 2.606,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 3.654,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.584,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "websearch-allow",
+      "companion": "allow",
+      "settings_extra": {},
+      "prompt": "Use the WebSearch tool exactly once to search for: example domain. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u2736 Crystallizing\u2026 2 2",
+            "ing",
+            "\u2733 4",
+            "\u23fa Web Search (\"example domain\")",
+            "running PreToolUse hook \u00b7 2s \u00b7 \u2193 74 tokens)",
+            "ing",
+            "\u2722 8",
+            "Tool use",
+            "\u2502 Claude wants to search the web for: example domain",
+            "Web Search(\"example domain\")",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. Yes, and don't ask again for Web Search commands in <lab>/project",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.163,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01P444oNLHNZsTiUvwnT2wyM",
+          "permission_mode": "default",
+          "targets": {
+            "query": "select:WebSearch"
+          },
+          "tool_input_shape": {
+            "query": "str[16]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.232,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01P444oNLHNZsTiUvwnT2wyM",
+          "permission_mode": "default",
+          "targets": {
+            "query": "select:WebSearch"
+          },
+          "tool_input_shape": {
+            "query": "str[16]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.302,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.321,
+          "hook": "PreToolUse",
+          "tool_name": "WebSearch",
+          "tool_use_id": "toolu_01WGkv7xR3eeDEC71LK4itMd",
+          "permission_mode": "default",
+          "targets": {
+            "query": "example domain",
+            "mode": "standard"
+          },
+          "tool_input_shape": {
+            "query": "str[14]",
+            "mode": "str[8]"
+          }
+        },
+        {
+          "t": 2.396,
+          "hook": "PermissionRequest",
+          "tool_name": "WebSearch",
+          "request_id": "913cb3f5-f848-4d2c-9e46-21e196de4449",
+          "permission_mode": "default",
+          "targets": {
+            "query": "example domain",
+            "mode": "standard"
+          },
+          "tool_input_shape": {
+            "query": "str[14]",
+            "mode": "str[8]"
+          }
+        },
+        {
+          "t": 2.442,
+          "driver": "request_seen",
+          "request_id": "913cb3f5-f848-4d2c-9e46-21e196de4449",
+          "tool": "WebSearch",
+          "decided_by_companion": true
+        },
+        {
+          "t": 2.443,
+          "driver": "companion_receipt",
+          "request_id": "913cb3f5-f848-4d2c-9e46-21e196de4449"
+        },
+        {
+          "t": 4.626,
+          "driver": "companion_decision",
+          "request_id": "913cb3f5-f848-4d2c-9e46-21e196de4449",
+          "decision": "allow"
+        },
+        {
+          "t": 4.716,
+          "hook": "helper_exit",
+          "request_id": "913cb3f5-f848-4d2c-9e46-21e196de4449",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 8.618,
+          "hook": "PostToolUse",
+          "tool_name": "WebSearch",
+          "tool_use_id": "toolu_01WGkv7xR3eeDEC71LK4itMd",
+          "permission_mode": "default",
+          "targets": {
+            "query": "example domain",
+            "mode": "standard"
+          },
+          "tool_input_shape": {
+            "query": "str[14]",
+            "mode": "str[8]"
+          }
+        },
+        {
+          "t": 8.689,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 9.41,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 12.145,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "websearch-deny",
+      "companion": "deny",
+      "settings_extra": {},
+      "prompt": "Use the WebSearch tool exactly once to search for: example domain. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u00b7 Leavening\u2026 9 thinking",
+            "Lea vening\u2026",
+            "11 thinking",
+            "\u23fa Web Search (\"example domain\")",
+            "running PreT olU e hook \u00b7 2s \u00b7 \u2193 211 tokens \u00b7 thinking )",
+            "Leavening\u2026",
+            "Leavening\u2026 2 thinking",
+            "Tool use",
+            "\u2502 Claude wants to search the web for: example domain",
+            "Web Search(\"example domain\")",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. Yes, and don't ask again for Web Search commands in <lab>/project",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.599,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01X3MgxezB8feqGHY5QNgQUq",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[16]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.678,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01X3MgxezB8feqGHY5QNgQUq",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[16]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.77,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.745,
+          "hook": "PreToolUse",
+          "tool_name": "WebSearch",
+          "tool_use_id": "toolu_01KJwfxh7LZgFJgPWDPnB1ag",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[14]",
+            "mode": "str[8]"
+          }
+        },
+        {
+          "t": 2.824,
+          "hook": "PermissionRequest",
+          "tool_name": "WebSearch",
+          "request_id": "1afd82cc-1aa0-4a6b-abe7-1e7fadef95a1",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[14]",
+            "mode": "str[8]"
+          }
+        },
+        {
+          "t": 3.076,
+          "driver": "request_seen",
+          "request_id": "1afd82cc-1aa0-4a6b-abe7-1e7fadef95a1",
+          "tool": "WebSearch",
+          "decided_by_companion": true
+        },
+        {
+          "t": 3.077,
+          "driver": "companion_receipt",
+          "request_id": "1afd82cc-1aa0-4a6b-abe7-1e7fadef95a1"
+        },
+        {
+          "t": 5.264,
+          "driver": "companion_decision",
+          "request_id": "1afd82cc-1aa0-4a6b-abe7-1e7fadef95a1",
+          "decision": "deny"
+        },
+        {
+          "t": 5.359,
+          "hook": "helper_exit",
+          "request_id": "1afd82cc-1aa0-4a6b-abe7-1e7fadef95a1",
+          "outcome": "emitted",
+          "decision": "deny"
+        },
+        {
+          "t": 5.442,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 7.209,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 9.738,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "websearch-handoff",
+      "companion": "handoff",
+      "settings_extra": {},
+      "prompt": "Use the WebSearch tool exactly once to search for: example domain. Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "mcp_server_log": [],
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "Composing\u2026 9 thinking",
+            "Com posing\u2026",
+            "m 11 thinking",
+            "\u23fa Web Search (\"example domain\")",
+            "running PreT olU e hook \u00b7 2s \u00b7 \u2193 211 tokens \u00b7 thinking )",
+            "Composing\u2026",
+            "Composing\u2026 22 thinking",
+            "Tool use",
+            "\u2502 Claude wants to search the web for: example domain",
+            "Web Search(\"example domain\")",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. Yes, and don't ask again for Web Search commands in <lab>/project",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.715,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01MqBks4GVdaG4Nd4ab98EWX",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[16]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.807,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01MqBks4GVdaG4Nd4ab98EWX",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[16]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 1.913,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.859,
+          "hook": "PreToolUse",
+          "tool_name": "WebSearch",
+          "tool_use_id": "toolu_01MyDkD4Vx94xzdPEgBeGhCw",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[14]",
+            "mode": "str[8]"
+          }
+        },
+        {
+          "t": 2.952,
+          "hook": "PermissionRequest",
+          "tool_name": "WebSearch",
+          "request_id": "230091ba-78b8-400a-8081-886bc429ae1a",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[14]",
+            "mode": "str[8]"
+          }
+        },
+        {
+          "t": 3.091,
+          "driver": "request_seen",
+          "request_id": "230091ba-78b8-400a-8081-886bc429ae1a",
+          "tool": "WebSearch",
+          "decided_by_companion": true
+        },
+        {
+          "t": 3.092,
+          "driver": "companion_receipt",
+          "request_id": "230091ba-78b8-400a-8081-886bc429ae1a"
+        },
+        {
+          "t": 5.288,
+          "driver": "companion_decision",
+          "request_id": "230091ba-78b8-400a-8081-886bc429ae1a",
+          "decision": "no_decision"
+        },
+        {
+          "t": 5.374,
+          "hook": "helper_exit",
+          "request_id": "230091ba-78b8-400a-8081-886bc429ae1a",
+          "outcome": "handed_back",
+          "decision": "no_decision"
+        },
+        {
+          "t": 8.41,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 13.361,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 18.356,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 23.366,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 28.361,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 33.34,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 38.338,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 43.322,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 48.308,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 53.307,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 58.178,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 63.185,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 68.184,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 73.175,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 75.905,
+          "hook": "SessionEnd"
+        }
+      ]
+    }
+  ]
+}

@@ -56,7 +56,7 @@ summary = {
                          for k, v in tool_input.items()} or None,
     # Path-like targets only; lab paths are disposable.
     "targets": {k: tool_input[k] for k in ("file_path", "notebook_path", "path", "pattern", "cell_id", "edit_mode",
-                                           "cell_type", "replace_all", "offset", "limit")
+                                           "cell_type", "replace_all", "offset", "limit", "url", "query", "mode")
                 if k in tool_input} or None,
 }
 if event != "PermissionRequest":
