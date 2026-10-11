@@ -241,24 +241,61 @@ The companion runs quietly in the background even while the notch is hidden. For
 
 If the companion was fully quit when the user visited the result, that visit may not be recoverable. Restored notifications must not be described as authoritatively unread without a verified Codex read-status signal. Retain uncertain completions without replaying their sound and let the user open or dismiss them. Fully quitting the companion stops its background observation.
 
-## Agreed herdr presentation
+## Agreed terminal host presentation
 
-Agreed with the user on 2026-10-07 (issue #114). This covers how herdr readiness and unavailable reasons appear for Claude Code and Codex CLI sessions in a herdr tab hosted by Ghostty. Binding, transport, question relay and Open follow ADRs [0008](adr/0008-bind-herdr-panes-when-steer-and-herdr-agree.md) (Claude), [0012](adr/0012-bind-codex-herdr-panes-by-title-and-foreground-process.md) (Codex, issue #144), [0009](adr/0009-talk-to-herdr-over-its-socket-and-poll-snapshots.md), [0010](adr/0010-relay-codex-question-options-as-herdr-pane-keys.md) and [0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md). The settings row and the notch reason lines are implemented (#127), and failed Opens (#125) and unrelayable questions (#126) route through the same groups (#141).
+Agreed with the user on 2026-10-11 ([issue #213](https://github.com/r-curio/steer/issues/213), map [#197](https://github.com/r-curio/steer/issues/197)). This covers how every terminal host and multiplexer appears in Settings and on notch cards. It replaces the herdr presentation agreed on 2026-10-07 (issue #114), which this section generalizes, and keeps its herdr-specific lines. Binding, Open, visits and typed input follow ADRs [0013](adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md), 0014 (multiplexer panes, branch `docs/211-multiplexer-pane-binding`), [0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md), [0016](adr/0016-open-and-acknowledge-visits-the-same-way-on-every-terminal-host.md) and 0017 (typed input, branch `docs/212-typed-input`), and for herdr ADRs [0008](adr/0008-bind-herdr-panes-when-steer-and-herdr-agree.md), [0009](adr/0009-talk-to-herdr-over-its-socket-and-poll-snapshots.md), [0010](adr/0010-relay-codex-question-options-as-herdr-pane-keys.md), [0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md) and [0012](adr/0012-bind-codex-herdr-panes-by-title-and-foreground-process.md). The earlier herdr row and its four reason groups are implemented (#127, #141), and source comments still cite that section by its old name; everything here is specified, not built.
 
-**Settings.** The Terminals page shows a read-only herdr row under Ghostty, with no switch of its own. herdr works only while Ghostty controls are on. Until ADR 0009's gate opens (a Claude session has reported running in herdr, or a Codex session is live, or Codex's daemon has loaded a terminal session, while herdr's default socket passes ADR 0009's trust check), the row says "No herdr sessions seen", Steer does not contact herdr, and the badge reads Not in use. The row says the same when herdr's server is not running and no Claude session reported a pane. Otherwise the badge reads Ready or Needs attention, and the row lists every problem that applies, one per line, because they are independent fixes:
+### Settings
 
-- herdr's Claude integration missing or not current while Steer has seen Claude in herdr: the exact `herdr integration install claude` command with a Copy button. Steer never runs it or edits herdr's configuration.
-- Ghostty cannot identify herdr's tab: update Ghostty. Steer decides this by checking that Ghostty exposes each terminal's `tty`, not by comparing version numbers. Without `tty`, Open is still offered while Ghostty has exactly one terminal and it is herdr's client (ADR 0011's sole-terminal rule); a second Ghostty tab, window, or quick terminal brings this guidance back. The message names a Ghostty version only once a release has been verified to provide it.
-- herdr unavailable (not found in the fixed locations, not running, unsupported protocol, untrusted socket, and similar): generic wording.
+**Layout.** The Terminals page has two sections. **Terminals** lists Ghostty, iTerm2, Terminal.app and WezTerm. **Multiplexers** lists tmux, Zellij and herdr. Each has its own card with its own switch; Steer scans and contacts only what is switched on. herdr gains a switch: on upgrade it starts in the position of the Ghostty switch, so existing behavior is unchanged. Every other new switch starts off.
 
-**Notch.** Rows never label a session as running in herdr. When Open in Codex or Open in Claude is unavailable for a herdr session, the card replaces Open with one reason line and shows no disabled button, as Claude cards do. Amended 2026-10-11 by [ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md): an old Ghostty, a layout that is not supported, or a missing host-tab join no longer makes Open unavailable when Ghostty is running; Open performs a silent Open fallback that raises Ghostty, with no reason line, and the "Update Ghostty" and layout guidance stays only in the settings row. The groups below apply only to Opens that remain unavailable. The internal reasons fall into four groups the user can act on:
+**Card.** Each card shows:
 
-- Ghostty too old: "Update Ghostty to return to herdr panes."
-- Integration missing or not current (Claude only; Codex needs no herdr integration): run `herdr integration install claude`.
-- Layout not supported (a split, several herdr clients, a named herdr session, a Ghostty tab in another window): "Steer returns only to a single-pane herdr tab in one Ghostty window."
-- Everything else: "Open Session is unavailable until Steer can verify the exact herdr pane."
+- **Switch.** Off means Steer never scans or contacts that app.
+- **Version.** The installed version, for information only. Steer checks the capabilities it needs (such as Ghostty's `tty`) rather than comparing version numbers. The one hard floor is Zellij 0.44.1, which is needed for `focus-pane-id` and `--pane-id`. A message names a version only once a release has been verified to provide the capability.
+- **Permission** (iTerm2, Terminal.app and Ghostty only). These need macOS Automation access and follow Ghostty's existing flow: turning the switch on asks macOS; a denial turns the switch back off and offers Open Settings…; if the app isn't running, Steer asks when it next launches. The badge reads Allowed, Not allowed or Not verified. WezTerm and the multiplexers use command-line tools or sockets and have no Permission row.
+- **Status badge.** Off while the switch is off. Not in use while nothing has been seen there. Otherwise Ready or Needs attention.
+- **Problem lines.** Every problem that applies, one per line, because each is a separate fix. Commands come with a Copy button; Steer never runs them or edits the app's configuration.
+- **Footer.** The card's targeting rule and what Open does otherwise, for example "Steer returns to unsplit tabs; otherwise Open raises iTerm2." Because an Open fallback is silent on the card (ADR 0015), this footer is where it is explained.
+- **Show diagnostics.** The exact internal reasons: the scan's result and, for each queued session in that app, its Open availability, its last Open result (verified, fallback or unavailable) with the reason, and why typed input is unavailable.
 
-The exact internal reason goes to diagnostics, not to the card. Every action whose own route still works stays on the card while Open is unavailable: Dismiss, details, CLI approve or deny through the hook, and question options when ADR 0010's checks pass. If Open passes the scan but fails its recheck at click time, the same grouped reason appears in the navigation message, the item is retained, and the card swaps Open for the reason line on the next scan. When a Codex question cannot be relayed and Open is also unavailable, the card shows one line: "Answer this in Codex." followed by Open's grouped reason. Why the relay failed goes to diagnostics.
+**Problem lines.**
+
+- **Every card:** not found in its fixed locations; can't be read (a scripting error, Automation denied, a socket that is missing or fails its trust check).
+- **A switched-off app holding sessions:** once Steer sees a live session whose process ancestry reaches an installed app that is switched off, its card says sessions were seen there and offers to turn it on. Ancestry needs no Automation access.
+- **Multiplexer with no terminal on:** the switch stays usable, the badge reads Needs attention, and the line says "Turn on the terminal you run tmux in." (naming that multiplexer). Steer contacts a multiplexer only while a terminal is also on (ADR 0014).
+- **tmux:** sessions seen on a socket other than the default can't be reached.
+- **Zellij:** older than 0.44.1; more than one `zellij` client process running.
+- **herdr:** its Claude integration missing or not current while Steer has seen Claude in herdr: the exact `herdr integration install claude` command. herdr unavailable (not running, unsupported protocol, untrusted socket and similar): generic wording. Until ADR 0009's gate opens, the card says "No herdr sessions seen", Steer does not contact herdr, and the badge reads Not in use.
+- **Ghostty without `tty`:** "Update Ghostty", decided by checking that Ghostty exposes each terminal's `tty`. ADR 0011's sole-terminal rule still applies; a second Ghostty tab, window or quick terminal brings this guidance back.
+
+### First-launch offer
+
+On the first interactive launch, the one-time "Use Ghostty with Steer?" sheet becomes a single offer listing every installed terminal and multiplexer, each with a checkbox, plus Select all. Checkboxes start unchecked. Each app the user checks shows its own macOS permission prompt, one at a time; an app that isn't running is asked when it next launches. Not Now leaves everything off. Users who have already passed the first launch get no sheet; the Settings card's "sessions seen here" line offers each app instead.
+
+### Notch
+
+Rows never name the terminal or multiplexer a session runs in. An Open fallback, including one for a session whose app is switched off, looks like any other Open and shows no reason line (ADR 0015).
+
+**Open unavailable.** The card replaces Open with one reason line and shows no disabled button. The line names the app because the user has to act on it:
+
+| Cause | Card line |
+| --- | --- |
+| The app can't be read (permission, scripting error, socket) | "Steer can't read iTerm2. Check Settings › Terminals." |
+| herdr's Claude integration missing or not current | run `herdr integration install claude` |
+| The app isn't running | "iTerm2 isn't running." |
+| The app can't be identified | "Steer can't tell which terminal this session is in." |
+| The session has ended | "This session has ended." |
+
+The old groups "Ghostty too old" and "Layout not supported" no longer appear on cards: those cases are Open fallbacks.
+
+**Typed input unavailable.** None of these lines points to Settings:
+
+- iTerm2 (no typed input, ADR 0017): "Steer can't type into iTerm2. Reply in the session."
+- A Codex question in Terminal.app: "Answer this in Codex."
+- No binding (the app is switched off, no exact match, a split) or a multiplexer pane check fails: "Steer can't reach this session's tab. Reply in the session."
+
+Every action whose own route still works stays on the card while Open or typed input is unavailable: Dismiss, details, CLI approve or deny through the hook, and question options when their checks pass. If Open passes the scan but fails its recheck at click time with an unavailable cause, the same line appears in the navigation message, the item is retained, and the card swaps Open for the line on the next scan. When a Codex question cannot be typed and Open is also unavailable, the card shows one line: "Answer this in Codex." followed by Open's line. The exact internal reasons go to the app's diagnostics.
 
 ## Integration findings
 

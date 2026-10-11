@@ -1,6 +1,6 @@
 # Ghostty terminal `tty`: first release and feature check (#117)
 
-Checked 2026-10-07 for [Find the first Ghostty release that exposes terminal tty](https://github.com/r-curio/steer/issues/117). It answers the open point in [ADR 0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md) and the feature-check rule in [Agreed herdr presentation](product.md#agreed-herdr-presentation).
+Checked 2026-10-07 for [Find the first Ghostty release that exposes terminal tty](https://github.com/r-curio/steer/issues/117). It answers the open point in [ADR 0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md) and the feature-check rule in [Agreed terminal host presentation](product.md#agreed-terminal-host-presentation).
 
 ## Answer
 
