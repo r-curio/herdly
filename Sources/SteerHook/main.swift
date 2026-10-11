@@ -98,7 +98,7 @@ private func boundedClaudeString(_ value: Any?, limit: Int = 4096, allowNewline:
 }
 
 private func boundedClaudeToolInput(_ input: [String: Any]) -> [String: Any] {
-    let scalarKeys = Set(["command", "cmd", "file_path", "notebook_path", "path", "pattern", "url"])
+    let scalarKeys = Set(["command", "cmd", "file_path", "notebook_path", "path", "pattern", "url", "query"])
     var result: [String: Any] = [:]
     for key in scalarKeys {
         if let value = boundedClaudeString(input[key], allowNewline: true) { result[key] = value }
@@ -406,6 +406,12 @@ func selfTest() -> Int32 {
     guard markDirectPermission(&edit) != nil, markDirectPermission(&extraKey) == nil, extraKey["approval_details"] == nil,
           markDirectPermission(&grep) == nil, markDirectPermission(&bash) != nil, bash["approval_details"] == nil,
           markDirectPermission(&forged) == nil, forged["approval_details"] == nil, forged["approval_request_id"] == nil,
+          { var fetch: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": session.uuidString,
+                                        "tool_name": "WebFetch", "tool_input": ["url": "https://example.com/", "prompt": "title"]]
+            var plan: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": session.uuidString,
+                                       "tool_name": "ExitPlanMode", "tool_input": ["plan": "x", "planFilePath": "/tmp/p.md"]]
+            return markDirectPermission(&fetch) != nil && (fetch["approval_details"] as? [String: Any])?["command_label"] as? String == "url"
+                && markDirectPermission(&plan) == nil }(),
           writeClaudeEvent(edit, to: fileDirectory, installationID: UUID().uuidString),
           let fileRecord = (try? FileManager.default.contentsOfDirectory(at: fileDirectory, includingPropertiesForKeys: nil))?
             .compactMap({ try? Data(contentsOf: $0) })

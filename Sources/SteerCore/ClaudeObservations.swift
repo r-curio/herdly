@@ -349,19 +349,20 @@ public enum ClaudeObservationReader {
                       approvalDetails: approvalDetails(object["approval_details"]))
     }
 
-    /// The helper's display details for a decidable file request, re-bounded: an action, an absolute
-    /// path, and at most a few previews. Anything else is dropped, so the request stays native.
+    /// The helper's display details for a decidable file or web request, re-bounded: an action, an absolute
+    /// path, URL, or query matching its label, and at most a few previews. Anything else is dropped, so the
+    /// request stays native.
     private static func approvalDetails(_ value: Any?) -> ApprovalDetails? {
         guard let object = value as? [String: Any], JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object),
               let details = try? JSONDecoder().decode(ApprovalDetails.self, from: data),
               let action = details.action, bounded(action) != nil,
-              let path = ClaudeDirectApproval.path(details.command),
-              details.commandLabel == nil || bounded(details.commandLabel) != nil,
+              ClaudeDirectApproval.validCommand(details.command, label: details.commandLabel),
+              let command = details.command,
               (details.longText?.count ?? 0) <= ClaudeDirectApproval.maximumPreview * 2 + 512,
               details.longText?.contains(where: { $0 == "\u{1b}" || $0 == "\u{7}" || $0 == "\u{0}" }) != true
         else { return nil }
-        return ApprovalDetails(action: action, command: path, longText: details.longText,
+        return ApprovalDetails(action: action, command: command, longText: details.longText,
                                commandLabel: details.commandLabel)
     }
 

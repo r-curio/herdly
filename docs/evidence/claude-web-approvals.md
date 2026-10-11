@@ -43,7 +43,11 @@ recorded the URL.
 
 **Accept only:**
 
-- `WebFetch` with exactly `url` (an absolute `https` URL with a host; `http` was not observed) and `prompt` (a string);
+- `WebFetch` with exactly `url` and `prompt` (a string). The `url` must be the plain form observed,
+  `https://<host>[/...]`, all ASCII, with the host made only of letters, digits, hyphens and dots. That rules out
+  `http`, userinfo, ports, percent-encoded hosts, decoded IDN, and backslashes. Claude parses URLs the WHATWG way
+  and Foundation does not, and the two disagree on those forms (`https://evil.com\@example.com/` names a
+  different host to each), so Steer reads the host without either parser;
 - `WebSearch` with exactly `query` (a non-empty string) and `mode` equal to `standard`, the only value observed.
 
 Anything else stays in Claude's dialog.
