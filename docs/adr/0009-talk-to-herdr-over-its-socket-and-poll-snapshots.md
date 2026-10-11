@@ -2,6 +2,8 @@
 
 Accepted with the user on 2026-10-07 (issue #103). Steer sends every herdr API request (`ping`, `session.snapshot`, `pane.process_info`, focus, `agent.send_keys`) directly to herdr's default JSON socket, opening one short connection per request. It reads state by polling snapshots on its existing 2-second scan and never subscribes to events. The socket reports the running server's protocol and is the only route to herdr's API. herdr's event stream drops events under load, cannot replay, and has no ordering relative to snapshots, so it can only invalidate state that Steer must re-read anyway.
 
+Amended 2026-10-11 by [ADR 0014](0014-bind-multiplexer-panes-and-join-their-client-to-a-host-tab.md): the gate reads "herdr is enabled and any enabled host's inventory is known" in place of Ghostty controls, and the Ghostty-ancestry client check becomes ADR 0014's host-tab join.
+
 ## Rules
 
 - **Gate:** Steer contacts herdr only while Ghostty controls are enabled and either at least one live Claude Code session's newest Steer hook event carries `HERDR_PANE_ID`, or ADR 0012's Codex gate holds (a Ghostty inventory is known, a live Codex session exists or Codex's app-server daemon has loaded a terminal session, and the default socket passes the trust check below). Codex hook records never open the gate, because under the shared daemon their herdr fields belong to another pane. The hook helper records that variable and `HERDR_SOCKET_PATH`, and never contacts herdr itself.
