@@ -225,6 +225,15 @@ Text-only wells in the panel's own vocabulary. No icons.
 - **Focus:** a 1.5pt ring in ink at 90% opacity, 6pt continuous corners, 2pt outside the control. Visible whenever the control has keyboard focus.
 - **Disabled:** label drops to dim and the whole control to 60% opacity.
 
+### Question card
+The body of a question row, for Codex and Claude alike. One question is read at a time.
+- **Step rail** (several questions only): a 2pt bar per question at 4pt gaps, the question's header beneath in 10pt. The current step is ink, an answered step dim, an upcoming bar a well with a dim label. When the headers do not all fit whole, the rail keeps only its bars and names the current question beneath them with "N of M" in dim, so no header is cut.
+- **Answered lines:** each earlier question with an answer Steer sent or drafted, as a detail-table line (header in the 58pt label column, answer in text gray).
+- **Question:** 12pt regular in ink, wrapping in full. A single question's header sits above it in 11pt dim.
+- **Options:** full-width option wells stacked at 4pt, each with its digit in a 14pt slot in the session's highlight and the label in ink. Options that are not pressable here keep the same digit slot, dim, with the label in text gray.
+- **Later questions:** behind "Show the next question" / "Show the next N questions", as reference questions.
+- **Read-only card:** when Steer cannot answer, one 12pt ink sentence says where to answer ("Claude is asking 3 questions. Answer them in Claude."), followed by the questions as reference: header in the label column, question in ink, numbered options in text gray. Several questions sit behind "Show questions". The warning is never repeated per question.
+
 ### Badge
 The count of items to check, hidden at zero.
 - **Style:** well background, ink digits in 11pt medium tabular figures, continuous 4pt corners, 16pt minimum square with 2pt horizontal padding.
