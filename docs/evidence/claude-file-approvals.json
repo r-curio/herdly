@@ -1,0 +1,1798 @@
+{
+  "issue": 72,
+  "recorded": "2026-10-11",
+  "claude_code": "2.1.296 (Claude Code)",
+  "repo_commit": "1150f6f",
+  "helper": "scripts/claude-permission-lab/lab_helper.py (the #71 stand-in for SteerHook's Claude approval file protocol, any tool); not the shipped SteerHook, which decides Bash only",
+  "companion": "scripts/claude-permission-lab/run_file_case.py writes receipts and decisions; native answers are keystrokes into Claude's own dialog",
+  "decisions": "scripted by the agent at the operator's explicit direction (2026-10-11); not human-clicked",
+  "isolation": "claude --setting-sources project --model haiku --strict-mcp-config in <lab>/project with --permission-mode default unless a case sets one; user hooks, rules and auto mode not loaded; every target is a disposable fixture under <lab>",
+  "cases": [
+    {
+      "case": "edit-allow",
+      "companion": "allow",
+      "settings_extra": {},
+      "prompt": "Read target.txt, then use the Edit tool exactly once to change the word alpha to beta in target.txt. Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {
+        "project/target.txt": [
+          "b6a98d9ce9a2",
+          "f2c82decdd71"
+        ]
+      },
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "Edit file",
+            "target.txt",
+            "\u2026",
+            "Do you want to make this edit to target.txt ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "1 - alpha",
+            "1 + beta",
+            "Do you want to make this edit to target.txt ?",
+            "\u276f 1 Yes",
+            "2 Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.863,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01TSnCaS3fT6sytZBoyz8CXN",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 1.942,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01TSnCaS3fT6sytZBoyz8CXN",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 2.011,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 3.117,
+          "hook": "PreToolUse",
+          "tool_name": "Edit",
+          "tool_use_id": "toolu_01CJJyx2aF5aWFVHaqRAjMdj",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 3.198,
+          "hook": "PermissionRequest",
+          "tool_name": "Edit",
+          "request_id": "e47a028c-7731-4c43-bdf0-1019c41d40cc",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 3.359,
+          "driver": "request_seen",
+          "request_id": "e47a028c-7731-4c43-bdf0-1019c41d40cc",
+          "tool": "Edit"
+        },
+        {
+          "t": 3.36,
+          "driver": "companion_receipt",
+          "request_id": "e47a028c-7731-4c43-bdf0-1019c41d40cc"
+        },
+        {
+          "t": 5.544,
+          "driver": "companion_decision",
+          "request_id": "e47a028c-7731-4c43-bdf0-1019c41d40cc",
+          "decision": "allow"
+        },
+        {
+          "t": 5.633,
+          "hook": "helper_exit",
+          "request_id": "e47a028c-7731-4c43-bdf0-1019c41d40cc",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 5.788,
+          "hook": "PostToolUse",
+          "tool_name": "Edit",
+          "tool_use_id": "toolu_01CJJyx2aF5aWFVHaqRAjMdj",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 5.861,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 6.724,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 9.267,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "edit-deny",
+      "companion": "deny",
+      "settings_extra": {},
+      "prompt": "Read target.txt, then use the Edit tool exactly once to change the word alpha to beta in target.txt. Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "Edit file",
+            "target.txt",
+            "\u2026",
+            "Do you want to make this edit to target.txt ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "1 - alpha",
+            "1 + beta",
+            "Do you want to make this edit to target.txt ?",
+            "\u276f 1 Yes",
+            "2 Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.56,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01Wx7UxtwFU63jnsXbyt7kQW",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 1.646,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01Wx7UxtwFU63jnsXbyt7kQW",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 1.721,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.918,
+          "hook": "PreToolUse",
+          "tool_name": "Edit",
+          "tool_use_id": "toolu_01DtQhNuVgg1sHpfsTgdvySY",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 2.996,
+          "hook": "PermissionRequest",
+          "tool_name": "Edit",
+          "request_id": "8cbf8e03-e46a-46fd-9154-4a73e5c98ee5",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 3.051,
+          "driver": "request_seen",
+          "request_id": "8cbf8e03-e46a-46fd-9154-4a73e5c98ee5",
+          "tool": "Edit"
+        },
+        {
+          "t": 3.052,
+          "driver": "companion_receipt",
+          "request_id": "8cbf8e03-e46a-46fd-9154-4a73e5c98ee5"
+        },
+        {
+          "t": 5.25,
+          "driver": "companion_decision",
+          "request_id": "8cbf8e03-e46a-46fd-9154-4a73e5c98ee5",
+          "decision": "deny"
+        },
+        {
+          "t": 5.324,
+          "hook": "helper_exit",
+          "request_id": "8cbf8e03-e46a-46fd-9154-4a73e5c98ee5",
+          "outcome": "emitted",
+          "decision": "deny"
+        },
+        {
+          "t": 5.414,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 7.173,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 9.691,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "edit-handoff",
+      "companion": "handoff",
+      "settings_extra": {},
+      "prompt": "Read target.txt, then use the Edit tool exactly once to change the word alpha to beta in target.txt. Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "Edit file",
+            "target.txt",
+            "\u2026",
+            "Do you want to make this edit to target.txt ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "1 - alpha",
+            "1 + beta",
+            "Do you want to make this edit to target.txt ?",
+            "\u276f 1 Yes",
+            "2 Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.578,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01AsfzPNP7r28Af4xB461M6o",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 1.656,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01AsfzPNP7r28Af4xB461M6o",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 1.731,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.864,
+          "hook": "PreToolUse",
+          "tool_name": "Edit",
+          "tool_use_id": "toolu_01S6M8ygMsMQkLi36dzrkdab",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 2.94,
+          "hook": "PermissionRequest",
+          "tool_name": "Edit",
+          "request_id": "e30ca490-b5fa-4bb1-a820-10dc12d82eed",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 3.108,
+          "driver": "request_seen",
+          "request_id": "e30ca490-b5fa-4bb1-a820-10dc12d82eed",
+          "tool": "Edit"
+        },
+        {
+          "t": 3.11,
+          "driver": "companion_receipt",
+          "request_id": "e30ca490-b5fa-4bb1-a820-10dc12d82eed"
+        },
+        {
+          "t": 5.287,
+          "driver": "companion_decision",
+          "request_id": "e30ca490-b5fa-4bb1-a820-10dc12d82eed",
+          "decision": "no_decision"
+        },
+        {
+          "t": 5.38,
+          "hook": "helper_exit",
+          "request_id": "e30ca490-b5fa-4bb1-a820-10dc12d82eed",
+          "outcome": "handed_back",
+          "decision": "no_decision"
+        },
+        {
+          "t": 8.403,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 15.49,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "notebook-allow",
+      "companion": "allow",
+      "settings_extra": {},
+      "prompt": "Read nb.ipynb, then use the NotebookEdit tool exactly once to replace the source of the only cell in nb.ipynb with print(2). Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {
+        "project/nb.ipynb": [
+          "6eec27c5aa83",
+          "b48a3f60f81e"
+        ]
+      },
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "Spelunking\u2026 running PreT olU e hook \u00b7 6s \u00b7 \u2193 777 tokens \u00b7 thinking )",
+            "\u2736 Spelunking\u2026 802 thinking",
+            "6s \u00b7 \u2193 802 t ken \u00b7 thinking )",
+            "Edit notebook",
+            "<lab>/project/nb.ipynb",
+            "Replace cell contents for cell c1",
+            "1 - print(1)",
+            "1 No newline at end of file",
+            "2 + print(2)",
+            "3 No newline at end of file",
+            "Do you want to make this edit to nb.ipynb ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 3.468,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01GvbF335VuCw9pUueGJmLgj",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/nb.ipynb"
+          },
+          "tool_input_shape": {
+            "file_path": "str[78]"
+          }
+        },
+        {
+          "t": 3.558,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01GvbF335VuCw9pUueGJmLgj",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/nb.ipynb"
+          },
+          "tool_input_shape": {
+            "file_path": "str[78]"
+          }
+        },
+        {
+          "t": 3.636,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 6.295,
+          "hook": "PreToolUse",
+          "tool_name": "NotebookEdit",
+          "tool_use_id": "toolu_017s8MNPTTx52biSbRRZVhvR",
+          "permission_mode": "default",
+          "targets": {
+            "notebook_path": "<lab>/project/nb.ipynb",
+            "cell_id": "c1",
+            "edit_mode": "replace"
+          },
+          "tool_input_shape": {
+            "notebook_path": "str[78]",
+            "cell_id": "str[2]",
+            "new_source": "str[8]",
+            "edit_mode": "str[7]"
+          }
+        },
+        {
+          "t": 6.374,
+          "hook": "PermissionRequest",
+          "tool_name": "NotebookEdit",
+          "request_id": "f034bf42-ca6e-4bdf-8131-b68a34658d01",
+          "permission_mode": "default",
+          "targets": {
+            "notebook_path": "<lab>/project/nb.ipynb",
+            "cell_id": "c1",
+            "edit_mode": "replace"
+          },
+          "tool_input_shape": {
+            "notebook_path": "str[78]",
+            "cell_id": "str[2]",
+            "new_source": "str[8]",
+            "edit_mode": "str[7]"
+          }
+        },
+        {
+          "t": 6.428,
+          "driver": "request_seen",
+          "request_id": "f034bf42-ca6e-4bdf-8131-b68a34658d01",
+          "tool": "NotebookEdit"
+        },
+        {
+          "t": 6.429,
+          "driver": "companion_receipt",
+          "request_id": "f034bf42-ca6e-4bdf-8131-b68a34658d01"
+        },
+        {
+          "t": 8.611,
+          "driver": "companion_decision",
+          "request_id": "f034bf42-ca6e-4bdf-8131-b68a34658d01",
+          "decision": "allow"
+        },
+        {
+          "t": 8.718,
+          "hook": "helper_exit",
+          "request_id": "f034bf42-ca6e-4bdf-8131-b68a34658d01",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 8.809,
+          "hook": "PostToolUse",
+          "tool_name": "NotebookEdit",
+          "tool_use_id": "toolu_017s8MNPTTx52biSbRRZVhvR",
+          "permission_mode": "default",
+          "targets": {
+            "notebook_path": "<lab>/project/nb.ipynb",
+            "cell_id": "c1",
+            "edit_mode": "replace"
+          },
+          "tool_input_shape": {
+            "notebook_path": "str[78]",
+            "cell_id": "str[2]",
+            "new_source": "str[8]",
+            "edit_mode": "str[7]"
+          }
+        },
+        {
+          "t": 8.887,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 9.613,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 12.075,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "notebook-deny",
+      "companion": "deny",
+      "settings_extra": {},
+      "prompt": "Read nb.ipynb, then use the NotebookEdit tool exactly once to replace the source of the only cell in nb.ipynb with print(2). Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "Do you want to make this edit to nb.ipynb ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "<lab>/project/nb.ipynb",
+            "Replace cell contents for cell c1",
+            "1 - print(1)",
+            "1 No newline at end of file",
+            "2 + print(2)",
+            "3 No newline at end of file",
+            "Do you want to make this edit to nb.ipynb ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 3.447,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01UuoRodKgKVLktBVm7eawJP",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/nb.ipynb"
+          },
+          "tool_input_shape": {
+            "file_path": "str[78]"
+          }
+        },
+        {
+          "t": 3.524,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01UuoRodKgKVLktBVm7eawJP",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/nb.ipynb"
+          },
+          "tool_input_shape": {
+            "file_path": "str[78]"
+          }
+        },
+        {
+          "t": 3.593,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 4.605,
+          "hook": "PreToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01R1UUFHLMqF5jQGn3HB1hGk",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 4.672,
+          "hook": "PostToolUse",
+          "tool_name": "ToolSearch",
+          "tool_use_id": "toolu_01R1UUFHLMqF5jQGn3HB1hGk",
+          "permission_mode": "default",
+          "tool_input_shape": {
+            "query": "str[19]",
+            "max_results": "int"
+          }
+        },
+        {
+          "t": 4.747,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 6.215,
+          "hook": "PreToolUse",
+          "tool_name": "NotebookEdit",
+          "tool_use_id": "toolu_01KpD9Th6GzPPF8GuFDXYYwU",
+          "permission_mode": "default",
+          "targets": {
+            "notebook_path": "<lab>/project/nb.ipynb",
+            "cell_id": "c1",
+            "edit_mode": "replace"
+          },
+          "tool_input_shape": {
+            "notebook_path": "str[78]",
+            "cell_id": "str[2]",
+            "new_source": "str[8]",
+            "edit_mode": "str[7]"
+          }
+        },
+        {
+          "t": 6.287,
+          "hook": "PermissionRequest",
+          "tool_name": "NotebookEdit",
+          "request_id": "a512cb61-8fb6-41d5-b984-761c66a80d2c",
+          "permission_mode": "default",
+          "targets": {
+            "notebook_path": "<lab>/project/nb.ipynb",
+            "cell_id": "c1",
+            "edit_mode": "replace"
+          },
+          "tool_input_shape": {
+            "notebook_path": "str[78]",
+            "cell_id": "str[2]",
+            "new_source": "str[8]",
+            "edit_mode": "str[7]"
+          }
+        },
+        {
+          "t": 6.461,
+          "driver": "request_seen",
+          "request_id": "a512cb61-8fb6-41d5-b984-761c66a80d2c",
+          "tool": "NotebookEdit"
+        },
+        {
+          "t": 6.462,
+          "driver": "companion_receipt",
+          "request_id": "a512cb61-8fb6-41d5-b984-761c66a80d2c"
+        },
+        {
+          "t": 8.637,
+          "driver": "companion_decision",
+          "request_id": "a512cb61-8fb6-41d5-b984-761c66a80d2c",
+          "decision": "deny"
+        },
+        {
+          "t": 8.745,
+          "hook": "helper_exit",
+          "request_id": "a512cb61-8fb6-41d5-b984-761c66a80d2c",
+          "outcome": "emitted",
+          "decision": "deny"
+        },
+        {
+          "t": 8.833,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 10.909,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 13.457,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "write-outside-allow",
+      "companion": "allow",
+      "settings_extra": {},
+      "prompt": "Use the Write tool exactly once to create <lab>/outside/created.txt with the exact content lab . The path is a disposable lab fixture and you are allowed to request access to it. Make the call even though it is outside the current folder. Do not use any other tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {
+        "outside/created.txt": [
+          null,
+          "bf5ac3c51cb5"
+        ]
+      },
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "thinking",
+            "\u273b i \u2026 \u2193 38 tokens \u00b7 thinking )",
+            "\u2736 r g 63 thinking",
+            "\u23fa Write (<lab>/outside/created.txt)",
+            "running PreToolUse hook \u00b7 1s \u00b7 \u2193 63 tokens \u00b7 thinking )",
+            "\u2733 rin 88",
+            "Create file",
+            "../outside/created.txt",
+            "1 lab .",
+            "Do you want to create created.txt ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session; Yes, and always allow access to",
+            "<lab>/outside for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.737,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_018Z9roUSez9wE1Ew2yYiyJ2",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/created.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]",
+            "content": "str[5]"
+          }
+        },
+        {
+          "t": 1.871,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "56a26478-6c08-4b87-9b89-5cdcb22660b4",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/created.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]",
+            "content": "str[5]"
+          }
+        },
+        {
+          "t": 1.977,
+          "driver": "request_seen",
+          "request_id": "56a26478-6c08-4b87-9b89-5cdcb22660b4",
+          "tool": "Write"
+        },
+        {
+          "t": 1.979,
+          "driver": "companion_receipt",
+          "request_id": "56a26478-6c08-4b87-9b89-5cdcb22660b4"
+        },
+        {
+          "t": 4.167,
+          "driver": "companion_decision",
+          "request_id": "56a26478-6c08-4b87-9b89-5cdcb22660b4",
+          "decision": "allow"
+        },
+        {
+          "t": 4.206,
+          "hook": "helper_exit",
+          "request_id": "56a26478-6c08-4b87-9b89-5cdcb22660b4",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 4.349,
+          "hook": "PostToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_018Z9roUSez9wE1Ew2yYiyJ2",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/created.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]",
+            "content": "str[5]"
+          }
+        },
+        {
+          "t": 4.474,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 5.415,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.598,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "write-outside-deny",
+      "companion": "deny",
+      "settings_extra": {},
+      "prompt": "Use the Write tool exactly once to create <lab>/outside/created.txt with the exact content lab . The path is a disposable lab fixture and you are allowed to request access to it. Make the call even though it is outside the current folder. Do not use any other tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u273b a n 50 thinking",
+            "\u2736 n i 88 thinking",
+            "\u23fa Write (<lab>/outside/created.txt)",
+            "nat running PreToolUse hook \u00b7 1s \u00b7 \u2193 88 tokens \u00b7 thinking )",
+            "\u2733 113 tokens \u00b7 thinking )",
+            "1s \u00b7 \u2193 113 t ken \u00b7 thinking )",
+            "Create file",
+            "../outside/created.txt",
+            "1 lab .",
+            "Do you want to create created.txt ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session; Yes, and always allow access to",
+            "<lab>/outside for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.613,
+          "hook": "PreToolUse",
+          "tool_name": "Write",
+          "tool_use_id": "toolu_01GzUnHkozgYEsnbSeMdZw8r",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/created.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]",
+            "content": "str[5]"
+          }
+        },
+        {
+          "t": 1.759,
+          "hook": "PermissionRequest",
+          "tool_name": "Write",
+          "request_id": "226f1859-b23f-474b-b8cc-55f10e26a61a",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/created.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]",
+            "content": "str[5]"
+          }
+        },
+        {
+          "t": 2.077,
+          "driver": "request_seen",
+          "request_id": "226f1859-b23f-474b-b8cc-55f10e26a61a",
+          "tool": "Write"
+        },
+        {
+          "t": 2.079,
+          "driver": "companion_receipt",
+          "request_id": "226f1859-b23f-474b-b8cc-55f10e26a61a"
+        },
+        {
+          "t": 4.261,
+          "driver": "companion_decision",
+          "request_id": "226f1859-b23f-474b-b8cc-55f10e26a61a",
+          "decision": "deny"
+        },
+        {
+          "t": 4.306,
+          "hook": "helper_exit",
+          "request_id": "226f1859-b23f-474b-b8cc-55f10e26a61a",
+          "outcome": "emitted",
+          "decision": "deny"
+        },
+        {
+          "t": 4.422,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 5.514,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.693,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "read-outside-allow",
+      "companion": "allow",
+      "settings_extra": {},
+      "prompt": "Use the Read tool exactly once to read <lab>/outside/outside.txt and report its first word. The path is a disposable lab fixture and you are allowed to request access to it. Make the call even though it is outside the current folder. Do not use any other tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u273d i \u2026",
+            "\u23bf <lab>/outside/outside.txt",
+            "(running PreToolUse hook \u00b7 1s)",
+            "<lab>/outside/outside.txt",
+            "Thundering\u2026",
+            "Thundering\u2026 \u00b7 \u2193 7 tokens)",
+            "Read file",
+            "Read(<lab>/outside/outside.txt)",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. Yes, allow reading from <lab>/outside during this session",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "\u23fa",
+            "\u23fa"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.243,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01MLBZHQ936rcau1Jwkpek2Y",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/outside.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]"
+          }
+        },
+        {
+          "t": 1.331,
+          "hook": "PermissionRequest",
+          "tool_name": "Read",
+          "request_id": "88e8c493-b943-446d-aa69-d6f56dfede8e",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/outside.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]"
+          }
+        },
+        {
+          "t": 1.374,
+          "driver": "request_seen",
+          "request_id": "88e8c493-b943-446d-aa69-d6f56dfede8e",
+          "tool": "Read"
+        },
+        {
+          "t": 1.377,
+          "driver": "companion_receipt",
+          "request_id": "88e8c493-b943-446d-aa69-d6f56dfede8e"
+        },
+        {
+          "t": 3.445,
+          "driver": "companion_decision",
+          "request_id": "88e8c493-b943-446d-aa69-d6f56dfede8e",
+          "decision": "allow"
+        },
+        {
+          "t": 3.456,
+          "hook": "helper_exit",
+          "request_id": "88e8c493-b943-446d-aa69-d6f56dfede8e",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 3.556,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01MLBZHQ936rcau1Jwkpek2Y",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/outside.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]"
+          }
+        },
+        {
+          "t": 3.628,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 4.387,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.512,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "read-outside-deny",
+      "companion": "deny",
+      "settings_extra": {},
+      "prompt": "Use the Read tool exactly once to read <lab>/outside/outside.txt and report its first word. The path is a disposable lab fixture and you are allowed to request access to it. Make the call even though it is outside the current folder. Do not use any other tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u273b",
+            "\u273d n n",
+            "\u23bf <lab>/outside/outside.txt",
+            "(running PreToolUse hook \u00b7 1s)",
+            "<lab>/outside/outside.txt",
+            "Thinking\u2026",
+            "Read file",
+            "Read(<lab>/outside/outside.txt)",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. Yes, allow reading from <lab>/outside during this session",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "\u23fa",
+            "\u23fa"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.276,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01B7EBD2YShih5jsxVivfXZ5",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/outside.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]"
+          }
+        },
+        {
+          "t": 1.354,
+          "hook": "PermissionRequest",
+          "tool_name": "Read",
+          "request_id": "560b55a9-ed1c-46fb-8edd-68662aa67e76",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/outside.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]"
+          }
+        },
+        {
+          "t": 1.435,
+          "driver": "request_seen",
+          "request_id": "560b55a9-ed1c-46fb-8edd-68662aa67e76",
+          "tool": "Read"
+        },
+        {
+          "t": 1.436,
+          "driver": "companion_receipt",
+          "request_id": "560b55a9-ed1c-46fb-8edd-68662aa67e76"
+        },
+        {
+          "t": 3.482,
+          "driver": "companion_decision",
+          "request_id": "560b55a9-ed1c-46fb-8edd-68662aa67e76",
+          "decision": "deny"
+        },
+        {
+          "t": 3.569,
+          "hook": "helper_exit",
+          "request_id": "560b55a9-ed1c-46fb-8edd-68662aa67e76",
+          "outcome": "emitted",
+          "decision": "deny"
+        },
+        {
+          "t": 3.661,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 4.398,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.478,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "read-outside-handoff",
+      "companion": "handoff",
+      "settings_extra": {},
+      "prompt": "Use the Read tool exactly once to read <lab>/outside/outside.txt and report its first word. The path is a disposable lab fixture and you are allowed to request access to it. Make the call even though it is outside the current folder. Do not use any other tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "permission_suggestions",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {},
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "\u23bf <lab>/outside/outside.txt",
+            "(running PreToolUse hook \u00b7 1s)",
+            "<lab>/outside/outside.txt",
+            "anc",
+            "\u2733 \u00b7 \u2193 7 tokens)",
+            "1s \u00b7 \u2193 7 tokens)",
+            "Read file",
+            "Read(<lab>/outside/outside.txt)",
+            "Do you want to proceed?",
+            "\u276f 1. Yes",
+            "2. Yes, allow reading from <lab>/outside during this session",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "\u23fa",
+            "\u23fa"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.671,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_018kNq3a5BTCoUvu35GBTaGR",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/outside.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]"
+          }
+        },
+        {
+          "t": 1.754,
+          "hook": "PermissionRequest",
+          "tool_name": "Read",
+          "request_id": "e49f326d-a68f-40b6-9872-df7073aa8d40",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/outside/outside.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[81]"
+          }
+        },
+        {
+          "t": 1.799,
+          "driver": "request_seen",
+          "request_id": "e49f326d-a68f-40b6-9872-df7073aa8d40",
+          "tool": "Read"
+        },
+        {
+          "t": 1.8,
+          "driver": "companion_receipt",
+          "request_id": "e49f326d-a68f-40b6-9872-df7073aa8d40"
+        },
+        {
+          "t": 3.955,
+          "driver": "companion_decision",
+          "request_id": "e49f326d-a68f-40b6-9872-df7073aa8d40",
+          "decision": "no_decision"
+        },
+        {
+          "t": 3.984,
+          "hook": "helper_exit",
+          "request_id": "e49f326d-a68f-40b6-9872-df7073aa8d40",
+          "outcome": "handed_back",
+          "decision": "no_decision"
+        },
+        {
+          "t": 6.997,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 11.946,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 16.939,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 21.948,
+          "driver": "native_no_esc"
+        },
+        {
+          "t": 29.055,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "grep-outside",
+      "companion": "observe",
+      "settings_extra": {},
+      "prompt": "Use the Grep tool exactly once to search for the word gamma with path <lab>/outside. The path is a disposable lab fixture and you are allowed to request access to it. Make the call even though it is outside the current folder. Do not use any other tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 0,
+      "permission_request_keys": null,
+      "files_changed": {},
+      "native_dialog": [],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.191,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 2.759,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.606,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "glob-outside",
+      "companion": "observe",
+      "settings_extra": {},
+      "prompt": "Use the Glob tool exactly once with pattern *.txt and path <lab>/outside. The path is a disposable lab fixture and you are allowed to request access to it. Make the call even though it is outside the current folder. Do not use any other tool. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 0,
+      "permission_request_keys": null,
+      "files_changed": {},
+      "native_dialog": [],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.307,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 3.165,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.591,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "edit-ask-rule-allow",
+      "companion": "allow",
+      "settings_extra": {
+        "permissions": {
+          "ask": [
+            "Edit"
+          ]
+        }
+      },
+      "prompt": "Read target.txt, then use the Edit tool exactly once to change the word alpha to beta in target.txt. Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 1,
+      "permission_request_keys": [
+        "cwd",
+        "effort",
+        "hook_event_name",
+        "permission_mode",
+        "prompt_id",
+        "scratchpad_dir",
+        "session_id",
+        "tool_input",
+        "tool_name",
+        "transcript_path"
+      ],
+      "files_changed": {
+        "project/target.txt": [
+          "b6a98d9ce9a2",
+          "f2c82decdd71"
+        ]
+      },
+      "native_dialog": [
+        {
+          "at": "before_decision",
+          "lines": [
+            "Edit file",
+            "target.txt",
+            "\u2026",
+            "Do you want to make this edit to target.txt ?",
+            "\u276f 1. Yes",
+            "2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend",
+            "1 - alpha",
+            "1 + beta",
+            "Do you want to make this edit to target.txt ?",
+            "\u276f 1 Yes",
+            "2 Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)",
+            "3. No",
+            "Esc to cancel \u00b7 Tab to amend"
+          ]
+        }
+      ],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.784,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01JzaoFEdQUMfW1FvTGNAmAq",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 1.874,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01JzaoFEdQUMfW1FvTGNAmAq",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 1.953,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 3.004,
+          "hook": "PreToolUse",
+          "tool_name": "Edit",
+          "tool_use_id": "toolu_01Uu2P1nJ1qsnze3CUptkTvU",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 3.082,
+          "hook": "PermissionRequest",
+          "tool_name": "Edit",
+          "request_id": "1ad429a4-2735-4f27-9fbd-e907e9e4e89e",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 3.353,
+          "driver": "request_seen",
+          "request_id": "1ad429a4-2735-4f27-9fbd-e907e9e4e89e",
+          "tool": "Edit"
+        },
+        {
+          "t": 3.354,
+          "driver": "companion_receipt",
+          "request_id": "1ad429a4-2735-4f27-9fbd-e907e9e4e89e"
+        },
+        {
+          "t": 5.532,
+          "driver": "companion_decision",
+          "request_id": "1ad429a4-2735-4f27-9fbd-e907e9e4e89e",
+          "decision": "allow"
+        },
+        {
+          "t": 5.615,
+          "hook": "helper_exit",
+          "request_id": "1ad429a4-2735-4f27-9fbd-e907e9e4e89e",
+          "outcome": "emitted",
+          "decision": "allow"
+        },
+        {
+          "t": 5.71,
+          "hook": "PostToolUse",
+          "tool_name": "Edit",
+          "tool_use_id": "toolu_01Uu2P1nJ1qsnze3CUptkTvU",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 5.785,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 6.576,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 9.01,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "edit-deny-rule",
+      "companion": "observe",
+      "settings_extra": {
+        "permissions": {
+          "deny": [
+            "Edit"
+          ]
+        }
+      },
+      "prompt": "Read target.txt, then use the Edit tool exactly once to change the word alpha to beta in target.txt. Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 0,
+      "permission_request_keys": null,
+      "files_changed": {},
+      "native_dialog": [],
+      "events_seconds_from_prompt": [
+        {
+          "t": 1.885,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01UaMUQwEsUPu7quu1Y7JUeo",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 1.971,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01UaMUQwEsUPu7quu1Y7JUeo",
+          "permission_mode": "default",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 2.049,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 3.154,
+          "hook": "PostToolBatch",
+          "permission_mode": "default"
+        },
+        {
+          "t": 5.002,
+          "hook": "Stop",
+          "permission_mode": "default"
+        },
+        {
+          "t": 8.484,
+          "hook": "SessionEnd"
+        }
+      ]
+    },
+    {
+      "case": "edit-accept-edits",
+      "companion": "observe",
+      "settings_extra": {
+        "mode": "acceptEdits"
+      },
+      "prompt": "Read target.txt, then use the Edit tool exactly once to change the word alpha to beta in target.txt. Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE.",
+      "permission_requests": 0,
+      "permission_request_keys": null,
+      "files_changed": {
+        "project/target.txt": [
+          "b6a98d9ce9a2",
+          "f2c82decdd71"
+        ]
+      },
+      "native_dialog": [],
+      "events_seconds_from_prompt": [
+        {
+          "t": 2.228,
+          "hook": "PreToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01SCXhvVBAffnUG16oApys3P",
+          "permission_mode": "acceptEdits",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 2.322,
+          "hook": "PostToolUse",
+          "tool_name": "Read",
+          "tool_use_id": "toolu_01SCXhvVBAffnUG16oApys3P",
+          "permission_mode": "acceptEdits",
+          "targets": {
+            "file_path": "<lab>/project/target.txt"
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]"
+          }
+        },
+        {
+          "t": 2.406,
+          "hook": "PostToolBatch",
+          "permission_mode": "acceptEdits"
+        },
+        {
+          "t": 3.41,
+          "hook": "PreToolUse",
+          "tool_name": "Edit",
+          "tool_use_id": "toolu_01LHZ6CqpVwwYcAFpTVed2bD",
+          "permission_mode": "acceptEdits",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 3.516,
+          "hook": "PostToolUse",
+          "tool_name": "Edit",
+          "tool_use_id": "toolu_01LHZ6CqpVwwYcAFpTVed2bD",
+          "permission_mode": "acceptEdits",
+          "targets": {
+            "file_path": "<lab>/project/target.txt",
+            "replace_all": false
+          },
+          "tool_input_shape": {
+            "file_path": "str[80]",
+            "old_string": "str[5]",
+            "new_string": "str[4]",
+            "replace_all": "bool"
+          }
+        },
+        {
+          "t": 3.602,
+          "hook": "PostToolBatch",
+          "permission_mode": "acceptEdits"
+        },
+        {
+          "t": 4.344,
+          "hook": "Stop",
+          "permission_mode": "acceptEdits"
+        },
+        {
+          "t": 8.677,
+          "hook": "SessionEnd"
+        }
+      ]
+    }
+  ]
+}

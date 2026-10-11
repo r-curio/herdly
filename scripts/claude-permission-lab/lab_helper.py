@@ -51,6 +51,13 @@ summary = {
     "file_path": tool_input.get("file_path"), "permission_mode": payload.get("permission_mode"),
     "notification_type": payload.get("notification_type"),
     "transcript_path": payload.get("transcript_path"),
+    # Key -> type (and length for strings), so a family proof can state the display fields without content.
+    "tool_input_shape": {k: (f"str[{len(v)}]" if isinstance(v, str) else type(v).__name__)
+                         for k, v in tool_input.items()} or None,
+    # Path-like targets only; lab paths are disposable.
+    "targets": {k: tool_input[k] for k in ("file_path", "notebook_path", "path", "pattern", "cell_id", "edit_mode",
+                                           "cell_type", "replace_all", "offset", "limit")
+                if k in tool_input} or None,
 }
 if event != "PermissionRequest":
     log(summary)
