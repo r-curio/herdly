@@ -1,36 +1,40 @@
 {
-  "issue": 88,
-  "status": "package-prepared",
-  "base_commit": "90549cda2e65a0953d3005506b23e749927c6d27",
+ "issue": 88,
+ "status": "package-prepared",
+ "source_commit": "63ce63e2c0ab9e3b99bf8ccaacc43c4b36f55adf",
+ "artifact": "Steer-0.1.0+400-unsigned-dev.zip",
+ "sha256": "adf8ae1e4895d6fa7470afa7b9c0d4af5c54adfb5b703fa62a91bda861752f43",
+ "supersedes": {
   "source_commit": "6b3664c7db421867013baa2d6facdacc78ae888e",
   "artifact": "Steer-0.1.0+175-unsigned-dev.zip",
-  "sha256": "35826f78ea907926f0a52acc9169d2b4d2e4c6232d15cefe7563ecf7866e1f8f",
-  "manifest": {
-    "dirty_worktree": false,
-    "built_at": "2026-09-21T00:20:11Z",
-    "signing": "ad-hoc",
-    "notarized": false,
-    "gatekeeper_assessment": "rejected",
-    "bundle_identifier": "dev.rcurio.steer.prototype",
-    "minimum_macos": "14.0",
-    "host_macos": "26.5",
-    "xcode": "Xcode 26.6 Build version 17F113",
-    "swift": "swift-driver version: 1.148.6 Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)",
-    "executables": {
-      "Contents/MacOS/Steer": "381af5c7db87db7e5c71edfe6296de05d835836b2d2130207fbbe7ad469ceadd",
-      "Contents/Helpers/SteerHook": "79e233f1fe2d8368bdc7d62307ad73959b1f25948cca749f6d47a0aebd72e2e5"
-    },
-    "helper_self_test": "passed"
+  "sha256": "35826f78ea907926f0a52acc9169d2b4d2e4c6232d15cefe7563ecf7866e1f8f"
+ },
+ "manifest": {
+  "dirty_worktree": false,
+  "built_at": "2026-10-11T08:44:39Z",
+  "signing": "ad-hoc",
+  "notarized": false,
+  "gatekeeper_assessment": "rejected",
+  "bundle_identifier": "dev.rcurio.steer.prototype",
+  "minimum_macos": "14.0",
+  "host_macos": "26.5",
+  "xcode": "Xcode 26.6 Build version 17F113",
+  "swift": "swift-driver version: 1.148.6 Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)",
+  "executables": {
+   "Contents/MacOS/Steer": "86ac6d52f24189f42638a125bbbaa520b6a01ee564768e4213c644e1d0f0a046",
+   "Contents/Helpers/SteerHook": "d92c63dda3f5d8a8d1bb7df658230d77a46f2698f502072af991c1ca5062ad0a"
   },
-  "automated": {
-    "swift_test": "passed; 315 tests",
-    "package_app": "passed",
-    "packaged_smoke": "passed",
-    "helper_self_test": "passed",
-    "checksum": "passed",
-    "codesign_verify": "passed",
-    "git_diff_check": "passed"
-  },
-  "main_ci": "not claimed; post-merge run 35546830796 was refused before steps by the account billing limit",
-  "live": "not run; optional feedback from normal use"
+  "helper_self_test": "passed"
+ },
+ "automated": {
+  "swift_test": "passed; 670 tests",
+  "package_app": "passed",
+  "packaged_smoke": "passed",
+  "helper_self_test": "passed",
+  "checksum": "passed",
+  "codesign_verify": "passed",
+  "git_diff_check": "passed"
+ },
+ "main_ci": "not claimed; CI is optional and no run is cited for this commit",
+ "live": "not run; optional feedback from normal use"
 }
