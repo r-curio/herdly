@@ -294,6 +294,109 @@ private func inventory(_ status: String, at observedAt: Double) -> ClaudeInvento
     #expect(queue.items.compactMap(\.running).count == 1)
 }
 
+@Test func acknowledgedConfirmedStopDoesNotReturnAsWorking() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-inventory-ack-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    for (index, event) in [
+        ["hook_event_name": "UserPromptSubmit", "session_id": interactiveID, "prompt_id": "prompt", "captured_at": 1],
+        ["hook_event_name": "Stop", "session_id": interactiveID, "prompt_id": "prompt", "captured_at": 2]
+    ].enumerated() {
+        var event = event
+        event["source"] = ClaudeSetupRequirements.helperSource
+        event["installation_id"] = "install"
+        try JSONSerialization.data(withJSONObject: event).write(to: root.appendingPathComponent("event-\(index).json"))
+    }
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    let idle = { (at: Double) in
+        ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: at, sessions: [
+            ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                                   lifecycle: .interactive(status: "idle"))
+        ])
+    }
+    let scan = { (now: Double) in
+        ClaudeObservationReader.scan(events: root, sourceScope: "/tmp/root", installationID: "install", now: now)
+    }
+
+    var queue = AgentAttentionQueue()
+    queue.apply(scan(3), now: 3)
+    queue.apply(idle(4), now: 4)
+    #expect(queue.items.compactMap(\.outcome).count == 1)
+
+    queue.dismiss(.outcome(AgentTurnIdentity(session: identity, turn: "prompt")))
+    #expect(queue.items.isEmpty)
+
+    // Later polls still see the same Stop records. Whether the inventory keeps listing the idle
+    // session or stops listing it (Claude skips a parked entry), the finished turn stays gone.
+    queue.apply(scan(5), now: 5)
+    queue.apply(idle(6), now: 6)
+    #expect(queue.items.isEmpty)
+    #expect(queue.workingCount == 0)
+
+    queue.apply(scan(7), now: 7)
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 8), now: 8)
+    #expect(queue.items.isEmpty)
+    #expect(queue.workingCount == 0)
+}
+
+@Test func acknowledgedClaudeTurnThatResumesCompletesAgain() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-inventory-resume-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    func write(_ events: [[String: Any]], from start: Int) throws {
+        for (index, event) in events.enumerated() {
+            var event = event
+            event["source"] = ClaudeSetupRequirements.helperSource
+            event["installation_id"] = "install"
+            try JSONSerialization.data(withJSONObject: event).write(to: root.appendingPathComponent("event-\(start + index).json"))
+        }
+    }
+    try write([
+        ["hook_event_name": "UserPromptSubmit", "session_id": interactiveID, "prompt_id": "prompt", "captured_at": 1],
+        ["hook_event_name": "Stop", "session_id": interactiveID, "prompt_id": "prompt", "captured_at": 2]
+    ], from: 0)
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    let turn = AgentTurnIdentity(session: identity, turn: "prompt")
+    let idle = { (at: Double) in
+        ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: at, sessions: [
+            ClaudeInventorySession(sessionID: interactiveID, kind: .interactive, startedAt: 1,
+                                   lifecycle: .interactive(status: "idle"))
+        ])
+    }
+    let scan = { (now: Double) in
+        ClaudeObservationReader.scan(events: root, sourceScope: "/tmp/root", installationID: "install", now: now)
+    }
+
+    var queue = AgentAttentionQueue()
+    queue.apply(scan(3), now: 3)
+    queue.apply(idle(4), now: 4)
+    queue.dismiss(.outcome(turn))
+
+    // The same turn runs a tool after its acknowledged completion: that is new work.
+    try write([
+        ["hook_event_name": "PreToolUse", "session_id": interactiveID, "prompt_id": "prompt", "captured_at": 5,
+         "tool_name": "Bash", "tool_use_id": "t1"]
+    ], from: 2)
+    queue.apply(scan(6), now: 6)
+    #expect(queue.items.compactMap(\.running).map(\.identity) == [turn])
+    #expect(queue.workingCount == 1)
+
+    try write([
+        ["hook_event_name": "PostToolUse", "session_id": interactiveID, "prompt_id": "prompt", "captured_at": 7,
+         "tool_use_id": "t1"],
+        ["hook_event_name": "Stop", "session_id": interactiveID, "prompt_id": "prompt", "captured_at": 8]
+    ], from: 3)
+    queue.apply(scan(9), now: 9)
+    queue.apply(idle(10), now: 10)
+    #expect(queue.items.compactMap(\.outcome).map(\.arrivedAt) == [10])
+    #expect(queue.items.compactMap(\.running).isEmpty)
+    #expect(!queue.acknowledgedOutcomes.contains(turn))
+
+    queue.dismiss(.outcome(turn))
+    queue.apply(scan(11), now: 11)
+    #expect(queue.items.isEmpty)
+}
+
 @Test func unavailableInventoryPreservesExistingGenericStateAndRootsStaySeparate() {
     let rootB = ClaudeInventorySession(sessionID: backgroundID, kind: .background, startedAt: 1,
                                        lifecycle: .background(state: "working"))
