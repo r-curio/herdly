@@ -41,7 +41,7 @@ A session in a multiplexer has two layers: the pane running it, and the terminal
 4. **Raise the host tab** with that host's Open ([issue #210](https://github.com/r-curio/steer/issues/210); ADR 0011 for Ghostty).
 5. **Verify the host** as that host's Open requires, with the tty join unchanged.
 
-Steer reports Opened only when steps 3 and 5 both pass. Each failed step yields one typed reason, and focus is never rolled back. What follows a failure, unavailable or the app-raise fallback, is decided in [issue #203](https://github.com/r-curio/steer/issues/203).
+Steer reports Opened only when steps 3 and 5 both pass. Each failed step yields one typed reason, and focus is never rolled back. What follows a failure, unavailable or the app-raise fallback, is decided in [ADR 0015](0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md) (issue #203).
 
 ## Considered options
 
