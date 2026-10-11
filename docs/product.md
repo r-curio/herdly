@@ -74,7 +74,7 @@ Keyboard and VoiceOver operation of the notch panel are in scope: every row and 
 
 ## Initial supported surfaces
 
-Support the Codex desktop app and Codex CLI running directly in Ghostty first. A terminal multiplexer is not part of the user's stated workflow. Other terminal hosts are outside the initial scope.
+Support the Codex desktop app and Codex CLI running directly in Ghostty first. Map [#197](https://github.com/r-curio/steer/issues/197) widens CLI support, for Codex CLI and Claude Code, to iTerm2, Terminal.app and WezTerm tabs and to tmux, Zellij and herdr panes hosted in any of them, under ADRs [0013](adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md) to [0017](adr/0017-type-question-digits-and-replies-into-one-bound-pane.md) and the terminal host presentation below; each host ships once its acceptance run in [MVP acceptance](mvp-acceptance.md) passes. Warp, kitty, Alacritty, editors and IDEs, iTerm2's tmux control mode, and split panes stay outside the scope.
 
 Monitor only Codex sessions running locally on the user's Mac in the first version. Remote Codex sessions, including sessions reached through SSH, are outside the initial scope. No remote session connection layer is required.
 
@@ -243,7 +243,7 @@ If the companion was fully quit when the user visited the result, that visit may
 
 ## Agreed terminal host presentation
 
-Agreed with the user on 2026-10-11 ([issue #213](https://github.com/r-curio/steer/issues/213), map [#197](https://github.com/r-curio/steer/issues/197)). This covers how every terminal host and multiplexer appears in Settings and on notch cards. It replaces the herdr presentation agreed on 2026-10-07 (issue #114), which this section generalizes, and keeps its herdr-specific lines. Binding, Open, visits and typed input follow ADRs [0013](adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md), 0014 (multiplexer panes, branch `docs/211-multiplexer-pane-binding`), [0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md), [0016](adr/0016-open-and-acknowledge-visits-the-same-way-on-every-terminal-host.md) and 0017 (typed input, branch `docs/212-typed-input`), and for herdr ADRs [0008](adr/0008-bind-herdr-panes-when-steer-and-herdr-agree.md), [0009](adr/0009-talk-to-herdr-over-its-socket-and-poll-snapshots.md), [0010](adr/0010-relay-codex-question-options-as-herdr-pane-keys.md), [0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md) and [0012](adr/0012-bind-codex-herdr-panes-by-title-and-foreground-process.md). The earlier herdr row and its four reason groups are implemented (#127, #141), and source comments still cite that section by its old name; everything here is specified, not built.
+Agreed with the user on 2026-10-11 ([issue #213](https://github.com/r-curio/steer/issues/213), map [#197](https://github.com/r-curio/steer/issues/197)). This covers how every terminal host and multiplexer appears in Settings and on notch cards. It replaces the herdr presentation agreed on 2026-10-07 (issue #114), which this section generalizes, and keeps its herdr-specific lines. Binding, Open, visits and typed input follow ADRs [0013](adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md), [0014](adr/0014-bind-multiplexer-panes-and-join-their-client-to-a-host-tab.md), [0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md), [0016](adr/0016-open-and-acknowledge-visits-the-same-way-on-every-terminal-host.md) and [0017](adr/0017-type-question-digits-and-replies-into-one-bound-pane.md), and for herdr ADRs [0008](adr/0008-bind-herdr-panes-when-steer-and-herdr-agree.md), [0009](adr/0009-talk-to-herdr-over-its-socket-and-poll-snapshots.md), [0010](adr/0010-relay-codex-question-options-as-herdr-pane-keys.md), [0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md) and [0012](adr/0012-bind-codex-herdr-panes-by-title-and-foreground-process.md). The earlier herdr row and its four reason groups are implemented (#127, #141), and source comments still cite that section by its old name; everything here is specified, not built.
 
 ### Settings
 
@@ -262,7 +262,7 @@ Agreed with the user on 2026-10-11 ([issue #213](https://github.com/r-curio/stee
 **Problem lines.**
 
 - **Every card:** not found in its fixed locations; can't be read (a scripting error, Automation denied, a socket that is missing or fails its trust check).
-- **A switched-off app holding sessions:** once Steer sees a live session whose process ancestry reaches an installed app that is switched off, its card says sessions were seen there and offers to turn it on. Ancestry needs no Automation access.
+- **A switched-off app holding sessions:** once Steer sees a live Claude session whose process ancestry reaches an installed app that is switched off, its card says sessions were seen there and offers to turn it on. Ancestry needs no Automation access.
 - **Multiplexer with no terminal on:** the switch stays usable, the badge reads Needs attention, and the line says "Turn on the terminal you run tmux in." (naming that multiplexer). Steer contacts a multiplexer only while a terminal is also on (ADR 0014).
 - **tmux:** sessions seen on a socket other than the default can't be reached.
 - **Zellij:** older than 0.44.1; more than one `zellij` client process running.
@@ -275,7 +275,7 @@ On the first interactive launch, the one-time "Use Ghostty with Steer?" sheet be
 
 ### Notch
 
-Rows never name the terminal or multiplexer a session runs in. An Open fallback, including one for a session whose app is switched off, looks like any other Open and shows no reason line (ADR 0015).
+Rows never name the terminal or multiplexer a session runs in. An Open fallback, including one for a Claude session whose app is switched off, looks like any other Open and shows no reason line (ADR 0015). A Codex session in a switched-off app, or one whose title shows in tabs of different apps with no clear latest output, cannot have its app identified (ADR 0015's amendment).
 
 **Open unavailable.** The card replaces Open with one reason line and shows no disabled button. The line names the app because the user has to act on it:
 
@@ -324,4 +324,4 @@ A handed-back approval reminder clears when the exact originating session/turn c
 
 ## Selected Ghostty tab binding
 
-Use Codex’s session-ID terminal title as the stable-version mapping candidate (ADR 0005). This changes the visible title while Codex runs. Match only one unsplit tab, reject ambiguity, and preserve normal launching. First verify using a temporary command-line override; no saved user setting has been changed.
+Use Codex’s session-ID terminal title as the stable-version mapping candidate (ADR 0005). [ADR 0013](adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md) adds a foreground `codex` check on the tab's tty for every host; Ghostty keeps the title-only rule until it exposes `tty`. This changes the visible title while Codex runs. Match only one unsplit tab, reject ambiguity, and preserve normal launching. First verify using a temporary command-line override; no saved user setting has been changed.
