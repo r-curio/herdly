@@ -58,6 +58,9 @@ import Testing
         // Leading/trailing whitespace a display could trim, or a bidirectional override that reorders the shown path.
         ("Write", ["file_path": "/tmp/a ", "content": "x"]),
         ("Write", ["file_path": "/tmp/\u{202E}txt.exe", "content": "x"]),
+        ("Write", ["file_path": "/tmp/a\u{2028}b", "content": "x"]),
+        ("Write", ["file_path": "/tmp/a\u{2029}b", "content": "x"]),
+        ("NotebookEdit", ["notebook_path": "/tmp/nb.ipynb", "cell_id": "c\u{2028}1", "new_source": "x", "edit_mode": "replace"]),
         ("NotebookEdit", ["notebook_path": "/tmp/nb.ipynb", "cell_id": "c1", "new_source": "", "edit_mode": "move"]),
         ("NotebookEdit", ["notebook_path": "/tmp/nb.ipynb", "new_source": "x", "edit_mode": "replace"]),
         ("NotebookEdit", ["notebook_path": "/tmp/nb.ipynb", "cell_id": "c1", "new_source": "x", "cell_type": "code",
