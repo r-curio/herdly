@@ -153,6 +153,11 @@ public enum ClaudeDirectApproval {
         let allowed = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-.")
         guard !host.isEmpty, host.count <= 253, host.allSatisfy(allowed.contains), !host.hasPrefix("."),
               !host.hasPrefix("-"), !host.contains("..") else { return nil }
+        // A WHATWG parser reads a host whose last label is a number (decimal, or 0x hex) as an IPv4 address,
+        // so "0x7f.1" would be fetched as 127.0.0.1. Such hosts are not shown as names.
+        let last = host.split(separator: ".").last.map(String.init) ?? ""
+        let hex = last.lowercased().hasPrefix("0x") && last.dropFirst(2).allSatisfy(\.isHexDigit)
+        guard !last.isEmpty, !last.allSatisfy(\.isNumber), !hex else { return nil }
         return String(host)
     }
 
