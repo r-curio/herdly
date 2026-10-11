@@ -508,7 +508,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     var count: Int { orderedAgentAttentionItems.count + (attention.pending ? 1 : 0) }
     var workingCount: Int { agentQueue.workingCount }
+    /// Every row needing the user, including Earlier results; the restart lab records this.
     var toCheckCount: Int { agentQueue.toCheckCount + (attention.pending ? 1 : 0) }
+    /// What settings shows, matching the strip badge: Earlier results are left out.
+    var currentToCheckCount: Int {
+        agentQueue.toCheckCount(at: Date().timeIntervalSince1970, earlier: appearance.earlier) + (attention.pending ? 1 : 0)
+    }
     /// One presentation mode prevents passive hover from replacing a new item's focused card.
     @Published var expanded = false
     @Published var presentationMode: NotchPresentationMode = .collapsed

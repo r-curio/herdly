@@ -294,6 +294,12 @@ public struct AgentAttentionQueue: Sendable {
         let unavailable = ambiguousClaudeSessions.subtracting(covered)
         return approvals.count + questions.count + outcomes.count + unavailable.count + waiting.count
     }
+    /// The count the strip badge and settings show: `toCheckCount` without results that have
+    /// moved under "Earlier" by `now`.
+    public func toCheckCount(at now: Double, earlier: EarlierDelay) -> Int {
+        guard let delay = earlier.seconds else { return toCheckCount }
+        return toCheckCount - outcomes.values.filter { now - $0.arrivedAt >= delay }.count
+    }
     public var acknowledgedOutcomes: Set<AgentTurnIdentity> { acknowledged }
     public var unavailableClaudeSessions: Set<AgentSessionIdentity> { ambiguousClaudeSessions }
     public func isClaudeSessionUnavailable(_ identity: AgentSessionIdentity) -> Bool {
