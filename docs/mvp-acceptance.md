@@ -67,8 +67,8 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 | --- | --- | --- | --- |
 | G1 | Enable **Enable Ghostty controls**; macOS asks for Automation access to Ghostty; allow. | Steer reports the permission verified after the first navigation. | |
 | G2 | Two unsplit tabs in the same project, one `codex` session each. Complete a turn in tab A while tab B is focused. | A's completion presents; B stays unaffected. | |
-| G3 | **Open in Codex** on A's item. | Exactly tab A in its window is selected; the item is acknowledged by the verified visit. | |
-| G4 | Split a tab and run a session in one pane. | Open in Codex reports unavailable; nothing selects an arbitrary pane. | |
+| G3 | **Open in Codex** on A's item. | Exactly tab A in its window is selected; the item is acknowledged by the verified Open (ADR 0016). | |
+| G4 | Split a tab and run a session in one pane. | Open in Codex raises Ghostty without selecting a tab or pane (ADR 0015); nothing is acknowledged. | |
 | G5 | Trigger a permission request in the CLI session and leave the tab. | Card with command, project and reason (when given), Approve once, Deny, Open in Codex, and a 30-second countdown that hovering does not extend. | |
 | G6 | Approve once. | Codex runs that one command; the next request asks again. | |
 | G7 | Deny. | Codex reports the denial; nothing runs. | |
@@ -76,7 +76,32 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 | G9 | Answer an expired one in Codex. | The row clears on Codex's recorded answer, not before. | |
 | G10 | While a request is pending in the notch, force-quit Steer (`kill -9`). | Codex's native prompt appears within the helper's deadline; nothing approved. Relaunch: the request shows handed back with no buttons. | |
 
-### 3d. Sound, mute, restart, displays
+### 3d. Terminal host acceptance
+
+Map [#197](https://github.com/r-curio/steer/issues/197) adds iTerm2, Terminal.app, WezTerm, tmux and Zellij. These lines gate each host, not the MVP. Each host ships only after this table passes for it on a packaged build, recorded in `docs/evidence/<host>-acceptance.md` with the host's version, the artifact's `sha256` and its commit. The agent drives the run; the operator approves macOS permission prompts and confirms each Open and acknowledgment line by looking. tmux and Zellij run the table once inside each of iTerm2, Terminal.app and WezTerm. Rules: ADRs [0013](adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md)–[0017](adr/0017-type-question-digits-and-replies-into-one-bound-pane.md) and [terminal host presentation](product.md#agreed-terminal-host-presentation).
+
+| # | Step | Expected | Result |
+| --- | --- | --- | --- |
+| H1 | Turn the host's switch on in Settings › Terminals. | iTerm2 and Terminal.app ask for Automation access; the card's badge reads ready with no problem lines. | |
+| H2 | One Codex and one Claude session, each in its own unsplit tab or single-pane window, plus a decoy tab showing the Codex session's title without running `codex`. | Both sessions bind to their own tabs; the decoy binds nothing. | |
+| H3 | From another app, with a different tab showing, complete a turn in each session and press Open. | The exact tab (and pane) shows in front; the completion is acknowledged only after Steer verifies it. | |
+| H4 | Switch to a session's tab by hand for under five seconds, then for over five. | The short visit acknowledges nothing; the long one acknowledges. | |
+| H5 | Split the tab, or for a multiplexer add a second pane or attach a second client, then press Open. | The app is raised without selecting a tab or pane; nothing is acknowledged; typed input shows "Steer can't reach this session's tab. Reply in the session." | |
+| H6 | Make the host unreadable (deny Automation, or move the multiplexer's socket), then look at the card and Settings. | Card: "Steer can't read <app>. Check Settings › Terminals."; Settings shows the matching problem line. | |
+| H7 | Quit the host app; then relaunch it and close a session's tab. | "<app> isn't running."; then "This session has ended." Steer never launches the app. | |
+| H8 | Turn the host's switch off with both sessions running, then press Open on each. | Claude: the app is raised silently and its card offers to turn the host back on. Codex: "Steer can't tell which terminal this session is in." | |
+| H9 | Typed input where ADR 0017 allows it: a Codex question option, then a reply to Codex and to Claude. | Each lands only in the bound pane and commits (Codex submits after a separate return); where ADR 0017 refuses input, the card shows its agreed line instead. | |
+
+Host-specific lines, added to the same evidence file:
+
+- **iTerm2:** no typed input at all (H9 shows "Steer can't type into iTerm2. Reply in the session."). With iTerm2's own Claude Code integration turned on, Steer's Claude hooks and binding still work and iTerm2's hook still runs.
+- **Terminal.app:** replies only; a Codex question shows "Answer this in Codex."
+- **WezTerm:** a session's tab in a window that isn't in front gets the fallback (H5's result), never a window switch.
+- **tmux:** a session on a socket other than the default is unreachable, with the card's socket line.
+- **Zellij:** a second `zellij` client process, or a version older than 0.44.1, shows its problem line.
+- **Once, across hosts:** the same Codex title in tabs of two different apps raises the app whose tab printed last, and is unavailable when both printed within the same second (ADR 0015 amendment).
+
+### 3e. Sound, mute, restart, displays
 
 | # | Step | Expected | Result |
 | --- | --- | --- | --- |
@@ -85,7 +110,7 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 | S3 | Kill Steer with `kill -9` after a completion queued, relaunch. | Same item returns silently; dismissals made before the kill are kept. | |
 | M1–M7 | The seven lines of the operator walkthrough in [notch-placement.md](notch-placement.md): two displays, freeze during interaction, disconnect/reconnect, deadline independence, keyboard, VoiceOver, Spaces and full screen. | As written there. | |
 
-### 3e. Remove
+### 3f. Remove
 
 | # | Step | Expected | Result |
 | --- | --- | --- | --- |
@@ -98,4 +123,5 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 - The build and packaging route is reproducible and machine-checked; the artifact carries a checksum and a manifest naming the commit and toolchain. Reproducible means the same steps and version from the same commit, not byte-identical binaries: two local builds of unchanged app sources produced different `Contents/MacOS/Steer` hashes while the helper's hash matched, so a checksum identifies one artifact rather than the commit.
 - The artifact is an ad-hoc signed development build. A signed or notarized release needs the maintainer's Developer ID identity and has not been produced.
 - Desktop session detection, approval handoff, Ghostty navigation, and restart recovery each have earlier live human evidence on unpackaged builds and automated evidence in the tests and labs, but the integrated pass in section 3 has **not** been run on the packaged app. Until every non-deferred line there is recorded as pass, the MVP is packaged, not verified.
-- Exact desktop task focus (D7) and split-pane targeting (G4 as unavailable) remain deferred by decision, not by omission.
+- Exact desktop task focus (D7) and split-pane targeting (G4 raises Ghostty instead) remain deferred by decision, not by omission.
+- The terminal hosts in section 3d ship one at a time; a host whose table has not passed keeps its switch hidden.
