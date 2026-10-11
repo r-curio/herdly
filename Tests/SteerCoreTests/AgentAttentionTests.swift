@@ -49,6 +49,32 @@ import Testing
     #expect(queue.toCheckCount == 3)
 }
 
+@Test func dismissingTheEarlierRunClearsOnlyThoseOutcomes() {
+    let claude = { (session: String) in
+        AgentSessionIdentity(source: .claude, sourceScope: "root-a", session: session, surface: .cli)
+    }
+    var queue = AgentAttentionQueue()
+    queue.apply(.outcome(AgentOutcome(session: claude("old-1"), turn: "t1", status: .finished, arrivedAt: 10)))
+    queue.apply(.outcome(AgentOutcome(session: claude("old-2"), turn: "t2", status: .failed, arrivedAt: 20)))
+    queue.apply(.outcome(AgentOutcome(session: claude("fresh"), turn: "t3", status: .finished, arrivedAt: 400)))
+    queue.apply(.outcome(AgentOutcome(session: claude("old-1"), turn: "t4", status: .finished, arrivedAt: 450)))
+    queue.apply(.approval(AgentApproval(session: claude("approval"), turn: "t5", call: "a1", arrivedAt: 15, handoffAfter: 30)))
+
+    // The Dismiss all list is taken from what is shown; a result that moves into Earlier later is not in it.
+    let earlier = queue.items(at: 500).filter { $0.kind == .earlierOutcome }.map(\.id)
+    #expect(earlier.count == 2)
+    for id in earlier { queue.dismiss(id) }
+
+    // Redelivered observations of the dismissed results do not bring them back.
+    queue.apply(.outcome(AgentOutcome(session: claude("old-1"), turn: "t1", status: .finished, arrivedAt: 10)))
+    queue.apply(.outcome(AgentOutcome(session: claude("old-2"), turn: "t2", status: .failed, arrivedAt: 20)))
+
+    let remaining = queue.items(at: 500)
+    #expect(remaining.compactMap(\.outcome).map(\.turn).sorted() == ["t3", "t4"])
+    #expect(remaining.contains { $0.kind == .handedBackApproval })
+    #expect(queue.items(at: 800).filter { $0.kind == .earlierOutcome }.count == 2)
+}
+
 @Test func versionOneCodexSnapshotsMigrateToFinishedVersionTwoOutcomes() throws {
     let session = UUID(), turn = UUID()
     let legacy = """

@@ -176,7 +176,9 @@ arrived before Steer restarted is uncertain and silent. After the Earlier delay 
 outcome moves into Earlier while retaining its to-check count and Dismiss action; Codex retains Open
 in Codex, while Claude keeps the unavailable return explanation. In the open queue an Earlier row folds to
 one line (its session name and tag, with its age); opening the fold shows its full header, details, and controls. This is
-presentation decay, not deletion or acknowledgment. Claude has no trustworthy read receipt; only
+presentation decay, not deletion or acknowledgment. Agreed on 2026-10-11: the Earlier heading carries a Dismiss all
+action that explicitly dismisses exactly the results listed under it, as if each row's Dismiss were clicked; results
+that move into Earlier afterwards, and every other row, stay queued. Claude has no trustworthy read receipt; only
 explicit dismissal, a later verified exact-tab visit, or a reply can acknowledge its outcome. Agreed
 on 2026-10-08: a prompt submitted in a Claude session (its `UserPromptSubmit`) acknowledges that
 session's outcomes from other turns that arrived strictly before the prompt. An outcome arriving at

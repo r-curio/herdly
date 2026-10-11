@@ -1880,17 +1880,24 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func dismissAgent(_ id: AgentAttentionID) {
-        if case let .outcome(identity) = id, let completion = codexTurn(identity) {
-            queue.dismiss(.completion(completion.id))
-        } else if case let .approval(identity) = id, let requestID = UUID(uuidString: identity.call),
-                  let request = queue.items.compactMap(\.request).first(where: { $0.id == requestID }) {
-            queue.dismiss(.request(request.identity))
-        } else if case let .question(identity) = id, let session = codexSession(identity.session),
-                  let turn = UUID(uuidString: identity.turn),
-                  let question = queue.items.compactMap(\.question).first(where: { $0.session == session && $0.turn == turn && $0.callID == identity.call }) {
-            queue.dismiss(.question(question.id))
+        dismissAgents([id])
+    }
+    /// Dismisses exactly the listed items, each as its own Dismiss would, then saves once. Items
+    /// not listed stay queued, including results that move into Earlier after the list was taken.
+    func dismissAgents(_ ids: [AgentAttentionID]) {
+        for id in ids {
+            if case let .outcome(identity) = id, let completion = codexTurn(identity) {
+                queue.dismiss(.completion(completion.id))
+            } else if case let .approval(identity) = id, let requestID = UUID(uuidString: identity.call),
+                      let request = queue.items.compactMap(\.request).first(where: { $0.id == requestID }) {
+                queue.dismiss(.request(request.identity))
+            } else if case let .question(identity) = id, let session = codexSession(identity.session),
+                      let turn = UUID(uuidString: identity.turn),
+                      let question = queue.items.compactMap(\.question).first(where: { $0.session == session && $0.turn == turn && $0.callID == identity.call }) {
+                queue.dismiss(.question(question.id))
+            }
+            agentQueue.dismiss(id)
         }
-        agentQueue.dismiss(id)
         syncAgentQueueWithCodex(now: Date().timeIntervalSince1970)
         saveCompletions()
         refresh()

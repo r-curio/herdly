@@ -1514,15 +1514,22 @@ struct Notch: View {
                             }
                             ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
                                 if item.kind == .earlierOutcome && (index == 0 || group.items[index - 1].kind != .earlierOutcome) {
-                                    let count = group.items[index...].prefix { $0.kind == .earlierOutcome }.count
+                                    // Dismiss all clears exactly the results listed under this heading.
+                                    let earlierIDs = group.items[index...].prefix { $0.kind == .earlierOutcome }.map(\.id)
+                                    let count = earlierIDs.count
                                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                        Text("Earlier").font(NotchStyle.mono(11, .semibold))
-                                        Text("\(count)").font(NotchStyle.mono(11)).monospacedDigit()
+                                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                            Text("Earlier").font(NotchStyle.mono(11, .semibold))
+                                            Text("\(count)").font(NotchStyle.mono(11)).monospacedDigit()
+                                        }
+                                        .foregroundStyle(NotchStyle.dim)
+                                        .accessibilityElement(children: .ignore)
+                                        .accessibilityLabel("Earlier, \(count) \(count == 1 ? "result" : "results")")
+                                        .accessibilityAddTraits(.isHeader)
+                                        Spacer(minLength: 8)
+                                        NotchButton(title: "Dismiss all") { model.dismissAgents(earlierIDs) }
+                                            .accessibilityLabel("Dismiss all \(count) earlier \(count == 1 ? "result" : "results")")
                                     }
-                                    .foregroundStyle(NotchStyle.dim)
-                                    .accessibilityElement(children: .ignore)
-                                    .accessibilityLabel("Earlier, \(count) \(count == 1 ? "result" : "results")")
-                                    .accessibilityAddTraits(.isHeader)
                                     .transition(rowTransition)
                                 }
                                 attentionRow(item)
