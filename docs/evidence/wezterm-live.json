@@ -1,0 +1,1137 @@
+{
+ "issue": 206,
+ "recorded": "2026-10-11",
+ "main_run": {
+  "nonce": "82de9948",
+  "started": 1791701651.7247841,
+  "steps": [
+   {
+    "step": "version",
+    "at": 0.04,
+    "version": "wezterm 20240203-110809-5046fc22",
+    "front": "com.github.wez.wezterm",
+    "clients": [
+     {
+      "pid": 38165,
+      "connection_elapsed": {
+       "secs": 3,
+       "nanos": 765604000
+      },
+      "idle_time": {
+       "secs": 3,
+       "nanos": 765604000
+      },
+      "workspace": "default",
+      "focused_pane_id": 0
+     }
+    ]
+   },
+   {
+    "step": "preexisting",
+    "at": 0.05,
+    "count": 1
+   },
+   {
+    "step": "created",
+    "at": 0.26,
+    "panes": {
+     "A1": 1,
+     "A2": 2,
+     "A3": 3,
+     "A4a": 4,
+     "A4b": 5,
+     "B1": 6
+    },
+    "windows": [
+     1,
+     2
+    ]
+   },
+   {
+    "step": "env_clean",
+    "at": 4.37,
+    "leaks": {},
+    "wezterm_pane": {
+     "A1": "1",
+     "A2": "2",
+     "A3": "3",
+     "A4a": "4",
+     "A4b": "5",
+     "B1": "6"
+    }
+   },
+   {
+    "step": "codex_title",
+    "at": 6.44,
+    "title": "01a129bd-a3ec-7dc0-875a-4fac3..."
+   },
+   {
+    "step": "claude_title",
+    "at": 67.17,
+    "title": null,
+    "observed": "2.1.296"
+   },
+   {
+    "step": "codex_rollout_ids",
+    "at": 79.37,
+    "ids": [
+     "01a129ba-c0e4-7d52-9521-81b024ad0928",
+     "01a129bd-a3ec-7dc0-875a-4fac39ec9eaa"
+    ]
+   },
+   {
+    "step": "claude_hook_events",
+    "at": 79.38,
+    "events": [
+     {
+      "at": 1791701727.680547,
+      "event": "SessionStart",
+      "session_id": "729984f1-4a2d-4649-b5f3-92212557f4ee",
+      "env": {
+       "TERM_PROGRAM": "WezTerm",
+       "TERM_PROGRAM_VERSION": "20240203-110809-5046fc22",
+       "WEZTERM_PANE": "2",
+       "WEZTERM_UNIX_SOCKET": "~/.local/share/wezterm/gui-sock-38165"
+      },
+      "ancestors": [
+       {
+        "tty": "ttys018",
+        "comm": "claude"
+       },
+       {
+        "tty": "??",
+        "comm": "wezterm-gui"
+       }
+      ]
+     },
+     {
+      "at": 1791701727.898895,
+      "event": "UserPromptSubmit",
+      "session_id": "729984f1-4a2d-4649-b5f3-92212557f4ee",
+      "env": {
+       "TERM_PROGRAM": "WezTerm",
+       "TERM_PROGRAM_VERSION": "20240203-110809-5046fc22",
+       "WEZTERM_PANE": "2",
+       "WEZTERM_UNIX_SOCKET": "~/.local/share/wezterm/gui-sock-38165"
+      },
+      "ancestors": [
+       {
+        "tty": "ttys018",
+        "comm": "claude"
+       },
+       {
+        "tty": "??",
+        "comm": "wezterm-gui"
+       }
+      ]
+     },
+     {
+      "at": 1791701729.46051,
+      "event": "Stop",
+      "session_id": "729984f1-4a2d-4649-b5f3-92212557f4ee",
+      "env": {
+       "TERM_PROGRAM": "WezTerm",
+       "TERM_PROGRAM_VERSION": "20240203-110809-5046fc22",
+       "WEZTERM_PANE": "2",
+       "WEZTERM_UNIX_SOCKET": "~/.local/share/wezterm/gui-sock-38165"
+      },
+      "ancestors": [
+       {
+        "tty": "ttys018",
+        "comm": "claude"
+       },
+       {
+        "tty": "??",
+        "comm": "wezterm-gui"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "step": "inventory",
+    "at": 81.47,
+    "panes": [
+     {
+      "window_id": 1,
+      "tab_id": 1,
+      "pane_id": 1,
+      "workspace": "default",
+      "size": {
+       "rows": 24,
+       "cols": 80,
+       "pixel_width": 1120,
+       "pixel_height": 768,
+       "dpi": 144
+      },
+      "title": "01a129bd-a3ec-7dc0-875a-4fac3...",
+      "cwd": "file://<lab-root>/project",
+      "cursor_x": 2,
+      "cursor_y": 20,
+      "cursor_shape": "Default",
+      "cursor_visibility": "Visible",
+      "left_col": 0,
+      "top_row": 0,
+      "tab_title": "",
+      "window_title": "01a129bd-a3ec-7dc0-875a-4fac3...",
+      "is_active": true,
+      "is_zoomed": false,
+      "tty_name": "/dev/ttys017",
+      "ps_foreground": [
+       "codex"
+      ]
+     },
+     {
+      "window_id": 1,
+      "tab_id": 2,
+      "pane_id": 2,
+      "workspace": "default",
+      "size": {
+       "rows": 24,
+       "cols": 80,
+       "pixel_width": 1120,
+       "pixel_height": 768,
+       "dpi": 144
+      },
+      "title": "Steer Claude 729984f1-4a2d-4649-b5f3-92212557f4ee",
+      "cwd": "file://<lab-root>/claude-project",
+      "cursor_x": 2,
+      "cursor_y": 21,
+      "cursor_shape": "Default",
+      "cursor_visibility": "Visible",
+      "left_col": 0,
+      "top_row": 0,
+      "tab_title": "",
+      "window_title": "01a129bd-a3ec-7dc0-875a-4fac3...",
+      "is_active": true,
+      "is_zoomed": false,
+      "tty_name": "/dev/ttys018",
+      "ps_foreground": [
+       "claude",
+       "caffeinate"
+      ]
+     },
+     {
+      "window_id": 1,
+      "tab_id": 3,
+      "pane_id": 3,
+      "workspace": "default",
+      "size": {
+       "rows": 24,
+       "cols": 80,
+       "pixel_width": 1120,
+       "pixel_height": 768,
+       "dpi": 144
+      },
+      "title": "01a129bd-a3ec-7dc0-875a-4fac3...",
+      "cwd": "file://~",
+      "cursor_x": 0,
+      "cursor_y": 6,
+      "cursor_shape": "Default",
+      "cursor_visibility": "Visible",
+      "left_col": 0,
+      "top_row": 0,
+      "tab_title": "",
+      "window_title": "01a129bd-a3ec-7dc0-875a-4fac3...",
+      "is_active": true,
+      "is_zoomed": false,
+      "tty_name": "/dev/ttys019",
+      "ps_foreground": [
+       "sleep"
+      ]
+     },
+     {
+      "window_id": 1,
+      "tab_id": 4,
+      "pane_id": 4,
+      "workspace": "default",
+      "size": {
+       "rows": 24,
+       "cols": 39,
+       "pixel_width": 546,
+       "pixel_height": 768,
+       "dpi": 144
+      },
+      "title": "zsh",
+      "cwd": "file://~",
+      "cursor_x": 16,
+      "cursor_y": 7,
+      "cursor_shape": "Default",
+      "cursor_visibility": "Visible",
+      "left_col": 0,
+      "top_row": 0,
+      "tab_title": "",
+      "window_title": "01a129bd-a3ec-7dc0-875a-4fac3...",
+      "is_active": false,
+      "is_zoomed": false,
+      "tty_name": "/dev/ttys020",
+      "ps_foreground": [
+       "-zsh"
+      ]
+     },
+     {
+      "window_id": 1,
+      "tab_id": 4,
+      "pane_id": 5,
+      "workspace": "default",
+      "size": {
+       "rows": 24,
+       "cols": 40,
+       "pixel_width": 560,
+       "pixel_height": 768,
+       "dpi": 144
+      },
+      "title": "zsh",
+      "cwd": "file://~",
+      "cursor_x": 16,
+      "cursor_y": 7,
+      "cursor_shape": "Default",
+      "cursor_visibility": "Visible",
+      "left_col": 40,
+      "top_row": 0,
+      "tab_title": "",
+      "window_title": "01a129bd-a3ec-7dc0-875a-4fac3...",
+      "is_active": true,
+      "is_zoomed": false,
+      "tty_name": "/dev/ttys021",
+      "ps_foreground": [
+       "-zsh"
+      ]
+     },
+     {
+      "window_id": 2,
+      "tab_id": 5,
+      "pane_id": 6,
+      "workspace": "default",
+      "size": {
+       "rows": 24,
+       "cols": 80,
+       "pixel_width": 1120,
+       "pixel_height": 768,
+       "dpi": 144
+      },
+      "title": "zsh",
+      "cwd": "file://~",
+      "cursor_x": 16,
+      "cursor_y": 4,
+      "cursor_shape": "Default",
+      "cursor_visibility": "Visible",
+      "left_col": 0,
+      "top_row": 0,
+      "tab_title": "",
+      "window_title": "",
+      "is_active": true,
+      "is_zoomed": false,
+      "tty_name": "/dev/ttys022",
+      "ps_foreground": [
+       "-zsh"
+      ]
+     }
+    ],
+    "clients": [
+     {
+      "focused_pane_id": 6,
+      "workspace": "default"
+     }
+    ]
+   },
+   {
+    "step": "select:activate-pane-other-tab",
+    "at": 86.28,
+    "target": 2,
+    "raise_app": false,
+    "activate_exit": 0,
+    "before": {
+     "front": "com.github.wez.wezterm",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ]
+    },
+    "after": {
+     "front": "com.github.wez.wezterm",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ],
+     "active_in_tab": {
+      "1": true,
+      "2": true,
+      "3": true,
+      "4": false,
+      "5": true,
+      "6": true
+     }
+    },
+    "matched": false,
+    "elapsed": 3.15
+   },
+   {
+    "step": "select:activate-pane-other-window",
+    "at": 86.87,
+    "target": 6,
+    "raise_app": false,
+    "activate_exit": 0,
+    "before": {
+     "front": "com.github.wez.wezterm",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ]
+    },
+    "after": {
+     "front": "com.github.wez.wezterm",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ],
+     "active_in_tab": {
+      "1": true,
+      "2": true,
+      "3": true,
+      "4": false,
+      "5": true,
+      "6": true
+     }
+    },
+    "matched": true,
+    "elapsed": 0.03
+   },
+   {
+    "step": "select:activate-pane-split",
+    "at": 90.57,
+    "target": 5,
+    "raise_app": false,
+    "activate_exit": 0,
+    "before": {
+     "front": "com.github.wez.wezterm",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ]
+    },
+    "after": {
+     "front": "com.github.wez.wezterm",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ],
+     "active_in_tab": {
+      "1": true,
+      "2": true,
+      "3": true,
+      "4": false,
+      "5": true,
+      "6": true
+     }
+    },
+    "matched": false,
+    "elapsed": 3.12
+   },
+   {
+    "step": "select:activate-pane+open-from-finder-same-window",
+    "at": 94.41,
+    "target": 1,
+    "raise_app": true,
+    "activate_exit": 0,
+    "before": {
+     "front": "com.apple.finder",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ]
+    },
+    "after": {
+     "front": "com.github.wez.wezterm",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ],
+     "active_in_tab": {
+      "1": true,
+      "2": true,
+      "3": true,
+      "4": false,
+      "5": true,
+      "6": true
+     }
+    },
+    "matched": false,
+    "elapsed": 3.2
+   },
+   {
+    "step": "select:activate-pane+open-from-finder-other-window",
+    "at": 95.17,
+    "target": 6,
+    "raise_app": true,
+    "activate_exit": 0,
+    "before": {
+     "front": "com.apple.finder",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ]
+    },
+    "after": {
+     "front": "com.github.wez.wezterm",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ],
+     "active_in_tab": {
+      "1": true,
+      "2": true,
+      "3": true,
+      "4": false,
+      "5": true,
+      "6": true
+     }
+    },
+    "matched": true,
+    "elapsed": 0.11
+   },
+   {
+    "step": "select:activate-pane+open-from-finder-back-window",
+    "at": 99.0,
+    "target": 3,
+    "raise_app": true,
+    "activate_exit": 0,
+    "before": {
+     "front": "com.apple.finder",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ]
+    },
+    "after": {
+     "front": "com.github.wez.wezterm",
+     "focused": [
+      {
+       "focused_pane_id": 6,
+       "workspace": "default"
+      }
+     ],
+     "active_in_tab": {
+      "1": true,
+      "2": true,
+      "3": true,
+      "4": false,
+      "5": true,
+      "6": true
+     }
+    },
+    "matched": false,
+    "elapsed": 3.21
+   },
+   {
+    "step": "focus:other-app-front",
+    "at": 100.09,
+    "front": "com.apple.finder",
+    "focused": [
+     {
+      "focused_pane_id": 6,
+      "workspace": "default"
+     }
+    ]
+   },
+   {
+    "step": "send:paste-then-cr",
+    "at": 103.2,
+    "typed_visible": true,
+    "ran_before_cr": false,
+    "ran_after_cr": true,
+    "front": "com.apple.finder"
+   },
+   {
+    "step": "send:unknown-pane",
+    "at": 103.23,
+    "pane_id": 1006,
+    "exit": 1,
+    "stderr": "14:55:54.949  ERROR  wezterm > unexpected response Ok(ErrorResponse(ErrorResponse { reason: \"Error: no such pane 1006\" })); terminating"
+   },
+   {
+    "step": "send:tui-prompt",
+    "at": 153.9,
+    "results": {
+     "codex": {
+      "no-paste text+CR": false,
+      "separate CR": true
+     },
+     "claude": {
+      "no-paste text+CR": true
+     }
+    }
+   },
+   {
+    "step": "send:landing",
+    "at": 153.99,
+    "panes": {
+     "0": {
+      "I1": 0,
+      "I2": 0,
+      "bad": 0,
+      "lab": false
+     },
+     "1": {
+      "I1": 0,
+      "I2": 0,
+      "bad": 0,
+      "lab": true
+     },
+     "2": {
+      "I1": 0,
+      "I2": 0,
+      "bad": 0,
+      "lab": true
+     },
+     "3": {
+      "I1": 0,
+      "I2": 0,
+      "bad": 0,
+      "lab": true
+     },
+     "4": {
+      "I1": 2,
+      "I2": 0,
+      "bad": 0,
+      "lab": true
+     },
+     "5": {
+      "I1": 0,
+      "I2": 0,
+      "bad": 0,
+      "lab": true
+     },
+     "6": {
+      "I1": 0,
+      "I2": 2,
+      "bad": 0,
+      "lab": true
+     }
+    },
+    "I1_target": 4,
+    "I2_target": 6
+   }
+  ],
+  "finished": 1791701805.717706
+ },
+ "select_probe_two_windows": {
+  "tag": "LAB4fbd",
+  "steps": [
+   {
+    "step": "titles",
+    "panes": {
+     "11": {
+      "title": "LAB4fbd-x1",
+      "tab_title": "",
+      "window_title": "LAB4fbd-x2b"
+     },
+     "12": {
+      "title": "LAB4fbd-x2",
+      "tab_title": "",
+      "window_title": "LAB4fbd-x2b"
+     },
+     "13": {
+      "title": "ICON-LAB4fbd-x2b",
+      "tab_title": "",
+      "window_title": "LAB4fbd-x2b"
+     },
+     "14": {
+      "title": "LAB4fbd-y1",
+      "tab_title": "",
+      "window_title": "LAB4fbd-y1"
+     }
+    },
+    "lab": {
+     "x1": 11,
+     "x2": 12,
+     "x2b": 13,
+     "y1": 14
+    }
+   },
+   {
+    "step": "select:pane-in-other-tab-same-window",
+    "target": "x1",
+    "raise_app": false,
+    "activate_exit": 0,
+    "before": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": false,
+      "13": true,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "after": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": false,
+      "13": true,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "front_names_target": false
+   },
+   {
+    "step": "select:back-to-split-tab",
+    "target": "x2b",
+    "raise_app": false,
+    "activate_exit": 0,
+    "before": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": false,
+      "13": true,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "after": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": false,
+      "13": true,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "front_names_target": false
+   },
+   {
+    "step": "select:split-sibling",
+    "target": "x2",
+    "raise_app": false,
+    "activate_exit": 0,
+    "before": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": false,
+      "13": true,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "after": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": true,
+      "13": false,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "front_names_target": false
+   },
+   {
+    "step": "select:other-window-with-raise-from-finder",
+    "target": "y1",
+    "raise_app": true,
+    "activate_exit": 0,
+    "before": {
+     "front_app": "com.apple.finder",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": true,
+      "13": false,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "after": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": true,
+      "13": false,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "front_names_target": true
+   },
+   {
+    "step": "select:back-window-with-raise-from-finder",
+    "target": "x2b",
+    "raise_app": true,
+    "activate_exit": 0,
+    "before": {
+     "front_app": "com.apple.finder",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": true,
+      "13": false,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "after": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": false,
+      "13": true,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "front_names_target": false
+   },
+   {
+    "step": "select:other-tab-with-raise-from-finder",
+    "target": "x1",
+    "raise_app": true,
+    "activate_exit": 0,
+    "before": {
+     "front_app": "com.apple.finder",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": false,
+      "13": true,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "after": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "LAB4fbd-y1",
+     "focused_pane_ids": [
+      14
+     ],
+     "active_in_tab": {
+      "11": true,
+      "12": false,
+      "13": true,
+      "14": true
+     },
+     "window_titles": {
+      "5": "LAB4fbd-x2b",
+      "6": "LAB4fbd-y1"
+     }
+    },
+    "front_names_target": false
+   }
+  ]
+ },
+ "select_probe_single_window": {
+  "tag": "LAB0b63",
+  "steps": [
+   {
+    "step": "titles",
+    "panes": {
+     "15": {
+      "title": "LAB0b63-x1",
+      "tab_title": "",
+      "window_title": "LAB0b63-x2b"
+     },
+     "16": {
+      "title": "LAB0b63-x2",
+      "tab_title": "",
+      "window_title": "LAB0b63-x2b"
+     },
+     "17": {
+      "title": "ICON-LAB0b63-x2b",
+      "tab_title": "",
+      "window_title": "LAB0b63-x2b"
+     }
+    },
+    "lab": {
+     "x1": 15,
+     "x2": 16,
+     "x2b": 17
+    }
+   },
+   {
+    "step": "select:single:other-tab",
+    "target": "x1",
+    "raise_app": false,
+    "activate_exit": 0,
+    "before": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "[2/2] ICON-LAB0b63-x2b",
+     "focused_pane_ids": [
+      17
+     ],
+     "active_in_tab": {
+      "15": true,
+      "16": false,
+      "17": true
+     },
+     "window_titles": {
+      "7": "LAB0b63-x2b"
+     }
+    },
+    "after": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "[1/2] LAB0b63-x1",
+     "focused_pane_ids": [
+      15
+     ],
+     "active_in_tab": {
+      "15": true,
+      "16": false,
+      "17": true
+     },
+     "window_titles": {
+      "7": "LAB0b63-x2b"
+     }
+    },
+    "front_names_target": false
+   },
+   {
+    "step": "select:single:back-to-split-tab",
+    "target": "x2b",
+    "raise_app": false,
+    "activate_exit": 0,
+    "before": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "[1/2] LAB0b63-x1",
+     "focused_pane_ids": [
+      15
+     ],
+     "active_in_tab": {
+      "15": true,
+      "16": false,
+      "17": true
+     },
+     "window_titles": {
+      "7": "LAB0b63-x2b"
+     }
+    },
+    "after": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "[2/2] ICON-LAB0b63-x2b",
+     "focused_pane_ids": [
+      17
+     ],
+     "active_in_tab": {
+      "15": true,
+      "16": false,
+      "17": true
+     },
+     "window_titles": {
+      "7": "LAB0b63-x2b"
+     }
+    },
+    "front_names_target": false
+   },
+   {
+    "step": "select:single:split-sibling",
+    "target": "x2",
+    "raise_app": false,
+    "activate_exit": 0,
+    "before": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "[2/2] ICON-LAB0b63-x2b",
+     "focused_pane_ids": [
+      17
+     ],
+     "active_in_tab": {
+      "15": true,
+      "16": false,
+      "17": true
+     },
+     "window_titles": {
+      "7": "LAB0b63-x2b"
+     }
+    },
+    "after": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "[2/2] LAB0b63-x2",
+     "focused_pane_ids": [
+      16
+     ],
+     "active_in_tab": {
+      "15": true,
+      "16": true,
+      "17": false
+     },
+     "window_titles": {
+      "7": "LAB0b63-x2b"
+     }
+    },
+    "front_names_target": false
+   },
+   {
+    "step": "select:single:other-tab-raise-from-finder",
+    "target": "x1",
+    "raise_app": true,
+    "activate_exit": 0,
+    "before": {
+     "front_app": "com.apple.finder",
+     "front_wezterm_window": "[2/2] LAB0b63-x2",
+     "focused_pane_ids": [
+      16
+     ],
+     "active_in_tab": {
+      "15": true,
+      "16": true,
+      "17": false
+     },
+     "window_titles": {
+      "7": "LAB0b63-x2b"
+     }
+    },
+    "after": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "[1/2] LAB0b63-x1",
+     "focused_pane_ids": [
+      15
+     ],
+     "active_in_tab": {
+      "15": true,
+      "16": true,
+      "17": false
+     },
+     "window_titles": {
+      "7": "LAB0b63-x2b"
+     }
+    },
+    "front_names_target": false
+   },
+   {
+    "step": "select:single:split-tab-raise-from-finder",
+    "target": "x2b",
+    "raise_app": true,
+    "activate_exit": 0,
+    "before": {
+     "front_app": "com.apple.finder",
+     "front_wezterm_window": "[1/2] LAB0b63-x1",
+     "focused_pane_ids": [
+      15
+     ],
+     "active_in_tab": {
+      "15": true,
+      "16": true,
+      "17": false
+     },
+     "window_titles": {
+      "7": "LAB0b63-x2b"
+     }
+    },
+    "after": {
+     "front_app": "com.github.wez.wezterm",
+     "front_wezterm_window": "[2/2] ICON-LAB0b63-x2b",
+     "focused_pane_ids": [
+      17
+     ],
+     "active_in_tab": {
+      "15": true,
+      "16": false,
+      "17": true
+     },
+     "window_titles": {
+      "7": "LAB0b63-x2b"
+     }
+    },
+    "front_names_target": false
+   }
+  ]
+ }
+}
