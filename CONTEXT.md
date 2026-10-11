@@ -18,8 +18,12 @@ The companion's compact display at the top of the screen, intended to show Codex
 An individual Codex conversation in the desktop app or CLI, distinct from its hosting application.
 
 **Terminal host**:
-The terminal environment that contains a CLI session's terminal: an unsplit Ghostty tab directly, or a single-pane herdr tab whose herdr client runs in Ghostty.
+The terminal environment that contains a CLI session's terminal: an unsplit tab of a supported terminal (Ghostty, iTerm2, Terminal.app, WezTerm) directly, or a single-pane herdr tab whose herdr client runs in Ghostty.
 _Avoid_: Terminal app, multiplexer, window
+
+**Tab binding**:
+The association between a CLI session and the one unsplit terminal tab running it. For Claude Code it follows the session's own process to its tab. For Codex it holds only while exactly one tab runs a Codex process in its foreground and shows the session's shortened identifier as its title. It is void once the tab closes, its foreground process changes, the session ends, or, for Codex, the title changes.
+_Avoid_: Tab match, tab mapping
 
 **Pane binding**:
 The association between a CLI session and the one herdr pane running it. For Claude Code it holds only while the companion's own record of that pane and herdr's report of the pane's session agree, and is void once the session ends, herdr's report changes, or herdr restarts. For Codex it holds only while exactly one pane runs a Codex process in its foreground and shows the session's shortened identifier as its title, and is void once either stops holding or the session ends.
