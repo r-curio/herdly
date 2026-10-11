@@ -55,6 +55,10 @@ The action that returns the user to the Codex session associated with a notch no
 **Attention queue**:
 The ordered collection of Codex activity presented in the shared notch, with approval requests ahead of other activity. Its order determines presentation, not when Codex sessions execute. The user may sort the remaining rows by last update; live approvals and waiting questions stay first either way.
 
+**Open fallback**:
+An Open that raises the session's terminal app, without selecting a tab or pane, because the exact tab or pane cannot be reached. It is navigation only: it never counts as a visit, acknowledges nothing, and is never an input target.
+_Avoid_: Partial open, best-effort open
+
 **Acknowledged completion**:
 A particular completion cleared by explicit dismissal; for a supported CLI surface, also by a verified visit after completion; when it arrives while its herdr pane is already in front, by that pane staying visible for five seconds after it arrived; or by a later prompt submitted in the same session. Desktop app visibility never acknowledges a completion; the desktop app's own cleared unread flag, read from its state file after the completion, does (see [desktop read state](docs/desktop-read-state.md). This does not mean every result in the session has been read.
 
