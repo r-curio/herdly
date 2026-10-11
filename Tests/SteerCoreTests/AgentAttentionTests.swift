@@ -310,3 +310,33 @@ import Testing
             cliSessions: cliSessions))
     }
 }
+
+@Test func earlierResultsLeaveTheStripBadgeAndSprites() {
+    let claude = { (session: String) in
+        AgentSessionIdentity(source: .claude, sourceScope: "root-a", session: session, surface: .cli)
+    }
+    var queue = AgentAttentionQueue()
+    queue.apply(.outcome(AgentOutcome(session: claude("old"), turn: "t1", status: .finished, arrivedAt: 10)))
+    queue.apply(.outcome(AgentOutcome(session: claude("fresh"), turn: "t2", status: .finished, arrivedAt: 400)))
+    queue.apply(.running(AgentRunning(session: claude("busy"), turn: "t3", arrivedAt: 20)))
+
+    let strip = AgentStripSummary.make(items: queue.items(at: 500))
+    #expect(strip.toCheck == 1)
+    #expect(queue.toCheckCount(at: 500, earlier: .fiveMinutes) == 1)
+    #expect(queue.toCheckCount(at: 500, earlier: .never) == 2)
+    #expect(Set(strip.sessions.map(\.session)) == [claude("fresh"), claude("busy")])
+    // The open queue still lists the Earlier result.
+    #expect(queue.items(at: 500).contains { $0.kind == .earlierOutcome && $0.session == claude("old") })
+
+    // A session with an Earlier result keeps its sprite while it is working again.
+    queue.apply(.running(AgentRunning(session: claude("old"), turn: "t4", arrivedAt: 450)))
+    let working = AgentStripSummary.make(items: queue.items(at: 500))
+    #expect(working.toCheck == 1)
+    #expect(working.sessions.contains { $0.session == claude("old") && $0.working })
+
+    // Only Earlier results left: the strip is empty.
+    var onlyEarlier = AgentAttentionQueue()
+    onlyEarlier.apply(.outcome(AgentOutcome(session: claude("old"), turn: "t1", status: .finished, arrivedAt: 10)))
+    let empty = AgentStripSummary.make(items: onlyEarlier.items(at: 500))
+    #expect(empty.toCheck == 0 && empty.sessions.isEmpty && empty.subject == "idle")
+}
