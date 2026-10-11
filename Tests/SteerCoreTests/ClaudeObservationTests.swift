@@ -778,3 +778,37 @@ private func approvals(_ root: URL) -> [AgentApproval] {
     try appendClaudeEvent(claudeRecord("PostToolUse", at: 4, promptID: "p1", toolUseID: "call"), to: root)
     #expect(approvals(root).isEmpty)
 }
+
+@Test func claudeWebFetchApprovalMatchesTheCallOnTheSameURL() throws {
+    let input: [String: Any] = ["url": "https://example.com/", "prompt": "title?"]
+    var request = claudeRecord("PermissionRequest", at: 3, promptID: "p1", toolName: "WebFetch",
+                               toolInput: ["url": "https://example.com/"], approvalRequestID: "request-1")
+    request["approval_details"] = fileDetails("WebFetch", input)
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 1.5, promptID: "p1", toolName: "WebFetch", toolUseID: "other",
+                     toolInput: ["url": "https://httpbin.org/redirect-to"]),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "WebFetch", toolUseID: "call",
+                     toolInput: ["url": "https://example.com/"]),
+        request
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let approval = try #require(approvals(root).first)
+    #expect(approval.identity.call == "call")
+    #expect(approval.details?.action == "Fetch web page")
+    #expect(approval.details?.commandLabel == "url")
+}
+
+@Test func claudeWebSearchApprovalNeedsAValidQueryLabel() throws {
+    var request = claudeRecord("PermissionRequest", at: 3, promptID: "p1", toolName: "WebSearch",
+                               toolInput: [:], approvalRequestID: "request-1")
+    // Details whose command does not fit its label are dropped by the reader.
+    request["approval_details"] = ["action": "Search the web", "command": "two\nlines", "command_label": "query"]
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "WebSearch", toolUseID: "call", toolInput: [:]),
+        request
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    #expect(approvals(root).isEmpty)
+}

@@ -78,7 +78,6 @@ import Testing
         ("Grep", ["pattern": "x", "path": "/tmp"]),
         ("Glob", ["pattern": "*.txt", "path": "/tmp"]),
         ("LSP", ["file_path": "/tmp/a"]),
-        ("WebFetch", ["url": "https://example.com/", "prompt": "title"]),
     ]
     for (tool, input) in rejected {
         #expect(ClaudeDirectApproval.details(toolName: tool, toolInput: input) == nil, "\(tool) \(input)")
@@ -107,4 +106,92 @@ import Testing
     #expect(ClaudeDirectApproval.target(toolName: "Edit", toolInput: ["file_path": "/a"]) == "/a")
     #expect(ClaudeDirectApproval.target(toolName: "NotebookEdit", toolInput: ["notebook_path": "/nb"]) == "/nb")
     #expect(ClaudeDirectApproval.target(toolName: "Bash", toolInput: ["command": "ls"]) == nil)
+}
+
+// Shapes observed in docs/evidence/claude-web-approvals.md.
+
+@Test func claudeWebRequestsWithTheProvenShapeAreDecidable() throws {
+    let fetch = try #require(ClaudeDirectApproval.details(toolName: "WebFetch", toolInput: [
+        "url": "https://example.com/", "prompt": "What is the title of this page?"]))
+    #expect(fetch.action == "Fetch web page")
+    #expect(fetch.command == "https://example.com/")
+    #expect(fetch.commandLabel == "url")
+    #expect(fetch.longText == "Host: example.com\n\nClaude asks of the page:\nWhat is the title of this page?")
+    // A redirect target arrives as its own request; the redirecting URL is shown exactly as given.
+    let redirect = try #require(ClaudeDirectApproval.details(toolName: "WebFetch", toolInput: [
+        "url": "https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com%2F", "prompt": "title"]))
+    #expect(redirect.longText?.hasPrefix("Host: httpbin.org\n") == true)
+    // Punycode stays as written, never decoded into lookalike characters.
+    let punycode = try #require(ClaudeDirectApproval.details(toolName: "WebFetch", toolInput: [
+        "url": "https://xn--e1aybc.com/path?q=1#top", "prompt": "t"]))
+    #expect(punycode.longText?.hasPrefix("Host: xn--e1aybc.com\n") == true)
+    // The host is shown as Claude's parser normalizes it; the URL itself stays exactly as given.
+    let mixedCase = try #require(ClaudeDirectApproval.details(toolName: "WebFetch", toolInput: [
+        "url": "https://Example.COM/", "prompt": "t"]))
+    #expect(mixedCase.command == "https://Example.COM/")
+    #expect(mixedCase.longText?.hasPrefix("Host: example.com\n") == true)
+
+    let search = try #require(ClaudeDirectApproval.details(toolName: "WebSearch", toolInput: [
+        "query": "example domain", "mode": "standard"]))
+    #expect(search.action == "Search the web")
+    #expect(search.command == "example domain")
+    #expect(search.commandLabel == "query")
+    #expect(search.longText == nil)
+    #expect(ClaudeDirectApproval.target(toolName: "WebFetch", toolInput: ["url": "https://example.com/"]) == "https://example.com/")
+    #expect(ClaudeDirectApproval.target(toolName: "WebSearch", toolInput: ["query": "q"]) == "q")
+}
+
+@Test func claudeWebRequestsOutsideTheProvenShapeStayNative() {
+    let rejected: [(String, [String: Any])] = [
+        ("WebFetch", ["url": "https://example.com/"]),
+        ("WebFetch", ["url": "https://example.com/", "prompt": "t", "extra": "x"]),
+        ("WebFetch", ["url": "example.com", "prompt": "t"]),
+        ("WebFetch", ["url": "file:///etc/hosts", "prompt": "t"]),
+        ("WebFetch", ["url": "ftp://example.com/", "prompt": "t"]),
+        // Only https was observed.
+        ("WebFetch", ["url": "http://example.com/", "prompt": "t"]),
+        // Forms where Claude's WHATWG parser and Foundation name different hosts, or the host could be disguised.
+        ("WebFetch", ["url": "https://evil.com\\@example.com/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://example.com@evil.com/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://user:pass@example.com/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://example.com:8443/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://exa%6Dple.com/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://тест.com/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://example.com/caf\u{00E9}", "prompt": "t"]),
+        ("WebFetch", ["url": "https:///path", "prompt": "t"]),
+        ("WebFetch", ["url": "https://.example.com/", "prompt": "t"]),
+        // Hosts a WHATWG parser reads as IPv4 addresses.
+        ("WebFetch", ["url": "https://0x7f.1/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://127.0.0.1/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://2130706433/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://example.0x10/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://a.0x/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://example.com/a b", "prompt": "t"]),
+        ("WebFetch", ["url": "https://exa\u{202E}mple.com/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://example.com/", "prompt": 3]),
+        ("WebSearch", ["query": "example domain"]),
+        ("WebSearch", ["query": "example domain", "mode": "extended"]),
+        ("WebSearch", ["query": "", "mode": "standard"]),
+        ("WebSearch", ["query": "two\nlines", "mode": "standard"]),
+        ("WebSearch", ["query": " padded", "mode": "standard"]),
+        ("WebSearch", ["query": String(repeating: "q", count: ClaudeDirectApproval.maximumQuery + 1), "mode": "standard"]),
+        // One character but thousands of bytes: bounded by bytes so the helper keeps the matching PreToolUse value.
+        ("WebSearch", ["query": "e" + String(repeating: "\u{0301}", count: 3000), "mode": "standard"]),
+        // Excluded families.
+        ("ExitPlanMode", ["plan": "do it", "planFilePath": "/tmp/plan.md"]),
+        ("mcp__steer-lab__lab_echo", ["text": "hello"]),
+    ]
+    for (tool, input) in rejected {
+        #expect(ClaudeDirectApproval.accepts(toolName: tool, toolInput: input) == false, "\(tool) \(input)")
+    }
+}
+
+@Test func claudeDirectApprovalRechecksACommandByItsLabel() {
+    #expect(ClaudeDirectApproval.validCommand("/tmp/a", label: "path"))
+    #expect(ClaudeDirectApproval.validCommand("https://example.com/", label: "url"))
+    #expect(ClaudeDirectApproval.validCommand("example domain", label: "query"))
+    #expect(ClaudeDirectApproval.validCommand("https://example.com/", label: "path") == false)
+    #expect(ClaudeDirectApproval.validCommand("/tmp/a", label: "url") == false)
+    #expect(ClaudeDirectApproval.validCommand("/tmp/a", label: nil) == false)
+    #expect(ClaudeDirectApproval.validCommand("/tmp/a", label: "command") == false)
 }
