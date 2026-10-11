@@ -4,6 +4,8 @@ Accepted with the user on 2026-10-07 (issue #105). Open in Codex or Open in Clau
 
 Amended 2026-10-11 by [ADR 0015](0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md): when the herdr pane is focused and verified but the Ghostty tab cannot be joined or selected (no `tty` outside the sole-terminal rule, zero or several matching terminals, another window, a split), Open raises Ghostty without selecting a tab instead of returning unavailable. That Open fallback acknowledges nothing and sends no input. herdr protocol, socket, binding and integration failures stay unavailable, and Steer still never focuses another pane or tab.
 
+Amended 2026-10-11 by [ADR 0016](0016-open-and-acknowledge-visits-the-same-way-on-every-terminal-host.md): this ADR's Open sequence, manual-visit rule and dwell rule now apply to every terminal host and multiplexer, and to plain Ghostty tabs for Codex and Claude alike, with "visible" defined per host there. Ghostty's current-window limit and the interim rules without `tty` are unchanged.
+
 ## Sequence
 
 1. **Revalidate.** Re-read the herdr snapshot, `pane.process_info` for the bound pane, integration status (Claude only), and `lsof`, plus a fresh Ghostty inventory. Apply the session's pane binding and target checks (ADR 0008 for Claude, ADR 0012 for Codex) and ADR 0009's protocol and socket checks. Require exactly one Ghostty terminal whose `tty` equals the single client's TTY, in an unsplit tab in the current Ghostty window.
