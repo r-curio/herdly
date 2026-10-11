@@ -359,6 +359,7 @@ struct DraftField: View {
 /// One answer option: its digit in the session's colour, the label in ink. The option the user
 /// chose fills with that colour and reads in black, the way a pressed control inverts; the colour
 /// says which session's question this is, the fill says what was chosen. Focus ring as elsewhere.
+/// Each option spans the column, so the list reads as one stack of answers and every label wraps.
 struct OptionButton: View {
     let number: Int
     let label: String
@@ -371,9 +372,12 @@ struct OptionButton: View {
         Button(action: action) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("\(number)").monospacedDigit().foregroundStyle(selected ? Color.black : (enabled ? tone.light : NotchStyle.dim))
+                    .frame(width: 14, alignment: .leading)
                 Text(label).foregroundStyle(selected ? Color.black : (enabled ? NotchStyle.ink : NotchStyle.dim))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .font(NotchStyle.mono(11, selected ? .semibold : .regular))
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(selected ? tone.body : NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
@@ -383,6 +387,59 @@ struct OptionButton: View {
         .focused($focused)
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .stroke(NotchStyle.ink.opacity(focused ? 0.9 : 0), lineWidth: 1.5).padding(-2))
+    }
+}
+
+/// The questions of one call as a rail of steps: a short bar per question with its header beneath,
+/// in ink for the current one and dim for the rest; an upcoming bar is a well. When the headers do
+/// not all fit whole, the rail keeps only its bars and names the current question beneath them,
+/// so no header is cut.
+struct QuestionStepRail: View {
+    let steps: [QuestionSteps.Step]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 4) {
+                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                    VStack(alignment: .leading, spacing: 5) {
+                        bar(step.state)
+                        Text(step.label).font(NotchStyle.mono(10))
+                            .foregroundStyle(step.state == .current ? NotchStyle.ink : NotchStyle.dim)
+                            .fixedSize()
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 4) {
+                    ForEach(Array(steps.enumerated()), id: \.offset) { _, step in bar(step.state) }
+                }
+                if let index = steps.firstIndex(where: { $0.state == .current }) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(steps[index].label).foregroundStyle(NotchStyle.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("\(index + 1) of \(steps.count)").foregroundStyle(NotchStyle.dim).fixedSize()
+                    }
+                    .font(NotchStyle.mono(10))
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+    }
+
+    private var spoken: String {
+        guard let index = steps.firstIndex(where: { $0.state == .current }) else { return "" }
+        return "Question \(index + 1) of \(steps.count): \(steps[index].label)"
+    }
+
+    private func bar(_ state: QuestionSteps.State) -> some View {
+        let fill = switch state {
+        case .answered: NotchStyle.dim
+        case .current: NotchStyle.ink
+        case .upcoming: NotchStyle.well
+        }
+        return RoundedRectangle(cornerRadius: 1, style: .continuous).fill(fill).frame(maxWidth: .infinity).frame(height: 2)
     }
 }
 
@@ -605,28 +662,26 @@ struct Notch: View {
             Text("Codex asked a question Steer could not read; answer it in Codex.")
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
         } else {
-            ForEach(Array(question.prompts.enumerated()), id: \.offset) { index, prompt in
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        if let header = prompt.header { Text(header).font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink) }
-                        if question.prompts.count > 1 { Text("\(index + 1) of \(question.prompts.count)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim) }
-                    }
-                    if let text = prompt.question {
-                        Text(text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    ForEach(Array(prompt.options.enumerated()), id: \.offset) { option, label in
-                        if model.canAnswerAgentQuestion(question) {
-                            OptionButton(number: option + 1, label: label, tone: NotchStyle.spriteColor(spriteColor(for: question.identity.session))) {
-                                model.chooseAgentOption(question, index: index, option: option)
-                            }
-                            .accessibilityLabel("Answer \(option + 1): \(label), for \(subject)")
-                        } else {
-                            HStack(alignment: .top, spacing: 8) {
-                                Text("\(option + 1)").foregroundStyle(NotchStyle.dim).frame(width: 14, alignment: .trailing)
-                                Text(label).foregroundStyle(NotchStyle.text)
-                            }.font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
-                        }
+            // Not in the queue Steer answers from, so nothing here is pressable.
+            readOnlyQuestions(question.prompts, agent: "Codex", key: "questions:\(question.id)", subject: subject,
+                              tone: spriteColor(for: question.identity.session))
+        }
+    }
+
+    /// A question Steer cannot answer: one sentence saying where to answer it, then the questions
+    /// as a reference list (behind a disclosure when there are several), never as controls.
+    @ViewBuilder
+    private func readOnlyQuestions(_ prompts: [QuestionPrompt], agent: String, key: String, subject: String,
+                                   tone: Int) -> some View {
+        Text(QuestionSteps.answerElsewhere(count: prompts.count, agent: agent))
+            .font(NotchStyle.mono(12)).foregroundStyle(NotchStyle.ink).fixedSize(horizontal: false, vertical: true)
+        if prompts.count == 1, let only = prompts.first {
+            referenceQuestion(only, index: 0, tone: tone)
+        } else {
+            NotchDisclosure(title: "Show questions", subject: subject, expanded: disclosure(key)) {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(prompts.enumerated()), id: \.offset) { offset, prompt in
+                        referenceQuestion(prompt, index: offset, tone: tone)
                     }
                 }
             }
@@ -636,70 +691,108 @@ struct Notch: View {
     @ViewBuilder
     private func claudeQuestionBody(_ question: AgentQuestion, subject: String) -> some View {
         let controls = model.canAnswerAgentQuestion(question)
+        let tone = spriteColor(for: question.identity.session)
         if question.prompts.isEmpty {
-            Text("Claude's question answer control is unavailable; check Claude's native question.")
+            Text("Claude asked a question Steer could not read; answer it in Claude.")
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+        } else if !controls {
+            readOnlyQuestions(question.prompts, agent: "Claude", key: "questions:\(question.id)", subject: subject, tone: tone)
         } else {
+            // Claude's answer control takes exactly one question (`canAnswerAgentQuestion`).
             ForEach(Array(question.prompts.enumerated()), id: \.offset) { index, prompt in
-                VStack(alignment: .leading, spacing: 3) {
-                    if !controls {
-                        Text("Claude's question answer control is unavailable; check Claude's native question.")
-                            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        if let header = prompt.header { Text(header).font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink) }
-                        if question.prompts.count > 1 { Text("\(index + 1) of \(question.prompts.count)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim) }
-                    }
-                    if let text = prompt.question {
-                        Text(text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                questionHead(question.prompts, current: index) { _ in nil }
+                if let text = prompt.question { questionText(text) }
+                VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(prompt.options.enumerated()), id: \.offset) { option, label in
-                        if controls && prompt.multiSelect {
+                        if prompt.multiSelect {
                             let selected = claudeSelections[claudeSelectionKey(question, index)]?.contains(option) == true
-                            OptionButton(number: option + 1, label: label,
-                                         tone: NotchStyle.spriteColor(spriteColor(for: question.identity.session)),
-                                         selected: selected) {
+                            OptionButton(number: option + 1, label: label, tone: NotchStyle.spriteColor(tone), selected: selected) {
                                 toggleClaudeSelection(question, index: index, option: option)
                             }
                             .accessibilityLabel("Select \(option + 1): \(label), for \(subject)")
-                        } else if controls {
-                            OptionButton(number: option + 1, label: label,
-                                         tone: NotchStyle.spriteColor(spriteColor(for: question.identity.session))) {
+                        } else {
+                            OptionButton(number: option + 1, label: label, tone: NotchStyle.spriteColor(tone)) {
                                 model.answerClaudeQuestion(question, kind: .option, answer: label)
                             }
                             .accessibilityLabel("Answer \(option + 1): \(label), for \(subject)")
-                        } else {
-                            HStack(alignment: .top, spacing: 8) {
-                                Text("\(option + 1)").foregroundStyle(NotchStyle.dim).frame(width: 14, alignment: .trailing)
-                                Text(label).foregroundStyle(NotchStyle.text)
-                            }.font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    if controls && prompt.multiSelect {
-                        let selected = claudeSelections[claudeSelectionKey(question, index)] ?? []
-                        NotchButton(title: "Send") {
-                            let labels = selected.sorted().compactMap { prompt.options.indices.contains($0) ? prompt.options[$0] : nil }
-                            model.answerClaudeQuestion(question, kind: .multiSelect, answer: labels.joined(separator: ", "))
-                            claudeSelections[claudeSelectionKey(question, index)] = nil
-                        }
-                        .disabled(selected.isEmpty)
-                        .accessibilityLabel("Send selected answers for \(subject)")
-                    }
-                    if controls {
-                        DraftField(placeholder: prompt.options.isEmpty ? "Type your answer" : "Or type another answer",
-                                   text: draft(claudeSelectionKey(question, index).storageKey), sendTitle: "Send",
-                                   fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
-                                   onEscape: model.collapse) {
-                            model.answerClaudeQuestion(question, kind: .text,
-                                                       answer: drafts[claudeSelectionKey(question, index).storageKey] ?? "")
-                            drafts[claudeSelectionKey(question, index).storageKey] = nil
                         }
                     }
                 }
+                if prompt.multiSelect {
+                    let selected = claudeSelections[claudeSelectionKey(question, index)] ?? []
+                    NotchButton(title: "Send") {
+                        let labels = selected.sorted().compactMap { prompt.options.indices.contains($0) ? prompt.options[$0] : nil }
+                        model.answerClaudeQuestion(question, kind: .multiSelect, answer: labels.joined(separator: ", "))
+                        claudeSelections[claudeSelectionKey(question, index)] = nil
+                    }
+                    .disabled(selected.isEmpty)
+                    .accessibilityLabel("Send selected answers for \(subject)")
+                }
+                DraftField(placeholder: prompt.options.isEmpty ? "Type your answer" : "Or type another answer",
+                           text: draft(claudeSelectionKey(question, index).storageKey), sendTitle: "Send",
+                           fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
+                           onEscape: model.collapse) {
+                    model.answerClaudeQuestion(question, kind: .text,
+                                               answer: drafts[claudeSelectionKey(question, index).storageKey] ?? "")
+                    drafts[claudeSelectionKey(question, index).storageKey] = nil
+                }
             }
         }
+    }
+
+    /// What sits above the current question: with several questions, the step rail and a line for
+    /// each answer already given; with one, its header alone in dim, when it has one.
+    @ViewBuilder
+    private func questionHead(_ prompts: [QuestionPrompt], current: Int,
+                              answer: @escaping (Int) -> ChosenAnswer?) -> some View {
+        if prompts.count > 1 {
+            let steps = QuestionSteps.make(prompts, current: current, answer: answer)
+            QuestionStepRail(steps: steps.steps)
+            if !steps.answered.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(steps.answered.enumerated()), id: \.offset) { _, line in
+                        detail(line.label, line.answer)
+                    }
+                }
+            }
+        } else if let only = prompts.first, only.header?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            Text(QuestionSteps.label(only, index: 0)).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The question being asked now: read first, so it is in ink at the title size.
+    private func questionText(_ text: String) -> some View {
+        Text(text).font(NotchStyle.mono(12)).foregroundStyle(NotchStyle.ink).textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// One question for reference, not to answer here: its header in the detail label column, the
+    /// question in ink, and the options as a numbered list in the reading gray. The option Steer
+    /// sent or drafted carries the session's highlight on its digit, and typed text is shown as typed.
+    private func referenceQuestion(_ prompt: QuestionPrompt, index: Int, tone: Int,
+                                   pick: Int? = nil, typed: String? = nil) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(QuestionSteps.label(prompt, index: index)).foregroundStyle(NotchStyle.dim)
+                .frame(width: 58, alignment: .leading)
+            VStack(alignment: .leading, spacing: 3) {
+                if let text = prompt.question {
+                    Text(text).foregroundStyle(NotchStyle.ink).textSelection(.enabled)
+                }
+                ForEach(Array(prompt.options.enumerated()), id: \.offset) { offset, label in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("\(offset + 1)").monospacedDigit()
+                            .foregroundStyle(pick == offset ? NotchStyle.spriteColor(tone).light : NotchStyle.dim)
+                            .frame(width: 14, alignment: .leading)
+                        Text(label).foregroundStyle(pick == offset ? NotchStyle.ink : NotchStyle.text)
+                    }
+                }
+                if let typed {
+                    Text("Typed: \(typed)").foregroundStyle(NotchStyle.ink)
+                }
+            }
+        }
+        .font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
     }
 
     /// Which rows the open panel shows: the explicit queue, or only the notification that opened it.
@@ -800,36 +893,31 @@ struct Notch: View {
         }
     }
 
-    /// One question as Codex's own panel shows it: header with the "1 of N" pager, the question, and
-    /// the option labels. Descriptions and the free-text field stay in Codex. With `choose` set the
-    /// options are controls for the question Codex is on; `pick` is the one the user chose here.
+    /// The question Codex is on, as Codex's own panel shows it: the question and the option labels,
+    /// beneath the rail `questionHead` draws. Descriptions and the free-text field stay in Codex.
+    /// With `choose` set the options are controls; `pick` is the one the user chose here.
     @ViewBuilder
-    private func prompt(_ prompt: QuestionPrompt, index: Int, of total: Int, subject: String = "", tone: Int = 0,
+    private func prompt(_ prompt: QuestionPrompt, subject: String = "", tone: Int = 0,
                         pick: Int? = nil, typed: String? = nil, enabled: Bool = true, choose: ((Int) -> Void)? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if let header = prompt.header {
-                    Text(header).font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
-                }
-                if total > 1 { Text("\(index + 1) of \(total)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim) }
-            }
-            if let question = prompt.question {
-                Text(question).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            ForEach(Array(prompt.options.enumerated()), id: \.offset) { offset, label in
-                if let choose {
-                    OptionButton(number: offset + 1, label: label, tone: NotchStyle.spriteColor(tone), selected: pick == offset) { choose(offset) }
-                        .disabled(!enabled)
-                        .accessibilityLabel("Answer \(offset + 1): \(label), for \(subject)")
-                        .accessibilityHint(pick == offset ? "Your pick." : "Sends \(offset + 1) as your answer.")
-                } else {
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("\(offset + 1)").foregroundStyle(pick == offset ? NotchStyle.spriteColor(tone).light : NotchStyle.dim)
-                            .frame(width: 14, alignment: .trailing)
-                        Text(pick == offset ? "\(label) (sent)" : label).foregroundStyle(pick == offset ? NotchStyle.ink : NotchStyle.text)
+        VStack(alignment: .leading, spacing: 8) {
+            if let question = prompt.question { questionText(question) }
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(prompt.options.enumerated()), id: \.offset) { offset, label in
+                    if let choose {
+                        OptionButton(number: offset + 1, label: label, tone: NotchStyle.spriteColor(tone), selected: pick == offset) { choose(offset) }
+                            .disabled(!enabled)
+                            .accessibilityLabel("Answer \(offset + 1): \(label), for \(subject)")
+                            .accessibilityHint(pick == offset ? "Your pick." : "Sends \(offset + 1) as your answer.")
+                    } else {
+                        HStack(alignment: .top, spacing: 8) {
+                            Text("\(offset + 1)").monospacedDigit()
+                                .foregroundStyle(pick == offset ? NotchStyle.spriteColor(tone).light : NotchStyle.dim)
+                                .frame(width: 14, alignment: .leading)
+                            Text(pick == offset ? "\(label) (sent)" : label).foregroundStyle(pick == offset ? NotchStyle.ink : NotchStyle.text)
+                        }
+                        .font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, 8)
                     }
-                    .font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
                 }
             }
             if let typed {
@@ -849,26 +937,19 @@ struct Notch: View {
                               choose: @escaping (ChosenAnswer) -> Void) -> some View {
         let pick: Int? = { if case let .option(option) = answer { return option }; return nil }()
         let shown = question.displayPrompt
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if let header = shown.header {
-                    Text(header).font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
-                }
-                if total > 1 { Text("\(index + 1) of \(total)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim) }
-            }
-            if let text = shown.question {
-                Text(text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        VStack(alignment: .leading, spacing: 8) {
+            if let text = shown.question { questionText(text) }
             if question.isSecret {
                 Text("Codex asked for a secret; answer it in Codex.").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
             } else {
-                ForEach(Array(shown.options.enumerated()), id: \.offset) { offset, label in
-                    OptionButton(number: offset + 1, label: label,
-                                 tone: NotchStyle.spriteColor(tone), selected: pick == offset) { choose(.option(offset)) }
-                        .disabled(!enabled)
-                        .accessibilityLabel("Answer \(offset + 1): \(label), for \(subject)")
-                        .accessibilityHint(pick == offset ? "Your answer." : "Answers with this option through Codex's daemon.")
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(shown.options.enumerated()), id: \.offset) { offset, label in
+                        OptionButton(number: offset + 1, label: label,
+                                     tone: NotchStyle.spriteColor(tone), selected: pick == offset) { choose(.option(offset)) }
+                            .disabled(!enabled)
+                            .accessibilityLabel("Answer \(offset + 1): \(label), for \(subject)")
+                            .accessibilityHint(pick == offset ? "Your answer." : "Answers with this option through Codex's daemon.")
+                    }
                 }
                 if question.takesText {
                     let key = "\(callID):\(index)"
@@ -952,32 +1033,27 @@ struct Notch: View {
         let index = progress.questionIndex
         let total = max(question.questionCount, question.prompts.count)
         let route = model.route(for: question)
+        let tone = spriteColor(for: question.session)
         if case let .daemon(request) = route {
             let current = min(max(index, 0), request.questions.count - 1)
+            let prompts = request.questions.map(\.displayPrompt)
+            questionHead(prompts, current: current, answer: progress.answer(for:))
             daemonPrompt(request.questions[current], index: current, of: request.questions.count, callID: question.callID,
-                         subject: subject, tone: spriteColor(for: question.session), answer: progress.answer(for: current),
+                         subject: subject, tone: tone, answer: progress.answer(for: current),
                          enabled: progress.phase == .ready && index == current) { answer in
                 switch answer {
                 case let .option(option): model.chooseOption(question, question: index, option: option)
                 case let .text(text): model.answerText(question, question: index, text: text)
                 }
             }
-            if request.questions.count > 1 {
-                NotchDisclosure(title: "Show all \(request.questions.count) questions", expanded: disclosure("questions:\(question.callID)")) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(request.questions.enumerated()).filter { $0.offset != current }, id: \.offset) { offset, rest in
-                            prompt(rest.displayPrompt, index: offset, of: request.questions.count, tone: spriteColor(for: question.session),
-                                   pick: progress.picks[offset], typed: progress.texts[offset])
-                        }
-                    }
-                }
-            }
+            upcomingQuestions(prompts, after: current, key: "questions:\(question.callID)", subject: subject, tone: tone)
             if let status = daemonStatus(question, request: request, progress: progress) {
                 Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
             }
         } else if route == .daemonAnswered {
             if let first = question.prompts.first {
-                prompt(first, index: 0, of: total, tone: spriteColor(for: question.session), pick: progress.picks[0], typed: progress.texts[0])
+                questionHead([first], current: 0) { _ in nil }
+                prompt(first, tone: tone, pick: progress.picks[0], typed: progress.texts[0])
             }
             if let status = daemonStatus(question, request: nil, progress: progress) {
                 Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
@@ -995,21 +1071,36 @@ struct Notch: View {
                 case .sending, .sent, .unconfirmed, .failed: return false
                 }
             }()
-            prompt(question.prompts[current], index: current, of: total, subject: subject, tone: spriteColor(for: question.session),
+            // Codex may ask more questions than Steer could read; the rail still counts every one.
+            let unread = QuestionPrompt(header: nil, question: nil, options: [])
+            let railPrompts = question.prompts + Array(repeating: unread, count: total - question.prompts.count)
+            questionHead(railPrompts, current: min(index, total - 1), answer: progress.answer(for:))
+            prompt(question.prompts[current], subject: subject, tone: tone,
                    pick: progress.picks[current], enabled: progress.phase != .sending,
                    choose: interactive ? { option in model.chooseOption(question, question: index, option: option) } : nil)
-            if question.prompts.count > 1 {
-                NotchDisclosure(title: "Show all \(total) questions", expanded: disclosure("questions:\(question.callID)")) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(question.prompts.enumerated()).filter { $0.offset != current }, id: \.offset) { offset, rest in
-                            prompt(rest, index: offset, of: total, tone: spriteColor(for: question.session), pick: progress.picks[offset])
-                        }
-                    }
-                }
-            }
+            upcomingQuestions(question.prompts, after: current, key: "questions:\(question.callID)", subject: subject, tone: tone)
         }
         if let status = questionStatus(question, progress: progress, total: total) {
             Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The questions after the current one, for reference behind a disclosure; the rail already
+    /// names them, and the answers before the current one sit above it.
+    @ViewBuilder
+    private func upcomingQuestions(_ prompts: [QuestionPrompt], after current: Int, key: String, subject: String,
+                                   tone: Int) -> some View {
+        let remaining = prompts.count - current - 1
+        if remaining > 0 {
+            NotchDisclosure(title: remaining == 1 ? "Show the next question" : "Show the next \(remaining) questions",
+                            expandedTitle: remaining == 1 ? "Hide the next question" : "Hide the next \(remaining) questions",
+                            subject: subject, expanded: disclosure(key)) {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(prompts.enumerated()).filter { $0.offset > current }, id: \.offset) { offset, rest in
+                        referenceQuestion(rest, index: offset, tone: tone)
+                    }
+                }
+            }
         }
     }
 
