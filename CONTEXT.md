@@ -18,8 +18,12 @@ The companion's compact display at the top of the screen, intended to show Codex
 An individual Codex conversation in the desktop app or CLI, distinct from its hosting application.
 
 **Terminal host**:
-The terminal environment that contains a CLI session's terminal: an unsplit tab of a supported terminal (Ghostty, iTerm2, Terminal.app, WezTerm) directly, or a single-pane tmux window, Zellij tab or herdr tab whose one client runs in an unsplit tab of a supported terminal.
-_Avoid_: Terminal app, multiplexer, window
+The terminal environment that contains a CLI session's terminal: an unsplit tab of a supported terminal (Ghostty, iTerm2, Terminal.app, WezTerm) that the user switched on in Steer, or a single-pane tmux window, Zellij tab or herdr tab whose one client runs in such a tab.
+_Avoid_: Terminal app, window
+
+**Multiplexer**:
+A program that runs terminal panes inside one client in a terminal tab: tmux, Zellij or herdr. A session in a multiplexer has two layers, its pane and the terminal host tab running the client.
+_Avoid_: Terminal host (for the multiplexer alone), session manager
 
 **Tab binding**:
 The association between a CLI session and the one unsplit terminal tab running it. For Claude Code it follows the session's own process to its tab. For Codex it holds only while exactly one tab runs a Codex process in its foreground and shows the session's shortened identifier as its title. It is void once the tab closes, its foreground process changes, the session ends, or, for Codex, the title changes.
