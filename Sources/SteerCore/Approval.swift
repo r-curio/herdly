@@ -27,15 +27,18 @@ public struct ApprovalDetails: Codable, Equatable, Sendable {
     public let command: String?
     public let reason: String?
     public let longText: String?
+    /// What `command` holds when it is not a command, such as "path" for a Claude file request. Nil means a command.
+    public let commandLabel: String?
 
     public init(taskName: String? = nil, project: String? = nil, action: String? = nil,
-                command: String? = nil, reason: String? = nil, longText: String? = nil) {
+                command: String? = nil, reason: String? = nil, longText: String? = nil, commandLabel: String? = nil) {
         self.taskName = taskName; self.project = project; self.action = action
         self.command = command; self.reason = reason; self.longText = longText
+        self.commandLabel = commandLabel
     }
 
     private enum CodingKeys: String, CodingKey {
-        case taskName = "task_name", project, action, command, reason, longText = "long_text"
+        case taskName = "task_name", project, action, command, reason, longText = "long_text", commandLabel = "command_label"
     }
 }
 

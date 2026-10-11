@@ -683,6 +683,15 @@ private struct ClaudeAgentControls: View {
                     }
                     Divider().padding(.horizontal, SettingsStyle.rowInset)
                     PreviewDisclosure(title: "Show setup changes") { previewText(root, plan: plan) }
+                    if plan.addsHooks, root.status == .connected || { if case .configuredAwaitingRestart = root.status { return true }; return false }() {
+                        // A connected root missing newer Steer hooks (such as file approvals) keeps working;
+                        // those requests stay in Claude until the user reconfigures.
+                        Divider().padding(.horizontal, SettingsStyle.rowInset)
+                        Text("This version of Steer adds Claude hooks, such as file approvals. Configure Claude to add them; until then those requests stay in Claude.")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, SettingsStyle.rowInset).padding(.vertical, 6)
+                    }
                     Divider().padding(.horizontal, SettingsStyle.rowInset)
                     ActionRow {
                         if index > 0 {
