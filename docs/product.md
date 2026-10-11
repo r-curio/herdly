@@ -124,9 +124,13 @@ exact helper is waiting; it is bound to the installation, normalized Claude root
 session, prompt, tool-use, and request identities. A human-selected single choice, multi-select, or
 typed answer can be returned once through Claude's supported `updatedInput` response. The request
 does not become an answer capability after restart, and Steer stores no transcript or tool response.
-One exact live Bash permission may be approved once or denied through the source-scoped helper
-handshake. Ambiguous, expired, disconnected, interrupted, handed-back, and non-Bash permissions
-keep only Claude's native controls. Interactive inventory status can add Working or Waiting rows;
+One exact live Bash permission, or one exact file request (`Edit`, `Write`, `NotebookEdit`, or a `Read`
+outside the working folders, with the input shape proven in
+[claude-file-approvals](evidence/claude-file-approvals.md)), may be approved once or denied through the
+source-scoped helper handshake (#196). A file request shows the action, the full absolute path, and a
+bounded, labeled preview of the edit, content, or cell; Steer never offers Claude's session-wide
+choices such as accepting edits or allowing a folder. Ambiguous, expired, disconnected, interrupted,
+handed-back, unproven shapes, and other permission families keep only Claude's native controls. Interactive inventory status can add Working or Waiting rows;
 background inventory alone does not create a queue row. A background done, failed, or stopped state
 never creates a user-facing outcome without matching hook evidence. Per-root inventory reconciliation
 is issue #82; mixed source presentation and counts in the existing notch are issue #83.
@@ -153,8 +157,8 @@ helper trace cover the response shape; integrated Steer behavior for each answer
 kind and native fallback after timeout has not yet been observed in use. Claude completion
 cards retain Dismiss and explain the unavailable return action without rendering an unsupported Open
 control.
-Claude follow-up prompts and direct approval decisions beyond Bash stay unavailable until their
-transports are separately proven; the card explains that limitation instead of guessing a target.
+Claude follow-up prompts and direct approval decisions beyond Bash and the file family stay unavailable
+until their transports are separately proven; the card explains that limitation instead of guessing a target.
 Codex cards keep their existing answer, approval, detail, and reply actions.
 
 Mixed-source release checks require reviewed source, automated tests, package

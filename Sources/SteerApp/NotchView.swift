@@ -1107,7 +1107,7 @@ struct Notch: View {
                         detail("task", details.taskName, missing: missing)
                         detail("project", details.project, missing: missing)
                         detail("action", details.action, missing: missing)
-                        detail("command", details.command, selectable: true, missing: missing)
+                        detail(details.commandLabel ?? "command", details.command, selectable: true, missing: missing)
                         detail("reason", details.reason, selectable: true, missing: missing)
                     }
                     if let longText = details.longText {

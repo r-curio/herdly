@@ -69,6 +69,8 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
     if let requestID = boundedClaudeString(object["approval_request_id"], limit: 256) {
         record["approval_request_id"] = requestID
     }
+    // Already bounded by ClaudeDirectApproval: the path plus at most two previews of maximumPreview characters.
+    if let details = object["approval_details"] as? [String: Any] { record["approval_details"] = details }
     if let input = object["tool_input"] as? [String: Any] {
         let kept = boundedClaudeToolInput(input)
         if !kept.isEmpty { record["tool_input"] = kept }
@@ -96,7 +98,7 @@ private func boundedClaudeString(_ value: Any?, limit: Int = 4096, allowNewline:
 }
 
 private func boundedClaudeToolInput(_ input: [String: Any]) -> [String: Any] {
-    let scalarKeys = Set(["command", "cmd", "file_path", "path", "pattern", "url"])
+    let scalarKeys = Set(["command", "cmd", "file_path", "notebook_path", "path", "pattern", "url"])
     var result: [String: Any] = [:]
     for key in scalarKeys {
         if let value = boundedClaudeString(input[key], allowNewline: true) { result[key] = value }
@@ -305,6 +307,24 @@ private func update(_ request: ApprovalRequest, outcome: ApprovalDecision, in di
     try? data.write(to: ApprovalStore.requestURL(in: directory, id: request.id), options: .atomic)
 }
 
+/// Marks a Claude `PermissionRequest` Steer may decide: a fresh request token and, for a file request, the
+/// validated display details. Returns nil, leaving the object unchanged, for anything else, so only an exact,
+/// proven request shape waits for Steer and every other request stays in Claude's own dialog.
+func markDirectPermission(_ object: inout [String: Any]) -> String? {
+    guard object["hook_event_name"] as? String == "PermissionRequest", let tool = object["tool_name"] as? String else { return nil }
+    let input = object["tool_input"] as? [String: Any] ?? [:]
+    guard ClaudeDirectApproval.accepts(toolName: tool, toolInput: input) else { return nil }
+    if tool != "Bash" {
+        guard let details = ClaudeDirectApproval.details(toolName: tool, toolInput: input),
+              let data = try? JSONEncoder().encode(details),
+              let encoded = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        object["approval_details"] = encoded
+    }
+    let requestID = UUID().uuidString
+    object["approval_request_id"] = requestID
+    return requestID
+}
+
 func selfTest() -> Int32 {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("steer-hook-self-test-" + UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -364,6 +384,29 @@ func selfTest() -> Int32 {
             == "\u{1b}]2;\(ClaudeSetupRequirements.titlePrefix)\(session.uuidString)\u{7}",
           terminalSequence(for: session.uuidString, reset: true).flatMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: String] })?["terminalSequence"]
             == "\u{1b}]2;\u{7}" else { return 1 }
+    // A file request with the proven shape waits for Steer and keeps only bounded display details; any
+    // other shape, or an unproven tool, is left to Claude's own dialog.
+    let fileDirectory = directory.appendingPathComponent("file-approval", isDirectory: true)
+    var edit: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": session.uuidString,
+                               "prompt_id": "prompt-1", "tool_name": "Edit",
+                               "tool_input": ["file_path": "/tmp/target.txt", "old_string": "alpha", "new_string": "beta",
+                                              "replace_all": false]]
+    var extraKey = edit
+    extraKey["tool_input"] = ["file_path": "/tmp/target.txt", "old_string": "a", "new_string": "b", "unproven": true]
+    var grep: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": session.uuidString,
+                               "tool_name": "Grep", "tool_input": ["pattern": "x", "path": "/tmp"]]
+    var bash: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": session.uuidString,
+                               "tool_name": "Bash", "tool_input": ["command": "touch marker"]]
+    guard markDirectPermission(&edit) != nil, markDirectPermission(&extraKey) == nil, extraKey["approval_details"] == nil,
+          markDirectPermission(&grep) == nil, markDirectPermission(&bash) != nil, bash["approval_details"] == nil,
+          writeClaudeEvent(edit, to: fileDirectory, installationID: UUID().uuidString),
+          let fileRecord = (try? FileManager.default.contentsOfDirectory(at: fileDirectory, includingPropertiesForKeys: nil))?
+            .compactMap({ try? Data(contentsOf: $0) })
+            .compactMap({ try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }).first,
+          fileRecord["approval_request_id"] as? String == edit["approval_request_id"] as? String,
+          let details = fileRecord["approval_details"] as? [String: Any],
+          details["action"] as? String == "Edit file", details["command"] as? String == "/tmp/target.txt",
+          (fileRecord["tool_input"] as? [String: String]) == ["file_path": "/tmp/target.txt"] else { return 1 }
     let promptDirectory = directory.appendingPathComponent("claude-prompt", isDirectory: true)
     let longPrompt = String(repeating: "Explain why the queue keeps this order. ", count: 12)
     guard writeClaudeEvent(["hook_event_name": "UserPromptSubmit", "session_id": session.uuidString,
@@ -403,11 +446,8 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
     let isQuestion = arguments.contains("--question-helper") && object["hook_event_name"] as? String == "PreToolUse"
         && object["tool_name"] as? String == "AskUserQuestion"
     let questionRequestID = isQuestion ? UUID().uuidString : nil
-    let isBashPermission = object["hook_event_name"] as? String == "PermissionRequest"
-        && object["tool_name"] as? String == "Bash"
     let publishedAt = Date().timeIntervalSince1970
-    let approvalRequestID = isBashPermission ? UUID().uuidString : nil
-    if let approvalRequestID { object["approval_request_id"] = approvalRequestID }
+    let approvalRequestID = markDirectPermission(&object)
     guard writeClaudeEvent(object, to: directory, installationID: installationID,
                            helperRequestID: questionRequestID) else { exit(0) }
     if isQuestion,
