@@ -78,8 +78,8 @@ emitted a decision.
   - `NotebookEdit` with `edit_mode` = `insert`: those four keys plus `cell_type` = `code`;
   - `NotebookEdit` with `edit_mode` = `delete`: the same four keys as replace, with an empty `new_source`;
   - `Read`: `file_path`, or `file_path` with integer `offset` and `limit`;
-- the path is absolute, has no surrounding whitespace, and has no control, format or bidirectional characters, so
-  the displayed path is exactly the target;
+- the path is absolute, has no surrounding whitespace, and has no control, format, bidirectional, or line or
+  paragraph separator characters, so the displayed path is exactly the target;
 - exactly one unmatched `PreToolUse` exists for the same session, prompt and tool **on the same path**. That is the
   existing single-candidate rule. Claude runs prompted calls one at a time (#71), so the path is enough; Steer
   does not keep the full input of every call.
