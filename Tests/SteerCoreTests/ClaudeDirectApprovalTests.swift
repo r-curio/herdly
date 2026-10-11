@@ -121,6 +121,10 @@ import Testing
     let redirect = try #require(ClaudeDirectApproval.details(toolName: "WebFetch", toolInput: [
         "url": "https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com%2F", "prompt": "title"]))
     #expect(redirect.longText?.hasPrefix("Host: httpbin.org\n") == true)
+    // Punycode stays as written, never decoded into lookalike characters.
+    let punycode = try #require(ClaudeDirectApproval.details(toolName: "WebFetch", toolInput: [
+        "url": "https://xn--e1aybc.com/path?q=1#top", "prompt": "t"]))
+    #expect(punycode.longText?.hasPrefix("Host: xn--e1aybc.com\n") == true)
 
     let search = try #require(ClaudeDirectApproval.details(toolName: "WebSearch", toolInput: [
         "query": "example domain", "mode": "standard"]))
@@ -141,6 +145,16 @@ import Testing
         ("WebFetch", ["url": "ftp://example.com/", "prompt": "t"]),
         // Only https was observed.
         ("WebFetch", ["url": "http://example.com/", "prompt": "t"]),
+        // Forms where Claude's WHATWG parser and Foundation name different hosts, or the host could be disguised.
+        ("WebFetch", ["url": "https://evil.com\\@example.com/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://example.com@evil.com/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://user:pass@example.com/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://example.com:8443/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://exa%6Dple.com/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://тест.com/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://example.com/caf\u{00E9}", "prompt": "t"]),
+        ("WebFetch", ["url": "https:///path", "prompt": "t"]),
+        ("WebFetch", ["url": "https://.example.com/", "prompt": "t"]),
         ("WebFetch", ["url": "https://example.com/a b", "prompt": "t"]),
         ("WebFetch", ["url": "https://exa\u{202E}mple.com/", "prompt": "t"]),
         ("WebFetch", ["url": "https://example.com/", "prompt": 3]),
@@ -150,6 +164,8 @@ import Testing
         ("WebSearch", ["query": "two\nlines", "mode": "standard"]),
         ("WebSearch", ["query": " padded", "mode": "standard"]),
         ("WebSearch", ["query": String(repeating: "q", count: ClaudeDirectApproval.maximumQuery + 1), "mode": "standard"]),
+        // One character but thousands of bytes: bounded by bytes so the helper keeps the matching PreToolUse value.
+        ("WebSearch", ["query": "e" + String(repeating: "\u{0301}", count: 3000), "mode": "standard"]),
         // Excluded families.
         ("ExitPlanMode", ["plan": "do it", "planFilePath": "/tmp/plan.md"]),
         ("mcp__steer-lab__lab_echo", ["text": "hello"]),
