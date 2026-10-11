@@ -654,3 +654,127 @@ private func claudeRecord(_ event: String, at capturedAt: Double, promptID: Stri
     if !toolInput.isEmpty { record["tool_input"] = toolInput }
     return record
 }
+
+// MARK: - File-family approvals
+
+private func fileDetails(_ tool: String, _ input: [String: Any]) -> [String: Any] {
+    let details = ClaudeDirectApproval.details(toolName: tool, toolInput: input)!
+    let data = try! JSONEncoder().encode(details)
+    return try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+}
+
+private func filePermission(at: Double, tool: String = "Edit", input: [String: Any], requestID: String? = "request-1",
+                            details: [String: Any]? = nil) -> [String: Any] {
+    var record = claudeRecord("PermissionRequest", at: at, promptID: "p1", toolName: tool,
+                              toolInput: ["file_path": input["file_path"] as Any], approvalRequestID: requestID)
+    if let details = details ?? (ClaudeDirectApproval.details(toolName: tool, toolInput: input) != nil
+                                  ? fileDetails(tool, input) : nil) {
+        record["approval_details"] = details
+    }
+    return record
+}
+
+private func approvals(_ root: URL) -> [AgentApproval] {
+    scanClaude(root).observations.compactMap { observation -> AgentApproval? in
+        if case let .approval(value) = observation { return value }
+        return nil
+    }
+}
+
+@Test func claudeEditApprovalShowsTheHelpersValidatedDetails() throws {
+    let input: [String: Any] = ["file_path": "/tmp/lab/target.txt", "old_string": "alpha", "new_string": "beta",
+                                "replace_all": false]
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Edit", toolUseID: "call",
+                     toolInput: ["file_path": "/tmp/lab/target.txt"]),
+        filePermission(at: 3, input: input)
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let approval = try #require(approvals(root).first)
+    #expect(approval.identity.call == "call")
+    #expect(approval.hookRequestID == "request-1")
+    #expect(approval.details?.action == "Edit file")
+    #expect(approval.details?.command == "/tmp/lab/target.txt")
+    #expect(approval.details?.commandLabel == "path")
+    #expect(approval.details?.longText == "Replace:\nalpha\n\nWith:\nbeta")
+}
+
+@Test func claudeFileApprovalNeedsTheHelpersDetailsAndOneCallOnThatPath() throws {
+    let input: [String: Any] = ["file_path": "/tmp/a", "old_string": "x", "new_string": "y", "replace_all": false]
+    // No validated details: an older helper, or a shape the helper refused. Claude's dialog stays in charge.
+    let undecidable = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Edit", toolUseID: "call", toolInput: ["file_path": "/tmp/a"]),
+        claudeRecord("PermissionRequest", at: 3, promptID: "p1", toolName: "Edit", toolInput: ["file_path": "/tmp/a"])
+    ])
+    defer { try? FileManager.default.removeItem(at: undecidable) }
+    #expect(approvals(undecidable).isEmpty)
+
+    // The request names a different path from the only open Edit call.
+    let otherPath = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Edit", toolUseID: "call", toolInput: ["file_path": "/tmp/b"]),
+        filePermission(at: 3, input: input)
+    ])
+    defer { try? FileManager.default.removeItem(at: otherPath) }
+    #expect(approvals(otherPath).isEmpty)
+
+    // Two open Edit calls on the same path cannot be told apart.
+    let ambiguous = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Edit", toolUseID: "c1", toolInput: ["file_path": "/tmp/a"]),
+        claudeRecord("PreToolUse", at: 2.5, promptID: "p1", toolName: "Edit", toolUseID: "c2", toolInput: ["file_path": "/tmp/a"]),
+        filePermission(at: 3, input: input)
+    ])
+    defer { try? FileManager.default.removeItem(at: ambiguous) }
+    #expect(approvals(ambiguous).isEmpty)
+
+    // An open Edit call on another path does not make the request ambiguous.
+    let distinct = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Edit", toolUseID: "other", toolInput: ["file_path": "/tmp/b"]),
+        claudeRecord("PreToolUse", at: 2.5, promptID: "p1", toolName: "Edit", toolUseID: "mine", toolInput: ["file_path": "/tmp/a"]),
+        filePermission(at: 3, input: input)
+    ])
+    defer { try? FileManager.default.removeItem(at: distinct) }
+    #expect(approvals(distinct).map(\.identity.call) == ["mine"])
+}
+
+@Test func claudeFileApprovalRejectsTamperedOrUnboundedDetails() throws {
+    let input: [String: Any] = ["file_path": "/tmp/a", "content": "x"]
+    for details: [String: Any] in [
+        ["action": "Write file", "command": "relative/path", "command_label": "path"],
+        ["action": "Write file", "command": "/tmp/a", "long_text": "clear \u{1b}[2J"],
+        ["action": "Write file\nInjected", "command": "/tmp/a"],
+        ["action": "Write file", "command": "/tmp/a",
+         "long_text": String(repeating: "x", count: ClaudeDirectApproval.maximumPreview * 3)],
+    ] {
+        let root = try makeClaudeEvents([
+            claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+            claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Write", toolUseID: "call", toolInput: ["file_path": "/tmp/a"]),
+            filePermission(at: 3, tool: "Write", input: input, details: details)
+        ])
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(approvals(root).isEmpty, "\(details)")
+    }
+}
+
+@Test func claudeFileApprovalClearsOnItsOwnPostToolUse() throws {
+    let input: [String: Any] = ["notebook_path": "/tmp/nb.ipynb", "cell_id": "c1", "new_source": "print(2)", "edit_mode": "replace"]
+    var request = claudeRecord("PermissionRequest", at: 3, promptID: "p1", toolName: "NotebookEdit",
+                               toolInput: ["notebook_path": "/tmp/nb.ipynb"], approvalRequestID: "request-1")
+    request["approval_details"] = fileDetails("NotebookEdit", input)
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "NotebookEdit", toolUseID: "call",
+                     toolInput: ["notebook_path": "/tmp/nb.ipynb"]),
+        request
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    #expect(approvals(root).first?.details?.action == "Edit notebook")
+
+    try appendClaudeEvent(claudeRecord("PostToolUse", at: 4, promptID: "p1", toolUseID: "call"), to: root)
+    #expect(approvals(root).isEmpty)
+}

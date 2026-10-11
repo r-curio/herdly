@@ -66,8 +66,9 @@ public enum ClaudeSetupRequirements {
     public static let titleDisableEnvironmentValue = "1"
     public static let metadataClockSkew: TimeInterval = 300
 
-    /// The events needed by the observer and Bash decision slices. Other permission families stay
-    /// in Claude's native flow until separately proven.
+    /// The events needed by the observer and the Bash and file decision slices. Other permission
+    /// families stay in Claude's native flow until separately proven. The file family has its own
+    /// `PermissionRequest` entry so an existing install's exact Bash entry stays unchanged.
     public static let hookDefinitions = [
         ClaudeHookDefinition(event: "SessionStart", terminalTitle: true),
         ClaudeHookDefinition(event: "UserPromptSubmit"),
@@ -77,6 +78,7 @@ public enum ClaudeSetupRequirements {
         ClaudeHookDefinition(event: "PostToolUseFailure"),
         ClaudeHookDefinition(event: "PostToolBatch"),
         ClaudeHookDefinition(event: "PermissionRequest", matcher: "Bash"),
+        ClaudeHookDefinition(event: "PermissionRequest", matcher: ClaudeDirectApproval.fileMatcher),
         ClaudeHookDefinition(event: "Stop"),
         ClaudeHookDefinition(event: "StopFailure"),
         ClaudeHookDefinition(event: "SessionEnd", terminalTitle: true),
@@ -140,6 +142,9 @@ public struct ClaudeSetupPlan: Sendable {
     public let ownedEnvironment: [String: String]
     public let helperCommand: String
     public let requiresConfigure: Bool
+    /// True when Configure would add a Steer hook entry the settings do not have yet, such as a newer
+    /// release's file-approval hook on an already connected root.
+    public let addsHooks: Bool
     public let installationID: String
     public let usageEnabled: Bool
     public let usageStatus: ClaudeUsageSetupStatus
@@ -149,7 +154,7 @@ public struct ClaudeSetupPlan: Sendable {
 
     init(status: ClaudeSetupStatus, settingsChange: Data, ownedHooks: [ClaudeOwnedHook],
          ownedEnvironment: [String: String],
-         helperCommand: String, requiresConfigure: Bool, installationID: String,
+         helperCommand: String, requiresConfigure: Bool, addsHooks: Bool = false, installationID: String,
          usageEnabled: Bool, usageStatus: ClaudeUsageSetupStatus,
          originalSettings: Data, originalSettingsExisted: Bool) {
         self.status = status
@@ -158,6 +163,7 @@ public struct ClaudeSetupPlan: Sendable {
         self.ownedEnvironment = ownedEnvironment
         self.helperCommand = helperCommand
         self.requiresConfigure = requiresConfigure
+        self.addsHooks = addsHooks
         self.installationID = installationID
         self.usageEnabled = usageEnabled
         self.usageStatus = usageStatus
@@ -224,6 +230,7 @@ public enum ClaudeSetupPlanner {
         }
         var merged = source
         var hooks = (source["hooks"] as? [String: Any]) ?? [:]
+        var addsHooks = false
         for (definition, owned) in zip(definitions, expectedHooks) {
             var groups = (hooks[definition.event] as? [[String: Any]]) ?? []
             let exact = groups.filter { group in
@@ -251,6 +258,7 @@ public enum ClaudeSetupPlanner {
                 var group: [String: Any] = ["hooks": [["type": "command", "command": owned.command, "timeout": ClaudeSetupRequirements.hookTimeout]]]
                 if let matcher = definition.matcher { group["matcher"] = matcher }
                 groups.append(group)
+                addsHooks = true
             }
             hooks[definition.event] = groups
         }
@@ -312,7 +320,7 @@ public enum ClaudeSetupPlanner {
         }
         return ClaudeSetupPlan(status: .ready, settingsChange: changed, ownedHooks: ownedHooks,
                                ownedEnvironment: titleEnvironmentAlreadyPresent ? [:] : [ClaudeSetupRequirements.titleDisableEnvironmentKey: ClaudeSetupRequirements.titleDisableEnvironmentValue],
-                               helperCommand: ownedHooks.first?.command ?? "", requiresConfigure: changed != settings,
+                               helperCommand: ownedHooks.first?.command ?? "", requiresConfigure: changed != settings, addsHooks: addsHooks,
                                installationID: installationID, usageEnabled: usageEnabled, usageStatus: usage,
                                originalSettings: settings, originalSettingsExisted: settingsExisted)
     }

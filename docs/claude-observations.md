@@ -35,7 +35,10 @@ that bound, the reader falls back to the general running prompt until newer evid
 current action.
 
 Permission observations require exactly one matching, uncompleted `PreToolUse` call in the same
-session, prompt, root, and tool name. Only `Bash` creates a direct approval observation. The helper
+session, prompt, root, and tool name. `Bash` creates a direct approval observation as before. A file
+request (`Edit`, `Write`, `NotebookEdit`, or `Read`) creates one only when the helper accepted its exact
+proven input shape and attached bounded display details (`ClaudeDirectApproval`), and only for the one
+uncompleted call of that tool on the same absolute path. The helper
 adds a bounded request token because `PermissionRequest` does not supply `tool_use_id`; Steer
 publishes a receipt only for that exact candidate while the helper's short-lived heartbeat is fresh,
 and accepts one allow or deny before the request's 30-second deadline. The helper acknowledges a user decision only after emitting Claude's response;

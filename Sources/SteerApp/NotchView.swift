@@ -1107,7 +1107,7 @@ struct Notch: View {
                         detail("task", details.taskName, missing: missing)
                         detail("project", details.project, missing: missing)
                         detail("action", details.action, missing: missing)
-                        detail("command", details.command, selectable: true, missing: missing)
+                        detail(details.commandLabel ?? "command", details.command, selectable: true, missing: missing)
                         detail("reason", details.reason, selectable: true, missing: missing)
                     }
                     if let longText = details.longText {
@@ -1208,10 +1208,10 @@ struct Notch: View {
                         if item.session.source == .claude, let approval = item.approval, model.canDecideAgent(approval) {
                             NotchButton(title: "Approve once", emphasized: true) { model.decideAgent(approval, as: .allowOnce) }
                                 .accessibilityLabel("Approve once: \(subject)")
-                                .accessibilityHint("Approves this Claude Bash request once.")
+                                .accessibilityHint("Approves this Claude \(Self.claudeRequestKind(approval)) request once.")
                             NotchButton(title: "Deny") { model.decideAgent(approval, as: .deny) }
                                 .accessibilityLabel("Deny: \(subject)")
-                                .accessibilityHint("Denies this Claude Bash request.")
+                                .accessibilityHint("Denies this Claude \(Self.claudeRequestKind(approval)) request.")
                         }
                         if item.session.source == .codex, herdr.offersOpen {
                             NotchButton(title: "Open Session") {
@@ -1364,6 +1364,12 @@ struct Notch: View {
         Text(line)
             .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
+    }
+
+    /// The kind of Claude request for VoiceOver: the action the row shows ("Edit file"), lowercased, or "Bash".
+    static func claudeRequestKind(_ approval: AgentApproval) -> String {
+        guard let action = approval.details?.action, !action.isEmpty else { return "permission" }
+        return action == "Bash" ? action : action.lowercased()
     }
 
     @ViewBuilder
