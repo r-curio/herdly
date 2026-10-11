@@ -69,7 +69,7 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
     if let requestID = boundedClaudeString(object["approval_request_id"], limit: 256) {
         record["approval_request_id"] = requestID
     }
-    // Already bounded by ClaudeDirectApproval: the path plus at most two previews of maximumPreview characters.
+    // Set only by markDirectPermission, which bounds it: the path plus at most two previews of maximumPreview characters.
     if let details = object["approval_details"] as? [String: Any] { record["approval_details"] = details }
     if let input = object["tool_input"] as? [String: Any] {
         let kept = boundedClaudeToolInput(input)
@@ -311,6 +311,9 @@ private func update(_ request: ApprovalRequest, outcome: ApprovalDecision, in di
 /// validated display details. Returns nil, leaving the object unchanged, for anything else, so only an exact,
 /// proven request shape waits for Steer and every other request stays in Claude's own dialog.
 func markDirectPermission(_ object: inout [String: Any]) -> String? {
+    // Only this function sets these keys; a value arriving on stdin is never trusted or kept.
+    object.removeValue(forKey: "approval_details")
+    object.removeValue(forKey: "approval_request_id")
     guard object["hook_event_name"] as? String == "PermissionRequest", let tool = object["tool_name"] as? String else { return nil }
     let input = object["tool_input"] as? [String: Any] ?? [:]
     guard ClaudeDirectApproval.accepts(toolName: tool, toolInput: input) else { return nil }
@@ -397,8 +400,12 @@ func selfTest() -> Int32 {
                                "tool_name": "Grep", "tool_input": ["pattern": "x", "path": "/tmp"]]
     var bash: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": session.uuidString,
                                "tool_name": "Bash", "tool_input": ["command": "touch marker"]]
+    var forged: [String: Any] = ["hook_event_name": "PermissionRequest", "session_id": session.uuidString, "tool_name": "Grep",
+                                 "tool_input": ["pattern": "x"], "approval_details": ["action": "Edit file", "command": "/etc/hosts"],
+                                 "approval_request_id": "forged"]
     guard markDirectPermission(&edit) != nil, markDirectPermission(&extraKey) == nil, extraKey["approval_details"] == nil,
           markDirectPermission(&grep) == nil, markDirectPermission(&bash) != nil, bash["approval_details"] == nil,
+          markDirectPermission(&forged) == nil, forged["approval_details"] == nil, forged["approval_request_id"] == nil,
           writeClaudeEvent(edit, to: fileDirectory, installationID: UUID().uuidString),
           let fileRecord = (try? FileManager.default.contentsOfDirectory(at: fileDirectory, includingPropertiesForKeys: nil))?
             .compactMap({ try? Data(contentsOf: $0) })

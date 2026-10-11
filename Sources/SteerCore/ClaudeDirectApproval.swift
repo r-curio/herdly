@@ -4,9 +4,9 @@ import Foundation
 ///
 /// Bash was the first proven family. The file family (`Edit`, `Write`, `NotebookEdit`, and `Read` outside the
 /// working folders) was proven in [claude-file-approvals](../../docs/evidence/claude-file-approvals.md) on Claude
-/// Code 2.1.296. Each accepted request must have exactly the input shape observed there: a key the tool schema
-/// allows but the proof never saw, a wrong type, or a relative path returns nil, so the helper waits for no
-/// decision and Claude's own dialog stays in charge.
+/// Code 2.1.296. Each accepted request must have exactly a key set observed there: a key the tool schema allows
+/// but the proof never saw (or a missing one), a wrong type, or a relative path returns nil, so the helper waits
+/// for no decision and Claude's own dialog stays in charge.
 public enum ClaudeDirectApproval {
     /// The tools whose `PermissionRequest` the helper waits on for a Steer decision.
     public static let tools: Set<String> = ["Bash", "Edit", "Write", "NotebookEdit", "Read"]
@@ -27,14 +27,9 @@ public enum ClaudeDirectApproval {
     public static func details(toolName: String, toolInput input: [String: Any]) -> ApprovalDetails? {
         switch toolName {
         case "Edit":
-            guard keys(input, required: ["file_path", "old_string", "new_string"], optional: ["replace_all"]),
+            guard keys(input, required: ["file_path", "old_string", "new_string", "replace_all"]),
                   let path = path(input["file_path"]), let old = input["old_string"] as? String,
-                  let new = input["new_string"] as? String else { return nil }
-            var replaceAll = false
-            if let value = input["replace_all"] {
-                guard let flag = bool(value) else { return nil }
-                replaceAll = flag
-            }
+                  let new = input["new_string"] as? String, let replaceAll = input["replace_all"].flatMap(bool) else { return nil }
             let scope = replaceAll ? "Replace every occurrence of" : "Replace"
             return ApprovalDetails(action: "Edit file", command: path,
                                    longText: "\(scope):\n\(preview(old))\n\nWith:\n\(preview(new))",
@@ -47,41 +42,35 @@ public enum ClaudeDirectApproval {
                                    longText: "Content (\(content.count) characters):\n\(preview(content))",
                                    commandLabel: "path")
         case "NotebookEdit":
-            guard keys(input, required: ["notebook_path", "new_source", "edit_mode"], optional: ["cell_id", "cell_type"]),
-                  let path = path(input["notebook_path"]), let source = input["new_source"] as? String,
-                  // Delete was never observed raising a request, so it stays native until proven.
-                  let mode = input["edit_mode"] as? String, ["replace", "insert"].contains(mode) else { return nil }
-            var cell: String?
-            if let value = input["cell_id"] {
-                guard let id = value as? String, !id.isEmpty, id.count <= 256,
-                      !id.contains(where: \.isNewline) else { return nil }
-                cell = id
-            }
-            if let value = input["cell_type"] {
-                guard let type = value as? String, ["code", "markdown"].contains(type) else { return nil }
-            }
+            // Each edit mode accepts exactly the keys it was observed with.
+            guard let mode = input["edit_mode"] as? String, let path = path(input["notebook_path"]),
+                  let cell = cellID(input["cell_id"]), let source = input["new_source"] as? String else { return nil }
             let summary: String
             switch mode {
+            case "replace":
+                guard keys(input, required: ["notebook_path", "cell_id", "new_source", "edit_mode"]) else { return nil }
+                summary = "Replace the source of cell \(cell):\n\(preview(source))"
             case "insert":
-                let type = (input["cell_type"] as? String).map { $0 + " " } ?? ""
-                summary = "Insert a new \(type)cell " + (cell.map { "after cell \($0)" } ?? "at the start")
+                guard keys(input, required: ["notebook_path", "cell_id", "new_source", "cell_type", "edit_mode"]),
+                      input["cell_type"] as? String == "code" else { return nil }
+                summary = "Insert a new code cell after cell \(cell):\n\(preview(source))"
+            case "delete":
+                guard keys(input, required: ["notebook_path", "cell_id", "new_source", "edit_mode"]), source.isEmpty else { return nil }
+                summary = "Delete cell \(cell)"
             default:
-                guard let cell else { return nil }
-                summary = "Replace the source of cell \(cell)"
+                return nil
             }
-            return ApprovalDetails(action: "Edit notebook", command: path, longText: "\(summary):\n\(preview(source))",
-                                   commandLabel: "path")
+            return ApprovalDetails(action: "Edit notebook", command: path, longText: summary, commandLabel: "path")
         case "Read":
-            guard keys(input, required: ["file_path"], optional: ["offset", "limit"]),
-                  let path = path(input["file_path"]) else { return nil }
-            var range: [String] = []
-            for key in ["offset", "limit"] where input[key] != nil {
-                guard let value = integer(input[key]), value >= 0 else { return nil }
-                range.append("\(key) \(value)")
+            guard let path = path(input["file_path"]) else { return nil }
+            if keys(input, required: ["file_path"]) {
+                return ApprovalDetails(action: "Read file", command: path, commandLabel: "path")
             }
+            guard keys(input, required: ["file_path", "offset", "limit"]),
+                  let offset = integer(input["offset"]), offset >= 0,
+                  let limit = integer(input["limit"]), limit >= 0 else { return nil }
             return ApprovalDetails(action: "Read file", command: path,
-                                   longText: range.isEmpty ? nil : "Lines: " + range.joined(separator: ", "),
-                                   commandLabel: "path")
+                                   longText: "Lines: offset \(offset), limit \(limit)", commandLabel: "path")
         default:
             return nil
         }
@@ -96,15 +85,25 @@ public enum ClaudeDirectApproval {
         }
     }
 
-    private static func keys(_ input: [String: Any], required: Set<String>, optional: Set<String> = []) -> Bool {
-        let present = Set(input.keys)
-        return required.isSubset(of: present) && present.isSubset(of: required.union(optional))
+    private static func keys(_ input: [String: Any], required: Set<String>) -> Bool {
+        Set(input.keys) == required
     }
 
-    private static func path(_ value: Any?) -> String? {
+    /// An absolute path shown exactly as it will be used: no control, format, or bidirectional characters
+    /// that could make the displayed path read differently, and no surrounding whitespace a display might trim.
+    public static func path(_ value: Any?) -> String? {
         guard let path = value as? String, path.hasPrefix("/"), path.utf8.count <= maximumPath,
-              !path.contains(where: { $0.isNewline || $0 == "\u{0}" || $0 == "\u{1b}" || $0 == "\u{7}" }) else { return nil }
+              path == path.trimmingCharacters(in: .whitespacesAndNewlines),
+              !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0)
+                  || $0.properties.generalCategory == .format }) else { return nil }
         return path
+    }
+
+    private static func cellID(_ value: Any?) -> String? {
+        guard let id = value as? String, !id.isEmpty, id.count <= 256,
+              !id.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0)
+                  || $0.properties.generalCategory == .format }) else { return nil }
+        return id
     }
 
     /// The text as shown: characters a terminal or the notch could act on are replaced, and past

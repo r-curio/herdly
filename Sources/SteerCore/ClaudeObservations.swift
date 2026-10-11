@@ -356,8 +356,7 @@ public enum ClaudeObservationReader {
               let data = try? JSONSerialization.data(withJSONObject: object),
               let details = try? JSONDecoder().decode(ApprovalDetails.self, from: data),
               let action = details.action, bounded(action) != nil,
-              let path = details.command, path.hasPrefix("/"), path.utf8.count <= ClaudeDirectApproval.maximumPath,
-              !path.contains(where: { $0.isNewline || $0 == "\u{0}" || $0 == "\u{1b}" || $0 == "\u{7}" }),
+              let path = ClaudeDirectApproval.path(details.command),
               details.commandLabel == nil || bounded(details.commandLabel) != nil,
               (details.longText?.count ?? 0) <= ClaudeDirectApproval.maximumPreview * 2 + 512,
               details.longText?.contains(where: { $0 == "\u{1b}" || $0 == "\u{7}" || $0 == "\u{0}" }) != true
