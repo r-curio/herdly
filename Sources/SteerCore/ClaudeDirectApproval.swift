@@ -84,7 +84,7 @@ public enum ClaudeDirectApproval {
             guard keys(input, required: ["url", "prompt"]), let url = url(input["url"]), let host = host(of: url),
                   let prompt = input["prompt"] as? String else { return nil }
             return ApprovalDetails(action: "Fetch web page", command: url,
-                                   longText: "Host: \(host)\n\nClaude asks of the page:\n\(preview(prompt))",
+                                   longText: "Host: \(host.lowercased())\n\nClaude asks of the page:\n\(preview(prompt))",
                                    commandLabel: "url")
         case "WebSearch":
             guard keys(input, required: ["query", "mode"]), input["mode"] as? String == "standard",
