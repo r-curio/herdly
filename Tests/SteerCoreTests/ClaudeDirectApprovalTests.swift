@@ -125,6 +125,11 @@ import Testing
     let punycode = try #require(ClaudeDirectApproval.details(toolName: "WebFetch", toolInput: [
         "url": "https://xn--e1aybc.com/path?q=1#top", "prompt": "t"]))
     #expect(punycode.longText?.hasPrefix("Host: xn--e1aybc.com\n") == true)
+    // The host is shown as Claude's parser normalizes it; the URL itself stays exactly as given.
+    let mixedCase = try #require(ClaudeDirectApproval.details(toolName: "WebFetch", toolInput: [
+        "url": "https://Example.COM/", "prompt": "t"]))
+    #expect(mixedCase.command == "https://Example.COM/")
+    #expect(mixedCase.longText?.hasPrefix("Host: example.com\n") == true)
 
     let search = try #require(ClaudeDirectApproval.details(toolName: "WebSearch", toolInput: [
         "query": "example domain", "mode": "standard"]))
@@ -160,6 +165,7 @@ import Testing
         ("WebFetch", ["url": "https://127.0.0.1/", "prompt": "t"]),
         ("WebFetch", ["url": "https://2130706433/", "prompt": "t"]),
         ("WebFetch", ["url": "https://example.0x10/", "prompt": "t"]),
+        ("WebFetch", ["url": "https://a.0x/", "prompt": "t"]),
         ("WebFetch", ["url": "https://example.com/a b", "prompt": "t"]),
         ("WebFetch", ["url": "https://exa\u{202E}mple.com/", "prompt": "t"]),
         ("WebFetch", ["url": "https://example.com/", "prompt": 3]),
