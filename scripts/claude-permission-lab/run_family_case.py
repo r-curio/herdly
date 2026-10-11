@@ -1,7 +1,7 @@
-"""Drive interactive Claude Code through one issue #72 file-family permission case.
+"""Drive interactive Claude Code through one permission-family case (issues #72-#75).
 
-Usage: python3 -I run_file_case.py <case> [--wait S]
-       python3 -I run_file_case.py --list
+Usage: python3 -I run_family_case.py <case> [--wait S]
+       python3 -I run_family_case.py --list [family]     families: file (#72), web (#73), plan (#74), mcp (#75)
 
 Each case names a tool action, a companion decision for every PermissionRequest it raises, and optional
 project permission rules or mode. The companion is this script, writing receipt/decision records for
@@ -9,10 +9,13 @@ lab_helper.py (the #71 stand-in for SteerHook's Claude approval protocol). Decis
   allow / deny     receipt, then that decision 2 s later
   handoff          receipt, then no_decision 2 s later; the native prompt is then answered No (Esc)
   observe          no receipt; any native prompt is answered No (Esc) 3 s after it appears
+A case may limit its decision to one tool ("decide_tool"); requests for other tools are observed. MCP cases
+start lab_mcp_server.py through --mcp-config; "kill_mcp" kills that server after the receipt, before the decision.
 
 Isolation: Claude runs with --setting-sources project in output/claude-file-lab/project, whose
 .claude/settings.json registers only lab_helper.py. User hooks, rules and auto mode are not loaded, and no
-user settings file changes. Every file read or written is a disposable lab file under output/claude-file-lab.
+user settings file changes. Every file read or written is a disposable lab file under output/claude-file-lab. Web cases fetch only
+example.com (and one httpbin.org redirect to it) and search only for "example domain".
 Results go to output/claude-file-lab/runs/<case>.json.
 """
 import hashlib, json, os, pty, re, select, shutil, signal, struct, sys, time, fcntl, termios
@@ -25,6 +28,10 @@ OUTSIDE = os.path.join(LAB, "outside")
 RUNS = os.path.join(LAB, "runs")
 
 ONLY = " Do not use any other tool except Read on a file inside the current folder. If it is not permitted, do not retry. Then reply only DONE."
+ANY = " Do not use any other tool, except ToolSearch if you need it to load the tool. If it is not permitted, do not retry. Then reply only DONE."
+PLAN = ("Without reading or searching any files, write a one-line plan to create plan.txt containing the word lab, and present it"
+        " with ExitPlanMode immediately. If the plan is not approved, stop and reply only DONE.")
+REDIRECT = "https://httpbin.org/redirect-to?url=https%3A%2F%2Fexample.com%2F"
 # Outside-folder cases name an absolute path the lab owns; the call itself is the point of the case.
 OUT = (" The path is a disposable lab fixture and you are allowed to request access to it. Make the call even though it"
        " is outside the current folder. Do not use any other tool. If it is not permitted, do not retry. Then reply only DONE.")
@@ -50,10 +57,42 @@ CASES = {
     # Mode: acceptEdits should approve an in-project Edit without a request.
     "edit-accept-edits": ("Read target.txt, then use the Edit tool exactly once to change the word alpha to beta in target.txt." + ONLY, "observe",
                           {"mode": "acceptEdits"}),
+    # #72 gaps.
+    "write-overwrite-allow": ("Read target.txt, then use the Write tool exactly once to overwrite target.txt with the exact content lab ." + ONLY, "allow", {}),
+    "read-outside-range-allow": ("Use the Read tool exactly once to read {outside}/outside.txt with offset 1 and limit 1." + OUT, "allow", {}),
+    "notebook-insert-allow": ("Read nb.ipynb, then use the NotebookEdit tool exactly once to insert a new code cell with source print(3) after cell c1 in nb.ipynb." + ONLY, "allow", {}),
+    "notebook-delete-allow": ("Read nb.ipynb, then use the NotebookEdit tool exactly once to delete cell c1 in nb.ipynb." + ONLY, "allow", {}),
+    # #73 web.
+    "webfetch-allow": ("Use the WebFetch tool exactly once to fetch https://example.com/ and report its title." + ANY, "allow", {}),
+    "webfetch-deny": ("Use the WebFetch tool exactly once to fetch https://example.com/ and report its title." + ANY, "deny", {}),
+    "webfetch-handoff": ("Use the WebFetch tool exactly once to fetch https://example.com/ and report its title." + ANY, "handoff", {}),
+    "webfetch-redirect-allow": ("Use the WebFetch tool to fetch " + REDIRECT + " and report the final page title. If WebFetch reports a redirect,"
+                                " fetch the redirect target once with WebFetch." + ANY, "allow", {}),
+    "webfetch-domain-deny-rule": ("Use the WebFetch tool exactly once to fetch https://example.com/ and report its title." + ANY, "observe",
+                                  {"permissions": {"deny": ["WebFetch(domain:example.com)"]}}),
+    "websearch-allow": ("Use the WebSearch tool exactly once to search for: example domain." + ANY, "allow", {}),
+    "websearch-deny": ("Use the WebSearch tool exactly once to search for: example domain." + ANY, "deny", {}),
+    "websearch-handoff": ("Use the WebSearch tool exactly once to search for: example domain." + ANY, "handoff", {}),
+    # #74 plan approval, in plan mode. Only ExitPlanMode is decided; any follow-up request is observed (native No).
+    "plan-allow": (PLAN, "allow", {"mode": "plan", "decide_tool": "ExitPlanMode"}),
+    "plan-deny": (PLAN, "deny", {"mode": "plan", "decide_tool": "ExitPlanMode"}),
+    "plan-handoff": (PLAN, "handoff", {"mode": "plan", "decide_tool": "ExitPlanMode"}),
+    # #75 one bounded lab MCP tool.
+    "mcp-allow": ("Use the lab_echo MCP tool exactly once with text hello." + ANY, "allow", {"mcp": True}),
+    "mcp-deny": ("Use the lab_echo MCP tool exactly once with text hello." + ANY, "deny", {"mcp": True}),
+    "mcp-handoff": ("Use the lab_echo MCP tool exactly once with text hello." + ANY, "handoff", {"mcp": True}),
+    "mcp-user-interaction-allow": ("Use the lab_confirm MCP tool exactly once with text hello." + ANY, "allow", {"mcp": True}),
+    "mcp-server-loss-allow": ("Use the lab_echo MCP tool exactly once with text hello." + ANY, "allow", {"mcp": True, "kill_mcp": True}),
 }
+FAMILIES = {"file": ("edit", "notebook", "write", "read", "grep", "glob"), "web": ("webfetch", "websearch"),
+            "plan": ("plan",), "mcp": ("mcp",)}
+
+def family(case):
+    return next(f for f, prefixes in FAMILIES.items() if case.split("-")[0] in prefixes)
 
 if "--list" in sys.argv:
-    print("\n".join(CASES)); sys.exit(0)
+    wanted = sys.argv[sys.argv.index("--list") + 1:]
+    print("\n".join(c for c in CASES if not wanted or family(c) in wanted)); sys.exit(0)
 CASE = sys.argv[1]
 WAIT = float(sys.argv[sys.argv.index("--wait") + 1]) if "--wait" in sys.argv else 75
 prompt_text, DECISION, extra = CASES[CASE]
@@ -78,7 +117,12 @@ FIXTURES = {
 }
 for path, content in FIXTURES.items():
     with open(path, "w") as f: f.write(content)
-WATCHED = list(FIXTURES) + [os.path.join(OUTSIDE, "created.txt")]
+WATCHED = list(FIXTURES) + [os.path.join(OUTSIDE, "created.txt"), os.path.join(PROJECT, "plan.txt")]
+DECIDE_TOOL = extra.get("decide_tool")
+MCP_CONFIG = os.path.join(EVENTS, "mcp.json")
+with open(MCP_CONFIG, "w") as f:
+    servers = {"steer-lab": {"command": "/usr/bin/python3", "args": ["-I", os.path.join(S, "lab_mcp_server.py"), EVENTS]}}
+    json.dump({"mcpServers": servers if extra.get("mcp") else {}}, f)
 
 def digest(path):
     return hashlib.sha256(open(path, "rb").read()).hexdigest()[:12] if os.path.exists(path) else None
@@ -122,7 +166,7 @@ if pid == 0:
         del os.environ[name]
     os.chdir(PROJECT)
     os.execv(CLAUDE, ["claude", "--setting-sources", "project", "--permission-mode", extra.get("mode", "default"),
-                      "--model", "haiku", "--strict-mcp-config"])
+                      "--model", "haiku", "--strict-mcp-config", "--mcp-config", MCP_CONFIG])
 fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 45, 150, 0, 0))
 
 def pump(seconds):
@@ -141,7 +185,7 @@ def screen(n=6000):
 
 prompts_seen = []
 def native_prompt_open():
-    return bool(re.search(r"Do you want", screen(2500)))
+    return bool(re.search(r"Do you want|Would you like to proceed|Esc to cancel", screen(2500)))
 
 def capture_prompt(label):
     # The text Claude's own dialog shows, for the display contract.
@@ -164,19 +208,24 @@ try:
         for r in requests():
             rid = r["request_id"]
             if rid in steps: continue
-            steps[rid] = {"seen": now}
-            note("request_seen", request_id=rid, tool=r.get("tool_name"))
-            if DECISION != "observe":
+            decide = DECISION != "observe" and DECIDE_TOOL in (None, r.get("tool_name"))
+            steps[rid] = {"seen": now, "decide": decide}
+            note("request_seen", request_id=rid, tool=r.get("tool_name"), decided_by_companion=decide)
+            if decide:
                 atomic(os.path.join(EVENTS, rid + ".receipt"), {"request_id": rid, "received_at": now, "expires_at": now + 30})
                 note("companion_receipt", request_id=rid)
+                if extra.get("kill_mcp"):
+                    # Server loss while the request waits: kill the lab MCP server before deciding.
+                    import subprocess
+                    subprocess.run(["pkill", "-f", "lab_mcp_server.py " + EVENTS]); note("mcp_server_killed")
         for rid, step in steps.items():
-            if DECISION in ("allow", "deny", "handoff") and "decided" not in step and now - step["seen"] >= 2:
+            if step["decide"] and "decided" not in step and now - step["seen"] >= 2:
                 if native_prompt_open(): capture_prompt("before_decision")
                 kind = "no_decision" if DECISION == "handoff" else DECISION
                 atomic(os.path.join(EVENTS, rid + ".decision"), {"request_id": rid, "decision": kind, "decided_at": now})
                 note("companion_decision", request_id=rid, decision=kind); step["decided"] = now
         # Native prompt with no pending companion decision: answer it No after 3 s.
-        pending = any("decided" not in s for s in steps.values()) and DECISION != "observe"
+        pending = any(s["decide"] and "decided" not in s for s in steps.values())
         if native_prompt_open() and not pending:
             native_since = native_since or now
             if now - native_since >= 3:
@@ -202,6 +251,8 @@ records = {n: json.load(open(os.path.join(EVENTS, n))) for n in sorted(os.listdi
 result = {"case": CASE, "decision": DECISION, "extra": extra, "prompt": prompt.replace(LAB, "<lab>"),
           "files_before": before, "files_after": after, "timeline": timeline, "hooks": hooks(),
           "records": records, "native_prompts": prompts_seen,
+          "mcp_calls": [json.loads(l) for l in open(os.path.join(EVENTS, "mcp-calls.jsonl"))]
+                       if os.path.exists(os.path.join(EVENTS, "mcp-calls.jsonl")) else [],
           "final_screen": [l for l in (re.sub(r"\s+", " ", l).strip() for l in screen(5000).splitlines()) if l][-25:]}
 with open(os.path.join(RUNS, CASE + ".json"), "w") as f:
     json.dump(result, f, indent=2)
