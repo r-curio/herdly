@@ -21,28 +21,29 @@ This builds on the transport proof in [claude-permission-transport.md](claude-pe
 | webfetch-allow | `PermissionRequest(WebFetch)` with `url` and `prompt`. Allow; `PostToolUse` followed. | Pass |
 | webfetch-deny | Deny. No post-tool event; Claude stopped. | Pass |
 | webfetch-handoff | `no_decision`; the helper exited silently; the native dialog stayed, and native No showed "Interrupted". | Pass |
-| webfetch-redirect-allow | The first request named the `httpbin.org` URL. Claude did not follow the redirect itself: it made a **second** `WebFetch` call for `https://example.com/`, which raised its own `PermissionRequest`. Each was allowed separately. | Pass: every new URL is a new request |
+| webfetch-redirect-allow | The first request named the `httpbin.org` URL. WebFetch returned the cross-host 302 to Claude instead of following it (seen in the lab session transcript), and Claude made a **second** `WebFetch` call for `https://example.com/`, which raised its own `PermissionRequest`. Each was allowed separately. | Pass: a cross-host redirect is a new request |
 | webfetch-domain-deny-rule | Project rule `deny: ["WebFetch(domain:example.com)"]`. `PreToolUse` fired, but no `PermissionRequest`; nothing was fetched. | Deny rule wins before the hook |
-| websearch-allow | `PermissionRequest(WebSearch)` with `query` and `mode` (`standard`). Allow; `PostToolUse` followed. | Pass |
+| websearch-allow | `PermissionRequest(WebSearch)` with `query` (`example domain`) and `mode` (`standard`); the rerun recorded both values. Allow; `PostToolUse` followed. | Pass |
 | websearch-deny | Deny. No post-tool event. | Pass |
 | websearch-handoff | `no_decision`, then native No ("Interrupted"). | Pass |
 
-The driver pressed Esc more than once in the two handoff cases, because it re-read the already answered
-dialog. Every extra keypress came after the first had answered the dialog, so the results stand. The driver
-now ignores screen text drawn before its last answer.
+The first handoff runs pressed Esc more than once, because the driver re-read the already answered dialog.
+Every extra keypress came after the first had answered it, so the results stand. The driver now ignores screen
+text drawn before its last answer; a `webfetch-handoff` rerun pressed Esc once, with the same outcome, and
+recorded the URL.
 
 ## Decision
 
 | Tool | Decision | Reason |
 | --- | --- | --- |
-| `WebFetch` | Include | Allow, deny and handoff behaved exactly, and a redirect produces a new request for the new URL, so an approval never silently covers another host. |
+| `WebFetch` | Include | Allow, deny and handoff behaved exactly, and a cross-host redirect produced a new request for the new URL, so an approval did not cover the other host. Same-host redirects were not exercised. |
 | `WebSearch` | Include | Allow, deny and handoff behaved exactly. |
 
 ## Display and validation contract
 
 **Accept only:**
 
-- `WebFetch` with exactly `url` (an absolute `https` or `http` URL with a host) and `prompt` (a string);
+- `WebFetch` with exactly `url` (an absolute `https` URL with a host; `http` was not observed) and `prompt` (a string);
 - `WebSearch` with exactly `query` (a non-empty string) and `mode` equal to `standard`, the only value observed.
 
 Anything else stays in Claude's dialog.

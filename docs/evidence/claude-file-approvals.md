@@ -21,7 +21,8 @@ This builds on the transport proof in [claude-permission-transport.md](claude-pe
   cells or at the start, and an `Edit` without `replace_all`.
 - **Follow-up runs (#196):** `Write` overwriting an existing file, `Read` with `offset`/`limit`, and NotebookEdit
   `insert` and `delete` were added with [run_family_case.py](../../scripts/claude-permission-lab/run_family_case.py),
-  the renamed driver. Its prompts now also permit `ToolSearch`, which the first notebook-delete run needed.
+  which replaced the original `run_file_case.py` driver used for the first 15 cases. Its prompts also permit
+  `ToolSearch`, which the first notebook-delete run needed.
 
 ## Results
 
@@ -73,8 +74,9 @@ emitted a decision.
   schema allows but these runs did not exercise stay unsupported until proven):
   - `Edit`: `file_path`, `old_string`, `new_string`, `replace_all` (bool);
   - `Write`: `file_path`, `content` (create or overwrite);
-  - `NotebookEdit`: `notebook_path`, `cell_id`, `new_source`, `edit_mode` = `replace`; the same plus `cell_type` =
-    `code` for `insert`; or the same four keys with an empty `new_source` for `delete`;
+  - `NotebookEdit` with `edit_mode` = `replace`: `notebook_path`, `cell_id`, `new_source`, `edit_mode`;
+  - `NotebookEdit` with `edit_mode` = `insert`: those four keys plus `cell_type` = `code`;
+  - `NotebookEdit` with `edit_mode` = `delete`: the same four keys as replace, with an empty `new_source`;
   - `Read`: `file_path`, or `file_path` with integer `offset` and `limit`;
 - the path is absolute, has no surrounding whitespace, and has no control, format or bidirectional characters, so
   the displayed path is exactly the target;

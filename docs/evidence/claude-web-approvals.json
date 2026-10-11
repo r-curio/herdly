@@ -2,11 +2,11 @@
   "issue": 73,
   "recorded": "2026-10-11",
   "claude_code": "2.1.296 (Claude Code)",
-  "repo_commit": "fee411a",
+  "repo_commit_at_compile": "503501a",
   "helper": "scripts/claude-permission-lab/lab_helper.py (the #71 stand-in for SteerHook's Claude approval file protocol, any tool); not the shipped SteerHook, which decides Bash only",
   "companion": "scripts/claude-permission-lab/run_family_case.py writes receipts and decisions; native answers are keystrokes into Claude's own dialog",
   "decisions": "scripted by the agent at the operator's explicit direction (2026-10-11); not human-clicked",
-  "isolation": "claude --setting-sources project --model haiku --strict-mcp-config in <lab>/project with --permission-mode default unless a case sets one; user hooks, rules and auto mode not loaded; every file target is a disposable fixture under <lab>; web cases fetch only example.com (one via an httpbin.org redirect) and search only for \"example domain\"; MCP cases use scripts/claude-permission-lab/lab_mcp_server.py",
+  "isolation": "claude --setting-sources project --model haiku --strict-mcp-config in <lab>/project with --permission-mode default unless a case sets one; user hooks, rules and auto mode not loaded; every file target is a disposable fixture under <lab>, except that plan cases let Claude write its own plan file to ~/.claude/plans (removed by hand after the runs); web cases fetch only example.com (one via an httpbin.org redirect) and search only for \"example domain\"; MCP cases use scripts/claude-permission-lab/lab_mcp_server.py",
   "cases": [
     {
       "case": "webfetch-allow",
@@ -312,17 +312,17 @@
         {
           "at": "before_decision",
           "lines": [
-            "\u2722 92",
-            "oog",
-            "4 thinking",
-            "\u00b7 B g 5 thinking",
+            "\u2733 Proofing\u2026 3 50",
+            "\u2736 Proofing\u2026 75",
+            "\u273b 313",
+            "24",
             "\u23fa Fetch (https://example.com/)",
-            "running PreT olU e hook \u00b7 2s \u00b7 \u2193 195 tokens \u00b7 thinking )",
-            "Boogieing\u2026",
+            "running PreT olU e hook \u00b7 3s \u00b7 \u2193 324 tokens \u00b7 thought for 1s)",
+            "Proofing\u2026",
             "Fetch",
             "Claude wants to fetch content from example.com",
             "url: https://example.com/",
-            "prompt: What is the title of this page? Reply with the title only.",
+            "prompt: What is the title of this page? Reply with the exact title text only.",
             "Do you want to allow Claude to fetch this content?",
             "\u276f 1. Yes",
             "2. Yes, and don't ask again for example.com",
@@ -332,137 +332,97 @@
       ],
       "events_seconds_from_prompt": [
         {
-          "t": 1.461,
+          "t": 2.375,
           "hook": "PreToolUse",
           "tool_name": "ToolSearch",
-          "tool_use_id": "toolu_01CmgWdHDWwJ5gt8VqMwn4ue",
+          "tool_use_id": "toolu_012TNL99CDxeBinL9Kk3BsBi",
           "permission_mode": "default",
+          "targets": {
+            "query": "select:WebFetch"
+          },
           "tool_input_shape": {
             "query": "str[15]",
             "max_results": "int"
           }
         },
         {
-          "t": 1.534,
+          "t": 2.447,
           "hook": "PostToolUse",
           "tool_name": "ToolSearch",
-          "tool_use_id": "toolu_01CmgWdHDWwJ5gt8VqMwn4ue",
+          "tool_use_id": "toolu_012TNL99CDxeBinL9Kk3BsBi",
           "permission_mode": "default",
+          "targets": {
+            "query": "select:WebFetch"
+          },
           "tool_input_shape": {
             "query": "str[15]",
             "max_results": "int"
           }
         },
         {
-          "t": 1.611,
+          "t": 2.522,
           "hook": "PostToolBatch",
           "permission_mode": "default"
         },
         {
-          "t": 2.595,
+          "t": 3.528,
           "hook": "PreToolUse",
           "tool_name": "WebFetch",
-          "tool_use_id": "toolu_017pp8tBGEPMh9u58eR4PSGh",
+          "tool_use_id": "toolu_01UYeSnEZ1zcSM7DVyozsBzT",
           "permission_mode": "default",
+          "targets": {
+            "url": "https://example.com/"
+          },
           "tool_input_shape": {
             "url": "str[20]",
-            "prompt": "str[58]"
+            "prompt": "str[69]"
           }
         },
         {
-          "t": 2.672,
+          "t": 3.603,
           "hook": "PermissionRequest",
           "tool_name": "WebFetch",
-          "request_id": "f648795f-1637-4943-800b-741611e99f3f",
+          "request_id": "84407e56-1403-4416-a621-ce09325cd480",
           "permission_mode": "default",
+          "targets": {
+            "url": "https://example.com/"
+          },
           "tool_input_shape": {
             "url": "str[20]",
-            "prompt": "str[58]"
+            "prompt": "str[69]"
           }
         },
         {
-          "t": 2.714,
+          "t": 3.752,
           "driver": "request_seen",
-          "request_id": "f648795f-1637-4943-800b-741611e99f3f",
+          "request_id": "84407e56-1403-4416-a621-ce09325cd480",
           "tool": "WebFetch",
           "decided_by_companion": true
         },
         {
-          "t": 2.715,
+          "t": 3.752,
           "driver": "companion_receipt",
-          "request_id": "f648795f-1637-4943-800b-741611e99f3f"
+          "request_id": "84407e56-1403-4416-a621-ce09325cd480"
         },
         {
-          "t": 4.892,
+          "t": 5.949,
           "driver": "companion_decision",
-          "request_id": "f648795f-1637-4943-800b-741611e99f3f",
+          "request_id": "84407e56-1403-4416-a621-ce09325cd480",
           "decision": "no_decision"
         },
         {
-          "t": 4.978,
+          "t": 6.038,
           "hook": "helper_exit",
-          "request_id": "f648795f-1637-4943-800b-741611e99f3f",
+          "request_id": "84407e56-1403-4416-a621-ce09325cd480",
           "outcome": "handed_back",
           "decision": "no_decision"
         },
         {
-          "t": 8.022,
+          "t": 9.055,
           "driver": "native_no_esc"
         },
         {
-          "t": 12.978,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 17.954,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 22.976,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 27.967,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 32.949,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 37.935,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 42.905,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 47.9,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 52.884,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 57.867,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 62.846,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 67.83,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 72.824,
-          "driver": "native_no_esc"
-        },
-        {
-          "t": 75.866,
+          "t": 16.136,
           "hook": "SessionEnd"
         }
       ]
@@ -771,13 +731,13 @@
         {
           "at": "before_decision",
           "lines": [
-            "\u2736 Cooking\u2026 2 82 thinking",
-            "\u2733 91",
-            "C",
-            "\u2722 C 7",
-            "9 thinking",
+            "\u2736 Crystallizing\u2026 2 2",
+            "ing",
+            "\u2733 4",
             "\u23fa Web Search (\"example domain\")",
-            "Cooking\u2026 running PreT olU e hook \u00b7 2s \u00b7 \u2193 199 tokens \u00b7 thinking )",
+            "running PreToolUse hook \u00b7 2s \u00b7 \u2193 74 tokens)",
+            "ing",
+            "\u2722 8",
             "Tool use",
             "\u2502 Claude wants to search the web for: example domain",
             "Web Search(\"example domain\")",
@@ -791,102 +751,120 @@
       ],
       "events_seconds_from_prompt": [
         {
-          "t": 1.465,
+          "t": 1.163,
           "hook": "PreToolUse",
           "tool_name": "ToolSearch",
-          "tool_use_id": "toolu_01JbGqdiSUyjwLmTKYDyzbuw",
+          "tool_use_id": "toolu_01P444oNLHNZsTiUvwnT2wyM",
           "permission_mode": "default",
+          "targets": {
+            "query": "select:WebSearch"
+          },
           "tool_input_shape": {
             "query": "str[16]",
             "max_results": "int"
           }
         },
         {
-          "t": 1.538,
+          "t": 1.232,
           "hook": "PostToolUse",
           "tool_name": "ToolSearch",
-          "tool_use_id": "toolu_01JbGqdiSUyjwLmTKYDyzbuw",
+          "tool_use_id": "toolu_01P444oNLHNZsTiUvwnT2wyM",
           "permission_mode": "default",
+          "targets": {
+            "query": "select:WebSearch"
+          },
           "tool_input_shape": {
             "query": "str[16]",
             "max_results": "int"
           }
         },
         {
-          "t": 1.616,
+          "t": 1.302,
           "hook": "PostToolBatch",
           "permission_mode": "default"
         },
         {
-          "t": 2.495,
+          "t": 2.321,
           "hook": "PreToolUse",
           "tool_name": "WebSearch",
-          "tool_use_id": "toolu_015HXKXZFbUJRjm3kWBqiNVD",
+          "tool_use_id": "toolu_01WGkv7xR3eeDEC71LK4itMd",
           "permission_mode": "default",
+          "targets": {
+            "query": "example domain",
+            "mode": "standard"
+          },
           "tool_input_shape": {
             "query": "str[14]",
             "mode": "str[8]"
           }
         },
         {
-          "t": 2.567,
+          "t": 2.396,
           "hook": "PermissionRequest",
           "tool_name": "WebSearch",
-          "request_id": "d2542524-83de-4f1b-8010-4027c43f63b0",
+          "request_id": "913cb3f5-f848-4d2c-9e46-21e196de4449",
           "permission_mode": "default",
+          "targets": {
+            "query": "example domain",
+            "mode": "standard"
+          },
           "tool_input_shape": {
             "query": "str[14]",
             "mode": "str[8]"
           }
         },
         {
-          "t": 2.717,
+          "t": 2.442,
           "driver": "request_seen",
-          "request_id": "d2542524-83de-4f1b-8010-4027c43f63b0",
+          "request_id": "913cb3f5-f848-4d2c-9e46-21e196de4449",
           "tool": "WebSearch",
           "decided_by_companion": true
         },
         {
-          "t": 2.718,
+          "t": 2.443,
           "driver": "companion_receipt",
-          "request_id": "d2542524-83de-4f1b-8010-4027c43f63b0"
+          "request_id": "913cb3f5-f848-4d2c-9e46-21e196de4449"
         },
         {
-          "t": 4.914,
+          "t": 4.626,
           "driver": "companion_decision",
-          "request_id": "d2542524-83de-4f1b-8010-4027c43f63b0",
+          "request_id": "913cb3f5-f848-4d2c-9e46-21e196de4449",
           "decision": "allow"
         },
         {
-          "t": 5.005,
+          "t": 4.716,
           "hook": "helper_exit",
-          "request_id": "d2542524-83de-4f1b-8010-4027c43f63b0",
+          "request_id": "913cb3f5-f848-4d2c-9e46-21e196de4449",
           "outcome": "emitted",
           "decision": "allow"
         },
         {
-          "t": 9.333,
+          "t": 8.618,
           "hook": "PostToolUse",
           "tool_name": "WebSearch",
-          "tool_use_id": "toolu_015HXKXZFbUJRjm3kWBqiNVD",
+          "tool_use_id": "toolu_01WGkv7xR3eeDEC71LK4itMd",
           "permission_mode": "default",
+          "targets": {
+            "query": "example domain",
+            "mode": "standard"
+          },
           "tool_input_shape": {
             "query": "str[14]",
             "mode": "str[8]"
           }
         },
         {
-          "t": 9.421,
+          "t": 8.689,
           "hook": "PostToolBatch",
           "permission_mode": "default"
         },
         {
-          "t": 10.234,
+          "t": 9.41,
           "hook": "Stop",
           "permission_mode": "default"
         },
         {
-          "t": 12.895,
+          "t": 12.145,
           "hook": "SessionEnd"
         }
       ]

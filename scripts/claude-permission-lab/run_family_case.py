@@ -14,7 +14,8 @@ start lab_mcp_server.py through --mcp-config; "kill_mcp" kills that server after
 
 Isolation: Claude runs with --setting-sources project in output/claude-file-lab/project, whose
 .claude/settings.json registers only lab_helper.py. User hooks, rules and auto mode are not loaded, and no
-user settings file changes. Every file read or written is a disposable lab file under output/claude-file-lab. Web cases fetch only
+user settings file changes. Every file read or written is a disposable lab file under output/claude-file-lab, except
+that plan cases let Claude write its own plan to ~/.claude/plans/<slug>.md; remove those files after a plan run. Web cases fetch only
 example.com (and one httpbin.org redirect to it) and search only for "example domain".
 Results go to output/claude-file-lab/runs/<case>.json.
 """
