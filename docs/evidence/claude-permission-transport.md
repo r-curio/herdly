@@ -67,10 +67,12 @@ Recorded 2026-10-11 against Claude Code 2.1.296. Raw timeline: [claude-permissio
 
 ## Follow-ups this suggests
 
-- Today Steer removes a Claude approval row on the matched `PostToolUse` (native Yes) at its next scan.
-  A native No leaves the direct controls live until the 30-second deadline. Hand back an actionable
-  Claude approval when the registry shows the same session's `statusUpdatedAt` later than the request's
-  arrival. The `claude agents --json` fallback has no such timestamp and keeps today's behavior.
+- Done after this proof: when this was recorded, Steer removed a Claude approval row on the matched
+  `PostToolUse` (native Yes) at its next scan, and a native No left the direct controls live until the
+  30-second deadline. Steer now hands back an actionable Claude approval when the registry shows the
+  same session's `statusUpdatedAt` later than the request's arrival
+  ([Claude observations](../claude-observations.md)). The `claude agents --json` fallback has no such
+  timestamp and keeps the deadline.
 - The helper could apply the same check to stop waiting without emitting, so a late click is reported
   as unconfirmed rather than received.
 - A human-clicked rerun through the real notch is still needed if the operator wants #71's original

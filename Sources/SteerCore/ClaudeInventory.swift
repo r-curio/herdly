@@ -44,9 +44,14 @@ public struct ClaudeInventorySession: Equatable, Sendable {
     /// The session's working directory as Claude reported it. Presentation only (the row's
     /// "project @ branch"); never used for targeting or identity.
     public let directory: String?
+    /// When Claude last changed the interactive status, in seconds, when the source reports it
+    /// (the session registry's `statusUpdatedAt`). nil from `claude agents --json` or a missing or
+    /// malformed value.
+    public let statusUpdatedAt: Double?
 
     public init(sessionID: String, name: String = "", kind: ClaudeInventoryKind, startedAt: Double,
-                lifecycle: ClaudeInventoryLifecycle, pid: Int32? = nil, directory: String? = nil) {
+                lifecycle: ClaudeInventoryLifecycle, pid: Int32? = nil, directory: String? = nil,
+                statusUpdatedAt: Double? = nil) {
         self.sessionID = sessionID
         self.name = name
         self.kind = kind
@@ -54,6 +59,7 @@ public struct ClaudeInventorySession: Equatable, Sendable {
         self.lifecycle = lifecycle
         self.pid = pid
         self.directory = directory
+        self.statusUpdatedAt = statusUpdatedAt
     }
 }
 
@@ -159,8 +165,11 @@ public enum ClaudeInventoryDecoder {
                 }
                 lifecycle = .background(state: state)
             }
+            // Optional and advisory: a missing or malformed value never makes the inventory unavailable.
+            let statusUpdatedAt = kind == .interactive ? timestamp(row["statusUpdatedAt"]) : nil
             sessions.append(ClaudeInventorySession(sessionID: sessionID, name: name, kind: kind,
-                                                   startedAt: startedAt, lifecycle: lifecycle, directory: directory))
+                                                   startedAt: startedAt, lifecycle: lifecycle, directory: directory,
+                                                   statusUpdatedAt: statusUpdatedAt))
         }
         return ClaudeInventoryScan(sourceScope: sourceScope, observedAt: observedAt, sessions: sessions)
     }
