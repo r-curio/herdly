@@ -15,6 +15,8 @@ import Foundation
 /// - Only `interactive` entries (or entries with no `kind`, which Claude treats as interactive)
 ///   become inventory rows. Other holders of a session are not duplicates: a `bg` entry only marks
 ///   its session as background, and `daemon`, `daemon-worker`, and parked-job entries are skipped.
+///   A parked interactive entry still identifies the process that displays its job: its
+///   `parkedJobId` names the `jobId` of the `bg` entry now holding the session.
 ///   An unknown kind makes the scan unavailable. Claude writes the `shell` status when the prompt is
 ///   idle while a background Bash task (a dev server, say) is still running, so it is reported as
 ///   `idle`: the turn has ended.
@@ -96,6 +98,8 @@ public enum ClaudeSessionRegistry {
         var rows: [[String: Any]] = []
         var pids: [String: Int32] = [:]
         var background: Set<String> = []
+        var jobSessions: [String: Set<String>] = [:]
+        var parkedHolders: [String: Set<Int32>] = [:]
         for entry in entries {
             // A vanished entry's session ended, and any entry, torn or malformed, is harmless once
             // the process its name carries is gone.
@@ -105,7 +109,12 @@ public enum ClaudeSessionRegistry {
             }
             // The PID now belongs to a different process than the one Claude registered.
             guard isRunning(process) else { continue }
-            guard row["parkedJobId"] == nil else { continue }
+            if let parked = row["parkedJobId"] {
+                if row["kind"] == nil || row["kind"] as? String == "interactive", let job = jobID(parked) {
+                    parkedHolders[job, default: []].insert(process.pid)
+                }
+                continue
+            }
             switch row["kind"] {
             case nil, "interactive" as String:
                 // Claude treats a missing kind as interactive.
@@ -123,6 +132,9 @@ public enum ClaudeSessionRegistry {
                     return unavailable(ClaudeInventoryDecoder.incompleteMessage)
                 }
                 background.insert(sessionID.uuidString.lowercased())
+                if let job = row["jobId"].flatMap(jobID) {
+                    jobSessions[job, default: []].insert(sessionID.uuidString.lowercased())
+                }
             case "daemon" as String, "daemon-worker" as String:
                 continue
             default:
@@ -137,7 +149,25 @@ public enum ClaudeSessionRegistry {
                                    statusUpdatedAt: $0.statusUpdatedAt)
         }
         return ClaudeInventoryScan(sourceScope: sourceScope, observedAt: observedAt, sessions: sessions,
-                                   backgroundSessionIDs: background)
+                                   backgroundSessionIDs: background,
+                                   parkedJobProcesses: parkedJobProcesses(jobSessions: jobSessions, holders: parkedHolders))
+    }
+
+    /// Links each background session to the interactive process that parked its job. Only a job held
+    /// by one background session and parked by one process identifies that process; any other
+    /// overlap is ambiguous, so the binding fails closed rather than using the name rule.
+    static func parkedJobProcesses(jobSessions: [String: Set<String>],
+                                   holders: [String: Set<Int32>]) -> [String: ClaudeSessionProcess] {
+        var result: [String: ClaudeSessionProcess] = [:]
+        for (job, sessions) in jobSessions {
+            guard let pids = holders[job], !pids.isEmpty else { continue }
+            for session in sessions {
+                let process: ClaudeSessionProcess = sessions.count == 1 && pids.count == 1 ? .identified(pid: pids.first!) : .ambiguous
+                // A session reached through two jobs has no single holder either.
+                result[session] = result[session] == nil ? process : .ambiguous
+            }
+        }
+        return result
     }
 
     /// Whether `process` is alive (not a zombie) and, when Claude recorded `procStart`, started at
@@ -186,6 +216,12 @@ public enum ClaudeSessionRegistry {
         do { return .read(try handle.read(upToCount: maximumEntrySize + 1) ?? Data()) } catch { return .failed }
     }
 
+    /// A job identifier as Claude writes `jobId` and `parkedJobId`: short nonempty text.
+    private static func jobID(_ value: Any) -> String? {
+        guard let text = value as? String, !text.isEmpty, text.utf8.count <= 64 else { return nil }
+        return text
+    }
+
     private static func parse(_ data: Data) -> [String: Any]? {
         guard data.count <= maximumEntrySize else { return nil }
         return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -214,11 +250,13 @@ public enum ClaudeSessionProcess: Equatable, Hashable, Sendable {
     /// to a process named `claude`.
     case unidentified
     /// Exactly one available inventory lists the session as interactive, and its registry names
-    /// this live process.
+    /// this live process; or the session runs as a background job that this one live interactive
+    /// process parked and displays.
     case identified(pid: Int32)
     /// Several available inventories list the session as interactive, or an inventory reports it
-    /// held by two interactive processes, whether from a registry or `claude agents --json`. No one
-    /// process can be required, so the binding fails closed.
+    /// held by two interactive processes, whether from a registry or `claude agents --json`; or the
+    /// session has both an interactive holder and a parked-job link, or a link that is not
+    /// one-to-one. No one process can be required, so the binding fails closed.
     case ambiguous
 
     /// Selects the session's process from every configured root's latest inventory.
@@ -233,11 +271,14 @@ public enum ClaudeSessionProcess: Equatable, Hashable, Sendable {
             self = .ambiguous
             return
         }
-        let holders = inventories.filter(\.available).flatMap(\.sessions)
-            .filter { $0.kind == .interactive && $0.sessionID == sessionID }
-        switch holders.count {
-        case 0: self = .unidentified
-        case 1: self = holders[0].pid.map { .identified(pid: $0) } ?? .unidentified
+        let available = inventories.filter(\.available)
+        let holders = available.flatMap(\.sessions).filter { $0.kind == .interactive && $0.sessionID == sessionID }
+        // A background session continued from a parked one is held by the parking process instead.
+        let parked = available.compactMap { $0.parkedJobProcesses[sessionID] }
+        switch (holders.count, parked.count) {
+        case (0, 0): self = .unidentified
+        case (1, 0): self = holders[0].pid.map { .identified(pid: $0) } ?? .unidentified
+        case (0, 1): self = parked[0]
         default: self = .ambiguous
         }
     }

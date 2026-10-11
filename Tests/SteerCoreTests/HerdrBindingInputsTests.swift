@@ -391,6 +391,46 @@ private func inventory(_ root: String, _ sessions: [(id: String, pid: Int32?)],
     ]) == .ambiguous)
 }
 
+private func parkedInventory(_ root: String, _ links: [String: ClaudeSessionProcess]) -> ClaudeInventoryScan {
+    ClaudeInventoryScan(sourceScope: root, observedAt: 10, backgroundSessionIDs: Set(links.keys), parkedJobProcesses: links)
+}
+
+@Test func claudeSessionProcessFollowsTheParkedJobLinkOnlyWhenItIsTheOneHolder() {
+    // A background job continued from a parked session is held by the process that parked it.
+    #expect(ClaudeSessionProcess(sessionID: session, inventories: [
+        parkedInventory("/tmp/one", [session: .identified(pid: 83378)]), inventory("/tmp/two", [(otherSession, 83400)]),
+    ]) == .identified(pid: 83378))
+    #expect(ClaudeSessionProcess(sessionID: session, inventories: [parkedInventory("/tmp/one", [session: .ambiguous])])
+        == .ambiguous)
+    // A link and an interactive holder, or links from two roots, name no one process.
+    #expect(ClaudeSessionProcess(sessionID: session, inventories: [
+        parkedInventory("/tmp/one", [session: .identified(pid: 83378)]), inventory("/tmp/two", [(session, 83600)]),
+    ]) == .ambiguous)
+    #expect(ClaudeSessionProcess(sessionID: session, inventories: [
+        parkedInventory("/tmp/one", [session: .identified(pid: 83378)]),
+        parkedInventory("/tmp/two", [session: .identified(pid: 83378)]),
+    ]) == .ambiguous)
+    // An unavailable root's link does not count.
+    #expect(ClaudeSessionProcess(sessionID: session, inventories: [
+        .unavailable(sourceScope: "/tmp/one", observedAt: 10, reason: ClaudeInventoryDecoder.invalidMessage),
+    ]) == .unidentified)
+}
+
+@Test func herdrClaudeBindingAcceptsTheParkingProcessForABackgroundJob() {
+    // The pane's foreground process, 83378, parked the session's job and displays it.
+    let outcome = scan(processInfo: ["w1:p1": foreground("w1:p1", ["2.1.296", "node"])])
+    func bind(_ link: ClaudeSessionProcess) -> HerdrSessionBinding {
+        HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: [record()], ghosttyControlsEnabled: true,
+                                   gateOpen: true, outcome: outcome, defaultSocketPath: socket, codex: .none,
+                                   claudeProcess: ClaudeSessionProcess(sessionID: session,
+                                                                       inventories: [parkedInventory("/tmp/one", [session: link])]))
+    }
+    #expect(bind(.identified(pid: 83378)) == .bound(target))
+    // A job parked from another pane's process does not bind this pane.
+    #expect(bind(.identified(pid: 99999)) == .unavailable(.binding(.agentProcessNotInForeground(.claude))))
+    #expect(bind(.ambiguous) == .unavailable(.binding(.agentProcessAmbiguous(.claude))))
+}
+
 @Test func herdrClaudeBindingFollowsTheSessionProcessSelectedFromInventories() {
     // The pane runs the session's native-installer process, 83378, named for its version.
     let outcome = scan(processInfo: ["w1:p1": foreground("w1:p1", ["2.1.293", "node"])])

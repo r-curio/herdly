@@ -74,6 +74,10 @@ public struct ClaudeInventoryScan: Equatable, Sendable {
     /// a live background holder but carries no background state. Never includes a session that also
     /// has a row.
     public let backgroundSessionIDs: Set<String>
+    /// The process holding each background session whose job a live interactive process parked and
+    /// now displays: the registry links the background entry's `jobId` to that process's
+    /// `parkedJobId`. `.ambiguous` when the link is not one-to-one. Empty when unavailable.
+    public let parkedJobProcesses: [String: ClaudeSessionProcess]
 
     public func isBackgroundSession(_ sessionID: String) -> Bool {
         available && (backgroundSessionIDs.contains(sessionID)
@@ -82,7 +86,8 @@ public struct ClaudeInventoryScan: Equatable, Sendable {
 
     public init(sourceScope: String, observedAt: Double, sessions: [ClaudeInventorySession] = [],
                 available: Bool = true, failure: String? = nil,
-                ambiguousSessionIDs: Set<String> = [], backgroundSessionIDs: Set<String> = []) {
+                ambiguousSessionIDs: Set<String> = [], backgroundSessionIDs: Set<String> = [],
+                parkedJobProcesses: [String: ClaudeSessionProcess] = [:]) {
         self.sourceScope = URL(fileURLWithPath: sourceScope).standardizedFileURL.path
         self.observedAt = observedAt
         self.sessions = sessions
@@ -90,6 +95,7 @@ public struct ClaudeInventoryScan: Equatable, Sendable {
         self.failure = failure
         self.ambiguousSessionIDs = ambiguousSessionIDs
         self.backgroundSessionIDs = available ? backgroundSessionIDs.subtracting(sessions.map(\.sessionID)) : []
+        self.parkedJobProcesses = available ? parkedJobProcesses : [:]
     }
 
     public static func unavailable(sourceScope: String, observedAt: Double, reason: String,
