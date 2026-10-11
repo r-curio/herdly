@@ -388,11 +388,21 @@ struct OptionButton: View {
 
 /// A disclosure that keeps its content on the panel's left edge. SwiftUI's DisclosureGroup indents
 /// and centers what it reveals; here the revealed rows align with everything above them.
+/// The label names what pressing it does, so an open disclosure reads "Hide …" (or `expandedTitle`)
+/// rather than still offering to show what is already shown.
 struct NotchDisclosure<Content: View>: View {
     let title: String
+    var expandedTitle: String? = nil
+    /// Names the item for VoiceOver, so the spoken label follows the visible one.
+    var subject: String? = nil
     @Binding var expanded: Bool
     @ViewBuilder let content: () -> Content
     @FocusState private var focused: Bool
+    private var currentTitle: String {
+        guard expanded else { return title }
+        if let expandedTitle { return expandedTitle }
+        return title.hasPrefix("Show ") ? "Hide " + title.dropFirst(5) : title
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
@@ -403,7 +413,7 @@ struct NotchDisclosure<Content: View>: View {
                         .font(.system(size: 9, weight: .semibold))
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                         .frame(width: 10)
-                    Text(title)
+                    Text(currentTitle)
                 }
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
                 .contentShape(Rectangle())
@@ -412,7 +422,7 @@ struct NotchDisclosure<Content: View>: View {
             .focused($focused)
             .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .stroke(NotchStyle.ink.opacity(focused ? 0.9 : 0), lineWidth: 1.5).padding(.horizontal, -4).padding(.vertical, -2))
-            .accessibilityLabel(title)
+            .accessibilityLabel(subject.map { "\(currentTitle) for \($0)" } ?? currentTitle)
             .accessibilityValue(expanded ? "expanded" : "collapsed")
             if expanded { content() }
         }
@@ -767,11 +777,10 @@ struct Notch: View {
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
         }
         if let full = request.fullRequest {
-            NotchDisclosure(title: "Show full request", expanded: disclosure("request:\(item.session.session)")) {
+            NotchDisclosure(title: "Show full request", subject: subject, expanded: disclosure("request:\(item.session.session)")) {
                 Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .accessibilityLabel("Show full request for \(subject)")
         }
     }
 
@@ -1114,11 +1123,10 @@ struct Notch: View {
                         detail("reason", details.reason, selectable: true, missing: missing)
                     }
                     if let longText = details.longText {
-                        NotchDisclosure(title: "Show full request", expanded: disclosure("request:\(item.session.session)")) {
+                        NotchDisclosure(title: "Show full request", subject: subject, expanded: disclosure("request:\(item.session.session)")) {
                             Text(longText).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        .accessibilityLabel("Show full request for \(subject)")
                     }
                 }
                 switch item.kind {
@@ -1179,21 +1187,19 @@ struct Notch: View {
                             Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).lineLimit(2).truncationMode(.tail)
                         }
                         if let full = running.fullAction {
-                            NotchDisclosure(title: "Show full action", expanded: disclosure("action:\(item.session.session)")) {
+                            NotchDisclosure(title: "Show full action", subject: subject, expanded: disclosure("action:\(item.session.session)")) {
                                 Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
-                            .accessibilityLabel("Show full action for \(subject)")
                         } else if expandsPrompt {
                             // A shortened prompt is only its start; the disclosure must not call it full.
-                            let title = promptOpen ? "Show less" : running.promptShortened ? "Show more of prompt" : "Show full prompt"
-                            NotchDisclosure(title: title, expanded: disclosure(promptKey)) {
+                            let title = running.promptShortened ? "Show more of prompt" : "Show full prompt"
+                            NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject, expanded: disclosure(promptKey)) {
                                 if running.promptShortened {
                                     Text("Shortened; the full prompt is in \(item.session.source == .claude ? "Claude" : "Codex").")
                                         .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                                 }
                             }
-                            .accessibilityLabel("\(title) for \(subject)")
                         }
                     }
                     if item.session.source == .claude {
