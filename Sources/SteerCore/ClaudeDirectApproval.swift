@@ -94,16 +94,22 @@ public enum ClaudeDirectApproval {
     public static func path(_ value: Any?) -> String? {
         guard let path = value as? String, path.hasPrefix("/"), path.utf8.count <= maximumPath,
               path == path.trimmingCharacters(in: .whitespacesAndNewlines),
-              !path.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0)
-                  || $0.properties.generalCategory == .format }) else { return nil }
+              !path.unicodeScalars.contains(where: unsafeForDisplay) else { return nil }
         return path
     }
 
     private static func cellID(_ value: Any?) -> String? {
         guard let id = value as? String, !id.isEmpty, id.count <= 256,
-              !id.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0)
-                  || $0.properties.generalCategory == .format }) else { return nil }
+              !id.unicodeScalars.contains(where: unsafeForDisplay) else { return nil }
         return id
+    }
+
+    /// Control, format (including bidirectional overrides), and line or paragraph separator characters, any of
+    /// which could make a shown target read differently from the real one.
+    private static func unsafeForDisplay(_ scalar: Unicode.Scalar) -> Bool {
+        CharacterSet.controlCharacters.contains(scalar) || CharacterSet.newlines.contains(scalar)
+            || scalar.properties.generalCategory == .format
+            || scalar.properties.generalCategory == .lineSeparator || scalar.properties.generalCategory == .paragraphSeparator
     }
 
     /// The text as shown: characters a terminal or the notch could act on are replaced, and past
