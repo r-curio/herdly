@@ -4,6 +4,7 @@ import Testing
 
 private let interactiveID = "11111111-1111-4111-8111-111111111111"
 private let backgroundID = "22222222-2222-4222-8222-222222222222"
+private let otherBackgroundID = "44444444-4444-4444-8444-444444444444"
 
 @Test func claudeInventoryDecodesSeparateLifecycleFields() throws {
     let data = try JSONSerialization.data(withJSONObject: [
@@ -569,6 +570,36 @@ private func decodeRegistry(_ entries: [ClaudeSessionRegistry.Entry],
     let malformed = decodeRegistry([entry(21, try registryRow(pid: 21, sessionID: "nope", kind: "bg"))])
     #expect(!malformed.available)
     #expect(!malformed.isBackgroundSession(backgroundID))
+}
+
+@Test func claudeSessionRegistryLinksABackgroundJobToTheProcessThatParkedIt() throws {
+    // Claude 2.1.296: the interactive process parks its session as job `j1`, which a `bg` process
+    // continues under a new session ID while the interactive process keeps displaying it.
+    let parked = entry(20, try registryRow(pid: 20, sessionID: interactiveID, extra: ["parkedJobId": "j1"]))
+    let job = entry(30, try registryRow(pid: 30, sessionID: backgroundID.uppercased(), kind: "bg", extra: ["jobId": "j1"]))
+    let scan = decodeRegistry([parked, job])
+    #expect(scan.available)
+    #expect(scan.sessions.isEmpty)
+    #expect(scan.isBackgroundSession(backgroundID))
+    #expect(scan.parkedJobProcesses == [backgroundID: .identified(pid: 20)])
+
+    // No link without a matching job, a live parking process, or an interactive parking entry.
+    let spare = entry(31, try registryRow(pid: 31, sessionID: otherBackgroundID, kind: "bg", extra: ["jobId": "j2"]))
+    #expect(decodeRegistry([parked, spare]).parkedJobProcesses.isEmpty)
+    #expect(decodeRegistry([parked, job]) { $0.pid != 20 }.parkedJobProcesses.isEmpty)
+    let parkedDaemon = entry(20, try registryRow(pid: 20, sessionID: interactiveID, kind: "daemon", extra: ["parkedJobId": "j1"]))
+    #expect(decodeRegistry([parkedDaemon, job]).parkedJobProcesses.isEmpty)
+    let malformedJob = entry(30, try registryRow(pid: 30, sessionID: backgroundID, kind: "bg", extra: ["jobId": 7]))
+    #expect(decodeRegistry([parked, malformedJob]).parkedJobProcesses.isEmpty)
+
+    // A job parked by two processes, or held by two background sessions, identifies no one.
+    let secondParked = entry(21, try registryRow(pid: 21, sessionID: otherBackgroundID, extra: ["parkedJobId": "j1"]))
+    #expect(decodeRegistry([parked, secondParked, job]).parkedJobProcesses == [backgroundID: .ambiguous])
+    let secondJob = entry(31, try registryRow(pid: 31, sessionID: otherBackgroundID, kind: "bg", extra: ["jobId": "j1"]))
+    #expect(decodeRegistry([parked, job, secondJob]).parkedJobProcesses
+        == [backgroundID: .ambiguous, otherBackgroundID: .ambiguous])
+    // An unavailable scan carries no link.
+    #expect(decodeRegistry([parked, job, entry(40, Data("{".utf8))]).parkedJobProcesses.isEmpty)
 }
 
 @Test func claudeSessionRegistryKindDefaultsToInteractiveAndUnknownKindIsUnavailable() throws {
