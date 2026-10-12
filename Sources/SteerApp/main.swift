@@ -316,12 +316,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     var claudeInventories: [String: ClaudeInventoryScan] = [:]
     /// Unix time of the inventory in `ghosttyFocusState`, for dating a session end at the tab's absence.
     private var ghosttyInventoryAt: Double = 0
-    /// The first successful snapshot establishes a baseline. Later selected-target changes are
-    /// manual visits; a continuously focused tab cannot clear a completion that arrived after it.
-    private var hasGhosttySelectionBaseline = false
-    private var lastGhosttySelection: GhosttyTarget?
-    private var lastGhosttySnapshotAt: Double?
-    private var lastGhosttyVisitAfter: Double?
+    /// ADR 0016's visit interval and dwell run over Ghostty title-route tabs, one reading per Ghostty scan.
+    private var ghosttyVisits = TerminalVisitTracker<GhosttyTarget>()
     private var checkingGhostty = false
     private var nextGhosttyScan: Double = 0
     private var checkingApprovalFocus = false
@@ -1814,6 +1810,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return queue.items.compactMap(\.completion).first { $0.session == session && $0.turn == turn }
     }
 
+    /// Ends the Ghostty tabs' visit interval and dwell run as of `at` (an Open, or controls switched off).
+    func resetGhosttyVisits(at: Double) {
+        ghosttyVisits.reset(at: at)
+    }
+
     var knownGhosttySnapshot: GhosttySnapshot? {
         guard case let .known(snapshot) = ghosttyFocusState, snapshot.status == "ok" else { return nil }
         return snapshot
@@ -2143,8 +2144,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // `.checking` every poll collapsed an already presented CLI popup early.
         if case .known = ghosttyFocusState {} else { ghosttyFocusState = .checking }
         nextGhosttyScan = now + 2
-        let queued = cliItems
         let configuredRoots = configuredClaudeNavigationRoots()
+        // ADR 0016: frontmost comes from macOS, read as the scan starts; Ghostty's own answer must agree.
+        let frontmost = TerminalApps.frontmostHost()
         Task { @MainActor in
             let observedAt = Date().timeIntervalSince1970
             let result = await Task.detached {
@@ -2160,21 +2162,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 ghosttyPermissionVerified = true
                 ghosttyFocusState = .known(snapshot)
                 ghosttyInventoryAt = observedAt
-                let previousSnapshotAt = lastGhosttySnapshotAt
-                if hasGhosttySelectionBaseline, snapshot.selected != lastGhosttySelection,
-                   let previousSnapshotAt {
-                    // The selection changed sometime after the prior snapshot. Requiring the
-                    // outcome to predate that snapshot rejects the interval race where an outcome
-                    // arrives after a human switch but before this poll observes it.
-                    lastGhosttyVisitAfter = previousSnapshotAt
-                }
-                lastGhosttySelection = snapshot.selected
-                hasGhosttySelectionBaseline = true
-                lastGhosttySnapshotAt = observedAt
+                // ADR 0016: one visit and dwell rule for Codex and Claude tabs alike. Only completions are
+                // acknowledged, and only when the session's own bound tab is the one visible.
+                ghosttyVisits.record(TerminalVisibilityScan(takenAt: observedAt,
+                                                            reading: TerminalVisibility.ghostty(snapshot, frontmost: frontmost)))
+                let queued = cliItems
                 for session in Set(queued.map(\.session)) {
-                    if let target = GhosttyMatch.target(session: session, live: liveCLI, snapshot: snapshot), snapshot.selected == target {
-                        acknowledgeCodexCompletions(queued.filter { $0.session == session }.map(\.id))
-                    }
+                    let completions = queued.filter { $0.session == session }
+                        .map { TerminalCompletionCandidate(id: $0.id, arrivedAt: $0.arrivedAt) }
+                    let target = GhosttyVisitTargets.codex(session, live: liveCLI, snapshot: snapshot)
+                    acknowledgeCodexCompletions(Array(ghosttyVisits.acknowledged(completions, target: target)))
                 }
                 let liveByScope = Dictionary(uniqueKeysWithValues: result.1.map { scan in
                     (scan.sourceScope, scan.available
@@ -2183,18 +2180,18 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 })
                 let inventoryAvailable = Dictionary(uniqueKeysWithValues: result.1.map { ($0.sourceScope, $0.available) })
                 let currentScopes = Set(configuredClaudeNavigationRoots().map { $0.root.path })
-                if currentScopes == Set(liveByScope.keys), let visitObservedAt = lastGhosttyVisitAfter {
-                    let acknowledged = ClaudeVisitAcknowledgment.outcomes(
-                        agentQueue.snapshot.outcomes,
-                        liveSessionsByScope: liveByScope,
-                        inventoryAvailable: inventoryAvailable,
-                        snapshot: snapshot,
-                        snapshotTakenAt: observedAt,
-                        transitionAfter: visitObservedAt)
-                    for id in acknowledged { agentQueue.dismiss(.outcome(id)) }
+                let outcomes = agentQueue.snapshot.outcomes.filter { $0.session.source == .claude && $0.session.surface == .cli }
+                for identity in Set(outcomes.map(\.session)) {
+                    let completions = outcomes.filter { $0.session == identity }
+                        .map { TerminalCompletionCandidate(id: $0.id, arrivedAt: $0.arrivedAt) }
+                    let target = GhosttyVisitTargets.claude(identity, liveSessionsByScope: liveByScope,
+                                                            inventoryAvailable: inventoryAvailable,
+                                                            configuredScopes: currentScopes, snapshot: snapshot)
+                    for id in ghosttyVisits.acknowledged(completions, target: target) { agentQueue.dismiss(.outcome(id)) }
                 }
                 saveCompletions()
             } else if ghosttyEnabled {
+                ghosttyVisits.record(TerminalVisibilityScan(takenAt: observedAt, reading: .unknown))
                 let generation = ghosttyAccessGeneration
                 let access = await Task.detached { GhosttyAutomationPermission.check(askIfNeeded: false) }.value
                 if generation == ghosttyAccessGeneration, ghosttyEnabled {
@@ -2220,10 +2217,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         ghosttyEnabled = false
         appliedGhosttyEnabled = false
         ghosttyPermissionVerified = false
-        hasGhosttySelectionBaseline = false
-        lastGhosttySelection = nil
-        lastGhosttySnapshotAt = nil
-        lastGhosttyVisitAfter = nil
+        resetGhosttyVisits(at: Date().timeIntervalSince1970)
         navigationMessage = "Ghostty controls unavailable. Check Automation permission before enabling them again."
     }
     /// Opens the whole queue from the strip (a click or VoiceOver activation); it stays open while
@@ -2357,12 +2351,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         ghosttyUnavailable = false
         ghosttyPermissionVerified = false
         ghosttyFocusState = enabled ? .checking : .disabled
-        if !enabled {
-            hasGhosttySelectionBaseline = false
-            lastGhosttySelection = nil
-            lastGhosttySnapshotAt = nil
-            lastGhosttyVisitAfter = nil
-        }
+        if !enabled { resetGhosttyVisits(at: Date().timeIntervalSince1970) }
         if enabled {
             nextGhosttyScan = 0
             probeGhosttyAccess()

@@ -96,7 +96,8 @@ extension Companion {
         openingTask = true
         navigationMessage = "Finding the matching Claude tab…"
         let configuredRoots = configuredClaudeNavigationRoots()
-        let queued = orderedAgentAttentionItems.filter { $0.session == identity && $0.outcome != nil }.map(\.id)
+        // ADR 0016: a verified Open acknowledges the session's completions that arrived before the pre-Open read.
+        let preOpenAt = Date().timeIntervalSince1970
         let ghosttyOn = ghosttyEnabled
         let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
         Task { @MainActor in
@@ -124,7 +125,7 @@ extension Companion {
                 // Ghostty off is never scanned: the session's own registry process names its app.
                 let outcome: GhosttyTitleOutcome = ghosttyOn
                     ? await Task.detached {
-                        GhosttyNavigation.openClaude(sessionID: identity.session, live: live, running: ghosttyRunning)
+                        await GhosttyNavigation.openClaude(sessionID: identity.session, live: live, running: ghosttyRunning)
                     }.value
                     : .miss(.fallBack(.noUniqueTarget, candidates: 0))
                 let pid = own[0].pid
@@ -144,13 +145,18 @@ extension Companion {
                    let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: { $0.id == approval.id }) {
                     handBackClaudeApproval(current)
                 }
-                if result?.acknowledges == true {
-                    for id in queued { agentQueue.dismiss(id) }
+                if let result {
+                    let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }
+                        .map { TerminalCompletionCandidate(id: $0.id, arrivedAt: $0.arrivedAt) }
+                    for id in TerminalVisitAcknowledgment.afterOpen(outcomes, result: result, preOpenAt: preOpenAt) {
+                        agentQueue.dismiss(.outcome(id))
+                    }
                     saveCompletions()
                 }
             case .unavailable?, nil:
                 break
             }
+            endVisitIntervalsAfterOpen()
             openingTask = false
             refresh()
         }
@@ -222,21 +228,25 @@ extension Companion {
         openingTask = true
         navigationMessage = "Finding the matching Ghostty tab…"
         let live = liveCLI
-        let queued = cliItems.filter { $0.session == session }.map(\.id)
+        // ADR 0016: a verified Open acknowledges the session's completions that arrived before the pre-Open read.
+        let preOpenAt = Date().timeIntervalSince1970
         let running = TerminalApps.isRunning(.ghostty)
         Task { @MainActor in
-            let outcome = await Task.detached { GhosttyNavigation.open(session: session, live: live, running: running) }.value
+            let outcome = await Task.detached { await GhosttyNavigation.open(session: session, live: live, running: running) }.value
             let switches = hostSwitches
             // ADR 0015 amendment: the tabs carrying the title name the app; none cannot be identified.
             let result = await openResult(outcome) { count in
                 OpenFallback.codexApp(candidates: GhosttyTitleOpen.codexCandidates(count: count), switches: switches)
             }
             navigationMessage = message(for: result, opened: "Opened the matching Ghostty tab.")
-            // A verified visit acknowledges only completions already queued for this session.
-            if result.acknowledges {
-                acknowledgeCodexCompletions(queued)
+            let queued = cliItems.filter { $0.session == session }
+                .map { TerminalCompletionCandidate(id: $0.id, arrivedAt: $0.arrivedAt) }
+            let acknowledged = TerminalVisitAcknowledgment.afterOpen(queued, result: result, preOpenAt: preOpenAt)
+            if !acknowledged.isEmpty {
+                acknowledgeCodexCompletions(Array(acknowledged))
                 saveCompletions()
             }
+            endVisitIntervalsAfterOpen()
             openingTask = false
             refresh()
         }
@@ -293,10 +303,11 @@ final class HerdrOpenState {
     /// The typed reason of each session's latest unavailable herdr Open, cleared by a later Opened.
     /// For diagnostics and for the card's grouped reason line (docs/product.md, "Agreed herdr presentation").
     fileprivate(set) var failures: [HerdrSessionKey: HerdrOpenFailure] = [:]
-    /// The previous scheduled scan, for ADR 0009's visit interval.
-    fileprivate var previousFocus: HerdrFocusObservation?
+    /// The latest scheduled scan's reading, for the visit interval (ADR 0016). A scan whose Ghostty check
+    /// is in flight reads `.unchecked` until the check returns; nil after an Open.
+    fileprivate var lastScan: TerminalVisibilityScan<String>?
     /// The focused pane's current visible run, for the dwell rule.
-    fileprivate var dwell = HerdrDwell()
+    fileprivate var dwell = TerminalDwell<String>()
     /// The pane a Ghostty visit check is sampling, while one is in flight.
     fileprivate var checkingPaneID: String?
 }
@@ -352,33 +363,45 @@ extension Companion {
                     navigationMessage = HerdrPresentation.cardLine(for: .open(failure), agent: key.agent)
                 }
             }
+            endVisitIntervalsAfterOpen()
             openingTask = false
             refresh()
         }
     }
 
     /// Called after each scheduled herdr scan. While the focused pane is bound to a live session or to one
-    /// with queued completions, takes one fresh Ghostty inventory and applies ADR 0011's manual-visit rule
-    /// (focus moved to the pane) and the dwell rule (the pane stayed visible after the completion arrived).
-    /// A live session's pane is sampled before any completion arrives, so the dwell run can predate one.
+    /// with queued completions, applies ADR 0016's manual-visit rule (the pane became visible) and dwell
+    /// rule (it stayed visible after the completion arrived). The pane is visible when herdr focuses it and
+    /// Ghostty shows its client's tab. Ghostty is asked for an inventory only while macOS reports it
+    /// frontmost; otherwise nothing is visible and no Apple Event is sent. A live session's pane is sampled
+    /// before any completion arrives, so the dwell run can predate one.
     func observeHerdrVisit(_ outcome: HerdrScanOutcome) {
         guard let startedAt = herdr.monitor.latestStartedAt else { return }
         // The scan's start on the completions' clock: conservative, as the snapshot was read after it.
         let takenAt = Date().timeIntervalSince1970 - max(0, ProcessInfo.processInfo.systemUptime - startedAt)
-        let previous = herdr.open.previousFocus
+        let previous = herdr.open.lastScan
         let current = HerdrFocusObservation.from(outcome, takenAt: takenAt)
-        herdr.open.previousFocus = current
+        // Until a Ghostty check says otherwise, only the focused pane is known.
+        herdr.open.lastScan = TerminalVisibilityScan(takenAt: takenAt, reading: HerdrOpenAcknowledgment.reading(
+            current, ghosttyShowsVisit: nil, ghosttyTakenAt: takenAt))
         guard herdr.open.checkingPaneID == nil, !openingTask else {
             // No Ghostty check for this scan. A failed scan or another pane still restarts the run, so a
             // check in flight from an earlier scan cannot extend it past this one.
-            herdr.open.dwell.skip(focusedPaneID: current?.focusedPaneID, pendingPaneID: herdr.open.checkingPaneID,
-                                  at: takenAt)
+            herdr.open.dwell.skip(candidate: current?.focusedPaneID, pending: herdr.open.checkingPaneID, at: takenAt)
             return
         }
         guard let current, let pane = current.focusedPaneID else { herdr.open.dwell.reset(at: takenAt); return }
         let subjects = herdrVisitSubjects(boundTo: pane)
-        guard !subjects.isEmpty || herdrPaneHostsLiveSession(pane) else {
+        let holdsLiveBoundTarget = !subjects.isEmpty || herdrPaneHostsLiveSession(pane)
+        guard holdsLiveBoundTarget else {
             herdr.open.dwell.reset(at: takenAt)
+            return
+        }
+        guard TerminalVisibility.shouldCheck(.ghostty, frontmost: TerminalApps.frontmostHost(),
+                                             holdsLiveBoundTarget: holdsLiveBoundTarget, checkInFlight: false) else {
+            // Another app is in front: the pane is not visible, and Ghostty is not asked (ADR 0016).
+            herdr.open.lastScan = TerminalVisibilityScan(takenAt: takenAt, reading: .nothing)
+            herdr.open.dwell.observe(target: pane, visible: false, at: takenAt)
             return
         }
         herdr.open.checkingPaneID = pane
@@ -390,21 +413,33 @@ extension Companion {
             }.value
             herdr.open.checkingPaneID = nil
             guard ghosttyEnabled else { herdr.open.dwell.reset(at: current.takenAt); return }
-            let visible = observed.ghostty.map {
-                HerdrOpenAcknowledgment.ghosttyShowsVisit(clientTTY: current.clientTTY, support: observed.support,
-                                                          ghostty: $0)
-            } ?? false
-            herdr.open.dwell.observe(paneID: pane, visible: visible, at: current.takenAt)
+            let reading: TerminalVisibilityReading<String> = observed.ghostty.map {
+                HerdrOpenAcknowledgment.reading(current, ghosttyShowsVisit: HerdrOpenAcknowledgment.ghosttyShowsVisit(
+                    clientTTY: current.clientTTY, support: observed.support, ghostty: $0), ghosttyTakenAt: ghosttyTakenAt)
+            } ?? .unknown
+            let scan = TerminalVisibilityScan(takenAt: current.takenAt, reading: reading)
+            // A later scan or an Open has replaced this one already: leave its reading.
+            if herdr.open.lastScan?.takenAt == current.takenAt { herdr.open.lastScan = scan }
+            herdr.open.dwell.observe(target: pane, visible: reading == .visible(pane), at: current.takenAt)
             for subject in subjects {
                 let completions = herdrCompletions(subject)
-                let visited = HerdrOpenAcknowledgment.manualVisit(
-                    completions, boundPaneID: pane, previous: previous, current: current,
-                    ghosttyShowsVisit: visible, ghosttyTakenAt: ghosttyTakenAt)
-                let dwelled = herdr.open.dwell.acknowledged(completions, boundPaneID: pane, at: current.takenAt)
+                let visited = TerminalVisitAcknowledgment.manualVisit(completions, target: pane, previous: previous,
+                                                                      current: scan)
+                let dwelled = herdr.open.dwell.acknowledged(completions, target: pane, at: current.takenAt)
                 acknowledgeHerdrCompletions(visited.union(dwelled), subject: subject)
             }
             refresh()
         }
+    }
+
+    /// Ends every visit interval and dwell run as of now, after an Open of any outcome (ADR 0015, 0016):
+    /// the interval spanning an Open is never a visit, so a fallback that happened to raise the target's
+    /// tab acknowledges nothing, and a check started before the Open ended is ignored.
+    func endVisitIntervalsAfterOpen() {
+        let now = Date().timeIntervalSince1970
+        herdr.open.lastScan = nil
+        herdr.open.dwell.reset(at: now)
+        resetGhosttyVisits(at: now)
     }
 
     /// Sessions with queued completions whose current binding is `pane`.
@@ -421,14 +456,14 @@ extension Companion {
         return codex + claude
     }
 
-    private func herdrCompletions(_ subject: HerdrOpenSubject) -> [HerdrCompletionCandidate<String>] {
+    private func herdrCompletions(_ subject: HerdrOpenSubject) -> [TerminalCompletionCandidate<String>] {
         switch subject {
         case .codex(let session):
             return cliItems.filter { $0.session == session }
-                .map { HerdrCompletionCandidate(id: $0.turn.uuidString, arrivedAt: $0.arrivedAt) }
+                .map { TerminalCompletionCandidate(id: $0.turn.uuidString, arrivedAt: $0.arrivedAt) }
         case .claude(let identity):
             return agentQueue.snapshot.outcomes.filter { $0.session == identity }
-                .map { HerdrCompletionCandidate(id: $0.turn, arrivedAt: $0.arrivedAt) }
+                .map { TerminalCompletionCandidate(id: $0.turn, arrivedAt: $0.arrivedAt) }
         }
     }
 
