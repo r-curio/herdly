@@ -305,19 +305,20 @@ extension Companion {
         refresh()
         Task { @MainActor in
             let result = await Task.detached { () -> (sent: Bool, message: String) in
-                // ADR 0013 freshness: Ghostty binds by title alone, so every other enabled host is read
-                // fresh first; an unreadable one, or one whose tab carries the title, sends no key.
-                let hosts = TerminalKeyRelayCheck.hostsToRead(switches: switches)
-                if !hosts.isEmpty,
-                   let veto = TerminalKeyRelayCheck.ghosttyVeto(title: GhosttyMatch.title(current.session), switches: switches,
-                                                                fresh: Companion.freshInventories(hosts, running: running)) {
-                    return (false, veto.message)
-                }
                 // The rollout as of this instant: an answer Codex already recorded, or an ended turn,
                 // means the pane is gone and the key would land in the composer instead.
                 let evidence = ReminderReader.currentEvidence(for: current.session, in: rolloutRoot)
                 guard QuestionAnswerGuard.stillPending(current, in: evidence) else {
                     return (false, "Codex already has an answer or the turn ended; nothing was sent.")
+                }
+                // ADR 0013 "Freshness": Ghostty binds by title alone, so every other enabled host is read
+                // fresh last, closest to the key; an unreadable one, or one whose tab carries the title,
+                // sends no key, so a Ghostty decoy never gets it (ADR 0017).
+                let hosts = TerminalKeyRelayCheck.hostsToRead(switches: switches)
+                if !hosts.isEmpty,
+                   let veto = TerminalKeyRelayCheck.ghosttyVeto(title: GhosttyMatch.title(current.session), switches: switches,
+                                                                fresh: Companion.freshInventories(hosts, running: running)) {
+                    return (false, veto.message)
                 }
                 return GhosttyNavigation.answer(session: current.session, live: live, keys: [key])
             }.value
