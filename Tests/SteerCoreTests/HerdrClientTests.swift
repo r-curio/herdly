@@ -475,40 +475,59 @@ final class ScanCounter: @unchecked Sendable {
     var delivered: [HerdrScanOutcome] = []
     monitor.onScan = { delivered.append($0) }
 
-    #expect(monitor.tick(now: 0, ghosttyControlsEnabled: false, herdrPaneIDs: ["w1:p1"]) == nil)
-    #expect(monitor.tick(now: 0, ghosttyControlsEnabled: true, herdrPaneIDs: []) == nil)
+    #expect(monitor.tick(now: 0, herdrEnabled: false, herdrPaneIDs: ["w1:p1"]) == nil)
+    #expect(monitor.tick(now: 0, herdrEnabled: true, herdrPaneIDs: []) == nil)
     #expect(await monitor.revalidate() == nil)
     #expect(counter.count == 0)
 
-    await monitor.tick(now: 10, ghosttyControlsEnabled: true, herdrPaneIDs: ["w1:p1"])?.value
+    await monitor.tick(now: 10, herdrEnabled: true, herdrPaneIDs: ["w1:p1"])?.value
     #expect(counter.count == 1)
     #expect(monitor.latest == .unavailable(.notRunning))
     #expect(monitor.latestStartedAt == 10)
     #expect(delivered == [.unavailable(.notRunning)])
 
-    #expect(monitor.tick(now: 11.9, ghosttyControlsEnabled: true, herdrPaneIDs: ["w1:p1"]) == nil)
-    await monitor.tick(now: 12, ghosttyControlsEnabled: true, herdrPaneIDs: ["w1:p1"])?.value
+    #expect(monitor.tick(now: 11.9, herdrEnabled: true, herdrPaneIDs: ["w1:p1"]) == nil)
+    await monitor.tick(now: 12, herdrEnabled: true, herdrPaneIDs: ["w1:p1"])?.value
     #expect(counter.count == 2)
 
     #expect(await monitor.revalidate() == .unavailable(.notRunning))
     #expect(counter.count == 3)
 
-    #expect(monitor.tick(now: 20, ghosttyControlsEnabled: false, herdrPaneIDs: ["w1:p1"]) == nil)
+    #expect(monitor.tick(now: 20, herdrEnabled: false, herdrPaneIDs: ["w1:p1"]) == nil)
     #expect(monitor.latest == nil)
     #expect(counter.count == 3)
     // Reopening the gate scans at once rather than waiting out the old interval.
-    await monitor.tick(now: 20.5, ghosttyControlsEnabled: true, herdrPaneIDs: ["w2:p1"])?.value
+    await monitor.tick(now: 20.5, herdrEnabled: true, herdrPaneIDs: ["w2:p1"])?.value
     #expect(counter.count == 4)
+}
+
+@MainActor @Test func herdrMonitorNeverScansWhileHerdrIsSwitchedOff() async {
+    let counter = ScanCounter()
+    let monitor = HerdrMonitor { _ in counter.increment(); return .unavailable(.notRunning) }
+    // Ghostty on, herdr off: a recorded pane and the Codex gate still never reach herdr.
+    let ghosttyOnly = TerminalHostSwitches(enabled: [.ghostty])
+    for now in stride(from: 0.0, through: 10, by: 2) {
+        #expect(monitor.tick(now: now, herdrEnabled: ghosttyOnly.mayContact(.herdr), herdrPaneIDs: ["w1:p1"],
+                             codexGate: true) == nil)
+    }
+    // herdr on with no terminal on is still off limits (ADR 0014).
+    let herdrOnly = TerminalHostSwitches(enabled: [.herdr])
+    #expect(monitor.tick(now: 12, herdrEnabled: herdrOnly.mayContact(.herdr), herdrPaneIDs: ["w1:p1"]) == nil)
+    #expect(await monitor.revalidate() == nil)
+    #expect(counter.count == 0)
+    let both = TerminalHostSwitches(enabled: [.ghostty, .herdr])
+    await monitor.tick(now: 14, herdrEnabled: both.mayContact(.herdr), herdrPaneIDs: ["w1:p1"])?.value
+    #expect(counter.count == 1)
 }
 
 @MainActor @Test func herdrMonitorDropsAScanThatFinishesAfterTheGateCloses() async {
     let gate = DispatchSemaphore(value: 0)
     let monitor = HerdrMonitor { _ in gate.wait(); return .unavailable(.timeout) }
-    let task = monitor.tick(now: 0, ghosttyControlsEnabled: true, herdrPaneIDs: ["w1:p1"])
+    let task = monitor.tick(now: 0, herdrEnabled: true, herdrPaneIDs: ["w1:p1"])
     #expect(task != nil)
     // While one scan is in flight no second scan starts.
-    #expect(monitor.tick(now: 5, ghosttyControlsEnabled: true, herdrPaneIDs: ["w1:p1"]) == nil)
-    monitor.tick(now: 6, ghosttyControlsEnabled: false, herdrPaneIDs: [])
+    #expect(monitor.tick(now: 5, herdrEnabled: true, herdrPaneIDs: ["w1:p1"]) == nil)
+    monitor.tick(now: 6, herdrEnabled: false, herdrPaneIDs: [])
     gate.signal()
     await task?.value
     #expect(monitor.latest == nil)
@@ -544,9 +563,9 @@ private final class RequestLog: @unchecked Sendable {
     let log = RequestLog()
     let monitor = HerdrMonitor { request in log.append(request); return .unavailable(.notRunning) }
     let codex = HerdrScanRequest(includeIntegration: false, processInfoTitles: ["01a1151d-4e9d-7e53-a0b0-10d6e..."])
-    #expect(monitor.tick(now: 0, ghosttyControlsEnabled: false, herdrPaneIDs: [], codexGate: true, request: codex) == nil)
-    #expect(monitor.tick(now: 0, ghosttyControlsEnabled: true, herdrPaneIDs: [], codexGate: false, request: codex) == nil)
-    await monitor.tick(now: 1, ghosttyControlsEnabled: true, herdrPaneIDs: [], codexGate: true, request: codex)?.value
+    #expect(monitor.tick(now: 0, herdrEnabled: false, herdrPaneIDs: [], codexGate: true, request: codex) == nil)
+    #expect(monitor.tick(now: 0, herdrEnabled: true, herdrPaneIDs: [], codexGate: false, request: codex) == nil)
+    await monitor.tick(now: 1, herdrEnabled: true, herdrPaneIDs: [], codexGate: true, request: codex)?.value
     #expect(monitor.isGateOpen)
     let fresh = HerdrScanRequest(includeIntegration: false, processInfoTitles: ["9f3c2b10-1111-4222-8333-44445..."])
     #expect(await monitor.revalidate(fresh) == .unavailable(.notRunning))

@@ -71,12 +71,15 @@ public enum HerdrOpenAvailability: Equatable, Sendable {
 
 /// The settings row's badge. The row shows none while the first scan after the gate opened runs.
 public enum HerdrReadinessBadge: Equatable, Sendable {
+    /// herdr's switch is off.
+    case off
     case notInUse
     case ready
     case needsAttention
 
     public var title: String {
         switch self {
+        case .off: "Off"
         case .notInUse: "Not in use"
         case .ready: "Ready"
         case .needsAttention: "Needs attention"
@@ -92,6 +95,8 @@ public enum HerdrSettingsProblem: Equatable, Hashable, Sendable {
     case ghosttyCannotIdentifyTab
     /// herdr itself could not be used (not found, not running, protocol, socket, and similar).
     case herdrUnavailable
+    /// herdr's switch is on but no terminal is, so Steer does not contact herdr (ADR 0014).
+    case noTerminalOn
 
     public var message: String {
         switch self {
@@ -101,6 +106,8 @@ public enum HerdrSettingsProblem: Equatable, Hashable, Sendable {
             "Ghostty cannot identify herdr's tab. Update Ghostty."
         case .herdrUnavailable:
             "herdr is unavailable. Check that herdr is installed and running."
+        case .noTerminalOn:
+            "Turn on the terminal you run herdr in."
         }
     }
 
@@ -111,7 +118,7 @@ public enum HerdrSettingsProblem: Equatable, Hashable, Sendable {
     }
 }
 
-/// The read-only herdr row under Ghostty in settings.
+/// The herdr card under Multiplexers in settings.
 public struct HerdrSettingsRow: Equatable, Sendable {
     /// Nil only while the first scan after the gate opened is still running.
     public let badge: HerdrReadinessBadge?
@@ -132,7 +139,7 @@ public enum HerdrPresentation {
 
     public static func group(_ reason: HerdrSessionUnavailable) -> HerdrReasonGroup {
         switch reason {
-        case .ghosttyControlsOff, .notScanned, .serverIdentityUnknown: .generic
+        case .herdrSwitchedOff, .ghosttyControlsOff, .notScanned, .serverIdentityUnknown: .generic
         case .herdr(let reason): group(reason)
         case .binding(let reason): group(reason)
         }
@@ -283,21 +290,28 @@ public enum HerdrPresentation {
     /// The settings row model.
     ///
     /// - Parameters:
-    ///   - inUse: the ADR 0009 gate is open (Ghostty controls on, and a live Claude session reported a
-    ///     pane or a live or daemon-loaded Codex terminal session exists beside a known Ghostty
-    ///     inventory with herdr's socket trusted).
+    ///   - switches: every host's switch. herdr off reads Off; herdr on with no terminal on needs
+    ///     attention, because Steer contacts herdr only through a terminal (ADR 0014).
+    ///   - inUse: the ADR 0009 gate is open (herdr's switch allows contact, and a live Claude session
+    ///     reported a pane or a live or daemon-loaded Codex terminal session exists beside a known
+    ///     Ghostty inventory with herdr's socket trusted).
     ///   - outcome: the latest scan, nil before the first scan after the gate opened.
     ///   - agentsSeen: agents whose live sessions' newest hook event reported running in herdr;
     ///     an integration problem is listed only for Claude Code, and only when it is among these.
     ///   - ttySupport: whether Ghostty declares `tty`; nil while unknown, which lists no problem.
-    public static func settingsRow(inUse: Bool, ghosttyControlsEnabled: Bool, outcome: HerdrScanOutcome?,
+    public static func settingsRow(switches: TerminalHostSwitches, inUse: Bool, outcome: HerdrScanOutcome?,
                                    agentsSeen: Set<HerdrAgentKind>, ttySupport: GhosttyTTYSupport?) -> HerdrSettingsRow {
+        guard switches.isOn(.herdr) else {
+            return HerdrSettingsRow(badge: .off, detail: "Steer never scans or contacts herdr.", problems: [])
+        }
+        guard switches.anyTerminalOn else {
+            return HerdrSettingsRow(badge: .needsAttention, detail: "Fix each item below.", problems: [.noTerminalOn])
+        }
         // A Codex session opens the gate whenever herdr's socket is trusted (ADR 0012); with no
         // server and no Claude session reporting a pane, nothing runs in herdr.
         let nothingInHerdr = outcome == .unavailable(.notRunning) && !agentsSeen.contains(.claude)
         guard inUse, !nothingInHerdr else {
-            let detail = ghosttyControlsEnabled ? "No herdr sessions seen." : "Works only while Ghostty controls are on."
-            return HerdrSettingsRow(badge: .notInUse, detail: detail, problems: [])
+            return HerdrSettingsRow(badge: .notInUse, detail: "No herdr sessions seen.", problems: [])
         }
         guard let outcome else {
             return HerdrSettingsRow(badge: nil, detail: "Checking herdr…", problems: [])
