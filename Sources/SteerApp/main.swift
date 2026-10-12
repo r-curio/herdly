@@ -2341,7 +2341,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func setHostSwitch(_ host: TerminalHost, on: Bool) {
         guard host != .ghostty, hostSwitches.isOn(host) != on else { return }
         hostSwitches.set(host, on: on)
-        UserDefaults.standard.set(on, forKey: host.defaultsKey)
+        if previewMode == nil { UserDefaults.standard.set(on, forKey: host.defaultsKey) }
         if host == .herdr { scanHerdr() }
     }
 
