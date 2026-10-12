@@ -22,8 +22,17 @@ private let panesOutput = """
 """
 private let clientsOutput = "/dev/ttys022|45245|$0|%0|0\n"
 
-private func snapshot(panes: String = panesOutput, clients: String = clientsOutput) -> TmuxSnapshot? {
-    TmuxSnapshot.parse(panes: panes, clients: clients)
+/// A client run from a shell in a terminal tab: no multiplexer above it.
+private let hostedAncestry = ["tmux", "zsh", "login", "Terminal"]
+
+/// The listings, with every client's ancestry read as hosted directly by a terminal unless `ancestry`
+/// says otherwise (a missing entry is an ancestry that could not be read).
+private func snapshot(panes: String = panesOutput, clients: String = clientsOutput,
+                      ancestry: ((Int32) -> [String]?)? = nil) -> TmuxSnapshot? {
+    guard let parsed = TmuxSnapshot.parse(panes: panes, clients: clients) else { return nil }
+    var ancestries: [Int32: [String]] = [:]
+    for client in parsed.clients { ancestries[client.pid] = ancestry.map { $0(client.pid) } ?? hostedAncestry }
+    return parsed.withClientAncestries(ancestries.compactMapValues { $0 })
 }
 
 // MARK: - Listing
@@ -177,6 +186,30 @@ private func codexBinding(tmux: TerminalHostInventory?, terminal: TerminalHostIn
     // The session's client runs inside a tmux pane (tmux in tmux): nested.
     let nested = try #require(snapshot(clients: "/dev/ttys018|45300|$0|%0|0\n"))
     #expect(TmuxLayout.paneLayer("%0", in: nested) == .nested)
+}
+
+@Test func tmuxClientInsideHerdrOrZellijIsNestedAndAnUnreadAncestryCannotBeRuledOut() throws {
+    // herdr and Zellij list no pane tty, so only the client process's ancestry shows them (ADR 0014).
+    for multiplexer in ["herdr", "zellij", "tmux"] {
+        let inside = try #require(snapshot(ancestry: { _ in ["tmux", "zsh", multiplexer, "login", "Terminal"] }))
+        #expect(TmuxLayout.paneLayer("%0", in: inside) == .nested)
+        #expect(TmuxLayout.inputLayer("%0", in: inside) == .nested)
+        #expect(TmuxOpen.plan(.bound(paneTarget), snapshot: inside, join: { _ in .tab(hostTab) })
+                == .failure(.fallBack(.unsupportedLayout, candidates: 1)))
+    }
+    let unread = try #require(snapshot(ancestry: { _ in nil }))
+    #expect(TmuxLayout.paneLayer("%0", in: unread) == .nested)
+    // A parsed listing whose ancestries were never read cannot rule nesting out either.
+    #expect(TmuxLayout.inputLayer("%0", in: try #require(TmuxSnapshot.parse(panes: panesOutput, clients: clientsOutput))) == .nested)
+    // A session with no client has no client to nest.
+    #expect(TmuxLayout.inputLayer("%0", in: try #require(snapshot(clients: ""))) == nil)
+}
+
+@Test func tmuxInputIsRefusedWhileTheSessionHasAControlModeClient() throws {
+    // Conservative, pending a product decision: as Open falls back, typed input and digits go nowhere.
+    let control = try #require(snapshot(clients: "/dev/ttys022|45245|$0|%0|1\n"))
+    #expect(TmuxLayout.inputLayer("%0", in: control) == .controlModeClient)
+    #expect(TmuxInput.route(.bound(paneTarget), snapshot: control) == .unreachable)
 }
 
 @Test func tmuxInputNeedsThePaneOutOfCopyModeAndAcceptingKeys() throws {
@@ -344,6 +377,19 @@ private let inputPane = TypedInputPane(host: .tmux, paneID: "%0", tty: "/dev/tty
     // Claude submits text plus CR from one send-keys (tmux-live.md, "send-keys to a TUI").
     #expect(TmuxInput.arguments(.textAndSubmit("hi"), into: inputPane) == ["send-keys", "-t", "%0", "-l", "--", "hi\r"])
     #expect(TmuxInput.arguments(.submit, into: inputPane) == ["send-keys", "-t", "%0", "Enter"])
+}
+
+@Test func tmuxEscapesATrailingSemicolonSoItIsTypedNotTakenAsACommandSeparator() {
+    // tmux 3.8 (isolated server): an argument ending in `;` ends the command and loses the `;`, even
+    // after `-l --`; a trailing `\;` types `;`. Only the last `;` is special.
+    #expect(TmuxInput.arguments(.text("fix the parser;"), into: inputPane).last == "fix the parser\\;")
+    #expect(TmuxInput.arguments(.text(";"), into: inputPane).last == "\\;")
+    #expect(TmuxInput.arguments(.text("a\\;"), into: inputPane).last == "a\\\\;")
+    #expect(TmuxInput.arguments(.text("a;b"), into: inputPane).last == "a;b")
+    #expect(TmuxInput.arguments(.text("x\\"), into: inputPane).last == "x\\")
+    #expect(TmuxInput.arguments(.textAndSubmit("go;"), into: inputPane).last == "go;\r")
+    #expect(TmuxInput.literal("stop;") == "stop\\;")
+    #expect(TmuxInput.digitArguments("2", into: inputPane).last == "2")
     // Codex gets its text, then the separate Enter.
     #expect(TypedReplyWrites.plan(agent: .codex, text: "go").map { TmuxInput.arguments($0, into: inputPane) }
             == [["send-keys", "-t", "%0", "-l", "--", "go"], ["send-keys", "-t", "%0", "Enter"]])
@@ -477,6 +523,10 @@ private func cliQuestion() -> AttentionQuestion {
                                            otherSocketSeen: false)
     #expect(row.badge == .needsAttention)
     #expect(row.problems == ["Turn on the terminal you run tmux in."])
+    // product.md's lines, and the shared unavailable line where product.md names none.
+    #expect(TmuxPresentation.otherSocketLine == "Sessions seen on a socket other than the default can't be reached.")
+    #expect(TmuxPresentation.unreadableLine == OpenUnavailableReason.hostUnreadable(.tmux).cardLine)
+    #expect(!TmuxPresentation.footer.contains("Codex questions"))
     #expect(TmuxPresentation.settingsRow(on: false, anyTerminalOn: false, read: nil, sessionsSeen: false,
                                          otherSocketSeen: true).badge == .off)
 }
@@ -489,7 +539,11 @@ private func cliQuestion() -> AttentionQuestion {
     #expect(TmuxPresentation.settingsRow(on: true, anyTerminalOn: true, read: .binaryNotFound, sessionsSeen: false,
                                          otherSocketSeen: false).problems == [TmuxPresentation.notFoundLine])
     #expect(TmuxPresentation.settingsRow(on: true, anyTerminalOn: true, read: .untrustedSocket, sessionsSeen: false,
+                                         otherSocketSeen: false).problems == [TmuxPresentation.untrustedSocketLine])
+    #expect(TmuxPresentation.untrustedSocketLine.contains("Check that it runs as you"))
+    #expect(TmuxPresentation.settingsRow(on: true, anyTerminalOn: true, read: .unreadable, sessionsSeen: false,
                                          otherSocketSeen: false).problems == [TmuxPresentation.unreadableLine])
+    #expect(!TmuxPresentation.unreadableLine.contains("runs as you"))
     let ready = TmuxPresentation.settingsRow(on: true, anyTerminalOn: true, read: .notRunning, sessionsSeen: true,
                                              otherSocketSeen: false)
     #expect(ready.badge == .ready && ready.problems.isEmpty)
@@ -506,6 +560,21 @@ private func cliQuestion() -> AttentionQuestion {
     #expect(!TmuxPresentation.otherSocketSeen([underTmux], defaultPaneTTYs: nil))
     #expect(!TmuxPresentation.otherSocketSeen([TmuxSessionProcess(tty: "/dev/ttys050", ancestorCommands: ["claude", "zsh", "login"])],
                                               defaultPaneTTYs: []))
+}
+
+// MARK: - Server identity before a send
+
+@Test func tmuxSendGoesOnlyToTheServerItsFreshCheckRead() {
+    // `display-message -p '#{pid}|#{start_time}'` from an isolated tmux 3.8 server.
+    let identity = TmuxServerIdentity.parse("48163|1791809248\n")
+    #expect(identity == TmuxServerIdentity(pid: 48163, startTime: 1791809248))
+    #expect(TmuxServerIdentity.parse("48163") == nil)
+    #expect(TmuxServerIdentity.parse("x|1") == nil)
+    // A restarted server reuses pane ids; a send to it is refused before anything is typed.
+    #expect(TmuxServerIdentity.allowsSend(expected: identity, current: identity))
+    #expect(!TmuxServerIdentity.allowsSend(expected: identity, current: TmuxServerIdentity(pid: 50000, startTime: 1791809999)))
+    #expect(!TmuxServerIdentity.allowsSend(expected: identity, current: nil))
+    #expect(!TmuxServerIdentity.allowsSend(expected: nil, current: identity))
 }
 
 // MARK: - Default socket and binary (ADR 0014 "Sockets, sessions and gates")

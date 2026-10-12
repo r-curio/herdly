@@ -59,7 +59,7 @@ private struct CodexTabReads: Sendable {
                 result[.ghostty] = .ghosttyTitles(ghosttyRunning ? GhosttyNavigation.snapshot() : nil, running: ghosttyRunning)
             }
             if tmuxOn {
-                let tmux = TmuxClient.read()
+                let tmux = TmuxRunner.read()
                 result[.tmux] = tmux.inventory
                 if clientTTYs.isEmpty, tmuxTTYs.isEmpty, let snapshot = tmux.snapshot {
                     clientTTYs = snapshot.clientTTYs

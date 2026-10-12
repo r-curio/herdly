@@ -7,7 +7,7 @@ import SteerCore
 /// no command ever starts a server. Every command has a bounded wait and runs with a minimal
 /// environment; nothing is retried. Called only while tmux may be contacted (its switch and a terminal
 /// on). Blocking: call off the main actor. Steer never edits tmux's configuration.
-enum TmuxClient {
+enum TmuxRunner {
     /// Seconds any one tmux command may run before it is terminated.
     static let timeout: Double = 2
 
@@ -19,8 +19,42 @@ enum TmuxClient {
         TmuxDefaultSocket.path(uid: getuid(), environment: ProcessInfo.processInfo.environment, resolve: realPath)
     }
 
-    /// One read of the default server: trust first, then `list-panes -a` and `list-clients`.
+    /// One read of the default server: trust first, then `list-panes -a`, `list-clients`, the server's
+    /// identity and each client process's ancestry (for nesting, ADR 0014).
     static func read() -> TmuxRead {
+        if let problem = trustProblem() { return problem }
+        guard binary() != nil else { return .binaryNotFound }
+        guard case .succeeded(let panes) = run(["list-panes", "-a", "-F", TmuxListing.paneFormat]),
+              case .succeeded(let clients) = run(["list-clients", "-F", TmuxListing.clientFormat]),
+              let snapshot = TmuxSnapshot.parse(panes: panes, clients: clients) else { return .unreadable }
+        var ancestries: [Int32: [String]] = [:]
+        for client in snapshot.clients {
+            let chain = HerdrProcessTree.ancestry(of: client.pid)
+            // A client that exited or could not be read has no entry, so its nesting cannot be ruled out.
+            if chain.first?.pid == client.pid { ancestries[client.pid] = chain.map(\.command) }
+        }
+        return .snapshot(snapshot.withClientAncestries(ancestries).withServer(identity()))
+    }
+
+    /// The running server's pid and start time, nil when unreadable.
+    static func identity() -> TmuxServerIdentity? {
+        guard case .succeeded(let output) = run(["display-message", "-p", TmuxServerIdentity.format]) else { return nil }
+        return TmuxServerIdentity.parse(output)
+    }
+
+    /// A command that types or moves a client (`send-keys`, `switch-client`): sent only when, immediately
+    /// before it, the default socket still passes its trust checks and its server is `expected`, the one
+    /// the fresh check read. A restarted server, which reuses pane ids, gets nothing (`.failed`, so
+    /// nothing counts as written).
+    static func send(_ arguments: [String], expecting expected: TmuxServerIdentity?) -> TmuxCommandOutcome {
+        guard trustProblem() == nil, TmuxServerIdentity.allowsSend(expected: expected, current: identity()) else {
+            return .failed
+        }
+        return run(arguments)
+    }
+
+    /// The trust checks of the default socket (ADR 0014): ownership, then the server's user.
+    private static func trustProblem() -> TmuxRead? {
         guard let socket = socketPath() else { return .notRunning }
         switch TmuxSocketTrust.problem(directory: facts((socket as NSString).deletingLastPathComponent),
                                        socket: facts(socket), me: getuid()) {
@@ -31,17 +65,12 @@ enum TmuxClient {
         switch peer(socket) {
         case .refused: return .notRunning
         case .otherUser: return .untrustedSocket
-        case .currentUser: break
+        case .currentUser: return nil
         }
-        guard binary() != nil else { return .binaryNotFound }
-        guard case .succeeded(let panes) = run(["list-panes", "-a", "-F", TmuxListing.paneFormat]),
-              case .succeeded(let clients) = run(["list-clients", "-F", TmuxListing.clientFormat]),
-              let snapshot = TmuxSnapshot.parse(panes: panes, clients: clients) else { return .unreadable }
-        return .snapshot(snapshot)
     }
 
     /// Runs one tmux command against the default socket. Stdout over `TmuxListing.maximumOutput` is a
-    /// failure; stderr is discarded.
+    /// failure; stderr is discarded. Reads only; a send goes through `send(_:expecting:)`.
     static func run(_ arguments: [String]) -> TmuxCommandOutcome {
         guard let executable = binary(), let socket = socketPath() else { return .notLaunched }
         let process = Process(), output = Pipe()

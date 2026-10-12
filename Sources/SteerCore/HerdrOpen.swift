@@ -196,7 +196,7 @@ public enum HerdrOpen {
     public static func attachedClient(_ outcome: HerdrScanOutcome?) -> HerdrAttachedClient? {
         guard case .success(let client)? = outcome?.scan?.client else { return nil }
         return HerdrAttachedClient(pid: client.pid, tty: client.tty.flatMap(GhosttyTTYMatch.normalizedTTY),
-                                   serverPID: client.serverPID)
+                                   serverPID: client.serverPID, host: client.host)
     }
 
     /// The pane herdr reports focused, only when the snapshot's focused pane also marks itself focused.

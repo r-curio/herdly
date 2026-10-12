@@ -14,18 +14,23 @@ public struct HerdrFocusObservation: Equatable, Sendable {
     public let clientPID: Int32
     /// The client's TTY, normalized; nil when unusable.
     public let clientTTY: String?
+    /// The terminal host the client runs in (ADR 0014). Only a Ghostty-hosted client's pane can be
+    /// visible through Ghostty's test; visits through other hosts are not built yet.
+    public let clientHost: TerminalHost
 
-    public init(takenAt: Double, focusedPaneID: String?, clientPID: Int32, clientTTY: String?) {
+    public init(takenAt: Double, focusedPaneID: String?, clientPID: Int32, clientTTY: String?,
+                clientHost: TerminalHost = .ghostty) {
         self.takenAt = takenAt
         self.focusedPaneID = focusedPaneID
         self.clientPID = clientPID
         self.clientTTY = clientTTY
+        self.clientHost = clientHost
     }
 
     public static func from(_ outcome: HerdrScanOutcome?, takenAt: Double) -> HerdrFocusObservation? {
         guard takenAt.isFinite, let scan = outcome?.scan, let client = HerdrOpen.attachedClient(outcome) else { return nil }
         return HerdrFocusObservation(takenAt: takenAt, focusedPaneID: HerdrOpen.focusedPane(in: scan.snapshot),
-                                     clientPID: client.pid, clientTTY: client.tty)
+                                     clientPID: client.pid, clientTTY: client.tty, clientHost: client.host)
     }
 }
 
@@ -82,8 +87,10 @@ public struct HerdrVisitTracker: Equatable, Sendable {
             return nil
         }
         // ADR 0016, "Presentation and scanning": a host that macOS does not report frontmost has nothing
-        // visible, so it is not asked.
-        guard frontmost == .ghostty else {
+        // visible, so it is not asked. A client in another host's tab is never shown by Ghostty, whose
+        // interim test without `tty` would pass for any frontmost Ghostty (ADR 0014; visits through
+        // other hosts are not built, so such a pane is not visible).
+        guard frontmost == .ghostty, current.clientHost == .ghostty else {
             lastScan = TerminalVisibilityScan(takenAt: takenAt, reading: .nothing)
             dwell.observe(target: pane, visible: false, at: takenAt)
             return nil

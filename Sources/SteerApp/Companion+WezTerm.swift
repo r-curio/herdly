@@ -29,6 +29,8 @@ final class WezTermState: ObservableObject {
     var codexSeen: Set<UUID> = []
     /// ADR 0016's visit interval and dwell run over WezTerm panes, by pane id.
     var visits = TerminalVisitTracker<String>()
+    /// Every pane title in the latest readable `list`, for herdr's Codex gate (ADR 0014, #241); nil before one.
+    var latestTitles: Set<String>?
     /// Bumped on every switch change, so a scan started before it applies to nothing.
     var generation = 0
     var checking = false
@@ -64,7 +66,7 @@ struct WezTermTabReads: Sendable {
             inventories[.terminalApp] = terminal ? TerminalAppNavigation.snapshot().inventory : .notRunning
         }
         // tmux beside it (#241): its panes count toward uniqueness, and its clients' host tabs do not.
-        let tmux: TmuxRead = others.tmuxOn ? TmuxClient.read() : .notRunning
+        let tmux: TmuxRead = others.tmuxOn ? TmuxRunner.read() : .notRunning
         if others.tmuxOn { inventories[.tmux] = tmux.inventory }
         let ttys = (read.snapshot?.ttysToRead(codexTitles: codexTitles, claudeTTYs: claudeTTYs) ?? [])
             .union(tmux.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
@@ -72,7 +74,7 @@ struct WezTermTabReads: Sendable {
         var secondRead = inventories
         if second {
             secondRead[.wezTerm] = WezTermNavigation.read(running: running).0.inventory
-            if others.tmuxOn { secondRead[.tmux] = TmuxClient.read().inventory }
+            if others.tmuxOn { secondRead[.tmux] = TmuxRunner.read().inventory }
         }
         return WezTermTabReads(wezTerm: read, clients: clientRead, inventories: inventories, processes: processes,
                                secondRead: secondRead, multiplexerClientTTYs: tmux.snapshot?.clientTTYs ?? [])
@@ -124,6 +126,7 @@ extension Companion {
         wezTerm.codexRoutes = [:]
         wezTerm.claudeRoutes = [:]
         wezTerm.codexSeen = []
+        wezTerm.latestTitles = nil
         wezTerm.diagnostics = []
         wezTerm.nextScan = 0
         wezTerm.visits.reset(at: Date().timeIntervalSince1970)
@@ -190,7 +193,9 @@ extension Companion {
     private func applyWezTermScan(_ reads: WezTermTabReads, claude: [AgentSessionIdentity: ClaudeTabProcess],
                                   codexSessions: Set<UUID>, frontmost: TerminalHost?, takenAt: Double) {
         switch reads.wezTerm {
-        case .snapshot: wezTerm.scan = .read
+        case .snapshot(let snapshot):
+            wezTerm.scan = .read
+            wezTerm.latestTitles = Set(snapshot.panes.compactMap(\.title))
         case .notRunning: wezTerm.scan = .notRunning
         case .unreadable(let reason): wezTerm.scan = .unreadable(reason)
         }

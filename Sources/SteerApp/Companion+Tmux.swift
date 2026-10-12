@@ -3,10 +3,10 @@ import SteerCore
 
 // tmux (#241): the two-second binding and visit scan, ADR 0014's two-layer Open with ADR 0015's
 // fallback, replies typed into the bound pane (ADR 0017), and the question-digit relay, built but off
-// until its live proof (`TmuxQuestionKeys.digitCommitsProvenLive`). Everything runs only while tmux may
+// until its live proof (`TmuxInput.questionDigitsProvenLive`). Everything runs only while tmux may
 // be contacted (its switch and a terminal on); the switch and card stay hidden until acceptance (#246).
 // Rules are SteerCore's (`Tmux.swift`, `TmuxTargeting.swift`, `TmuxInput.swift`,
-// `MultiplexerHostTab.swift`); this file reads, sends and schedules. Commands go through `TmuxClient`.
+// `MultiplexerHostTab.swift`); this file reads, sends and schedules. Commands go through `TmuxRunner`.
 
 /// tmux state held by the companion. Main-actor only; memory only.
 @MainActor
@@ -65,13 +65,15 @@ extension Companion {
     }
 
     /// Writes one typed-input write into `pane` by its host's own send. Blocking: call off the main
-    /// actor. A host without a send in this build writes nothing.
-    nonisolated static func typeInto(_ pane: TypedInputPane, _ write: TypedWrite) -> TypedInputDelivery {
+    /// actor. A host without a send in this build writes nothing. `tmuxServer` is the tmux server the
+    /// fresh check read; a tmux send goes only to it.
+    nonisolated static func typeInto(_ pane: TypedInputPane, _ write: TypedWrite,
+                                     tmuxServer: TmuxServerIdentity? = nil) -> TypedInputDelivery {
         switch pane.host {
         case .terminalApp:
             return TerminalAppInput.delivery(TerminalAppNavigation.type(TerminalAppInput.script(write), into: pane))
         case .tmux:
-            return TmuxInput.delivery(TmuxClient.run(TmuxInput.arguments(write, into: pane)))
+            return TmuxInput.delivery(TmuxRunner.send(TmuxInput.arguments(write, into: pane), expecting: tmuxServer))
         case .ghostty, .iTerm2, .wezTerm, .zellij, .herdr:
             return .notWritten
         }
@@ -228,7 +230,7 @@ extension Companion {
         navigationMessage = "Finding the matching tmux pane…"
         let title = GhosttyMatch.title(session)
         Task { @MainActor in
-            let first = await Task.detached { TmuxClient.read() }.value
+            let first = await Task.detached { TmuxRunner.read() }.value
             if first == .notRunning || first.snapshot.map({ !$0.panes.contains { $0.title == title } }) == true {
                 openingTask = false
                 otherwise()
@@ -273,7 +275,7 @@ extension Companion {
                 refresh()
                 return
             }
-            let first = await Task.detached { (ClaudeTabProcess.read(rows), TmuxClient.read()) }.value
+            let first = await Task.detached { (ClaudeTabProcess.read(rows), TmuxRunner.read()) }.value
             if first.1 == .notRunning
                 || first.1.snapshot.map({ snapshot in !snapshot.panes.contains { $0.tty == first.0.tty } }) == true {
                 openingTask = false
@@ -351,10 +353,13 @@ extension Companion {
                 })
             },
             focus: { plan in
-                TmuxOpen.focused(await Task.detached { TmuxClient.run(TmuxOpen.focusArguments(plan)) }.value)
+                let server = record.reads?.tmux.snapshot?.server
+                return TmuxOpen.focused(await Task.detached {
+                    TmuxRunner.send(TmuxOpen.focusArguments(plan), expecting: server)
+                }.value)
             },
             verifyPane: { plan in
-                let fresh = await Task.detached { TmuxClient.read() }.value
+                let fresh = await Task.detached { TmuxRunner.read() }.value
                 guard let reads = record.reads else { return .fallBack(.notVerified, candidates: 1) }
                 var inventories = reads.inventories
                 inventories[.tmux] = fresh.inventory
@@ -503,7 +508,8 @@ extension Companion {
                                                                 spent: start.pane) {
                     return .vetoed(veto)
                 }
-                let delivery = TmuxInput.delivery(TmuxClient.run(TmuxInput.digitArguments(start.key, into: start.pane)))
+                let delivery = TmuxInput.delivery(TmuxRunner.send(TmuxInput.digitArguments(start.key, into: start.pane),
+                                                                  expecting: reads.tmux.snapshot?.server))
                 return .delivered(TerminalQuestionKeys.delivery(delivery))
             }.value
             answering = false
