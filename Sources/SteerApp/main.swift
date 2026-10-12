@@ -194,8 +194,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The daemon path is available; the preview renders it with a seeded request.
     var daemonConnected: Bool { daemonClient.isConnected || previewMode != nil }
     private var savedSnapshot = Companion.launchSnapshot
-    /// Remembered across launches; switched off only by the user or an Automation denial.
-    @Published var ghosttyEnabled = false
+    /// Every terminal app's and multiplexer's switch, remembered across launches (product.md, "Agreed
+    /// terminal host presentation"). Steer scans and contacts only hosts that are switched on.
+    @Published private(set) var hostSwitches = TerminalHostSwitches()
+    /// Ghostty's switch; switched off only by the user or an Automation denial.
+    var ghosttyEnabled: Bool {
+        get { hostSwitches.isOn(.ghostty) }
+        set { hostSwitches.set(.ghostty, on: newValue) }
+    }
     @Published var ghosttyPermissionVerified = false
     /// The latest Automation consent check for Ghostty; nil until one has run in this launch.
     @Published var ghosttyAccess: GhosttyAutomationAccess?
@@ -331,7 +337,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// fires the Settings toggle's `onChange`; the repeat call is a no-op.
     private var appliedGhosttyEnabled = false
     private var ghosttyStartupRetries = 0
-    static let ghosttyEnabledKey = "ghosttyControlsEnabled"
+    static let ghosttyEnabledKey = TerminalHost.ghostty.defaultsKey
     static let ghosttyOfferedKey = "ghosttyFirstRunOffered"
 
     private func claudeApprovalRootKey(sourceScope: String, events: URL, installationID: String) -> ClaudeApprovalRootKey {
@@ -711,13 +717,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         startGhosttyControls()
     }
 
-    /// Resumes remembered Ghostty controls, or offers them once on the first interactive launch.
-    /// Preview and probe launches never read the saved choice, so they keep controls off.
+    /// Restores every host's remembered switch, then resumes remembered Ghostty controls or offers
+    /// them once on the first interactive launch. Preview and probe launches never read the saved
+    /// choices, so every host stays off.
     private func startGhosttyControls() {
         guard previewMode == nil,
               !["--smoke-test", "--setup-probe", "--placement-probe"].contains(where: CommandLine.arguments.contains) else { return }
         observeGhosttyLaunches()
         let defaults = UserDefaults.standard
+        restoreHostSwitches(defaults)
         let stored = defaults.object(forKey: Companion.ghosttyEnabledKey) as? Bool
         if stored == true {
             ghosttyEnabled = true
@@ -735,6 +743,20 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                         storedPreference: stored) else { return }
         // Ask after launch finishes, on the controls window, so the notch keeps refreshing.
         DispatchQueue.main.async { [weak self] in self?.offerGhosttyControls() }
+    }
+
+    /// Every switch but Ghostty's, whose Automation flow below restores it. Writes back herdr's
+    /// starting position on the first launch after the upgrade (`TerminalHostSwitches.restore`).
+    private func restoreHostSwitches(_ defaults: UserDefaults) {
+        var stored: [TerminalHost: Bool] = [:]
+        for host in TerminalHost.allCases {
+            if let value = defaults.object(forKey: host.defaultsKey) as? Bool { stored[host] = value }
+        }
+        let restored = TerminalHostSwitches.restore(stored: stored)
+        for (host, value) in restored.toPersist { defaults.set(value, forKey: host.defaultsKey) }
+        var switches = restored.switches
+        switches.set(.ghostty, on: false)
+        hostSwitches = switches
     }
 
     /// Steer's own explanation before macOS's one-time Automation prompt, so Not Now leaves that
@@ -2314,6 +2336,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if !enabled { desktopReadStateMessage = "Desktop read state: off. Desktop completions clear only by dismissal." }
         nextScan = 0
     }
+    /// The Settings switch of a host without Automation access (every host but Ghostty, which goes
+    /// through `ghosttyChanged`). Remembered at once; herdr's gate is re-evaluated now.
+    func setHostSwitch(_ host: TerminalHost, on: Bool) {
+        guard host != .ghostty, hostSwitches.isOn(host) != on else { return }
+        hostSwitches.set(host, on: on)
+        UserDefaults.standard.set(on, forKey: host.defaultsKey)
+        if host == .herdr { scanHerdr() }
+    }
+
     func ghosttyChanged(_ enabled: Bool) {
         if !enabled && ghosttyUnavailable { return }
         guard enabled != appliedGhosttyEnabled else { return }

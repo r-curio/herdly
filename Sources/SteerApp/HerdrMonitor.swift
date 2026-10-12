@@ -1,8 +1,8 @@
 import Foundation
 import SteerCore
 
-/// Polls herdr on the 2-second scan, and only while the gate in ADR 0009 holds: Ghostty controls
-/// are on in this launch and either a live Claude Code session's newest Steer hook event recorded
+/// Polls herdr on the 2-second scan, and only while the gate in ADR 0009 holds: herdr's switch
+/// allows contact (`TerminalHostSwitches.mayContact(.herdr)`) and either a live Claude Code session's newest Steer hook event recorded
 /// a `HERDR_PANE_ID` or a live or daemon-loaded Codex terminal session exists beside a known Ghostty inventory while herdr's
 /// default socket is trusted (ADR 0012). Outside the gate Steer does not contact herdr and the
 /// last scan is dropped.
@@ -42,9 +42,9 @@ final class HerdrMonitor {
     /// when the gate is open, none is in flight, and the interval has passed, and returns its task
     /// so callers and tests can await completion; otherwise nil.
     @discardableResult
-    func tick(now: Double, ghosttyControlsEnabled: Bool, herdrPaneIDs: Set<String>, codexGate: Bool = false,
+    func tick(now: Double, herdrEnabled: Bool, herdrPaneIDs: Set<String>, codexGate: Bool = false,
               request: HerdrScanRequest = HerdrScanRequest()) -> Task<Void, Never>? {
-        let gate = HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: ghosttyControlsEnabled, paneIDs: herdrPaneIDs,
+        let gate = HerdrBindingInputs.allowsContact(herdrEnabled: herdrEnabled, paneIDs: herdrPaneIDs,
                                                     codexGate: codexGate)
         guard gate else {
             if isGateOpen || latest != nil {

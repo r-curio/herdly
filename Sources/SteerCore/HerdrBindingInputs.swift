@@ -43,7 +43,10 @@ public enum HerdrSessionBinding: Equatable, Sendable {
 
 /// Why a session that runs in herdr has no usable pane right now.
 public enum HerdrSessionUnavailable: Equatable, Hashable, Sendable {
-    /// Ghostty controls are off in this launch, so Steer does not contact herdr (ADR 0009 gate).
+    /// herdr's switch is off, or no terminal is on, so Steer does not contact herdr (product.md,
+    /// "Agreed terminal host presentation").
+    case herdrSwitchedOff
+    /// Ghostty controls are off in this launch, so Steer cannot reach herdr's client tab (ADR 0011).
     case ghosttyControlsOff
     /// The gate is open but no herdr scan has completed since it opened.
     case notScanned
@@ -148,10 +151,11 @@ public enum HerdrBindingInputs {
         defaultSocketTrusted && codex.ghostty != nil && !codex.liveTitles.isEmpty
     }
 
-    /// Steer may contact herdr only while Ghostty controls are on and either a live Claude session's
-    /// newest hook event recorded a pane ID or the Codex half of the gate holds.
-    public static func allowsContact(ghosttyControlsEnabled: Bool, paneIDs: Set<String>, codexGate: Bool = false) -> Bool {
-        ghosttyControlsEnabled && (!paneIDs.isEmpty || codexGate)
+    /// Steer may contact herdr only while herdr's switch allows it (`TerminalHostSwitches.mayContact`)
+    /// and either a live Claude session's newest hook event recorded a pane ID or the Codex half of
+    /// the gate holds.
+    public static func allowsContact(herdrEnabled: Bool, paneIDs: Set<String>, codexGate: Bool = false) -> Bool {
+        herdrEnabled && (!paneIDs.isEmpty || codexGate)
     }
 
     /// What a scan inside the gate reads: Claude's integration status and process info for the panes
@@ -228,6 +232,7 @@ public enum HerdrBindingInputs {
     /// - Parameters:
     ///   - hookRecords: Steer's hook records for every herdr-capable session it read, any order.
     ///     Only Claude Code records are read.
+    ///   - herdrEnabled: herdr's switch allows contact (`TerminalHostSwitches.mayContact(.herdr)`).
     ///   - ghosttyControlsEnabled: Ghostty controls in this launch.
     ///   - gateOpen: whether ADR 0009's gate holds, so a nil `outcome` is a scan still pending rather
     ///     than herdr not being contacted.
@@ -237,12 +242,13 @@ public enum HerdrBindingInputs {
     ///   - claudeProcess: the Claude session's live interactive process as Claude's inventories name
     ///     it (`ClaudeSessionProcess(sessionID:inventories:)`); see `HerdrBindingRules.evaluate`.
     /// - Returns: for Claude Code, `notInHerdr` when the session's newest hook event carried no pane
-    ///   ID; otherwise `bound` only when Ghostty controls are on, the scan succeeded with a server
+    ///   ID; otherwise `bound` only when herdr's switch and Ghostty controls are on, the scan succeeded with a server
     ///   start time, and `HerdrBindingRules` bound the session. For Codex, see `codexBinding`.
     public static func binding(
         for session: HerdrSessionKey,
         liveness: HerdrSessionLiveness,
         hookRecords: [HerdrHookPaneRecord],
+        herdrEnabled: Bool,
         ghosttyControlsEnabled: Bool,
         gateOpen: Bool,
         outcome: HerdrScanOutcome?,
@@ -251,7 +257,8 @@ public enum HerdrBindingInputs {
         claudeProcess: ClaudeSessionProcess = .unidentified
     ) -> HerdrSessionBinding {
         if session.agent == .codex {
-            return codexBinding(for: session, liveness: liveness, ghosttyControlsEnabled: ghosttyControlsEnabled,
+            return codexBinding(for: session, liveness: liveness, herdrEnabled: herdrEnabled,
+                                ghosttyControlsEnabled: ghosttyControlsEnabled,
                                 gateOpen: gateOpen, outcome: outcome, codex: codex)
         }
         let hookRecords = hookRecords.map(normalized).filter { $0.agent == .claude }
@@ -259,6 +266,7 @@ public enum HerdrBindingInputs {
             $0.agent == session.agent && $0.sessionID == session.sessionID
         }
         guard newest.contains(where: { $0.paneID != nil }) else { return .notInHerdr }
+        guard herdrEnabled else { return .unavailable(.herdrSwitchedOff) }
         guard ghosttyControlsEnabled else { return .unavailable(.ghosttyControlsOff) }
         guard let outcome else { return .unavailable(.notScanned) }
         let scan: HerdrScan
@@ -283,17 +291,18 @@ public enum HerdrBindingInputs {
     ///
     /// While the gate holds without a successful scan, herdr cannot be ruled out, so the session is
     /// unavailable; only `notRunning` counts as herdr showing nothing, since no server holds a pane.
-    /// With Ghostty controls off, no known Ghostty inventory, or the gate closed, herdr counts as not
-    /// showing the title.
+    /// With herdr's switch or Ghostty controls off, no known Ghostty inventory, or the gate closed,
+    /// herdr counts as not showing the title.
     public static func codexBinding(
         for session: HerdrSessionKey,
         liveness: HerdrSessionLiveness,
+        herdrEnabled: Bool,
         ghosttyControlsEnabled: Bool,
         gateOpen: Bool,
         outcome: HerdrScanOutcome?,
         codex: HerdrCodexTitles
     ) -> HerdrSessionBinding {
-        guard session.agent == .codex, ghosttyControlsEnabled, let ghostty = codex.ghostty,
+        guard session.agent == .codex, herdrEnabled, ghosttyControlsEnabled, let ghostty = codex.ghostty,
               let title = HerdrCodexBindingRules.title(forSession: session.sessionID) else { return .notInHerdr }
         let scan: HerdrScan
         switch outcome {

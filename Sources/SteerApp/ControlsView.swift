@@ -787,37 +787,52 @@ private struct TerminalControls: View {
 
     var body: some View {
         ControlsPage(section: .terminals) {
-            SettingsHeader("Ghostty")
-            SettingsCard {
-                SettingsRow(title: "Ghostty controls", detail: "Open sessions in their exact tab, and answer questions there") {
-                    Toggle("Ghostty controls", isOn: $model.ghosttyEnabled)
-                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                        .accessibilityLabel("Enable Ghostty controls")
-                        .onChange(of: model.ghosttyEnabled) { _, enabled in model.ghosttyChanged(enabled) }
-                }
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Version", detail: nil) {
-                    Text(AgentControls.version(installed: model.setupCapabilities.ghosttyInstalled,
-                                               supported: model.setupCapabilities.ghostty,
-                                               version: model.setupCapabilities.ghosttyVersion,
-                                               minimum: CodexSetupRequirements.minimumGhosttyVersion))
-                        .foregroundStyle(.secondary)
-                }
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Automation permission",
-                            detail: model.ghosttyPermissionVerified ? nil : automationDetail) {
-                    HStack(spacing: 10) {
-                        if model.ghosttyAccess == .denied {
-                            Button("Open Settings…", action: GhosttyAutomationPermission.openSettings)
-                        }
-                        StatusBadge(title: automationBadge, color: model.ghosttyPermissionVerified ? .green : .orange)
+            SettingsHeader("Terminals")
+            ForEach(TerminalHost.terminals.filter(\.showsCard), id: \.self, content: card)
+            SettingsHeader("Multiplexers")
+            ForEach(TerminalHost.multiplexers.filter(\.showsCard), id: \.self, content: card)
+        }
+    }
+
+    /// A host's card. Each host's acceptance ticket adds its card here and turns on `showsCard`.
+    @ViewBuilder
+    private func card(_ host: TerminalHost) -> some View {
+        switch host {
+        case .ghostty: ghosttyCard
+        case .herdr: HerdrControls(model: model)
+        case .iTerm2, .terminalApp, .wezTerm, .tmux, .zellij: EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var ghosttyCard: some View {
+        SettingsCard {
+            SettingsRow(title: "Ghostty", detail: "Open sessions in their exact tab, and answer questions there") {
+                Toggle("Ghostty controls", isOn: $model.ghosttyEnabled)
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    .accessibilityLabel("Enable Ghostty controls")
+                    .onChange(of: model.ghosttyEnabled) { _, enabled in model.ghosttyChanged(enabled) }
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Version", detail: nil) {
+                Text(AgentControls.version(installed: model.setupCapabilities.ghosttyInstalled,
+                                           supported: model.setupCapabilities.ghostty,
+                                           version: model.setupCapabilities.ghosttyVersion,
+                                           minimum: CodexSetupRequirements.minimumGhosttyVersion))
+                    .foregroundStyle(.secondary)
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Automation permission",
+                        detail: model.ghosttyPermissionVerified ? nil : automationDetail) {
+                HStack(spacing: 10) {
+                    if model.ghosttyAccess == .denied {
+                        Button("Open Settings…", action: GhosttyAutomationPermission.openSettings)
                     }
+                    StatusBadge(title: automationBadge, color: model.ghosttyPermissionVerified ? .green : .orange)
                 }
             }
-            SettingsFooter("Steer targets only unsplit tabs it can match exactly. If a tab is split, closed, or duplicated, Open Session reports it unavailable instead of guessing.")
-
-            HerdrControls(model: model)
         }
+        SettingsFooter("Steer targets only unsplit tabs it can match exactly. If a tab is split, closed, or duplicated, Open Session reports it unavailable instead of guessing.")
     }
 
     private var automationBadge: String {
@@ -835,23 +850,30 @@ private struct TerminalControls: View {
     }
 }
 
-/// The read-only herdr row (product.md, "Agreed herdr presentation"). It has no switch: herdr
-/// works only while Ghostty controls are on. Copy places a command on the pasteboard and never
-/// runs it. Exact internal reasons appear only under diagnostics, never on a notch card.
+/// The herdr card (product.md, "Agreed terminal host presentation"). Its switch is herdr's own;
+/// Steer contacts herdr only while it and a terminal are on. Copy places a command on the
+/// pasteboard and never runs it. Exact internal reasons appear only under diagnostics, never on a
+/// notch card.
 private struct HerdrControls: View {
     @ObservedObject var model: Companion
     @ObservedObject private var tty = GhosttyTTYSupportMonitor.shared
 
     private var row: HerdrSettingsRow {
-        HerdrPresentation.settingsRow(inUse: model.herdr.inUse, ghosttyControlsEnabled: model.ghosttyEnabled,
+        HerdrPresentation.settingsRow(switches: model.hostSwitches, inUse: model.herdr.inUse,
                                       outcome: model.herdrScanOutcome, agentsSeen: model.herdrAgentsSeen,
                                       ttySupport: tty.support)
     }
 
     var body: some View {
         let row = row
-        SettingsHeader("herdr")
         SettingsCard {
+            SettingsRow(title: "herdr", detail: "Open sessions in their exact pane, and answer questions there") {
+                Toggle("herdr", isOn: Binding(get: { model.hostSwitches.isOn(.herdr) },
+                                              set: { model.setHostSwitch(.herdr, on: $0) }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    .accessibilityLabel("Enable herdr")
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
             SettingsRow(title: "Status", detail: nil) {
                 if let badge = row.badge {
                     StatusBadge(title: badge.title, color: color(badge))
@@ -875,7 +897,7 @@ private struct HerdrControls: View {
 
     private func color(_ badge: HerdrReadinessBadge) -> Color {
         switch badge {
-        case .notInUse: .secondary
+        case .off, .notInUse: .secondary
         case .ready: .green
         case .needsAttention: .orange
         }
