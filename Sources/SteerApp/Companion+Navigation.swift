@@ -104,8 +104,20 @@ extension Companion {
         openClaudeOutsideTmux(identity, approval: approval)
     }
 
-    /// WezTerm's, then Terminal.app's sequence while each is on, otherwise Ghostty's title route or the walk.
+    /// Zellij (#242): a session whose newest hook records and process put it in a Zellij pane opens through
+    /// ADR 0014's two layers; anything else keeps the routes below.
     private func openClaudeOutsideTmux(_ identity: AgentSessionIdentity, approval: AgentApproval?) {
+        if zellijContactAllowed {
+            openClaudeWithZellij(identity, approval: approval) { [weak self] in
+                self?.openClaudeOutsideMultiplexers(identity, approval: approval)
+            }
+            return
+        }
+        openClaudeOutsideMultiplexers(identity, approval: approval)
+    }
+
+    /// WezTerm's, then Terminal.app's sequence while each is on, otherwise Ghostty's title route or the walk.
+    private func openClaudeOutsideMultiplexers(_ identity: AgentSessionIdentity, approval: AgentApproval?) {
         // WezTerm on (#240): a pane there opens through its own sequence; anything else keeps the routes below.
         if wezTermSwitchedOn {
             openClaudeWithWezTerm(identity, approval: approval) { [weak self] in
@@ -278,8 +290,18 @@ extension Companion {
         openCLIOutsideTmux(session)
     }
 
-    /// WezTerm's, then Terminal.app's sequence while each is on, otherwise iTerm2's or Ghostty's route.
+    /// Zellij (#242): a title a Zellij pane carries opens through ADR 0014's two layers; anything else keeps
+    /// the routes below, which read Zellij too for ADR 0013's uniqueness.
     private func openCLIOutsideTmux(_ session: UUID) {
+        if zellijContactAllowed {
+            openCodexWithZellij(session) { [weak self] in self?.openCLIOutsideMultiplexers(session) }
+            return
+        }
+        openCLIOutsideMultiplexers(session)
+    }
+
+    /// WezTerm's, then Terminal.app's sequence while each is on, otherwise iTerm2's or Ghostty's route.
+    private func openCLIOutsideMultiplexers(_ session: UUID) {
         // WezTerm on (#240): a pane there opens through its own sequence; a title no WezTerm pane carries
         // keeps the routes below. Each reads every enabled host for ADR 0013's binding.
         if wezTermSwitchedOn {
@@ -592,6 +614,7 @@ extension Companion {
         terminalApp.visits.reset(at: now)
         wezTerm.visits.reset(at: now)
         tmux.visits.reset(at: now)
+        zellij.visits.reset(at: now)
     }
 
     /// Sessions with queued completions whose current binding is `pane`.

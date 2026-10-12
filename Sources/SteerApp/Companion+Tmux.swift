@@ -65,16 +65,21 @@ extension Companion {
     }
 
     /// Writes one typed-input write into `pane` by its host's own send. Blocking: call off the main
-    /// actor. A host without a send in this build writes nothing. `tmuxServer` is the tmux server the
-    /// fresh check read; a tmux send goes only to it.
-    nonisolated static func typeInto(_ pane: TypedInputPane, _ write: TypedWrite,
-                                     tmuxServer: TmuxServerIdentity? = nil) -> TypedInputDelivery {
+    /// actor. A host without a send in this build writes nothing. `tmuxServer` and `zellijServer` are the
+    /// servers the fresh check read; a tmux or Zellij send goes only to it, and a Zellij send only after
+    /// the pane is re-read (`ZellijRunner.send`).
+    nonisolated static func typeInto(_ pane: TypedInputPane, _ write: TypedWrite, tmuxServer: TmuxServerIdentity? = nil,
+                                     zellijServer: ZellijServerIdentity? = nil) -> TypedInputDelivery {
         switch pane.host {
         case .terminalApp:
             return TerminalAppInput.delivery(TerminalAppNavigation.type(TerminalAppInput.script(write), into: pane))
         case .tmux:
             return TmuxInput.delivery(TmuxRunner.send(TmuxInput.arguments(write, into: pane), expecting: tmuxServer))
-        case .ghostty, .iTerm2, .wezTerm, .zellij, .herdr:
+        case .zellij:
+            guard let target = ZellijPaneTarget(handle: pane.paneID),
+                  let arguments = ZellijInput.arguments(write, into: pane) else { return .notWritten }
+            return ZellijInput.delivery(ZellijRunner.send(arguments, to: target, expecting: zellijServer))
+        case .ghostty, .iTerm2, .wezTerm, .herdr:
             return .notWritten
         }
     }
@@ -365,7 +370,7 @@ extension Companion {
                 inventories[.tmux] = fresh.inventory
                 let rebound = TerminalTabReads(terminalApp: reads.terminalApp, inventories: inventories,
                                                processes: reads.processes, secondRead: inventories, tmux: fresh,
-                                               ghostty: reads.ghostty, iTerm2: reads.iTerm2)
+                                               zellij: reads.zellij, ghostty: reads.ghostty, iTerm2: reads.iTerm2)
                 return TmuxOpen.verifyPane(plan, read: fresh, binding: rebind(rebound))
             },
             raise: { [weak self] plan in
@@ -390,7 +395,10 @@ extension Companion {
 
     /// ADR 0014 step 4 for any multiplexer: the host tab's own select and raise, once. Terminal.app's tab
     /// must be alone in its window; a WezTerm pane must be in the focused window, as WezTerm's Open requires.
-    func raiseHostTab(_ host: MultiplexerHostTarget, clientTTY: String, record: MultiplexerOpenRecord) async -> OpenMiss? {
+    /// `requiredTitlePrefix` is Zellij's host-title veto for the tab Ghostty's own join chooses here (the
+    /// other hosts' tabs were checked when the plan was made).
+    func raiseHostTab(_ host: MultiplexerHostTarget, clientTTY: String, record: MultiplexerOpenRecord,
+                      requiredTitlePrefix: String? = nil) async -> OpenMiss? {
         switch host {
         case .tab(let target):
             switch target.host {
@@ -426,6 +434,9 @@ extension Companion {
             guard case .matched(let target) = join else {
                 return HerdrOpenFallback.reason(for: join).map { .fallBack($0, candidates: 1) }
                     ?? .unavailable(.hostUnreadable(.ghostty))
+            }
+            if let requiredTitlePrefix, snapshot.terminalName(target)?.hasPrefix(requiredTitlePrefix) != true {
+                return .fallBack(.noUniqueTarget, candidates: 1)
             }
             record.ghostty = (target, observed.0)
             let selected = await Task.detached { GhosttyNavigation.selectHerdrTab(target: target, tty: tty) }.value

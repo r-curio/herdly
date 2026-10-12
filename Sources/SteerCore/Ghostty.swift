@@ -36,6 +36,13 @@ public struct GhosttySnapshot: Decodable, Sendable {
     public var terminalNames: Set<String> {
         Set(windows.flatMap { $0.tabs.flatMap { $0.terminals.map(\.name) } })
     }
+
+    /// The title of `target`'s terminal, nil when this inventory does not hold it: a multiplexer's host
+    /// tab title veto (Zellij's `<session> | `, ADR 0014) reads it once Ghostty's own join chose the tab.
+    public func terminalName(_ target: GhosttyTarget) -> String? {
+        windows.first { $0.id == target.window_id }?.tabs.first { $0.id == target.tab_id }?
+            .terminals.first { $0.id == target.terminal_id }?.name
+    }
 }
 /// Ghostty's terminal titles as of one inventory, with when it was taken (Unix seconds). Passed
 /// into every reminder scan: a session-id title proves a CLI session, and its later absence is the

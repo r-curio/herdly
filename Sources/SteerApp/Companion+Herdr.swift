@@ -102,6 +102,12 @@ extension Companion {
     /// herdr's switch is on and a terminal is too, so the ADR 0009 gate may open (ADR 0014).
     var herdrContactAllowed: Bool { hostSwitches.mayContact(.herdr) }
 
+    /// A Claude session's newest Steer hook records from the last read, Zellij's binding input
+    /// (`HerdrHookPaneRecord.zellijPane`, ADR 0014, #242). They are read whatever herdr's switch says.
+    func newestHookRecords(forClaudeSession sessionID: String) -> [HerdrHookPaneRecord] {
+        herdr.hookRecords.filter { $0.agent == .claude && $0.sessionID == sessionID }
+    }
+
     /// The enabled terminal hosts whose tab may hold herdr's client (ADR 0014): Ghostty while its
     /// controls are on, iTerm2, Terminal.app and WezTerm while each may be contacted. With Ghostty alone
     /// this is ADR 0011's Ghostty-only rule, unchanged.
