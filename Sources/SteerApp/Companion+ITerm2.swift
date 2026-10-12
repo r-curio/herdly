@@ -35,12 +35,16 @@ private struct CodexTabReads: Sendable {
 
     /// Blocking: call off the main actor. Ghostty is read only while it is on and running, iTerm2 only
     /// while running; `ps` only for tabs showing one of `titles` or on one of `claudeTTYs`.
+    ///   - terminalAppRunning: nil while Terminal.app is off (never read); otherwise whether it runs (#239).
     static func read(titles: Set<String>, claudeTTYs: Set<String>, ghosttyOn: Bool, ghosttyRunning: Bool,
-                     iTerm2Running: Bool) -> CodexTabReads {
+                     iTerm2Running: Bool, terminalAppRunning: Bool? = nil) -> CodexTabReads {
         func hosts() -> ([TerminalHost: TerminalHostInventory], ITerm2Snapshot?) {
             var result: [TerminalHost: TerminalHostInventory] = [:]
             let reading = iTerm2Running ? ITerm2Navigation.snapshot() : .notRunning
             result[.iTerm2] = ITerm2Navigation.inventory(reading)
+            if let terminalAppRunning {
+                result[.terminalApp] = terminalAppRunning ? TerminalAppNavigation.snapshot().inventory : .notRunning
+            }
             if ghosttyOn {
                 result[.ghostty] = .ghosttyTitles(ghosttyRunning ? GhosttyNavigation.snapshot() : nil, running: ghosttyRunning)
             }
@@ -63,8 +67,9 @@ private final class ITerm2OpenRecord {
 }
 
 extension Companion {
-    /// Whether a terminal host that can hold a Codex CLI tab is on: Ghostty, or iTerm2 (#238).
-    var cliTerminalHostOn: Bool { ghosttyEnabled || hostSwitches.mayContact(.iTerm2) }
+    /// Whether a terminal host that can hold a Codex CLI tab is on: Ghostty, iTerm2 (#238) or
+    /// Terminal.app (#239).
+    var cliTerminalHostOn: Bool { ghosttyEnabled || hostSwitches.mayContact(.iTerm2) || terminalAppSwitchedOn }
 
     // MARK: - Switch and Automation permission (Ghostty's flow, product.md "Settings")
 
@@ -169,6 +174,7 @@ extension Companion {
         let ghosttyOn = ghosttyEnabled
         let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
         let iTerm2Running = TerminalApps.isRunning(.iTerm2)
+        let terminalAppRunning: Bool? = terminalAppSwitchedOn ? TerminalApps.isRunning(.terminalApp) : nil
         let liveness: HerdrSessionLiveness = live.contains(session) ? .live : .ended
         let record = ITerm2OpenRecord()
         Task { @MainActor in
@@ -177,7 +183,8 @@ extension Companion {
                 revalidate: { _ in
                     let reads = await Task.detached {
                         CodexTabReads.read(titles: [title], claudeTTYs: [], ghosttyOn: ghosttyOn,
-                                           ghosttyRunning: ghosttyRunning, iTerm2Running: iTerm2Running)
+                                           ghosttyRunning: ghosttyRunning, iTerm2Running: iTerm2Running,
+                                           terminalAppRunning: terminalAppRunning)
                     }.value
                     let binding = TerminalTabBindingRules.codex(sessionID: session.uuidString, liveness: liveness,
                                                                 liveSessions: liveIDs, switches: switches,
@@ -302,39 +309,9 @@ extension Companion {
 
     // MARK: - Typed input (ADR 0017; ADR 0013 "Freshness")
 
-    /// Why a Codex session's key route (Ghostty or herdr relay) or typed reply is withheld because of
-    /// iTerm2, from the latest scan; nil while iTerm2 is off or no iTerm2 tab shows the title. The
-    /// card shows the block's line instead of input controls; the click rechecks on a fresh read.
-    func iTerm2InputBlock(for session: UUID) -> ITerm2TypedInputBlock? {
-        guard hostSwitches.mayContact(.iTerm2) else { return nil }
-        return iTerm2.codexInputBlocks[session]
-    }
-
-    /// The question card's line when its key route would type into a session iTerm2 may hold. The
-    /// daemon route wins (ADR 0017), so it is never replaced.
-    func iTerm2InputLine(for question: AttentionQuestion) -> String? {
-        guard question.source == .cli else { return nil }
-        switch route(for: question) {
-        case .ghosttyRelay, .herdrRelay: return iTerm2InputBlock(for: question.session)?.line
-        case .daemon, .daemonAnswered, .desktopPick, .relayUnavailable: return nil
-        }
-    }
-
-    /// The reply field's line when no daemon can carry the reply and the session may be in iTerm2.
-    func iTerm2ReplyLine(for completion: AttentionCompletion, target: SessionReplyTarget) -> String? {
-        guard completion.source == .cli, case .unavailable(let reason) = target,
-              reason == .noDaemon || reason == .threadNotLoaded else { return nil }
-        return iTerm2InputBlock(for: completion.session)?.line
-    }
-
-    /// Immediately before a Ghostty key is typed into a Codex session: a fresh iTerm2 read, because the
-    /// title must be unique across every enabled inventory. Blocking: call off the main actor. `on` and
-    /// `running` are read on the main actor first; nil means the key may go.
-    nonisolated static func freshITerm2InputBlock(title: String, on: Bool, running: Bool) -> ITerm2TypedInputBlock? {
-        guard on else { return ITerm2TypedInput.codexBlock(title: title, iTerm2: nil) }
-        let inventory = running ? ITerm2Navigation.inventory(ITerm2Navigation.snapshot()) : .notRunning
-        return ITerm2TypedInput.codexBlock(title: title, iTerm2: inventory)
-    }
+    // iTerm2's latest-scan blocks feed the shared routes: `terminalReplyRoutes`, `terminalHost(forQuestionSession:)`
+    // and `unreadQuestionHost(for:)` (Companion+TerminalApp.swift). The fresh read before a Ghostty key is
+    // the shared `TerminalKeyRelayCheck` over every enabled host (Companion+Questions.swift).
 
     // MARK: - Visits (ADR 0016) and typed-input blocks
 

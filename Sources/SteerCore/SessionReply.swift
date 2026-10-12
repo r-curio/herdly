@@ -2,10 +2,11 @@ import Foundation
 
 // Replying to a finished session from its completion card. The reply starts a new turn on that
 // exact thread through the local app-server daemon (`turn/start`, per the schema the installed CLI
-// generates), the same verified transport that answers questions by call id. The Ghostty relay
-// carries one digit and nothing else (ADR 0006), so a session the daemon does not hold offers no
-// reply field at all; the card says why and the user opens Codex. Everything here is pure
-// bookkeeping and policy; the socket lives in the app.
+// generates), the same verified transport that answers questions by call id. When the daemon does
+// not hold the thread, ADR 0017's second route types the reply into the session's one bound pane on a
+// host that types replies (`TerminalTypedInput.swift`). The Ghostty relay carries one digit and
+// nothing else (ADR 0006). With neither route the field is disabled and the card says why.
+// Everything here is pure bookkeeping and policy; the socket and the host calls live in the app.
 
 /// What Steer knows right now about reaching a finished session. Gathered at the moment the user
 /// sends, never remembered from when the card rendered.
@@ -17,40 +18,62 @@ public struct SessionReplyAvailability: Equatable, Sendable {
     public let endedSessions: Set<UUID>
     /// Sessions with a turn running right now.
     public let workingSessions: Set<UUID>
+    /// The typed-input route of each session from the latest scan, only while a host that types
+    /// replies is switched on. A session without an entry has no typed route at all.
+    public let terminalRoutes: [UUID: TerminalReplyRoute]
 
     public init(daemonConnected: Bool = false, daemonThreads: Set<UUID> = [],
-                endedSessions: Set<UUID> = [], workingSessions: Set<UUID> = []) {
+                endedSessions: Set<UUID> = [], workingSessions: Set<UUID> = [],
+                terminalRoutes: [UUID: TerminalReplyRoute] = [:]) {
         self.daemonConnected = daemonConnected
         self.daemonThreads = daemonThreads
         self.endedSessions = endedSessions
         self.workingSessions = workingSessions
+        self.terminalRoutes = terminalRoutes
     }
 }
 
-/// Where a reply would go. There is one transport; anything else is no transport.
+/// Where a reply would go: the daemon, the bound pane, or nowhere.
 public enum SessionReplyTarget: Equatable, Sendable {
     /// The daemon holds this thread: the reply starts a new turn on it, by thread id.
     case daemon(thread: UUID)
+    /// The daemon does not hold it; the reply is typed into this bound pane (ADR 0017).
+    case terminal(TypedInputPane)
     /// Nothing verified can carry the text. The field is disabled and the card shows the reason.
     case unavailable(SessionReplyPolicy.Rejection)
 
     /// Whether the card may offer the field at all.
     public var isReachable: Bool {
-        if case .daemon = self { return true }
-        return false
+        if case .unavailable = self { return false }
+        return true
     }
+}
+
+/// The route one reply left by. One card sends at most one reply, by one route.
+public enum SessionReplyRoute: Equatable, Hashable, Sendable {
+    case daemon
+    case terminal(TypedInputPane)
 }
 
 public enum SessionReplyRouting {
     /// The target for one completion. An ended or newly working session is unreachable whatever the
-    /// daemon holds: the first has nowhere to put a turn and the second is already in one.
+    /// daemon holds: the first has nowhere to put a turn and the second is already in one. The daemon
+    /// wins whenever it holds the thread (ADR 0017); otherwise a typed route, when there is one, decides.
     public static func target(for completion: AttentionCompletion,
                               availability: SessionReplyAvailability) -> SessionReplyTarget {
         if availability.endedSessions.contains(completion.session) { return .unavailable(.sessionEnded) }
         if availability.workingSessions.contains(completion.session) { return .unavailable(.sessionWorking) }
+        if availability.daemonConnected, availability.daemonThreads.contains(completion.session) {
+            return .daemon(thread: completion.session)
+        }
+        switch availability.terminalRoutes[completion.session] {
+        case .pane(let pane)?: return .terminal(pane)
+        case .unreachable?: return .unavailable(.terminalUnreachable)
+        case .hostCannotType(let host)?: return .unavailable(.hostCannotType(host))
+        case nil: break
+        }
         guard availability.daemonConnected else { return .unavailable(.noDaemon) }
-        guard availability.daemonThreads.contains(completion.session) else { return .unavailable(.threadNotLoaded) }
-        return .daemon(thread: completion.session)
+        return .unavailable(.threadNotLoaded)
     }
 }
 
@@ -72,16 +95,23 @@ public enum SessionReplyPhase: Equatable, Sendable {
     case failed(String)
 }
 
-/// Steer's memory of one completion card's reply. In memory only: a restart returns the card with
-/// an empty field, and the completion itself is untouched either way.
-public struct SessionReplyProgress: Equatable, Sendable {
-    /// Seconds after the daemon accepted the reply within which Codex is expected to start a turn.
-    public static let confirmationWindow: Double = 10
+/// Steer's memory of one completion card's reply, keyed by the card's completion: a Codex
+/// `CompletionIdentity` (`SessionReplyProgress`) or a Claude outcome's `AgentTurnIdentity`. In memory
+/// only: a restart returns the card with an empty field, and the completion itself is untouched
+/// either way.
+public struct ReplyProgress<ID: Hashable & Sendable>: Equatable, Sendable {
+    /// Seconds after the reply left within which the session is expected to start a turn.
+    public static var confirmationWindow: Double { 10 }
 
-    public let completion: CompletionIdentity
+    public let completion: ID
     public private(set) var phase: SessionReplyPhase
+    /// The route the reply left by, once a send started.
+    public private(set) var route: SessionReplyRoute?
+    /// Codex's text counts as sent but its separate submit did not go: the text may be waiting in the
+    /// composer. Steer never presses Enter later.
+    public private(set) var composerMayHoldText = false
 
-    public init(completion: CompletionIdentity) {
+    public init(completion: ID) {
         self.completion = completion
         self.phase = .ready
     }
@@ -103,16 +133,34 @@ public struct SessionReplyProgress: Equatable, Sendable {
         }
     }
 
-    /// `.ready` → `.sending`. The caller has already applied the policy.
-    public func startingSend(text: String) -> SessionReplyProgress {
+    /// `.ready` → `.sending` by `route`. The caller has already applied the policy.
+    public func startingSend(text: String, route: SessionReplyRoute = .daemon) -> ReplyProgress {
         guard phase == .ready, let trimmed = SessionReplyPolicy.sendableText(text) else { return self }
         var next = self
         next.phase = .sending(trimmed)
+        next.route = route
         return next
     }
 
+    /// Settles a typed reply (ADR 0017): anything that counts as sent is sent, and is never resent;
+    /// a run that sent nothing fails with its reason, for good.
+    public func settling(_ run: TypedReplyRun, at now: Double) -> ReplyProgress {
+        switch run {
+        case .sent:
+            return recordingSent(at: now)
+        case .sentTextOnly:
+            var next = recordingSent(at: now)
+            if next != self { next.composerMayHoldText = true }
+            return next
+        case .notSent(.vetoed(let veto)):
+            return recordingFailure(veto.message)
+        case .notSent(.notWritten):
+            return recordingFailure("Steer couldn't type into the session's tab; nothing was sent. Reply in the session.")
+        }
+    }
+
     /// The daemon accepted the request. Only a send that was under way can be recorded.
-    public func recordingSent(at now: Double) -> SessionReplyProgress {
+    public func recordingSent(at now: Double) -> ReplyProgress {
         guard case let .sending(text) = phase else { return self }
         var next = self
         next.phase = .sent(text: text, at: now)
@@ -120,7 +168,7 @@ public struct SessionReplyProgress: Equatable, Sendable {
     }
 
     /// Nothing was sent, or the daemon refused; the reason is shown and Steer never retries.
-    public func recordingFailure(_ reason: String) -> SessionReplyProgress {
+    public func recordingFailure(_ reason: String) -> ReplyProgress {
         guard case .sending = phase else { return self }
         var next = self
         next.phase = .failed(reason)
@@ -130,7 +178,7 @@ public struct SessionReplyProgress: Equatable, Sendable {
     /// Applies what Steer can see of the session now. A turn started after the send is the
     /// confirmation, however late; silence inside the window keeps waiting, and silence past it is
     /// reported as unconfirmed rather than described as an answer Codex has.
-    public func observing(sessionWorking: Bool, at now: Double) -> SessionReplyProgress {
+    public func observing(sessionWorking: Bool, at now: Double) -> ReplyProgress {
         var next = self
         switch phase {
         case let .sent(text, at):
@@ -145,15 +193,26 @@ public struct SessionReplyProgress: Equatable, Sendable {
     }
 }
 
+/// A Codex completion card's reply.
+public typealias SessionReplyProgress = ReplyProgress<CompletionIdentity>
+
 /// Whether one typed reply may leave Steer. Judges the queue's current copy of the completion and
 /// the availability as it is right now, never the row that was rendered.
 public enum SessionReplyPolicy {
     /// The longest reply Steer sends; anything longer belongs in Codex's own composer.
     public static let maximumText = 4000
 
-    public enum Rejection: Equatable, Sendable {
+    public enum Rejection: Error, Equatable, Sendable {
         case notInQueue, noDaemon, threadNotLoaded, sessionEnded, sessionWorking
         case emptyText, textTooLong, notReady
+        /// A typed route exists but the session has no exact binding (ADR 0017).
+        case terminalUnreachable
+        /// The session is bound in a host that never types (iTerm2).
+        case hostCannotType(TerminalHost)
+        /// Typed replies only: a second line or a control character.
+        case notOneLine
+        /// Typed replies only: text starting with `/` or `!`.
+        case commandText
     }
 
     /// The text Steer would send: trimmed, non-empty, and within the limit.
@@ -168,11 +227,24 @@ public enum SessionReplyPolicy {
     public static func rejection(for completion: AttentionCompletion?, target: SessionReplyTarget,
                                  progress: SessionReplyProgress, text: String) -> Rejection? {
         guard let completion, completion.id == progress.completion else { return .notInQueue }
+        return rejection(target: target, phase: progress.phase, text: text)
+    }
+
+    /// The target and text half of the policy, for any agent's card.
+    public static func rejection(target: SessionReplyTarget, phase: SessionReplyPhase, text: String) -> Rejection? {
         if case let .unavailable(reason) = target { return reason }
+        if case .terminal = target, case let .failure(reason) = TypedReplyText.sendable(text) {
+            switch reason {
+            case .emptyText: return .emptyText
+            case .textTooLong: return .textTooLong
+            case .notOneLine: return .notOneLine
+            case .commandText: return .commandText
+            }
+        }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .emptyText }
         guard trimmed.count <= maximumText else { return .textTooLong }
-        guard progress.phase == .ready else { return .notReady }
+        guard phase == .ready else { return .notReady }
         return nil
     }
 
@@ -180,6 +252,16 @@ public enum SessionReplyPolicy {
     /// what the daemon said, and that it will not try again.
     public static func daemonRefused(_ error: String?) -> String {
         "Codex's daemon did not take the reply\(error.map { " (\($0))" } ?? ""). Steer will not retry; reply in Codex."
+    }
+
+    /// The sentence for `rejection` on `agent`'s card.
+    public static func message(for rejection: Rejection, agent: AgentSource) -> String {
+        guard agent == .claude else { return message(for: rejection) }
+        switch rejection {
+        case .sessionWorking: return "This session is working again; send your next prompt in Claude."
+        case .textTooLong: return "That reply is longer than Steer sends; send it in Claude."
+        default: return message(for: rejection)
+        }
     }
 
     public static func message(for rejection: Rejection) -> String {
@@ -192,6 +274,10 @@ public enum SessionReplyPolicy {
         case .emptyText: return "Type a reply first."
         case .textTooLong: return "That reply is longer than Steer sends; send it in Codex."
         case .notReady: return "Steer already sent a reply from this card; it never sends a second one."
+        case .terminalUnreachable: return "Steer can't reach this session's tab. Reply in the session."
+        case .hostCannotType(let host): return "Steer can't type into \(host.displayName). Reply in the session."
+        case .notOneLine: return "Steer types one line only; send longer replies in the session."
+        case .commandText: return "Type commands starting with / or ! in the session itself."
         }
     }
 }
@@ -219,9 +305,24 @@ public enum SessionReplySending {
         case sending(SessionReplyProgress)
     }
 
+    /// A reply typed into the bound pane: the pane the click chose and the writes, in order.
+    public struct TerminalSend: Equatable, Sendable {
+        public let pane: TypedInputPane
+        public let writes: [TypedWrite]
+    }
+
     public struct Plan {
         public let outcome: Outcome
+        /// The daemon route's `turn/start` params.
         public let params: [String: Any]?
+        /// The typed route's writes.
+        public let terminal: TerminalSend?
+
+        init(outcome: Outcome, params: [String: Any]? = nil, terminal: TerminalSend? = nil) {
+            self.outcome = outcome
+            self.params = params
+            self.terminal = terminal
+        }
     }
 
     public static func prepare(completion: AttentionCompletion?, availability: SessionReplyAvailability,
@@ -230,11 +331,51 @@ public enum SessionReplySending {
         let target = completion.map { SessionReplyRouting.target(for: $0, availability: availability) }
             ?? .unavailable(.notInQueue)
         if let rejection = SessionReplyPolicy.rejection(for: completion, target: target, progress: progress, text: text) {
-            return Plan(outcome: .refused(rejection), params: nil)
+            return Plan(outcome: .refused(rejection))
         }
-        guard case let .daemon(thread) = target, let params = SessionReplyRequest.params(thread: thread, text: text) else {
-            return Plan(outcome: .refused(.threadNotLoaded), params: nil)
+        switch target {
+        case let .daemon(thread):
+            guard let params = SessionReplyRequest.params(thread: thread, text: text) else {
+                return Plan(outcome: .refused(.emptyText))
+            }
+            return Plan(outcome: .sending(progress.startingSend(text: text)), params: params)
+        case let .terminal(pane):
+            guard case let .success(trimmed) = TypedReplyText.sendable(text) else { return Plan(outcome: .refused(.emptyText)) }
+            return Plan(outcome: .sending(progress.startingSend(text: trimmed, route: .terminal(pane))),
+                        terminal: TerminalSend(pane: pane, writes: TypedReplyWrites.plan(agent: .codex, text: trimmed)))
+        case let .unavailable(reason):
+            return Plan(outcome: .refused(reason))
         }
-        return Plan(outcome: .sending(progress.startingSend(text: text)), params: params)
+    }
+}
+
+/// A Claude Code completion card's reply. Claude has no daemon: the only route is typed input into the
+/// session's bound pane (ADR 0017), the session's first reply path.
+public enum ClaudeReplyRouting {
+    /// The target for a Claude outcome, nil when no typed route exists at all (no host that types replies
+    /// is switched on): the card then offers no field, as before.
+    public static func target(ended: Bool, inTurn: Bool, route: TerminalReplyRoute?) -> SessionReplyTarget? {
+        guard let route else { return nil }
+        if ended { return .unavailable(.sessionEnded) }
+        if inTurn { return .unavailable(.sessionWorking) }
+        switch route {
+        case .pane(let pane): return .terminal(pane)
+        case .unreachable: return .unavailable(.terminalUnreachable)
+        case .hostCannotType(let host): return .unavailable(.hostCannotType(host))
+        }
+    }
+
+    /// One Send judged against the target as it is now: the pane and Claude's one write (text and its
+    /// submit together), or why nothing leaves.
+    public static func prepare<ID>(target: SessionReplyTarget, progress: ReplyProgress<ID>,
+                                   text: String) -> Result<SessionReplySending.TerminalSend, SessionReplyPolicy.Rejection> {
+        if let rejection = SessionReplyPolicy.rejection(target: target, phase: progress.phase, text: text) {
+            return .failure(rejection)
+        }
+        // The policy above refused every unavailable target and every text the typed route refuses;
+        // Claude never has a daemon target.
+        guard case let .terminal(pane) = target else { return .failure(.notReady) }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return .success(SessionReplySending.TerminalSend(pane: pane, writes: TypedReplyWrites.plan(agent: .claude, text: trimmed)))
     }
 }
