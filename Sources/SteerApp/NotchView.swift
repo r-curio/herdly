@@ -1349,7 +1349,7 @@ struct Notch: View {
                     case .question:
                         if item.session.source == .claude {
                             claudeReturnControl(item, subject: subject, emphasized: true)
-                        } else if item.session.surface == .cli && !model.ghosttyEnabled {
+                        } else if item.session.surface == .cli && !model.cliTerminalHostOn {
                             NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
                                 .accessibilityLabel("Set up Ghostty: \(subject)")
                                 .accessibilityHint("Opens Steer controls to enable Ghostty controls.")

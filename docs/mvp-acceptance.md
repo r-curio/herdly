@@ -94,7 +94,7 @@ Map [#197](https://github.com/r-curio/steer/issues/197) adds iTerm2, Terminal.ap
 
 Host-specific lines, added to the same evidence file:
 
-- **iTerm2:** no typed input at all (H9 shows "Steer can't type into iTerm2. Reply in the session."). With iTerm2's own Claude Code integration turned on, Steer's Claude hooks and binding still work and iTerm2's hook still runs.
+- **iTerm2:** no typed input at all (H9 shows "Steer can't type into iTerm2. Reply in the session."). With iTerm2's own Claude Code integration turned on, Steer's Claude hooks and binding still work and iTerm2's hook still runs. Build state (#238): Open, visits, the Automation flow and the card are built, but the card stays hidden until this run passes, so H1 cannot yet be done from Settings, and H9's line is not yet shown on notch cards (it waits for the shared typed-input route, #239).
 - **Terminal.app:** replies only; a Codex question shows "Answer this in Codex."
 - **WezTerm:** a session's tab in a window that isn't in front gets the fallback (H5's result), never a window switch.
 - **tmux:** a session on a socket other than the default is unreachable, with the card's socket line.

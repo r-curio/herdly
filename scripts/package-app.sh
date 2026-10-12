@@ -35,6 +35,7 @@ for f in Contents/MacOS/Steer Contents/Helpers/SteerHook; do
     [ -x "$app/$f" ] || fail "missing executable $f"
 done
 [ -f "$app/Contents/Resources/Ghostty.js" ] || fail "missing Contents/Resources/Ghostty.js"
+[ -f "$app/Contents/Resources/ITerm2.js" ] || fail "missing Contents/Resources/ITerm2.js"
 "$app/Contents/Helpers/SteerHook" --self-test || fail "SteerHook --self-test failed"
 
 # 3. Sign. The helper is signed first so the app's nested-code seal covers it.

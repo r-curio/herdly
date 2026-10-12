@@ -213,7 +213,65 @@ Automated checks: `TerminalTabBindingTests` covers a decoy with the same title, 
 `codex` processes on one tty, one title in two hosts, a split tab, an unreadable or unread
 host, a switched-off host, the second read, a Claude title veto, a `procStart` mismatch,
 and hook identifiers deciding nothing outside Zellij. `SteerHook --self-test` checks the
-recorded identifiers. Not wired yet: no iTerm2, Terminal.app or WezTerm inventory reader,
-no `ps -t` runner, and nothing calls these rules from Open or typed input. The host build
-tickets add those ([#238](https://github.com/r-curio/steer/issues/238)–[#242](https://github.com/r-curio/steer/issues/242)).
+recorded identifiers. iTerm2's inventory reader, the `ps -t` runner and the Open and visit
+paths that call these rules are wired by #238 (below). Terminal.app and WezTerm readers and
+typed input are added by their build tickets ([#239](https://github.com/r-curio/steer/issues/239)–[#242](https://github.com/r-curio/steer/issues/242)).
 Live application proof: none. Not run; needs live acceptance (MVP acceptance §3d per host).
+
+## iTerm2 Open (#238)
+
+iTerm2 sessions get Open, visits and a Settings card, and no typed input (ADR 0017). The
+switch and card stay hidden (`TerminalHost.showsCard`) until [#243](https://github.com/r-curio/steer/issues/243)
+records iTerm2's §3d run. Rules are pure SteerCore functions (`ITerm2.swift`,
+`TerminalTabOpen.swift`); SteerApp runs the bundled `ITerm2.js`, `ps` and the Automation check
+(`ITerm2Navigation.swift`, `Companion+ITerm2.swift`).
+
+- **Inventory:** `ITerm2.js snapshot` lists every session's GUID `id`, `tty`, window id and
+  tab session count, and the current window's current session. The title is
+  `terminalWindowName`, else `terminalIconName`; the composite tab `name` and `jobName` are
+  never read. A session is a tab whose pane count is its tab's session count, so a split never
+  binds. `ITerm2Reading.parse` rejects the whole reply on any malformed part (bad GUID or tty,
+  duplicate GUID, more than 512 sessions, over 2 MiB); a tab left with no sessions is skipped.
+  A failed read of a running iTerm2 is `unreadable`; `not_running` holds nothing. The script
+  checks `running()` first and never launches iTerm2.
+- **Binding:** ADR 0013's rules, with `ps -o pid=,stat=,comm= -t` read only for tabs showing a
+  tracked Codex title or on a Claude process's tty. Codex's title uniqueness counts Ghostty's
+  tabs too while Ghostty is on (`TerminalHostInventory.ghosttyTitles`, no tty until #251); a
+  Codex title found only in Ghostty goes to Ghostty's title route. Claude uses the process
+  Claude's inventory names (its `procStart` already checked there) and binds only by tty; a
+  Claude process on no iTerm2 tab goes on to Ghostty's title route or the process walk as before.
+- **Open:** `ITerm2Open.run` over `TerminalOpenSequence`: revalidate on two fresh inventories
+  with `ps` between, then `select` (the script rechecks the GUID, the tty and a one-session tab,
+  then selects window, tab and session and activates), then a fresh inventory and macOS's
+  frontmost app must show the session visible, on the same tty, alone in its tab, and for Codex
+  still titled. No reply is "Steer can't read iTerm2. Check Settings › Terminals."; a session
+  gone is "This session has ended."; a refused or unverified select falls back. Binding
+  reasons map to ADR 0015 in `TerminalTabOpen.route`. Only a verified Open acknowledges.
+- **Fallback app:** Codex walks from each titled tab's single foreground `codex`
+  (`TerminalTabOpen.codexCarriers`/`codexCandidates`, then `OpenFallback.codexApp`); Claude walks
+  from its process. A tab with no `codex` to walk from, such as a decoy, leaves the app
+  unidentified. iTerm2 runs shells under `iTermServer`; the live proof's hook ancestry showed
+  `iTermServer-3.7.4` under `iTerm2`, so the walk should reach the app. When the server has been
+  reparented to launchd (iTerm2 restarted while its sessions lived on), the walk reaches no app
+  and Open shows "Steer can't tell which terminal this session is in." rather than assuming
+  iTerm2 from its own inventory. Neither case has been run from Steer.
+- **Visits:** every two seconds while iTerm2 is on and a CLI session is live or queued, Steer
+  asks iTerm2 only when macOS reports it frontmost (otherwise the scan records nothing visible);
+  `TerminalVisibility.iTerm2` plus the session's binding on the same reads feed a
+  `TerminalVisitTracker`, reset after every Open.
+- **Permission and card:** turning the switch on asks macOS as Ghostty does; a denial turns it
+  back off with the denial line and Open Settings…; iTerm2 not running waits for its launch.
+  The card shows the switch, Automation badge, status badge (Off, Not in use, Ready, Needs
+  attention), problem lines (not found, Automation denied, unreadable), diagnostics (scan,
+  typed input none, each session's last Open) and the footer "Steer returns to unsplit tabs;
+  otherwise Open raises iTerm2." `ITerm2Presentation.typedInputLine` holds "Steer can't type
+  into iTerm2. Reply in the session."; showing it on the notch's reply and question controls
+  belongs with the shared typed-input route (#239).
+
+Automated checks: `ITerm2Tests` (fixtures modeled on [the live proof](evidence/iterm2-live.md):
+inventory, malformed and unreadable replies, Codex decoy and second read, Claude by tty, split,
+visible test with another app in front, Open steps and their verification, the route mapping,
+fallback candidates including a failed walk, card lines, and that `ITerm2.js` compiles, never
+writes text and never reads `jobName`). Not run — needs live acceptance (#243): §3d H1–H9 and
+the iTerm2 line in [MVP acceptance](mvp-acceptance.md), and the lab
+`scripts/terminal-lab/iterm2_lab.py`, which drives a real iTerm2.
