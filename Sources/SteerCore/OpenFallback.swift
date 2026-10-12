@@ -59,7 +59,7 @@ public enum OpenUnavailableReason: Error, Equatable, Hashable, Sendable {
 
 /// An Open step that did not reach the exact target: either it may fall back, or it is unavailable.
 /// It has no exact case, so resolving one can never report a verified Open.
-public enum OpenMiss: Equatable, Sendable {
+public enum OpenMiss: Error, Equatable, Sendable {
     /// The exact target cannot be reached. `candidates` is how many tabs in the host's own inventory
     /// carry the session's title, which identifies the app for a Codex session.
     case fallBack(OpenFallbackReason, candidates: Int)
