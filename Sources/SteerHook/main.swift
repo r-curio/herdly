@@ -25,6 +25,7 @@ func writeEvent(_ object: [String: Any], to directory: URL, installationID: Stri
         if !kept.isEmpty { record["tool_input"] = kept }
     }
     HerdrPaneID.record(from: environment, into: &record)
+    TerminalHookIdentifiers.record(from: environment, into: &record)
     guard JSONSerialization.isValidJSONObject(record),
           let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
           (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil else { return false }
@@ -76,6 +77,7 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
         if !kept.isEmpty { record["tool_input"] = kept }
     }
     HerdrPaneID.record(from: environment, into: &record)
+    TerminalHookIdentifiers.record(from: environment, into: &record)
     guard JSONSerialization.isValidJSONObject(record),
           let data = try? JSONSerialization.data(withJSONObject: record, options: [.sortedKeys]),
           (try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)) != nil else { return false }
@@ -345,7 +347,8 @@ func selfTest() -> Int32 {
           (stored["tool_input"] as? [String: String]) == ["command": "swift test"], stored["tool_response"] == nil else { return 1 }
     let paneDirectory = directory.appendingPathComponent("herdr", isDirectory: true)
     let paneEvent: [String: Any] = ["hook_event_name": "SessionStart", "session_id": session.uuidString]
-    let paneEnvironment = ["HERDR_PANE_ID": "w1:p1", "HERDR_SOCKET_PATH": "/tmp/herdr.sock"]
+    let paneEnvironment = ["HERDR_PANE_ID": "w1:p1", "HERDR_SOCKET_PATH": "/tmp/herdr.sock",
+                           "WEZTERM_PANE": "4", "ZELLIJ_PANE_ID": "2", "ZELLIJ_SESSION_NAME": "lab"]
     guard writeEvent(paneEvent, to: paneDirectory, installationID: "self-test", environment: paneEnvironment),
           writeClaudeEvent(paneEvent, to: paneDirectory, installationID: UUID().uuidString,
                            environment: paneEnvironment),
@@ -359,7 +362,11 @@ func selfTest() -> Int32 {
           paneRecords.filter({ HerdrPaneID.recorded(in: $0) == "w1:p1" }).count == 2,
           paneRecords.filter({ $0[HerdrPaneID.recordKey] != nil }).count == 2,
           paneRecords.filter({ HerdrSocketPath.recorded(in: $0) == "/tmp/herdr.sock" }).count == 2,
-          paneRecords.filter({ $0[HerdrSocketPath.recordKey] != nil }).count == 2 else { return 1 }
+          paneRecords.filter({ $0[HerdrSocketPath.recordKey] != nil }).count == 2,
+          paneRecords.filter({ TerminalHookIdentifiers.diagnostics(in: $0)["wezterm_pane"] == "4" }).count == 2,
+          // Only the Claude record supplies Zellij's pane as a binding input.
+          paneRecords.filter({ TerminalHookIdentifiers.zellijPane(in: $0) == ZellijHookPane(paneID: "2", sessionName: "lab") })
+            .count == 1 else { return 1 }
     try? FileManager.default.removeItem(at: paneDirectory)
     let request = ApprovalRequest(requestID: UUID(), sessionID: session, turnID: turn,
                                   details: ApprovalDetails(command: "touch marker"), receivedAt: 100)
