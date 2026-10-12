@@ -548,6 +548,9 @@ extension Companion {
         case let .success(value):
             start = value
         }
+        // Unreachable in practice: `start` succeeded only for a queued question, and `pane` came from the
+        // ledger or a WezTerm route whose host types digits. Kept as a last guard so nothing is sent to a
+        // host without its send here, or in preview.
         guard let current, previewMode == nil, start.pane.host == .wezTerm, start.pane.host.typesQuestionDigits else { return }
         answering = true
         relayLedger = start.ledger
