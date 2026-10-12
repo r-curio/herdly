@@ -46,9 +46,11 @@ struct WezTermTabReads: Sendable {
     let inventories: [TerminalHost: TerminalHostInventory]
     let processes: [String: [TerminalProcess]]
     let secondRead: [TerminalHost: TerminalHostInventory]
-    /// tmux's attached clients in the first read, whose host tabs ADR 0014 leaves out of the Codex title
-    /// count (#241); empty while tmux is off.
+    /// tmux's attached clients and Zellij's client processes in the first read, whose host tabs ADR 0014
+    /// leaves out of the Codex title count (#241, #242); empty while both are off.
     var multiplexerClientTTYs: Set<String> = []
+    /// The first read's Zellij sessions; `.notRunning` while Zellij is off (#242).
+    var zellij: ZellijRead = .notRunning
 
     /// Blocking: call off the main actor. `others` says which other hosts are on and running.
     static func take(running: Bool, others: OtherTabHosts, codexTitles: Set<String>, claudeTTYs: Set<String>,
@@ -68,6 +70,9 @@ struct WezTermTabReads: Sendable {
         // tmux beside it (#241): its panes count toward uniqueness, and its clients' host tabs do not.
         let tmux: TmuxRead = others.tmuxOn ? TmuxRunner.read() : .notRunning
         if others.tmuxOn { inventories[.tmux] = tmux.inventory }
+        // Zellij beside it (#242): its panes count toward uniqueness, and its clients' host tabs do not.
+        let zellij: ZellijRead = others.zellijOn ? ZellijRunner.read() : .notRunning
+        if others.zellijOn { inventories[.zellij] = zellij.inventory }
         let ttys = (read.snapshot?.ttysToRead(codexTitles: codexTitles, claudeTTYs: claudeTTYs) ?? [])
             .union(tmux.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
         let processes = TerminalTTYReads.processes(on: ttys)
@@ -75,9 +80,12 @@ struct WezTermTabReads: Sendable {
         if second {
             secondRead[.wezTerm] = WezTermNavigation.read(running: running).0.inventory
             if others.tmuxOn { secondRead[.tmux] = TmuxRunner.read().inventory }
+            if others.zellijOn { secondRead[.zellij] = ZellijRunner.read().inventory }
         }
         return WezTermTabReads(wezTerm: read, clients: clientRead, inventories: inventories, processes: processes,
-                               secondRead: secondRead, multiplexerClientTTYs: tmux.snapshot?.clientTTYs ?? [])
+                               secondRead: secondRead,
+                               multiplexerClientTTYs: (tmux.snapshot?.clientTTYs ?? []).union(zellij.snapshot?.clientTTYs ?? []),
+                               zellij: zellij)
     }
 
     func carries(title: String) -> Bool {
@@ -106,7 +114,7 @@ extension Companion {
         return OtherTabHosts(ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyOn && TerminalApps.isRunning(.ghostty),
                              iTerm2Running: hostSwitches.mayContact(.iTerm2) ? TerminalApps.isRunning(.iTerm2) : nil,
                              terminalAppRunning: terminalAppActive ? TerminalApps.isRunning(.terminalApp) : nil,
-                             tmuxOn: tmuxContactAllowed)
+                             tmuxOn: tmuxContactAllowed, zellijOn: zellijContactAllowed)
     }
 
     // MARK: - Switch
@@ -219,7 +227,9 @@ extension Companion {
         var claudeTargets: [AgentSessionIdentity: TerminalTabTarget] = [:]
         for (identity, process) in claude {
             let binding = wezTermClaudeBinding(identity, process: process, reads: reads)
-            if let route = TerminalReplyRoute.from(binding) { claudeRoutes[identity] = route }
+            // A session Zellij holds or could hold keeps Zellij's route (#242): its pane has no tab here.
+            if zellijClaudeBinding(identity, process: process, read: reads.zellij) == .notInZellij,
+               let route = TerminalReplyRoute.from(binding) { claudeRoutes[identity] = route }
             if case .bound(let target) = binding, target.host == .wezTerm { claudeTargets[identity] = target }
             diagnostics.append("Claude \(identity.session.prefix(8)): \(binding)")
         }
@@ -552,6 +562,9 @@ extension Companion {
         } else if let bound = tmuxQuestionKeyPane(for: question.session) {
             // tmux (#241), behind its own live-proof gate.
             pane = bound
+        } else if let bound = zellijQuestionKeyPane(for: question.session) {
+            // Zellij (#242), behind its own live-proof gate.
+            pane = bound
         } else {
             pane = nil
         }
@@ -573,6 +586,11 @@ extension Companion {
         // tmux's pane keys type through tmux's own send (#241).
         if let current, previewMode == nil, start.pane.host == .tmux, start.pane.host.typesQuestionDigits {
             sendTmuxQuestionKey(current, start: start, question: question, index: index, option: option)
+            return
+        }
+        // Zellij's pane keys type through Zellij's own send (#242).
+        if let current, previewMode == nil, start.pane.host == .zellij, start.pane.host.typesQuestionDigits {
+            sendZellijQuestionKey(current, start: start, question: question, index: index, option: option)
             return
         }
         guard let current, previewMode == nil, start.pane.host == .wezTerm, start.pane.host.typesQuestionDigits else { return }

@@ -804,7 +804,7 @@ private struct TerminalControls: View {
         case .terminalApp: TerminalAppControls(model: model)
         case .wezTerm: WezTermControls(model: model, state: model.wezTerm)
         case .tmux: TmuxControls(model: model, state: model.tmux)
-        case .zellij: EmptyView()
+        case .zellij: ZellijControls(model: model, state: model.zellij)
         }
     }
 
@@ -963,6 +963,41 @@ private struct TmuxControls: View {
             }
         }
         SettingsFooter(TmuxPresentation.footer)
+    }
+}
+
+/// The Zellij card (product.md, "Agreed terminal host presentation"; #242). Shown only once
+/// `TerminalHost.zellij.showsCard` is turned on by its acceptance (#247). Zellij has no Permission row.
+private struct ZellijControls: View {
+    @ObservedObject var model: Companion
+    @ObservedObject var state: ZellijState
+
+    var body: some View {
+        let row = model.zellijSettingsRow
+        SettingsCard {
+            SettingsRow(title: TerminalHost.zellij.displayName, detail: "Open sessions in their exact pane, and type replies there") {
+                Toggle("Zellij", isOn: Binding(get: { model.hostSwitches.isOn(.zellij) },
+                                               set: { model.setHostSwitch(.zellij, on: $0) }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    .accessibilityLabel("Enable Zellij")
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Status", detail: row.detail) {
+                StatusBadge(title: row.badge.title, color: row.badge == .ready ? .green : row.badge == .needsAttention ? .orange : .secondary)
+            }
+            ForEach(row.problems, id: \.self) { problem in
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                Text(problem).fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, SettingsStyle.rowInset)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if model.hostSwitches.isOn(.zellij), !state.diagnostics.isEmpty {
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                PreviewDisclosure(title: "Show diagnostics") { state.diagnostics.joined(separator: "\n") }
+            }
+        }
+        SettingsFooter(ZellijPresentation.footer)
     }
 }
 

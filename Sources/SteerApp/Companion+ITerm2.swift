@@ -34,7 +34,7 @@ private struct CodexTabReads: Sendable {
     let processes: [String: [TerminalProcess]]
     let secondRead: [TerminalHost: TerminalHostInventory]
     let iTerm2: ITerm2Snapshot?
-    /// tmux's attached clients in the first read (ADR 0014's title-count exclusion).
+    /// tmux's attached clients and Zellij's client processes in the first read (ADR 0014's title-count exclusion).
     var multiplexerClientTTYs: Set<String> = []
 
     /// Blocking: call off the main actor. Ghostty is read only while it is on and running, iTerm2 only
@@ -42,9 +42,11 @@ private struct CodexTabReads: Sendable {
     ///   - terminalAppRunning: nil while Terminal.app is off (never read); otherwise whether it runs (#239).
     ///   - wezTermRunning: likewise for WezTerm (#240), whose panes count toward title uniqueness.
     ///   - tmuxOn: tmux may be contacted, so its panes are read too (#241).
+    ///   - zellijOn: Zellij may be contacted, so its panes count toward title uniqueness too (#242).
     static func read(titles: Set<String>, claudeTTYs: Set<String>, ghosttyOn: Bool, ghosttyRunning: Bool,
                      iTerm2Running: Bool, terminalAppRunning: Bool? = nil, wezTermRunning: Bool? = nil,
-                     tmuxOn: Bool = false) -> CodexTabReads {
+                     tmuxOn: Bool = false, zellijOn: Bool = false) -> CodexTabReads {
+        var zellijClientTTYs: Set<String>?
         var clientTTYs: Set<String> = []
         var tmuxTTYs: Set<String> = []
         func hosts() -> ([TerminalHost: TerminalHostInventory], ITerm2Snapshot?) {
@@ -66,13 +68,18 @@ private struct CodexTabReads: Sendable {
                     tmuxTTYs = snapshot.ttysToRead(claudeTTYs: claudeTTYs)
                 }
             }
+            if zellijOn {
+                let zellij = ZellijRunner.read()
+                result[.zellij] = zellij.inventory
+                if zellijClientTTYs == nil { zellijClientTTYs = zellij.snapshot?.clientTTYs ?? [] }
+            }
             if case .snapshot(let value)? = reading { return (result, value) }
             return (result, nil)
         }
         let (first, snapshot) = hosts()
         let ttys = (snapshot?.ttysToRead(codexTitles: titles, claudeTTYs: claudeTTYs) ?? []).union(tmuxTTYs)
         let processes = TerminalTTYReads.processes(on: ttys)
-        let firstClients = clientTTYs
+        let firstClients = clientTTYs.union(zellijClientTTYs ?? [])
         let (second, _) = hosts()
         return CodexTabReads(inventories: first, processes: processes, secondRead: second, iTerm2: snapshot,
                              multiplexerClientTTYs: firstClients)
@@ -200,6 +207,7 @@ extension Companion {
         let terminalAppRunning: Bool? = terminalAppSwitchedOn ? TerminalApps.isRunning(.terminalApp) : nil
         let wezTermRunning: Bool? = wezTermSwitchedOn ? TerminalApps.isRunning(.wezTerm) : nil
         let tmuxOn = tmuxContactAllowed
+        let zellijOn = zellijContactAllowed
         let liveness: HerdrSessionLiveness = live.contains(session) ? .live : .ended
         let record = ITerm2OpenRecord()
         Task { @MainActor in
@@ -210,7 +218,7 @@ extension Companion {
                         CodexTabReads.read(titles: [title], claudeTTYs: [], ghosttyOn: ghosttyOn,
                                            ghosttyRunning: ghosttyRunning, iTerm2Running: iTerm2Running,
                                            terminalAppRunning: terminalAppRunning, wezTermRunning: wezTermRunning,
-                                           tmuxOn: tmuxOn)
+                                           tmuxOn: tmuxOn, zellijOn: zellijOn)
                     }.value
                     let binding = TerminalTabBindingRules.codex(sessionID: session.uuidString, liveness: liveness,
                                                                 liveSessions: liveIDs, switches: switches,
@@ -380,10 +388,11 @@ extension Companion {
         let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
         let iTerm2Running = TerminalApps.isRunning(.iTerm2)
         // An enabled host left unread would make every binding here unavailable (ADR 0013), so Terminal.app
-        // (#239), WezTerm (#240) and tmux (#241) are read beside iTerm2 while each is on.
+        // (#239), WezTerm (#240), tmux (#241) and Zellij (#242) are read beside iTerm2 while each is on.
         let terminalAppRunning: Bool? = terminalAppSwitchedOn ? TerminalApps.isRunning(.terminalApp) : nil
         let wezTermRunning: Bool? = wezTermSwitchedOn ? TerminalApps.isRunning(.wezTerm) : nil
         let tmuxOn = tmuxContactAllowed
+        let zellijOn = zellijContactAllowed
         let generation = iTerm2.generation
         Task { @MainActor in
             let observed = await Task.detached { () -> (CodexTabReads, [Int32: TerminalProcessObservation]) in
@@ -393,7 +402,7 @@ extension Companion {
                 let reads = CodexTabReads.read(titles: titles, claudeTTYs: Set(observations.values.compactMap(\.tty)),
                                                ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyRunning,
                                                iTerm2Running: iTerm2Running, terminalAppRunning: terminalAppRunning,
-                                               wezTermRunning: wezTermRunning, tmuxOn: tmuxOn)
+                                               wezTermRunning: wezTermRunning, tmuxOn: tmuxOn, zellijOn: zellijOn)
                 return (reads, observations)
             }.value
             iTerm2.checking = false
