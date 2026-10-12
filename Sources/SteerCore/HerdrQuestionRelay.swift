@@ -30,10 +30,21 @@ public enum HerdrQuestionRelayUnavailable: Error, Equatable, Hashable, Sendable 
     case daemonAnswerInProgress
     /// herdr could not be reached, or refused the request, before the key could have been written.
     case herdrRefused(HerdrUnavailableReason)
+    /// The session runs in a terminal host that never types a question digit (Terminal.app, iTerm2;
+    /// ADR 0017). Not a failure of any send: the card says "Answer this in Codex."
+    case noQuestionKeys(TerminalHost)
+    /// Another enabled terminal host could hold the session but is unread, unreadable or denied, so
+    /// a Ghostty tab carrying the title may be a decoy (ADR 0013 "Inventory"): no key is sent.
+    case otherHostUnreadable(TerminalHost)
 
     /// Generic card wording, matching the Ghostty relay's sentences.
     public var message: String {
         switch self {
+        case .noQuestionKeys(let host):
+            // product.md, "Typed input unavailable": iTerm2 has no typed input at all.
+            return host == .iTerm2 ? ITerm2Presentation.typedInputLine : "Answer this in Codex."
+        case .otherHostUnreadable:
+            return "Steer can't reach this session's tab; nothing was sent. Reply in the session."
         case .answeredInRollout, .turnEnded:
             return "Codex already has an answer or the turn ended; nothing was sent."
         case .rolloutUnreadable:
@@ -150,12 +161,19 @@ public enum QuestionRelayRouting {
     /// 4. a desktop question is a pick;
     /// 5. answers drafted for a daemon that no longer holds the call never move to keys;
     /// 6. a CLI session herdr has anything to say about uses herdr keys (or nothing, when its pane
-    ///    is unavailable); only a session not in herdr uses Ghostty keys.
+    ///    is unavailable);
+    /// 7. a session another host holds is answered in Codex: Terminal.app and iTerm2 type no digits
+    ///    (ADR 0017), and no other host has a relay yet, so another host's digits never go to Ghostty;
+    /// 8. while another enabled host is unread or unreadable, a Ghostty tab with the title may be a
+    ///    decoy, so nothing is offered; only the rest use Ghostty keys.
     ///
-    /// `progress` is the raw stored progress (nil when Steer has none).
+    /// `progress` is the raw stored progress (nil when Steer has none). `terminalHost` is the host
+    /// other than Ghostty that the latest scan saw the session's tab in, nil when none. `unreadHost` is
+    /// an enabled host whose latest read is missing or unreadable, nil when every one was read.
     public static func route(for question: AttentionQuestion, book: AppServerQuestionBook, daemonConnected: Bool,
                              ledger: QuestionRelayLedger, progress: QuestionAnswerProgress?,
-                             herdr: HerdrSessionBinding) -> QuestionAnswerRoute {
+                             herdr: HerdrSessionBinding, terminalHost: TerminalHost? = nil,
+                             unreadHost: TerminalHost? = nil) -> QuestionAnswerRoute {
         if book.hasAnswered(question) { return .daemonAnswered }
         switch ledger.keyRoute(for: question.id) {
         case .herdr?: return .herdrRelay
@@ -167,8 +185,12 @@ public enum QuestionRelayRouting {
         if let progress, !progress.picks.isEmpty || !progress.texts.isEmpty {
             return .relayUnavailable(.daemonAnswerInProgress)
         }
+        // ADR 0013: a key (Ghostty's or herdr's) needs the title unique across every enabled host.
+        if let terminalHost, terminalHost != .ghostty { return .relayUnavailable(.noQuestionKeys(terminalHost)) }
+        if let unreadHost { return .relayUnavailable(.otherHostUnreadable(unreadHost)) }
         switch herdr {
-        case .notInHerdr: return .ghosttyRelay
+        case .notInHerdr:
+            return .ghosttyRelay
         case .bound: return .herdrRelay
         case .unavailable(let reason): return .relayUnavailable(.binding(reason))
         }

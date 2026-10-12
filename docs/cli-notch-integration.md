@@ -214,8 +214,9 @@ Automated checks: `TerminalTabBindingTests` covers a decoy with the same title, 
 host, a switched-off host, the second read, a Claude title veto, a `procStart` mismatch,
 and hook identifiers deciding nothing outside Zellij. `SteerHook --self-test` checks the
 recorded identifiers. iTerm2's inventory reader, the `ps -t` runner and the Open and visit
-paths that call these rules are wired by #238 (below). Terminal.app and WezTerm readers and
-typed input are added by their build tickets ([#239](https://github.com/r-curio/steer/issues/239)–[#242](https://github.com/r-curio/steer/issues/242)).
+paths that call these rules are wired by #238 (below), and Terminal.app's reader, Open and
+typed replies by #239 (below). WezTerm, tmux and Zellij come with their build tickets
+([#240](https://github.com/r-curio/steer/issues/240)–[#242](https://github.com/r-curio/steer/issues/242)).
 Live application proof: none. Not run; needs live acceptance (MVP acceptance §3d per host).
 
 ## iTerm2 Open (#238)
@@ -265,14 +266,15 @@ records iTerm2's §3d run. Rules are pure SteerCore functions (`ITerm2.swift`,
   the same reads feed a `TerminalVisitTracker`, reset after every Open.
 - **Typed input (ADR 0017):** nothing is ever typed into iTerm2. While iTerm2 is on, a Codex
   session whose title an iTerm2 tab shows gets "Steer can't type into iTerm2. Reply in the
-  session." in place of Ghostty or herdr question keys and of the reply field's daemon reason
-  (the daemon route still wins when it holds the session); an unreadable iTerm2 gives "Steer
+  session." in place of Ghostty or herdr question keys (`QuestionRelayRouting`'s `terminalHost`)
+  and of the reply field's daemon reason (the typed route `hostCannotType(.iTerm2)`; the daemon
+  route still wins when it holds the session); an unreadable or not yet read iTerm2 gives "Steer
   can't reach this session's tab. Reply in the session." (`ITerm2TypedInput.codexBlock`, from
-  the latest scan). Immediately before Ghostty's question key, after the rollout check, a fresh
-  iTerm2 read must show no tab with the title and must succeed, so a Ghostty decoy never gets a
-  key while the real session is in iTerm2. With iTerm2 off nothing changes. herdr's key path
-  hides its controls on the same block but has no fresh iTerm2 read at click time; Claude has
-  no typed input to guard. The shared route of #239 can absorb this check.
+  the latest scan). Immediately before Ghostty's question key, the shared
+  `TerminalKeyRelayCheck` reads every enabled host other than Ghostty fresh (iTerm2 and
+  Terminal.app today), so a Ghostty decoy never gets a key while the real session is in iTerm2.
+  With iTerm2 off nothing changes. herdr's key path hides its controls on the same block but has
+  no fresh read at click time; Claude has no typed input to guard here.
 - **Permission and card:** turning the switch on asks macOS as Ghostty does; a denial turns it
   back off with the denial line and Open Settings…; iTerm2 not running waits for its launch.
   The card shows the switch, Automation badge, status badge (Off, Not in use, Ready, Needs
@@ -290,3 +292,16 @@ Ghostty and iTerm2, an unreadable iTerm2 and iTerm2 off, the process start read,
 for the registered `procStart` carried with the PID. Not run — needs live acceptance (#243): §3d H1–H9 and
 the iTerm2 line in [MVP acceptance](mvp-acceptance.md), and the lab
 `scripts/terminal-lab/iterm2_lab.py`, which drives a real iTerm2.
+
+## Terminal.app: Open and replies (#239)
+
+Built behind Terminal.app's switch, which stays hidden with its card until acceptance (#244). Pure rules are in `TerminalAppHost.swift`, `TerminalTabOpen.swift` and `TerminalTypedInput.swift`; SteerApp's `TerminalAppNavigation.swift` and `Resources/TerminalApp.js` send the Apple Events through the shared JXA runner (`GhosttyNavigation.request`) and consent check (`GhosttyAutomationPermission.check(target:)`), and `Companion+TerminalApp.swift` schedules them.
+
+- **Inventory:** `TerminalApp.js` lists every scripting window front to back with each tab's `tty` and `custom title`; it never launches Terminal. `TerminalAppSnapshot.parse` is bounded (1 MiB, 512 windows, 64 tabs each, 1024-character titles) and refuses anything malformed. Each tab becomes one ADR 0013 tab whose handle is its window id, with one pane: Steer assumes Terminal's split view mirrors one tty, which is unverified (the live proof did not split a tab) and is a line for #244 to check. `ps -t` is read only for tabs titled with a shortened Codex identifier or on a Claude process's tty. Ghostty's titles (`TerminalHostInventory.ghosttyTitles`) and iTerm2's inventory are read beside Terminal.app while each is on, so a Codex title in two hosts counts as two candidates; iTerm2's Open reads Terminal.app beside it in turn.
+- **Permission:** Ghostty's flow. Turning the switch on asks macOS (`AEDeterminePermissionToAutomateTarget`); a denial turns it back off; Terminal not running is asked again when it launches. An Automation denial (-1743) or any other failure while reading later keeps the switch on and marks Terminal.app unreadable, which leaves every session it could hold unavailable ("Steer can't read Terminal.app. Check Settings › Terminals.").
+- **Ghostty question keys beside it:** Ghostty binds Codex by title alone, so while another terminal host's switch is on, a Ghostty key needs every such host read fresh (`TerminalKeyRelayCheck`, one generic check over the enabled hosts, iTerm2 included). The card offers no key while its latest read is missing, unreadable or denied (`QuestionRelayRouting`'s `unreadHost`), and the send re-reads it immediately before the key: an unreadable host, or one whose tab carries the session's title, sends nothing. A session another host holds is never relayed to Ghostty, whatever that host is. Open reads Terminal.app fresh before leaving a session to Ghostty's route; an unreadable Terminal.app is unavailable rather than left to Ghostty.
+- **Open:** a Codex session whose title no Terminal.app tab carries goes on to iTerm2's cross-host Open or Ghostty's title route while either is on, and a Claude session whose process tty no Terminal.app tab holds goes on to iTerm2, Ghostty's title route or the process walk (`TerminalAppOpen.leavesToOtherRoute`). Claude's binding compares the `procStart` Claude registered with a fresh kernel read (`TerminalTTYReads.observation`). Otherwise ADR 0016's sequence runs once: revalidate (both inventories, `ps`, a second inventory) → set the tab-window's `frontmost` and `activate` (`raise`, which first rechecks the window id holds that one tab) → verify. A tab inside a window of several tabs, no unique match, or a split falls back; so does a raise finding the tab moved to another window, its window gained a tab, or its tty shown twice. Automation denied, an unreadable host, an ended session and a tab no window holds any more are unavailable; any other raise error, and a raise that does not verify, fall back. Binding reasons map through the shared `TerminalTabOpen.miss`. Codex's fallback walks each titled tab's single foreground `codex` (`TerminalTabOpen.codexCarriers`/`codexCandidates`) and uses tty recency (`OpenFallback.codexApp`); Claude walks its registry process.
+- **Visible:** Terminal frontmost per macOS, its front window a one-tab window, and the window server listing that window on screen (`TerminalVisibility.terminalApp`). The two-second scan feeds `TerminalVisitTracker` for manual visits and dwell, and every Open resets it.
+- **Typed input:** replies only, per [session replies](session-replies.md#typed-into-the-bound-tab-239). Codex questions in Terminal.app show "Answer this in Codex."
+
+Automated: `TerminalAppTests` (fixture inventories from the live proof: binding, a decoy title, Claude by tty, an unreadable or switched-off host, Ghostty beside it, a multi-tab window, the visible test, Open plan, raise and verify, the sequence, fallback candidates, card lines) and `TerminalTypedInputTests`. Not run — needs live acceptance (#244): MVP acceptance §3d H1–H9 and the Terminal.app lines, and `scripts/terminal-lab/` (it drives the real Terminal.app).
