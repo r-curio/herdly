@@ -8,24 +8,27 @@ import Foundation
 
 extension TerminalHost {
     /// Whether Steer types session replies into this host's bound pane (ADR 0017's table, as built).
-    /// Terminal.app replies (#239), WezTerm replies (#240). tmux and Zellij gain replies in their build
-    /// tickets; Ghostty and herdr only after a live proof of their text send; iTerm2 never (Broadcast Input).
+    /// Terminal.app replies (#239), WezTerm replies (#240), tmux replies (#241). Zellij gains replies in
+    /// its build ticket; Ghostty and herdr only after a live proof of their text send; iTerm2 never
+    /// (Broadcast Input).
     public var typesReplies: Bool {
         switch self {
-        case .terminalApp, .wezTerm: true
-        case .ghostty, .iTerm2, .tmux, .zellij, .herdr: false
+        case .terminalApp, .wezTerm, .tmux: true
+        case .ghostty, .iTerm2, .zellij, .herdr: false
         }
     }
 
     /// Whether a Codex question's digit may be typed here. Ghostty (ADR 0006) and herdr (ADR 0010) have
     /// their own relays. Terminal.app never: `do script`'s forced newline could answer the next
     /// question. iTerm2 never. WezTerm's relay is built (#240) behind `WezTermInput.questionDigitsProvenLive`
-    /// until a live digit proof; tmux and Zellij wait for their tickets and a live digit proof.
+    /// until a live digit proof, and tmux's (#241) behind `TmuxInput.questionDigitsProvenLive`; Zellij
+    /// waits for its ticket and a live digit proof.
     public var typesQuestionDigits: Bool {
         switch self {
         case .ghostty, .herdr: true
         case .wezTerm: WezTermInput.questionDigitsProvenLive
-        case .terminalApp, .iTerm2, .tmux, .zellij: false
+        case .tmux: TmuxInput.questionDigitsProvenLive
+        case .terminalApp, .iTerm2, .zellij: false
         }
     }
 }
@@ -250,9 +253,10 @@ public enum TypedReplySequence {
 /// the key may go only when every other enabled host was read fresh and none carries the session's
 /// title. Host-neutral: each host's fresh inventory is passed in.
 public enum TerminalKeyRelayCheck {
-    /// The enabled terminal hosts other than Ghostty that must be read fresh before a Ghostty key.
+    /// The enabled hosts other than Ghostty that must be read fresh before a Ghostty key: every terminal
+    /// and tmux, whose panes carry Codex titles too (#241).
     public static func hostsToRead(switches: TerminalHostSwitches) -> [TerminalHost] {
-        TerminalHost.terminals.filter { $0 != .ghostty && switches.mayContact($0) }
+        TerminalHost.ttyBound.filter { $0 != .ghostty && switches.mayContact($0) }
     }
 
     /// nil when the key may go. A host missing from `fresh` or unreadable fails closed; a host whose tab

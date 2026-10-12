@@ -803,7 +803,8 @@ private struct TerminalControls: View {
         case .iTerm2: ITerm2Controls(model: model, state: model.iTerm2)
         case .terminalApp: TerminalAppControls(model: model)
         case .wezTerm: WezTermControls(model: model, state: model.wezTerm)
-        case .tmux, .zellij: EmptyView()
+        case .tmux: TmuxControls(model: model, state: model.tmux)
+        case .zellij: EmptyView()
         }
     }
 
@@ -927,6 +928,41 @@ private struct WezTermControls: View {
             }
         }
         SettingsFooter(WezTermPresentation.footer)
+    }
+}
+
+/// The tmux card (product.md, "Agreed terminal host presentation"; #241). Shown only once
+/// `TerminalHost.tmux.showsCard` is turned on by its acceptance (#246). tmux has no Permission row.
+private struct TmuxControls: View {
+    @ObservedObject var model: Companion
+    @ObservedObject var state: TmuxState
+
+    var body: some View {
+        let row = model.tmuxSettingsRow
+        SettingsCard {
+            SettingsRow(title: TerminalHost.tmux.displayName, detail: "Open sessions in their exact pane, and type replies there") {
+                Toggle("tmux", isOn: Binding(get: { model.hostSwitches.isOn(.tmux) },
+                                             set: { model.setHostSwitch(.tmux, on: $0) }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    .accessibilityLabel("Enable tmux")
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Status", detail: row.detail) {
+                StatusBadge(title: row.badge.title, color: row.badge == .ready ? .green : row.badge == .needsAttention ? .orange : .secondary)
+            }
+            ForEach(row.problems, id: \.self) { problem in
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                Text(problem).fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, SettingsStyle.rowInset)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if model.hostSwitches.isOn(.tmux), !state.diagnostics.isEmpty {
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                PreviewDisclosure(title: "Show diagnostics") { state.diagnostics.joined(separator: "\n") }
+            }
+        }
+        SettingsFooter(TmuxPresentation.footer)
     }
 }
 

@@ -167,6 +167,13 @@ public enum TerminalTabBinding: Equatable, Sendable {
     case unavailable(TerminalTabUnavailable)
 }
 
+extension TerminalHost {
+    /// The hosts whose inventories list each tab's or pane's tty, so ADR 0013's rules bind there: every
+    /// terminal, and tmux, whose `list-panes` gives each pane's tty (ADR 0014). Zellij and herdr list no
+    /// pane tty and keep their own rules.
+    public static let ttyBound: [TerminalHost] = terminals + [.tmux]
+}
+
 public enum TerminalTabBindingRules {
     /// ADR 0013's Codex CLI rule. Codex hook records are never read: under the shared daemon they
     /// name another tab (ADR 0012).
@@ -180,12 +187,17 @@ public enum TerminalTabBindingRules {
     ///   - processes: `ps -t` per normalized tty (`TerminalForegroundProcesses.parse`), read after
     ///     `inventories`; a missing entry is an unreadable read.
     ///   - secondRead: every enabled host read again after `processes`.
+    ///   - multiplexerClientTTYs: the ttys of enabled multiplexers' attached clients (tmux's
+    ///     `client_tty`). A terminal tab on one of them mirrors the focused pane's title and runs the
+    ///     client, so it is left out of the title count (ADR 0014, "Codex title count").
     /// - Returns: `.bound` only when every rule holds on both reads; otherwise the first failing
-    ///   reason. The order of hosts and tabs in the inputs does not matter.
+    ///   reason. The order of hosts and tabs in the inputs does not matter. A tmux pane binds as a
+    ///   tab does, with its host `.tmux` and its `%pane` id (ADR 0014).
     public static func codex(sessionID: String, liveness: HerdrSessionLiveness, liveSessions: Set<String>,
                              switches: TerminalHostSwitches, inventories: [TerminalHost: TerminalHostInventory],
                              processes: [String: [TerminalProcess]],
-                             secondRead: [TerminalHost: TerminalHostInventory]) -> TerminalTabBinding {
+                             secondRead: [TerminalHost: TerminalHostInventory],
+                             multiplexerClientTTYs: Set<String> = []) -> TerminalTabBinding {
         if liveness == .ended { return .unavailable(.sessionEnded) }
         guard let title = HerdrCodexBindingRules.title(forSession: sessionID.lowercased()) else {
             return .unavailable(.titleNotFound)
@@ -198,7 +210,7 @@ public enum TerminalTabBindingRules {
         guard sharing == 1 else { return .unavailable(.sessionPrefixNotUnique(sharing)) }
 
         let target: TerminalTabTarget
-        switch titledTab(title, switches: switches, inventories: inventories) {
+        switch titledTab(title, switches: switches, inventories: inventories, excluding: multiplexerClientTTYs) {
         case .success(let value): target = value
         case .failure(let reason): return .unavailable(reason)
         }
@@ -206,7 +218,7 @@ public enum TerminalTabBindingRules {
         let count = read.filter { $0.foreground && $0.name == HerdrCodexBindingRules.processName }.count
         guard count == 1 else { return .unavailable(.foregroundProcesses(count: count)) }
 
-        switch titledTab(title, switches: switches, inventories: secondRead) {
+        switch titledTab(title, switches: switches, inventories: secondRead, excluding: multiplexerClientTTYs) {
         case .success(let again) where again == target: return .bound(target)
         case .success: return .unavailable(.titleChanged)
         case .failure(.hostUnreadable(let host)): return .unavailable(.hostUnreadable(host))
@@ -271,12 +283,20 @@ public enum TerminalTabBindingRules {
 
     private typealias HostTab = (host: TerminalHost, tab: TerminalTab)
 
-    /// The one unsplit tab with a tty that shows `title` across the enabled inventories.
+    /// The one unsplit tab with a tty that shows `title` across the enabled inventories. A terminal tab
+    /// whose tty is in `excluding` (a multiplexer client's) is not counted.
     private static func titledTab(_ title: String, switches: TerminalHostSwitches,
-                                  inventories: [TerminalHost: TerminalHostInventory]) -> Result<TerminalTabTarget, TerminalTabUnavailable> {
+                                  inventories: [TerminalHost: TerminalHostInventory],
+                                  excluding clientTTYs: Set<String>) -> Result<TerminalTabTarget, TerminalTabUnavailable> {
         let titled: [HostTab]
         switch enabledTabs(switches: switches, inventories: inventories) {
-        case .success(let tabs): titled = tabs.filter { $0.tab.title == title }
+        case .success(let tabs):
+            titled = tabs.filter { entry in
+                guard entry.tab.title == title else { return false }
+                guard entry.host.kind == .terminal, !clientTTYs.isEmpty,
+                      let tty = entry.tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY) else { return true }
+                return !clientTTYs.contains(tty)
+            }
         case .failure(let reason): return .failure(reason)
         }
         guard let match = titled.first else { return .failure(.titleNotFound) }
@@ -288,14 +308,15 @@ public enum TerminalTabBindingRules {
         return .success(TerminalTabTarget(host: match.host, tabID: match.tab.tabID, tty: tty))
     }
 
-    /// Every tab of every enabled terminal host, in host order. Hosts switched off are never read,
-    /// whatever `inventories` holds for them. The first enabled host whose inventory is unreadable
-    /// or missing fails the whole read, because a session could be on a tab it holds.
+    /// Every tab of every enabled terminal host and every pane of an enabled tty-listing multiplexer
+    /// (`TerminalHost.ttyBound`), in host order. Hosts switched off are never read, whatever
+    /// `inventories` holds for them. The first enabled host whose inventory is unreadable or missing
+    /// fails the whole read, because a session could be on a tab it holds.
     private static func enabledTabs(switches: TerminalHostSwitches,
                                     inventories: [TerminalHost: TerminalHostInventory])
         -> Result<[HostTab], TerminalTabUnavailable> {
         var tabs: [HostTab] = []
-        for host in TerminalHost.terminals where switches.mayContact(host) {
+        for host in TerminalHost.ttyBound where switches.mayContact(host) {
             switch inventories[host] {
             case .notRunning?: continue
             case .tabs(let hostTabs)?: tabs += hostTabs.map { (host, $0) }

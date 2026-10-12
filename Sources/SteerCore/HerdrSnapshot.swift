@@ -609,27 +609,33 @@ public struct HerdrAttachedClient: Equatable, Sendable {
     /// The client's own terminal, which ADR 0011 joins to a Ghostty terminal's `tty`.
     public let tty: String?
     public let serverPID: Int32?
+    /// The enabled terminal host whose process the client's ancestry reached first (ADR 0014).
+    public let host: TerminalHost
 
-    public init(pid: Int32, tty: String?, serverPID: Int32?) {
+    public init(pid: Int32, tty: String?, serverPID: Int32?, host: TerminalHost = .ghostty) {
         self.pid = pid
         self.tty = tty
         self.serverPID = serverPID
+        self.host = host
     }
 
     /// The client verdict (ADR 0008): zero or several clients are `wrongClientCount`; a client
-    /// whose ancestry has no `ghostty` process is `nonGhosttyClient`. `ancestry` starts at the
-    /// client itself.
-    public static func verdict(listing: HerdrClientListing,
-                               ancestry: (Int32) -> [HerdrProcessAncestor]) -> Result<HerdrAttachedClient, HerdrUnavailableReason> {
+    /// whose ancestry has no process of an enabled terminal host is `nonGhosttyClient` (the name
+    /// predates ADR 0014, which lets any enabled host's tab hold the client). `hostCommands` are those
+    /// hosts' executable names (`TerminalHost.executableNames(of:)`), Ghostty's alone by default.
+    /// `ancestry` starts at the client itself. The exact host tab is joined by tty at Open.
+    public static func verdict(listing: HerdrClientListing, ancestry: (Int32) -> [HerdrProcessAncestor],
+                               hostCommands: Set<String> = ["ghostty"]) -> Result<HerdrAttachedClient, HerdrUnavailableReason> {
         guard listing.clientPIDs.count == 1, let pid = listing.clientPIDs.first else {
             return .failure(.wrongClientCount(listing.clientPIDs.count))
         }
         let chain = ancestry(pid)
-        guard chain.first?.pid == pid, chain.dropFirst().contains(where: { $0.command == "ghostty" }) else {
+        guard chain.first?.pid == pid, let reached = chain.dropFirst().first(where: { hostCommands.contains($0.command) }),
+              let host = TerminalHost.terminals.first(where: { $0.executableName == reached.command }) else {
             return .failure(.nonGhosttyClient)
         }
         return .success(HerdrAttachedClient(pid: pid, tty: chain.first?.tty,
-                                    serverPID: listing.serverPIDs.count == 1 ? listing.serverPIDs.first : nil))
+                                    serverPID: listing.serverPIDs.count == 1 ? listing.serverPIDs.first : nil, host: host))
     }
 }
 
@@ -648,12 +654,16 @@ public struct HerdrScanRequest: Equatable, Hashable, Sendable {
     public let includeIntegration: Bool
     public let processInfoTitles: Set<String>
     public let processInfoPaneIDs: Set<String>
+    /// The executable names of the enabled terminal hosts that may hold herdr's client (ADR 0014);
+    /// Ghostty's alone by default, as before ADR 0014.
+    public let clientHostCommands: Set<String>
 
     public init(includeIntegration: Bool = true, processInfoTitles: Set<String> = [],
-                processInfoPaneIDs: Set<String> = []) {
+                processInfoPaneIDs: Set<String> = [], clientHostCommands: Set<String> = ["ghostty"]) {
         self.includeIntegration = includeIntegration
         self.processInfoTitles = processInfoTitles
         self.processInfoPaneIDs = processInfoPaneIDs
+        self.clientHostCommands = clientHostCommands
     }
 
     /// The snapshot's panes to ask about, at most `maximumProcessInfoRequests` shared by both kinds:

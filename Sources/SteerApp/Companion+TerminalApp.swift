@@ -28,6 +28,8 @@ final class TerminalAppState {
     var codexSeen: Set<UUID> = []
     /// Whether any scan has seen a session's tab in Terminal.app (the card's In use).
     var sessionsSeen = false
+    /// Every tab title in the latest readable inventory, for herdr's Codex gate (ADR 0014); nil before one.
+    var latestTitles: Set<String>?
     /// ADR 0016's visit interval and dwell run over Terminal.app tab-windows.
     var visits = TerminalVisitTracker<TerminalTabTarget>()
     /// Claude completion cards' replies; Codex cards keep theirs in `Companion.replyProgress`.
@@ -38,8 +40,9 @@ final class TerminalAppState {
     var launchObserver: NSObjectProtocol?
 }
 
-/// The other enabled hosts a Terminal.app read is taken beside, for ADR 0013's cross-host uniqueness:
-/// Ghostty's titles and iTerm2's and WezTerm's inventories while each is on. Read on the main actor.
+/// The enabled hosts a read is taken across, for ADR 0013's cross-host uniqueness: Terminal.app's
+/// tabs, Ghostty's titles, iTerm2's, WezTerm's and tmux's inventories (#240, #241) while each is on.
+/// Read on the main actor.
 struct OtherTabHosts: Sendable {
     let ghosttyOn: Bool
     let ghosttyRunning: Bool
@@ -47,8 +50,13 @@ struct OtherTabHosts: Sendable {
     let iTerm2Running: Bool?
     /// nil while WezTerm is off (never read) (#240).
     var wezTermRunning: Bool? = nil
-    /// nil while Terminal.app is off, or when Terminal.app is the host being read (#240).
+    /// nil while Terminal.app is off, or when Terminal.app is the host being read (#240); read by
+    /// `WezTermTabReads`.
     var terminalAppRunning: Bool? = nil
+    /// Terminal.app's switch is on, for `TerminalTabReads`; it is never read otherwise.
+    var terminalAppOn = true
+    /// tmux may be contacted (its switch and a terminal on); it is never read otherwise (#241).
+    var tmuxOn = false
 }
 
 /// One set of fresh reads across the enabled hosts (ADR 0013): the first inventories, `ps` for the
@@ -58,35 +66,63 @@ struct TerminalTabReads: Sendable {
     let inventories: [TerminalHost: TerminalHostInventory]
     let processes: [String: [TerminalProcess]]
     let secondRead: [TerminalHost: TerminalHostInventory]
+    /// The first read's tmux server; `.notRunning` while tmux is off.
+    var tmux: TmuxRead = .notRunning
+    /// The first read's Ghostty, iTerm2 and WezTerm snapshots, for a multiplexer's host tab (#241).
+    var ghostty: GhosttySnapshot?
+    var iTerm2: ITerm2Snapshot?
+    var wezTerm: WezTermSnapshot?
+    var wezTermClients: WezTermClients?
 
-    /// Reads Terminal.app and the other enabled hosts, then `ps` for every Terminal.app tab whose title
-    /// is a shortened Codex identifier or whose tty is in `claudeTTYs`, then, when `second`, Terminal.app
-    /// again. Off the main actor.
+    /// Reads Terminal.app (while on) and the other enabled hosts, then `ps` for every Terminal.app tab and
+    /// tmux pane whose title is a shortened Codex identifier or whose tty is in `claudeTTYs`, then, when
+    /// `second`, Terminal.app and tmux again. Off the main actor.
     static func take(others: OtherTabHosts, claudeTTYs: Set<String>, second: Bool) -> TerminalTabReads {
-        let terminal = TerminalAppNavigation.snapshot()
-        var inventories: [TerminalHost: TerminalHostInventory] = [.terminalApp: terminal.inventory]
+        let terminal: TerminalAppNavigation.Read = others.terminalAppOn ? TerminalAppNavigation.snapshot() : .notRunning
+        var inventories: [TerminalHost: TerminalHostInventory] = [:]
+        if others.terminalAppOn { inventories[.terminalApp] = terminal.inventory }
+        var ghostty: GhosttySnapshot?
         if others.ghosttyOn {
-            inventories[.ghostty] = .ghosttyTitles(others.ghosttyRunning ? GhosttyNavigation.snapshot() : nil,
-                                                   running: others.ghosttyRunning)
+            ghostty = others.ghosttyRunning ? GhosttyNavigation.snapshot() : nil
+            inventories[.ghostty] = .ghosttyTitles(ghostty, running: others.ghosttyRunning)
         }
+        var iTerm2: ITerm2Snapshot?
         if let running = others.iTerm2Running {
-            inventories[.iTerm2] = running ? ITerm2Navigation.inventory(ITerm2Navigation.snapshot()) : .notRunning
+            let reading = running ? ITerm2Navigation.snapshot() : .notRunning
+            if case .snapshot(let value)? = reading { iTerm2 = value }
+            inventories[.iTerm2] = ITerm2Navigation.inventory(reading)
         }
         // WezTerm beside it (#240): its panes count toward uniqueness, and `ps` is read for its titled
-        // Codex panes and Claude ttys too, so a session bound there routes to its pane.
+        // Codex panes and Claude ttys too, so a session bound there routes to its pane. Its clients are
+        // read too, for a multiplexer client's host tab (#241).
         var wezTermTTYs: Set<String> = []
+        var wezTerm: WezTermSnapshot?
+        var wezTermClients: WezTermClients?
         if let running = others.wezTermRunning {
-            let read = WezTermNavigation.read(running: running).0
+            let (read, clients) = WezTermNavigation.read(running: running, clients: others.tmuxOn)
             inventories[.wezTerm] = read.inventory
+            wezTerm = read.snapshot
+            wezTermClients = clients
             wezTermTTYs = read.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? []
         }
-        let processes = TerminalTTYReads.processes(on: (terminal.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
-            .union(wezTermTTYs))
+        let tmux: TmuxRead = others.tmuxOn ? TmuxRunner.read() : .notRunning
+        if others.tmuxOn { inventories[.tmux] = tmux.inventory }
+        let ttys = (terminal.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
+            .union(wezTermTTYs).union(tmux.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
+        let processes = TerminalTTYReads.processes(on: ttys)
         var secondRead = inventories
-        if second { secondRead[.terminalApp] = TerminalAppNavigation.snapshot().inventory }
+        if second {
+            if others.terminalAppOn { secondRead[.terminalApp] = TerminalAppNavigation.snapshot().inventory }
+            if others.tmuxOn { secondRead[.tmux] = TmuxRunner.read().inventory }
+        }
         return TerminalTabReads(terminalApp: terminal, inventories: inventories, processes: processes,
-                                secondRead: secondRead)
+                                secondRead: secondRead, tmux: tmux, ghostty: ghostty, iTerm2: iTerm2,
+                                wezTerm: wezTerm, wezTermClients: wezTermClients)
     }
+
+    /// The ttys of tmux's attached clients in the first read: host tabs left out of the Codex title
+    /// count (ADR 0014).
+    var multiplexerClientTTYs: Set<String> { tmux.snapshot?.clientTTYs ?? [] }
 
     /// Whether Terminal.app's tabs carry `title`.
     func terminalAppCarries(title: String) -> Bool {
@@ -126,12 +162,13 @@ extension Companion {
         terminalAppSwitchedOn && terminalApp.access == .granted
     }
 
-    /// The other enabled hosts a Terminal.app read is taken beside (ADR 0013).
+    /// The enabled hosts a read is taken across (ADR 0013), tmux included while it may be contacted.
     var otherTabHosts: OtherTabHosts {
         let ghosttyOn = ghosttyEnabled && ghosttyPermissionVerified
         return OtherTabHosts(ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyOn && TerminalApps.isRunning(.ghostty),
                              iTerm2Running: hostSwitches.mayContact(.iTerm2) ? TerminalApps.isRunning(.iTerm2) : nil,
-                             wezTermRunning: wezTermSwitchedOn ? TerminalApps.isRunning(.wezTerm) : nil)
+                             wezTermRunning: wezTermSwitchedOn ? TerminalApps.isRunning(.wezTerm) : nil,
+                             terminalAppOn: terminalAppSwitchedOn, tmuxOn: tmuxContactAllowed)
     }
 
     /// Terminal.app's switch is on. Open and question keys then account for it even before or without a
@@ -160,6 +197,7 @@ extension Companion {
         terminalApp.claudeRoutes = [:]
         terminalApp.codexSeen = []
         terminalApp.readable = nil
+        terminalApp.latestTitles = nil
         terminalApp.nextScan = 0
         terminalApp.visits.reset(at: Date().timeIntervalSince1970)
     }
@@ -268,6 +306,7 @@ extension Companion {
         } else {
             terminalApp.readable = true
         }
+        if case .tabs(let tabs) = reads.terminalApp.inventory { terminalApp.latestTitles = Set(tabs.compactMap(\.title)) }
         var diagnostics = ["Terminal.app inventory: \(reads.terminalApp.diagnostic)"]
         var codexRoutes: [UUID: TerminalReplyRoute] = [:]
         var codexSeen: Set<UUID> = []
@@ -311,14 +350,14 @@ extension Companion {
         saveCompletions()
     }
 
-    private func codexBinding(_ session: UUID, reads: TerminalTabReads) -> TerminalTabBinding {
+    func codexBinding(_ session: UUID, reads: TerminalTabReads) -> TerminalTabBinding {
         TerminalTabBindingRules.codex(sessionID: session.uuidString, liveness: endedSessions.contains(session) ? .ended : .live,
                                       liveSessions: Set(liveCLI.map(\.uuidString)), switches: hostSwitches,
                                       inventories: reads.inventories, processes: reads.processes,
-                                      secondRead: reads.secondRead)
+                                      secondRead: reads.secondRead, multiplexerClientTTYs: reads.multiplexerClientTTYs)
     }
 
-    private func claudeBinding(_ identity: AgentSessionIdentity, process: ClaudeTabProcess,
+    func claudeBinding(_ identity: AgentSessionIdentity, process: ClaudeTabProcess,
                                reads: TerminalTabReads) -> TerminalTabBinding {
         TerminalTabBindingRules.claude(sessionID: identity.session, liveness: .live, process: process.process,
                                        observed: process.observed, switches: hostSwitches,
@@ -492,6 +531,10 @@ extension Companion {
         if wezTermSwitchedOn {
             for (session, route) in wezTerm.codexRoutes { routes[session] = TerminalReplyRoute.merging(routes[session], route) }
         }
+        // tmux (#241): a session tmux holds, or one an unreadable tmux could hold, merges tmux's route.
+        if tmuxContactAllowed {
+            for (session, route) in tmux.codexRoutes { routes[session] = TerminalReplyRoute.merging(routes[session], route) }
+        }
         if hostSwitches.mayContact(.iTerm2) {
             for (session, block) in iTerm2.codexInputBlocks {
                 routes[session] = block == .inITerm2 ? .hostCannotType(.iTerm2) : .unreachable
@@ -501,8 +544,10 @@ extension Companion {
     }
 
     /// The question route's host other than Ghostty whose latest scan showed the session's tab:
-    /// iTerm2 or Terminal.app, whose questions are answered in Codex (ADR 0017).
+    /// iTerm2 or Terminal.app, whose questions are answered in Codex (ADR 0017), or tmux (#241), whose
+    /// pane keys are offered only once its digit is proven live (`tmuxQuestionKeyPane`).
     func terminalHost(forQuestionSession session: UUID) -> TerminalHost? {
+        if tmuxContactAllowed, tmux.codexSeen.contains(session) { return .tmux }
         if hostSwitches.mayContact(.iTerm2), iTerm2.codexInputBlocks[session] == .inITerm2 { return .iTerm2 }
         if wezTermSwitchedOn, wezTerm.codexSeen.contains(session) { return .wezTerm }
         return terminalAppSwitchedOn && terminalApp.codexSeen.contains(session) ? .terminalApp : nil
@@ -511,6 +556,7 @@ extension Companion {
     /// An enabled host that could hold the Codex session but whose latest read is missing, unreadable or
     /// denied, so no key may be offered (ADR 0013 "Inventory"). A host that is not running holds nothing.
     func unreadQuestionHost(for session: UUID) -> TerminalHost? {
+        if tmuxContactAllowed, tmux.read?.snapshot == nil, tmux.read != .notRunning { return .tmux }
         if hostSwitches.mayContact(.iTerm2), TerminalApps.isRunning(.iTerm2),
            iTerm2.codexInputBlocks[session] == .iTerm2Unreadable || iTerm2.scan == .notRead || iTerm2.scan == .unreadable {
             return .iTerm2
@@ -526,6 +572,8 @@ extension Companion {
     nonisolated static func freshInventories(_ hosts: [TerminalHost], running: Set<TerminalHost>) -> [TerminalHost: TerminalHostInventory] {
         var result: [TerminalHost: TerminalHostInventory] = [:]
         for host in hosts {
+            // tmux is no app: its own read says whether its default server runs.
+            if host == .tmux { result[host] = TmuxRunner.read().inventory; continue }
             guard running.contains(host) else { result[host] = .notRunning; continue }
             switch host {
             case .terminalApp: result[host] = TerminalAppNavigation.snapshot().inventory
@@ -548,6 +596,8 @@ extension Companion {
         refresh()
         let others = otherTabHosts
         let rolloutRoot = Companion.rolloutRoot
+        // The tmux server each fresh check read; a tmux write goes only to it.
+        let checked = TmuxCheckedServer()
         Task { @MainActor in
             let run = await TypedReplySequence.run(
                 writes: send.writes,
@@ -557,14 +607,16 @@ extension Companion {
                         (TerminalTabReads.take(others: others, claudeTTYs: [], second: true),
                          ReminderReader.currentEvidence(for: completion.session, in: rolloutRoot))
                     }.value
+                    checked.server = fresh.0.tmux.snapshot?.server
                     return TypedReplyCheck.veto(self.codexReplyState(completion,
-                                                                     route: TerminalReplyRoute.from(self.codexBinding(completion.session, reads: fresh.0)),
+                                                                     route: TmuxInput.route(self.codexBinding(completion.session, reads: fresh.0),
+                                                                                            snapshot: fresh.0.tmux.snapshot),
                                                                      evidence: fresh.1),
                                                 spent: send.pane)
                 },
                 write: { write in
-                    let text = TerminalAppInput.script(write)
-                    return TerminalAppInput.delivery(await Task.detached { TerminalAppNavigation.type(text, into: send.pane) }.value)
+                    let server = checked.server
+                    return await Task.detached { Companion.typeInto(send.pane, write, tmuxServer: server) }.value
                 },
                 pause: { seconds in try? await Task.sleep(for: .seconds(seconds)) })
             terminalApp.replying = false
@@ -604,13 +656,16 @@ extension Companion {
     /// The Claude card's reply target, nil when no typed route exists (the card shows no field). Terminal.app's
     /// and WezTerm's latest scans each give a route; a route that is not one pane wins (#240).
     func claudeReplyTarget(for outcome: AgentOutcome) -> SessionReplyTarget? {
-        guard terminalAppActive || wezTermSwitchedOn, outcome.session.source == .claude, outcome.session.surface == .cli else { return nil }
+        guard terminalAppActive || wezTermSwitchedOn || tmuxContactAllowed, outcome.session.source == .claude,
+              outcome.session.surface == .cli else { return nil }
         let items = orderedAgentAttentionItems.filter { $0.session == outcome.session }
         let ended = liveClaudeSessions[outcome.session.sourceScope].map { !$0.contains(outcome.session.session) } ?? false
         let inTurn = items.contains { $0.running != nil || $0.question != nil || ($0.approval != nil) }
         // No entry (bound in Ghostty, or not scanned yet) offers no field, as for Codex.
-        let route = TerminalReplyRoute.merging(terminalAppActive ? terminalApp.claudeRoutes[outcome.session] : nil,
-                                               wezTermSwitchedOn ? wezTerm.claudeRoutes[outcome.session] : nil)
+        let route = TerminalReplyRoute.merging(
+            TerminalReplyRoute.merging(terminalAppActive ? terminalApp.claudeRoutes[outcome.session] : nil,
+                                       wezTermSwitchedOn ? wezTerm.claudeRoutes[outcome.session] : nil),
+            tmuxContactAllowed ? tmux.claudeRoutes[outcome.session] : nil)
         return ClaudeReplyRouting.target(ended: ended, inTurn: inTurn, route: route)
     }
 
@@ -618,7 +673,8 @@ extension Companion {
         terminalApp.claudeReplies[outcome.id] ?? ReplyProgress(completion: outcome.id)
     }
 
-    /// One Send on a Claude completion card: text and its submit in one `do script`, after a fresh check.
+    /// One Send on a Claude completion card: text and its submit in one write (`do script`, or tmux's
+    /// `send-keys`), after a fresh check.
     func sendClaudeReply(_ outcome: AgentOutcome, text: String) {
         guard !terminalApp.replying else { return }
         let progress = claudeReply(for: outcome)
@@ -643,6 +699,7 @@ extension Companion {
         refresh()
         let others = otherTabHosts
         let roots = configuredClaudeNavigationRoots().filter { $0.root.path == outcome.session.sourceScope }
+        let checked = TmuxCheckedServer()
         Task { @MainActor in
             let run = await TypedReplySequence.run(
                 writes: send.writes,
@@ -658,12 +715,14 @@ extension Companion {
                         return (rows.count == 1 ? rows[0] : nil, process, reads)
                     }.value
                     guard let fresh else { return .unreachable }
-                    let route = TerminalReplyRoute.from(self.claudeBinding(outcome.session, process: fresh.1, reads: fresh.2))
+                    checked.server = fresh.2.tmux.snapshot?.server
+                    let route = TmuxInput.route(self.claudeBinding(outcome.session, process: fresh.1, reads: fresh.2),
+                                                snapshot: fresh.2.tmux.snapshot)
                     return TypedReplyCheck.veto(self.claudeReplyState(outcome, row: fresh.0, route: route), spent: send.pane)
                 },
                 write: { write in
-                    let text = TerminalAppInput.script(write)
-                    return TerminalAppInput.delivery(await Task.detached { TerminalAppNavigation.type(text, into: send.pane) }.value)
+                    let server = checked.server
+                    return await Task.detached { Companion.typeInto(send.pane, write, tmuxServer: server) }.value
                 },
                 pause: { seconds in try? await Task.sleep(for: .seconds(seconds)) })
             terminalApp.replying = false
@@ -705,6 +764,12 @@ extension Companion {
         TerminalAppPresentation.settingsRow(on: hostSwitches.isOn(.terminalApp), access: terminalApp.access,
                                             readable: terminalApp.readable, sessionsSeen: terminalApp.sessionsSeen)
     }
+}
+
+/// The tmux server a typed reply's latest fresh check read, so its write goes only to that server.
+@MainActor
+final class TmuxCheckedServer {
+    var server: TmuxServerIdentity?
 }
 
 /// The latest reads an Open's revalidation took, for the fallback's candidate walks.
