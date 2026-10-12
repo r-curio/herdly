@@ -404,17 +404,15 @@ public enum WezTermSettingsProblem: Equatable, Hashable, Sendable {
     case notFound
     /// The socket fails the owner-only trust check.
     case untrustedSocket
-    /// Several WezTerm instances are running.
-    case severalInstances
-    /// Any other failed read: no socket, an error, a timeout or a malformed reply.
+    /// Any other failed read: no socket, several running copies, an error, a timeout or a malformed reply.
+    /// The exact reason goes to diagnostics only.
     case unreadable
 
     public var message: String {
         switch self {
         case .notFound: "Steer can't find WezTerm in /Applications or ~/Applications."
         case .untrustedSocket: "Steer can't read WezTerm: its socket in ~/.local/share/wezterm isn't private to you."
-        case .severalInstances: "Steer can't read WezTerm while more than one copy of it is running."
-        case .unreadable: "Steer can't read WezTerm. Check that WezTerm is responding."
+        case .unreadable: OpenUnavailableReason.hostUnreadable(.wezTerm).cardLine
         }
     }
 }
@@ -433,9 +431,10 @@ public struct WezTermSettingsRow: Equatable, Sendable {
 
 public enum WezTermPresentation {
     /// The card's targeting rule and what Open does otherwise; a fallback is silent on notch cards (ADR
-    /// 0015), so this is where it is explained. Codex questions stay in Codex until the digit gate opens.
+    /// 0015), so this is where it is explained. It says nothing about question digits, so it stays true
+    /// when `WezTermInput.questionDigitsProvenLive` is turned on (#245).
     public static let footer =
-        "Steer returns to unsplit tabs in WezTerm's front window; otherwise Open raises WezTerm. Replies are typed into the exact pane; Codex questions are answered in Codex."
+        "Steer returns to unsplit tabs in WezTerm's front window; otherwise Open raises WezTerm. Replies are typed into the exact pane."
 
     /// The card from the switch, whether a `wezterm` binary is in its fixed locations, the latest read,
     /// and whether a live session has been seen bound to a WezTerm pane.
@@ -447,8 +446,7 @@ public enum WezTermPresentation {
             switch reason {
             case .binaryNotFound: if installed { problems.append(.notFound) }
             case .socketUntrusted: problems.append(.untrustedSocket)
-            case .severalInstances: problems.append(.severalInstances)
-            case .socketMissing, .commandFailed, .timedOut, .malformedReply: problems.append(.unreadable)
+            case .severalInstances, .socketMissing, .commandFailed, .timedOut, .malformedReply: problems.append(.unreadable)
             }
         }
         let badge: HerdrReadinessBadge = !problems.isEmpty ? .needsAttention : inUse ? .ready : .notInUse

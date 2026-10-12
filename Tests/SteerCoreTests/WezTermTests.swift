@@ -475,8 +475,9 @@ private var pendingEvidence: ReminderReader.RolloutEvidence {
     #expect(WezTermPresentation.settingsRow(on: true, installed: true, scan: .read, inUse: true)
         == WezTermSettingsRow(badge: .ready, problems: []))
     #expect(WezTermPresentation.settingsRow(on: true, installed: true, scan: .notRunning, inUse: true).badge == .ready)
+    // The footer states targeting and replies only, so it cannot go stale when the digit gate opens (#245).
     #expect(WezTermPresentation.footer
-        == "Steer returns to unsplit tabs in WezTerm's front window; otherwise Open raises WezTerm. Replies are typed into the exact pane; Codex questions are answered in Codex.")
+        == "Steer returns to unsplit tabs in WezTerm's front window; otherwise Open raises WezTerm. Replies are typed into the exact pane.")
 }
 
 @Test func everyWezTermProblemIsItsOwnLine() {
@@ -488,20 +489,40 @@ private var pendingEvidence: ReminderReader.RolloutEvidence {
     #expect(untrusted.problems == [.untrustedSocket])
     #expect(WezTermSettingsProblem.untrustedSocket.message
         == "Steer can't read WezTerm: its socket in ~/.local/share/wezterm isn't private to you.")
+    // Several running copies, a timeout or any other failed read is the generic agreed line; the exact
+    // reason stays in diagnostics.
     #expect(WezTermPresentation.settingsRow(on: true, installed: true, scan: .unreadable(.severalInstances), inUse: true).problems
-        == [.severalInstances])
+        == [.unreadable])
     #expect(WezTermPresentation.settingsRow(on: true, installed: true, scan: .unreadable(.timedOut), inUse: true).problems
         == [.unreadable])
-    #expect(WezTermSettingsProblem.unreadable.message == "Steer can't read WezTerm. Check that WezTerm is responding.")
+    #expect(WezTermSettingsProblem.unreadable.message == OpenUnavailableReason.hostUnreadable(.wezTerm).cardLine)
     // A switched-off WezTerm says nothing about problems it was never asked about.
     #expect(WezTermPresentation.settingsRow(on: false, installed: false, scan: .notRead, inUse: false).problems.isEmpty)
 }
 
-@Test func wezTermCardLinesUseTheAgreedWording() {
+@Test func wezTermNotchLinesComeFromTheSharedReasons() {
     #expect(OpenUnavailableReason.hostUnreadable(.wezTerm).cardLine == "Steer can't read WezTerm. Check Settings › Terminals.")
     #expect(OpenUnavailableReason.appNotRunning(.wezTerm).cardLine == "WezTerm isn't running.")
     #expect(SessionReplyPolicy.message(for: .terminalUnreachable) == "Steer can't reach this session's tab. Reply in the session.")
     #expect(HerdrPresentation.keyDestination(for: .terminalRelay).place == "the session's pane")
+    // Every other key route names its own place; only the Ghostty relay reads "the Ghostty tab".
+    #expect(HerdrPresentation.keyDestination(for: .herdrRelay).place == "the herdr pane")
+    #expect(HerdrPresentation.keyDestination(for: .ghosttyRelay).place == "the Ghostty tab")
+}
+
+@Test func anEnabledTerminalAppMustBeReadBesideITerm2OrNoITerm2TabBinds() {
+    // iTerm2's visit scan (#238) reads every enabled host: left out, an enabled Terminal.app makes every
+    // binding "host unreadable", so no iTerm2 visit could acknowledge.
+    let switches = TerminalHostSwitches(enabled: [.iTerm2, .terminalApp])
+    let iTerm2 = TerminalHostInventory.tabs([TerminalTab(tabID: "GUID", tty: "/dev/ttys017", title: codexTitle, paneCount: 1)])
+    func bind(_ inventories: [TerminalHost: TerminalHostInventory]) -> TerminalTabBinding {
+        TerminalTabBindingRules.codex(sessionID: codexSession, liveness: .live, liveSessions: [codexSession],
+                                      switches: switches, inventories: inventories, processes: codexPS,
+                                      secondRead: inventories)
+    }
+    #expect(bind([.iTerm2: iTerm2]) == .unavailable(.hostUnreadable(.terminalApp)))
+    #expect(bind([.iTerm2: iTerm2, .terminalApp: .tabs([])])
+        == .bound(TerminalTabTarget(host: .iTerm2, tabID: "GUID", tty: "/dev/ttys017")))
 }
 
 // MARK: - Cross-host routes and freshness

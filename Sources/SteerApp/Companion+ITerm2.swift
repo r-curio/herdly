@@ -357,7 +357,9 @@ extension Companion {
         let ghosttyOn = ghosttyEnabled
         let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
         let iTerm2Running = TerminalApps.isRunning(.iTerm2)
-        // An enabled WezTerm left unread would make every binding here unavailable (ADR 0013), #240.
+        // An enabled host left unread would make every binding here unavailable (ADR 0013), so Terminal.app
+        // (#239) and WezTerm (#240) are read beside iTerm2 while each is on.
+        let terminalAppRunning: Bool? = terminalAppSwitchedOn ? TerminalApps.isRunning(.terminalApp) : nil
         let wezTermRunning: Bool? = wezTermSwitchedOn ? TerminalApps.isRunning(.wezTerm) : nil
         let generation = iTerm2.generation
         Task { @MainActor in
@@ -367,7 +369,8 @@ extension Companion {
                 })
                 let reads = CodexTabReads.read(titles: titles, claudeTTYs: Set(observations.values.compactMap(\.tty)),
                                                ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyRunning,
-                                               iTerm2Running: iTerm2Running, wezTermRunning: wezTermRunning)
+                                               iTerm2Running: iTerm2Running, terminalAppRunning: terminalAppRunning,
+                                               wezTermRunning: wezTermRunning)
                 return (reads, observations)
             }.value
             iTerm2.checking = false

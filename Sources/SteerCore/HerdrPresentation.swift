@@ -239,7 +239,8 @@ public enum HerdrPresentation {
         switch route {
         case .herdrRelay: ("the herdr pane", "pane")
         case .terminalRelay: ("the session's pane", "pane")
-        default: ("the Ghostty tab", "tab")
+        // No key is sent on these routes; only the Ghostty relay's key goes to a Ghostty tab.
+        case .ghosttyRelay, .daemon, .daemonAnswered, .relayUnavailable, .desktopPick: ("the Ghostty tab", "tab")
         }
     }
 
