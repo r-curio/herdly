@@ -93,6 +93,17 @@ extension Companion {
             openHerdr(herdrKey, subject: .claude(identity))
             return
         }
+        // WezTerm on (#240): a pane there opens through its own sequence; anything else keeps the routes below.
+        if wezTermSwitchedOn {
+            openClaudeWithWezTerm(identity, approval: approval) { [weak self] in
+                self?.openClaudeOutsideWezTerm(identity, approval: approval)
+            }
+            return
+        }
+        openClaudeOutsideWezTerm(identity, approval: approval)
+    }
+
+    private func openClaudeOutsideWezTerm(_ identity: AgentSessionIdentity, approval: AgentApproval?) {
         // Terminal.app on (#239): a tab there opens through its own sequence; anything else keeps
         // Ghostty's title route below.
         if terminalAppSwitchedOn {
@@ -245,6 +256,16 @@ extension Companion {
             openHerdr(herdrKey, subject: .codex(session))
             return
         }
+        // WezTerm on (#240): a pane there opens through its own sequence; a title no WezTerm pane carries
+        // keeps the routes below. Each reads every enabled host for ADR 0013's binding.
+        if wezTermSwitchedOn {
+            openCodexWithWezTerm(session) { [weak self] in self?.openCLIOutsideWezTerm(session) }
+            return
+        }
+        openCLIOutsideWezTerm(session)
+    }
+
+    private func openCLIOutsideWezTerm(_ session: UUID) {
         // Terminal.app on (#239): a tab there opens through its own sequence; a title no Terminal.app
         // tab carries keeps the routes below. Both read every enabled host for ADR 0013's binding.
         if terminalAppSwitchedOn {
@@ -450,6 +471,7 @@ extension Companion {
         resetGhosttyVisits(at: now)
         iTerm2.visits.reset(at: now)
         terminalApp.visits.reset(at: now)
+        wezTerm.visits.reset(at: now)
     }
 
     /// Sessions with queued completions whose current binding is `pane`.

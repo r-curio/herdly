@@ -197,6 +197,9 @@ public enum QuestionAnswerRoute: Equatable, Sendable {
     /// CLI session bound to a herdr pane without the daemon: one key per click through herdr's
     /// `agent.send_keys` (ADR 0010). See `QuestionRelayRouting`.
     case herdrRelay
+    /// CLI session bound to a terminal pane whose host types question digits (ADR 0017; WezTerm, #240,
+    /// behind its live-proof gate): one digit per click through the host's pane-addressed send.
+    case terminalRelay
     /// CLI session with no usable relay for this call: nothing is offered but Open in Codex.
     case relayUnavailable(HerdrQuestionRelayUnavailable)
     /// Desktop session without the daemon: a highlighted pick that opens the thread.
