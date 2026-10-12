@@ -52,19 +52,48 @@ public struct ZellijSnapshot: Equatable, Sendable {
     }
 }
 
+/// Why a Zellij read failed, for diagnostics only: the card shows the shared "can't read" line.
+public enum ZellijUnreadable: Equatable, Hashable, Sendable {
+    /// A socket in the default directory refuses connections. Any `zellij` command would delete it (an
+    /// isolated Zellij 0.45.1 run: `action` sweeps the directory as `list-sessions` does), so Steer runs none.
+    case staleSocket
+    /// No user temporary directory, or the default directory could not be listed.
+    case directoryUnlistable
+    /// `zellij --version` failed or printed something else.
+    case versionUnreadable
+    /// A live session's name could be read as an option or carries a control character.
+    case sessionName
+    /// The process table could not be read.
+    case processTable
+    /// A session's listing failed, timed out or was malformed.
+    case commandFailed
+
+    public var diagnostic: String {
+        switch self {
+        case .staleSocket: "a socket in the default directory refuses connections; no zellij command is run"
+        case .directoryUnlistable: "default socket directory unlistable"
+        case .versionUnreadable: "version unreadable"
+        case .sessionName: "a session name cannot be addressed"
+        case .processTable: "process table unreadable"
+        case .commandFailed: "a session listing failed"
+        }
+    }
+}
+
 /// One read of the default socket directory, from SteerApp's side.
 public enum ZellijRead: Equatable, Sendable {
     /// No contract directory, or no socket in it accepts connections: no session runs.
     case notRunning
     /// No `zellij` at the fixed locations.
     case binaryNotFound
-    /// The installed CLI is older than 0.44.1 (or its version could not be read: nil). `running`: a
-    /// `zellij --server` process runs, so a session could exist that Steer cannot reach.
-    case unsupportedVersion(ZellijVersion?, running: Bool)
+    /// The installed CLI is older than 0.44.1. `running`: a `zellij` process runs, so a session could
+    /// exist that Steer cannot reach.
+    case unsupportedVersion(ZellijVersion, running: Bool)
     /// A directory or socket fails the trust check, or a server runs as another user.
     case untrustedSocket
-    /// A command failed, timed out or printed a malformed listing, or a session name cannot be addressed.
-    case unreadable
+    /// A command failed, timed out or printed a malformed listing, a session name cannot be addressed, or
+    /// a stale socket keeps Steer from running any command.
+    case unreadable(ZellijUnreadable)
     case snapshot(ZellijSnapshot)
 
     /// ADR 0013's inventory: Zellij that may be running but cannot be read holds every session it could

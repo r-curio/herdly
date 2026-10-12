@@ -302,18 +302,21 @@ public struct ZellijSession: Equatable, Sendable {
 
 // MARK: - Processes
 
-/// One process from `ps -axo pid=,ppid=,tty=,comm=`: `name` is the executable's basename; arguments
-/// are read only for `zellij` processes (SteerApp, from the kernel), to find each session's server.
+/// One process from `ps -axo pid=,ppid=,uid=,tty=,comm=`: `name` is the executable's basename;
+/// arguments are read only for `zellij` processes (SteerApp, from the kernel), to find each session's server.
 public struct ZellijProcess: Equatable, Hashable, Sendable {
     public let pid: Int32
     public let ppid: Int32
+    /// The effective user id.
+    public let uid: UInt32
     /// Normalized `/dev/ttysNNN`; nil for none (`??`).
     public let tty: String?
     public let name: String
 
-    public init(pid: Int32, ppid: Int32, tty: String?, name: String) {
+    public init(pid: Int32, ppid: Int32, uid: UInt32, tty: String?, name: String) {
         self.pid = pid
         self.ppid = ppid
+        self.uid = uid
         self.tty = tty
         self.name = name
     }
@@ -340,33 +343,37 @@ public struct ZellijProcessTable: Equatable, Sendable {
     public static let nestingCommands: Set<String> = ["tmux", "herdr", "zellij"]
 
     public let processes: [Int32: ZellijProcess]
+    /// The user Steer runs as: only this user's `zellij` processes are its clients (ADR 0014).
+    public let owner: UInt32
     /// The argument vectors of `zellij` processes, read from the kernel; a missing entry was unreadable.
     public let arguments: [Int32: [String]]
     /// The start times of `zellij` server processes, read from the kernel; a missing entry was unreadable.
     public let startTimes: [Int32: Double]
 
-    public init(processes: [ZellijProcess], arguments: [Int32: [String]], startTimes: [Int32: Double]) {
+    public init(processes: [ZellijProcess], owner: UInt32, arguments: [Int32: [String]], startTimes: [Int32: Double]) {
         self.processes = Dictionary(processes.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
+        self.owner = owner
         self.arguments = arguments
         self.startTimes = startTimes
     }
 
-    /// `ps -axo pid=,ppid=,tty=,comm=` output, or nil when any row is malformed or there are too many.
-    public static func parse(_ output: String, arguments: [Int32: [String]], startTimes: [Int32: Double]) -> ZellijProcessTable? {
+    /// `ps -axo pid=,ppid=,uid=,tty=,comm=` output, or nil when any row is malformed or there are too many.
+    public static func parse(_ output: String, owner: UInt32, arguments: [Int32: [String]],
+                             startTimes: [Int32: Double]) -> ZellijProcessTable? {
         guard output.utf8.count <= ZellijListing.maximumOutput else { return nil }
         var processes: [ZellijProcess] = []
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
-            let fields = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
-            guard fields.count == 4, let pid = Int32(fields[0]), pid > 0, let ppid = Int32(fields[1]), ppid >= 0 else {
-                return nil
-            }
-            let command = fields[3].trimmingCharacters(in: .whitespaces)
+            let fields = line.split(separator: " ", maxSplits: 4, omittingEmptySubsequences: true)
+            guard fields.count == 5, let pid = Int32(fields[0]), pid > 0, let ppid = Int32(fields[1]), ppid >= 0,
+                  let uid = UInt32(fields[2]) else { return nil }
+            let command = fields[4].trimmingCharacters(in: .whitespaces)
             let name = command.hasPrefix("/") ? (command as NSString).lastPathComponent : command
             guard !name.isEmpty else { return nil }
-            processes.append(ZellijProcess(pid: pid, ppid: ppid, tty: GhosttyTTYMatch.normalizedTTY(String(fields[2])), name: name))
+            processes.append(ZellijProcess(pid: pid, ppid: ppid, uid: uid, tty: GhosttyTTYMatch.normalizedTTY(String(fields[3])),
+                                           name: name))
             guard processes.count <= maximumProcesses else { return nil }
         }
-        return ZellijProcessTable(processes: processes, arguments: arguments, startTimes: startTimes)
+        return ZellijProcessTable(processes: processes, owner: owner, arguments: arguments, startTimes: startTimes)
     }
 
     /// The pids of every `zellij` process, whose arguments SteerApp reads.
@@ -386,11 +393,11 @@ public struct ZellijProcessTable: Equatable, Sendable {
         return ZellijServerIdentity(pid: server.pid, startedAt: started)
     }
 
-    /// Every `zellij` client process for this user: a `zellij` with a controlling tty that is not a
-    /// server. Zellij ties none of them to a session (ADR 0014), so they are counted across all sessions.
+    /// Every `zellij` client process for this user: a `zellij` of `owner` with a controlling tty that is
+    /// not a server. Zellij ties none of them to a session (ADR 0014), so they are counted across all sessions.
     public var clientProcesses: [ZellijProcess] {
         processes.values.filter { process in
-            process.name == Self.processName && process.tty != nil
+            process.name == Self.processName && process.uid == owner && process.tty != nil
                 && !(arguments[process.pid]?.contains("--server") ?? false)
         }.sorted { $0.pid < $1.pid }
     }

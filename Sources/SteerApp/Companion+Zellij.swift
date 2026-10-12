@@ -186,9 +186,9 @@ extension Companion {
         case .notRunning: "no session in the default socket directory"
         case .binaryNotFound: "zellij not found"
         case .unsupportedVersion(let version, let running):
-            "version \(version.map(\.description) ?? "unknown") older than \(ZellijVersion.minimum)\(running ? ", running" : "")"
+            "version \(version) older than \(ZellijVersion.minimum)\(running ? ", running" : "")"
         case .untrustedSocket: "default socket directory untrusted"
-        case .unreadable: "unreadable"
+        case .unreadable(let reason): "unreadable: \(reason.diagnostic)"
         case .snapshot(let snapshot):
             "\(snapshot.sessions.count) sessions, \(snapshot.processes.clientProcesses.count) client processes"
         }

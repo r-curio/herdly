@@ -206,6 +206,23 @@ private let bound = HerdrBinding.bound(HerdrPaneTarget(sessionID: session, agent
     #expect(evaluate(observation: observation(panes: [pane(), pane(session: nil)])) == .unavailable(.conflictingPaneObservations))
 }
 
+@Test func herdrRecordsDifferingOnlyInTheirZellijPaneAreDistinctAndATieBetweenThemConflicts() {
+    // The Zellij pane (#242) is part of a record's identity: the same record twice is one record, but two
+    // newest records naming different Zellij panes cannot both describe the session, so herdr fails closed.
+    let plain = record(at: 100)
+    let inZellij = HerdrHookPaneRecord(sessionID: session, agent: .claude, paneID: "w1:p1", socketPath: defaultSocket,
+                                       recordedAt: 100, zellijPane: ZellijHookPane(paneID: "2", sessionName: "lab"))
+    #expect(plain != inZellij)
+    #expect(inZellij == HerdrHookPaneRecord(sessionID: session, agent: .claude, paneID: "w1:p1", socketPath: defaultSocket,
+                                            recordedAt: 100, zellijPane: ZellijHookPane(paneID: "2", sessionName: "lab")))
+    #expect(evaluate(records: [inZellij, inZellij]) == bound)
+    #expect(evaluate(records: [plain, inZellij]) == .unavailable(.conflictingHookRecords))
+    // A newer record decides as before.
+    #expect(evaluate(records: [plain, HerdrHookPaneRecord(sessionID: session, agent: .claude, paneID: "w1:p1",
+                                                          socketPath: defaultSocket, recordedAt: 110,
+                                                          zellijPane: ZellijHookPane(paneID: "2", sessionName: "lab"))]) == bound)
+}
+
 @Test func herdrBindingRestoresWhenTheSessionEndsAndANewOneStartsInThePane() {
     // Claude exits: herdr clears the pane and Steer marks the session ended.
     let cleared = observation(panes: [pane(agent: nil, session: nil)])

@@ -12,8 +12,9 @@ import SteerCore
 /// Zellij's configuration.
 ///
 /// An isolated Zellij 0.45.1 run (#242) showed that any `zellij action`, like `list-sessions`, deletes a
-/// socket in the directory that refuses a connection. Steer connects to each socket itself first and
-/// addresses only sessions whose socket accepts, but cannot stop Zellij's own sweep of refusing sockets.
+/// socket in the directory that refuses a connection. Steer connects to each socket itself first and runs
+/// no `zellij` command at all while any socket refuses (`ZellijReader`), so reading never changes the
+/// user's Zellij state.
 enum ZellijRunner {
     /// Seconds any one command may run before it is terminated.
     static let timeout: Double = 2
@@ -38,85 +39,48 @@ enum ZellijRunner {
         temporaryDirectory().flatMap { ZellijSocketDirectory.path(temporaryDirectory: $0, uid: getuid()) }
     }
 
-    /// One read of the default socket directory: binary and version, trust, the live sessions, the process
-    /// table, then each live session's panes, tabs and clients.
+    /// The effects `ZellijReader` orders: the fresh directory listing, Steer's own socket probe, the binary,
+    /// the bounded command runner and the process table.
+    static var effects: ZellijEffects {
+        ZellijEffects(socketDirectory: socketDirectory(), me: getuid(),
+                      listing: { socketDirectory().flatMap(listing) },
+                      probe: { path in
+                          switch TmuxRunner.peer(path) {
+                          case .refused: .refused
+                          case .otherUser: .otherUser
+                          case .currentUser: .currentUser
+                          }
+                      },
+                      binaryPresent: { binary() != nil },
+                      run: { run($0) },
+                      processTable: { processTable() })
+    }
+
+    /// One read (`ZellijReader.read`): no `zellij` command runs unless every socket in the default
+    /// directory accepts a connection.
     static func read() -> ZellijRead {
-        guard let directory = socketDirectory() else { return .unreadable }
-        let sockets: [String: TmuxFileFacts]
-        switch socketEntries(directory) {
-        case .none: return .unreadable
-        case .some(let entries): sockets = entries
-        }
-        guard binary() != nil else { return sockets.isEmpty ? .notRunning : .binaryNotFound }
-        // A version that cannot be read is a failed read, never claimed as too old.
-        guard let version = installedVersion() else { return .unreadable }
-        guard version.isSupported else {
-            return .unsupportedVersion(version, running: processTable().map { !$0.zellijPIDs.isEmpty } ?? true)
-        }
-        switch ZellijSocketTrust.problem(base: facts((directory as NSString).deletingLastPathComponent),
-                                         directory: facts(directory), sockets: sockets, me: getuid()) {
-        case .notRunning?: return .notRunning
-        case .untrusted?: return .untrustedSocket
-        case nil: break
-        }
-        var live: [String] = []
-        for name in sockets.keys.sorted() {
-            switch TmuxRunner.peer("\(directory)/\(name)") {
-            case .refused: continue
-            case .otherUser: return .untrustedSocket
-            case .currentUser:
-                guard let valid = ZellijSessionName.validated(name) else { return .unreadable }
-                live.append(valid)
-            }
-        }
-        guard !live.isEmpty else { return .notRunning }
-        guard let table = processTable() else { return .unreadable }
-        var sessions: [ZellijSession] = []
-        for name in live {
-            guard let session = readSession(name) else { return .unreadable }
-            sessions.append(session)
-        }
-        return .snapshot(ZellijSnapshot(socketDirectory: directory, sessions: sessions, processes: table))
+        ZellijReader.read(effects)
     }
 
-    /// A command that types or moves focus (`write-chars`, `write`, `focus-pane-id`): sent only when,
-    /// immediately before it, a read of the target's session and the process table shows the bound pane
-    /// still a live, single terminal pane under the server the fresh check read (`ZellijInput.writeAllowed`).
-    /// An unknown pane id would otherwise exit 0 having written nothing. Refused: `.failed`, so nothing
-    /// counts as written.
+    /// A command that types or moves focus, sent only after a fresh directory check and a re-read of the
+    /// bound pane (`ZellijReader.send`).
     static func send(_ arguments: [String], to target: ZellijPaneTarget, expecting expected: ZellijServerIdentity?) -> ZellijCommandOutcome {
-        guard let directory = socketDirectory(), let session = readSession(target.session), let table = processTable(),
-              ZellijInput.writeAllowed(target, expected: expected,
-                                       current: ZellijSnapshot(socketDirectory: directory, sessions: [session], processes: table)) else {
-            return .failed(stderr: "")
-        }
-        return run(arguments)
-    }
-
-    private static func readSession(_ name: String) -> ZellijSession? {
-        guard case .succeeded(let panes) = run(["--session", name, "action", "list-panes", "--json", "--all"]),
-              case .succeeded(let tabs) = run(["--session", name, "action", "list-tabs", "--json"]),
-              case .succeeded(let clients) = run(["--session", name, "action", "list-clients"]) else { return nil }
-        return ZellijSession.parse(name: name, panes: panes, tabs: tabs, clients: clients)
-    }
-
-    private static func installedVersion() -> ZellijVersion? {
-        guard case .succeeded(let output) = run(["--version"]) else { return nil }
-        return ZellijVersion.parse(output)
+        ZellijReader.send(arguments, to: target, expecting: expected, effects: effects)
     }
 
     /// The process table, each `zellij` process's arguments and each one's start time, from the kernel.
     static func processTable() -> ZellijProcessTable? {
-        guard case .succeeded(let output)? = bounded("/bin/ps", ["-axo", "pid=,ppid=,tty=,comm="],
+        guard case .succeeded(let output)? = bounded("/bin/ps", ["-axo", "pid=,ppid=,uid=,tty=,comm="],
                                                      environment: ["PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8"]),
-              let parsed = ZellijProcessTable.parse(output, arguments: [:], startTimes: [:]) else { return nil }
+              let parsed = ZellijProcessTable.parse(output, owner: getuid(), arguments: [:], startTimes: [:]) else { return nil }
         var arguments: [Int32: [String]] = [:]
         var starts: [Int32: Double] = [:]
         for pid in parsed.zellijPIDs {
             if let argv = processArguments(pid) { arguments[pid] = argv }
             if let started = HerdrProcessTree.startTime(of: pid) { starts[pid] = started }
         }
-        return ZellijProcessTable(processes: Array(parsed.processes.values), arguments: arguments, startTimes: starts)
+        return ZellijProcessTable(processes: Array(parsed.processes.values), owner: parsed.owner, arguments: arguments,
+                                  startTimes: starts)
     }
 
     /// Runs one Zellij command. Stdout over `ZellijListing.maximumOutput` is a failure.
@@ -168,10 +132,12 @@ enum ZellijRunner {
         return .succeeded(String(decoding: bytes, as: UTF8.self))
     }
 
-    /// Each socket in the contract directory by name, with its `lstat` facts; entries of other kinds are
-    /// never addressed. Empty when the directory does not exist; nil when it cannot be listed or is too large.
-    private static func socketEntries(_ directory: String) -> [String: TmuxFileFacts]? {
-        guard facts(directory) != nil else { return [:] }
+    /// A fresh `lstat` listing of the contract directory and its parent, with each socket entry by name;
+    /// entries of other kinds are never addressed. No sockets when the directory does not exist; nil when it
+    /// cannot be listed or is too large.
+    private static func listing(_ directory: String) -> ZellijDirectoryListing? {
+        let base = facts((directory as NSString).deletingLastPathComponent)
+        guard let contract = facts(directory) else { return ZellijDirectoryListing(base: base, directory: nil, sockets: [:]) }
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory),
               names.count <= maximumEntries else { return nil }
         var sockets: [String: TmuxFileFacts] = [:]
@@ -179,7 +145,7 @@ enum ZellijRunner {
             guard let entry = facts("\(directory)/\(name)") else { continue }
             if entry.kind == .socket { sockets[name] = entry }
         }
-        return sockets
+        return ZellijDirectoryListing(base: base, directory: contract, sockets: sockets)
     }
 
     private static func facts(_ path: String) -> TmuxFileFacts? {
