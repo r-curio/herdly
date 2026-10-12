@@ -144,3 +144,47 @@ showed 20 notifications; its first row read **Codex CLI finished Session
 This proves the fresh CLI lifecycle-to-completion path and native row rendering
 through the allowed Steer route. Sound audibility/mute and Ghostty-focused
 suppression remain human-only boundaries and are not proven here.
+
+## Tab binding by tty across enabled hosts (#235)
+
+[ADR 0013](adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md)'s rules are in
+`Sources/SteerCore/TerminalTabBinding.swift` as pure functions. SteerApp passes in each
+host's inventory, the `ps -t` reads and the kernel read of Claude's registered process.
+
+- **Inventory:** `TerminalHostInventory` per terminal host: `notRunning` (holds nothing),
+  `unreadable`, or `tabs`, where each `TerminalTab` has the host's tab handle, tty, title
+  and pane count. Only hosts whose switch is on are read, whatever is passed for the
+  others. If an enabled host is unreadable or has no inventory yet, every session is
+  `hostUnreadable`. A tab without a tty (Ghostty without `tty`) counts toward Codex title
+  uniqueness but never binds under these rules (`ttyUnknown`).
+- **Foreground:** `TerminalForegroundProcesses.parse` reads
+  `ps -o pid=,stat=,comm= -t <tty>`. A process is in the foreground when its `stat`
+  contains `+`, and its name is the basename of `comm`. A malformed row or more than 256
+  rows makes the whole read unreadable.
+- **Codex:** `TerminalTabBindingRules.codex` checks, in order: the session's shortened
+  identifier is unique among live sessions; exactly one enabled tab shows that title; the
+  tab has a tty and one pane; exactly one foreground `codex` runs on that tty; and a second
+  read finds the same tab, tty and title. Codex hook records are never read.
+- **Claude Code:** `TerminalTabBindingRules.claude` starts from the one registry process
+  (`unidentified` and `ambiguous` both fail). It requires the live PID's start time to
+  equal the `procStart` Claude recorded, when Claude recorded one. That process's tty must
+  be on exactly one unsplit enabled tab, and the PID must be in that tty's foreground
+  group. The title is optional. A Steer Claude title for another session, or any
+  shortened Codex identifier, vetoes the binding.
+- **Hook identifiers:** both hook writers record `ITERM_SESSION_ID`, `TERM_SESSION_ID`
+  and `WEZTERM_PANE` (`iterm_session_id`, `term_session_id`, `wezterm_pane`) for
+  diagnostics only. They also record `ZELLIJ_PANE_ID` and `ZELLIJ_SESSION_NAME`.
+  `TerminalHookIdentifiers.zellijPane` returns that pane only from a Claude Code record
+  that carries both values, as ADR 0014's binding input. The tab rules take no hook
+  identifier.
+- **Ghostty** keeps ADR 0005's title-only matching (`GhosttyMatch`) until it exposes
+  `tty` ([#251](https://github.com/r-curio/steer/issues/251)).
+
+Automated checks: `TerminalTabBindingTests` covers a decoy with the same title, two
+`codex` processes on one tty, one title in two hosts, a split tab, an unreadable or unread
+host, a switched-off host, the second read, a Claude title veto, a `procStart` mismatch,
+and hook identifiers deciding nothing outside Zellij. `SteerHook --self-test` checks the
+recorded identifiers. Not wired yet: no iTerm2, Terminal.app or WezTerm inventory reader,
+no `ps -t` runner, and nothing calls these rules from Open or typed input. The host build
+tickets add those ([#238](https://github.com/r-curio/steer/issues/238)–[#242](https://github.com/r-curio/steer/issues/242)).
+Live application proof: none. Not run; needs live acceptance (MVP acceptance §3d per host).
