@@ -79,39 +79,52 @@ enum GhosttyNavigation {
               let value = try? JSONSerialization.jsonObject(with: response) as? [String: Any] else { return false }
         return value["status"] as? String == "ok"
     }
-    static func open(session: UUID, live: Set<UUID>) -> (opened: Bool, message: String) {
-        open(title: GhosttyMatch.title(session), live: live.map(GhosttyMatch.title), unavailable: "No unique live, unsplit tab matches \(GhosttyMatch.title(session)). Keep that session open with its session-ID title enabled.", sameWindowOnly: false)
+    /// Open for a Codex CLI session's tab: `.opened` only when the exact tab was selected and
+    /// verified; otherwise the miss as ADR 0015 classifies it. Sends no input and
+    /// never raises Ghostty for a miss; the caller decides the fallback.
+    ///
+    /// - Parameter running: whether Ghostty is running, read on the main actor. A Ghostty that is not
+    ///   running is an empty inventory (ADR 0013) and is not asked anything.
+    static func open(session: UUID, live: Set<UUID>, running: Bool) -> GhosttyTitleOutcome {
+        open(title: GhosttyMatch.title(session), live: live.map(GhosttyMatch.title), running: running, sameWindowOnly: false)
     }
-    static func openClaude(sessionID: String, live: [String]) -> (opened: Bool, message: String) {
+    /// The same for a Claude tab, by its full Claude title, limited to the front window.
+    static func openClaude(sessionID: String, live: [String], running: Bool) -> GhosttyTitleOutcome {
         guard let title = GhosttyMatch.claudeTitle(sessionID) else {
-            return (false, "The exact Claude tab is unavailable because its session identity is not canonical.")
+            // A non-canonical session id has no title any tab can carry.
+            return .miss(.fallBack(.noUniqueTarget, candidates: 0))
         }
-        return open(title: title, live: live.compactMap(GhosttyMatch.claudeTitle), unavailable: "No unique live, unsplit tab matches \(title). Keep Claude open with its exact session title enabled.", sameWindowOnly: true)
+        return open(title: title, live: live.compactMap(GhosttyMatch.claudeTitle), running: running, sameWindowOnly: true)
     }
-    private static func open(title: String, live: [String], unavailable: String, sameWindowOnly: Bool) -> (opened: Bool, message: String) {
-        guard let before = snapshot() else {
-            return (false, "Could not read Ghostty’s tabs. Check Automation access and that Ghostty is running.")
+    private static func open(title: String, live: [String], running: Bool, sameWindowOnly: Bool) -> GhosttyTitleOutcome {
+        let before = running ? snapshot() : nil
+        let target: GhosttyTarget
+        switch GhosttyTitleOpen.revalidate(title: title, live: live, ghostty: before, running: running,
+                                           sameWindowOnly: sameWindowOnly) {
+        case .exact(let exact): target = exact
+        case .miss(let miss): return .miss(miss)
         }
-        guard let target = GhosttyMatch.target(title: title, live: live, snapshot: before) else {
-            return (false, unavailable)
+        var status: String?
+        if let bytes = try? JSONEncoder().encode(target),
+           let object = try? JSONSerialization.jsonObject(with: bytes),
+           let response = request(["action": "select", "title": title, "target": object, "same_window_only": sameWindowOnly]),
+           let value = try? JSONSerialization.jsonObject(with: response) as? [String: Any] {
+            status = value["status"] as? String ?? ""
         }
-        guard !sameWindowOnly || GhosttyMatch.isInCurrentWindow(target, snapshot: before) else {
-            return (false, "The exact tab is in another Ghostty window; Steer cannot raise that window safely.")
+        if let miss = GhosttyTitleOpen.selection(status: status) { return .miss(miss) }
+        if let miss = GhosttyTitleOpen.verify(target, title: title, live: live, after: snapshot(),
+                                              sameWindowOnly: sameWindowOnly) {
+            return .miss(miss)
         }
-        guard let bytes = try? JSONEncoder().encode(target),
-              let object = try? JSONSerialization.jsonObject(with: bytes),
-              let response = request(["action": "select", "title": title, "target": object, "same_window_only": sameWindowOnly]),
-              let value = try? JSONSerialization.jsonObject(with: response) as? [String: Any],
-              value["status"] as? String == "ok" else {
-            return (false, "Found the tab, but selection failed or its identity changed. The reminder is retained.")
-        }
-        guard let after = snapshot(), (!sameWindowOnly || GhosttyMatch.isInCurrentWindow(target, snapshot: after)),
-              after.selected == target,
-              GhosttyMatch.target(title: title, live: live, snapshot: after) == target else {
-            return (false, "Sent the tab selection, but could not verify the foreground tab. The reminder is retained.")
-        }
-        return (true, "Opened the matching Ghostty tab.")
+        return .opened
     }
+}
+
+/// What a Ghostty title Open did: the exact tab verified, or a miss for the caller to resolve under
+/// ADR 0015 (fall back to raising the app, or unavailable). A miss has no exact case.
+enum GhosttyTitleOutcome: Equatable, Sendable {
+    case opened
+    case miss(OpenMiss)
 }
 
 /// Reads the scripting dictionary of the Ghostty bundle Steer drives, without Apple Events or a

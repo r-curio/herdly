@@ -705,15 +705,22 @@ public struct HerdrScan: Equatable, Sendable {
     /// restart check compares against. Nil when the listing showed zero or several server
     /// processes or the kernel could not report a start time; a binding is then unavailable.
     public let serverStartedAt: Double?
+    /// Every attached client process, however many, so an Open fallback can walk each to the app
+    /// hosting it (ADR 0015). Never used to bind or target a pane.
+    public let clientPIDs: [Int32]
 
+    /// - Parameter clientPIDs: every attached client; defaults to the single client of a successful
+    ///   verdict, or none.
     public init(snapshot: HerdrSnapshot, integration: HerdrIntegrationReport,
                 client: Result<HerdrAttachedClient, HerdrUnavailableReason>, serverStartedAt: Double? = nil,
-                processInfo: [String: Result<HerdrProcessInfo, HerdrUnavailableReason>] = [:]) {
+                processInfo: [String: Result<HerdrProcessInfo, HerdrUnavailableReason>] = [:],
+                clientPIDs: [Int32]? = nil) {
         self.snapshot = snapshot
         self.integration = integration
         self.client = client
         self.serverStartedAt = serverStartedAt
         self.processInfo = processInfo
+        self.clientPIDs = clientPIDs ?? ((try? client.get()).map { [$0.pid] } ?? [])
     }
 
     /// The first scan-level reason a session of `agent` cannot be targeted, or nil when exactly one

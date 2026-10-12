@@ -50,6 +50,26 @@ public enum TerminalHost: String, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// The bundle identifier of a terminal app, which a process walk matches (ADR 0015); nil for a
+    /// multiplexer, which is not an app.
+    public var bundleIdentifier: String? {
+        switch self {
+        case .ghostty: "com.mitchellh.ghostty"
+        case .iTerm2: "com.googlecode.iterm2"
+        case .terminalApp: "com.apple.Terminal"
+        case .wezTerm: "com.github.wez.wezterm"
+        case .tmux, .zellij, .herdr: nil
+        }
+    }
+
+    /// The terminal app with this bundle identifier, nil for any other app.
+    public init?(bundleIdentifier: String) {
+        guard let host = TerminalHost.terminals.first(where: { $0.bundleIdentifier == bundleIdentifier }) else {
+            return nil
+        }
+        self = host
+    }
+
     /// The user-defaults key holding the switch. Ghostty keeps the key of the former single
     /// Ghostty controls switch, so its stored choice carries over unchanged.
     public var defaultsKey: String {

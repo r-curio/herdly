@@ -236,7 +236,8 @@ public struct HerdrOpenEffects {
 
 public enum HerdrOpenSequence {
     /// Runs ADR 0011's five steps, stopping at the first failure. A failure after step 2 leaves herdr's
-    /// focus as it is: there is no rollback and no fallback.
+    /// focus as it is: there is no rollback, and never another pane or tab. Whether the failure then
+    /// raises the client's app is `HerdrOpenFallback`'s decision (ADR 0015).
     @MainActor
     public static func run(_ effects: HerdrOpenEffects) async -> HerdrOpenResult {
         let support = await effects.ttySupport()
@@ -261,6 +262,93 @@ public enum HerdrOpenSequence {
             return .unavailable(failure)
         }
         return .opened(plan)
+    }
+}
+
+// MARK: - Fallback (ADR 0015)
+
+/// ADR 0015 over herdr's typed failures: a layout or match failure, a pane focus or verification that
+/// did not hold, or a Ghostty tab that could not be raised after the pane verified, falls back to
+/// raising the app hosting herdr's client. An unreadable herdr or Ghostty, a stale integration, an
+/// ended session, a closed pane, a switch that keeps Steer from contacting herdr, and a client whose
+/// tty cannot be joined stay unavailable with their own reason. The sequence itself is unchanged: it
+/// still stops at the first failure and never rolls back.
+public enum HerdrOpenFallback {
+    /// Why `failure` falls back, or nil when it stays unavailable.
+    public static func reason(for failure: HerdrOpenFailure) -> OpenFallbackReason? {
+        switch failure {
+        case .ghosttyTTYUnsupported: .noUniqueTarget
+        case .sessionNotInHerdr, .clientTTYUnknown, .ghosttyInventoryUnavailable: nil
+        case .binding(let reason), .herdrVerifyUnavailable(let reason): Self.reason(for: reason)
+        case .ghosttyTab(let join): Self.reason(for: join)
+        case .focusRejected(let reason): hostUnreadable(reason) ? nil : .notVerified
+        case .herdrBindingChanged, .herdrPaneNotFocused, .herdrClientChanged: .notVerified
+        case .ghosttySelectFailed, .ghosttyVerifyInventoryUnavailable, .ghosttyJoinChanged, .ghosttyTabNotSelected:
+            .partialReach
+        }
+    }
+
+    public static func reason(for session: HerdrSessionUnavailable) -> OpenFallbackReason? {
+        switch session {
+        case .herdrSwitchedOff, .ghosttyControlsOff, .notScanned, .serverIdentityUnknown: nil
+        case .herdr(let reason): Self.reason(for: reason)
+        case .binding(let reason): Self.reason(for: reason)
+        }
+    }
+
+    public static func reason(for herdr: HerdrUnavailableReason) -> OpenFallbackReason? {
+        switch herdr {
+        case .split, .nonGhosttyClient: .unsupportedLayout
+        case .wrongClientCount(let count): count > 1 ? .unsupportedLayout : nil
+        case .herdrNotFound, .notRunning, .untrustedSocket, .unsupportedProtocol, .integrationNotCurrent,
+             .namedSession, .voidBinding, .timeout, .malformedReply, .paneChangedDuringScan, .requestRefused: nil
+        }
+    }
+
+    /// Several panes claiming the session still put it in herdr, whose client names the app. A pane
+    /// that is missing, unidentified or contradicted does not show the session is there at all.
+    public static func reason(for binding: HerdrBindingUnavailable) -> OpenFallbackReason? {
+        switch binding {
+        case .split, .multipleClients, .nonGhosttyClient: .unsupportedLayout
+        case .duplicateMatches, .duplicateTitles, .sessionPrefixNotUnique: .noUniqueTarget
+        case .sessionEnded, .noHookRecord, .notInHerdr, .conflictingHookRecords, .unsupportedProtocol, .socketUnknown,
+             .namedSession, .herdrRestarted, .paneReusedBySession, .conflictingPaneObservations, .paneMissing,
+             .agentSessionNull, .agentSessionMismatch, .conflictingTitle, .integrationNotCurrent, .noClient,
+             .titleNotInHerdr, .titleInHerdrAndGhostty, .detectedAgent, .processInfoUnavailable,
+             .foregroundProcesses, .agentProcessNotInForeground, .agentProcessAmbiguous: nil
+        }
+    }
+
+    /// No unique Ghostty tab or an unsupported one falls back; an unreadable inventory or client tty does not.
+    public static func reason(for join: GhosttyTTYJoin) -> OpenFallbackReason? {
+        switch join {
+        case .ttyUnsupported, .noMatch, .emptyValue, .multipleMatches: .noUniqueTarget
+        case .split, .otherWindow: .unsupportedLayout
+        case .matched, .inventoryUnavailable, .invalidClientTTY: nil
+        }
+    }
+
+    /// The result of a herdr Open that failed with `failure`, or nil when the failure is not a fallback
+    /// and its own typed reason stands. `clientWalks` are walks from every client attached in the
+    /// latest scan (`clientPIDs`); the app they all reach is raised while running.
+    public static func resolve(_ failure: HerdrOpenFailure, agent: AgentSource, clientWalks: [TerminalAppWalk],
+                               switches: TerminalHostSwitches, isRunning: (TerminalHost) -> Bool) -> TerminalOpenResult? {
+        guard let reason = reason(for: failure) else { return nil }
+        return OpenFallback.resolve(reason, app: OpenFallback.processApp(walks: clientWalks, agent: agent, switches: switches),
+                                    isRunning: isRunning)
+    }
+
+    /// Every client attached in a successful scan; none otherwise.
+    public static func clientPIDs(_ outcome: HerdrScanOutcome?) -> [Int32] {
+        outcome?.scan?.clientPIDs ?? []
+    }
+
+    /// herdr's socket is missing, untrusted, unusable or herdr is absent: the host cannot be read.
+    private static func hostUnreadable(_ reason: HerdrUnavailableReason) -> Bool {
+        switch reason {
+        case .herdrNotFound, .notRunning, .untrustedSocket, .unsupportedProtocol: true
+        default: false
+        }
     }
 }
 
