@@ -18,13 +18,18 @@ public struct HerdrHookPaneRecord: Equatable, Hashable, Sendable {
     public let paneID: String?
     public let socketPath: String?
     public let recordedAt: Double
+    /// The Zellij pane a Claude Code record names (`TerminalHookIdentifiers.zellijPane`), Zellij's
+    /// binding input (ADR 0014, #242); nil for every Codex record.
+    public let zellijPane: ZellijHookPane?
 
-    public init(sessionID: String, agent: HerdrAgentKind, paneID: String?, socketPath: String?, recordedAt: Double) {
+    public init(sessionID: String, agent: HerdrAgentKind, paneID: String?, socketPath: String?, recordedAt: Double,
+                zellijPane: ZellijHookPane? = nil) {
         self.sessionID = sessionID
         self.agent = agent
         self.paneID = paneID
         self.socketPath = socketPath
         self.recordedAt = recordedAt
+        self.zellijPane = zellijPane
     }
 }
 

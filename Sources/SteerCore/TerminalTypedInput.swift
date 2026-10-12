@@ -8,27 +8,27 @@ import Foundation
 
 extension TerminalHost {
     /// Whether Steer types session replies into this host's bound pane (ADR 0017's table, as built).
-    /// Terminal.app replies (#239), WezTerm replies (#240), tmux replies (#241). Zellij gains replies in
-    /// its build ticket; Ghostty and herdr only after a live proof of their text send; iTerm2 never
-    /// (Broadcast Input).
+    /// Terminal.app replies (#239), WezTerm replies (#240), tmux replies (#241), Zellij replies (#242).
+    /// Ghostty and herdr only after a live proof of their text send; iTerm2 never (Broadcast Input).
     public var typesReplies: Bool {
         switch self {
-        case .terminalApp, .wezTerm, .tmux: true
-        case .ghostty, .iTerm2, .zellij, .herdr: false
+        case .terminalApp, .wezTerm, .tmux, .zellij: true
+        case .ghostty, .iTerm2, .herdr: false
         }
     }
 
     /// Whether a Codex question's digit may be typed here. Ghostty (ADR 0006) and herdr (ADR 0010) have
     /// their own relays. Terminal.app never: `do script`'s forced newline could answer the next
     /// question. iTerm2 never. WezTerm's relay is built (#240) behind `WezTermInput.questionDigitsProvenLive`
-    /// until a live digit proof, and tmux's (#241) behind `TmuxInput.questionDigitsProvenLive`; Zellij
-    /// waits for its ticket and a live digit proof.
+    /// until a live digit proof, tmux's (#241) behind `TmuxInput.questionDigitsProvenLive` and Zellij's
+    /// (#242) behind `ZellijInput.questionDigitsProvenLive`.
     public var typesQuestionDigits: Bool {
         switch self {
         case .ghostty, .herdr: true
         case .wezTerm: WezTermInput.questionDigitsProvenLive
         case .tmux: TmuxInput.questionDigitsProvenLive
-        case .terminalApp, .iTerm2, .zellij: false
+        case .zellij: ZellijInput.questionDigitsProvenLive
+        case .terminalApp, .iTerm2: false
         }
     }
 }
@@ -58,7 +58,8 @@ public enum TerminalReplyRoute: Equatable, Hashable, Sendable {
     case hostCannotType(TerminalHost)
 
     /// The route for a tab binding (ADR 0013). nil leaves the session to the routes it already has: a
-    /// tab bound in, or only titled by, a host whose replies are not built (Ghostty without `tty`).
+    /// tab bound in, or only titled by, a host whose replies are not built (Ghostty without `tty`), or a
+    /// Zellij pane, which Zellij's own rule binds and routes (`ZellijInput.route`, #242).
     public static func from(_ binding: TerminalTabBinding) -> TerminalReplyRoute? {
         switch binding {
         case .bound(let target):
@@ -66,7 +67,7 @@ public enum TerminalReplyRoute: Equatable, Hashable, Sendable {
                 return .pane(TypedInputPane(host: target.host, paneID: target.tabID, tty: target.tty))
             }
             return target.host == .iTerm2 ? .hostCannotType(.iTerm2) : nil
-        case .unavailable(.ttyUnknown(let host)) where !host.typesReplies:
+        case .unavailable(.ttyUnknown(let host)) where !host.typesReplies || host == .zellij:
             return nil
         case .unavailable:
             return .unreachable
@@ -253,10 +254,10 @@ public enum TypedReplySequence {
 /// the key may go only when every other enabled host was read fresh and none carries the session's
 /// title. Host-neutral: each host's fresh inventory is passed in.
 public enum TerminalKeyRelayCheck {
-    /// The enabled hosts other than Ghostty that must be read fresh before a Ghostty key: every terminal
-    /// and tmux, whose panes carry Codex titles too (#241).
+    /// The enabled hosts other than Ghostty that must be read fresh before a Ghostty key: every terminal,
+    /// tmux and Zellij, whose panes carry Codex titles too (#241, #242).
     public static func hostsToRead(switches: TerminalHostSwitches) -> [TerminalHost] {
-        TerminalHost.ttyBound.filter { $0 != .ghostty && switches.mayContact($0) }
+        TerminalHost.titleCounted.filter { $0 != .ghostty && switches.mayContact($0) }
     }
 
     /// nil when the key may go. A host missing from `fresh` or unreadable fails closed; a host whose tab

@@ -41,7 +41,7 @@ final class TerminalAppState {
 }
 
 /// The enabled hosts a read is taken across, for ADR 0013's cross-host uniqueness: Terminal.app's
-/// tabs, Ghostty's titles, iTerm2's, WezTerm's and tmux's inventories (#240, #241) while each is on.
+/// tabs, Ghostty's titles, iTerm2's, WezTerm's, tmux's and Zellij's inventories (#240–#242) while each is on.
 /// Read on the main actor.
 struct OtherTabHosts: Sendable {
     let ghosttyOn: Bool
@@ -57,6 +57,11 @@ struct OtherTabHosts: Sendable {
     var terminalAppOn = true
     /// tmux may be contacted (its switch and a terminal on); it is never read otherwise (#241).
     var tmuxOn = false
+    /// Zellij may be contacted (its switch and a terminal on); it is never read otherwise (#242).
+    var zellijOn = false
+
+    /// A multiplexer is read, so WezTerm's clients are read too, for a client's host tab.
+    var multiplexerOn: Bool { tmuxOn || zellijOn }
 }
 
 /// One set of fresh reads across the enabled hosts (ADR 0013): the first inventories, `ps` for the
@@ -68,6 +73,8 @@ struct TerminalTabReads: Sendable {
     let secondRead: [TerminalHost: TerminalHostInventory]
     /// The first read's tmux server; `.notRunning` while tmux is off.
     var tmux: TmuxRead = .notRunning
+    /// The first read's Zellij sessions; `.notRunning` while Zellij is off (#242).
+    var zellij: ZellijRead = .notRunning
     /// The first read's Ghostty, iTerm2 and WezTerm snapshots, for a multiplexer's host tab (#241).
     var ghostty: GhosttySnapshot?
     var iTerm2: ITerm2Snapshot?
@@ -99,7 +106,7 @@ struct TerminalTabReads: Sendable {
         var wezTerm: WezTermSnapshot?
         var wezTermClients: WezTermClients?
         if let running = others.wezTermRunning {
-            let (read, clients) = WezTermNavigation.read(running: running, clients: others.tmuxOn)
+            let (read, clients) = WezTermNavigation.read(running: running, clients: others.multiplexerOn)
             inventories[.wezTerm] = read.inventory
             wezTerm = read.snapshot
             wezTermClients = clients
@@ -107,6 +114,9 @@ struct TerminalTabReads: Sendable {
         }
         let tmux: TmuxRead = others.tmuxOn ? TmuxRunner.read() : .notRunning
         if others.tmuxOn { inventories[.tmux] = tmux.inventory }
+        // Zellij beside them (#242): its panes count toward Codex title uniqueness; it lists no tty to read.
+        let zellij: ZellijRead = others.zellijOn ? ZellijRunner.read() : .notRunning
+        if others.zellijOn { inventories[.zellij] = zellij.inventory }
         let ttys = (terminal.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
             .union(wezTermTTYs).union(tmux.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
         let processes = TerminalTTYReads.processes(on: ttys)
@@ -114,15 +124,18 @@ struct TerminalTabReads: Sendable {
         if second {
             if others.terminalAppOn { secondRead[.terminalApp] = TerminalAppNavigation.snapshot().inventory }
             if others.tmuxOn { secondRead[.tmux] = TmuxRunner.read().inventory }
+            if others.zellijOn { secondRead[.zellij] = ZellijRunner.read().inventory }
         }
         return TerminalTabReads(terminalApp: terminal, inventories: inventories, processes: processes,
-                                secondRead: secondRead, tmux: tmux, ghostty: ghostty, iTerm2: iTerm2,
+                                secondRead: secondRead, tmux: tmux, zellij: zellij, ghostty: ghostty, iTerm2: iTerm2,
                                 wezTerm: wezTerm, wezTermClients: wezTermClients)
     }
 
-    /// The ttys of tmux's attached clients in the first read: host tabs left out of the Codex title
-    /// count (ADR 0014).
-    var multiplexerClientTTYs: Set<String> { tmux.snapshot?.clientTTYs ?? [] }
+    /// The ttys of tmux's attached clients and of Zellij's client processes in the first read: host tabs
+    /// left out of the Codex title count (ADR 0014).
+    var multiplexerClientTTYs: Set<String> {
+        (tmux.snapshot?.clientTTYs ?? []).union(zellij.snapshot?.clientTTYs ?? [])
+    }
 
     /// Whether Terminal.app's tabs carry `title`.
     func terminalAppCarries(title: String) -> Bool {
@@ -168,7 +181,8 @@ extension Companion {
         return OtherTabHosts(ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyOn && TerminalApps.isRunning(.ghostty),
                              iTerm2Running: hostSwitches.mayContact(.iTerm2) ? TerminalApps.isRunning(.iTerm2) : nil,
                              wezTermRunning: wezTermSwitchedOn ? TerminalApps.isRunning(.wezTerm) : nil,
-                             terminalAppOn: terminalAppSwitchedOn, tmuxOn: tmuxContactAllowed)
+                             terminalAppOn: terminalAppSwitchedOn, tmuxOn: tmuxContactAllowed,
+                             zellijOn: zellijContactAllowed)
     }
 
     /// Terminal.app's switch is on. Open and question keys then account for it even before or without a
@@ -324,7 +338,9 @@ extension Companion {
         var claudeTargets: [AgentSessionIdentity: TerminalTabTarget] = [:]
         for (identity, process) in claude {
             let binding = claudeBinding(identity, process: process, reads: reads)
-            if let route = TerminalReplyRoute.from(binding) { claudeRoutes[identity] = route }
+            // A session Zellij holds or could hold keeps Zellij's route (#242): its pane has no tab here.
+            if zellijClaudeBinding(identity, process: process, read: reads.zellij) == .notInZellij,
+               let route = TerminalReplyRoute.from(binding) { claudeRoutes[identity] = route }
             if case .bound(let target) = binding, target.host == .terminalApp { claudeTargets[identity] = target }
             diagnostics.append("Claude \(identity.session): \(binding)")
         }
@@ -535,6 +551,10 @@ extension Companion {
         if tmuxContactAllowed {
             for (session, route) in tmux.codexRoutes { routes[session] = TerminalReplyRoute.merging(routes[session], route) }
         }
+        // Zellij (#242): a session Zellij holds, or one an unreadable Zellij could hold, merges Zellij's route.
+        if zellijContactAllowed {
+            for (session, route) in zellij.codexRoutes { routes[session] = TerminalReplyRoute.merging(routes[session], route) }
+        }
         if hostSwitches.mayContact(.iTerm2) {
             for (session, block) in iTerm2.codexInputBlocks {
                 routes[session] = block == .inITerm2 ? .hostCannotType(.iTerm2) : .unreachable
@@ -544,10 +564,12 @@ extension Companion {
     }
 
     /// The question route's host other than Ghostty whose latest scan showed the session's tab:
-    /// iTerm2 or Terminal.app, whose questions are answered in Codex (ADR 0017), or tmux (#241), whose
-    /// pane keys are offered only once its digit is proven live (`tmuxQuestionKeyPane`).
+    /// iTerm2 or Terminal.app, whose questions are answered in Codex (ADR 0017), or tmux (#241) and Zellij
+    /// (#242), whose pane keys are offered only once each one's digit is proven live (`tmuxQuestionKeyPane`,
+    /// `zellijQuestionKeyPane`).
     func terminalHost(forQuestionSession session: UUID) -> TerminalHost? {
         if tmuxContactAllowed, tmux.codexSeen.contains(session) { return .tmux }
+        if zellijContactAllowed, zellij.codexSeen.contains(session) { return .zellij }
         if hostSwitches.mayContact(.iTerm2), iTerm2.codexInputBlocks[session] == .inITerm2 { return .iTerm2 }
         if wezTermSwitchedOn, wezTerm.codexSeen.contains(session) { return .wezTerm }
         return terminalAppSwitchedOn && terminalApp.codexSeen.contains(session) ? .terminalApp : nil
@@ -557,6 +579,7 @@ extension Companion {
     /// denied, so no key may be offered (ADR 0013 "Inventory"). A host that is not running holds nothing.
     func unreadQuestionHost(for session: UUID) -> TerminalHost? {
         if tmuxContactAllowed, tmux.read?.snapshot == nil, tmux.read != .notRunning { return .tmux }
+        if zellijContactAllowed, zellij.read?.snapshot == nil, zellij.read?.inventory != .notRunning { return .zellij }
         if hostSwitches.mayContact(.iTerm2), TerminalApps.isRunning(.iTerm2),
            iTerm2.codexInputBlocks[session] == .iTerm2Unreadable || iTerm2.scan == .notRead || iTerm2.scan == .unreadable {
             return .iTerm2
@@ -572,8 +595,9 @@ extension Companion {
     nonisolated static func freshInventories(_ hosts: [TerminalHost], running: Set<TerminalHost>) -> [TerminalHost: TerminalHostInventory] {
         var result: [TerminalHost: TerminalHostInventory] = [:]
         for host in hosts {
-            // tmux is no app: its own read says whether its default server runs.
+            // tmux and Zellij are no apps: their own reads say whether a server runs.
             if host == .tmux { result[host] = TmuxRunner.read().inventory; continue }
+            if host == .zellij { result[host] = ZellijRunner.read().inventory; continue }
             guard running.contains(host) else { result[host] = .notRunning; continue }
             switch host {
             case .terminalApp: result[host] = TerminalAppNavigation.snapshot().inventory
@@ -608,15 +632,15 @@ extension Companion {
                          ReminderReader.currentEvidence(for: completion.session, in: rolloutRoot))
                     }.value
                     checked.server = fresh.0.tmux.snapshot?.server
+                    checked.zellij = Companion.zellijServer(for: send.pane, in: fresh.0)
                     return TypedReplyCheck.veto(self.codexReplyState(completion,
-                                                                     route: TmuxInput.route(self.codexBinding(completion.session, reads: fresh.0),
-                                                                                            snapshot: fresh.0.tmux.snapshot),
+                                                                     route: self.codexTypedRoute(completion.session, reads: fresh.0),
                                                                      evidence: fresh.1),
                                                 spent: send.pane)
                 },
                 write: { write in
-                    let server = checked.server
-                    return await Task.detached { Companion.typeInto(send.pane, write, tmuxServer: server) }.value
+                    let server = checked.server, zellij = checked.zellij
+                    return await Task.detached { Companion.typeInto(send.pane, write, tmuxServer: server, zellijServer: zellij) }.value
                 },
                 pause: { seconds in try? await Task.sleep(for: .seconds(seconds)) })
             terminalApp.replying = false
@@ -656,7 +680,7 @@ extension Companion {
     /// The Claude card's reply target, nil when no typed route exists (the card shows no field). Terminal.app's
     /// and WezTerm's latest scans each give a route; a route that is not one pane wins (#240).
     func claudeReplyTarget(for outcome: AgentOutcome) -> SessionReplyTarget? {
-        guard terminalAppActive || wezTermSwitchedOn || tmuxContactAllowed, outcome.session.source == .claude,
+        guard terminalAppActive || wezTermSwitchedOn || tmuxContactAllowed || zellijContactAllowed, outcome.session.source == .claude,
               outcome.session.surface == .cli else { return nil }
         let items = orderedAgentAttentionItems.filter { $0.session == outcome.session }
         let ended = liveClaudeSessions[outcome.session.sourceScope].map { !$0.contains(outcome.session.session) } ?? false
@@ -665,7 +689,8 @@ extension Companion {
         let route = TerminalReplyRoute.merging(
             TerminalReplyRoute.merging(terminalAppActive ? terminalApp.claudeRoutes[outcome.session] : nil,
                                        wezTermSwitchedOn ? wezTerm.claudeRoutes[outcome.session] : nil),
-            tmuxContactAllowed ? tmux.claudeRoutes[outcome.session] : nil)
+            TerminalReplyRoute.merging(tmuxContactAllowed ? tmux.claudeRoutes[outcome.session] : nil,
+                                       zellijContactAllowed ? zellij.claudeRoutes[outcome.session] : nil))
         return ClaudeReplyRouting.target(ended: ended, inTurn: inTurn, route: route)
     }
 
@@ -673,8 +698,8 @@ extension Companion {
         terminalApp.claudeReplies[outcome.id] ?? ReplyProgress(completion: outcome.id)
     }
 
-    /// One Send on a Claude completion card: text and its submit in one write (`do script`, or tmux's
-    /// `send-keys`), after a fresh check.
+    /// One Send on a Claude completion card: text and its submit in one write (`do script`, tmux's
+    /// `send-keys` or Zellij's `write-chars`), after a fresh check.
     func sendClaudeReply(_ outcome: AgentOutcome, text: String) {
         guard !terminalApp.replying else { return }
         let progress = claudeReply(for: outcome)
@@ -716,13 +741,13 @@ extension Companion {
                     }.value
                     guard let fresh else { return .unreachable }
                     checked.server = fresh.2.tmux.snapshot?.server
-                    let route = TmuxInput.route(self.claudeBinding(outcome.session, process: fresh.1, reads: fresh.2),
-                                                snapshot: fresh.2.tmux.snapshot)
+                    checked.zellij = Companion.zellijServer(for: send.pane, in: fresh.2)
+                    let route = self.claudeTypedRoute(outcome.session, process: fresh.1, reads: fresh.2)
                     return TypedReplyCheck.veto(self.claudeReplyState(outcome, row: fresh.0, route: route), spent: send.pane)
                 },
                 write: { write in
-                    let server = checked.server
-                    return await Task.detached { Companion.typeInto(send.pane, write, tmuxServer: server) }.value
+                    let server = checked.server, zellij = checked.zellij
+                    return await Task.detached { Companion.typeInto(send.pane, write, tmuxServer: server, zellijServer: zellij) }.value
                 },
                 pause: { seconds in try? await Task.sleep(for: .seconds(seconds)) })
             terminalApp.replying = false
@@ -766,10 +791,11 @@ extension Companion {
     }
 }
 
-/// The tmux server a typed reply's latest fresh check read, so its write goes only to that server.
+/// The tmux and Zellij servers a typed reply's latest fresh check read, so its write goes only to them.
 @MainActor
 final class TmuxCheckedServer {
     var server: TmuxServerIdentity?
+    var zellij: ZellijServerIdentity?
 }
 
 /// The latest reads an Open's revalidation took, for the fallback's candidate walks.

@@ -320,6 +320,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     let wezTerm = WezTermState()
     /// tmux scan, visits and typed routes (Companion+Tmux.swift, #241).
     let tmux = TmuxState()
+    /// Zellij scan, visits and typed routes (Companion+Zellij.swift, #242).
+    let zellij = ZellijState()
     var claudeInventoryAvailable: [String: Bool] = [:]
     var claudeInventories: [String: ClaudeInventoryScan] = [:]
     /// Unix time of the inventory in `ghosttyFocusState`, for dating a session end at the tab's absence.
@@ -1449,6 +1451,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         checkTerminalApp()
         checkWezTerm()
         checkTmux()
+        checkZellij()
         // App identity only: no window contents, task titles, or accessibility queries.
         // App activation affects notification delivery, never the notch's visibility.
         let codexForeground = previewMode == nil ? desktopAdapter.codexForeground() : false
@@ -2368,6 +2371,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if host == .wezTerm { wezTermSwitchChanged(on) }
         // tmux is contacted only while a terminal is on too (ADR 0014), so any switch can move its gate.
         tmuxSwitchChanged(hostSwitches.isOn(.tmux))
+        zellijSwitchChanged(hostSwitches.isOn(.zellij))
     }
 
     func ghosttyChanged(_ enabled: Bool) {
