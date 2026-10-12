@@ -17,8 +17,9 @@ enum GhosttyAutomationPermission {
 
     static func openSettings() { NSWorkspace.shared.open(settingsURL) }
 
-    static func check(askIfNeeded: Bool) -> GhosttyAutomationAccess {
-        let target = NSAppleEventDescriptor(bundleIdentifier: bundleIdentifier)
+    /// `targetIdentifier` names another app for the same check (iTerm2, #238).
+    static func check(askIfNeeded: Bool, target targetIdentifier: String = bundleIdentifier) -> GhosttyAutomationAccess {
+        let target = NSAppleEventDescriptor(bundleIdentifier: targetIdentifier)
         guard let desc = target.aeDesc else { return .unknown(-1) }
         return GhosttyAutomationAccess(status: AEDeterminePermissionToAutomateTarget(desc, typeWildCard, typeWildCard, askIfNeeded))
     }

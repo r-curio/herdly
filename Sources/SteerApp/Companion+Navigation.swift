@@ -123,16 +123,21 @@ extension Companion {
                 result = nil
             } else {
                 // Ghostty off is never scanned: the session's own registry process names its app.
-                let outcome: GhosttyTitleOutcome = ghosttyOn
-                    ? await Task.detached {
-                        await GhosttyNavigation.openClaude(sessionID: identity.session, live: live, running: ghosttyRunning)
-                    }.value
-                    : .miss(.fallBack(.noUniqueTarget, candidates: 0))
                 let pid = own[0].pid
                 let switches = hostSwitches
-                result = await openResult(outcome) { _ in
-                    let walk = await Task.detached { pid.map(TerminalApps.walk(from:)) ?? .failed }.value
-                    return OpenFallback.processApp(walks: [walk], agent: .claude, switches: switches)
+                // iTerm2 first (#238): its tty binding decides whenever the process's tty is on an iTerm2 tab.
+                if let iTerm2Result = await openClaudeInITerm2(sessionID: identity.session, pid: pid) {
+                    result = iTerm2Result
+                } else {
+                    let outcome: GhosttyTitleOutcome = ghosttyOn
+                        ? await Task.detached {
+                            await GhosttyNavigation.openClaude(sessionID: identity.session, live: live, running: ghosttyRunning)
+                        }.value
+                        : .miss(.fallBack(.noUniqueTarget, candidates: 0))
+                    result = await openResult(outcome) { _ in
+                        let walk = await Task.detached { pid.map(TerminalApps.walk(from:)) ?? .failed }.value
+                        return OpenFallback.processApp(walks: [walk], agent: .claude, switches: switches)
+                    }
                 }
             }
             navigationMessage = result.map { message(for: $0, opened: "Opened the matching Claude tab.") }
@@ -217,12 +222,18 @@ extension Companion {
 
     func openCLI(_ session: UUID) {
         guard !openingTask else { return }
-        guard ghosttyEnabled else { showControls(); return }
+        guard cliTerminalHostOn else { showControls(); return }
         // A session in herdr never falls back to the title route. An approval reaching here through
         // `openApprovalInCodex` was already handed back (ADR 0011).
         let herdrKey = HerdrSessionKey(agent: .codex, sessionID: session.uuidString)
-        if herdrBinding(for: herdrKey) != .notInHerdr {
+        let herdrRoute = herdrBinding(for: herdrKey)
+        if herdrRoute != .notInHerdr, ghosttyEnabled || herdrRoute != .unavailable(.ghosttyControlsOff) {
             openHerdr(herdrKey, subject: .codex(session))
+            return
+        }
+        // With iTerm2 on (#238), ADR 0013's binding across the enabled hosts decides.
+        if hostSwitches.mayContact(.iTerm2) {
+            openCLIAcrossHosts(session)
             return
         }
         openingTask = true
@@ -252,10 +263,10 @@ extension Companion {
         }
     }
     func reminderActionTitle(_ item: Reminder) -> String {
-        cliSessions.contains(item.session_id) && !ghosttyEnabled ? "Set up Ghostty" : "Open Session"
+        cliSessions.contains(item.session_id) && !cliTerminalHostOn ? "Set up Ghostty" : "Open Session"
     }
     var needsGhosttySetup: Bool {
-        !ghosttyEnabled && (!cliItems.isEmpty || visibleReminders.contains { cliSessions.contains($0.session_id) }
+        !cliTerminalHostOn && (!cliItems.isEmpty || visibleReminders.contains { cliSessions.contains($0.session_id) }
                             || queue.items.contains { $0.question?.source == .cli })
     }
     func openReminder(_ item: Reminder) {
@@ -408,6 +419,7 @@ extension Companion {
         let now = Date().timeIntervalSince1970
         herdr.open.visits.reset(at: now)
         resetGhosttyVisits(at: now)
+        iTerm2.visits.reset(at: now)
     }
 
     /// Sessions with queued completions whose current binding is `pane`.
