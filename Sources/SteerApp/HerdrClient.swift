@@ -195,7 +195,8 @@ struct HerdrClient: Sendable {
             }
         }
         return .available(HerdrScan(snapshot: snapshot, integration: integration,
-                                    client: HerdrAttachedClient.verdict(listing: listing, ancestry: ancestry),
+                                    client: HerdrAttachedClient.verdict(listing: listing, ancestry: ancestry,
+                                                                        hostCommands: request.clientHostCommands),
                                     serverStartedAt: serverStartedAt(listing), processInfo: processInfo,
                                     clientPIDs: listing.clientPIDs))
     }

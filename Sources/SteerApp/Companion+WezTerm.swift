@@ -44,6 +44,9 @@ struct WezTermTabReads: Sendable {
     let inventories: [TerminalHost: TerminalHostInventory]
     let processes: [String: [TerminalProcess]]
     let secondRead: [TerminalHost: TerminalHostInventory]
+    /// tmux's attached clients in the first read, whose host tabs ADR 0014 leaves out of the Codex title
+    /// count (#241); empty while tmux is off.
+    var multiplexerClientTTYs: Set<String> = []
 
     /// Blocking: call off the main actor. `others` says which other hosts are on and running.
     static func take(running: Bool, others: OtherTabHosts, codexTitles: Set<String>, claudeTTYs: Set<String>,
@@ -60,12 +63,19 @@ struct WezTermTabReads: Sendable {
         if let terminal = others.terminalAppRunning {
             inventories[.terminalApp] = terminal ? TerminalAppNavigation.snapshot().inventory : .notRunning
         }
-        let ttys = read.snapshot?.ttysToRead(codexTitles: codexTitles, claudeTTYs: claudeTTYs) ?? []
+        // tmux beside it (#241): its panes count toward uniqueness, and its clients' host tabs do not.
+        let tmux: TmuxRead = others.tmuxOn ? TmuxClient.read() : .notRunning
+        if others.tmuxOn { inventories[.tmux] = tmux.inventory }
+        let ttys = (read.snapshot?.ttysToRead(codexTitles: codexTitles, claudeTTYs: claudeTTYs) ?? [])
+            .union(tmux.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
         let processes = TerminalTTYReads.processes(on: ttys)
         var secondRead = inventories
-        if second { secondRead[.wezTerm] = WezTermNavigation.read(running: running).0.inventory }
+        if second {
+            secondRead[.wezTerm] = WezTermNavigation.read(running: running).0.inventory
+            if others.tmuxOn { secondRead[.tmux] = TmuxClient.read().inventory }
+        }
         return WezTermTabReads(wezTerm: read, clients: clientRead, inventories: inventories, processes: processes,
-                               secondRead: secondRead)
+                               secondRead: secondRead, multiplexerClientTTYs: tmux.snapshot?.clientTTYs ?? [])
     }
 
     func carries(title: String) -> Bool {
@@ -93,7 +103,8 @@ extension Companion {
         let ghosttyOn = ghosttyEnabled && ghosttyPermissionVerified
         return OtherTabHosts(ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyOn && TerminalApps.isRunning(.ghostty),
                              iTerm2Running: hostSwitches.mayContact(.iTerm2) ? TerminalApps.isRunning(.iTerm2) : nil,
-                             terminalAppRunning: terminalAppActive ? TerminalApps.isRunning(.terminalApp) : nil)
+                             terminalAppRunning: terminalAppActive ? TerminalApps.isRunning(.terminalApp) : nil,
+                             tmuxOn: tmuxContactAllowed)
     }
 
     // MARK: - Switch
@@ -236,7 +247,7 @@ extension Companion {
         TerminalTabBindingRules.codex(sessionID: session.uuidString, liveness: endedSessions.contains(session) ? .ended : .live,
                                       liveSessions: Set(liveCLI.map(\.uuidString)), switches: hostSwitches,
                                       inventories: reads.inventories, processes: reads.processes,
-                                      secondRead: reads.secondRead)
+                                      secondRead: reads.secondRead, multiplexerClientTTYs: reads.multiplexerClientTTYs)
     }
 
     private func wezTermClaudeBinding(_ identity: AgentSessionIdentity, process: ClaudeTabProcess,
@@ -533,6 +544,9 @@ extension Companion {
         } else if wezTermSwitchedOn, case let .pane(bound)? = wezTerm.codexRoutes[question.session],
                   bound.host.typesQuestionDigits {
             pane = bound
+        } else if let bound = tmuxQuestionKeyPane(for: question.session) {
+            // tmux (#241), behind its own live-proof gate.
+            pane = bound
         } else {
             pane = nil
         }
@@ -551,6 +565,11 @@ extension Companion {
         // Unreachable in practice: `start` succeeded only for a queued question, and `pane` came from the
         // ledger or a WezTerm route whose host types digits. Kept as a last guard so nothing is sent to a
         // host without its send here, or in preview.
+        // tmux's pane keys type through tmux's own send (#241).
+        if let current, previewMode == nil, start.pane.host == .tmux, start.pane.host.typesQuestionDigits {
+            sendTmuxQuestionKey(current, start: start, question: question, index: index, option: option)
+            return
+        }
         guard let current, previewMode == nil, start.pane.host == .wezTerm, start.pane.host.typesQuestionDigits else { return }
         answering = true
         relayLedger = start.ledger
@@ -571,7 +590,8 @@ extension Companion {
                 let binding = TerminalTabBindingRules.codex(sessionID: current.session.uuidString, liveness: liveness,
                                                             liveSessions: liveIDs, switches: switches,
                                                             inventories: reads.inventories, processes: reads.processes,
-                                                            secondRead: reads.secondRead)
+                                                            secondRead: reads.secondRead,
+                                                            multiplexerClientTTYs: reads.multiplexerClientTTYs)
                 // The rollout last, as of this instant: a manual answer Codex already recorded, or an ended
                 // turn, sends nothing.
                 let evidence = ReminderReader.currentEvidence(for: current.session, in: rolloutRoot)
