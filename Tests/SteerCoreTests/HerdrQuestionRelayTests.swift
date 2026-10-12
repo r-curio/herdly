@@ -235,7 +235,8 @@ private func started(_ question: AttentionQuestion, progress: QuestionAnswerProg
 
 @Test func aCodexQuestionInAHostWithoutDigitsIsAnsweredInCodex() {
     // ADR 0017: Terminal.app types no question digits, because `do script`'s newline could answer the
-    // next question. The daemon still wins, and a session in herdr keeps its pane route.
+    // next question. The daemon still wins; a session also bound in herdr is withheld too, since a herdr
+    // key needs the title unique across the enabled hosts.
     let call = question()
     func terminalRoute(book: AppServerQuestionBook = AppServerQuestionBook(), daemonConnected: Bool = false,
                        herdr: HerdrSessionBinding = .notInHerdr) -> QuestionAnswerRoute {
