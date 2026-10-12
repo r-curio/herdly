@@ -29,6 +29,111 @@ public struct HerdrFocusObservation: Equatable, Sendable {
     }
 }
 
+/// A Ghostty check SteerApp must take for one herdr scan: the scan, its focused pane, and the scan
+/// before it, for the visit interval.
+public struct HerdrVisitCheck: Equatable, Sendable {
+    public let current: HerdrFocusObservation
+    public let pane: String
+    public let previous: TerminalVisibilityScan<String>?
+}
+
+/// A check that returned and still counts, with what it read.
+public struct HerdrVisitCheckResult: Sendable {
+    public let check: HerdrVisitCheck
+    public let support: GhosttyTTYSupport
+    public let ghostty: GhosttySnapshot?
+    public let ghosttyTakenAt: Double
+}
+
+/// The visit interval and dwell run over scheduled herdr scans (ADR 0016). Scans arrive from a detached
+/// monitor and Ghostty checks return asynchronously, so each carries its scan time: after `reset(at:)` (an
+/// Open ended), a scan or check taken at or before that time is ignored. The interval spanning an Open is
+/// therefore never a visit, and a fallback acknowledges nothing (ADR 0015).
+public struct HerdrVisitTracker: Equatable, Sendable {
+    /// The latest scan's reading. A scan whose Ghostty check is in flight reads `.unchecked` until the
+    /// check returns; nil after a reset.
+    public private(set) var lastScan: TerminalVisibilityScan<String>?
+    public private(set) var dwell = TerminalDwell<String>()
+    /// The pane a Ghostty check is sampling, while one is in flight.
+    public private(set) var checkingPaneID: String?
+    private var resetAt = -Double.infinity
+
+    public init() {}
+
+    /// Records one scheduled scan started at `takenAt` (`current` is nil when it had no single
+    /// Ghostty-hosted client) and returns the Ghostty check to take, if any. Ghostty is asked only while macOS reports
+    /// it `frontmost`, the focused pane holds a live or queued session, and no check or Open is in flight;
+    /// with another app in front the pane is not visible and nothing is asked.
+    public mutating func scan(_ current: HerdrFocusObservation?, takenAt: Double, openInFlight: Bool,
+                              holdsLiveBoundTarget: (String) -> Bool, frontmost: TerminalHost?) -> HerdrVisitCheck? {
+        guard takenAt.isFinite, takenAt > resetAt else { return nil }
+        let previous = lastScan
+        // Until a Ghostty check says otherwise, only the focused pane is known.
+        lastScan = TerminalVisibilityScan(takenAt: takenAt, reading: HerdrOpenAcknowledgment.reading(
+            current, ghosttyShowsVisit: nil, ghosttyTakenAt: takenAt))
+        guard checkingPaneID == nil, !openInFlight else {
+            // A failed scan or another pane still restarts the run, so a check in flight from an earlier
+            // scan cannot extend it past this one.
+            dwell.skip(candidate: current?.focusedPaneID, pending: checkingPaneID, at: takenAt)
+            return nil
+        }
+        guard let current, let pane = current.focusedPaneID, holdsLiveBoundTarget(pane) else {
+            dwell.reset(at: takenAt)
+            return nil
+        }
+        // ADR 0016, "Presentation and scanning": a host that macOS does not report frontmost has nothing
+        // visible, so it is not asked.
+        guard frontmost == .ghostty else {
+            lastScan = TerminalVisibilityScan(takenAt: takenAt, reading: .nothing)
+            dwell.observe(target: pane, visible: false, at: takenAt)
+            return nil
+        }
+        checkingPaneID = pane
+        return HerdrVisitCheck(current: current, pane: pane, previous: previous)
+    }
+
+    /// Records a returned check. Nil when its scan was taken at or before the latest reset: it then
+    /// counts for nothing. An unreadable inventory (`ghostty` nil) is unknown.
+    public mutating func finish(_ check: HerdrVisitCheck, support: GhosttyTTYSupport, ghostty: GhosttySnapshot?,
+                                ghosttyTakenAt: Double) -> HerdrVisitCheckResult? {
+        checkingPaneID = nil
+        let takenAt = check.current.takenAt
+        guard takenAt > resetAt else { return nil }
+        let reading: TerminalVisibilityReading<String> = ghostty.map {
+            HerdrOpenAcknowledgment.reading(check.current, ghosttyShowsVisit: HerdrOpenAcknowledgment.ghosttyShowsVisit(
+                clientTTY: check.current.clientTTY, support: support, ghostty: $0), ghosttyTakenAt: ghosttyTakenAt)
+        } ?? .unknown
+        // A later scan has replaced this one already: leave its reading.
+        if lastScan?.takenAt == takenAt { lastScan = TerminalVisibilityScan(takenAt: takenAt, reading: reading) }
+        dwell.observe(target: check.pane, visible: reading == .visible(check.pane), at: takenAt)
+        return HerdrVisitCheckResult(check: check, support: support, ghostty: ghostty, ghosttyTakenAt: ghosttyTakenAt)
+    }
+
+    /// Ends a check without a result (Ghostty switched off meanwhile): the run restarts at its scan.
+    public mutating func cancel(_ check: HerdrVisitCheck) {
+        checkingPaneID = nil
+        dwell.reset(at: check.current.takenAt)
+    }
+
+    /// The completions of a session bound to the checked pane that a manual visit or the dwell
+    /// acknowledges as of the returned check.
+    public func acknowledged<ID>(_ completions: [TerminalCompletionCandidate<ID>],
+                                 after result: HerdrVisitCheckResult) -> Set<ID> {
+        let check = result.check
+        return HerdrOpenAcknowledgment.manualVisit(completions, boundPaneID: check.pane, previous: check.previous,
+                                                   current: check.current, support: result.support,
+                                                   ghostty: result.ghostty, ghosttyTakenAt: result.ghosttyTakenAt)
+            .union(dwell.acknowledged(completions, target: check.pane, at: check.current.takenAt))
+    }
+
+    /// Forgets every scan up to `at` (an Open ended): the next visit needs two scans taken after it.
+    public mutating func reset(at: Double) {
+        lastScan = nil
+        dwell.reset(at: at)
+        if at.isFinite { resetAt = max(resetAt, at) }
+    }
+}
+
 public enum HerdrOpenAcknowledgment {
     /// After an Open: only when it reported Opened, the completions that arrived strictly before the
     /// pre-Open herdr scan started.

@@ -18,6 +18,20 @@ public struct TerminalCompletionCandidate<ID: Hashable & Sendable>: Equatable, S
     }
 }
 
+extension TerminalCompletionCandidate where ID == CompletionIdentity {
+    /// A queued Codex completion, identified as the Codex queue acknowledges it.
+    public init(_ completion: AttentionCompletion) {
+        self.init(id: completion.id, arrivedAt: completion.arrivedAt)
+    }
+}
+
+extension TerminalCompletionCandidate where ID == AgentTurnIdentity {
+    /// A queued agent outcome, identified as the agent queue dismisses it.
+    public init(_ outcome: AgentOutcome) {
+        self.init(id: outcome.id, arrivedAt: outcome.arrivedAt)
+    }
+}
+
 /// What one scan of a host says about its bound targets (ADR 0016, "Visible").
 public enum TerminalVisibilityReading<Target: Equatable & Sendable>: Equatable, Sendable {
     /// A fresh read shows this target visible: its host frontmost per macOS, the host's own front tab
@@ -74,8 +88,7 @@ public enum TerminalVisitAcknowledgment {
     }
 }
 
-/// The per-host visible tests and when Steer asks a host (ADR 0016, "Visible" and "Presentation and
-/// scanning"). Frontmost always comes from macOS, passed in as the terminal app it reports (nil for any
+/// The per-host visible tests (ADR 0016, "Visible"). Frontmost always comes from macOS, passed in as the terminal app it reports (nil for any
 /// other app), never from the host: hosts keep reporting a current tab while another app is in front.
 public enum TerminalVisibility {
     /// Ghostty's test (ADR 0011): macOS reports Ghostty frontmost, and the inventory's selected tab, in
@@ -88,14 +101,6 @@ public enum TerminalVisibility {
         guard frontmost == .ghostty, let selected = snapshot.selected,
               GhosttyMatch.isInCurrentWindow(selected, snapshot: snapshot) else { return .nothing }
         return .visible(selected)
-    }
-
-    /// Whether to ask `host` for its two-second visibility check: only while macOS reports it frontmost
-    /// (a host that is not frontmost has nothing visible, so it is not asked), it holds a target bound to
-    /// a live session, and no check of it is already in flight.
-    public static func shouldCheck(_ host: TerminalHost, frontmost: TerminalHost?, holdsLiveBoundTarget: Bool,
-                                   checkInFlight: Bool) -> Bool {
-        frontmost == host && holdsLiveBoundTarget && !checkInFlight
     }
 }
 
