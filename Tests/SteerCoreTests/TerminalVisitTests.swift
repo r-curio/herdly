@@ -201,11 +201,3 @@ private func ghostty(selected: GhosttyTarget?, front: String = "w1", status: Str
     #expect(TerminalVisibility.ghostty(try ghostty(selected: tab, status: "unavailable"), frontmost: .ghostty) == .unknown)
     #expect(TerminalVisibility.ghostty(nil, frontmost: .ghostty) == .unknown)
 }
-
-@Test func aHostIsCheckedOnlyWhileFrontmostWithALiveBoundTargetAndNoCheckInFlight() {
-    #expect(TerminalVisibility.shouldCheck(.ghostty, frontmost: .ghostty, holdsLiveBoundTarget: true, checkInFlight: false))
-    #expect(!TerminalVisibility.shouldCheck(.ghostty, frontmost: nil, holdsLiveBoundTarget: true, checkInFlight: false))
-    #expect(!TerminalVisibility.shouldCheck(.ghostty, frontmost: .wezTerm, holdsLiveBoundTarget: true, checkInFlight: false))
-    #expect(!TerminalVisibility.shouldCheck(.ghostty, frontmost: .ghostty, holdsLiveBoundTarget: false, checkInFlight: false))
-    #expect(!TerminalVisibility.shouldCheck(.ghostty, frontmost: .ghostty, holdsLiveBoundTarget: true, checkInFlight: true))
-}

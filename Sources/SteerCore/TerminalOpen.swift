@@ -8,9 +8,9 @@ import Foundation
 // rolled back.
 
 /// The steps of ADR 0016's Open sequence, in order.
-public enum TerminalOpenStep: Int, CaseIterable, Comparable, Sendable {
+public enum TerminalOpenStep: Equatable, Sendable {
     /// Re-read the binding, layout and (for a pane) the host-tab join.
-    case revalidate = 1
+    case revalidate
     /// Focus the bound pane (multiplexers only), once.
     case focusPane
     /// A fresh multiplexer read shows the bound pane current.
@@ -19,8 +19,6 @@ public enum TerminalOpenStep: Int, CaseIterable, Comparable, Sendable {
     case raise
     /// A fresh read shows the target visible.
     case verify
-
-    public static func < (lhs: TerminalOpenStep, rhs: TerminalOpenStep) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
 /// What a sequence did: every verification passed, or the step that failed and its typed failure.

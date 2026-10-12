@@ -147,7 +147,7 @@ extension Companion {
                 }
                 if let result {
                     let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }
-                        .map { TerminalCompletionCandidate(id: $0.id, arrivedAt: $0.arrivedAt) }
+                        .map(TerminalCompletionCandidate.init)
                     for id in TerminalVisitAcknowledgment.afterOpen(outcomes, result: result, preOpenAt: preOpenAt) {
                         agentQueue.dismiss(.outcome(id))
                     }
@@ -240,7 +240,7 @@ extension Companion {
             }
             navigationMessage = message(for: result, opened: "Opened the matching Ghostty tab.")
             let queued = cliItems.filter { $0.session == session }
-                .map { TerminalCompletionCandidate(id: $0.id, arrivedAt: $0.arrivedAt) }
+                .map(TerminalCompletionCandidate.init)
             let acknowledged = TerminalVisitAcknowledgment.afterOpen(queued, result: result, preOpenAt: preOpenAt)
             if !acknowledged.isEmpty {
                 acknowledgeCodexCompletions(Array(acknowledged))
@@ -303,13 +303,8 @@ final class HerdrOpenState {
     /// The typed reason of each session's latest unavailable herdr Open, cleared by a later Opened.
     /// For diagnostics and for the card's grouped reason line (docs/product.md, "Agreed herdr presentation").
     fileprivate(set) var failures: [HerdrSessionKey: HerdrOpenFailure] = [:]
-    /// The latest scheduled scan's reading, for the visit interval (ADR 0016). A scan whose Ghostty check
-    /// is in flight reads `.unchecked` until the check returns; nil after an Open.
-    fileprivate var lastScan: TerminalVisibilityScan<String>?
-    /// The focused pane's current visible run, for the dwell rule.
-    fileprivate var dwell = TerminalDwell<String>()
-    /// The pane a Ghostty visit check is sampling, while one is in flight.
-    fileprivate var checkingPaneID: String?
+    /// The visit interval and dwell run over scheduled scans (ADR 0016), reset after every Open.
+    fileprivate var visits = HerdrVisitTracker()
 }
 
 extension Companion {
@@ -379,54 +374,28 @@ extension Companion {
         guard let startedAt = herdr.monitor.latestStartedAt else { return }
         // The scan's start on the completions' clock: conservative, as the snapshot was read after it.
         let takenAt = Date().timeIntervalSince1970 - max(0, ProcessInfo.processInfo.systemUptime - startedAt)
-        let previous = herdr.open.lastScan
         let current = HerdrFocusObservation.from(outcome, takenAt: takenAt)
-        // Until a Ghostty check says otherwise, only the focused pane is known.
-        herdr.open.lastScan = TerminalVisibilityScan(takenAt: takenAt, reading: HerdrOpenAcknowledgment.reading(
-            current, ghosttyShowsVisit: nil, ghosttyTakenAt: takenAt))
-        guard herdr.open.checkingPaneID == nil, !openingTask else {
-            // No Ghostty check for this scan. A failed scan or another pane still restarts the run, so a
-            // check in flight from an earlier scan cannot extend it past this one.
-            herdr.open.dwell.skip(candidate: current?.focusedPaneID, pending: herdr.open.checkingPaneID, at: takenAt)
-            return
-        }
-        guard let current, let pane = current.focusedPaneID else { herdr.open.dwell.reset(at: takenAt); return }
-        let subjects = herdrVisitSubjects(boundTo: pane)
-        let holdsLiveBoundTarget = !subjects.isEmpty || herdrPaneHostsLiveSession(pane)
-        guard holdsLiveBoundTarget else {
-            herdr.open.dwell.reset(at: takenAt)
-            return
-        }
-        guard TerminalVisibility.shouldCheck(.ghostty, frontmost: TerminalApps.frontmostHost(),
-                                             holdsLiveBoundTarget: holdsLiveBoundTarget, checkInFlight: false) else {
-            // Another app is in front: the pane is not visible, and Ghostty is not asked (ADR 0016).
-            herdr.open.lastScan = TerminalVisibilityScan(takenAt: takenAt, reading: .nothing)
-            herdr.open.dwell.observe(target: pane, visible: false, at: takenAt)
-            return
-        }
-        herdr.open.checkingPaneID = pane
+        var subjects: [HerdrOpenSubject] = []
+        guard let check = herdr.open.visits.scan(current, takenAt: takenAt, openInFlight: openingTask,
+                                                 holdsLiveBoundTarget: { pane in
+                                                     subjects = herdrVisitSubjects(boundTo: pane)
+                                                     return !subjects.isEmpty || herdrPaneHostsLiveSession(pane)
+                                                 },
+                                                 frontmost: TerminalApps.frontmostHost()) else { return }
+        let checkedSubjects = subjects
         Task { @MainActor in
             let ghosttyTakenAt = Date().timeIntervalSince1970
             let observed = await Task.detached { () -> (support: GhosttyTTYSupport, ghostty: GhosttySnapshot?) in
                 // Without `tty` the inventory still says whether Ghostty is frontmost (interim, issue #155).
                 (GhosttyScriptingSupport.ttySupport(), GhosttyNavigation.snapshot())
             }.value
-            herdr.open.checkingPaneID = nil
-            guard ghosttyEnabled else { herdr.open.dwell.reset(at: current.takenAt); return }
-            let reading: TerminalVisibilityReading<String> = observed.ghostty.map {
-                HerdrOpenAcknowledgment.reading(current, ghosttyShowsVisit: HerdrOpenAcknowledgment.ghosttyShowsVisit(
-                    clientTTY: current.clientTTY, support: observed.support, ghostty: $0), ghosttyTakenAt: ghosttyTakenAt)
-            } ?? .unknown
-            let scan = TerminalVisibilityScan(takenAt: current.takenAt, reading: reading)
-            // A later scan or an Open has replaced this one already: leave its reading.
-            if herdr.open.lastScan?.takenAt == current.takenAt { herdr.open.lastScan = scan }
-            herdr.open.dwell.observe(target: pane, visible: reading == .visible(pane), at: current.takenAt)
-            for subject in subjects {
-                let completions = herdrCompletions(subject)
-                let visited = TerminalVisitAcknowledgment.manualVisit(completions, target: pane, previous: previous,
-                                                                      current: scan)
-                let dwelled = herdr.open.dwell.acknowledged(completions, target: pane, at: current.takenAt)
-                acknowledgeHerdrCompletions(visited.union(dwelled), subject: subject)
+            guard ghosttyEnabled else { herdr.open.visits.cancel(check); return }
+            // Nil when an Open ended after this scan started: the check then counts for nothing.
+            guard let result = herdr.open.visits.finish(check, support: observed.support, ghostty: observed.ghostty,
+                                                        ghosttyTakenAt: ghosttyTakenAt) else { return }
+            for subject in checkedSubjects {
+                acknowledgeHerdrCompletions(herdr.open.visits.acknowledged(herdrCompletions(subject), after: result),
+                                            subject: subject)
             }
             refresh()
         }
@@ -437,8 +406,7 @@ extension Companion {
     /// tab acknowledges nothing, and a check started before the Open ended is ignored.
     func endVisitIntervalsAfterOpen() {
         let now = Date().timeIntervalSince1970
-        herdr.open.lastScan = nil
-        herdr.open.dwell.reset(at: now)
+        herdr.open.visits.reset(at: now)
         resetGhosttyVisits(at: now)
     }
 

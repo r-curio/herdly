@@ -2169,7 +2169,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 let queued = cliItems
                 for session in Set(queued.map(\.session)) {
                     let completions = queued.filter { $0.session == session }
-                        .map { TerminalCompletionCandidate(id: $0.id, arrivedAt: $0.arrivedAt) }
+                        .map(TerminalCompletionCandidate.init)
                     let target = GhosttyVisitTargets.codex(session, live: liveCLI, snapshot: snapshot)
                     acknowledgeCodexCompletions(Array(ghosttyVisits.acknowledged(completions, target: target)))
                 }
@@ -2183,7 +2183,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 let outcomes = agentQueue.snapshot.outcomes.filter { $0.session.source == .claude && $0.session.surface == .cli }
                 for identity in Set(outcomes.map(\.session)) {
                     let completions = outcomes.filter { $0.session == identity }
-                        .map { TerminalCompletionCandidate(id: $0.id, arrivedAt: $0.arrivedAt) }
+                        .map(TerminalCompletionCandidate.init)
                     let target = GhosttyVisitTargets.claude(identity, liveSessionsByScope: liveByScope,
                                                             inventoryAvailable: inventoryAvailable,
                                                             configuredScopes: currentScopes, snapshot: snapshot)
