@@ -23,14 +23,18 @@ enum ITerm2Navigation {
     }
 
     /// ADR 0016's select step for `plan`: ITerm2.js rechecks the session's tty and that it is alone in
-    /// its tab, then selects the window, tab and session and activates iTerm2. Nil when iTerm2 did not
-    /// reply. Sends no input.
-    static func select(_ plan: ITerm2OpenPlan) -> ITerm2SelectReply? {
+    /// its tab, then selects the window, tab and session and activates iTerm2. Sends no input. Without a
+    /// reply, a fresh consent check tells an Automation denial (unavailable) from any other error or
+    /// timeout (a fallback, ADR 0016).
+    static func select(_ plan: ITerm2OpenPlan) -> ITerm2SelectReply {
         guard let data = GhosttyNavigation.request(["action": "select", "session": plan.target.tabID,
                                                      "tty": plan.target.tty], resource: "ITerm2"),
               let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let status = value["status"] as? String else { return nil }
-        return ITerm2SelectReply(rawValue: status) ?? .changed
+              let status = value["status"] as? String else {
+            let access = GhosttyAutomationPermission.check(askIfNeeded: false, target: bundleIdentifier)
+            return access == .denied ? .denied : .noReply
+        }
+        return ITerm2SelectReply(status: status)
     }
 }
 
@@ -60,10 +64,10 @@ enum TerminalTTYReads {
         return Double(info.st_mtimespec.tv_sec) + Double(info.st_mtimespec.tv_nsec) / 1_000_000_000
     }
 
-    /// A fresh read of `pid`'s controlling tty. The start time is not re-read: Claude's inventory
-    /// already verified `procStart` when it named the process (`ClaudeInventorySession.pid`).
+    /// A fresh kernel read of `pid`: its start time in Claude's `procStart` layout and its controlling
+    /// tty, so ADR 0013's rule can compare the start time Claude registered (a reused PID never binds).
     static func observation(of pid: Int32) -> TerminalProcessObservation? {
         guard let process = HerdrProcessTree.ancestry(of: pid).first, process.pid == pid else { return nil }
-        return TerminalProcessObservation(pid: pid, procStart: nil, tty: process.tty)
+        return TerminalProcessObservation(pid: pid, procStart: ClaudeSessionRegistry.procStart(of: pid), tty: process.tty)
     }
 }

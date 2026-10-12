@@ -69,6 +69,9 @@ private func snapshot(_ json: String = snapshotJSON()) -> ITerm2Snapshot? {
         snapshotJSON().replacingOccurrences(of: a2, with: "not-a-guid"),
         #"{"status":"ok","current":null,"windows":[{"id":1,"tabs":[{"sessions":null}]}]}"#,
         #"{"status":"unknown"}"#,
+        // A title of the wrong type is malformed, not a missing title.
+        snapshotJSON().replacingOccurrences(of: #""window_name":"Steer Claude \#(claudeSession)""#, with: #""window_name":7"#),
+        snapshotJSON().replacingOccurrences(of: #""icon_name":null"#, with: #""icon_name":["x"]"#),
     ]
     for json in malformed { #expect(ITerm2Reading.parse(Data(json.utf8)) == nil, "\(json.prefix(80))") }
     #expect(ITerm2Reading.parse(Data(repeating: 0x20, count: ITerm2Reading.maximumBytes + 1)) == nil)
@@ -230,7 +233,7 @@ private final class StepLog {
 
 @MainActor
 private func runOpen(_ revalidated: Result<ITerm2OpenPlan, OpenMiss> = .success(codexPlan),
-                     reply: ITerm2SelectReply? = .ok,
+                     reply: ITerm2SelectReply = .ok,
                      after: ITerm2Snapshot? = snapshot(snapshotJSON(current: a1, currentWindow: 9592, a3Title: nil)),
                      frontmost: TerminalHost? = .iTerm2,
                      log: StepLog = StepLog()) async -> TerminalOpenRun<ITerm2OpenPlan, OpenMiss> {
@@ -257,8 +260,9 @@ private func runOpen(_ revalidated: Result<ITerm2OpenPlan, OpenMiss> = .success(
     #expect(await runOpen(.failure(.fallBack(.unsupportedLayout, candidates: 1)), log: log)
             == .failed(.fallBack(.unsupportedLayout, candidates: 1), at: .revalidate))
     #expect(log.steps == ["now", "revalidate@100"])
-    // No reply (a scripting error or Automation denied) is an unreadable host.
-    #expect(await runOpen(reply: nil) == .failed(.unavailable(.hostUnreadable(.iTerm2)), at: .raise))
+    // ADR 0016: an Automation denial is unavailable; any other script error or timeout falls back.
+    #expect(await runOpen(reply: .denied) == .failed(.unavailable(.hostUnreadable(.iTerm2)), at: .raise))
+    #expect(await runOpen(reply: .noReply) == .failed(.fallBack(.notVerified, candidates: 1), at: .raise))
     // The session is gone: its tab closed.
     #expect(await runOpen(reply: .gone) == .failed(.unavailable(.sessionEnded), at: .raise))
     // The session's tty or layout changed under the request: iTerm2 selected nothing; fall back.
@@ -356,4 +360,44 @@ private func runOpen(_ revalidated: Result<ITerm2OpenPlan, OpenMiss> = .success(
     // Every problem line is its own fix.
     #expect(Set(ITerm2SettingsProblem.allCases.map(\.message)).count == ITerm2SettingsProblem.allCases.count)
     #expect(ITerm2Presentation.footer == "Steer returns to unsplit tabs; otherwise Open raises iTerm2.")
+}
+
+@Test func iTerm2SelectRepliesComeOnlyFromTheScriptsThreeStatuses() {
+    #expect(ITerm2SelectReply(status: "ok") == .ok)
+    #expect(ITerm2SelectReply(status: "gone") == .gone)
+    #expect(ITerm2SelectReply(status: "changed") == .changed)
+    // Anything else the script could say selected nothing Steer can name: it falls back.
+    #expect(ITerm2SelectReply(status: "denied") == .changed)
+    #expect(ITerm2SelectReply(status: "unknown") == .changed)
+}
+
+// MARK: - Typed input (ADR 0017, ADR 0013 "Freshness")
+
+@Test func noKeyIsTypedForACodexSessionWhoseTitleIsAlsoInITerm2() {
+    // The same title in a Ghostty tab and an iTerm2 tab: the title is not unique across the enabled
+    // inventories, so Ghostty's relay must not type, and the card shows iTerm2's line.
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, iTerm2: snapshot()!.inventory) == .inITerm2)
+    #expect(ITerm2TypedInputBlock.inITerm2.line == "Steer can't type into iTerm2. Reply in the session.")
+}
+
+@Test func anUnreadableEnabledITerm2MakesTypedInputUnavailable() {
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, iTerm2: .unreadable) == .iTerm2Unreadable)
+    #expect(ITerm2TypedInputBlock.iTerm2Unreadable.line == "Steer can't reach this session's tab. Reply in the session.")
+}
+
+@Test func iTerm2OffNotRunningOrWithoutTheTitleLeavesGhosttyTypedInputUnchanged() {
+    // nil: iTerm2's switch is off, so it is never read.
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, iTerm2: nil) == nil)
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, iTerm2: .notRunning) == nil)
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, iTerm2: snapshot(snapshotJSON(a1Title: nil, a3Title: nil))!.inventory) == nil)
+}
+
+// MARK: - Claude's process start (ADR 0013, ADR 0008)
+
+@Test func aProcessStartReadsBackInClaudesProcStartLayout() throws {
+    let pid = getpid()
+    let start = try #require(ClaudeSessionRegistry.procStart(of: pid))
+    #expect(ClaudeSessionRegistry.isRunning(.init(pid: pid, procStart: start)))
+    #expect(!ClaudeSessionRegistry.isRunning(.init(pid: pid, procStart: "Thu Jan  1 00:00:00 1970")))
+    #expect(ClaudeSessionRegistry.procStart(of: -1) == nil)
 }

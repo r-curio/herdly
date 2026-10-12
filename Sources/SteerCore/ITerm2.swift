@@ -98,8 +98,10 @@ public enum ITerm2Reading: Equatable, Sendable {
                         tty = normalized
                     default: return nil
                     }
-                    sessions.append(ITerm2Session(id: id, window: windowID, tty: tty,
-                                                  title: title(window: member["window_name"], icon: member["icon_name"]),
+                    guard case .success(let title) = title(window: member["window_name"], icon: member["icon_name"]) else {
+                        return nil
+                    }
+                    sessions.append(ITerm2Session(id: id, window: windowID, tty: tty, title: title,
                                                   tabSessionCount: members.count))
                     guard sessions.count <= maximumSessions else { return nil }
                 }
@@ -131,13 +133,27 @@ public enum ITerm2Reading: Equatable, Sendable {
         return NSNumber(value: int) == number ? int : nil
     }
 
-    /// The window name when iTerm2 has one, else the icon name. An overlong window name is no title;
-    /// it never falls through to the icon name.
-    private static func title(window: Any?, icon: Any?) -> String? {
-        let text = (window as? String).flatMap { $0.isEmpty ? nil : $0 } ?? (icon as? String) ?? ""
-        return text.isEmpty || text.count > maximumTitleLength ? nil : text
+    /// The window name when iTerm2 has one, else the icon name; `.failure` when either is neither a
+    /// string nor null, which makes the whole reply malformed. An overlong window name is no title; it
+    /// never falls through to the icon name.
+    private static func title(window: Any?, icon: Any?) -> Result<String?, ITerm2MalformedReply> {
+        func text(_ value: Any?) -> Result<String, ITerm2MalformedReply> {
+            switch value {
+            case nil, is NSNull: .success("")
+            case let string as String: .success(string)
+            default: .failure(ITerm2MalformedReply())
+            }
+        }
+        guard case .success(let windowName) = text(window), case .success(let iconName) = text(icon) else {
+            return .failure(ITerm2MalformedReply())
+        }
+        let chosen = windowName.isEmpty ? iconName : windowName
+        return .success(chosen.isEmpty || chosen.count > maximumTitleLength ? nil : chosen)
     }
 }
+
+/// A reply part of the wrong type.
+struct ITerm2MalformedReply: Error {}
 
 /// What a revalidated iTerm2 Open holds to: the bound session and, for Codex, the title that must still
 /// show (ADR 0013 voids a Codex binding when its title changes; a Claude rename voids nothing).
@@ -153,13 +169,27 @@ public struct ITerm2OpenPlan: Equatable, Sendable {
 
 /// ITerm2.js's reply to `select`. No reply at all (a scripting error, a timeout, Automation denied) is
 /// passed as nil.
-public enum ITerm2SelectReply: String, Equatable, Sendable {
+public enum ITerm2SelectReply: Equatable, Sendable {
     /// The window, tab and session were selected, then iTerm2 activated. Nothing is verified yet.
     case ok
     /// No session has the GUID: its tab closed. Nothing was selected.
     case gone
     /// The session's tty no longer matches, or its tab now holds several sessions. Nothing was selected.
     case changed
+    /// The script got no reply and a fresh check shows macOS Automation access denied.
+    case denied
+    /// Any other script error or timeout: what iTerm2 did is unknown.
+    case noReply
+
+    /// The script's own `status`. Only its three statuses are read; anything else selected nothing
+    /// Steer can name and counts as changed.
+    public init(status: String) {
+        switch status {
+        case "ok": self = .ok
+        case "gone": self = .gone
+        default: self = .changed
+        }
+    }
 }
 
 public enum ITerm2Open {
@@ -174,14 +204,14 @@ public enum ITerm2Open {
         }
     }
 
-    /// Step 3's outcome (ADR 0016, "Failures"): no reply is an unreadable host; a target that is gone
-    /// is an ended session; any other refusal falls back.
-    public static func selection(_ reply: ITerm2SelectReply?) -> OpenMiss? {
+    /// Step 3's outcome (ADR 0016, "Failures"): an Automation denial is an unreadable host; a target
+    /// that is gone is an ended session; any other error or refusal falls back.
+    public static func selection(_ reply: ITerm2SelectReply) -> OpenMiss? {
         switch reply {
-        case nil: .unavailable(.hostUnreadable(.iTerm2))
-        case .gone?: .unavailable(.sessionEnded)
-        case .changed?: .fallBack(.notVerified, candidates: 1)
-        case .ok?: nil
+        case .denied: .unavailable(.hostUnreadable(.iTerm2))
+        case .gone: .unavailable(.sessionEnded)
+        case .changed, .noReply: .fallBack(.notVerified, candidates: 1)
+        case .ok: nil
         }
     }
 
@@ -203,11 +233,11 @@ public enum ITerm2Open {
     /// - Parameters:
     ///   - revalidate: re-runs ADR 0013's binding on fresh inventories and `ps` reads, given the pre-Open
     ///     time; a binding to another host or tab is a miss here.
-    ///   - select: sends ITerm2.js `select` for the plan, nil when iTerm2 did not reply.
+    ///   - select: sends ITerm2.js `select` for the plan once and returns its reply.
     ///   - verifyRead: a fresh inventory (nil when unreadable) and the app macOS reports frontmost.
     public static func run(now: @escaping () -> Double,
                            revalidate: @escaping (Double) async -> Result<ITerm2OpenPlan, OpenMiss>,
-                           select: @escaping (ITerm2OpenPlan) async -> ITerm2SelectReply?,
+                           select: @escaping (ITerm2OpenPlan) async -> ITerm2SelectReply,
                            verifyRead: @escaping () async -> (ITerm2Snapshot?, TerminalHost?),
                            isolation: isolated (any Actor)? = #isolation) async -> TerminalOpenRun<ITerm2OpenPlan, OpenMiss> {
         await TerminalOpenSequence.run(TerminalOpenSteps<ITerm2OpenPlan, OpenMiss>(
@@ -299,5 +329,41 @@ public enum ITerm2Presentation {
         let permission = access == .granted ? "Allowed" : access == .denied ? "Not allowed" : "Not verified"
         let badge: HerdrReadinessBadge = !on ? .off : !problems.isEmpty ? .needsAttention : inUse ? .ready : .notInUse
         return ITerm2SettingsRow(badge: badge, permission: permission, problems: problems)
+    }
+}
+
+// MARK: - Typed input (ADR 0017)
+
+/// Why a Codex session gets no typed input because of iTerm2. Typed input is never sent to iTerm2, and
+/// while iTerm2 is on it counts toward ADR 0013's title uniqueness for every other host's key route.
+public enum ITerm2TypedInputBlock: Equatable, Sendable {
+    /// An iTerm2 tab shows the session's title: its input target is, or may be, in iTerm2.
+    case inITerm2
+    /// iTerm2 is on and running but could not be read, so it cannot be ruled out.
+    case iTerm2Unreadable
+
+    /// The card's line (product.md, "Typed input unavailable"); neither points to Settings.
+    public var line: String {
+        switch self {
+        case .inITerm2: ITerm2Presentation.typedInputLine
+        case .iTerm2Unreadable: "Steer can't reach this session's tab. Reply in the session."
+        }
+    }
+}
+
+/// A small host check that the shared typed-input route (#239) can absorb: before a question key or
+/// typed reply reaches a Codex session through another host (Ghostty's relay), on a fresh iTerm2 read.
+public enum ITerm2TypedInput {
+    /// - Parameters:
+    ///   - title: the session's shortened identifier (ADR 0005).
+    ///   - iTerm2: a fresh iTerm2 inventory, or nil while iTerm2's switch is off (never read).
+    /// - Returns: nil when iTerm2 cannot hold the session: switched off, not running, or no tab shows
+    ///   the title.
+    public static func codexBlock(title: String, iTerm2: TerminalHostInventory?) -> ITerm2TypedInputBlock? {
+        switch iTerm2 {
+        case nil, .notRunning?: nil
+        case .unreadable?: .iTerm2Unreadable
+        case .tabs(let tabs)?: tabs.contains { $0.title == title } ? .inITerm2 : nil
+        }
     }
 }

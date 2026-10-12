@@ -238,14 +238,17 @@ records iTerm2's §3d run. Rules are pure SteerCore functions (`ITerm2.swift`,
   tracked Codex title or on a Claude process's tty. Codex's title uniqueness counts Ghostty's
   tabs too while Ghostty is on (`TerminalHostInventory.ghosttyTitles`, no tty until #251); a
   Codex title found only in Ghostty goes to Ghostty's title route. Claude uses the process
-  Claude's inventory names (its `procStart` already checked there) and binds only by tty; a
-  Claude process on no iTerm2 tab goes on to Ghostty's title route or the process walk as before.
+  Claude's inventory names, with the `procStart` Claude registered compared against a fresh
+  kernel read of the PID's start time, and binds only by tty; a Claude process on no iTerm2
+  tab goes on to Ghostty's title route or the process walk as before.
 - **Open:** `ITerm2Open.run` over `TerminalOpenSequence`: revalidate on two fresh inventories
   with `ps` between, then `select` (the script rechecks the GUID, the tty and a one-session tab,
   then selects window, tab and session and activates), then a fresh inventory and macOS's
   frontmost app must show the session visible, on the same tty, alone in its tab, and for Codex
-  still titled. No reply is "Steer can't read iTerm2. Check Settings › Terminals."; a session
-  gone is "This session has ended."; a refused or unverified select falls back. Binding
+  still titled. A select with no reply is "Steer can't read iTerm2. Check Settings › Terminals."
+  only when a fresh consent check shows Automation denied; any other script error or timeout
+  falls back (ADR 0016). A session gone is "This session has ended."; a refused or unverified
+  select falls back. An unreadable inventory at revalidation stays unavailable. Binding
   reasons map to ADR 0015 in `TerminalTabOpen.route`. Only a verified Open acknowledges.
 - **Fallback app:** Codex walks from each titled tab's single foreground `codex`
   (`TerminalTabOpen.codexCarriers`/`codexCandidates`, then `OpenFallback.codexApp`); Claude walks
@@ -255,23 +258,35 @@ records iTerm2's §3d run. Rules are pure SteerCore functions (`ITerm2.swift`,
   reparented to launchd (iTerm2 restarted while its sessions lived on), the walk reaches no app
   and Open shows "Steer can't tell which terminal this session is in." rather than assuming
   iTerm2 from its own inventory. Neither case has been run from Steer.
-- **Visits:** every two seconds while iTerm2 is on and a CLI session is live or queued, Steer
-  asks iTerm2 only when macOS reports it frontmost (otherwise the scan records nothing visible);
-  `TerminalVisibility.iTerm2` plus the session's binding on the same reads feed a
-  `TerminalVisitTracker`, reset after every Open.
+- **Visits:** every two seconds while iTerm2 is on and a CLI session is live or queued. A
+  session is visible only while macOS reports iTerm2 frontmost; otherwise the scan records
+  nothing visible, and iTerm2 is read only while a queued Codex question or completion needs
+  its typed-input line kept current. `TerminalVisibility.iTerm2` plus the session's binding on
+  the same reads feed a `TerminalVisitTracker`, reset after every Open.
+- **Typed input (ADR 0017):** nothing is ever typed into iTerm2. While iTerm2 is on, a Codex
+  session whose title an iTerm2 tab shows gets "Steer can't type into iTerm2. Reply in the
+  session." in place of Ghostty or herdr question keys and of the reply field's daemon reason
+  (the daemon route still wins when it holds the session); an unreadable iTerm2 gives "Steer
+  can't reach this session's tab. Reply in the session." (`ITerm2TypedInput.codexBlock`, from
+  the latest scan). Immediately before Ghostty's question key, after the rollout check, a fresh
+  iTerm2 read must show no tab with the title and must succeed, so a Ghostty decoy never gets a
+  key while the real session is in iTerm2. With iTerm2 off nothing changes. herdr's key path
+  hides its controls on the same block but has no fresh iTerm2 read at click time; Claude has
+  no typed input to guard. The shared route of #239 can absorb this check.
 - **Permission and card:** turning the switch on asks macOS as Ghostty does; a denial turns it
   back off with the denial line and Open Settings…; iTerm2 not running waits for its launch.
   The card shows the switch, Automation badge, status badge (Off, Not in use, Ready, Needs
   attention), problem lines (not found, Automation denied, unreadable), diagnostics (scan,
   typed input none, each session's last Open) and the footer "Steer returns to unsplit tabs;
-  otherwise Open raises iTerm2." `ITerm2Presentation.typedInputLine` holds "Steer can't type
-  into iTerm2. Reply in the session."; showing it on the notch's reply and question controls
-  belongs with the shared typed-input route (#239).
+  otherwise Open raises iTerm2."
 
 Automated checks: `ITerm2Tests` (fixtures modeled on [the live proof](evidence/iterm2-live.md):
-inventory, malformed and unreadable replies, Codex decoy and second read, Claude by tty, split,
-visible test with another app in front, Open steps and their verification, the route mapping,
-fallback candidates including a failed walk, card lines, and that `ITerm2.js` compiles, never
-writes text and never reads `jobName`). Not run — needs live acceptance (#243): §3d H1–H9 and
+inventory, malformed and unreadable replies including titles of the wrong type, Codex decoy
+and second read, Claude by tty, split, visible test with another app in front, Open steps and
+their verification including denial versus other script errors, the route mapping, fallback
+candidates including a failed walk, card lines, the typed-input block for a title in both
+Ghostty and iTerm2, an unreadable iTerm2 and iTerm2 off, the process start read, and that
+`ITerm2.js` compiles, never writes text and never reads `jobName`), plus `ClaudeInventoryTests`
+for the registered `procStart` carried with the PID. Not run — needs live acceptance (#243): §3d H1–H9 and
 the iTerm2 line in [MVP acceptance](mvp-acceptance.md), and the lab
 `scripts/terminal-lab/iterm2_lab.py`, which drives a real iTerm2.
