@@ -100,6 +100,8 @@ public enum TerminalTabUnavailable: Error, Equatable, Hashable, Sendable {
     case titleNotFound
     /// `count` tabs across the enabled inventories have the session's title.
     case duplicateTitles(Int)
+    /// The Codex session is not among the live tracked sessions passed in.
+    case sessionNotLive
     /// Not exactly one live tracked Codex session renders this shortened identifier; `count` do.
     case sessionPrefixNotUnique(Int)
     /// The only tab showing the title is in a host that does not report its tty (Ghostty without
@@ -170,8 +172,8 @@ public enum TerminalTabBindingRules {
     /// name another tab (ADR 0012).
     ///
     /// - Parameters:
-    ///   - liveSessions: every live tracked Codex session ID, including this one when it is live.
-    ///     The session's shortened identifier must be unique among them.
+    ///   - liveSessions: every live tracked Codex session ID. This session must be among them, and
+    ///     its shortened identifier must be unique among them.
     ///   - switches: only terminal hosts switched on are read; an inventory given for any other
     ///     host is ignored.
     ///   - inventories: the first fresh read of every enabled host.
@@ -188,7 +190,10 @@ public enum TerminalTabBindingRules {
         guard let title = HerdrCodexBindingRules.title(forSession: sessionID.lowercased()) else {
             return .unavailable(.titleNotFound)
         }
-        let sharing = Set(liveSessions.map { $0.lowercased() })
+        let live = Set(liveSessions.map { $0.lowercased() })
+        // Otherwise a live sibling sharing the prefix would be counted as this session's tab.
+        guard live.contains(sessionID.lowercased()) else { return .unavailable(.sessionNotLive) }
+        let sharing = live
             .filter { HerdrCodexBindingRules.title(forSession: $0) == title }.count
         guard sharing == 1 else { return .unavailable(.sessionPrefixNotUnique(sharing)) }
 

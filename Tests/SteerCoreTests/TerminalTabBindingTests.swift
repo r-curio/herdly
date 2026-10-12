@@ -185,6 +185,8 @@ private func codex(_ sessionID: String = codexSession, liveness: HerdrSessionLiv
     let sibling = "019a7c1e-5b2d-7f30-9c11-2f4e8a6b0002"   // same 29-character prefix
     #expect(codex(live: [codexSession, sibling]) == .unavailable(.sessionPrefixNotUnique(2)))
     #expect(codex(liveness: .ended) == .unavailable(.sessionEnded))
+    // A session missing from the live list never takes the tab of a live sibling sharing its prefix.
+    #expect(codex(live: [sibling, otherCodex]) == .unavailable(.sessionNotLive))
     #expect(codex("not-a-uuid") == .unavailable(.titleNotFound))
     // Codex session IDs are compared lowercased.
     #expect(codex(codexSession.uppercased())

@@ -305,8 +305,9 @@ public struct ZellijHookPane: Equatable, Hashable, Sendable {
 /// `ITERM_SESSION_ID`, `TERM_SESSION_ID` and `WEZTERM_PANE` are recorded for diagnostics only: they
 /// neither bind nor veto, because a terminal launched from another agent's session inherits that
 /// session's values. `ZELLIJ_PANE_ID` with `ZELLIJ_SESSION_NAME` is the one exception, a Claude
-/// Code binding input checked against the session process's ancestry; Codex records never supply
-/// it, because Codex hooks run in a shared daemon (ADR 0012).
+/// Code binding input checked against the session process's ancestry. Both hook writers record
+/// every key, but `zellijPane(in:)` reads the Zellij pane only from Claude Code records: Codex
+/// hooks run in a shared daemon whose environment names another pane (ADR 0012).
 ///
 /// A missing, empty, oversized or malformed value is absent, never trimmed or repaired.
 public enum TerminalHookIdentifiers {
