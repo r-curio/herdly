@@ -75,6 +75,32 @@ public enum TmuxBinary {
     }
 }
 
+/// One running tmux server, so a send never reaches a restarted server that reuses pane ids.
+public struct TmuxServerIdentity: Equatable, Hashable, Sendable {
+    public static let format = "#{pid}|#{start_time}"
+
+    public let pid: Int32
+    public let startTime: Int
+
+    public init(pid: Int32, startTime: Int) {
+        self.pid = pid
+        self.startTime = startTime
+    }
+
+    /// `display-message -p` output in `format`; nil for anything else.
+    public static func parse(_ output: String) -> TmuxServerIdentity? {
+        let fields = output.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "|", omittingEmptySubsequences: false)
+        guard fields.count == 2, let pid = Int32(fields[0]), pid > 0, let start = Int(fields[1]), start > 0 else { return nil }
+        return TmuxServerIdentity(pid: pid, startTime: start)
+    }
+
+    /// A send goes only to the server the fresh check read, re-read immediately before the send.
+    public static func allowsSend(expected: TmuxServerIdentity?, current: TmuxServerIdentity?) -> Bool {
+        guard let expected, let current else { return false }
+        return expected == current
+    }
+}
+
 /// One read of the default server, from SteerApp's side.
 public enum TmuxRead: Equatable, Sendable {
     /// No default socket, or nothing accepts connections on it: no pane exists.
@@ -167,10 +193,28 @@ public struct TmuxSnapshot: Equatable, Sendable {
 
     public let panes: [TmuxPane]
     public let clients: [TmuxClient]
+    /// Each client process's ancestry from itself up, by executable name, as read from the kernel when
+    /// this listing was taken; a client missing here could not be read. herdr and Zellij list no pane
+    /// tty, so only this shows a client running inside their panes (ADR 0014, "Nesting").
+    public private(set) var clientAncestries: [Int32: [String]] = [:]
+    /// The server this listing came from (`display-message -p '#{pid}|#{start_time}'`), nil when unread.
+    public private(set) var server: TmuxServerIdentity?
 
     public init(panes: [TmuxPane], clients: [TmuxClient]) {
         self.panes = panes
         self.clients = clients
+    }
+
+    public func withClientAncestries(_ ancestries: [Int32: [String]]) -> TmuxSnapshot {
+        var copy = self
+        copy.clientAncestries = ancestries
+        return copy
+    }
+
+    public func withServer(_ server: TmuxServerIdentity?) -> TmuxSnapshot {
+        var copy = self
+        copy.server = server
+        return copy
     }
 
     /// Both listings, or nil when either is not complete and well formed: unreadable, never repaired.

@@ -51,11 +51,17 @@ public enum TmuxLayout {
         guard listings.count == 1, !pane.sessionGrouped else { return .groupedSession }
         guard pane.windowPanes == 1 else { return .split }
         let paneTTYs = Set(snapshot.panes.map(\.tty))
-        if snapshot.clients.contains(where: { $0.sessionID == pane.sessionID && paneTTYs.contains($0.tty) }) {
-            return .nested
+        for client in snapshot.clients where client.sessionID == pane.sessionID {
+            if paneTTYs.contains(client.tty) { return .nested }
+            // Inside a herdr, Zellij or another tmux pane, or an ancestry that could not be read.
+            guard let ancestry = snapshot.clientAncestries[client.pid],
+                  !ancestry.dropFirst().contains(where: nestingCommands.contains) else { return .nested }
         }
         return nil
     }
+
+    /// Executables whose presence above a tmux client means it runs inside another multiplexer's pane.
+    public static let nestingCommands: Set<String> = ["tmux", "herdr", "zellij"]
 
     /// The pane layer plus what a send needs (ADR 0017): not in a mode, alive, accepting input. The
     /// host-tab join is not required, because the bytes never pass through the host tab.
@@ -65,6 +71,11 @@ public enum TmuxLayout {
         if pane.inMode { return .inMode }
         if pane.dead { return .paneDead }
         if pane.inputOff { return .inputOff }
+        // Conservative, pending a product decision: a session a control-mode client (iTerm2's `-CC`)
+        // shows gets no typed input, as its Open falls back.
+        if snapshot.clients.contains(where: { $0.sessionID == pane.sessionID && $0.controlMode }) {
+            return .controlModeClient
+        }
         return nil
     }
 

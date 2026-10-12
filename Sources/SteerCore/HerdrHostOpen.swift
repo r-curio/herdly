@@ -68,3 +68,15 @@ public enum HerdrHostOpen {
                              outcome: outcome).map(HerdrHostOpenFailure.herdr)
     }
 }
+
+/// The titles of the enabled hosts' known inventories for herdr's Codex gate and route (ADR 0012 as
+/// ADR 0014 reads it: "any enabled host's inventory is known").
+public enum HerdrHostTitles {
+    /// While Ghostty's controls are on, Ghostty's known inventory alone, unchanged; otherwise the union of
+    /// every other enabled host's latest known titles (iTerm2, Terminal.app, WezTerm), nil while none is known.
+    public static func known(ghosttyEnabled: Bool, ghostty: Set<String>?, otherHosts: [Set<String>?]) -> Set<String>? {
+        if ghosttyEnabled { return ghostty }
+        let known = otherHosts.compactMap { $0 }
+        return known.isEmpty ? nil : known.reduce(into: Set<String>()) { $0.formUnion($1) }
+    }
+}

@@ -105,7 +105,7 @@ struct TerminalTabReads: Sendable {
             wezTermClients = clients
             wezTermTTYs = read.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? []
         }
-        let tmux: TmuxRead = others.tmuxOn ? TmuxClient.read() : .notRunning
+        let tmux: TmuxRead = others.tmuxOn ? TmuxRunner.read() : .notRunning
         if others.tmuxOn { inventories[.tmux] = tmux.inventory }
         let ttys = (terminal.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
             .union(wezTermTTYs).union(tmux.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
@@ -113,7 +113,7 @@ struct TerminalTabReads: Sendable {
         var secondRead = inventories
         if second {
             if others.terminalAppOn { secondRead[.terminalApp] = TerminalAppNavigation.snapshot().inventory }
-            if others.tmuxOn { secondRead[.tmux] = TmuxClient.read().inventory }
+            if others.tmuxOn { secondRead[.tmux] = TmuxRunner.read().inventory }
         }
         return TerminalTabReads(terminalApp: terminal, inventories: inventories, processes: processes,
                                 secondRead: secondRead, tmux: tmux, ghostty: ghostty, iTerm2: iTerm2,
@@ -573,7 +573,7 @@ extension Companion {
         var result: [TerminalHost: TerminalHostInventory] = [:]
         for host in hosts {
             // tmux is no app: its own read says whether its default server runs.
-            if host == .tmux { result[host] = TmuxClient.read().inventory; continue }
+            if host == .tmux { result[host] = TmuxRunner.read().inventory; continue }
             guard running.contains(host) else { result[host] = .notRunning; continue }
             switch host {
             case .terminalApp: result[host] = TerminalAppNavigation.snapshot().inventory
@@ -596,6 +596,8 @@ extension Companion {
         refresh()
         let others = otherTabHosts
         let rolloutRoot = Companion.rolloutRoot
+        // The tmux server each fresh check read; a tmux write goes only to it.
+        let checked = TmuxCheckedServer()
         Task { @MainActor in
             let run = await TypedReplySequence.run(
                 writes: send.writes,
@@ -605,6 +607,7 @@ extension Companion {
                         (TerminalTabReads.take(others: others, claudeTTYs: [], second: true),
                          ReminderReader.currentEvidence(for: completion.session, in: rolloutRoot))
                     }.value
+                    checked.server = fresh.0.tmux.snapshot?.server
                     return TypedReplyCheck.veto(self.codexReplyState(completion,
                                                                      route: TmuxInput.route(self.codexBinding(completion.session, reads: fresh.0),
                                                                                             snapshot: fresh.0.tmux.snapshot),
@@ -612,7 +615,8 @@ extension Companion {
                                                 spent: send.pane)
                 },
                 write: { write in
-                    await Task.detached { Companion.typeInto(send.pane, write) }.value
+                    let server = checked.server
+                    return await Task.detached { Companion.typeInto(send.pane, write, tmuxServer: server) }.value
                 },
                 pause: { seconds in try? await Task.sleep(for: .seconds(seconds)) })
             terminalApp.replying = false
@@ -695,6 +699,7 @@ extension Companion {
         refresh()
         let others = otherTabHosts
         let roots = configuredClaudeNavigationRoots().filter { $0.root.path == outcome.session.sourceScope }
+        let checked = TmuxCheckedServer()
         Task { @MainActor in
             let run = await TypedReplySequence.run(
                 writes: send.writes,
@@ -710,12 +715,14 @@ extension Companion {
                         return (rows.count == 1 ? rows[0] : nil, process, reads)
                     }.value
                     guard let fresh else { return .unreachable }
+                    checked.server = fresh.2.tmux.snapshot?.server
                     let route = TmuxInput.route(self.claudeBinding(outcome.session, process: fresh.1, reads: fresh.2),
                                                 snapshot: fresh.2.tmux.snapshot)
                     return TypedReplyCheck.veto(self.claudeReplyState(outcome, row: fresh.0, route: route), spent: send.pane)
                 },
                 write: { write in
-                    await Task.detached { Companion.typeInto(send.pane, write) }.value
+                    let server = checked.server
+                    return await Task.detached { Companion.typeInto(send.pane, write, tmuxServer: server) }.value
                 },
                 pause: { seconds in try? await Task.sleep(for: .seconds(seconds)) })
             terminalApp.replying = false
@@ -757,6 +764,12 @@ extension Companion {
         TerminalAppPresentation.settingsRow(on: hostSwitches.isOn(.terminalApp), access: terminalApp.access,
                                             readable: terminalApp.readable, sessionsSeen: terminalApp.sessionsSeen)
     }
+}
+
+/// The tmux server a typed reply's latest fresh check read, so its write goes only to that server.
+@MainActor
+final class TmuxCheckedServer {
+    var server: TmuxServerIdentity?
 }
 
 /// The latest reads an Open's revalidation took, for the fallback's candidate walks.

@@ -230,14 +230,14 @@ extension Companion {
 
     /// The titles of the known enabled host inventories, nil when none is known: ADR 0012's "a Ghostty
     /// inventory is known" reads "any enabled host's inventory is known" (ADR 0014). While Ghostty's
-    /// controls are on this is Ghostty's inventory alone, unchanged; otherwise the latest iTerm2 and
-    /// Terminal.app scans' titles.
+    /// controls are on this is Ghostty's inventory alone, unchanged; otherwise the latest iTerm2,
+    /// Terminal.app and WezTerm scans' titles.
     private func herdrHostTitles(ghostty: Set<String>?) -> Set<String>? {
-        if ghosttyEnabled { return ghostty }
-        var known: Set<String>?
-        if hostSwitches.mayContact(.iTerm2), let titles = iTerm2.latestTitles { known = (known ?? []).union(titles) }
-        if terminalAppSwitchedOn, let titles = terminalApp.latestTitles { known = (known ?? []).union(titles) }
-        return known
+        HerdrHostTitles.known(ghosttyEnabled: ghosttyEnabled, ghostty: ghostty, otherHosts: [
+            hostSwitches.mayContact(.iTerm2) ? iTerm2.latestTitles : nil,
+            terminalAppSwitchedOn ? terminalApp.latestTitles : nil,
+            wezTermSwitchedOn ? wezTerm.latestTitles : nil,
+        ])
     }
 
     /// Live Codex sessions and the titles of the latest complete Ghostty inventory (ADR 0012).

@@ -609,11 +609,14 @@ public struct HerdrAttachedClient: Equatable, Sendable {
     /// The client's own terminal, which ADR 0011 joins to a Ghostty terminal's `tty`.
     public let tty: String?
     public let serverPID: Int32?
+    /// The enabled terminal host whose process the client's ancestry reached first (ADR 0014).
+    public let host: TerminalHost
 
-    public init(pid: Int32, tty: String?, serverPID: Int32?) {
+    public init(pid: Int32, tty: String?, serverPID: Int32?, host: TerminalHost = .ghostty) {
         self.pid = pid
         self.tty = tty
         self.serverPID = serverPID
+        self.host = host
     }
 
     /// The client verdict (ADR 0008): zero or several clients are `wrongClientCount`; a client
@@ -627,11 +630,12 @@ public struct HerdrAttachedClient: Equatable, Sendable {
             return .failure(.wrongClientCount(listing.clientPIDs.count))
         }
         let chain = ancestry(pid)
-        guard chain.first?.pid == pid, chain.dropFirst().contains(where: { hostCommands.contains($0.command) }) else {
+        guard chain.first?.pid == pid, let reached = chain.dropFirst().first(where: { hostCommands.contains($0.command) }),
+              let host = TerminalHost.terminals.first(where: { $0.executableName == reached.command }) else {
             return .failure(.nonGhosttyClient)
         }
         return .success(HerdrAttachedClient(pid: pid, tty: chain.first?.tty,
-                                    serverPID: listing.serverPIDs.count == 1 ? listing.serverPIDs.first : nil))
+                                    serverPID: listing.serverPIDs.count == 1 ? listing.serverPIDs.first : nil, host: host))
     }
 }
 

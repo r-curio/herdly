@@ -32,9 +32,9 @@ private let one = HerdrClientListing(serverPIDs: [900], clientPIDs: [93954])
     let hosts = TerminalHost.executableNames(of: [.iTerm2, .terminalApp])
     #expect(hosts == ["iTerm2", "Terminal"])
     #expect(HerdrAttachedClient.verdict(listing: one, ancestry: { _ in chain(host: "iTerm2") }, hostCommands: hosts)
-            == .success(HerdrAttachedClient(pid: 93954, tty: "ttys015", serverPID: 900)))
+            == .success(HerdrAttachedClient(pid: 93954, tty: "ttys015", serverPID: 900, host: .iTerm2)))
     #expect(HerdrAttachedClient.verdict(listing: one, ancestry: { _ in chain(host: "Terminal") }, hostCommands: hosts)
-            == .success(HerdrAttachedClient(pid: 93954, tty: "ttys015", serverPID: 900)))
+            == .success(HerdrAttachedClient(pid: 93954, tty: "ttys015", serverPID: 900, host: .terminalApp)))
     // A host that is switched off never hosts the client Steer targets.
     #expect(HerdrAttachedClient.verdict(listing: one, ancestry: { _ in chain(host: "ghostty") }, hostCommands: hosts)
             == .failure(.nonGhosttyClient))
@@ -76,4 +76,42 @@ private let hostTab = TerminalTabTarget(host: .iTerm2, tabID: "GUID-1", tty: cli
             == .herdr(.herdrPaneNotFocused))
     #expect(HerdrHostOpen.verifyPane(plan, binding: .bound(target), outcome: scan(clientTTY: "ttys099"))
             == .herdr(.herdrClientChanged))
+}
+
+// MARK: - Visits stay Ghostty's (ADR 0016): a client in another host is never visible through Ghostty
+
+@Test func herdrClientVerdictNamesTheHostItsAncestryReaches() throws {
+    let hosts = TerminalHost.executableNames(of: [.ghostty, .iTerm2])
+    let iTerm2 = try HerdrAttachedClient.verdict(listing: one, ancestry: { _ in chain(host: "iTerm2") }, hostCommands: hosts).get()
+    #expect(iTerm2.host == .iTerm2)
+    let ghostty = try HerdrAttachedClient.verdict(listing: one, ancestry: { _ in chain(host: "ghostty") }, hostCommands: hosts).get()
+    #expect(ghostty.host == .ghostty)
+}
+
+@Test func herdrPaneWhoseClientIsInAnotherHostIsNotVisibleWhenGhosttyIsFrontmost() {
+    // A Ghostty without `tty` counts any frontmost Ghostty as showing herdr's client (ADR 0011's interim
+    // rule); that holds only for a client Ghostty hosts.
+    var tracker = HerdrVisitTracker()
+    let elsewhere = HerdrFocusObservation(takenAt: 10, focusedPaneID: paneID, clientPID: 501, clientTTY: clientTTY,
+                                          clientHost: .iTerm2)
+    #expect(tracker.scan(elsewhere, takenAt: 10, openInFlight: false, holdsLiveBoundTarget: { _ in true },
+                         frontmost: .ghostty) == nil)
+    #expect(tracker.lastScan?.reading == .nothing)
+    // A Ghostty-hosted client is still checked as before.
+    let here = HerdrFocusObservation(takenAt: 12, focusedPaneID: paneID, clientPID: 501, clientTTY: clientTTY)
+    #expect(tracker.scan(here, takenAt: 12, openInFlight: false, holdsLiveBoundTarget: { _ in true },
+                         frontmost: .ghostty) != nil)
+    #expect(HerdrFocusObservation.from(scan(), takenAt: 1)?.clientHost == .ghostty)
+}
+
+// MARK: - The Codex gate's known titles (ADR 0014: any enabled host's inventory)
+
+@Test func herdrCodexGateTitlesComeFromEveryEnabledHostOnceOneIsKnown() {
+    // Ghostty on: its inventory alone, unchanged.
+    #expect(HerdrHostTitles.known(ghosttyEnabled: true, ghostty: ["g"], otherHosts: [["i"], ["w"]]) == ["g"])
+    #expect(HerdrHostTitles.known(ghosttyEnabled: true, ghostty: nil, otherHosts: [["i"]]) == nil)
+    // Ghostty off: iTerm2's, Terminal.app's and WezTerm's latest titles, nil until one is known.
+    #expect(HerdrHostTitles.known(ghosttyEnabled: false, ghostty: nil, otherHosts: [nil, nil, ["w"]]) == ["w"])
+    #expect(HerdrHostTitles.known(ghosttyEnabled: false, ghostty: nil, otherHosts: [["i"], ["t"], ["w"]]) == ["i", "t", "w"])
+    #expect(HerdrHostTitles.known(ghosttyEnabled: false, ghostty: nil, otherHosts: [nil, nil, nil]) == nil)
 }

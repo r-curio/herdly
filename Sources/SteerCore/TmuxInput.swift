@@ -12,10 +12,20 @@ public enum TmuxInput {
     /// (tmux-live.md, "send-keys to a TUI").
     public static func arguments(_ write: TypedWrite, into pane: TypedInputPane) -> [String] {
         switch write {
-        case .text(let text): ["send-keys", "-t", pane.paneID, "-l", "--", text]
-        case .textAndSubmit(let text): ["send-keys", "-t", pane.paneID, "-l", "--", text + "\r"]
+        case .text(let text): ["send-keys", "-t", pane.paneID, "-l", "--", literal(text)]
+        case .textAndSubmit(let text): ["send-keys", "-t", pane.paneID, "-l", "--", literal(text + "\r")]
         case .submit: ["send-keys", "-t", pane.paneID, "Enter"]
         }
+    }
+
+    /// One `send-keys -l` argument that tmux types exactly as `text`. tmux's command parser takes an
+    /// argument ending in an unescaped `;` as the end of the command and drops that `;`, even after
+    /// `-l --` (an isolated tmux 3.8: `abc;` typed `abc`, and `;` alone typed nothing yet exited 0); a
+    /// trailing `\;` types `;`. So a trailing `;` gets one backslash before it, and only that one: `a\;`
+    /// becomes `a\\;`, which types `a\;`. Nothing else in an argument is special.
+    public static func literal(_ text: String) -> String {
+        guard text.hasSuffix(";") else { return text }
+        return String(text.dropLast()) + "\\;"
     }
 
     /// A call that did not return in time counts as sent (ADR 0017, "Multiplexers"). A non-zero exit is
@@ -49,7 +59,7 @@ extension TmuxInput {
 
     /// One digit, typed literally, never followed by Enter.
     public static func digitArguments(_ key: String, into pane: TypedInputPane) -> [String] {
-        ["send-keys", "-t", pane.paneID, "-l", "--", key]
+        ["send-keys", "-t", pane.paneID, "-l", "--", literal(key)]
     }
 }
 
@@ -101,12 +111,16 @@ public struct TmuxSettingsRow: Equatable, Sendable {
 /// stays false.
 public enum TmuxPresentation {
     public static let noTerminalLine = "Turn on the terminal you run tmux in."
+    /// The not-found pattern WezTerm's card uses, naming tmux's fixed locations.
     public static let notFoundLine = "Steer can't find tmux in /opt/homebrew/bin, /usr/local/bin or /usr/bin."
-    public static let unreadableLine = "Steer can't read tmux's default server. Check that it runs as you."
-    public static let otherSocketLine =
-        "Sessions on a tmux socket other than the default can't be reached. Steer reads only tmux's default socket."
+    /// The ownership failure: the default socket or its server is not this user's.
+    public static let untrustedSocketLine = "Steer can't read tmux's default socket. Check that it runs as you."
+    /// Any other failed read: the shared agreed line.
+    public static let unreadableLine = OpenUnavailableReason.hostUnreadable(.tmux).cardLine
+    /// product.md, "Problem lines": "sessions seen on a socket other than the default can't be reached."
+    public static let otherSocketLine = "Sessions seen on a socket other than the default can't be reached."
     public static let footer =
-        "Steer returns to a pane alone in its window, with one client, on tmux's default socket; otherwise Open raises the terminal running tmux. Replies are typed into the exact pane; Codex questions are answered in Codex."
+        "Steer returns to a pane alone in its window, with one client, on tmux's default socket; otherwise Open raises the terminal running tmux. Replies are typed into the exact pane."
 
     /// - Parameters:
     ///   - read: the latest read of the default server, nil before one (or while tmux is not contacted).
@@ -121,7 +135,8 @@ public enum TmuxPresentation {
         if !anyTerminalOn { problems.append(noTerminalLine) }
         switch read {
         case .binaryNotFound?: problems.append(notFoundLine)
-        case .untrustedSocket?, .unreadable?: problems.append(unreadableLine)
+        case .untrustedSocket?: problems.append(untrustedSocketLine)
+        case .unreadable?: problems.append(unreadableLine)
         case .notRunning?, .snapshot?, nil: break
         }
         if otherSocketSeen { problems.append(otherSocketLine) }
