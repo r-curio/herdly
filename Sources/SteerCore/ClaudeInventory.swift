@@ -41,6 +41,9 @@ public struct ClaudeInventorySession: Equatable, Sendable {
     /// registry, with its start time verified when Claude recorded `procStart`). nil from
     /// `claude agents --json`.
     public let pid: Int32?
+    /// The start time Claude registered for `pid` (`procStart`), nil when it recorded none or no
+    /// process is identified. Binding rules compare it with a fresh read (ADR 0013).
+    public let procStart: String?
     /// The session's working directory as Claude reported it. Presentation only (the row's
     /// "project @ branch"); never used for targeting or identity.
     public let directory: String?
@@ -51,13 +54,14 @@ public struct ClaudeInventorySession: Equatable, Sendable {
 
     public init(sessionID: String, name: String = "", kind: ClaudeInventoryKind, startedAt: Double,
                 lifecycle: ClaudeInventoryLifecycle, pid: Int32? = nil, directory: String? = nil,
-                statusUpdatedAt: Double? = nil) {
+                statusUpdatedAt: Double? = nil, procStart: String? = nil) {
         self.sessionID = sessionID
         self.name = name
         self.kind = kind
         self.startedAt = startedAt
         self.lifecycle = lifecycle
         self.pid = pid
+        self.procStart = procStart
         self.directory = directory
         self.statusUpdatedAt = statusUpdatedAt
     }

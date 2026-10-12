@@ -126,7 +126,8 @@ extension Companion {
                 let pid = own[0].pid
                 let switches = hostSwitches
                 // iTerm2 first (#238): its tty binding decides whenever the process's tty is on an iTerm2 tab.
-                if let iTerm2Result = await openClaudeInITerm2(sessionID: identity.session, pid: pid) {
+                let registered = pid.map { ClaudeSessionRegistry.Process(pid: $0, procStart: own[0].procStart) }
+                if let iTerm2Result = await openClaudeInITerm2(sessionID: identity.session, process: registered) {
                     result = iTerm2Result
                 } else {
                     let outcome: GhosttyTitleOutcome = ghosttyOn

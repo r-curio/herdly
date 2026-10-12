@@ -12,6 +12,8 @@ final class ITerm2State: ObservableObject {
     @Published var installed = false
     /// Each session's latest Open in iTerm2, for Show diagnostics: verified, fallback or unavailable, with the reason.
     @Published var lastOpen: [String: String] = [:]
+    /// Queued Codex sessions whose typed input iTerm2 withholds, from the latest scan (ADR 0017).
+    @Published var codexInputBlocks: [UUID: ITerm2TypedInputBlock] = [:]
     /// ADR 0016's visit interval and dwell run over iTerm2 sessions, by session GUID.
     var visits = TerminalVisitTracker<String>()
     var probing = false
@@ -100,6 +102,7 @@ extension Companion {
         iTerm2.startupRetries = 0
         iTerm2.scan = .notRead
         iTerm2.inUse = false
+        iTerm2.codexInputBlocks = [:]
         iTerm2.visits.reset(at: Date().timeIntervalSince1970)
         if on {
             iTerm2.access = nil
@@ -237,8 +240,9 @@ extension Companion {
     /// Open for a live Claude session's registered process while iTerm2 is on. Nil when the process's
     /// tty is on no iTerm2 tab, so Ghostty's title route or the process walk decides as before; otherwise
     /// the iTerm2 Open's result, a fallback included.
-    func openClaudeInITerm2(sessionID: String, pid: Int32?) async -> TerminalOpenResult? {
-        guard hostSwitches.mayContact(.iTerm2), let pid else { return nil }
+    func openClaudeInITerm2(sessionID: String, process: ClaudeSessionRegistry.Process?) async -> TerminalOpenResult? {
+        guard hostSwitches.mayContact(.iTerm2), let process else { return nil }
+        let pid = process.pid
         // Only tty-bound hosts take part: a Ghostty tab without `tty` never holds a tty binding (ADR 0013).
         let switches = TerminalHostSwitches(enabled: [.iTerm2])
         let running = TerminalApps.isRunning(.iTerm2)
@@ -256,7 +260,7 @@ extension Companion {
                     return (reading, observed, TerminalTTYReads.processes(on: ttys))
                 }.value
                 let binding = TerminalTabBindingRules.claude(sessionID: sessionID, liveness: .live,
-                                                             process: .registered(.init(pid: pid, procStart: nil)),
+                                                             process: .registered(process),
                                                              observed: reads.1, switches: switches,
                                                              inventories: [.iTerm2: ITerm2Navigation.inventory(reads.0)],
                                                              processes: reads.2)
@@ -296,59 +300,109 @@ extension Companion {
         }
     }
 
-    // MARK: - Visits (ADR 0016)
+    // MARK: - Typed input (ADR 0017; ADR 0013 "Freshness")
 
-    /// Every two seconds while iTerm2 is on and a CLI session could be in it. iTerm2 is asked only while
-    /// macOS reports it frontmost; otherwise nothing there is visible. One check at a time; none during
-    /// an Open.
+    /// Why a Codex session's key route (Ghostty or herdr relay) or typed reply is withheld because of
+    /// iTerm2, from the latest scan; nil while iTerm2 is off or no iTerm2 tab shows the title. The
+    /// card shows the block's line instead of input controls; the click rechecks on a fresh read.
+    func iTerm2InputBlock(for session: UUID) -> ITerm2TypedInputBlock? {
+        guard hostSwitches.mayContact(.iTerm2) else { return nil }
+        return iTerm2.codexInputBlocks[session]
+    }
+
+    /// The question card's line when its key route would type into a session iTerm2 may hold. The
+    /// daemon route wins (ADR 0017), so it is never replaced.
+    func iTerm2InputLine(for question: AttentionQuestion) -> String? {
+        guard question.source == .cli else { return nil }
+        switch route(for: question) {
+        case .ghosttyRelay, .herdrRelay: return iTerm2InputBlock(for: question.session)?.line
+        case .daemon, .daemonAnswered, .desktopPick, .relayUnavailable: return nil
+        }
+    }
+
+    /// The reply field's line when no daemon can carry the reply and the session may be in iTerm2.
+    func iTerm2ReplyLine(for completion: AttentionCompletion, target: SessionReplyTarget) -> String? {
+        guard completion.source == .cli, case .unavailable(let reason) = target,
+              reason == .noDaemon || reason == .threadNotLoaded else { return nil }
+        return iTerm2InputBlock(for: completion.session)?.line
+    }
+
+    /// Immediately before a Ghostty key is typed into a Codex session: a fresh iTerm2 read, because the
+    /// title must be unique across every enabled inventory. Blocking: call off the main actor. `on` and
+    /// `running` are read on the main actor first; nil means the key may go.
+    nonisolated static func freshITerm2InputBlock(title: String, on: Bool, running: Bool) -> ITerm2TypedInputBlock? {
+        guard on else { return ITerm2TypedInput.codexBlock(title: title, iTerm2: nil) }
+        let inventory = running ? ITerm2Navigation.inventory(ITerm2Navigation.snapshot()) : .notRunning
+        return ITerm2TypedInput.codexBlock(title: title, iTerm2: inventory)
+    }
+
+    // MARK: - Visits (ADR 0016) and typed-input blocks
+
+    /// Every two seconds while iTerm2 is on. Visibility needs macOS to report iTerm2 frontmost; when it
+    /// is not, nothing there is visible, and iTerm2 is read only while a queued CLI question or
+    /// completion could show input controls (to keep their iTerm2 line current). One check at a time;
+    /// none during an Open.
     func checkITerm2Visits() {
         let uptime = ProcessInfo.processInfo.systemUptime
         guard previewMode == nil, hostSwitches.mayContact(.iTerm2), !iTerm2.probing, !iTerm2.checking, !openingTask,
               uptime >= iTerm2.nextScan else { return }
         let claudeOutcomes = agentQueue.snapshot.outcomes.filter { $0.session.source == .claude && $0.session.surface == .cli }
-        guard !cliItems.isEmpty || !liveCLI.isEmpty || !liveClaudeSessions.isEmpty || !claudeOutcomes.isEmpty else { return }
+        let cliQuestions = queue.items.compactMap(\.question).filter { $0.source == .cli }
+        guard !cliItems.isEmpty || !cliQuestions.isEmpty || !liveCLI.isEmpty || !liveClaudeSessions.isEmpty
+                || !claudeOutcomes.isEmpty else { return }
         iTerm2.nextScan = uptime + 2
         let takenAt = Date().timeIntervalSince1970
-        guard TerminalApps.frontmostHost() == .iTerm2 else {
+        let frontmost = TerminalApps.frontmostHost()
+        let inputSessions = Set(cliItems.map(\.session)).union(cliQuestions.map(\.session))
+        guard frontmost == .iTerm2 || !inputSessions.isEmpty else {
             iTerm2.visits.record(TerminalVisibilityScan(takenAt: takenAt, reading: .nothing))
             return
         }
         iTerm2.checking = true
         let live = liveCLI
         let liveIDs = Set(live.map(\.uuidString))
-        let codexSessions = live.union(cliItems.map(\.session))
+        let codexSessions = live.union(inputSessions)
         let titles = Set(codexSessions.compactMap { HerdrCodexBindingRules.title(forSession: $0.uuidString.lowercased()) })
         // Each queued Claude session's one registered process, from the latest inventories.
-        var claudePIDs: [AgentSessionIdentity: Int32] = [:]
+        var claudeProcesses: [AgentSessionIdentity: ClaudeSessionRegistry.Process] = [:]
         for identity in Set(claudeOutcomes.map(\.session)) {
             let own = claudeInventories[identity.sourceScope]?.sessions
                 .filter { $0.kind == .interactive && $0.sessionID == identity.session } ?? []
-            if own.count == 1, let pid = own[0].pid { claudePIDs[identity] = pid }
+            if own.count == 1, let pid = own[0].pid { claudeProcesses[identity] = .init(pid: pid, procStart: own[0].procStart) }
         }
-        let pids = claudePIDs
+        let processes = claudeProcesses
         let switches = hostSwitches
         let ghosttyOn = ghosttyEnabled
         let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
+        let iTerm2Running = TerminalApps.isRunning(.iTerm2)
         let generation = iTerm2.generation
         Task { @MainActor in
             let observed = await Task.detached { () -> (CodexTabReads, [Int32: TerminalProcessObservation]) in
-                let observations = Dictionary(uniqueKeysWithValues: pids.values.compactMap { pid in
-                    TerminalTTYReads.observation(of: pid).map { (pid, $0) }
+                let observations = Dictionary(uniqueKeysWithValues: processes.values.compactMap { process in
+                    TerminalTTYReads.observation(of: process.pid).map { (process.pid, $0) }
                 })
                 let reads = CodexTabReads.read(titles: titles, claudeTTYs: Set(observations.values.compactMap(\.tty)),
-                                               ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyRunning, iTerm2Running: true)
+                                               ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyRunning,
+                                               iTerm2Running: iTerm2Running)
                 return (reads, observations)
             }.value
             iTerm2.checking = false
             guard generation == iTerm2.generation, hostSwitches.mayContact(.iTerm2) else { return }
             let reads = observed.0
-            switch reads.inventories[.iTerm2] {
-            case .tabs?: iTerm2.scan = .read; iTerm2.access = .granted
-            case .notRunning?: iTerm2.scan = .notRunning
-            case .unreadable?, nil: iTerm2.scan = .unreadable
+            let iTerm2Inventory = reads.inventories[.iTerm2] ?? .unreadable
+            switch iTerm2Inventory {
+            case .tabs: iTerm2.scan = .read; iTerm2.access = .granted
+            case .notRunning: iTerm2.scan = .notRunning
+            case .unreadable: iTerm2.scan = .unreadable
             }
+            iTerm2.codexInputBlocks = Dictionary(uniqueKeysWithValues: inputSessions.compactMap { session in
+                HerdrCodexBindingRules.title(forSession: session.uuidString.lowercased())
+                    .flatMap { ITerm2TypedInput.codexBlock(title: $0, iTerm2: iTerm2Inventory) }
+                    .map { (session, $0) }
+            })
+            // Frontmost as macOS reported it when the scan started: anything else shows nothing visible.
             iTerm2.visits.record(TerminalVisibilityScan(takenAt: takenAt,
-                                                        reading: TerminalVisibility.iTerm2(reads.iTerm2, frontmost: .iTerm2)))
+                                                        reading: TerminalVisibility.iTerm2(reads.iTerm2, frontmost: frontmost)))
             var inUse = false
             for session in codexSessions.sorted(by: { $0.uuidString < $1.uuidString }) {
                 let binding = TerminalTabBindingRules.codex(sessionID: session.uuidString,
@@ -362,11 +416,11 @@ extension Companion {
                 acknowledgeCodexCompletions(Array(iTerm2.visits.acknowledged(completions, target: target.tabID)))
             }
             let claudeSwitches = TerminalHostSwitches(enabled: [.iTerm2])
-            for (identity, pid) in pids {
+            for (identity, process) in processes {
                 let binding = TerminalTabBindingRules.claude(sessionID: identity.session, liveness: .live,
-                                                             process: .registered(.init(pid: pid, procStart: nil)),
-                                                             observed: observed.1[pid], switches: claudeSwitches,
-                                                             inventories: [.iTerm2: reads.inventories[.iTerm2] ?? .unreadable],
+                                                             process: .registered(process),
+                                                             observed: observed.1[process.pid], switches: claudeSwitches,
+                                                             inventories: [.iTerm2: iTerm2Inventory],
                                                              processes: reads.processes)
                 guard case .bound(let target) = binding, target.host == .iTerm2 else { continue }
                 inUse = true

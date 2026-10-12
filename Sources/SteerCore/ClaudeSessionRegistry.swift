@@ -96,7 +96,7 @@ public enum ClaudeSessionRegistry {
         }
         guard entries.count <= maximumEntries else { return unavailable(ClaudeInventoryDecoder.incompleteMessage) }
         var rows: [[String: Any]] = []
-        var pids: [String: Int32] = [:]
+        var pids: [String: Process] = [:]
         var background: Set<String> = []
         var jobSessions: [String: Set<String>] = [:]
         var parkedHolders: [String: Set<Int32>] = [:]
@@ -124,7 +124,7 @@ public enum ClaudeSessionRegistry {
                 rows.append(normalized)
                 // A duplicate session ID makes the decoder reject the scan, so this pid is never misattributed.
                 if let sessionID = (row["sessionId"] as? String).flatMap(UUID.init(uuidString:)) {
-                    pids[sessionID.uuidString.lowercased()] = process.pid
+                    pids[sessionID.uuidString.lowercased()] = process
                 }
             case "bg" as String:
                 // A background holder has no `state`; it only marks the session as background.
@@ -145,8 +145,8 @@ public enum ClaudeSessionRegistry {
         guard scan.available else { return scan }
         let sessions = scan.sessions.map {
             ClaudeInventorySession(sessionID: $0.sessionID, name: $0.name, kind: $0.kind, startedAt: $0.startedAt,
-                                   lifecycle: $0.lifecycle, pid: pids[$0.sessionID], directory: $0.directory,
-                                   statusUpdatedAt: $0.statusUpdatedAt)
+                                   lifecycle: $0.lifecycle, pid: pids[$0.sessionID]?.pid, directory: $0.directory,
+                                   statusUpdatedAt: $0.statusUpdatedAt, procStart: pids[$0.sessionID]?.procStart)
         }
         return ClaudeInventoryScan(sourceScope: sourceScope, observedAt: observedAt, sessions: sessions,
                                    backgroundSessionIDs: background,
@@ -185,6 +185,23 @@ public enum ClaudeSessionRegistry {
         return procStart(weekday: Int(utc.tm_wday), month: Int(utc.tm_mon), day: Int(utc.tm_mday),
                          hour: Int(utc.tm_hour), minute: Int(utc.tm_min), second: Int(utc.tm_sec),
                          year: Int(utc.tm_year) + 1900) == recorded
+    }
+
+    /// The live (not zombie) process's start time in Claude's `procStart` layout, read as `isRunning`
+    /// reads it; nil when it cannot be read.
+    public static func procStart(of pid: Int32) -> String? {
+        guard pid > 0 else { return nil }
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0,
+              info.kp_proc.p_pid == pid, info.kp_proc.p_stat != SZOMB else { return nil }
+        var seconds = info.kp_proc.p_starttime.tv_sec
+        var utc = tm()
+        guard gmtime_r(&seconds, &utc) != nil else { return nil }
+        return procStart(weekday: Int(utc.tm_wday), month: Int(utc.tm_mon), day: Int(utc.tm_mday),
+                         hour: Int(utc.tm_hour), minute: Int(utc.tm_min), second: Int(utc.tm_sec),
+                         year: Int(utc.tm_year) + 1900)
     }
 
     /// Claude's `procStart` text for a UTC start time: `ctime` layout with English names, independent

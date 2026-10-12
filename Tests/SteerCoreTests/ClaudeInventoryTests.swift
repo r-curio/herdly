@@ -493,6 +493,8 @@ private func decodeRegistry(_ entries: [ClaudeSessionRegistry.Entry],
     #expect(scan.sessions[0].lifecycle == .interactive(status: "busy"))
     #expect(scan.sessions[0].startedAt == 1_791_352_804.684)
     #expect(scan.sessions[0].pid == 20)
+    // The registered start time travels with the PID, so a tab binding can revalidate it (ADR 0013).
+    #expect(scan.sessions[0].procStart == "Wed Oct  7 06:00:02 2026")
     // The CLI inventory does not identify a process.
     #expect(ClaudeInventoryDecoder.decode(try JSONSerialization.data(withJSONObject: [
         ["sessionId": interactiveID, "kind": "interactive", "cwd": "/tmp/one", "status": "busy", "startedAt": 1, "pid": 20]
