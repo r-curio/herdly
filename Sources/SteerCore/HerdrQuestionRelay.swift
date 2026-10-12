@@ -94,6 +94,8 @@ public enum HerdrKeyDelivery: Equatable, Sendable {
 public enum QuestionKeyRoute: Equatable, Hashable, Sendable {
     case herdr(paneID: String)
     case ghostty
+    /// A terminal host's bound pane (ADR 0017, `TerminalQuestionKeys`).
+    case terminal(TypedInputPane)
 }
 
 /// Steer's memory of the keys it may have sent per call and question index, and of the last
@@ -162,22 +164,28 @@ public enum QuestionRelayRouting {
     /// 5. answers drafted for a daemon that no longer holds the call never move to keys;
     /// 6. a CLI session herdr has anything to say about uses herdr keys (or nothing, when its pane
     ///    is unavailable);
-    /// 7. a session another host holds is answered in Codex: Terminal.app and iTerm2 type no digits
-    ///    (ADR 0017), and no other host has a relay yet, so another host's digits never go to Ghostty;
+    /// 7. a session another host holds is answered in Codex where that host types no digits (Terminal.app,
+    ///    iTerm2, and WezTerm until its live digit proof; ADR 0017), and otherwise uses that host's pane
+    ///    keys; another host's digits never go to Ghostty;
     /// 8. while another enabled host is unread or unreadable, a Ghostty tab with the title may be a
     ///    decoy, so nothing is offered; only the rest use Ghostty keys.
     ///
     /// `progress` is the raw stored progress (nil when Steer has none). `terminalHost` is the host
     /// other than Ghostty that the latest scan saw the session's tab in, nil when none. `unreadHost` is
     /// an enabled host whose latest read is missing or unreadable, nil when every one was read.
+    /// `typesDigits` says which hosts carry a question digit (`TerminalHost.typesQuestionDigits`): a
+    /// session another such host holds uses that host's pane keys (`.terminalRelay`, #240), unless an
+    /// enabled host is unread.
     public static func route(for question: AttentionQuestion, book: AppServerQuestionBook, daemonConnected: Bool,
                              ledger: QuestionRelayLedger, progress: QuestionAnswerProgress?,
                              herdr: HerdrSessionBinding, terminalHost: TerminalHost? = nil,
-                             unreadHost: TerminalHost? = nil) -> QuestionAnswerRoute {
+                             unreadHost: TerminalHost? = nil,
+                             typesDigits: (TerminalHost) -> Bool = { $0.typesQuestionDigits }) -> QuestionAnswerRoute {
         if book.hasAnswered(question) { return .daemonAnswered }
         switch ledger.keyRoute(for: question.id) {
         case .herdr?: return .herdrRelay
         case .ghostty?: return .ghosttyRelay
+        case .terminal?: return .terminalRelay
         case nil: break
         }
         if daemonConnected, let request = book.request(for: question) { return .daemon(request) }
@@ -186,7 +194,11 @@ public enum QuestionRelayRouting {
             return .relayUnavailable(.daemonAnswerInProgress)
         }
         // ADR 0013: a key (Ghostty's or herdr's) needs the title unique across every enabled host.
-        if let terminalHost, terminalHost != .ghostty { return .relayUnavailable(.noQuestionKeys(terminalHost)) }
+        if let terminalHost, terminalHost != .ghostty {
+            guard typesDigits(terminalHost) else { return .relayUnavailable(.noQuestionKeys(terminalHost)) }
+            if let unreadHost { return .relayUnavailable(.otherHostUnreadable(unreadHost)) }
+            return .terminalRelay
+        }
         if let unreadHost { return .relayUnavailable(.otherHostUnreadable(unreadHost)) }
         switch herdr {
         case .notInHerdr:

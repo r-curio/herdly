@@ -233,9 +233,14 @@ public enum HerdrPresentation {
     }
 
     /// Where a Codex question card's relayed key went, as its status sentences name it: the herdr
-    /// pane for the herdr route (ADR 0010), otherwise the Ghostty tab (ADR 0006).
+    /// pane for the herdr route (ADR 0010), the session's pane for a terminal host's pane keys (ADR 0017,
+    /// which never names the host on a card), otherwise the Ghostty tab (ADR 0006).
     public static func keyDestination(for route: QuestionAnswerRoute) -> (place: String, noun: String) {
-        route == .herdrRelay ? ("the herdr pane", "pane") : ("the Ghostty tab", "tab")
+        switch route {
+        case .herdrRelay: ("the herdr pane", "pane")
+        case .terminalRelay: ("the session's pane", "pane")
+        default: ("the Ghostty tab", "tab")
+        }
     }
 
     /// The card's sentence when no relay can answer a CLI question but Open still works. Ghostty
