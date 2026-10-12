@@ -93,6 +93,19 @@ extension Companion {
             openHerdr(herdrKey, subject: .claude(identity))
             return
         }
+        // tmux (#241): a session whose process's tty is a pane of tmux's default server opens through
+        // ADR 0014's two layers; anything else keeps the routes below.
+        if tmuxContactAllowed {
+            openClaudeWithTmux(identity, approval: approval) { [weak self] in
+                self?.openClaudeOutsideTmux(identity, approval: approval)
+            }
+            return
+        }
+        openClaudeOutsideTmux(identity, approval: approval)
+    }
+
+    /// WezTerm's, then Terminal.app's sequence while each is on, otherwise Ghostty's title route or the walk.
+    private func openClaudeOutsideTmux(_ identity: AgentSessionIdentity, approval: AgentApproval?) {
         // WezTerm on (#240): a pane there opens through its own sequence; anything else keeps the routes below.
         if wezTermSwitchedOn {
             openClaudeWithWezTerm(identity, approval: approval) { [weak self] in
@@ -256,6 +269,17 @@ extension Companion {
             openHerdr(herdrKey, subject: .codex(session))
             return
         }
+        // tmux (#241): a title a pane of tmux's default server carries opens through ADR 0014's two
+        // layers; anything else keeps the routes below, which read tmux too for ADR 0013's uniqueness.
+        if tmuxContactAllowed {
+            openCodexWithTmux(session) { [weak self] in self?.openCLIOutsideTmux(session) }
+            return
+        }
+        openCLIOutsideTmux(session)
+    }
+
+    /// WezTerm's, then Terminal.app's sequence while each is on, otherwise iTerm2's or Ghostty's route.
+    private func openCLIOutsideTmux(_ session: UUID) {
         // WezTerm on (#240): a pane there opens through its own sequence; a title no WezTerm pane carries
         // keeps the routes below. Each reads every enabled host for ADR 0013's binding.
         if wezTermSwitchedOn {
@@ -375,9 +399,104 @@ extension Companion {
         herdr.open.failures[session]
     }
 
+    /// Opens a session in herdr (ADR 0014): a client hosted by Ghostty, or by no other enabled host the
+    /// latest scan's client walks to, keeps ADR 0011's sequence unchanged; a client in another enabled
+    /// host's tab joins it by tty and is raised by that host's own Open.
+    fileprivate func openHerdr(_ key: HerdrSessionKey, subject: HerdrOpenSubject) {
+        let others = herdrClientHosts.subtracting([.ghostty])
+        guard !others.isEmpty, let clientPID = HerdrOpen.attachedClient(herdr.scanOutcome)?.pid else {
+            openHerdrInGhostty(key, subject: subject)
+            return
+        }
+        openingTask = true
+        navigationMessage = "Finding the matching herdr pane…"
+        Task { @MainActor in
+            let walk = await Task.detached { TerminalApps.walk(from: clientPID) }.value
+            if case .reached(let host) = walk, others.contains(host) {
+                openHerdrInHostTab(key, subject: subject)
+            } else {
+                openHerdrInGhostty(key, subject: subject)
+            }
+        }
+    }
+
+    /// ADR 0014's sequence for a herdr pane whose client runs in another enabled host's tab: revalidate
+    /// herdr and the tty join, focus and verify the pane as ADR 0011 does, then raise and verify the tab
+    /// with that host's Open. herdr failures keep their own lines and fallback; a host-tab failure after
+    /// the pane verified is a partial reach (ADR 0015).
+    private func openHerdrInHostTab(_ key: HerdrSessionKey, subject: HerdrOpenSubject) {
+        openingTask = true
+        navigationMessage = "Finding the matching herdr pane…"
+        let client = herdr.client
+        let others = otherTabHosts
+        let switches = hostSwitches
+        final class LatestScan { var outcome: HerdrScanOutcome? }
+        let latest = LatestScan()
+        let record = MultiplexerOpenRecord()
+        Task { @MainActor in
+            let run = await TerminalOpenSequence.run(TerminalOpenSteps<HerdrHostOpenPlan, HerdrHostOpenFailure>(
+                now: { Date().timeIntervalSince1970 },
+                revalidate: { [weak self] _ in
+                    guard let self else { return .failure(.herdr(.binding(.notScanned))) }
+                    let fresh = await self.revalidateHerdrBinding(for: key)
+                    latest.outcome = fresh.outcome
+                    let reads = await Task.detached { TerminalTabReads.take(others: others, claudeTTYs: [], second: false) }.value
+                    record.reads = reads
+                    return HerdrHostOpen.plan(binding: fresh.binding, outcome: fresh.outcome, join: {
+                        MultiplexerHostTab.join(clientTTY: $0, switches: switches, inventories: reads.inventories)
+                    })
+                },
+                focusPane: { plan in
+                    HerdrOpen.focusOutcome(await Task.detached { client.focusAgent(target: plan.pane.paneID) }.value)
+                        .map(HerdrHostOpenFailure.herdr)
+                },
+                verifyPane: { [weak self] plan in
+                    guard let self else { return .herdr(.herdrVerifyUnavailable(.notScanned)) }
+                    let verify = await self.revalidateHerdrBinding(for: key)
+                    latest.outcome = verify.outcome ?? latest.outcome
+                    return HerdrHostOpen.verifyPane(plan, binding: verify.binding, outcome: verify.outcome)
+                },
+                raise: { [weak self] plan in
+                    TmuxOpen.hostRaised(await self?.raiseHostTab(plan.host, clientTTY: plan.clientTTY, record: record))
+                        .map(HerdrHostOpenFailure.host)
+                },
+                verify: { [weak self] plan in
+                    TmuxOpen.hostRaised(await self?.verifyHostTab(plan.host, clientTTY: plan.clientTTY, record: record))
+                        .map(HerdrHostOpenFailure.host)
+                }))
+            let pids = HerdrOpenFallback.clientPIDs(latest.outcome)
+            let agent: AgentSource = key.agent == .claude ? .claude : .codex
+            switch run {
+            case .opened(_, let preOpenAt):
+                herdr.open.failures[key] = nil
+                navigationMessage = "Opened the matching herdr pane."
+                acknowledgeHerdrCompletions(TerminalVisitAcknowledgment.afterOpen(herdrCompletions(subject), result: .opened,
+                                                                                  preOpenAt: preOpenAt), subject: subject)
+            case .failed(.herdr(let failure), _):
+                herdr.open.failures[key] = failure
+                let walks = await Task.detached { pids.map(TerminalApps.walk(from:)) }.value
+                if let fallback = HerdrOpenFallback.resolve(failure, agent: agent, clientWalks: walks, switches: switches,
+                                                            isRunning: TerminalApps.isRunning) {
+                    navigationMessage = message(for: raise(fallback), opened: "")
+                } else {
+                    navigationMessage = HerdrPresentation.cardLine(for: .open(failure), agent: key.agent)
+                }
+            case .failed(.host(let miss), _):
+                let result = await openResult(.miss(miss)) { _ in
+                    let walks = await Task.detached { pids.map(TerminalApps.walk(from:)) }.value
+                    return OpenFallback.processApp(walks: walks, agent: agent, switches: switches)
+                }
+                navigationMessage = message(for: result, opened: "")
+            }
+            endVisitIntervalsAfterOpen()
+            openingTask = false
+            refresh()
+        }
+    }
+
     /// Runs ADR 0011's sequence for a session in herdr. The completion or reminder is retained on
     /// every failure; only completions that arrived before the pre-Open scan are acknowledged on success.
-    fileprivate func openHerdr(_ key: HerdrSessionKey, subject: HerdrOpenSubject) {
+    private func openHerdrInGhostty(_ key: HerdrSessionKey, subject: HerdrOpenSubject) {
         openingTask = true
         navigationMessage = "Finding the matching herdr pane…"
         let client = herdr.client
@@ -472,6 +591,7 @@ extension Companion {
         iTerm2.visits.reset(at: now)
         terminalApp.visits.reset(at: now)
         wezTerm.visits.reset(at: now)
+        tmux.visits.reset(at: now)
     }
 
     /// Sessions with queued completions whose current binding is `pane`.

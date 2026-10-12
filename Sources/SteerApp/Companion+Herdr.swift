@@ -46,7 +46,7 @@ extension Companion {
     /// contacts herdr.
     func herdrBinding(for session: HerdrSessionKey) -> HerdrSessionBinding {
         HerdrBindingInputs.binding(for: session, liveness: herdrLiveness(of: session), hookRecords: herdr.hookRecords,
-                                   herdrEnabled: herdrContactAllowed, ghosttyControlsEnabled: ghosttyEnabled,
+                                   herdrEnabled: herdrContactAllowed, ghosttyControlsEnabled: herdrHostReady,
                                    gateOpen: herdr.monitor.isGateOpen,
                                    outcome: herdr.scanOutcome, defaultSocketPath: herdr.defaultSocketPath,
                                    codex: herdrCodexTitles(), claudeProcess: claudeSessionProcess(session))
@@ -85,12 +85,13 @@ extension Companion {
             ghostty = herdrCodexTitles().ghostty
         }
         let outcome = await herdr.monitor.revalidate(
-            HerdrBindingInputs.scanRequest(paneIDs: herdr.claudePaneIDs, codex: herdrCodexTitles(ghostty: ghostty)))
+            HerdrBindingInputs.scanRequest(paneIDs: herdr.claudePaneIDs, codex: herdrCodexTitles(ghostty: ghostty),
+                                           clientHostCommands: herdrClientHostCommands))
         // Sessions are re-read: one may have ended while herdr and Ghostty were read.
         let binding = HerdrBindingInputs.binding(for: session, liveness: herdrLiveness(of: session),
                                                  hookRecords: herdr.hookRecords,
                                                  herdrEnabled: herdrContactAllowed,
-                                                 ghosttyControlsEnabled: ghosttyEnabled,
+                                                 ghosttyControlsEnabled: herdrHostReady,
                                                  gateOpen: herdr.monitor.isGateOpen, outcome: outcome,
                                                  defaultSocketPath: herdr.defaultSocketPath,
                                                  codex: herdrCodexTitles(ghostty: ghostty),
@@ -100,6 +101,23 @@ extension Companion {
 
     /// herdr's switch is on and a terminal is too, so the ADR 0009 gate may open (ADR 0014).
     var herdrContactAllowed: Bool { hostSwitches.mayContact(.herdr) }
+
+    /// The enabled terminal hosts whose tab may hold herdr's client (ADR 0014): Ghostty while its
+    /// controls are on, iTerm2, Terminal.app and WezTerm while each may be contacted. With Ghostty alone
+    /// this is ADR 0011's Ghostty-only rule, unchanged.
+    var herdrClientHosts: Set<TerminalHost> {
+        var hosts: Set<TerminalHost> = []
+        if ghosttyEnabled { hosts.insert(.ghostty) }
+        if hostSwitches.mayContact(.iTerm2) { hosts.insert(.iTerm2) }
+        if terminalAppSwitchedOn { hosts.insert(.terminalApp) }
+        if wezTermSwitchedOn { hosts.insert(.wezTerm) }
+        return hosts
+    }
+
+    /// Whether any host may hold herdr's client; in place of "Ghostty controls are on" (ADR 0014).
+    var herdrHostReady: Bool { !herdrClientHosts.isEmpty }
+
+    var herdrClientHostCommands: Set<String> { TerminalHost.executableNames(of: herdrClientHosts) }
 
     /// The latest herdr scan outcome for settings (also published by `herdr.scanOutcome`).
     var herdrScanOutcome: HerdrScanOutcome? { herdr.scanOutcome }
@@ -175,7 +193,8 @@ extension Companion {
         }
         monitor.tick(now: ProcessInfo.processInfo.systemUptime, herdrEnabled: herdrContactAllowed,
                      herdrPaneIDs: paneIDs, codexGate: codexGate,
-                     request: HerdrBindingInputs.scanRequest(paneIDs: paneIDs, codex: codex))
+                     request: HerdrBindingInputs.scanRequest(paneIDs: paneIDs, codex: codex,
+                                                             clientHostCommands: herdrClientHostCommands))
         publishHerdrScan(monitor.latest)
     }
 
@@ -204,9 +223,21 @@ extension Companion {
     /// sessions not yet proved live, whose herdr pane title is what proves them. Bindings still use
     /// live sessions only (`herdrCodexTitles()`).
     private func herdrGateCodexTitles() -> HerdrCodexTitles {
-        let ghostty = knownGhosttySnapshot?.terminalNames
         let sessions = liveCLI.subtracting(endedSessions).union(daemonCLISessions)
-        return HerdrCodexTitles(liveSessions: Set(sessions.map(\.uuidString)), ghostty: ghosttyEnabled ? ghostty : nil)
+        return HerdrCodexTitles(liveSessions: Set(sessions.map(\.uuidString)),
+                                ghostty: herdrHostTitles(ghostty: knownGhosttySnapshot?.terminalNames))
+    }
+
+    /// The titles of the known enabled host inventories, nil when none is known: ADR 0012's "a Ghostty
+    /// inventory is known" reads "any enabled host's inventory is known" (ADR 0014). While Ghostty's
+    /// controls are on this is Ghostty's inventory alone, unchanged; otherwise the latest iTerm2,
+    /// Terminal.app and WezTerm scans' titles.
+    private func herdrHostTitles(ghostty: Set<String>?) -> Set<String>? {
+        HerdrHostTitles.known(ghosttyEnabled: ghosttyEnabled, ghostty: ghostty, otherHosts: [
+            hostSwitches.mayContact(.iTerm2) ? iTerm2.latestTitles : nil,
+            terminalAppSwitchedOn ? terminalApp.latestTitles : nil,
+            wezTermSwitchedOn ? wezTerm.latestTitles : nil,
+        ])
     }
 
     /// Live Codex sessions and the titles of the latest complete Ghostty inventory (ADR 0012).
@@ -214,10 +245,10 @@ extension Companion {
         herdrCodexTitles(ghostty: knownGhosttySnapshot?.terminalNames)
     }
 
-    /// Live Codex sessions and `ghostty`'s titles, or none while Ghostty controls are off.
+    /// Live Codex sessions and the known host titles (`herdrHostTitles`).
     private func herdrCodexTitles(ghostty: Set<String>?) -> HerdrCodexTitles {
         HerdrCodexTitles(liveSessions: Set(liveCLI.subtracting(endedSessions).map(\.uuidString)),
-                         ghostty: ghosttyEnabled ? ghostty : nil)
+                         ghostty: herdrHostTitles(ghostty: ghostty))
     }
 
     private func herdrLiveness(of session: HerdrSessionKey) -> HerdrSessionLiveness {

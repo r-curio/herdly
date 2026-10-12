@@ -162,9 +162,11 @@ public enum HerdrBindingInputs {
     /// live Claude sessions recorded, only when a Claude pane opened the gate, and process info for
     /// panes showing the title of a Codex session in `codex.liveSessions` (live, or loaded by the
     /// daemon as a terminal session) outside Ghostty.
-    public static func scanRequest(paneIDs: Set<String>, codex: HerdrCodexTitles) -> HerdrScanRequest {
+    /// `clientHostCommands` are the enabled terminal hosts that may hold herdr's client (ADR 0014).
+    public static func scanRequest(paneIDs: Set<String>, codex: HerdrCodexTitles,
+                                   clientHostCommands: Set<String> = ["ghostty"]) -> HerdrScanRequest {
         HerdrScanRequest(includeIntegration: !paneIDs.isEmpty, processInfoTitles: codex.outsideGhostty,
-                         processInfoPaneIDs: paneIDs)
+                         processInfoPaneIDs: paneIDs, clientHostCommands: clientHostCommands)
     }
 
     // MARK: - Observation
