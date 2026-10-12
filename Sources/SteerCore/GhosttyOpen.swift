@@ -76,6 +76,35 @@ public enum GhosttyTitleOpen {
         return nil
     }
 
+    /// ADR 0016's sequence for a title-route tab: revalidate on a fresh inventory, select and raise the
+    /// tab once, then verify on a fresh inventory. A Ghostty that is not running is an empty inventory
+    /// (ADR 0013) and is never asked.
+    ///
+    /// - Parameters:
+    ///   - snapshot: a fresh inventory, nil when it could not be read.
+    ///   - select: sends the selection (which rechecks the title and activates Ghostty) and returns
+    ///     Ghostty's status, nil when Ghostty did not reply.
+    public static func run(title: String, live: [String], running: Bool, sameWindowOnly: Bool,
+                           now: @escaping () -> Double,
+                           snapshot: @escaping () async -> GhosttySnapshot?,
+                           select: @escaping (GhosttyTarget) async -> String?,
+                           isolation: isolated (any Actor)? = #isolation) async -> TerminalOpenRun<GhosttyTarget, OpenMiss> {
+        await TerminalOpenSequence.run(TerminalOpenSteps<GhosttyTarget, OpenMiss>(
+            now: now,
+            revalidate: { _ in
+                let before = running ? await snapshot() : nil
+                switch revalidate(title: title, live: live, ghostty: before, running: running,
+                                  sameWindowOnly: sameWindowOnly) {
+                case .exact(let target): return .success(target)
+                case .miss(let miss): return .failure(miss)
+                }
+            },
+            raise: { target in selection(status: await select(target)) },
+            verify: { target in
+                verify(target, title: title, live: live, after: await snapshot(), sameWindowOnly: sameWindowOnly)
+            }))
+    }
+
     /// The amendment's Codex candidates for `count` Ghostty terminals carrying the title. Until
     /// Ghostty exposes `tty`, its tabs bind by title alone (ADR 0013), so each titled terminal in
     /// Ghostty's own inventory is a candidate in Ghostty; tty times are not read, and are not needed

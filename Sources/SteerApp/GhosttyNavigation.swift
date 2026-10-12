@@ -85,38 +85,35 @@ enum GhosttyNavigation {
     ///
     /// - Parameter running: whether Ghostty is running, read on the main actor. A Ghostty that is not
     ///   running is an empty inventory (ADR 0013) and is not asked anything.
-    static func open(session: UUID, live: Set<UUID>, running: Bool) -> GhosttyTitleOutcome {
-        open(title: GhosttyMatch.title(session), live: live.map(GhosttyMatch.title), running: running, sameWindowOnly: false)
+    static func open(session: UUID, live: Set<UUID>, running: Bool) async -> GhosttyTitleOutcome {
+        await open(title: GhosttyMatch.title(session), live: live.map(GhosttyMatch.title), running: running, sameWindowOnly: false)
     }
     /// The same for a Claude tab, by its full Claude title, limited to the front window.
-    static func openClaude(sessionID: String, live: [String], running: Bool) -> GhosttyTitleOutcome {
+    static func openClaude(sessionID: String, live: [String], running: Bool) async -> GhosttyTitleOutcome {
         guard let title = GhosttyMatch.claudeTitle(sessionID) else {
             // A non-canonical session id has no title any tab can carry.
             return .miss(.fallBack(.noUniqueTarget, candidates: 0))
         }
-        return open(title: title, live: live.compactMap(GhosttyMatch.claudeTitle), running: running, sameWindowOnly: true)
+        return await open(title: title, live: live.compactMap(GhosttyMatch.claudeTitle), running: running, sameWindowOnly: true)
     }
-    private static func open(title: String, live: [String], running: Bool, sameWindowOnly: Bool) -> GhosttyTitleOutcome {
-        let before = running ? snapshot() : nil
-        let target: GhosttyTarget
-        switch GhosttyTitleOpen.revalidate(title: title, live: live, ghostty: before, running: running,
-                                           sameWindowOnly: sameWindowOnly) {
-        case .exact(let exact): target = exact
-        case .miss(let miss): return .miss(miss)
+    /// ADR 0016's sequence (`GhosttyTitleOpen.run`): revalidate, select and raise once, verify.
+    private static func open(title: String, live: [String], running: Bool, sameWindowOnly: Bool) async -> GhosttyTitleOutcome {
+        let run = await GhosttyTitleOpen.run(
+            title: title, live: live, running: running, sameWindowOnly: sameWindowOnly,
+            now: { Date().timeIntervalSince1970 },
+            snapshot: { snapshot() },
+            select: { target in
+                guard let bytes = try? JSONEncoder().encode(target),
+                      let object = try? JSONSerialization.jsonObject(with: bytes),
+                      let response = request(["action": "select", "title": title, "target": object,
+                                              "same_window_only": sameWindowOnly]),
+                      let value = try? JSONSerialization.jsonObject(with: response) as? [String: Any] else { return nil }
+                return value["status"] as? String ?? ""
+            })
+        switch run {
+        case .opened: return .opened
+        case .failed(let miss, _): return .miss(miss)
         }
-        var status: String?
-        if let bytes = try? JSONEncoder().encode(target),
-           let object = try? JSONSerialization.jsonObject(with: bytes),
-           let response = request(["action": "select", "title": title, "target": object, "same_window_only": sameWindowOnly]),
-           let value = try? JSONSerialization.jsonObject(with: response) as? [String: Any] {
-            status = value["status"] as? String ?? ""
-        }
-        if let miss = GhosttyTitleOpen.selection(status: status) { return .miss(miss) }
-        if let miss = GhosttyTitleOpen.verify(target, title: title, live: live, after: snapshot(),
-                                              sameWindowOnly: sameWindowOnly) {
-            return .miss(miss)
-        }
-        return .opened
     }
 }
 
