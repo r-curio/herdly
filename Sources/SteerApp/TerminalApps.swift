@@ -40,7 +40,8 @@ enum TerminalApps {
     }
 
     /// The bundle identifier when `pid` runs the main executable of an app (`X.app/Contents/MacOS/…`).
-    private static func appBundleIdentifier(of pid: Int32) -> String? {
+    /// Safe off the main actor; WezTerm's socket check uses it too (#240).
+    static func appBundleIdentifier(of pid: Int32) -> String? {
         guard pid > 0 else { return nil }
         var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }

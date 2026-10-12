@@ -316,6 +316,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     let herdr = HerdrSessionBindings()
     /// Terminal.app permission, scan, visits and Claude replies (Companion+TerminalApp.swift).
     let terminalApp = TerminalAppState()
+    /// WezTerm scan, visits and Open diagnostics (Companion+WezTerm.swift, #240).
+    let wezTerm = WezTermState()
     var claudeInventoryAvailable: [String: Bool] = [:]
     var claudeInventories: [String: ClaudeInventoryScan] = [:]
     /// Unix time of the inventory in `ghosttyFocusState`, for dating a session end at the tab's absence.
@@ -728,6 +730,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         restoreHostSwitches(defaults)
         startITerm2()
         startTerminalApp()
+        startWezTerm()
         let stored = defaults.object(forKey: Companion.ghosttyEnabledKey) as? Bool
         if stored == true {
             ghosttyEnabled = true
@@ -1442,6 +1445,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         checkGhosttyFocus()
         checkITerm2Visits()
         checkTerminalApp()
+        checkWezTerm()
         // App identity only: no window contents, task titles, or accessibility queries.
         // App activation affects notification delivery, never the notch's visibility.
         let codexForeground = previewMode == nil ? desktopAdapter.codexForeground() : false
@@ -2049,7 +2053,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             }
             // ADR 0017: the daemon does not hold the thread; type the reply into the bound tab.
             if let terminal = plan.terminal {
-                sendTypedCodexReply(completion, send: terminal, progress: next)
+                if terminal.pane.host == .wezTerm {
+                    sendWezTermCodexReply(completion, send: terminal, progress: next)
+                } else {
+                    sendTypedCodexReply(completion, send: terminal, progress: next)
+                }
                 return
             }
             guard let params = plan.params else { return }
@@ -2354,6 +2362,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if host == .herdr { scanHerdr() }
         if host == .iTerm2 { iTerm2SwitchChanged(on) }
         if host == .terminalApp { terminalAppSwitchChanged(on) }
+        if host == .wezTerm { wezTermSwitchChanged(on) }
     }
 
     func ghosttyChanged(_ enabled: Bool) {

@@ -39,12 +39,16 @@ final class TerminalAppState {
 }
 
 /// The other enabled hosts a Terminal.app read is taken beside, for ADR 0013's cross-host uniqueness:
-/// Ghostty's titles and iTerm2's inventory while each is on. Read on the main actor.
+/// Ghostty's titles and iTerm2's and WezTerm's inventories while each is on. Read on the main actor.
 struct OtherTabHosts: Sendable {
     let ghosttyOn: Bool
     let ghosttyRunning: Bool
     /// nil while iTerm2 is off (never read).
     let iTerm2Running: Bool?
+    /// nil while WezTerm is off (never read) (#240).
+    var wezTermRunning: Bool? = nil
+    /// nil while Terminal.app is off, or when Terminal.app is the host being read (#240).
+    var terminalAppRunning: Bool? = nil
 }
 
 /// One set of fresh reads across the enabled hosts (ADR 0013): the first inventories, `ps` for the
@@ -68,7 +72,16 @@ struct TerminalTabReads: Sendable {
         if let running = others.iTerm2Running {
             inventories[.iTerm2] = running ? ITerm2Navigation.inventory(ITerm2Navigation.snapshot()) : .notRunning
         }
-        let processes = TerminalTTYReads.processes(on: terminal.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
+        // WezTerm beside it (#240): its panes count toward uniqueness, and `ps` is read for its titled
+        // Codex panes and Claude ttys too, so a session bound there routes to its pane.
+        var wezTermTTYs: Set<String> = []
+        if let running = others.wezTermRunning {
+            let read = WezTermNavigation.read(running: running).0
+            inventories[.wezTerm] = read.inventory
+            wezTermTTYs = read.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? []
+        }
+        let processes = TerminalTTYReads.processes(on: (terminal.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
+            .union(wezTermTTYs))
         var secondRead = inventories
         if second { secondRead[.terminalApp] = TerminalAppNavigation.snapshot().inventory }
         return TerminalTabReads(terminalApp: terminal, inventories: inventories, processes: processes,
@@ -117,7 +130,8 @@ extension Companion {
     var otherTabHosts: OtherTabHosts {
         let ghosttyOn = ghosttyEnabled && ghosttyPermissionVerified
         return OtherTabHosts(ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyOn && TerminalApps.isRunning(.ghostty),
-                             iTerm2Running: hostSwitches.mayContact(.iTerm2) ? TerminalApps.isRunning(.iTerm2) : nil)
+                             iTerm2Running: hostSwitches.mayContact(.iTerm2) ? TerminalApps.isRunning(.iTerm2) : nil,
+                             wezTermRunning: wezTermSwitchedOn ? TerminalApps.isRunning(.wezTerm) : nil)
     }
 
     /// Terminal.app's switch is on. Open and question keys then account for it even before or without a
@@ -475,6 +489,9 @@ extension Companion {
     /// unreadable iTerm2 the unreachable line). Any route that is not a pane wins over a pane.
     var terminalReplyRoutes: [UUID: TerminalReplyRoute] {
         var routes = terminalAppActive ? terminalApp.codexRoutes : [:]
+        if wezTermSwitchedOn {
+            for (session, route) in wezTerm.codexRoutes { routes[session] = TerminalReplyRoute.merging(routes[session], route) }
+        }
         if hostSwitches.mayContact(.iTerm2) {
             for (session, block) in iTerm2.codexInputBlocks {
                 routes[session] = block == .inITerm2 ? .hostCannotType(.iTerm2) : .unreachable
@@ -487,6 +504,7 @@ extension Companion {
     /// iTerm2 or Terminal.app, whose questions are answered in Codex (ADR 0017).
     func terminalHost(forQuestionSession session: UUID) -> TerminalHost? {
         if hostSwitches.mayContact(.iTerm2), iTerm2.codexInputBlocks[session] == .inITerm2 { return .iTerm2 }
+        if wezTermSwitchedOn, wezTerm.codexSeen.contains(session) { return .wezTerm }
         return terminalAppSwitchedOn && terminalApp.codexSeen.contains(session) ? .terminalApp : nil
     }
 
@@ -497,6 +515,7 @@ extension Companion {
            iTerm2.codexInputBlocks[session] == .iTerm2Unreadable || iTerm2.scan == .notRead || iTerm2.scan == .unreadable {
             return .iTerm2
         }
+        if wezTermSwitchedOn, TerminalApps.isRunning(.wezTerm), wezTerm.scan != .read { return .wezTerm }
         guard terminalAppSwitchedOn, TerminalApps.isRunning(.terminalApp) else { return nil }
         return terminalApp.access == .granted && terminalApp.readable == true ? nil : .terminalApp
     }
@@ -511,7 +530,8 @@ extension Companion {
             switch host {
             case .terminalApp: result[host] = TerminalAppNavigation.snapshot().inventory
             case .iTerm2: result[host] = ITerm2Navigation.inventory(ITerm2Navigation.snapshot())
-            case .ghostty, .wezTerm, .tmux, .zellij, .herdr: result[host] = .unreadable
+            case .wezTerm: result[host] = WezTermNavigation.read(running: true).0.inventory
+            case .ghostty, .tmux, .zellij, .herdr: result[host] = .unreadable
             }
         }
         return result
@@ -537,7 +557,9 @@ extension Companion {
                         (TerminalTabReads.take(others: others, claudeTTYs: [], second: true),
                          ReminderReader.currentEvidence(for: completion.session, in: rolloutRoot))
                     }.value
-                    return TypedReplyCheck.veto(self.codexReplyState(completion, reads: fresh.0, evidence: fresh.1),
+                    return TypedReplyCheck.veto(self.codexReplyState(completion,
+                                                                     route: TerminalReplyRoute.from(self.codexBinding(completion.session, reads: fresh.0)),
+                                                                     evidence: fresh.1),
                                                 spent: send.pane)
                 },
                 write: { write in
@@ -557,9 +579,10 @@ extension Companion {
         }
     }
 
-    /// ADR 0017's fresh check for a Codex reply, from the queue as it is now and fresh reads.
-    private func codexReplyState(_ completion: AttentionCompletion, reads: TerminalTabReads,
-                                 evidence: ReminderReader.RolloutEvidence) -> TypedReplyFreshState {
+    /// ADR 0017's fresh check for a Codex reply, from the queue as it is now, the rollout and the route of
+    /// the binding re-run on fresh reads of every enabled host.
+    func codexReplyState(_ completion: AttentionCompletion, route: TerminalReplyRoute?,
+                         evidence: ReminderReader.RolloutEvidence) -> TypedReplyFreshState {
         let session = completion.session
         let turn = TurnIdentity(session: session, turn: completion.turn)
         let queued = queue.items.compactMap(\.completion)
@@ -573,19 +596,22 @@ extension Companion {
                 && (evidence.completed.contains(turn) || evidence.canceled.contains(turn)),
             pendingInteraction: pending,
             daemonHoldsThread: daemonClient.isConnected && daemonClient.loadedThreads.contains(session),
-            route: TerminalReplyRoute.from(codexBinding(session, reads: reads)))
+            route: route)
     }
 
     // MARK: Claude replies
 
-    /// The Claude card's reply target, nil when no typed route exists (the card shows no field).
+    /// The Claude card's reply target, nil when no typed route exists (the card shows no field). Terminal.app's
+    /// and WezTerm's latest scans each give a route; a route that is not one pane wins (#240).
     func claudeReplyTarget(for outcome: AgentOutcome) -> SessionReplyTarget? {
-        guard terminalAppActive, outcome.session.source == .claude, outcome.session.surface == .cli else { return nil }
+        guard terminalAppActive || wezTermSwitchedOn, outcome.session.source == .claude, outcome.session.surface == .cli else { return nil }
         let items = orderedAgentAttentionItems.filter { $0.session == outcome.session }
         let ended = liveClaudeSessions[outcome.session.sourceScope].map { !$0.contains(outcome.session.session) } ?? false
         let inTurn = items.contains { $0.running != nil || $0.question != nil || ($0.approval != nil) }
         // No entry (bound in Ghostty, or not scanned yet) offers no field, as for Codex.
-        return ClaudeReplyRouting.target(ended: ended, inTurn: inTurn, route: terminalApp.claudeRoutes[outcome.session])
+        let route = TerminalReplyRoute.merging(terminalAppActive ? terminalApp.claudeRoutes[outcome.session] : nil,
+                                               wezTermSwitchedOn ? wezTerm.claudeRoutes[outcome.session] : nil)
+        return ClaudeReplyRouting.target(ended: ended, inTurn: inTurn, route: route)
     }
 
     func claudeReply(for outcome: AgentOutcome) -> ReplyProgress<AgentTurnIdentity> {
@@ -605,6 +631,11 @@ extension Companion {
         case .failure(let rejection):
             navigationMessage = SessionReplyPolicy.message(for: rejection, agent: .claude); refresh(); return
         case .success(let value): send = value
+        }
+        // A pane in WezTerm types through WezTerm's send (#240).
+        if send.pane.host == .wezTerm {
+            sendWezTermClaudeReply(outcome, send: send, progress: progress)
+            return
         }
         terminalApp.replying = true
         terminalApp.claudeReplies[outcome.id] = progress.startingSend(text: text, route: .terminal(send.pane))
@@ -627,8 +658,8 @@ extension Companion {
                         return (rows.count == 1 ? rows[0] : nil, process, reads)
                     }.value
                     guard let fresh else { return .unreachable }
-                    return TypedReplyCheck.veto(self.claudeReplyState(outcome, row: fresh.0, process: fresh.1, reads: fresh.2),
-                                                spent: send.pane)
+                    let route = TerminalReplyRoute.from(self.claudeBinding(outcome.session, process: fresh.1, reads: fresh.2))
+                    return TypedReplyCheck.veto(self.claudeReplyState(outcome, row: fresh.0, route: route), spent: send.pane)
                 },
                 write: { write in
                     let text = TerminalAppInput.script(write)
@@ -642,9 +673,10 @@ extension Companion {
         }
     }
 
-    /// ADR 0017's fresh check for a Claude reply: a fresh interactive inventory reading must say idle.
-    private func claudeReplyState(_ outcome: AgentOutcome, row: ClaudeInventorySession?, process: ClaudeTabProcess,
-                                  reads: TerminalTabReads) -> TypedReplyFreshState {
+    /// ADR 0017's fresh check for a Claude reply: a fresh interactive inventory reading must say idle, and
+    /// `route` is the binding re-run on fresh reads of every enabled host.
+    func claudeReplyState(_ outcome: AgentOutcome, row: ClaudeInventorySession?,
+                          route: TerminalReplyRoute?) -> TypedReplyFreshState {
         let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == outcome.session }
         let items = orderedAgentAttentionItems.filter { $0.session == outcome.session }
         return TypedReplyFreshState(
@@ -653,7 +685,7 @@ extension Companion {
             sessionIdle: row?.lifecycle.isIdleInteractive == true && !items.contains { $0.running != nil },
             pendingInteraction: items.contains { $0.question != nil || $0.approval != nil },
             daemonHoldsThread: false,
-            route: TerminalReplyRoute.from(claudeBinding(outcome.session, process: process, reads: reads)))
+            route: route)
     }
 
     /// Keeps a Claude card's reply only while its outcome is queued, and lets a sent one reach its final
