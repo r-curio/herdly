@@ -801,7 +801,8 @@ private struct TerminalControls: View {
         case .ghostty: ghosttyCard
         case .herdr: HerdrControls(model: model)
         case .iTerm2: ITerm2Controls(model: model, state: model.iTerm2)
-        case .terminalApp, .wezTerm, .tmux, .zellij: EmptyView()
+        case .terminalApp: TerminalAppControls(model: model)
+        case .wezTerm, .tmux, .zellij: EmptyView()
         }
     }
 
@@ -848,6 +849,46 @@ private struct TerminalControls: View {
         case .ghosttyNotRunning: return "Waiting for Ghostty to open; macOS asks then."
         default: return model.ghosttyEnabled ? "Waiting for macOS to confirm access." : "Enable Ghostty to let macOS request access."
         }
+    }
+}
+
+/// The Terminal.app card (product.md, "Agreed terminal host presentation"; #239). Shown only once
+/// `TerminalHost.terminalApp.showsCard` is turned on by its acceptance (#244).
+private struct TerminalAppControls: View {
+    @ObservedObject var model: Companion
+
+    var body: some View {
+        let row = model.terminalAppSettingsRow
+        SettingsCard {
+            SettingsRow(title: TerminalHost.terminalApp.displayName, detail: "Open sessions in their exact tab, and type replies there") {
+                Toggle("Terminal.app", isOn: Binding(get: { model.hostSwitches.isOn(.terminalApp) },
+                                                     set: { model.setHostSwitch(.terminalApp, on: $0) }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    .accessibilityLabel("Enable Terminal.app")
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Automation permission", detail: nil) {
+                HStack(spacing: 10) {
+                    if model.terminalApp.access == .denied {
+                        Button("Open Settings…", action: GhosttyAutomationPermission.openSettings)
+                    }
+                    StatusBadge(title: row.permission, color: row.permission == "Allowed" ? .green : .orange)
+                }
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Status", detail: row.detail) {
+                StatusBadge(title: row.badge.title, color: row.badge == .ready ? .green : row.badge == .needsAttention ? .orange : .secondary)
+            }
+            ForEach(row.problems, id: \.self) { problem in
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                SettingsRow(title: problem, detail: nil) { EmptyView() }
+            }
+            if !model.terminalApp.diagnostics.isEmpty {
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                PreviewDisclosure(title: "Show diagnostics") { model.terminalApp.diagnostics.joined(separator: "\n") }
+            }
+        }
+        SettingsFooter(TerminalAppPresentation.footer)
     }
 }
 

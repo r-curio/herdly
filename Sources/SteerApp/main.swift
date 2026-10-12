@@ -314,6 +314,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     var liveClaudeSessions: [String: [String]] = [:]
     /// herdr monitor, hook pane records and latest scan (Companion+Herdr.swift).
     let herdr = HerdrSessionBindings()
+    /// Terminal.app permission, scan, visits and Claude replies (Companion+TerminalApp.swift).
+    let terminalApp = TerminalAppState()
     var claudeInventoryAvailable: [String: Bool] = [:]
     var claudeInventories: [String: ClaudeInventoryScan] = [:]
     /// Unix time of the inventory in `ghosttyFocusState`, for dating a session end at the tab's absence.
@@ -725,6 +727,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let defaults = UserDefaults.standard
         restoreHostSwitches(defaults)
         startITerm2()
+        startTerminalApp()
         let stored = defaults.object(forKey: Companion.ghosttyEnabledKey) as? Bool
         if stored == true {
             ghosttyEnabled = true
@@ -1422,6 +1425,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         queue.expire(at: Date().timeIntervalSince1970)
         pruneAnswerProgress()
         pruneReplyProgress()
+        pruneClaudeReplies()
         if previewMode == nil {
             // A waiting question on a thread Steer has not subscribed to yet: ask for the list now.
             if daemonClient.isConnected,
@@ -1437,6 +1441,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         checkApprovalFocus()
         checkGhosttyFocus()
         checkITerm2Visits()
+        checkTerminalApp()
         // App identity only: no window contents, task titles, or accessibility queries.
         // App activation affects notification delivery, never the notch's visibility.
         let codexForeground = previewMode == nil ? desktopAdapter.codexForeground() : false
@@ -1957,7 +1962,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                             endedSessions: endedSessions, workingSessions: working)
         }
         return SessionReplyAvailability(daemonConnected: daemonClient.isConnected, daemonThreads: daemonClient.loadedThreads,
-                                        endedSessions: endedSessions, workingSessions: working)
+                                        endedSessions: endedSessions, workingSessions: working,
+                                        terminalRoutes: terminalReplyRoutes)
     }
 
     /// Where this completion's reply would go, or why the field is disabled.
@@ -2039,6 +2045,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             guard previewMode == nil else {
                 navigationMessage = "Preview only; nothing was sent."
                 refresh()
+                return
+            }
+            // ADR 0017: the daemon does not hold the thread; type the reply into the bound tab.
+            if let terminal = plan.terminal {
+                sendTypedCodexReply(completion, send: terminal, progress: next)
                 return
             }
             guard let params = plan.params else { return }
@@ -2342,6 +2353,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if previewMode == nil { UserDefaults.standard.set(on, forKey: host.defaultsKey) }
         if host == .herdr { scanHerdr() }
         if host == .iTerm2 { iTerm2SwitchChanged(on) }
+        if host == .terminalApp { terminalAppSwitchChanged(on) }
     }
 
     func ghosttyChanged(_ enabled: Bool) {

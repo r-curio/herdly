@@ -93,6 +93,19 @@ extension Companion {
             openHerdr(herdrKey, subject: .claude(identity))
             return
         }
+        // Terminal.app on (#239): a tab there opens through its own sequence; anything else keeps
+        // Ghostty's title route below.
+        if terminalAppSwitchedOn {
+            openClaudeWithTerminalApp(identity, approval: approval) { [weak self] in
+                self?.openClaudeByTitle(identity, approval: approval)
+            }
+            return
+        }
+        openClaudeByTitle(identity, approval: approval)
+    }
+
+    /// Ghostty's title route for a Claude tab, or the fallback from its registry process (ADR 0015).
+    private func openClaudeByTitle(_ identity: AgentSessionIdentity, approval: AgentApproval?) {
         openingTask = true
         navigationMessage = "Finding the matching Claude tab…"
         let configuredRoots = configuredClaudeNavigationRoots()
@@ -232,11 +245,26 @@ extension Companion {
             openHerdr(herdrKey, subject: .codex(session))
             return
         }
-        // With iTerm2 on (#238), ADR 0013's binding across the enabled hosts decides.
+        // Terminal.app on (#239): a tab there opens through its own sequence; a title no Terminal.app
+        // tab carries keeps the routes below. Both read every enabled host for ADR 0013's binding.
+        if terminalAppSwitchedOn {
+            openCodexWithTerminalApp(session) { [weak self] in self?.openCLIOutsideTerminalApp(session) }
+            return
+        }
+        openCLIOutsideTerminalApp(session)
+    }
+
+    /// iTerm2's cross-host Open while it is on (#238), otherwise Ghostty's title route.
+    private func openCLIOutsideTerminalApp(_ session: UUID) {
         if hostSwitches.mayContact(.iTerm2) {
             openCLIAcrossHosts(session)
             return
         }
+        openCLIInGhostty(session)
+    }
+
+    /// Ghostty's title route for a Codex tab (ADR 0005, ADR 0016), with ADR 0015's fallback.
+    private func openCLIInGhostty(_ session: UUID) {
         openingTask = true
         navigationMessage = "Finding the matching Ghostty tab…"
         let live = liveCLI
@@ -421,6 +449,7 @@ extension Companion {
         herdr.open.visits.reset(at: now)
         resetGhosttyVisits(at: now)
         iTerm2.visits.reset(at: now)
+        terminalApp.visits.reset(at: now)
     }
 
     /// Sessions with queued completions whose current binding is `pane`.

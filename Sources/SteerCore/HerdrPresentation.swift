@@ -202,7 +202,7 @@ public enum HerdrPresentation {
         switch reason {
         case .binding(let reason): group(reason)
         case .leftHerdr, .paneChanged, .answeredInRollout, .turnEnded, .rolloutUnreadable, .agentNotBlocked,
-             .daemonAnswerInProgress, .herdrRefused: .generic
+             .daemonAnswerInProgress, .herdrRefused, .noQuestionKeys, .otherHostUnreadable: .generic
         }
     }
 
@@ -242,6 +242,8 @@ public enum HerdrPresentation {
     /// controls are already on here, so the Ghostty fallback sentence would mislead. Only a session
     /// in herdr has a pane to open; daemon drafts in progress just point to Codex.
     public static func relayUnavailableLine(for reason: HerdrQuestionRelayUnavailable) -> String {
+        if case .noQuestionKeys = reason { return reason.message }
+        if case .otherHostUnreadable = reason { return "Steer can't reach this session's tab. Reply in the session." }
         if case .binding = reason { return "Steer can't answer this from here. Answer in Codex, or open its pane." }
         return "Steer can't answer this from here. Answer in Codex."
     }
