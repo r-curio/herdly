@@ -288,3 +288,83 @@ public enum HerdrSocketPath {
         return validated(record[recordKey] as? String)
     }
 }
+
+/// A Zellij pane named by a Claude Code hook event: `ZELLIJ_PANE_ID` within `ZELLIJ_SESSION_NAME`.
+public struct ZellijHookPane: Equatable, Hashable, Sendable {
+    public let paneID: String
+    public let sessionName: String
+
+    public init(paneID: String, sessionName: String) {
+        self.paneID = paneID
+        self.sessionName = sessionName
+    }
+}
+
+/// Terminal and multiplexer identifiers from a hook helper's environment (ADR 0013, ADR 0014).
+///
+/// `ITERM_SESSION_ID`, `TERM_SESSION_ID` and `WEZTERM_PANE` are recorded for diagnostics only: they
+/// neither bind nor veto, because a terminal launched from another agent's session inherits that
+/// session's values. `ZELLIJ_PANE_ID` with `ZELLIJ_SESSION_NAME` is the one exception, a Claude
+/// Code binding input checked against the session process's ancestry; Codex records never supply
+/// it, because Codex hooks run in a shared daemon (ADR 0012).
+///
+/// A missing, empty, oversized or malformed value is absent, never trimmed or repaired.
+public enum TerminalHookIdentifiers {
+    /// Environment key → hook record key, snake case like the record's other keys.
+    static let keys: [(environment: String, record: String)] = [
+        ("ITERM_SESSION_ID", "iterm_session_id"),
+        ("TERM_SESSION_ID", "term_session_id"),
+        ("WEZTERM_PANE", "wezterm_pane"),
+        (zellijPaneEnvironmentKey, zellijPaneRecordKey),
+        (zellijSessionEnvironmentKey, zellijSessionRecordKey),
+    ]
+    static let zellijPaneEnvironmentKey = "ZELLIJ_PANE_ID"
+    static let zellijPaneRecordKey = "zellij_pane_id"
+    static let zellijSessionEnvironmentKey = "ZELLIJ_SESSION_NAME"
+    static let zellijSessionRecordKey = "zellij_session_name"
+    /// iTerm2's and Terminal.app's `w0t0p0:` plus a GUID is 42 bytes.
+    public static let maximumLength = 128
+
+    /// `value` when it is 1...`maximumLength` ASCII letters, digits, `:`, `_`, `-` or `.`.
+    public static func validated(_ value: String?) -> String? {
+        guard let value, !value.isEmpty, value.utf8.count <= maximumLength,
+              value.utf8.allSatisfy(isAllowed) else { return nil }
+        return value
+    }
+
+    /// Adds every valid identifier in `environment` to a hook event record.
+    public static func record(from environment: [String: String], into record: inout [String: Any]) {
+        for key in keys {
+            if let value = validated(environment[key.environment]) { record[key.record] = value }
+        }
+    }
+
+    /// Every valid identifier recorded in a decoded hook event record, by record key. For
+    /// diagnostics only.
+    public static func diagnostics(in record: [String: Any]) -> [String: String] {
+        keys.reduce(into: [:]) { result, key in
+            if let value = validated(record[key.record] as? String) { result[key.record] = value }
+        }
+    }
+
+    /// The Zellij pane a Claude Code hook event recorded, or nil for any other record, including
+    /// every Codex record and a pane recorded without its session.
+    public static func zellijPane(in record: [String: Any]) -> ZellijHookPane? {
+        guard record["source"] as? String == ClaudeSetupRequirements.helperSource,
+              let paneID = validated(record[zellijPaneRecordKey] as? String),
+              paneID.utf8.allSatisfy({ (UInt8(ascii: "0")...UInt8(ascii: "9")).contains($0) }),
+              let session = validated(record[zellijSessionRecordKey] as? String) else { return nil }
+        return ZellijHookPane(paneID: paneID, sessionName: session)
+    }
+
+    private static func isAllowed(_ byte: UInt8) -> Bool {
+        switch byte {
+        case UInt8(ascii: "a")...UInt8(ascii: "z"), UInt8(ascii: "A")...UInt8(ascii: "Z"),
+             UInt8(ascii: "0")...UInt8(ascii: "9"), UInt8(ascii: ":"), UInt8(ascii: "_"),
+             UInt8(ascii: "-"), UInt8(ascii: "."):
+            return true
+        default:
+            return false
+        }
+    }
+}
