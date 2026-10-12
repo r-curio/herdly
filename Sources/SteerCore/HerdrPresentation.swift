@@ -270,17 +270,21 @@ public enum HerdrPresentation {
     ///   latest Ghostty inventory (`GhosttyTTYMatch.join`), nil when either is unknown. Open is offered
     ///   only when it matched; otherwise its reason is shown, or "update Ghostty" when Ghostty has
     ///   several surfaces.
+    ///
+    /// A cause that is an Open fallback (ADR 0015: a split, several clients, colliding matches, a
+    /// Ghostty without `tty`) keeps Open on the card, which looks the same whether the click will reach
+    /// the exact pane or raise the app. Setup guidance such as "Update Ghostty" stays in settings.
     public static func openAvailability(binding: HerdrSessionBinding, ttySupport: GhosttyTTYSupport?,
                                         soleTerminal: GhosttyTTYJoin? = nil) -> HerdrOpenAvailability {
         switch binding {
         case .notInHerdr: return .notInHerdr
-        case .unavailable(let reason): return .unavailable(.session(reason))
+        case .unavailable(let reason):
+            return HerdrOpenFallback.reason(for: reason) == nil ? .unavailable(.session(reason)) : .available
         case .bound:
             guard ttySupport == .unsupported else { return .available }
             switch soleTerminal {
-            case .matched?: return .available
-            case nil, .ttyUnsupported?: return .unavailable(.ghosttyTTYUnsupported)
-            case let join?: return .unavailable(.ghosttyTTY(join))
+            case .matched?, nil, .ttyUnsupported?: return .available
+            case let join?: return HerdrOpenFallback.reason(for: join) == nil ? .unavailable(.ghosttyTTY(join)) : .available
             }
         }
     }
