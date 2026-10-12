@@ -264,25 +264,39 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
 // MARK: - Settings row
 
 @Test func herdrSettingsRowIsNotInUseUntilASessionReportsHerdr() {
-    let row = HerdrPresentation.settingsRow(inUse: false, ghosttyControlsEnabled: true, outcome: nil,
+    let row = HerdrPresentation.settingsRow(switches: herdrOn, inUse: false, outcome: nil,
                                             agentsSeen: [], ttySupport: .unsupported)
     #expect(row == HerdrSettingsRow(badge: .notInUse, detail: "No herdr sessions seen.", problems: []))
     #expect(row.badge?.title == "Not in use")
-    let off = HerdrPresentation.settingsRow(inUse: false, ghosttyControlsEnabled: false, outcome: nil,
-                                            agentsSeen: [.codex], ttySupport: .unsupported)
-    #expect(off.badge == .notInUse)
-    #expect(off.problems.isEmpty)
+}
+
+@Test func herdrSettingsRowReadsOffWhileHerdrsSwitchIsOff() {
+    for switches in [TerminalHostSwitches(enabled: [.ghostty]), TerminalHostSwitches()] {
+        let row = HerdrPresentation.settingsRow(switches: switches, inUse: false, outcome: nil,
+                                                agentsSeen: [.claude], ttySupport: .unsupported)
+        #expect(row == HerdrSettingsRow(badge: .off, detail: "Steer never scans or contacts herdr.", problems: []))
+        #expect(row.badge?.title == "Off")
+    }
+}
+
+@Test func herdrSettingsRowAsksForATerminalWhileNoneIsOn() {
+    let row = HerdrPresentation.settingsRow(switches: TerminalHostSwitches(enabled: [.herdr]), inUse: false,
+                                            outcome: nil, agentsSeen: [.claude], ttySupport: .unsupported)
+    #expect(row.badge == .needsAttention)
+    #expect(row.problems == [.noTerminalOn])
+    #expect(HerdrSettingsProblem.noTerminalOn.message == "Turn on the terminal you run herdr in.")
+    #expect(HerdrSettingsProblem.noTerminalOn.command == nil)
 }
 
 @Test func herdrSettingsRowShowsNoBadgeWhileTheFirstScanRuns() {
-    let row = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true, outcome: nil,
+    let row = HerdrPresentation.settingsRow(switches: herdrOn, inUse: true, outcome: nil,
                                             agentsSeen: [.codex], ttySupport: .supported)
     #expect(row.badge == nil)
     #expect(row.problems.isEmpty)
 }
 
 @Test func herdrSettingsRowIsReadyWithNoProblems() {
-    let row = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true, outcome: scan(),
+    let row = HerdrPresentation.settingsRow(switches: herdrOn, inUse: true, outcome: scan(),
                                             agentsSeen: [.codex, .claude], ttySupport: .supported)
     #expect(row.badge == .ready)
     #expect(row.badge?.title == "Ready")
@@ -292,11 +306,11 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
 @Test func herdrSettingsRowListsClaudesIntegrationOnlyWhenClaudeWasSeen() {
     let outcome = scan(integration: [.codex: .notInstalled, .claude: .outdated])
     // Codex needs no herdr integration (ADR 0012), so its state is never a problem.
-    let codexOnly = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true, outcome: outcome,
+    let codexOnly = HerdrPresentation.settingsRow(switches: herdrOn, inUse: true, outcome: outcome,
                                                   agentsSeen: [.codex], ttySupport: .supported)
     #expect(codexOnly.badge == .ready)
     #expect(codexOnly.problems.isEmpty)
-    let claude = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true, outcome: outcome,
+    let claude = HerdrPresentation.settingsRow(switches: herdrOn, inUse: true, outcome: outcome,
                                                agentsSeen: [.claude], ttySupport: .supported)
     #expect(claude.badge == .needsAttention)
     #expect(claude.badge?.title == "Needs attention")
@@ -306,7 +320,7 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
 
 @Test func herdrSettingsRowListsEveryIndependentProblem() {
     let outcome = scan(integration: [.codex: .unparseable, .claude: .notInstalled])
-    let row = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true, outcome: outcome,
+    let row = HerdrPresentation.settingsRow(switches: herdrOn, inUse: true, outcome: outcome,
                                             agentsSeen: [.codex, .claude], ttySupport: .unsupported)
     #expect(row.badge == .needsAttention)
     #expect(row.problems == [.integration(.claude), .ghosttyCannotIdentifyTab])
@@ -314,7 +328,7 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
 }
 
 @Test func herdrSettingsRowListsHerdrUnavailableAndGhosttyTogether() {
-    let row = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true,
+    let row = HerdrPresentation.settingsRow(switches: herdrOn, inUse: true,
                                             outcome: .unavailable(.untrustedSocket), agentsSeen: [.codex],
                                             ttySupport: .unsupported)
     #expect(row.badge == .needsAttention)
@@ -324,24 +338,26 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
 
 @Test func herdrSettingsRowIsNotInUseWhileOnlyCodexOpenedTheGateAndHerdrIsNotRunning() {
     // A stale socket opens ADR 0012's Codex gate; with no server nothing runs in herdr.
-    let codexOnly = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true,
+    let codexOnly = HerdrPresentation.settingsRow(switches: herdrOn, inUse: true,
                                                   outcome: .unavailable(.notRunning), agentsSeen: [], ttySupport: .supported)
     #expect(codexOnly.badge == .notInUse)
     #expect(codexOnly.problems.isEmpty)
-    let claude = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true,
+    let claude = HerdrPresentation.settingsRow(switches: herdrOn, inUse: true,
                                                outcome: .unavailable(.notRunning), agentsSeen: [.claude], ttySupport: .supported)
     #expect(claude.problems == [.herdrUnavailable])
 }
 
 @Test func herdrSettingsRowMapsAScanLevelIntegrationFailureToItsCommand() {
-    let row = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true,
+    let row = HerdrPresentation.settingsRow(switches: herdrOn, inUse: true,
                                             outcome: .unavailable(.integrationNotCurrent(.claude)),
                                             agentsSeen: [.claude], ttySupport: nil)
     #expect(row.problems == [.integration(.claude)])
 }
 
 @Test func herdrSettingsRowListsNoGhosttyProblemWhileSupportIsUnknown() {
-    let row = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true, outcome: scan(),
+    let row = HerdrPresentation.settingsRow(switches: herdrOn, inUse: true, outcome: scan(),
                                             agentsSeen: [.codex], ttySupport: nil)
     #expect(row.badge == .ready)
 }
+
+private let herdrOn = TerminalHostSwitches(enabled: [.ghostty, .herdr])

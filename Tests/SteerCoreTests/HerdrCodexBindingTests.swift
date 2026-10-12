@@ -54,10 +54,12 @@ private func evaluate(_ sessionID: String = session, liveness: HerdrSessionLiven
 }
 
 private func binding(_ key: HerdrSessionKey = codexKey, liveness: HerdrSessionLiveness = .live,
-                     records: [HerdrHookPaneRecord] = [], ghosttyControls: Bool = true, gateOpen: Bool = true,
+                     records: [HerdrHookPaneRecord] = [], herdr: Bool = true, ghosttyControls: Bool = true,
+                     gateOpen: Bool = true,
                      ghostty: Set<String>? = [otherTitle], live: Set<String> = [session, otherSession],
                      outcome: HerdrScanOutcome? = .available(scan())) -> HerdrSessionBinding {
-    HerdrBindingInputs.binding(for: key, liveness: liveness, hookRecords: records, ghosttyControlsEnabled: ghosttyControls,
+    HerdrBindingInputs.binding(for: key, liveness: liveness, hookRecords: records, herdrEnabled: herdr,
+                               ghosttyControlsEnabled: ghosttyControls,
                                gateOpen: gateOpen, outcome: outcome, defaultSocketPath: socket,
                                codex: HerdrCodexTitles(liveSessions: live, ghostty: ghostty))
 }
@@ -188,6 +190,7 @@ private func binding(_ key: HerdrSessionKey = codexKey, liveness: HerdrSessionLi
     // No server holds a pane, so herdr shows nothing.
     #expect(binding(ghostty: [title], outcome: .unavailable(.notRunning)) == .notInHerdr)
     #expect(binding(ghosttyControls: false) == .notInHerdr)
+    #expect(binding(herdr: false) == .notInHerdr)
     #expect(binding(ghostty: nil) == .notInHerdr)
 }
 
@@ -299,12 +302,12 @@ private func binding(_ key: HerdrSessionKey = codexKey, liveness: HerdrSessionLi
 
 @Test func herdrSettingsListNoCodexIntegrationProblem() {
     let outdated = HerdrScanOutcome.available(scan(integration: [.codex: .outdated, .claude: .current(version: 10)]))
-    let row = HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true, outcome: outdated,
+    let row = HerdrPresentation.settingsRow(switches: herdrOn, inUse: true, outcome: outdated,
                                             agentsSeen: [.codex, .claude], ttySupport: .supported)
     #expect(row.problems.isEmpty)
     #expect(row.badge == .ready)
     let claudeOutdated = HerdrScanOutcome.available(scan(integration: [.claude: .outdated]))
-    #expect(HerdrPresentation.settingsRow(inUse: true, ghosttyControlsEnabled: true, outcome: claudeOutdated,
+    #expect(HerdrPresentation.settingsRow(switches: herdrOn, inUse: true, outcome: claudeOutdated,
                                           agentsSeen: [.claude], ttySupport: .supported).problems == [.integration(.claude)])
 }
 
@@ -313,3 +316,5 @@ private func ghosttySnapshot(titles: [String]) -> GhosttySnapshot {
     let json = #"{"status":"ok","windows":[{"id":"w","tabs":[{"id":"tab","terminals":[\#(terminals)]}]}],"front_window_id":"w"}"#
     return try! JSONDecoder().decode(GhosttySnapshot.self, from: Data(json.utf8))
 }
+
+private let herdrOn = TerminalHostSwitches(enabled: [.ghostty, .herdr])
