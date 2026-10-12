@@ -250,6 +250,8 @@ extension Companion {
         // A session another enabled host may hold, or one that host cannot rule out, already routes to
         // `relayUnavailable` (ADR 0013, ADR 0017).
         case .ghosttyRelay, .herdrRelay: return ghosttyEnabled || previewMode != nil
+        // A pane-bound host's digits (ADR 0017), offered only where `typesQuestionDigits` is on.
+        case .terminalRelay: return true
         case .relayUnavailable: return false
         }
     }
@@ -267,6 +269,9 @@ extension Companion {
             return
         case .herdrRelay:
             answerThroughHerdr(question, question: index, option: option)
+            return
+        case .terminalRelay:
+            answerThroughTerminalKeys(question, question: index, option: option)
             return
         case let .relayUnavailable(reason):
             navigationMessage = reason.message; refresh()

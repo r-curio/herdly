@@ -36,8 +36,9 @@ private struct CodexTabReads: Sendable {
     /// Blocking: call off the main actor. Ghostty is read only while it is on and running, iTerm2 only
     /// while running; `ps` only for tabs showing one of `titles` or on one of `claudeTTYs`.
     ///   - terminalAppRunning: nil while Terminal.app is off (never read); otherwise whether it runs (#239).
+    ///   - wezTermRunning: likewise for WezTerm (#240), whose panes count toward title uniqueness.
     static func read(titles: Set<String>, claudeTTYs: Set<String>, ghosttyOn: Bool, ghosttyRunning: Bool,
-                     iTerm2Running: Bool, terminalAppRunning: Bool? = nil) -> CodexTabReads {
+                     iTerm2Running: Bool, terminalAppRunning: Bool? = nil, wezTermRunning: Bool? = nil) -> CodexTabReads {
         func hosts() -> ([TerminalHost: TerminalHostInventory], ITerm2Snapshot?) {
             var result: [TerminalHost: TerminalHostInventory] = [:]
             let reading = iTerm2Running ? ITerm2Navigation.snapshot() : .notRunning
@@ -45,6 +46,7 @@ private struct CodexTabReads: Sendable {
             if let terminalAppRunning {
                 result[.terminalApp] = terminalAppRunning ? TerminalAppNavigation.snapshot().inventory : .notRunning
             }
+            if let wezTermRunning { result[.wezTerm] = WezTermNavigation.read(running: wezTermRunning).0.inventory }
             if ghosttyOn {
                 result[.ghostty] = .ghosttyTitles(ghosttyRunning ? GhosttyNavigation.snapshot() : nil, running: ghosttyRunning)
             }
@@ -67,9 +69,11 @@ private final class ITerm2OpenRecord {
 }
 
 extension Companion {
-    /// Whether a terminal host that can hold a Codex CLI tab is on: Ghostty, iTerm2 (#238) or
-    /// Terminal.app (#239).
-    var cliTerminalHostOn: Bool { ghosttyEnabled || hostSwitches.mayContact(.iTerm2) || terminalAppSwitchedOn }
+    /// Whether a terminal host that can hold a Codex CLI tab is on: Ghostty, iTerm2 (#238),
+    /// Terminal.app (#239) or WezTerm (#240).
+    var cliTerminalHostOn: Bool {
+        ghosttyEnabled || hostSwitches.mayContact(.iTerm2) || terminalAppSwitchedOn || wezTermSwitchedOn
+    }
 
     // MARK: - Switch and Automation permission (Ghostty's flow, product.md "Settings")
 
@@ -175,6 +179,7 @@ extension Companion {
         let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
         let iTerm2Running = TerminalApps.isRunning(.iTerm2)
         let terminalAppRunning: Bool? = terminalAppSwitchedOn ? TerminalApps.isRunning(.terminalApp) : nil
+        let wezTermRunning: Bool? = wezTermSwitchedOn ? TerminalApps.isRunning(.wezTerm) : nil
         let liveness: HerdrSessionLiveness = live.contains(session) ? .live : .ended
         let record = ITerm2OpenRecord()
         Task { @MainActor in
@@ -184,7 +189,7 @@ extension Companion {
                     let reads = await Task.detached {
                         CodexTabReads.read(titles: [title], claudeTTYs: [], ghosttyOn: ghosttyOn,
                                            ghosttyRunning: ghosttyRunning, iTerm2Running: iTerm2Running,
-                                           terminalAppRunning: terminalAppRunning)
+                                           terminalAppRunning: terminalAppRunning, wezTermRunning: wezTermRunning)
                     }.value
                     let binding = TerminalTabBindingRules.codex(sessionID: session.uuidString, liveness: liveness,
                                                                 liveSessions: liveIDs, switches: switches,
@@ -352,6 +357,8 @@ extension Companion {
         let ghosttyOn = ghosttyEnabled
         let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
         let iTerm2Running = TerminalApps.isRunning(.iTerm2)
+        // An enabled WezTerm left unread would make every binding here unavailable (ADR 0013), #240.
+        let wezTermRunning: Bool? = wezTermSwitchedOn ? TerminalApps.isRunning(.wezTerm) : nil
         let generation = iTerm2.generation
         Task { @MainActor in
             let observed = await Task.detached { () -> (CodexTabReads, [Int32: TerminalProcessObservation]) in
@@ -360,7 +367,7 @@ extension Companion {
                 })
                 let reads = CodexTabReads.read(titles: titles, claudeTTYs: Set(observations.values.compactMap(\.tty)),
                                                ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyRunning,
-                                               iTerm2Running: iTerm2Running)
+                                               iTerm2Running: iTerm2Running, wezTermRunning: wezTermRunning)
                 return (reads, observations)
             }.value
             iTerm2.checking = false

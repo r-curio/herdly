@@ -802,7 +802,8 @@ private struct TerminalControls: View {
         case .herdr: HerdrControls(model: model)
         case .iTerm2: ITerm2Controls(model: model, state: model.iTerm2)
         case .terminalApp: TerminalAppControls(model: model)
-        case .wezTerm, .tmux, .zellij: EmptyView()
+        case .wezTerm: WezTermControls(model: model, state: model.wezTerm)
+        case .tmux, .zellij: EmptyView()
         }
     }
 
@@ -889,6 +890,43 @@ private struct TerminalAppControls: View {
             }
         }
         SettingsFooter(TerminalAppPresentation.footer)
+    }
+}
+
+/// The WezTerm card (product.md, "Agreed terminal host presentation"; #240), hidden until WezTerm's
+/// acceptance run passes (`TerminalHost.showsCard`, #245). WezTerm needs no Automation access, so the card
+/// has no Permission row.
+private struct WezTermControls: View {
+    @ObservedObject var model: Companion
+    @ObservedObject var state: WezTermState
+
+    var body: some View {
+        let row = model.wezTermSettingsRow
+        SettingsCard {
+            SettingsRow(title: TerminalHost.wezTerm.displayName, detail: "Open sessions in their exact tab, and type replies there") {
+                Toggle("WezTerm", isOn: Binding(get: { model.hostSwitches.isOn(.wezTerm) },
+                                                set: { model.setHostSwitch(.wezTerm, on: $0) }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    .accessibilityLabel("Enable WezTerm")
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Status", detail: nil) {
+                StatusBadge(title: row.badge.title,
+                            color: row.badge == .ready ? .green : row.badge == .needsAttention ? .orange : .secondary)
+            }
+            ForEach(row.problems, id: \.self) { problem in
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                Text(problem.message).fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, SettingsStyle.rowInset)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if model.hostSwitches.isOn(.wezTerm), !state.diagnostics.isEmpty {
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                PreviewDisclosure(title: "Show diagnostics") { state.diagnostics.joined(separator: "\n") }
+            }
+        }
+        SettingsFooter(WezTermPresentation.footer)
     }
 }
 

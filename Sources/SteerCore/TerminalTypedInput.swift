@@ -8,22 +8,24 @@ import Foundation
 
 extension TerminalHost {
     /// Whether Steer types session replies into this host's bound pane (ADR 0017's table, as built).
-    /// Terminal.app replies (#239). WezTerm, tmux and Zellij gain replies in their build tickets;
-    /// Ghostty and herdr only after a live proof of their text send; iTerm2 never (Broadcast Input).
+    /// Terminal.app replies (#239), WezTerm replies (#240). tmux and Zellij gain replies in their build
+    /// tickets; Ghostty and herdr only after a live proof of their text send; iTerm2 never (Broadcast Input).
     public var typesReplies: Bool {
         switch self {
-        case .terminalApp: true
-        case .ghostty, .iTerm2, .wezTerm, .tmux, .zellij, .herdr: false
+        case .terminalApp, .wezTerm: true
+        case .ghostty, .iTerm2, .tmux, .zellij, .herdr: false
         }
     }
 
     /// Whether a Codex question's digit may be typed here. Ghostty (ADR 0006) and herdr (ADR 0010) have
     /// their own relays. Terminal.app never: `do script`'s forced newline could answer the next
-    /// question. iTerm2 never. WezTerm, tmux and Zellij wait for their tickets and a live digit proof.
+    /// question. iTerm2 never. WezTerm's relay is built (#240) behind `WezTermInput.questionDigitsProvenLive`
+    /// until a live digit proof; tmux and Zellij wait for their tickets and a live digit proof.
     public var typesQuestionDigits: Bool {
         switch self {
         case .ghostty, .herdr: true
-        case .terminalApp, .iTerm2, .wezTerm, .tmux, .zellij: false
+        case .wezTerm: WezTermInput.questionDigitsProvenLive
+        case .terminalApp, .iTerm2, .tmux, .zellij: false
         }
     }
 }
@@ -65,6 +67,19 @@ public enum TerminalReplyRoute: Equatable, Hashable, Sendable {
             return nil
         case .unavailable:
             return .unreachable
+        }
+    }
+
+    /// One session's route from two hosts' latest scans (#240): a host that saw nothing leaves the other's
+    /// route; the same pane agrees; anything else is not one exact pane, and a route that is not a pane
+    /// wins over a pane, the first such route kept.
+    public static func merging(_ first: TerminalReplyRoute?, _ second: TerminalReplyRoute?) -> TerminalReplyRoute? {
+        guard let first else { return second }
+        guard let second else { return first }
+        switch (first, second) {
+        case (.pane(let a), .pane(let b)): return a == b ? first : .unreachable
+        case (.pane, _): return second
+        default: return first
         }
     }
 }

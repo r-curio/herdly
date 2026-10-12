@@ -15,7 +15,7 @@ Params and shapes follow the schema the installed CLI generates (`codex app-serv
 
 The socket itself is proven: a second client connects, subscribes and receives a real `item/tool/requestUserInput` ([ADR 0007](adr/0007-connect-to-the-codex-daemon-socket-as-the-same-user.md), `docs/evidence/app-server-daemon-live.json`). `turn/start` is not: no run on the installed CLI has yet started a turn from Steer, so this is a source-level finding about the method, not a proven capability. The live walkthrough below is what would establish it.
 
-The Ghostty relay is not a second path. It delivers one key name to a matched tab and was verified for that alone (ADR 0006); nothing proves it can type a whole prompt and a Return into one unsplit tab, so a session the daemon does not hold has no reply path in Steer at all. Amended on 2026-10-11 by [ADR 0017](adr/0017-type-question-digits-and-replies-into-one-bound-pane.md): typing the reply into the session's one bound pane is a second path, used only when the daemon does not hold the thread, on the hosts that ADR lists. It is built for Terminal.app (#239, below) and is the only reply path for Claude Code sessions. `turn/steer`, which interjects into a running turn, is not used either: a completion card is about a turn that has ended.
+The Ghostty relay is not a second path. It delivers one key name to a matched tab and was verified for that alone (ADR 0006); nothing proves it can type a whole prompt and a Return into one unsplit tab, so a session the daemon does not hold has no reply path in Steer at all. Amended on 2026-10-11 by [ADR 0017](adr/0017-type-question-digits-and-replies-into-one-bound-pane.md): typing the reply into the session's one bound pane is a second path, used only when the daemon does not hold the thread, on the hosts that ADR lists. It is built for Terminal.app (#239, below) and WezTerm (#240, below), and is the only reply path for Claude Code sessions. `turn/steer`, which interjects into a running turn, is not used either: a completion card is about a turn that has ended.
 
 ## Typed into the bound tab (#239)
 
@@ -29,6 +29,10 @@ The Ghostty relay is not a second path. It delivers one key name to a matched ta
 - **Claude cards** show the field only while a host that types replies is on (`ClaudeReplyRouting`), with the same one-reply rules.
 
 Automated: `TerminalTypedInputTests` (hosts and routes, the daemon winning, text rules, write plans, Terminal.app delivery, every fresh-check veto, the check before every write, the one-second submit, no resend, the composer case, Claude routing) and `TerminalAppTests`. Live application proof: none; not run — needs live acceptance (#244).
+
+### WezTerm (#240)
+
+WezTerm is the route's second host (`TerminalHost.wezTerm.typesReplies`), behind its hidden switch. Each write is one `wezterm cli --no-auto-start send-text --no-paste --pane-id <id> -- <payload>` (`WezTermInput`): Claude's payload is the text and a CR, Codex's is the text, then a CR alone one second later, as the live proof required. `--` keeps text starting with `-` from being read as an option. The fresh check before every write re-runs the binding on fresh reads of every enabled host (WezTerm read twice with `ps -t` between). A send that exited 0 is written; nothing run (no binary, no trusted socket) or WezTerm's "no such pane" is not written; any other error or a timeout may have typed and counts as sent. Terminal.app's and WezTerm's latest scans each give a route, merged so that anything other than one exact pane wins (`TerminalReplyRoute.merging`). Automated: `WezTermTests`. Live application proof: none; not run — needs live acceptance (#245).
 
 ## When the field is offered
 

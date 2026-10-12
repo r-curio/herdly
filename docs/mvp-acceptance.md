@@ -96,7 +96,7 @@ Host-specific lines, added to the same evidence file:
 
 - **iTerm2:** no typed input at all (H9 shows "Steer can't type into iTerm2. Reply in the session."). With iTerm2's own Claude Code integration turned on, Steer's Claude hooks and binding still work and iTerm2's hook still runs. Build state (#238): Open, visits, the Automation flow and the card are built, but the card stays hidden until this run passes, so H1 cannot yet be done from Settings. H9's line replaces Codex question keys and the reply field's reason while an iTerm2 tab shows the session's title and the daemon does not hold it.
 - **Terminal.app:** replies only; a Codex question shows "Answer this in Codex."
-- **WezTerm:** a session's tab in a window that isn't in front gets the fallback (H5's result), never a window switch.
+- **WezTerm:** a session's tab in a window that isn't in front gets the fallback (H5's result), never a window switch. Build state (#240): Open, visits, replies and the card are built behind the hidden switch, so H1 cannot yet be done from Settings. H9's Codex question line needs WezTerm's digit gate (`WezTermInput.questionDigitsProvenLive`) turned on in the build under test; until a run shows the digit alone commits, the card shows "Answer this in Codex." H6's unreadable case includes a socket in `~/.local/share/wezterm` that isn't owner-only.
 - **tmux:** a session on a socket other than the default is unreachable, with the card's socket line.
 - **Zellij:** a second `zellij` client process, or a version older than 0.44.1, shows its problem line.
 - **Once, across hosts:** the same Codex title in tabs of two different apps raises the app whose tab printed last, and is unavailable when both printed within the same second (ADR 0015 amendment).
