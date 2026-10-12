@@ -101,7 +101,8 @@ public enum HerdrBindingInputs {
         }
         return HerdrHookPaneRecord(sessionID: normalizedSessionID(rawSession, agent: agent), agent: agent,
                                    paneID: HerdrPaneID.recorded(in: object),
-                                   socketPath: HerdrSocketPath.recorded(in: object), recordedAt: recordedAt)
+                                   socketPath: HerdrSocketPath.recorded(in: object), recordedAt: recordedAt,
+                                   zellijPane: TerminalHookIdentifiers.zellijPane(in: object))
     }
 
     /// `record` with its session ID normalized, so records built anywhere compare exactly.
@@ -109,7 +110,8 @@ public enum HerdrBindingInputs {
         let sessionID = normalizedSessionID(record.sessionID, agent: record.agent)
         guard sessionID != record.sessionID else { return record }
         return HerdrHookPaneRecord(sessionID: sessionID, agent: record.agent, paneID: record.paneID,
-                                   socketPath: record.socketPath, recordedAt: record.recordedAt)
+                                   socketPath: record.socketPath, recordedAt: record.recordedAt,
+                                   zellijPane: record.zellijPane)
     }
 
     /// Each session's newest records, session IDs normalized: every record sharing the session's newest arrival time, so
@@ -127,8 +129,10 @@ public enum HerdrBindingInputs {
             }
         }
         return newest.values.flatMap { $0 }.sorted {
-            ($0.sessionID, $0.agent.rawValue, $0.paneID ?? "", $0.socketPath ?? "")
-                < ($1.sessionID, $1.agent.rawValue, $1.paneID ?? "", $1.socketPath ?? "")
+            ($0.sessionID, $0.agent.rawValue, $0.paneID ?? "", $0.socketPath ?? "",
+             $0.zellijPane?.sessionName ?? "", $0.zellijPane?.paneID ?? "")
+                < ($1.sessionID, $1.agent.rawValue, $1.paneID ?? "", $1.socketPath ?? "",
+                   $1.zellijPane?.sessionName ?? "", $1.zellijPane?.paneID ?? "")
         }
     }
 

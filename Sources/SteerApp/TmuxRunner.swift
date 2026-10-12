@@ -122,11 +122,12 @@ enum TmuxRunner {
         return TmuxFileFacts(kind: kind, owner: info.st_uid, mode: UInt16(info.st_mode & 0o7777))
     }
 
-    private enum Peer { case refused, otherUser, currentUser }
+    enum Peer { case refused, otherUser, currentUser }
 
     /// Connects to the socket, which the trust check already found owned by this user, and confirms the
     /// accepting server runs as this user (`getpeereid`), as herdr's client does. Nothing is written.
-    private static func peer(_ path: String) -> Peer {
+    /// Zellij's runner probes each session socket the same way (#242).
+    static func peer(_ path: String) -> Peer {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return .refused }
         defer { close(fd) }
