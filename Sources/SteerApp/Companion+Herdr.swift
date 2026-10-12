@@ -143,7 +143,9 @@ extension Companion {
         let cache = herdr.recordCache
         let socketPath = herdr.defaultSocketPath
         let titles = herdrGateCodexTitles()
-        let checkSocket = titles.ghostty != nil && !titles.liveTitles.isEmpty
+        // Steer's own hook records are read even while herdr is off, so a Claude session there stays
+        // `herdrSwitchedOff` rather than falling to the Ghostty route; herdr's socket is not inspected.
+        let checkSocket = herdrContactAllowed && titles.ghostty != nil && !titles.liveTitles.isEmpty
         Task { @MainActor in
             let result = await Task.detached(priority: .utility) {
                 (records: directories.isEmpty ? HerdrHookRecordReader.Result.empty

@@ -807,7 +807,7 @@ private struct TerminalControls: View {
     @ViewBuilder
     private var ghosttyCard: some View {
         SettingsCard {
-            SettingsRow(title: "Ghostty", detail: "Open sessions in their exact tab, and answer questions there") {
+            SettingsRow(title: TerminalHost.ghostty.displayName, detail: "Open sessions in their exact tab, and answer questions there") {
                 Toggle("Ghostty controls", isOn: $model.ghosttyEnabled)
                     .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                     .accessibilityLabel("Enable Ghostty controls")
@@ -867,7 +867,7 @@ private struct HerdrControls: View {
     var body: some View {
         let row = row
         SettingsCard {
-            SettingsRow(title: "herdr", detail: "Open sessions in their exact pane, and answer questions there") {
+            SettingsRow(title: TerminalHost.herdr.displayName, detail: "Open sessions in their exact pane, and answer questions there") {
                 Toggle("herdr", isOn: Binding(get: { model.hostSwitches.isOn(.herdr) },
                                               set: { model.setHostSwitch(.herdr, on: $0) }))
                     .labelsHidden().toggleStyle(.switch).controlSize(.mini)
