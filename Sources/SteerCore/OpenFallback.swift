@@ -41,6 +41,9 @@ public enum OpenUnavailableReason: Error, Equatable, Hashable, Sendable {
     case appNotRunning(TerminalHost)
     /// The session's terminal app cannot be identified (ADR 0015 and its amendment).
     case appNotIdentified
+    /// The identified app was still running but macOS did not activate it. Click-time only; not one of
+    /// the agreed card causes, so it is never claimed as "isn't running".
+    case activationFailed(TerminalHost)
 
     /// The one line that replaces Open on a card, and the click's message.
     public var cardLine: String {
@@ -49,8 +52,18 @@ public enum OpenUnavailableReason: Error, Equatable, Hashable, Sendable {
         case .sessionEnded: "This session has ended."
         case .appNotRunning(let host): "\(host.displayName) isn't running."
         case .appNotIdentified: "Steer can't tell which terminal this session is in."
+        case .activationFailed(let host): "Steer couldn't bring \(host.displayName) forward."
         }
     }
+}
+
+/// An Open step that did not reach the exact target: either it may fall back, or it is unavailable.
+/// It has no exact case, so resolving one can never report a verified Open.
+public enum OpenMiss: Equatable, Sendable {
+    /// The exact target cannot be reached. `candidates` is how many tabs in the host's own inventory
+    /// carry the session's title, which identifies the app for a Codex session.
+    case fallBack(OpenFallbackReason, candidates: Int)
+    case unavailable(OpenUnavailableReason)
 }
 
 /// One tab carrying a Codex session's title, as the amendment's walk sees it: where the walk from the
@@ -118,6 +131,25 @@ public enum OpenFallback {
             return isRunning(host) ? .fellBack(host, reason) : .unavailable(.appNotRunning(host))
         }
     }
+
+    /// The result of a miss: unavailable stays so; a fallback identifies the app from the number of
+    /// title candidates and raises it only while running.
+    /// `app` is consulted only for a fallback.
+    public static func resolve(_ miss: OpenMiss, app: (Int) -> Result<TerminalHost, OpenUnavailableReason>,
+                               isRunning: (TerminalHost) -> Bool) -> TerminalOpenResult {
+        switch miss {
+        case .unavailable(let reason): return .unavailable(reason)
+        case .fallBack(let reason, let candidates): return resolve(reason, app: app(candidates), isRunning: isRunning)
+        }
+    }
+
+    /// A fallback after SteerApp tried to activate its app. A failed activation is "isn't running" only
+    /// when a fresh running check says so; otherwise it is `activationFailed`. Other results pass through.
+    public static func afterActivation(_ result: TerminalOpenResult, activated: Bool,
+                                       stillRunning: Bool) -> TerminalOpenResult {
+        guard case .fellBack(let host, _) = result, !activated else { return result }
+        return .unavailable(stillRunning ? .activationFailed(host) : .appNotRunning(host))
+    }
 }
 
 /// Why an Open could not reach its exact target but may fall back (ADR 0015, "When Open falls back";
@@ -147,13 +179,10 @@ public enum TerminalOpenResult: Equatable, Sendable {
     /// Whether this Open acknowledges the session's completions (ADR 0016, "Acknowledgment").
     public var acknowledges: Bool { self == .opened }
 
-    /// The click's message for a miss: empty for a fallback, which is silent (ADR 0015,
-    /// "Presentation"), or the agreed card line. Nil for a verified Open, whose host says what opened.
-    public var message: String? {
-        switch self {
-        case .opened: nil
-        case .fellBack: ""
-        case .unavailable(let reason): reason.cardLine
-        }
+    /// The agreed line for an unavailable Open; nil otherwise. A fallback is silent (ADR 0015,
+    /// "Presentation"), and a verified Open's host says what opened.
+    public var unavailableLine: String? {
+        if case .unavailable(let reason) = self { return reason.cardLine }
+        return nil
     }
 }

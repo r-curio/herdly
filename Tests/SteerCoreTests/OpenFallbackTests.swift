@@ -129,12 +129,39 @@ private func candidate(_ walk: TerminalAppWalk, _ written: Double?) -> CodexOpen
     #expect(TerminalOpenResult.opened.acknowledges)
     #expect(!TerminalOpenResult.fellBack(.ghostty, .unsupportedLayout).acknowledges)
     #expect(!TerminalOpenResult.unavailable(.sessionEnded).acknowledges)
-    // No message for a fallback; each unavailable case keeps its agreed line.
-    #expect(TerminalOpenResult.fellBack(.ghostty, .noUniqueTarget).message == "")
-    #expect(TerminalOpenResult.unavailable(.hostUnreadable(.iTerm2)).message
+    // No message for a fallback (silent) or a verified Open; each unavailable case keeps its agreed line.
+    #expect(TerminalOpenResult.fellBack(.ghostty, .noUniqueTarget).unavailableLine == nil)
+    #expect(TerminalOpenResult.opened.unavailableLine == nil)
+    #expect(TerminalOpenResult.unavailable(.hostUnreadable(.iTerm2)).unavailableLine
         == "Steer can't read iTerm2. Check Settings › Terminals.")
-    #expect(TerminalOpenResult.unavailable(.appNotRunning(.iTerm2)).message == "iTerm2 isn't running.")
-    #expect(TerminalOpenResult.unavailable(.appNotIdentified).message
+    #expect(TerminalOpenResult.unavailable(.appNotRunning(.iTerm2)).unavailableLine == "iTerm2 isn't running.")
+    #expect(TerminalOpenResult.unavailable(.appNotIdentified).unavailableLine
         == "Steer can't tell which terminal this session is in.")
-    #expect(TerminalOpenResult.unavailable(.sessionEnded).message == "This session has ended.")
+    #expect(TerminalOpenResult.unavailable(.sessionEnded).unavailableLine == "This session has ended.")
+}
+
+@Test func aMissResolvesWithoutEverReportingAVerifiedOpen() {
+    // A miss has no exact case, so it can never become `.opened` or acknowledge.
+    #expect(OpenFallback.resolve(OpenMiss.unavailable(.sessionEnded), app: { _ in .success(.ghostty) },
+                                 isRunning: { _ in true }) == .unavailable(.sessionEnded))
+    #expect(OpenFallback.resolve(OpenMiss.fallBack(.unsupportedLayout, candidates: 1), app: { count in
+        count == 1 ? .success(.ghostty) : .failure(.appNotIdentified)
+    }, isRunning: { _ in true }) == .fellBack(.ghostty, .unsupportedLayout))
+    #expect(OpenFallback.resolve(OpenMiss.fallBack(.noUniqueTarget, candidates: 0), app: { _ in .failure(.appNotIdentified) },
+                                 isRunning: { _ in true }) == .unavailable(.appNotIdentified))
+}
+
+@Test func activationFailureIsReportedTruthfully() {
+    let fallback = TerminalOpenResult.fellBack(.ghostty, .unsupportedLayout)
+    #expect(OpenFallback.afterActivation(fallback, activated: true, stillRunning: true) == fallback)
+    // The app quit between the check and the activation.
+    #expect(OpenFallback.afterActivation(fallback, activated: false, stillRunning: false)
+        == .unavailable(.appNotRunning(.ghostty)))
+    // Still running, but macOS did not activate it: never claimed as "isn't running".
+    let refused = OpenFallback.afterActivation(fallback, activated: false, stillRunning: true)
+    #expect(refused == .unavailable(.activationFailed(.ghostty)))
+    #expect(refused.unavailableLine == "Steer couldn't bring Ghostty forward.")
+    #expect(!refused.acknowledges)
+    // Nothing to activate for a verified Open or an unavailable one.
+    #expect(OpenFallback.afterActivation(.opened, activated: false, stillRunning: false) == .opened)
 }

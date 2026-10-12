@@ -10,10 +10,9 @@ public enum GhosttyTitleRevalidation: Equatable, Sendable {
     /// Exactly one live session renders the title and exactly one unsplit terminal carries it (in the
     /// front window when the route is limited to it).
     case exact(GhosttyTarget)
-    /// The exact tab cannot be reached. `candidates` is how many Ghostty terminals carry the title,
-    /// which is what identifies the app for a Codex session (`codexCandidates(count:)`).
-    case fallBack(OpenFallbackReason, candidates: Int)
-    case unavailable(OpenUnavailableReason)
+    /// The exact tab cannot be reached; for a fallback, `candidates` counts the Ghostty terminals
+    /// carrying the title, which identifies the app for a Codex session (`codexCandidates(count:)`).
+    case miss(OpenMiss)
 }
 
 public enum GhosttyTitleOpen {
@@ -29,13 +28,13 @@ public enum GhosttyTitleOpen {
                                   sameWindowOnly: Bool) -> GhosttyTitleRevalidation {
         var carriers: [(target: GhosttyTarget, terminalsInTab: Int)] = []
         if running {
-            guard let ghostty, ghostty.status == "ok" else { return .unavailable(.hostUnreadable(.ghostty)) }
+            guard let ghostty, ghostty.status == "ok" else { return .miss(.unavailable(.hostUnreadable(.ghostty))) }
             for window in ghostty.windows {
-                guard !window.id.isEmpty else { return .unavailable(.hostUnreadable(.ghostty)) }
+                guard !window.id.isEmpty else { return .miss(.unavailable(.hostUnreadable(.ghostty))) }
                 for tab in window.tabs {
-                    guard !tab.id.isEmpty else { return .unavailable(.hostUnreadable(.ghostty)) }
+                    guard !tab.id.isEmpty else { return .miss(.unavailable(.hostUnreadable(.ghostty))) }
                     for terminal in tab.terminals {
-                        guard !terminal.id.isEmpty else { return .unavailable(.hostUnreadable(.ghostty)) }
+                        guard !terminal.id.isEmpty else { return .miss(.unavailable(.hostUnreadable(.ghostty))) }
                         if terminal.name == title {
                             carriers.append((GhosttyTarget(window_id: window.id, tab_id: tab.id, terminal_id: terminal.id),
                                              tab.terminals.count))
@@ -45,13 +44,13 @@ public enum GhosttyTitleOpen {
             }
         }
         let sessions = live.filter { $0 == title }.count
-        guard sessions > 0 else { return .unavailable(.sessionEnded) }
+        guard sessions > 0 else { return .miss(.unavailable(.sessionEnded)) }
         guard sessions == 1, carriers.count == 1, let carrier = carriers.first else {
-            return .fallBack(.noUniqueTarget, candidates: carriers.count)
+            return .miss(.fallBack(.noUniqueTarget, candidates: carriers.count))
         }
-        guard carrier.terminalsInTab == 1 else { return .fallBack(.unsupportedLayout, candidates: 1) }
+        guard carrier.terminalsInTab == 1 else { return .miss(.fallBack(.unsupportedLayout, candidates: 1)) }
         if sameWindowOnly, ghostty?.front_window_id != carrier.target.window_id {
-            return .fallBack(.unsupportedLayout, candidates: 1)
+            return .miss(.fallBack(.unsupportedLayout, candidates: 1))
         }
         return .exact(carrier.target)
     }
@@ -59,7 +58,7 @@ public enum GhosttyTitleOpen {
     /// Step 2: Ghostty's reply to the selection, nil when it reported ok. No reply at all (a script
     /// error, a timeout, Automation denied) is an unreadable host; a refusal because the tab changed
     /// under the request is any other error, which falls back (ADR 0016).
-    public static func selection(status: String?) -> GhosttyTitleRevalidation? {
+    public static func selection(status: String?) -> OpenMiss? {
         guard let status else { return .unavailable(.hostUnreadable(.ghostty)) }
         return status == "ok" ? nil : .fallBack(.notVerified, candidates: 1)
     }
@@ -68,7 +67,7 @@ public enum GhosttyTitleOpen {
     /// in the front window when required) and still the title's exact tab. Ghostty is already active,
     /// so a miss falls back, adding nothing (ADR 0016).
     public static func verify(_ target: GhosttyTarget, title: String, live: [String], after: GhosttySnapshot?,
-                              sameWindowOnly: Bool) -> GhosttyTitleRevalidation? {
+                              sameWindowOnly: Bool) -> OpenMiss? {
         guard let after, !sameWindowOnly || GhosttyMatch.isInCurrentWindow(target, snapshot: after),
               after.selected == target,
               GhosttyMatch.target(title: title, live: live, snapshot: after) == target else {

@@ -343,3 +343,24 @@ private func started(_ question: AttentionQuestion, progress: QuestionAnswerProg
     ledger.prune(keeping: [])
     #expect(ledger == QuestionRelayLedger())
 }
+
+// MARK: - Open fallback (ADR 0015)
+
+@Test func herdrFallbackOpenNeverEnablesOrTargetsTheKeyRelay() {
+    // Each of these bindings makes Open raise Ghostty (and the card keep Open), yet the relay's
+    // fresh check still refuses: a fallback never makes a pane, tab or app an input target.
+    let switches = TerminalHostSwitches(enabled: [.ghostty, .herdr])
+    let reasons: [HerdrSessionUnavailable] = [
+        .binding(.split), .binding(.multipleClients(2)), .binding(.nonGhosttyClient),
+        .binding(.duplicateTitles(["w1:p1", "w1:p2"])), .herdr(.wrongClientCount(2)),
+    ]
+    for reason in reasons {
+        let binding = HerdrSessionBinding.unavailable(reason)
+        let open = HerdrOpenFallback.resolve(.binding(reason), agent: .codex, clientWalks: [.reached(.ghostty)],
+                                             switches: switches, isRunning: { _ in true })
+        if case .fellBack(.ghostty, _)? = open {} else { Issue.record("\(reason) did not fall back: \(String(describing: open))") }
+        #expect(open?.acknowledges == false)
+        #expect(HerdrPresentation.openAvailability(binding: binding, ttySupport: .supported) == .available)
+        #expect(check(question(), binding: binding) == .failure(.binding(reason)), "\(reason)")
+    }
+}
