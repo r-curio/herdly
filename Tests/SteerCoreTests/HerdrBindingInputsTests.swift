@@ -52,10 +52,11 @@ private func foreground(_ paneID: String = "w1:p1", _ names: [String] = ["claude
 }
 
 private func binding(_ key: HerdrSessionKey = claudeKey, liveness: HerdrSessionLiveness = .live,
-                     records: [HerdrHookPaneRecord] = [record()], ghostty: Bool = true,
+                     records: [HerdrHookPaneRecord] = [record()], herdr: Bool = true, ghostty: Bool = true,
                      outcome: HerdrScanOutcome? = scan()) -> HerdrSessionBinding {
-    HerdrBindingInputs.binding(for: key, liveness: liveness, hookRecords: records, ghosttyControlsEnabled: ghostty,
-                               gateOpen: ghostty, outcome: outcome, defaultSocketPath: socket, codex: .none)
+    HerdrBindingInputs.binding(for: key, liveness: liveness, hookRecords: records, herdrEnabled: herdr,
+                               ghosttyControlsEnabled: ghostty,
+                               gateOpen: herdr && ghostty, outcome: outcome, defaultSocketPath: socket, codex: .none)
 }
 
 private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID: "w1:p1")
@@ -154,6 +155,9 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID:
 
 @Test func herdrInputsReportGateAndScanStatesForSessionsInHerdr() {
     #expect(binding(ghostty: false) == .unavailable(.ghosttyControlsOff))
+    // herdr's own switch closes the gate before Ghostty controls are consulted.
+    #expect(binding(herdr: false) == .unavailable(.herdrSwitchedOff))
+    #expect(binding(herdr: false, ghostty: false) == .unavailable(.herdrSwitchedOff))
     #expect(binding(outcome: nil) == .unavailable(.notScanned))
     for reason in [HerdrUnavailableReason.notRunning, .herdrNotFound, .untrustedSocket, .timeout, .malformedReply,
                    .unsupportedProtocol(23)] {
@@ -173,6 +177,7 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID:
     #expect(binding(records: [record(at: 1_100), record(pane: nil, at: 1_150)]) == .notInHerdr)
     // Not in herdr regardless of Ghostty controls or scan state.
     #expect(binding(records: [record(pane: nil)], ghostty: false, outcome: nil) == .notInHerdr)
+    #expect(binding(records: [record(pane: nil)], herdr: false, outcome: nil) == .notInHerdr)
     #expect(binding(records: [record(pane: nil)], outcome: .unavailable(.notRunning)) == .notInHerdr)
     // A disagreeing tie at the newest time is uncertain, not "not in herdr".
     #expect(binding(records: [record(at: 1_150), record(pane: nil, at: 1_150)])
@@ -181,12 +186,12 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID:
 
 // MARK: - Gate
 
-@Test func herdrGateRequiresGhosttyControlsAndARecordedPaneOrTheCodexGate() {
-    #expect(HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: true, paneIDs: ["w1:p1"]))
-    #expect(!HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: false, paneIDs: ["w1:p1"]))
-    #expect(!HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: true, paneIDs: []))
-    #expect(HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: true, paneIDs: [], codexGate: true))
-    #expect(!HerdrBindingInputs.allowsContact(ghosttyControlsEnabled: false, paneIDs: [], codexGate: true))
+@Test func herdrGateRequiresHerdrsSwitchAndARecordedPaneOrTheCodexGate() {
+    #expect(HerdrBindingInputs.allowsContact(herdrEnabled: true, paneIDs: ["w1:p1"]))
+    #expect(!HerdrBindingInputs.allowsContact(herdrEnabled: false, paneIDs: ["w1:p1"]))
+    #expect(!HerdrBindingInputs.allowsContact(herdrEnabled: true, paneIDs: []))
+    #expect(HerdrBindingInputs.allowsContact(herdrEnabled: true, paneIDs: [], codexGate: true))
+    #expect(!HerdrBindingInputs.allowsContact(herdrEnabled: false, paneIDs: [], codexGate: true))
 }
 
 @Test func herdrGatePaneIDsComeFromLiveClaudeSessionsNewestEvents() {
@@ -322,7 +327,8 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID:
     // A native-installer Claude: pid 83378 is named for its version.
     let outcome = scan(processInfo: ["w1:p1": foreground("w1:p1", ["2.1.293", "node"])])
     func bind(_ process: ClaudeSessionProcess) -> HerdrSessionBinding {
-        HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: [record()], ghosttyControlsEnabled: true,
+        HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: [record()], herdrEnabled: true,
+                                   ghosttyControlsEnabled: true,
                                    gateOpen: true, outcome: outcome, defaultSocketPath: socket, codex: .none,
                                    claudeProcess: process)
     }
@@ -420,7 +426,8 @@ private func parkedInventory(_ root: String, _ links: [String: ClaudeSessionProc
     // The pane's foreground process, 83378, parked the session's job and displays it.
     let outcome = scan(processInfo: ["w1:p1": foreground("w1:p1", ["2.1.296", "node"])])
     func bind(_ link: ClaudeSessionProcess) -> HerdrSessionBinding {
-        HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: [record()], ghosttyControlsEnabled: true,
+        HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: [record()], herdrEnabled: true,
+                                   ghosttyControlsEnabled: true,
                                    gateOpen: true, outcome: outcome, defaultSocketPath: socket, codex: .none,
                                    claudeProcess: ClaudeSessionProcess(sessionID: session,
                                                                        inventories: [parkedInventory("/tmp/one", [session: link])]))
@@ -435,7 +442,8 @@ private func parkedInventory(_ root: String, _ links: [String: ClaudeSessionProc
     // The pane runs the session's native-installer process, 83378, named for its version.
     let outcome = scan(processInfo: ["w1:p1": foreground("w1:p1", ["2.1.293", "node"])])
     func bind(_ inventories: [ClaudeInventoryScan], records: [HerdrHookPaneRecord] = [record()]) -> HerdrSessionBinding {
-        HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: records, ghosttyControlsEnabled: true,
+        HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: records, herdrEnabled: true,
+                                   ghosttyControlsEnabled: true,
                                    gateOpen: true, outcome: outcome, defaultSocketPath: socket, codex: .none,
                                    claudeProcess: ClaudeSessionProcess(sessionID: session, inventories: inventories))
     }

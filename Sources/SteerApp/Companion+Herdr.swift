@@ -7,7 +7,7 @@ import SteerCore
 @MainActor
 final class HerdrSessionBindings: ObservableObject {
     /// The latest herdr scan for settings; nil before the first scan and whenever the ADR 0009 gate
-    /// is closed (Ghostty controls off, or neither a live Claude session's newest hook event
+    /// is closed (herdr's switch off or no terminal on, or neither a live Claude session's newest hook event
     /// recorded a pane nor a live or daemon-loaded Codex terminal session exists beside a known Ghostty
     /// inventory with herdr's socket trusted).
     @Published fileprivate(set) var scanOutcome: HerdrScanOutcome?
@@ -46,7 +46,8 @@ extension Companion {
     /// contacts herdr.
     func herdrBinding(for session: HerdrSessionKey) -> HerdrSessionBinding {
         HerdrBindingInputs.binding(for: session, liveness: herdrLiveness(of: session), hookRecords: herdr.hookRecords,
-                                   ghosttyControlsEnabled: ghosttyEnabled, gateOpen: herdr.monitor.isGateOpen,
+                                   herdrEnabled: herdrContactAllowed, ghosttyControlsEnabled: ghosttyEnabled,
+                                   gateOpen: herdr.monitor.isGateOpen,
                                    outcome: herdr.scanOutcome, defaultSocketPath: herdr.defaultSocketPath,
                                    codex: herdrCodexTitles(), claudeProcess: claudeSessionProcess(session))
     }
@@ -67,8 +68,8 @@ extension Companion {
     /// A fresh herdr scan, off the main actor, and the session's binding against it, for an Open or
     /// relay about to act (ADR 0009 freshness). The scan re-reads `pane.process_info`, so ADR 0012's
     /// whole rule runs again for a Codex session. `outcome` is nil, and no request is made, when the
-    /// gate is closed; a Claude session in herdr is then `unavailable(.notScanned)` or
-    /// `.ghosttyControlsOff`, and a Codex session is `notInHerdr`. Claude hook records are those of
+    /// gate is closed; a Claude session in herdr is then `unavailable(.notScanned)`,
+    /// `.herdrSwitchedOff` or `.ghosttyControlsOff`, and a Codex session is `notInHerdr`. Claude hook records are those of
     /// the last scheduled read (at most one scan interval old); Codex sessions are Steer's current
     /// ones. For a Codex session a fresh Ghostty inventory is read first, so ADR 0012's route is
     /// decided against Ghostty and herdr as of this action; an unreadable inventory leaves the
@@ -88,6 +89,7 @@ extension Companion {
         // Sessions are re-read: one may have ended while herdr and Ghostty were read.
         let binding = HerdrBindingInputs.binding(for: session, liveness: herdrLiveness(of: session),
                                                  hookRecords: herdr.hookRecords,
+                                                 herdrEnabled: herdrContactAllowed,
                                                  ghosttyControlsEnabled: ghosttyEnabled,
                                                  gateOpen: herdr.monitor.isGateOpen, outcome: outcome,
                                                  defaultSocketPath: herdr.defaultSocketPath,
@@ -95,6 +97,9 @@ extension Companion {
                                                  claudeProcess: claudeSessionProcess(session))
         return (binding, outcome)
     }
+
+    /// herdr's switch is on and a terminal is too, so the ADR 0009 gate may open (ADR 0014).
+    var herdrContactAllowed: Bool { hostSwitches.mayContact(.herdr) }
 
     /// The latest herdr scan outcome for settings (also published by `herdr.scanOutcome`).
     var herdrScanOutcome: HerdrScanOutcome? { herdr.scanOutcome }
@@ -120,7 +125,7 @@ extension Companion {
     // MARK: - Scan
 
     /// Called once per completed hook scan. Reads the newest hook records and checks herdr's
-    /// default socket off the main actor, then ticks the monitor with Ghostty controls, the pane IDs
+    /// default socket off the main actor, then ticks the monitor with herdr's switch, the pane IDs
     /// of live Claude sessions' newest events, and the Codex half of the gate (ADR 0012). The monitor
     /// contacts herdr only when the gate holds.
     func scanHerdr() {
@@ -138,7 +143,9 @@ extension Companion {
         let cache = herdr.recordCache
         let socketPath = herdr.defaultSocketPath
         let titles = herdrGateCodexTitles()
-        let checkSocket = titles.ghostty != nil && !titles.liveTitles.isEmpty
+        // Steer's own hook records are read even while herdr is off, so a Claude session there stays
+        // `herdrSwitchedOff` rather than falling to the Ghostty route; herdr's socket is not inspected.
+        let checkSocket = herdrContactAllowed && titles.ghostty != nil && !titles.liveTitles.isEmpty
         Task { @MainActor in
             let result = await Task.detached(priority: .utility) {
                 (records: directories.isEmpty ? HerdrHookRecordReader.Result.empty
@@ -166,7 +173,7 @@ extension Companion {
                 self?.observeHerdrVisit(outcome)
             }
         }
-        monitor.tick(now: ProcessInfo.processInfo.systemUptime, ghosttyControlsEnabled: ghosttyEnabled,
+        monitor.tick(now: ProcessInfo.processInfo.systemUptime, herdrEnabled: herdrContactAllowed,
                      herdrPaneIDs: paneIDs, codexGate: codexGate,
                      request: HerdrBindingInputs.scanRequest(paneIDs: paneIDs, codex: codex))
         publishHerdrScan(monitor.latest)
