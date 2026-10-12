@@ -233,6 +233,43 @@ private func started(_ question: AttentionQuestion, progress: QuestionAnswerProg
     #expect(route(call, book: answered, daemonConnected: true) == .daemonAnswered)
 }
 
+@Test func aCodexQuestionInAHostWithoutDigitsIsAnsweredInCodex() {
+    // ADR 0017: Terminal.app types no question digits, because `do script`'s newline could answer the
+    // next question. The daemon still wins, and a session in herdr keeps its pane route.
+    let call = question()
+    func terminalRoute(book: AppServerQuestionBook = AppServerQuestionBook(), daemonConnected: Bool = false,
+                       herdr: HerdrSessionBinding = .notInHerdr) -> QuestionAnswerRoute {
+        QuestionRelayRouting.route(for: call, book: book, daemonConnected: daemonConnected, ledger: QuestionRelayLedger(),
+                                   progress: nil, herdr: herdr, terminalHost: .terminalApp)
+    }
+    #expect(terminalRoute() == .relayUnavailable(.noQuestionKeys(.terminalApp)))
+    #expect(QuestionRelayRouting.route(for: call, book: AppServerQuestionBook(), daemonConnected: false,
+                                       ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
+                                       terminalHost: .iTerm2) == .relayUnavailable(.noQuestionKeys(.iTerm2)))
+    guard case .daemon = terminalRoute(book: daemonBook(), daemonConnected: true) else {
+        Issue.record("the daemon must win"); return
+    }
+    // A herdr key needs the title unique across the enabled hosts too.
+    #expect(terminalRoute(herdr: .bound(target)) == .relayUnavailable(.noQuestionKeys(.terminalApp)))
+    #expect(HerdrQuestionRelayUnavailable.noQuestionKeys(.iTerm2).message == "Steer can't type into iTerm2. Reply in the session.")
+    #expect(HerdrQuestionRelayUnavailable.noQuestionKeys(.terminalApp).message == "Answer this in Codex.")
+    #expect(HerdrPresentation.relayUnavailableLine(for: .noQuestionKeys(.terminalApp)) == "Answer this in Codex.")
+    // Another host's digits never go to Ghostty: every non-Ghostty host lacks a relay here for now.
+    for host: TerminalHost in [.wezTerm, .tmux, .zellij, .iTerm2, .terminalApp] {
+        #expect(QuestionRelayRouting.route(for: call, book: AppServerQuestionBook(), daemonConnected: false,
+                                           ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
+                                           terminalHost: host) == .relayUnavailable(.noQuestionKeys(host)))
+    }
+    // An enabled host that is unread or unreadable could hold the session: no Ghostty key.
+    #expect(QuestionRelayRouting.route(for: call, book: AppServerQuestionBook(), daemonConnected: false,
+                                       ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
+                                       unreadHost: .terminalApp) == .relayUnavailable(.otherHostUnreadable(.terminalApp)))
+    // A Ghostty session keeps its own key relay.
+    #expect(QuestionRelayRouting.route(for: call, book: AppServerQuestionBook(), daemonConnected: false,
+                                       ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
+                                       terminalHost: .ghostty) == .ghosttyRelay)
+}
+
 @Test func sessionsRouteByTheirHerdrBinding() {
     let call = question()
     #expect(route(call, herdr: .notInHerdr) == .ghosttyRelay)

@@ -1001,7 +1001,6 @@ struct Notch: View {
             if index >= question.prompts.count { return "Codex is on question \(index + 1) of \(total). Continue in Codex." }
             if case let .continueInCodex(reason) = QuestionAnswerProgress.offer(question, at: index) { return reason }
             if case let .relayUnavailable(reason) = model.route(for: question) { return HerdrPresentation.relayUnavailableLine(for: reason) }
-            if let line = model.iTerm2InputLine(for: question) { return line }
             if question.source == .cli, !model.showsOptionControls(for: question) { return "\(noDaemon); enable Ghostty controls to answer from here, or answer in Codex." }
             if index > 0, let previous = progress.picks[index - 1] { return "Sent \(previous + 1) as a key to \(destination.place). Codex should now show question \(index + 1)." }
             // Nothing sent yet: no sentence. The path is named once something is.
@@ -1106,22 +1105,48 @@ struct Notch: View {
     }
 
     /// The completion card's own sentence about the reply the user sent from it. Every phase says
-    /// what Steer did and nothing more; a reply the daemon took is never called an answer Codex has.
-    private func replyStatus(_ progress: SessionReplyProgress, target: SessionReplyTarget) -> String? {
+    /// what Steer did and nothing more; a reply the daemon took, or text typed into the session's tab
+    /// (ADR 0017), is never called an answer the agent has.
+    private func replyStatus<ID>(_ progress: ReplyProgress<ID>, target: SessionReplyTarget,
+                                 agent: AgentSource = .codex) -> String? {
+        let name = agent == .claude ? "Claude" : "Codex"
+        let typed = progress.route.map { $0 != .daemon } ?? false
         switch progress.phase {
         case .ready:
-            if case let .unavailable(reason) = target { return SessionReplyPolicy.message(for: reason) }
+            if case let .unavailable(reason) = target { return SessionReplyPolicy.message(for: reason, agent: agent) }
             return nil
         case .sending:
-            return "Sending your reply to Codex's daemon…"
+            return typed ? "Typing your reply into the session…" : "Sending your reply to Codex's daemon…"
         case let .sent(text, _):
-            return "Sent “\(text)”. Waiting for Codex to record the turn."
+            if progress.composerMayHoldText {
+                return "Typed “\(text)”, but Steer couldn't press Return. The text may be waiting in Codex's composer; Steer won't press Return later."
+            }
+            return typed ? "Typed “\(text)”. Waiting for \(name) to start the turn." : "Sent “\(text)”. Waiting for Codex to record the turn."
         case let .working(text):
-            return "Sent “\(text)”. Codex started a turn; this session is working again."
+            return "Sent “\(text)”. \(name) started a turn; this session is working again."
         case let .unconfirmed(text, _):
-            return "Sent “\(text)”, but Codex has not started a turn. Check Codex; Steer will not resend."
+            return typed ? "Typed “\(text)”, but \(name) has not started a turn. Check the session; Steer will not resend."
+                : "Sent “\(text)”, but Codex has not started a turn. Check Codex; Steer will not resend."
         case let .failed(reason):
             return reason
+        }
+    }
+
+    /// A Claude completion card's reply (ADR 0017): typed into the session's bound tab, shown only
+    /// while a host that types replies is on. The same one-reply rules as a Codex card.
+    @ViewBuilder
+    private func claudeReplyBody(_ outcome: AgentOutcome, target: SessionReplyTarget, subject: String) -> some View {
+        let progress = model.claudeReply(for: outcome)
+        let key = "reply:\(outcome.session.sourceScope):\(outcome.session.session):\(outcome.turn)"
+        DraftField(placeholder: "Reply to this session", text: draft(key), sendTitle: "Send",
+                   fieldLabel: "Reply to \(subject)", sendLabel: "Send reply to \(subject)",
+                   hint: "Types a follow-up prompt into this session's tab.", onEscape: model.collapse) {
+            model.sendClaudeReply(outcome, text: drafts[key] ?? "")
+            if model.claudeReply(for: outcome).phase != .ready { drafts[key] = nil }
+        }
+        .disabled(!target.isReachable || progress.phase != .ready)
+        if let status = replyStatus(progress, target: target, agent: .claude) {
+            Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1141,9 +1166,8 @@ struct Notch: View {
             if model.reply(for: completion).phase != .ready { drafts[key] = nil }
         }
         .disabled(!target.isReachable || progress.phase != .ready)
-        // ADR 0017: a session iTerm2 may hold gets iTerm2's line instead of the daemon's reason.
-        let iTerm2Line = progress.phase == .ready ? model.iTerm2ReplyLine(for: completion, target: target) : nil
-        if let status = iTerm2Line ?? replyStatus(progress, target: target) {
+        // ADR 0017: a session another host may hold gets that host's line through its typed route.
+        if let status = replyStatus(progress, target: target) {
             Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1389,6 +1413,9 @@ struct Notch: View {
                 if let outcome = item.outcome, outcome.session.source == .codex, let completion = model.codexCompletion(for: outcome),
                    completion.source == .cli {
                     replyBody(completion, subject: subject)
+                }
+                if let outcome = item.outcome, let target = model.claudeReplyTarget(for: outcome) {
+                    claudeReplyBody(outcome, target: target, subject: subject)
                 }
                 if item.outcome != nil, let spotlightDetails {
                     VStack(alignment: .leading, spacing: 3) {

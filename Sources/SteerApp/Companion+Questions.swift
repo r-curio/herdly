@@ -221,7 +221,9 @@ extension Companion {
     func route(for question: AttentionQuestion) -> QuestionAnswerRoute {
         QuestionRelayRouting.route(for: question, book: daemonBook, daemonConnected: daemonConnected,
                                    ledger: relayLedger, progress: answerProgress[question.id],
-                                   herdr: question.source == .cli ? herdrBinding(for: herdrKey(question)) : .notInHerdr)
+                                   herdr: question.source == .cli ? herdrBinding(for: herdrKey(question)) : .notInHerdr,
+                                   terminalHost: question.source == .cli ? terminalHost(forQuestionSession: question.session) : nil,
+                                   unreadHost: question.source == .cli ? unreadQuestionHost(for: question.session) : nil)
     }
 
     private func herdrKey(_ question: AttentionQuestion) -> HerdrSessionKey {
@@ -245,8 +247,9 @@ extension Companion {
         case .daemon: return true
         case .daemonAnswered: return false
         case .desktopPick: return true
-        // ADR 0017: never offer a key for a session iTerm2 may hold (`iTerm2InputLine` says why).
-        case .ghosttyRelay, .herdrRelay: return (ghosttyEnabled || previewMode != nil) && iTerm2InputBlock(for: question.session) == nil
+        // A session another enabled host may hold, or one that host cannot rule out, already routes to
+        // `relayUnavailable` (ADR 0013, ADR 0017).
+        case .ghosttyRelay, .herdrRelay: return ghosttyEnabled || previewMode != nil
         case .relayUnavailable: return false
         }
     }
@@ -295,23 +298,26 @@ extension Companion {
         let key = QuestionAnswerPolicy.key(forOption: option)
         let live = liveCLI
         let rolloutRoot = Companion.rolloutRoot
-        let title = GhosttyMatch.title(current.session)
-        let iTerm2On = hostSwitches.mayContact(.iTerm2)
-        let iTerm2Running = iTerm2On && TerminalApps.isRunning(.iTerm2)
+        let switches = hostSwitches
+        // Read on the main actor: a host that is not running holds nothing and is not asked.
+        let running = Set(TerminalKeyRelayCheck.hostsToRead(switches: switches).filter(TerminalApps.isRunning))
         navigationMessage = "Sending \(key)…"
         refresh()
         Task { @MainActor in
             let result = await Task.detached { () -> (sent: Bool, message: String) in
+                // ADR 0013 freshness: Ghostty binds by title alone, so every other enabled host is read
+                // fresh first; an unreadable one, or one whose tab carries the title, sends no key.
+                let hosts = TerminalKeyRelayCheck.hostsToRead(switches: switches)
+                if !hosts.isEmpty,
+                   let veto = TerminalKeyRelayCheck.ghosttyVeto(title: GhosttyMatch.title(current.session), switches: switches,
+                                                                fresh: Companion.freshInventories(hosts, running: running)) {
+                    return (false, veto.message)
+                }
                 // The rollout as of this instant: an answer Codex already recorded, or an ended turn,
                 // means the pane is gone and the key would land in the composer instead.
                 let evidence = ReminderReader.currentEvidence(for: current.session, in: rolloutRoot)
                 guard QuestionAnswerGuard.stillPending(current, in: evidence) else {
                     return (false, "Codex already has an answer or the turn ended; nothing was sent.")
-                }
-                // ADR 0013 "Freshness": the title must be unique across every enabled inventory, so a
-                // fresh iTerm2 read comes last; a Ghostty decoy never gets the key (ADR 0017).
-                if let block = Companion.freshITerm2InputBlock(title: title, on: iTerm2On, running: iTerm2Running) {
-                    return (false, "\(block.line) Nothing was sent.")
                 }
                 return GhosttyNavigation.answer(session: current.session, live: live, keys: [key])
             }.value
