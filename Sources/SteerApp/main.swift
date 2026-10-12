@@ -203,6 +203,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         set { hostSwitches.set(.ghostty, on: newValue) }
     }
     @Published var ghosttyPermissionVerified = false
+    /// iTerm2's permission, scan and visit state (Companion+ITerm2.swift, #238).
+    let iTerm2 = ITerm2State()
     /// The latest Automation consent check for Ghostty; nil until one has run in this launch.
     @Published var ghosttyAccess: GhosttyAutomationAccess?
     /// Read the Codex desktop app's own unread flags to acknowledge desktop completions it has
@@ -722,6 +724,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         observeGhosttyLaunches()
         let defaults = UserDefaults.standard
         restoreHostSwitches(defaults)
+        startITerm2()
         let stored = defaults.object(forKey: Companion.ghosttyEnabledKey) as? Bool
         if stored == true {
             ghosttyEnabled = true
@@ -1433,6 +1436,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         checkApprovalFocus()
         checkGhosttyFocus()
+        checkITerm2Visits()
         // App identity only: no window contents, task titles, or accessibility queries.
         // App activation affects notification delivery, never the notch's visibility.
         let codexForeground = previewMode == nil ? desktopAdapter.codexForeground() : false
@@ -2337,6 +2341,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         hostSwitches.set(host, on: on)
         if previewMode == nil { UserDefaults.standard.set(on, forKey: host.defaultsKey) }
         if host == .herdr { scanHerdr() }
+        if host == .iTerm2 { iTerm2SwitchChanged(on) }
     }
 
     func ghosttyChanged(_ enabled: Bool) {

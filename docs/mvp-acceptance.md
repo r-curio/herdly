@@ -82,7 +82,7 @@ Map [#197](https://github.com/r-curio/steer/issues/197) adds iTerm2, Terminal.ap
 
 | # | Step | Expected | Result |
 | --- | --- | --- | --- |
-| H1 | Turn the host's switch on in Settings › Terminals. | iTerm2 and Terminal.app ask for Automation access; the card's badge reads ready with no problem lines. | |
+| H1 | Turn the host's switch on in Settings › Terminals. | iTerm2 and Terminal.app ask for Automation access; the card's badge reads ready with no problem lines (it reads Not in use until a session has been seen there; [product.md's card rules](product.md#settings) govern). | |
 | H2 | One Codex and one Claude session, each in its own unsplit tab or single-pane window, plus a decoy tab showing the Codex session's title without running `codex`. | Both sessions bind to their own tabs; the decoy binds nothing. | |
 | H3 | From another app, with a different tab showing, complete a turn in each session and press Open. | The exact tab (and pane) shows in front; the completion is acknowledged only after Steer verifies it. | |
 | H4 | Switch to a session's tab by hand for under five seconds, then for over five. | The short visit acknowledges nothing; the long one acknowledges. | |
@@ -94,7 +94,7 @@ Map [#197](https://github.com/r-curio/steer/issues/197) adds iTerm2, Terminal.ap
 
 Host-specific lines, added to the same evidence file:
 
-- **iTerm2:** no typed input at all (H9 shows "Steer can't type into iTerm2. Reply in the session."). With iTerm2's own Claude Code integration turned on, Steer's Claude hooks and binding still work and iTerm2's hook still runs.
+- **iTerm2:** no typed input at all (H9 shows "Steer can't type into iTerm2. Reply in the session."). With iTerm2's own Claude Code integration turned on, Steer's Claude hooks and binding still work and iTerm2's hook still runs. Build state (#238): Open, visits, the Automation flow and the card are built, but the card stays hidden until this run passes, so H1 cannot yet be done from Settings. H9's line replaces Codex question keys and the reply field's reason while an iTerm2 tab shows the session's title and the daemon does not hold it.
 - **Terminal.app:** replies only; a Codex question shows "Answer this in Codex."
 - **WezTerm:** a session's tab in a window that isn't in front gets the fallback (H5's result), never a window switch.
 - **tmux:** a session on a socket other than the default is unreachable, with the card's socket line.

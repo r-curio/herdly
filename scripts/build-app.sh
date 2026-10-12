@@ -10,7 +10,7 @@ app_dir="$PWD/output/Steer.app"
 mkdir -p "$app_dir/Contents/MacOS"
 mkdir -p "$app_dir/Contents/Resources"
 mkdir -p "$app_dir/Contents/Helpers"
-cp Sources/SteerApp/Resources/Ghostty.js "$app_dir/Contents/Resources/"
+cp Sources/SteerApp/Resources/Ghostty.js Sources/SteerApp/Resources/ITerm2.js "$app_dir/Contents/Resources/"
 cp "$bin_dir/Steer" "$app_dir/Contents/MacOS/Steer"
 cp "$bin_dir/SteerHook" "$app_dir/Contents/Helpers/SteerHook"
 cat > "$app_dir/Contents/Info.plist" <<PLIST
@@ -24,7 +24,7 @@ cat > "$app_dir/Contents/Info.plist" <<PLIST
 <key>CFBundleShortVersionString</key><string>${STEER_VERSION}</string>
 <key>CFBundleVersion</key><string>${STEER_BUILD}</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
-<key>NSAppleEventsUsageDescription</key><string>Steer selects the Ghostty tab for your Codex session when you enable Ghostty controls.</string>
+<key>NSAppleEventsUsageDescription</key><string>Steer selects the terminal tab for your Codex or Claude session when you turn that terminal on in Steer.</string>
 <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST

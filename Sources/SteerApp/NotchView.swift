@@ -1001,6 +1001,7 @@ struct Notch: View {
             if index >= question.prompts.count { return "Codex is on question \(index + 1) of \(total). Continue in Codex." }
             if case let .continueInCodex(reason) = QuestionAnswerProgress.offer(question, at: index) { return reason }
             if case let .relayUnavailable(reason) = model.route(for: question) { return HerdrPresentation.relayUnavailableLine(for: reason) }
+            if let line = model.iTerm2InputLine(for: question) { return line }
             if question.source == .cli, !model.showsOptionControls(for: question) { return "\(noDaemon); enable Ghostty controls to answer from here, or answer in Codex." }
             if index > 0, let previous = progress.picks[index - 1] { return "Sent \(previous + 1) as a key to \(destination.place). Codex should now show question \(index + 1)." }
             // Nothing sent yet: no sentence. The path is named once something is.
@@ -1140,7 +1141,9 @@ struct Notch: View {
             if model.reply(for: completion).phase != .ready { drafts[key] = nil }
         }
         .disabled(!target.isReachable || progress.phase != .ready)
-        if let status = replyStatus(progress, target: target) {
+        // ADR 0017: a session iTerm2 may hold gets iTerm2's line instead of the daemon's reason.
+        let iTerm2Line = progress.phase == .ready ? model.iTerm2ReplyLine(for: completion, target: target) : nil
+        if let status = iTerm2Line ?? replyStatus(progress, target: target) {
             Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1349,7 +1352,7 @@ struct Notch: View {
                     case .question:
                         if item.session.source == .claude {
                             claudeReturnControl(item, subject: subject, emphasized: true)
-                        } else if item.session.surface == .cli && !model.ghosttyEnabled {
+                        } else if item.session.surface == .cli && !model.cliTerminalHostOn {
                             NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
                                 .accessibilityLabel("Set up Ghostty: \(subject)")
                                 .accessibilityHint("Opens Steer controls to enable Ghostty controls.")

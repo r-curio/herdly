@@ -113,3 +113,24 @@ public enum GhosttyTitleOpen {
         Array(repeating: CodexOpenCandidate(walk: .reached(.ghostty), ttyWrittenAt: nil), count: max(0, count))
     }
 }
+
+extension TerminalHostInventory {
+    /// Ghostty's inventory for ADR 0013 while it does not expose `tty` (#251): every terminal with its
+    /// title and its tab's terminal count, and no tty, so it counts toward Codex title uniqueness across
+    /// enabled hosts but never binds by tty (`ttyUnknown`). A running Ghostty whose inventory failed is
+    /// unreadable; one that is not running holds nothing.
+    public static func ghosttyTitles(_ snapshot: GhosttySnapshot?, running: Bool) -> TerminalHostInventory {
+        guard running else { return .notRunning }
+        guard let snapshot, snapshot.status == "ok" else { return .unreadable }
+        var tabs: [TerminalTab] = []
+        for window in snapshot.windows {
+            for tab in window.tabs {
+                for terminal in tab.terminals {
+                    guard !terminal.id.isEmpty else { return .unreadable }
+                    tabs.append(TerminalTab(tabID: terminal.id, tty: nil, title: terminal.name, paneCount: tab.terminals.count))
+                }
+            }
+        }
+        return .tabs(tabs)
+    }
+}
