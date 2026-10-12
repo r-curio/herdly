@@ -1507,7 +1507,7 @@ struct Notch: View {
                 }
                     .disabled(model.openingTask)
                     .accessibilityLabel("Open Session: \(subject)")
-                    .accessibilityHint("Open the exact Claude Ghostty tab for this session.")
+                    .accessibilityHint("Open this Claude session in its terminal.")
             } else if herdr == .notInHerdr, !model.ghosttyEnabled {
                 NotchButton(title: "Set up Ghostty", emphasized: emphasized, action: model.showControls)
                     .accessibilityLabel("Set up Ghostty: \(subject)")
