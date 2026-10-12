@@ -240,23 +240,27 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
     #expect(HerdrPresentation.openAvailability(binding: .notInHerdr, ttySupport: .unsupported) == .notInHerdr)
     #expect(HerdrPresentation.openAvailability(binding: .bound(target), ttySupport: .supported) == .available)
     #expect(HerdrPresentation.openAvailability(binding: .bound(target), ttySupport: nil) == .available)
-    #expect(HerdrPresentation.openAvailability(binding: .bound(target), ttySupport: .unsupported)
-        == .unavailable(.ghosttyTTYUnsupported))
+    // ADR 0015: a Ghostty without `tty` and a split are Open fallbacks, so Open stays on the card.
+    #expect(HerdrPresentation.openAvailability(binding: .bound(target), ttySupport: .unsupported) == .available)
     #expect(HerdrPresentation.openAvailability(binding: .unavailable(.binding(.split)), ttySupport: .unsupported)
-        == .unavailable(.session(.binding(.split))))
+        == .available)
+    #expect(HerdrPresentation.openAvailability(binding: .unavailable(.binding(.sessionEnded)), ttySupport: .supported)
+        == .unavailable(.session(.binding(.sessionEnded))))
 }
 
-@Test func herdrPresentationOffersOpenWithoutTTYOnlyForTheSoleTerminal() {
+@Test func herdrPresentationWithoutTTYOffersOpenUnlessTheJoinShowsAnUnavailableCause() {
     let target = HerdrPaneTarget(sessionID: "s", agent: .claude, paneID: "w1:p1")
     let sole = GhosttyTarget(window_id: "w", tab_id: "t", terminal_id: "p")
     func availability(_ join: GhosttyTTYJoin?) -> HerdrOpenAvailability {
         HerdrPresentation.openAvailability(binding: .bound(target), ttySupport: .unsupported, soleTerminal: join)
     }
     #expect(availability(.matched(sole)) == .available)
-    #expect(availability(nil) == .unavailable(.ghosttyTTYUnsupported))
-    #expect(availability(.ttyUnsupported) == .unavailable(.ghosttyTTYUnsupported))
-    #expect(availability(.split) == .unavailable(.ghosttyTTY(.split)))
-    #expect(availability(.otherWindow) == .unavailable(.ghosttyTTY(.otherWindow)))
+    // Fallbacks (ADR 0015): Open raises Ghostty instead of showing a reason.
+    #expect(availability(nil) == .available)
+    #expect(availability(.ttyUnsupported) == .available)
+    #expect(availability(.split) == .available)
+    #expect(availability(.otherWindow) == .available)
+    #expect(availability(.inventoryUnavailable) == .unavailable(.ghosttyTTY(.inventoryUnavailable)))
     // With `tty` the sole-terminal join is never consulted.
     #expect(HerdrPresentation.openAvailability(binding: .bound(target), ttySupport: .supported, soleTerminal: .split) == .available)
 }

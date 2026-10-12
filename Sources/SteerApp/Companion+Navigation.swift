@@ -24,18 +24,19 @@ extension Companion {
         CodexAttentionAdapter.isTerminalSession(identity, cliSessions: cliSessions)
     }
 
+    /// Whether a Claude card offers Open: the session is live exactly once in complete inventories,
+    /// and Ghostty, when on, has its Automation permission. Whether the click reaches the exact tab or
+    /// falls back to raising the session's app (ADR 0015) is decided at click time; the card looks
+    /// the same either way.
     func canOpenClaude(_ identity: AgentSessionIdentity) -> Bool {
-        guard identity.source == .claude, identity.surface == .cli, ghosttyEnabled,
-              ghosttyPermissionVerified, !liveClaudeSessions.isEmpty,
+        guard identity.source == .claude, identity.surface == .cli,
+              !ghosttyEnabled || ghosttyPermissionVerified, !liveClaudeSessions.isEmpty,
               let configuredScopes = configuredClaudeNavigationScopes(),
               Set(liveClaudeSessions.keys) == configuredScopes,
               Set(claudeInventoryAvailable.keys) == configuredScopes,
-              claudeInventoryAvailable.values.allSatisfy({ $0 }),
-              liveClaudeSessions[identity.sourceScope]?.filter({ $0 == identity.session }).count == 1,
-              let snapshot = knownGhosttySnapshot else { return false }
-        let live = liveClaudeSessions.values.flatMap { $0 }
-        guard let target = GhosttyMatch.target(claudeSessionID: identity.session, live: live, snapshot: snapshot) else { return false }
-        return GhosttyMatch.isInCurrentWindow(target, snapshot: snapshot)
+              claudeInventoryAvailable.values.allSatisfy({ $0 }) else { return false }
+        return liveClaudeSessions[identity.sourceScope]?.filter({ $0 == identity.session }).count == 1
+            && liveClaudeSessions.values.flatMap({ $0 }).filter({ $0 == identity.session }).count == 1
     }
 
     func isBackgroundClaudeSession(_ identity: AgentSessionIdentity) -> Bool {
@@ -65,21 +66,22 @@ extension Companion {
     }
 
     var claudeReturnUnavailableMessage: String {
-        if !ghosttyEnabled { return "Enable Ghostty controls to open the exact Claude tab." }
-        if !ghosttyPermissionVerified { return "Ghostty controls are awaiting Automation permission." }
-        return "The exact Claude tab is unavailable until Steer can verify one live, unsplit target."
+        if ghosttyEnabled && !ghosttyPermissionVerified { return "Ghostty controls are awaiting Automation permission." }
+        return "Open is unavailable until Steer can verify this Claude session is live."
     }
 
     private func openClaude(_ identity: AgentSessionIdentity, approval: AgentApproval? = nil) {
         guard !openingTask else { return }
-        guard ghosttyEnabled else { showControls(); return }
         guard identity.surface == .cli else {
             navigationMessage = "The exact Claude tab is unavailable for this session surface."
             refresh()
             return
         }
         let herdrKey = HerdrSessionKey(agent: .claude, sessionID: identity.session)
-        if herdrBinding(for: herdrKey) != .notInHerdr {
+        let herdrRoute = herdrBinding(for: herdrKey)
+        // With Ghostty off Steer cannot reach herdr's client tab, so the session's own process decides,
+        // as for any Claude session in a switched-off app (ADR 0015).
+        if herdrRoute != .notInHerdr, herdrRoute != .unavailable(.ghosttyControlsOff) {
             // ADR 0011: an actionable approval is handed back before the herdr pane is opened.
             if let approval,
                let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: { $0.id == approval.id }) {
@@ -92,6 +94,8 @@ extension Companion {
         navigationMessage = "Finding the matching Claude tab…"
         let configuredRoots = configuredClaudeNavigationRoots()
         let queued = orderedAgentAttentionItems.filter { $0.session == identity && $0.outcome != nil }.map(\.id)
+        let ghosttyOn = ghosttyEnabled
+        let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
         Task { @MainActor in
             let inventories = await Task.detached {
                 configuredRoots.map { root in
@@ -104,28 +108,69 @@ extension Companion {
             let live = inventories.flatMap { scan in
                 scan.sessions.filter { $0.kind == .interactive }.map(\.sessionID)
             }
-            let ownLive = inventories.first { $0.sourceScope == identity.sourceScope }
-            let result: (opened: Bool, message: String)
-            if !complete || ownLive?.sessions.filter({ $0.kind == .interactive && $0.sessionID == identity.session }).count != 1
-                || live.filter({ $0 == identity.session }).count != 1 {
-                result = (false, claudeReturnUnavailableMessage)
+            let own = inventories.first { $0.sourceScope == identity.sourceScope }?.sessions
+                .filter { $0.kind == .interactive && $0.sessionID == identity.session } ?? []
+            let result: TerminalOpenResult?
+            if !complete {
+                result = nil
+            } else if own.isEmpty, !live.contains(identity.session) {
+                result = .unavailable(.sessionEnded)
+            } else if own.count != 1 || live.filter({ $0 == identity.session }).count != 1 {
+                result = nil
             } else {
-                result = await Task.detached {
-                    GhosttyNavigation.openClaude(sessionID: identity.session, live: live)
-                }.value
+                // Ghostty off is never scanned: the session's own registry process names its app.
+                let outcome: GhosttyTitleOutcome = ghosttyOn
+                    ? await Task.detached {
+                        GhosttyNavigation.openClaude(sessionID: identity.session, live: live, running: ghosttyRunning)
+                    }.value
+                    : .miss(.fallBack(.noUniqueTarget, candidates: 0))
+                let pid = own[0].pid
+                let switches = hostSwitches
+                result = await openResult(outcome) { _ in
+                    let walk = await Task.detached { pid.map(TerminalApps.walk(from:)) ?? .failed }.value
+                    return OpenFallback.processApp(walks: [walk], agent: .claude, switches: switches)
+                }
             }
-            navigationMessage = result.message
-            if result.opened {
+            navigationMessage = result.map { $0.message ?? "Opened the matching Claude tab." } ?? claudeReturnUnavailableMessage
+            switch result {
+            case .opened?, .fellBack?:
+                // ADR 0015: an Open on an actionable request hands it back with no decision, fallback
+                // included. Only the verified Open acknowledges.
                 if let approval,
                    let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: { $0.id == approval.id }) {
                     handBackClaudeApproval(current)
                 }
-                for id in queued { agentQueue.dismiss(id) }
-                saveCompletions()
+                if result?.acknowledges == true {
+                    for id in queued { agentQueue.dismiss(id) }
+                    saveCompletions()
+                }
+            case .unavailable?, nil:
+                break
             }
             openingTask = false
             refresh()
         }
+    }
+
+    /// Resolves a Ghostty title Open under ADR 0015 and performs the fallback: the identified app is
+    /// raised as a whole, only while running, and nothing is acknowledged or made an input target.
+    /// `app` identifies the session's app from the number of Ghostty terminals carrying its title.
+    func openResult(_ outcome: GhosttyTitleOutcome,
+                    app: (Int) async -> Result<TerminalHost, OpenUnavailableReason>) async -> TerminalOpenResult {
+        switch outcome {
+        case .opened, .miss(.exact):
+            return .opened
+        case .miss(.unavailable(let reason)):
+            return .unavailable(reason)
+        case .miss(.fallBack(let reason, let candidates)):
+            return raise(OpenFallback.resolve(reason, app: await app(candidates), isRunning: TerminalApps.isRunning))
+        }
+    }
+
+    /// Activates the app of a fallback; an app that quit in between is not running (never launched).
+    func raise(_ result: TerminalOpenResult) -> TerminalOpenResult {
+        guard case .fellBack(let host, _) = result else { return result }
+        return TerminalApps.activate(host) ? result : .unavailable(.appNotRunning(host))
     }
 
     func openAgentApproval(_ approval: AgentApproval) {
@@ -159,11 +204,17 @@ extension Companion {
         navigationMessage = "Finding the matching Ghostty tab…"
         let live = liveCLI
         let queued = cliItems.filter { $0.session == session }.map(\.id)
+        let running = TerminalApps.isRunning(.ghostty)
         Task { @MainActor in
-            let result = await Task.detached { GhosttyNavigation.open(session: session, live: live) }.value
-            navigationMessage = result.message
+            let outcome = await Task.detached { GhosttyNavigation.open(session: session, live: live, running: running) }.value
+            let switches = hostSwitches
+            // ADR 0015 amendment: the tabs carrying the title name the app; none cannot be identified.
+            let result = await openResult(outcome) { count in
+                OpenFallback.codexApp(candidates: GhosttyTitleOpen.codexCandidates(count: count), switches: switches)
+            }
+            navigationMessage = result.message ?? "Opened the matching Ghostty tab."
             // A verified visit acknowledges only completions already queued for this session.
-            if result.opened {
+            if result.acknowledges {
                 acknowledgeCodexCompletions(queued)
                 saveCompletions()
             }
@@ -244,12 +295,17 @@ extension Companion {
         openingTask = true
         navigationMessage = "Finding the matching herdr pane…"
         let client = herdr.client
+        // The latest scan the sequence read, whose attached clients a fallback walks (ADR 0015).
+        final class LatestScan { var outcome: HerdrScanOutcome? }
+        let latest = LatestScan()
         let effects = HerdrOpenEffects(
             now: { Date().timeIntervalSince1970 },
             ttySupport: { await Task.detached { GhosttyScriptingSupport.ttySupport() }.value },
             revalidate: { [weak self] in
                 guard let self else { return (.unavailable(.notScanned), nil) }
-                return await self.revalidateHerdrBinding(for: key)
+                let fresh = await self.revalidateHerdrBinding(for: key)
+                latest.outcome = fresh.outcome
+                return fresh
             },
             ghosttySnapshot: { await Task.detached { GhosttyNavigation.snapshot() }.value },
             focus: { pane in await Task.detached { client.focusAgent(target: pane) }.value },
@@ -263,9 +319,19 @@ extension Companion {
                 acknowledgeHerdrCompletions(HerdrOpenAcknowledgment.afterOpen(herdrCompletions(subject), result: result),
                                             subject: subject)
             case .unavailable(let failure):
+                // Kept for diagnostics whether or not the Open fell back.
                 herdr.open.failures[key] = failure
-                // The grouped reason only; the exact failure stays in diagnostics.
-                navigationMessage = HerdrPresentation.cardLine(for: .open(failure), agent: key.agent)
+                let pids = HerdrOpenFallback.clientPIDs(latest.outcome)
+                let walks = await Task.detached { pids.map(TerminalApps.walk(from:)) }.value
+                if let fallback = HerdrOpenFallback.resolve(failure, agent: key.agent == .claude ? .claude : .codex,
+                                                            clientWalks: walks, switches: hostSwitches,
+                                                            isRunning: TerminalApps.isRunning) {
+                    // Silent; the herdr focus already verified is kept, and nothing is acknowledged.
+                    navigationMessage = raise(fallback).message ?? ""
+                } else {
+                    // The grouped reason only; the exact failure stays in diagnostics.
+                    navigationMessage = HerdrPresentation.cardLine(for: .open(failure), agent: key.agent)
+                }
             }
             openingTask = false
             refresh()

@@ -23,16 +23,26 @@ Steer configures the selected user root. Claude can also merge project and comma
 - **Shadowed**: a higher-priority settings source wins; Steer does not try to defeat it.
 - **Unsupported**: the detected Claude Code version is older than the tested `2.1.273` baseline. Newer versions still need a fresh runtime event before they become connected.
 
-Ghostty readiness is separate from connection health. A root can be connected while Ghostty controls are off or still awaiting Automation permission. Exact return remains unavailable for stale, duplicate, overwritten, split, cross-window, or otherwise ambiguous targets.
+Ghostty readiness is separate from connection health. A root can be connected while Ghostty controls are off or still awaiting Automation permission. Exact return is never attempted for stale, duplicate, overwritten, split, cross-window, or otherwise ambiguous targets; Open falls back to raising the session's terminal app instead ([ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md), below).
 
 ## Exact Claude tab return (#84)
 
-When Ghostty controls are enabled and permission is verified, Claude's **Open in Claude** action is
-shown only for a canonical session that appears exactly once in every complete configured-root
-inventory and in one current unsplit Ghostty tab titled `Steer Claude <full-session-id>`. The action
-rechecks the root inventories, the complete Ghostty inventory, the exact window/tab/terminal
-locator, and the selected front window before it can acknowledge queued outcomes. A title match
-alone never acknowledges anything.
+Claude's **Open Session** action is shown for a canonical session that appears exactly once in every
+complete configured-root inventory, unless Ghostty controls are on and still awaiting Automation
+permission. Exact return selects one current unsplit Ghostty tab titled
+`Steer Claude <full-session-id>` in the front window. The action rechecks the root inventories, the
+complete Ghostty inventory, the exact window/tab/terminal locator, and the selected front window
+before it can acknowledge queued outcomes. A title match alone never acknowledges anything.
+
+When the exact tab cannot be reached (#236, ADR 0015) — Ghostty controls are off, Ghostty is not
+running, no tab or several tabs carry the title, the tab is split or in another window, or the
+selection does not verify — Steer walks from the session's registry PID up its parent processes to
+the nearest app. If that app is a supported terminal and is running, Steer activates it as a whole,
+silently, without selecting a window or tab, acknowledging anything, or making it an input target. A
+walk that fails or ends at another app, a session no longer in the inventory ("This session has
+ended."), or an unreadable Ghostty ("Steer can't read Ghostty. Check Settings › Terminals.") stays
+unavailable. An actionable approval is handed back, with no decision, on a verified Open or a
+fallback.
 
 Manual acknowledgment requires a fresh Ghostty snapshot to observe the exact selected target change
 after the outcome arrived. Since snapshots are polls, the outcome must also predate the prior
@@ -41,9 +51,9 @@ queued. A tab that was already selected, a restored outcome with no new observed
 inventory, or any uncertain target remains queued. The Open in Claude path has its own immediate
 before and after selection checks and may acknowledge only after that verified selection.
 
-Same-window return is supported. Duplicate live resumes, missing or stale sessions, overwritten
-titles, split tabs, background Ghostty windows, failed inventories, and changed locators remain
-unavailable without terminal input or acknowledgment. Ghostty Automation stays opt-in.
+Same-window return is supported. Duplicate live resumes and failed inventories remain unavailable;
+missing titles, overwritten titles, split tabs, background Ghostty windows and changed locators fall
+back as above. None sends terminal input or acknowledges. Ghostty Automation stays opt-in.
 Background Claude sessions do not create separate queue rows or exact-tab warnings; only
 interactive sessions can have a Ghostty target.
 
