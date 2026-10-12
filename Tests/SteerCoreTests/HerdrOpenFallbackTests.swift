@@ -96,7 +96,7 @@ private let switches = TerminalHostSwitches(enabled: [.ghostty, .herdr])
 
 @Test func herdrFallbackNeverAcknowledges() {
     // Only a verified Open acknowledges; a fallback leaves every completion queued.
-    let completions = [HerdrCompletionCandidate(id: "turn-1", arrivedAt: 10)]
+    let completions = [TerminalCompletionCandidate(id: "turn-1", arrivedAt: 10)]
     #expect(HerdrOpenAcknowledgment.afterOpen(completions, result: .unavailable(.ghosttyTab(.split))).isEmpty)
 }
 

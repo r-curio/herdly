@@ -44,12 +44,18 @@ ended."), or an unreadable Ghostty ("Steer can't read Ghostty. Check Settings â€
 unavailable. An actionable approval is handed back, with no decision, on a verified Open or a
 fallback.
 
-Manual acknowledgment requires a fresh Ghostty snapshot to observe the exact selected target change
-after the outcome arrived. Since snapshots are polls, the outcome must also predate the prior
-snapshot that establishes the transition lower bound; an outcome arriving between snapshots stays
-queued. A tab that was already selected, a restored outcome with no new observed visit, an incomplete
-inventory, or any uncertain target remains queued. The Open in Claude path has its own immediate
-before and after selection checks and may acknowledge only after that verified selection.
+Acknowledgment follows [ADR 0016](adr/0016-open-and-acknowledge-visits-the-same-way-on-every-terminal-host.md)'s
+one rule for every terminal host, the same as Codex tabs (#237). The tab is visible when macOS reports
+Ghostty frontmost and Ghostty's front window has it selected, and its binding (complete inventories,
+one live session, one unsplit tab carrying the full title, in the front window) still holds. A manual
+visit is a scan that shows the tab not visible followed by one that shows it visible; it acknowledges
+outcomes that arrived before the earlier scan, so one arriving between scans stays queued. An outcome
+that arrives while the tab is visible is acknowledged once the tab has stayed visible for five
+seconds after it arrived (the dwell rule); before #237 it stayed queued until dismissed. A failed or
+missing scan, an incomplete inventory, or any uncertain target acknowledges nothing, and a restored
+outcome in a tab that is already in front waits for a switch to it. A verified Open in Claude
+acknowledges the outcomes that arrived before it; a fallback never does, and the scan interval spanning
+any Open is never a visit.
 
 Same-window return is supported. Duplicate live resumes and failed inventories remain unavailable;
 missing titles, overwritten titles, split tabs, background Ghostty windows and changed locators fall

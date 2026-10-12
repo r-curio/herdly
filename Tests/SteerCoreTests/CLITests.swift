@@ -149,38 +149,71 @@ import Testing
     #expect(GhosttyMatch.isInCurrentWindow(target, snapshot: snapshot) == false)
 }
 
-@Test func claudeVisitAcknowledgesOnlyAQualifiedFocusTransitionAfterOutcome() throws {
+// ADR 0016 replaces the Claude-only transition rule: a Claude tab's bound target feeds the same visit and
+// dwell rule as every host (TerminalVisitTests). The binding still needs complete, unique inventories and
+// the front window.
+@Test func claudeGhosttyVisitTargetNeedsAUniqueLiveSessionInCompleteInventoriesAndTheFrontWindow() throws {
     let id = "11111111-1111-4111-8111-1111111111ab"
     let identity = AgentSessionIdentity(source: .claude, sourceScope: "/root-a", session: id, surface: .cli)
-    let outcome = AgentOutcome(session: identity, turn: "turn-1", status: .finished, arrivedAt: 10)
     let title = ClaudeSetupRequirements.titlePrefix + id
-    let data: [String: Any] = [
-        "status": "ok",
-        "front_window_id": "window-a",
-        "windows": [["id": "window-a", "tabs": [["id": "tab-a", "terminals": [["id": "pane-a", "name": title]]]]]],
-        "selected": ["window_id": "window-a", "tab_id": "tab-a", "terminal_id": "pane-a"]
-    ]
-    let selected = try JSONDecoder().decode(GhosttySnapshot.self, from: JSONSerialization.data(withJSONObject: data))
+    func snapshot(front: String = "window-a") throws -> GhosttySnapshot {
+        let data: [String: Any] = [
+            "status": "ok",
+            "front_window_id": front,
+            "windows": [["id": "window-a", "tabs": [["id": "tab-a", "terminals": [["id": "pane-a", "name": title]]]]],
+                        ["id": "window-b", "tabs": [["id": "tab-b", "terminals": [["id": "pane-b", "name": "shell"]]]]]],
+        ]
+        return try JSONDecoder().decode(GhosttySnapshot.self, from: JSONSerialization.data(withJSONObject: data))
+    }
+    let tab = GhosttyTarget(window_id: "window-a", tab_id: "tab-a", terminal_id: "pane-a")
     let live = ["/root-a": [id]]
     let available = ["/root-a": true]
+    #expect(GhosttyVisitTargets.claude(identity, liveSessionsByScope: live, inventoryAvailable: available,
+                                       configuredScopes: ["/root-a"], snapshot: try snapshot()) == tab)
+    // Another window in front: Claude tabs are reached only in the current window.
+    #expect(GhosttyVisitTargets.claude(identity, liveSessionsByScope: live, inventoryAvailable: available,
+                                       configuredScopes: ["/root-a"], snapshot: try snapshot(front: "window-b")) == nil)
+    // Duplicate identity across roots, an incomplete inventory, or an unscanned configured root.
+    #expect(GhosttyVisitTargets.claude(identity, liveSessionsByScope: ["/root-a": [id], "/root-b": [id]],
+                                       inventoryAvailable: ["/root-a": true, "/root-b": true],
+                                       configuredScopes: ["/root-a", "/root-b"], snapshot: try snapshot()) == nil)
+    #expect(GhosttyVisitTargets.claude(identity, liveSessionsByScope: live, inventoryAvailable: ["/root-a": false],
+                                       configuredScopes: ["/root-a"], snapshot: try snapshot()) == nil)
+    #expect(GhosttyVisitTargets.claude(identity, liveSessionsByScope: live, inventoryAvailable: available,
+                                       configuredScopes: ["/root-a", "/root-b"], snapshot: try snapshot()) == nil)
+    // A Codex or desktop identity never has a Claude tab.
+    let desktop = AgentSessionIdentity(source: .claude, sourceScope: "/root-a", session: id, surface: .desktop)
+    #expect(GhosttyVisitTargets.claude(desktop, liveSessionsByScope: live, inventoryAvailable: available,
+                                       configuredScopes: ["/root-a"], snapshot: try snapshot()) == nil)
+}
 
-    // A selected tab observed after the outcome is still not a visit when the focus transition
-    // happened before the outcome. A later transition is the evidence that clears it.
-    #expect(ClaudeVisitAcknowledgment.outcomes([outcome], liveSessionsByScope: live,
-                                               inventoryAvailable: available, snapshot: selected,
-                                               snapshotTakenAt: 11, transitionAfter: 9).isEmpty)
-    #expect(ClaudeVisitAcknowledgment.outcomes([outcome], liveSessionsByScope: live,
-                                               inventoryAvailable: available, snapshot: selected,
-                                               snapshotTakenAt: 12, transitionAfter: 11) == [outcome.identity])
+// ADR 0016 changes this: a Claude completion that arrives while its tab is already in front used to stay
+// queued until dismissed; it now clears after five seconds in front, like every host.
+@Test func aClaudeCompletionArrivingInItsVisibleTabClearsAfterFiveSeconds() {
+    let tab = GhosttyTarget(window_id: "window-a", tab_id: "tab-a", terminal_id: "pane-a")
+    let queued = [TerminalCompletionCandidate(id: "turn-1", arrivedAt: 11)]
+    var visits = TerminalVisitTracker<GhosttyTarget>()
+    for at in [10.0, 12, 14] {
+        visits.record(TerminalVisibilityScan(takenAt: at, reading: .visible(tab)))
+        #expect(visits.acknowledged(queued, target: tab).isEmpty)
+    }
+    visits.record(TerminalVisibilityScan(takenAt: 16, reading: .visible(tab)))
+    #expect(visits.acknowledged(queued, target: tab) == ["turn-1"])
+}
 
-    // Duplicate identity across configured roots and an incomplete root inventory remain queued.
-    #expect(ClaudeVisitAcknowledgment.outcomes([outcome],
-                                               liveSessionsByScope: ["/root-a": [id], "/root-b": [id]],
-                                               inventoryAvailable: ["/root-a": true, "/root-b": true],
-                                               snapshot: selected, snapshotTakenAt: 12, transitionAfter: 11).isEmpty)
-    #expect(ClaudeVisitAcknowledgment.outcomes([outcome], liveSessionsByScope: live,
-                                               inventoryAvailable: ["/root-a": false], snapshot: selected,
-                                               snapshotTakenAt: 12, transitionAfter: 11).isEmpty)
+// ADR 0016 changes this: a Codex tab no longer clears its completions at any scan that shows it selected.
+// A restored completion in a tab already in front waits for a switch to it (or dismissal).
+@Test func aCodexTabInFrontAtEveryScanIsNotAVisitForAnOlderCompletion() {
+    let tab = GhosttyTarget(window_id: "w", tab_id: "t", terminal_id: "p")
+    let restored = [TerminalCompletionCandidate(id: "restored", arrivedAt: 1)]
+    var visits = TerminalVisitTracker<GhosttyTarget>()
+    for at in [10.0, 12, 14, 16, 18, 20] {
+        visits.record(TerminalVisibilityScan(takenAt: at, reading: .visible(tab)))
+        #expect(visits.acknowledged(restored, target: tab).isEmpty)
+    }
+    visits.record(TerminalVisibilityScan(takenAt: 22, reading: .nothing))
+    visits.record(TerminalVisibilityScan(takenAt: 24, reading: .visible(tab)))
+    #expect(visits.acknowledged(restored, target: tab) == ["restored"])
 }
 
 

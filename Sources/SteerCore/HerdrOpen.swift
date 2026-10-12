@@ -235,33 +235,34 @@ public struct HerdrOpenEffects {
 }
 
 public enum HerdrOpenSequence {
-    /// Runs ADR 0011's five steps, stopping at the first failure. A failure after step 2 leaves herdr's
-    /// focus as it is: there is no rollback, and never another pane or tab. Whether the failure then
-    /// raises the client's app is `HerdrOpenFallback`'s decision (ADR 0015).
+    /// Runs ADR 0011's five steps as ADR 0016's sequence (`TerminalOpenSequence`): revalidate, focus and
+    /// verify the herdr pane, raise and verify the Ghostty tab, stopping at the first failure. A failure
+    /// after the focus leaves herdr's focus as it is: there is no rollback, and never another pane or tab.
+    /// Whether the failure then raises the client's app is `HerdrOpenFallback`'s decision (ADR 0015).
     @MainActor
     public static func run(_ effects: HerdrOpenEffects) async -> HerdrOpenResult {
-        let support = await effects.ttySupport()
-        let takenAt = effects.now()
-        let fresh = await effects.revalidate()
-        if let failure = HerdrOpen.herdrFailure(binding: fresh.binding, outcome: fresh.outcome) {
-            return .unavailable(failure)
+        let steps = TerminalOpenSteps<HerdrOpenPlan, HerdrOpenFailure>(
+            now: { effects.now() },
+            revalidate: { takenAt in
+                let support = await effects.ttySupport()
+                let fresh = await effects.revalidate()
+                if let failure = HerdrOpen.herdrFailure(binding: fresh.binding, outcome: fresh.outcome) {
+                    return .failure(failure)
+                }
+                return HerdrOpen.plan(support: support, binding: fresh.binding, outcome: fresh.outcome,
+                                      ghostty: await effects.ghosttySnapshot(), snapshotTakenAt: takenAt)
+            },
+            focusPane: { plan in HerdrOpen.focusOutcome(await effects.focus(plan.pane.paneID)) },
+            verifyPane: { plan in
+                let verify = await effects.revalidate()
+                return HerdrOpen.verifyHerdr(plan, binding: verify.binding, outcome: verify.outcome)
+            },
+            raise: { plan in await effects.select(plan.ghosttyTarget, plan.clientTTY) ? nil : .ghosttySelectFailed },
+            verify: { plan in HerdrOpen.verifyGhostty(plan, ghostty: await effects.ghosttySnapshot()) })
+        switch await TerminalOpenSequence.run(steps) {
+        case .opened(let plan, _): return .opened(plan)
+        case .failed(let failure, _): return .unavailable(failure)
         }
-        let plan: HerdrOpenPlan
-        switch HerdrOpen.plan(support: support, binding: fresh.binding, outcome: fresh.outcome,
-                              ghostty: await effects.ghosttySnapshot(), snapshotTakenAt: takenAt) {
-        case .failure(let failure): return .unavailable(failure)
-        case .success(let value): plan = value
-        }
-        if let failure = HerdrOpen.focusOutcome(await effects.focus(plan.pane.paneID)) { return .unavailable(failure) }
-        let verify = await effects.revalidate()
-        if let failure = HerdrOpen.verifyHerdr(plan, binding: verify.binding, outcome: verify.outcome) {
-            return .unavailable(failure)
-        }
-        guard await effects.select(plan.ghosttyTarget, plan.clientTTY) else { return .unavailable(.ghosttySelectFailed) }
-        if let failure = HerdrOpen.verifyGhostty(plan, ghostty: await effects.ghosttySnapshot()) {
-            return .unavailable(failure)
-        }
-        return .opened(plan)
     }
 }
 
@@ -349,176 +350,5 @@ public enum HerdrOpenFallback {
         case .herdrNotFound, .notRunning, .untrustedSocket, .unsupportedProtocol: true
         default: false
         }
-    }
-}
-
-// MARK: - Acknowledgment
-
-/// A queued completion for a herdr session: its queue identity and arrival time (Unix seconds).
-public struct HerdrCompletionCandidate<ID: Hashable & Sendable>: Equatable, Sendable {
-    public let id: ID
-    public let arrivedAt: Double
-
-    public init(id: ID, arrivedAt: Double) {
-        self.id = id
-        self.arrivedAt = arrivedAt
-    }
-}
-
-/// One scheduled herdr scan as the visit rule needs it. Only a scan with exactly one Ghostty-hosted
-/// client produces an observation.
-public struct HerdrFocusObservation: Equatable, Sendable {
-    /// When the scan started, Unix seconds.
-    public let takenAt: Double
-    public let focusedPaneID: String?
-    public let clientPID: Int32
-    /// The client's TTY, normalized; nil when unusable.
-    public let clientTTY: String?
-
-    public init(takenAt: Double, focusedPaneID: String?, clientPID: Int32, clientTTY: String?) {
-        self.takenAt = takenAt
-        self.focusedPaneID = focusedPaneID
-        self.clientPID = clientPID
-        self.clientTTY = clientTTY
-    }
-
-    public static func from(_ outcome: HerdrScanOutcome?, takenAt: Double) -> HerdrFocusObservation? {
-        guard takenAt.isFinite, let scan = outcome?.scan, let client = HerdrOpen.attachedClient(outcome) else { return nil }
-        return HerdrFocusObservation(takenAt: takenAt, focusedPaneID: HerdrOpen.focusedPane(in: scan.snapshot),
-                                     clientPID: client.pid, clientTTY: client.tty)
-    }
-}
-
-/// ADR 0011's acknowledgment rule. Only completions are acknowledged by a visit; approval requests,
-/// questions and reminders clear only on resolution evidence and are never passed here. On a Ghostty
-/// without `tty`, an interim rule (issue #155) accepts Ghostty frontmost in place of the TTY join.
-public enum HerdrOpenAcknowledgment {
-    /// After an Open: only when it reported Opened, the completions that arrived strictly before the
-    /// pre-Open herdr scan started.
-    public static func afterOpen<ID>(_ completions: [HerdrCompletionCandidate<ID>], result: HerdrOpenResult) -> Set<ID> {
-        guard case .opened(let plan) = result, plan.preOpenSnapshotAt.isFinite else { return [] }
-        return Set(completions.filter { $0.arrivedAt.isFinite && $0.arrivedAt < plan.preOpenSnapshotAt }.map(\.id))
-    }
-
-    /// A manual visit (ADR 0009 interval rule): the bound pane was not focused in `previous` and is
-    /// focused in `current`, both scans with exactly one Ghostty-hosted client, and a Ghostty inventory
-    /// taken at or after `current` shows the TTY-matched tab selected with Ghostty frontmost. Only
-    /// completions that arrived before `previous` started are acknowledged, so an outcome arriving
-    /// during the observation interval stays queued.
-    ///
-    /// Interim (issue #155): when Ghostty lacks `tty`, Ghostty frontmost stands in for the selected
-    /// matched tab. Steer cannot see which tab is selected, so a focus change the user did not watch
-    /// can acknowledge; the user accepted that until a Ghostty with `tty` ships. A Ghostty that has
-    /// `tty` always uses the exact join, with no fallback.
-    public static func manualVisit<ID>(
-        _ completions: [HerdrCompletionCandidate<ID>],
-        boundPaneID: String,
-        previous: HerdrFocusObservation?,
-        current: HerdrFocusObservation?,
-        support: GhosttyTTYSupport,
-        ghostty: GhosttySnapshot?,
-        ghosttyTakenAt: Double
-    ) -> Set<ID> {
-        guard let current, let ghostty else { return [] }
-        return manualVisit(completions, boundPaneID: boundPaneID, previous: previous, current: current,
-                           ghosttyShowsVisit: ghosttyShowsVisit(clientTTY: current.clientTTY, support: support,
-                                                                ghostty: ghostty),
-                           ghosttyTakenAt: ghosttyTakenAt)
-    }
-
-    /// The same rule with the Ghostty half already decided: `ghosttyShowsVisit` must be
-    /// `ghosttyShowsVisit(clientTTY:support:ghostty:)` for `current`'s client against the inventory taken
-    /// at `ghosttyTakenAt` (false without one), so one inventory serves every session in the pane.
-    public static func manualVisit<ID>(
-        _ completions: [HerdrCompletionCandidate<ID>],
-        boundPaneID: String,
-        previous: HerdrFocusObservation?,
-        current: HerdrFocusObservation,
-        ghosttyShowsVisit: Bool,
-        ghosttyTakenAt: Double
-    ) -> Set<ID> {
-        guard let previous, ghosttyShowsVisit, ghosttyTakenAt.isFinite,
-              previous.takenAt < current.takenAt, current.takenAt <= ghosttyTakenAt,
-              previous.focusedPaneID != boundPaneID, current.focusedPaneID == boundPaneID else { return [] }
-        return Set(completions.filter { $0.arrivedAt.isFinite && $0.arrivedAt < previous.takenAt }.map(\.id))
-    }
-
-    /// Whether a Ghostty inventory shows the herdr client's tab to the user: with `tty`, the
-    /// TTY-matched tab selected with Ghostty frontmost; without it (interim, issue #155), Ghostty frontmost.
-    public static func ghosttyShowsVisit(clientTTY: String?, support: GhosttyTTYSupport,
-                                         ghostty: GhosttySnapshot) -> Bool {
-        switch support {
-        case .supported:
-            guard let clientTTY,
-                  case .matched(let target) = GhosttyTTYMatch.join(clientTTY: clientTTY, support: support,
-                                                                   snapshot: ghostty) else { return false }
-            return ghostty.selected == target
-        case .unsupported:
-            // `selected` is present only while Ghostty is frontmost (Ghostty.js).
-            return ghostty.selected != nil
-        }
-    }
-}
-
-/// The dwell rule, agreed with the user on 2026-10-08: a completion that arrives while its bound pane is
-/// already in front is acknowledged once that pane has stayed visible for `required` seconds after the
-/// completion arrived. Visible means herdr reports the pane focused with exactly one Ghostty-hosted
-/// client and a Ghostty inventory shows that client's tab (`HerdrOpenAcknowledgment.ghosttyShowsVisit`).
-/// Visibility is sampled per scan, so a switch away and back between two scans goes unseen; a hidden
-/// or different pane, a failed scan, or a gap longer than `maxGap` between visible scans (sleep, or
-/// scans skipped while a check was slow) restarts the run. A completion that arrived before the run
-/// began is left to the manual-visit rule and dismissal. Steer cannot tell whether the user is looking
-/// at the screen; the user accepted that an unattended pane acknowledges.
-public struct HerdrDwell: Equatable, Sendable {
-    public static let required: Double = 5
-    public static let maxGap: Double = 5
-
-    /// The pane visible on every scan since `since`, or nil when no run is in progress.
-    public private(set) var paneID: String?
-    public private(set) var since: Double = 0
-    private var lastSeenAt: Double = 0
-    /// The scan time of the latest reset. An observation taken at or before it predates the scan
-    /// that ended the run, such as a check still in flight then, and is ignored. A clock set back past
-    /// it only withholds acknowledgment until the clock passes it again.
-    private var resetAt = -Double.infinity
-
-    public init() {}
-
-    /// Records the Ghostty check of the scan taken at `at`. `visible` is false when the pane is focused
-    /// but Ghostty does not show it.
-    public mutating func observe(paneID: String, visible: Bool, at: Double) {
-        guard at.isFinite else { reset(at: at); return }
-        guard at > resetAt else { return }
-        guard visible else { reset(at: at); return }
-        if self.paneID != paneID || at < lastSeenAt || at - lastSeenAt > Self.maxGap { since = at }
-        self.paneID = paneID
-        lastSeenAt = at
-    }
-
-    /// Records a scan taken at `at` that had no Ghostty check because a check or an Open was in flight.
-    /// `pendingPaneID` is the pane an in-flight check is sampling, if any. The scan cannot extend the
-    /// run, so it keeps the run and the pending check only while it shows that pane focused (or, with no
-    /// check in flight, the run's pane). A failed scan (nil) or another pane restarts the run, and the
-    /// pending check, taken before this scan, is then ignored.
-    public mutating func skip(focusedPaneID: String?, pendingPaneID: String?, at: Double) {
-        if focusedPaneID == nil || focusedPaneID != (pendingPaneID ?? paneID) { reset(at: at) }
-    }
-
-    /// Ends the run as of the scan taken at `at`. A non-finite time ends it without ignoring anything.
-    public mutating func reset(at: Double) {
-        paneID = nil
-        since = 0
-        lastSeenAt = 0
-        if at.isFinite { resetAt = max(resetAt, at) }
-    }
-
-    /// Completions for `boundPaneID` that arrived during the current run, at or after its start, and
-    /// have been visible for `required` seconds since arriving by `now`, the latest observed scan.
-    public func acknowledged<ID>(_ completions: [HerdrCompletionCandidate<ID>], boundPaneID: String,
-                                 at now: Double) -> Set<ID> {
-        guard paneID == boundPaneID, now.isFinite, now == lastSeenAt else { return [] }
-        return Set(completions.filter {
-            $0.arrivedAt.isFinite && $0.arrivedAt >= since && $0.arrivedAt + Self.required <= now
-        }.map(\.id))
     }
 }

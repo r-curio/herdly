@@ -23,6 +23,13 @@ enum TerminalApps {
         return !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty
     }
 
+    /// The terminal app macOS reports frontmost, nil for any other app (ADR 0016: frontmost is read from
+    /// macOS, never from the host). Main actor, as `isRunning`.
+    @MainActor
+    static func frontmostHost() -> TerminalHost? {
+        NSWorkspace.shared.frontmostApplication?.bundleIdentifier.flatMap(TerminalHost.init(bundleIdentifier:))
+    }
+
     /// Activates the running app; false when it is not running (it is never launched) or macOS did not
     /// activate it. The caller rechecks `isRunning` to tell the two apart.
     @MainActor
