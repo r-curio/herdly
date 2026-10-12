@@ -79,8 +79,11 @@ extension Companion {
         }
         let herdrKey = HerdrSessionKey(agent: .claude, sessionID: identity.session)
         let herdrRoute = herdrBinding(for: herdrKey)
-        // With Ghostty off Steer cannot reach herdr's client tab, so the session's own process decides,
-        // as for any Claude session in a switched-off app (ADR 0015).
+        // With Ghostty off Steer does not contact herdr (ADR 0014), so the session's own process is
+        // walked as for any Claude session in a switched-off app (ADR 0015). Under herdr that process
+        // descends from herdr's server, not a terminal app, so the walk fails and Open reports "Steer
+        // can't tell which terminal this session is in." That is accurate: without contacting herdr
+        // Steer cannot find the client, and so the app, the session is shown in.
         if herdrRoute != .notInHerdr, herdrRoute != .unavailable(.ghosttyControlsOff) {
             // ADR 0011: an actionable approval is handed back before the herdr pane is opened.
             if let approval,
@@ -131,7 +134,8 @@ extension Companion {
                     return OpenFallback.processApp(walks: [walk], agent: .claude, switches: switches)
                 }
             }
-            navigationMessage = result.map { $0.message ?? "Opened the matching Claude tab." } ?? claudeReturnUnavailableMessage
+            navigationMessage = result.map { message(for: $0, opened: "Opened the matching Claude tab.") }
+                ?? claudeReturnUnavailableMessage
             switch result {
             case .opened?, .fellBack?:
                 // ADR 0015: an Open on an actionable request hands it back with no decision, fallback
@@ -158,19 +162,34 @@ extension Companion {
     func openResult(_ outcome: GhosttyTitleOutcome,
                     app: (Int) async -> Result<TerminalHost, OpenUnavailableReason>) async -> TerminalOpenResult {
         switch outcome {
-        case .opened, .miss(.exact):
+        case .opened:
             return .opened
-        case .miss(.unavailable(let reason)):
-            return .unavailable(reason)
-        case .miss(.fallBack(let reason, let candidates)):
-            return raise(OpenFallback.resolve(reason, app: await app(candidates), isRunning: TerminalApps.isRunning))
+        case .miss(let miss):
+            // Identify the app off the decision (a walk may run off the main actor), only for a fallback.
+            var identified: Result<TerminalHost, OpenUnavailableReason> = .failure(.appNotIdentified)
+            if case .fallBack(_, let candidates) = miss { identified = await app(candidates) }
+            return raise(OpenFallback.resolve(miss, app: { _ in identified }, isRunning: TerminalApps.isRunning))
         }
     }
 
-    /// Activates the app of a fallback; an app that quit in between is not running (never launched).
+    /// Activates the app of a fallback. A failed activation is "isn't running" only when a fresh
+    /// check says so; the app is never launched.
     func raise(_ result: TerminalOpenResult) -> TerminalOpenResult {
         guard case .fellBack(let host, _) = result else { return result }
-        return TerminalApps.activate(host) ? result : .unavailable(.appNotRunning(host))
+        let activated = TerminalApps.activate(host)
+        return OpenFallback.afterActivation(result, activated: activated,
+                                            stillRunning: activated || TerminalApps.isRunning(host))
+    }
+
+    /// The navigation message after an Open: the host's line for a verified Open, none for a silent
+    /// fallback (ADR 0015; `navigationMessage` is empty when there is nothing to say), or the agreed
+    /// unavailable line.
+    func message(for result: TerminalOpenResult, opened: String) -> String {
+        switch result {
+        case .opened: opened
+        case .fellBack: ""
+        case .unavailable(let reason): reason.cardLine
+        }
     }
 
     func openAgentApproval(_ approval: AgentApproval) {
@@ -212,7 +231,7 @@ extension Companion {
             let result = await openResult(outcome) { count in
                 OpenFallback.codexApp(candidates: GhosttyTitleOpen.codexCandidates(count: count), switches: switches)
             }
-            navigationMessage = result.message ?? "Opened the matching Ghostty tab."
+            navigationMessage = message(for: result, opened: "Opened the matching Ghostty tab.")
             // A verified visit acknowledges only completions already queued for this session.
             if result.acknowledges {
                 acknowledgeCodexCompletions(queued)
@@ -327,7 +346,7 @@ extension Companion {
                                                             clientWalks: walks, switches: hostSwitches,
                                                             isRunning: TerminalApps.isRunning) {
                     // Silent; the herdr focus already verified is kept, and nothing is acknowledged.
-                    navigationMessage = raise(fallback).message ?? ""
+                    navigationMessage = message(for: raise(fallback), opened: "")
                 } else {
                     // The grouped reason only; the exact failure stays in diagnostics.
                     navigationMessage = HerdrPresentation.cardLine(for: .open(failure), agent: key.agent)

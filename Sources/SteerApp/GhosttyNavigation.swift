@@ -80,7 +80,7 @@ enum GhosttyNavigation {
         return value["status"] as? String == "ok"
     }
     /// Open for a Codex CLI session's tab: `.opened` only when the exact tab was selected and
-    /// verified; otherwise the miss as ADR 0015 classifies it (never `.exact`). Sends no input and
+    /// verified; otherwise the miss as ADR 0015 classifies it. Sends no input and
     /// never raises Ghostty for a miss; the caller decides the fallback.
     ///
     /// - Parameter running: whether Ghostty is running, read on the main actor. A Ghostty that is not
@@ -102,7 +102,7 @@ enum GhosttyNavigation {
         switch GhosttyTitleOpen.revalidate(title: title, live: live, ghostty: before, running: running,
                                            sameWindowOnly: sameWindowOnly) {
         case .exact(let exact): target = exact
-        case let miss: return .miss(miss)
+        case .miss(let miss): return .miss(miss)
         }
         var status: String?
         if let bytes = try? JSONEncoder().encode(target),
@@ -121,53 +121,10 @@ enum GhosttyNavigation {
 }
 
 /// What a Ghostty title Open did: the exact tab verified, or a miss for the caller to resolve under
-/// ADR 0015 (fall back to raising the app, or unavailable).
+/// ADR 0015 (fall back to raising the app, or unavailable). A miss has no exact case.
 enum GhosttyTitleOutcome: Equatable, Sendable {
     case opened
-    case miss(GhosttyTitleRevalidation)
-}
-
-/// The process walk, running check and activation behind an Open fallback (ADR 0015). Read-only
-/// except `activate`, which raises a running app as a whole: macOS brings forward whichever of its
-/// windows was last in front. Nothing here selects a window or tab, launches an app, or sends input.
-enum TerminalApps {
-    /// Walks from `pid` up its parents (at most `HerdrProcessTree.maximumDepth` processes) to the
-    /// nearest process that is an app's main executable. Safe off the main actor.
-    static func walk(from pid: Int32) -> TerminalAppWalk {
-        let chain = HerdrProcessTree.ancestry(of: pid)
-        guard chain.first?.pid == pid else { return .failed }
-        return TerminalAppWalk(ancestorBundleIdentifiers: chain.map { appBundleIdentifier(of: $0.pid) })
-    }
-
-    /// Whether `host`'s app is running. Main actor: `NSRunningApplication` was seen to come back
-    /// empty intermittently off it.
-    @MainActor
-    static func isRunning(_ host: TerminalHost) -> Bool {
-        guard let identifier = host.bundleIdentifier else { return false }
-        return !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty
-    }
-
-    /// Activates the running app; false when it is not running (it is never launched).
-    @MainActor
-    static func activate(_ host: TerminalHost) -> Bool {
-        guard let identifier = host.bundleIdentifier,
-              let app = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first else { return false }
-        return app.activate()
-    }
-
-    /// The bundle identifier when `pid` runs the main executable of an app (`X.app/Contents/MacOS/…`).
-    private static func appBundleIdentifier(of pid: Int32) -> String? {
-        guard pid > 0 else { return nil }
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
-        let macOS = URL(fileURLWithPath: String(decoding: bytes, as: UTF8.self)).deletingLastPathComponent()
-        let contents = macOS.deletingLastPathComponent()
-        let bundle = contents.deletingLastPathComponent()
-        guard macOS.lastPathComponent == "MacOS", contents.lastPathComponent == "Contents",
-              bundle.pathExtension == "app" else { return nil }
-        return Bundle(url: bundle)?.bundleIdentifier
-    }
+    case miss(OpenMiss)
 }
 
 /// Reads the scripting dictionary of the Ghostty bundle Steer drives, without Apple Events or a
