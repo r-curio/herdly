@@ -161,8 +161,8 @@ host's inventory, the `ps -t` reads and the kernel read of Claude's registered p
   `ps -o pid=,stat=,comm= -t <tty>`. A process is in the foreground when its `stat`
   contains `+`, and its name is the basename of `comm`. A malformed row or more than 256
   rows makes the whole read unreadable.
-- **Codex:** `TerminalTabBindingRules.codex` checks, in order: the session's shortened
-  identifier is unique among live sessions; exactly one enabled tab shows that title; the
+- **Codex:** `TerminalTabBindingRules.codex` checks, in order: the session is among the live
+  sessions and its shortened identifier is unique among them; exactly one enabled tab shows that title; the
   tab has a tty and one pane; exactly one foreground `codex` runs on that tty; and a second
   read finds the same tab, tty and title. Codex hook records are never read.
 - **Claude Code:** `TerminalTabBindingRules.claude` starts from the one registry process
