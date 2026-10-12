@@ -162,15 +162,22 @@ public enum HerdrOpen {
     /// Step 3 over a fresh herdr binding and its scan.
     public static func verifyHerdr(_ plan: HerdrOpenPlan, binding: HerdrSessionBinding,
                                    outcome: HerdrScanOutcome?) -> HerdrOpenFailure? {
+        verifyPane(plan.pane, clientPID: plan.clientPID, clientTTY: plan.clientTTY, binding: binding, outcome: outcome)
+    }
+
+    /// Step 3 for any host: the fresh binding is still `pane`, herdr shows exactly it focused, and the
+    /// single client is the one step 1 joined.
+    public static func verifyPane(_ pane: HerdrPaneTarget, clientPID: Int32, clientTTY: String,
+                                  binding: HerdrSessionBinding, outcome: HerdrScanOutcome?) -> HerdrOpenFailure? {
         switch binding {
         case .unavailable(let reason): return .herdrVerifyUnavailable(reason)
         case .notInHerdr: return .herdrBindingChanged
-        case .bound(let target): guard target == plan.pane else { return .herdrBindingChanged }
+        case .bound(let target): guard target == pane else { return .herdrBindingChanged }
         }
         guard let scan = outcome?.scan else { return .herdrVerifyUnavailable(.notScanned) }
-        guard focusedPane(in: scan.snapshot) == plan.pane.paneID else { return .herdrPaneNotFocused }
-        guard let client = attachedClient(outcome), client.pid == plan.clientPID,
-              client.tty == plan.clientTTY else { return .herdrClientChanged }
+        guard focusedPane(in: scan.snapshot) == pane.paneID else { return .herdrPaneNotFocused }
+        guard let client = attachedClient(outcome), client.pid == clientPID,
+              client.tty == clientTTY else { return .herdrClientChanged }
         return nil
     }
 
