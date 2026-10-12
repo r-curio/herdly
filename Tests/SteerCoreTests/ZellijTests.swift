@@ -199,9 +199,23 @@ private let serverArguments: [Int32: [String]] = [
 ]
 private let serverStart: [Int32: Double] = [49121: 1_791_702_790]
 
+/// `ps -axo pid=,ppid=,uid=,tty=,comm=`: the fixtures above, each row given `uid` 501 unless it already
+/// names one after a `uid:` marker (another user's process).
+private func withUIDs(_ output: String) -> String {
+    output.split(separator: "\n", omittingEmptySubsequences: false).map { line -> String in
+        let fields = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+        guard fields.count == 3 else { return String(line) }
+        if fields[2].hasPrefix("uid:") {
+            let rest = fields[2].dropFirst(4).split(separator: " ", maxSplits: 1)
+            return "\(fields[0]) \(fields[1]) \(rest[0]) \(rest[1])"
+        }
+        return "\(fields[0]) \(fields[1]) 501 \(fields[2])"
+    }.joined(separator: "\n")
+}
+
 private func processTable(_ output: String = psOutput, arguments: [Int32: [String]] = serverArguments,
                           startTimes: [Int32: Double] = serverStart) -> ZellijProcessTable? {
-    ZellijProcessTable.parse(output, arguments: arguments, startTimes: startTimes)
+    ZellijProcessTable.parse(withUIDs(output), owner: 501, arguments: arguments, startTimes: startTimes)
 }
 
 @Test func zellijProcessTableFindsEachSessionsServerAndTheClientProcesses() throws {
@@ -217,9 +231,18 @@ private func processTable(_ output: String = psOutput, arguments: [Int32: [Strin
     #expect(table.processes(named: "codex", under: 49121).map(\.pid) == [49201])
 }
 
+@Test func zellijClientProcessesAreCountedForThisUserOnly() throws {
+    // Another user's `zellij` client is never this user's (ADR 0014, "for the user"); it is still in the
+    // table, so ancestry through it reads.
+    let table = try #require(processTable(psOutput + "52000   950 uid:502 ttys040  /opt/homebrew/bin/zellij\n"))
+    #expect(table.clientProcesses.map(\.pid) == [49075])
+    #expect(table.processes[52000]?.uid == 502)
+}
+
 @Test func zellijProcessTableRefusesMalformedOutput() {
     #expect(processTable("x 1 ?? /bin/zsh\n") == nil)
     #expect(processTable("10 1\n") == nil)
+    #expect(ZellijProcessTable.parse("10 1 x ?? zsh\n", owner: 501, arguments: [:], startTimes: [:]) == nil)
     #expect(processTable(String(repeating: "10 1 ?? zsh\n", count: ZellijProcessTable.maximumProcesses + 1)) == nil)
 }
 
@@ -264,7 +287,7 @@ private func zellijSnapshot(_ sessions: [ZellijSession?]? = nil, table: ZellijPr
     #expect(ZellijRead.notRunning.inventory == .notRunning)
     #expect(ZellijRead.binaryNotFound.inventory == .unreadable)
     #expect(ZellijRead.untrustedSocket.inventory == .unreadable)
-    #expect(ZellijRead.unreadable.inventory == .unreadable)
+    #expect(ZellijRead.unreadable(.staleSocket).inventory == .unreadable)
     // An old Zellij keeps its sessions out of reach while one runs, and holds nothing while none does.
     #expect(ZellijRead.unsupportedVersion(ZellijVersion(major: 0, minor: 43, patch: 1), running: true).inventory == .unreadable)
     #expect(ZellijRead.unsupportedVersion(ZellijVersion(major: 0, minor: 43, patch: 1), running: false).inventory == .notRunning)
@@ -453,7 +476,7 @@ private func zellijClaudeBinding(_ read: ZellijRead?, records: [HerdrHookPaneRec
             == .unavailable(.terminal(.processStartMismatch)))
     #expect(zellijClaudeBinding(read, process: .ambiguous) == .unavailable(.terminal(.processAmbiguous)))
     // An unreadable Zellij could hold the session.
-    #expect(zellijClaudeBinding(.unreadable) == .unavailable(.terminal(.hostUnreadable(.zellij))))
+    #expect(zellijClaudeBinding(.unreadable(.commandFailed)) == .unavailable(.terminal(.hostUnreadable(.zellij))))
     #expect(zellijClaudeBinding(nil) == .unavailable(.terminal(.hostUnreadable(.zellij))))
 }
 
@@ -576,7 +599,7 @@ private let openPlan = ZellijOpenPlan(pane: codexPane, client: openClient, serve
                                                 table: processTable(startTimes: [49121: 1_791_800_000])))
     #expect(ZellijOpen.verifyPane(openPlan, read: .snapshot(restarted), binding: .bound(codexPane)) == .fallBack(.notVerified, candidates: 1))
     #expect(ZellijOpen.verifyPane(openPlan, read: .snapshot(moved), binding: .unavailable(.titleChanged)) == .fallBack(.notVerified, candidates: 1))
-    #expect(ZellijOpen.verifyPane(openPlan, read: .unreadable, binding: .bound(codexPane)) == .fallBack(.notVerified, candidates: 1))
+    #expect(ZellijOpen.verifyPane(openPlan, read: .unreadable(.commandFailed), binding: .bound(codexPane)) == .fallBack(.notVerified, candidates: 1))
 }
 
 @Test func zellijOpenSequenceStopsAtTheFirstFailureAndAHostFailureIsAPartialReach() async {
@@ -724,8 +747,12 @@ private let inputPane = TypedInputPane(host: .zellij, paneID: "lab/terminal_1", 
             == ["Steer can't find Zellij in /opt/homebrew/bin or /usr/local/bin."])
     #expect(ZellijPresentation.settingsRow(on: true, anyTerminalOn: true, read: .untrustedSocket, sessionsSeen: false).problems
             == [OpenUnavailableReason.hostUnreadable(.zellij).cardLine])
-    #expect(ZellijPresentation.settingsRow(on: true, anyTerminalOn: true, read: .unreadable, sessionsSeen: false).problems
+    #expect(ZellijPresentation.settingsRow(on: true, anyTerminalOn: true, read: .unreadable(.commandFailed), sessionsSeen: false).problems
             == [OpenUnavailableReason.hostUnreadable(.zellij).cardLine])
+    // A stale socket gets the same agreed line; its detail goes to diagnostics only.
+    #expect(ZellijPresentation.settingsRow(on: true, anyTerminalOn: true, read: .unreadable(.staleSocket), sessionsSeen: false).problems
+            == [OpenUnavailableReason.hostUnreadable(.zellij).cardLine])
+    #expect(ZellijUnreadable.staleSocket.diagnostic.contains("refuses"))
     let ready = ZellijPresentation.settingsRow(on: true, anyTerminalOn: true, read: .snapshot(try #require(zellijSnapshot())), sessionsSeen: true)
     #expect(ready.badge == .ready && ready.problems.isEmpty)
     #expect(ZellijPresentation.settingsRow(on: true, anyTerminalOn: true, read: .notRunning, sessionsSeen: false).badge == .notInUse)
@@ -740,4 +767,111 @@ private let inputPane = TypedInputPane(host: .zellij, paneID: "lab/terminal_1", 
     let split: TerminalHostInventory = .tabs([TerminalTab(tabID: "8", tty: hostTTY, title: "lab | x", paneCount: 2)])
     #expect(MultiplexerHostTab.join(clientTTY: hostTTY, switches: zellijSwitches, inventories: [.wezTerm: split])
             == .miss(.fallBack(.unsupportedLayout, candidates: 1)))
+}
+
+// MARK: - Fail closed beside a refusing socket (ADR 0014 "never list-sessions")
+
+/// Steer's side of a read or send, recorded: every `zellij` command it would run, and the answers.
+private final class FakeZellij: @unchecked Sendable {
+    var sockets: [String: ZellijSocketPeer]
+    var binary = true
+    var version = "zellij 0.45.1\n"
+    var commands: [[String]] = []
+    var directory: TmuxFileFacts? = TmuxFileFacts(kind: .directory, owner: 501, mode: 0o700)
+
+    init(sockets: [String: ZellijSocketPeer]) { self.sockets = sockets }
+
+    var effects: ZellijEffects {
+        ZellijEffects(
+            socketDirectory: socketDirectory, me: 501,
+            listing: { [self] in
+                ZellijDirectoryListing(base: TmuxFileFacts(kind: .directory, owner: 501, mode: 0o700), directory: directory,
+                                       sockets: sockets.mapValues { _ in TmuxFileFacts(kind: .socket, owner: 501, mode: 0o1700) })
+            },
+            probe: { [self] path in sockets[(path as NSString).lastPathComponent] ?? .refused },
+            binaryPresent: { [self] in binary },
+            run: { [self] arguments in
+                commands.append(arguments)
+                if arguments == ["--version"] { return .succeeded(version) }
+                switch Array(arguments.dropFirst(3)) {
+                case ["list-panes", "--json", "--all"]: return .succeeded(labPanes)
+                case ["list-tabs", "--json"]: return .succeeded(labTabs)
+                case ["list-clients"]: return .succeeded(labClients)
+                default: return .succeeded("")
+                }
+            },
+            processTable: { processTable() })
+    }
+
+    /// Commands that address a session (`--session …`), which sweep refusing sockets.
+    var sessionCommands: [[String]] { commands.filter { $0.first == "--session" } }
+}
+
+@Test func zellijReadRunsNoZellijCommandBesideASocketThatRefusesAConnection() {
+    // A crashed session's socket stays behind; any `zellij action` would delete it (isolated 0.45.1 run).
+    let fake = FakeZellij(sockets: ["lab": .currentUser, "crashed": .refused])
+    #expect(ZellijReader.read(fake.effects) == .unreadable(.staleSocket))
+    #expect(fake.commands.isEmpty)
+    // A stale socket alone, with Zellij installed: still no command, still unreadable.
+    let alone = FakeZellij(sockets: ["crashed": .refused])
+    #expect(ZellijReader.read(alone.effects) == .unreadable(.staleSocket))
+    #expect(alone.commands.isEmpty)
+}
+
+@Test func zellijSendRunsNoZellijCommandBesideASocketThatRefusesAConnection() {
+    let fake = FakeZellij(sockets: ["lab": .currentUser, "crashed": .refused])
+    let arguments = ["--session", "lab", "action", "write-chars", "--pane-id", "terminal_1", "--", "hi"]
+    #expect(ZellijReader.send(arguments, to: codexPane, expecting: server, effects: fake.effects) == .failed(stderr: ""))
+    #expect(fake.commands.isEmpty)
+}
+
+@Test func zellijReadsAndSendsNormallyWhenEverySocketAccepts() throws {
+    let fake = FakeZellij(sockets: ["lab": .currentUser])
+    let read = ZellijReader.read(fake.effects)
+    #expect(read.snapshot?.sessions.map(\.name) == ["lab"])
+    #expect(read.snapshot == zellijSnapshot())
+    #expect(fake.sessionCommands.count == 3)
+    let arguments = ["--session", "lab", "action", "write-chars", "--pane-id", "terminal_1", "--", "hi"]
+    fake.commands = []
+    #expect(ZellijReader.send(arguments, to: codexPane, expecting: server, effects: fake.effects) == .succeeded(""))
+    // The pane is re-read immediately before the write, then the write goes once.
+    #expect(fake.commands.last == arguments)
+    #expect(fake.commands.filter { $0 == arguments }.count == 1)
+    // A pane that is gone (an unknown id would exit 0 writing nothing) gets nothing.
+    fake.commands = []
+    let gone = ZellijPaneTarget(session: "lab", paneID: 9)
+    #expect(ZellijReader.send(arguments, to: gone, expecting: server, effects: fake.effects) == .failed(stderr: ""))
+    #expect(!fake.commands.contains(arguments))
+    // A session whose socket is gone gets nothing either.
+    fake.commands = []
+    #expect(ZellijReader.send(arguments, to: ZellijPaneTarget(session: "other", paneID: 1), expecting: server,
+                              effects: fake.effects) == .failed(stderr: ""))
+    #expect(fake.commands.isEmpty)
+}
+
+@Test func zellijWithoutABinaryOrALiveSessionHoldsNothing() {
+    // No binary and nothing accepting: a leftover socket file does not block every host's binding.
+    let leftover = FakeZellij(sockets: ["crashed": .refused])
+    leftover.binary = false
+    #expect(ZellijReader.read(leftover.effects) == .notRunning)
+    // A session accepts but the binary is gone: it cannot be read.
+    let missing = FakeZellij(sockets: ["lab": .currentUser])
+    missing.binary = false
+    #expect(ZellijReader.read(missing.effects) == .binaryNotFound)
+    #expect(missing.commands.isEmpty)
+    // No directory at all; an installed Zellij too old to address sessions with nothing running.
+    let none = FakeZellij(sockets: [:])
+    none.directory = nil
+    #expect(ZellijReader.read(none.effects) == .notRunning)
+    let old = FakeZellij(sockets: [:])
+    old.version = "zellij 0.43.1\n"
+    #expect(ZellijReader.read(old.effects) == .unsupportedVersion(ZellijVersion(major: 0, minor: 43, patch: 1), running: true))
+    // Another user's server behind a socket, or an untrusted directory: unreadable, nothing run.
+    let foreign = FakeZellij(sockets: ["lab": .otherUser])
+    #expect(ZellijReader.read(foreign.effects) == .untrustedSocket)
+    #expect(foreign.sessionCommands.isEmpty)
+    let unreadableVersion = FakeZellij(sockets: ["lab": .currentUser])
+    unreadableVersion.version = "garbage"
+    #expect(ZellijReader.read(unreadableVersion.effects) == .unreadable(.versionUnreadable))
+    #expect(unreadableVersion.sessionCommands.isEmpty)
 }
