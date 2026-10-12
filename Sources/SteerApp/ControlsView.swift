@@ -800,7 +800,8 @@ private struct TerminalControls: View {
         switch host {
         case .ghostty: ghosttyCard
         case .herdr: HerdrControls(model: model)
-        case .iTerm2, .terminalApp, .wezTerm, .tmux, .zellij: EmptyView()
+        case .iTerm2: ITerm2Controls(model: model, state: model.iTerm2)
+        case .terminalApp, .wezTerm, .tmux, .zellij: EmptyView()
         }
     }
 
@@ -922,6 +923,74 @@ private struct HerdrControls: View {
             if let key = model.herdrSessionKey(item.session), let failure = model.herdrOpenFailure(for: key) {
                 lines.append("\(label): \(HerdrUnavailableCause.open(failure).diagnostic)")
             }
+        }
+        return lines
+    }
+}
+
+/// The iTerm2 card (product.md, "Agreed terminal host presentation"), hidden until iTerm2's acceptance
+/// run passes (`TerminalHost.showsCard`). Its switch asks macOS for Automation access as Ghostty's does.
+private struct ITerm2Controls: View {
+    @ObservedObject var model: Companion
+    @ObservedObject var state: ITerm2State
+
+    private var row: ITerm2SettingsRow {
+        ITerm2Presentation.settingsRow(on: model.hostSwitches.isOn(.iTerm2), installed: state.installed,
+                                       access: state.access, scan: state.scan, inUse: state.inUse)
+    }
+
+    var body: some View {
+        let row = row
+        SettingsCard {
+            SettingsRow(title: TerminalHost.iTerm2.displayName, detail: "Open sessions in their exact tab") {
+                Toggle("iTerm2", isOn: Binding(get: { model.hostSwitches.isOn(.iTerm2) },
+                                               set: { model.setHostSwitch(.iTerm2, on: $0) }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    .accessibilityLabel("Enable iTerm2")
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Automation permission", detail: nil) {
+                HStack(spacing: 10) {
+                    if state.access == .denied {
+                        Button("Open Settings…", action: GhosttyAutomationPermission.openSettings)
+                    }
+                    StatusBadge(title: row.permission, color: state.access == .granted ? .green : .orange)
+                }
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Status", detail: nil) {
+                StatusBadge(title: row.badge.title, color: color(row.badge))
+            }
+            ForEach(row.problems, id: \.self) { problem in
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                Text(problem.message).fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, SettingsStyle.rowInset)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if !diagnostics.isEmpty {
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                PreviewDisclosure(title: "Show diagnostics") { diagnostics.joined(separator: "\n") }
+            }
+        }
+        SettingsFooter(ITerm2Presentation.footer)
+    }
+
+    private func color(_ badge: HerdrReadinessBadge) -> Color {
+        switch badge {
+        case .off, .notInUse: .secondary
+        case .ready: .green
+        case .needsAttention: .orange
+        }
+    }
+
+    /// The scan's result and each session's latest Open in iTerm2 with its exact reason. Typed input is
+    /// always unavailable there (ADR 0017).
+    private var diagnostics: [String] {
+        guard model.hostSwitches.isOn(.iTerm2) else { return [] }
+        var lines = ["scan: \(state.scan)", "typed input: none (ADR 0017)"]
+        for (session, line) in state.lastOpen.sorted(by: { $0.key < $1.key }) {
+            lines.append("\(session.prefix(8)): \(line)")
         }
         return lines
     }

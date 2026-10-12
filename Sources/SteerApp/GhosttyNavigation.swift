@@ -6,8 +6,10 @@ import SteerCore
 /// Besides tab selection it relays one user-chosen digit for a Codex question to the exact
 /// matched terminal (ADR 0006). No text input and no approval keystrokes are supported.
 enum GhosttyNavigation {
-    static func request(_ value: [String: Any]) -> Data? {
-        guard let script = Bundle.main.url(forResource: "Ghostty", withExtension: "js"),
+    /// Runs a bundled JXA adapter (`Ghostty.js` unless `resource` names another, such as `ITerm2.js`)
+    /// with one JSON request, under a five-second deadline; nil on any failure.
+    static func request(_ value: [String: Any], resource: String = "Ghostty") -> Data? {
+        guard let script = Bundle.main.url(forResource: resource, withExtension: "js"),
               let bytes = try? JSONSerialization.data(withJSONObject: value),
               let argument = String(data: bytes, encoding: .utf8) else { return nil }
         let process = Process(), output = Pipe()

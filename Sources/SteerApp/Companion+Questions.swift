@@ -245,7 +245,8 @@ extension Companion {
         case .daemon: return true
         case .daemonAnswered: return false
         case .desktopPick: return true
-        case .ghosttyRelay, .herdrRelay: return ghosttyEnabled || previewMode != nil
+        // ADR 0017: never offer a key for a session iTerm2 may hold (`iTerm2InputLine` says why).
+        case .ghosttyRelay, .herdrRelay: return (ghosttyEnabled || previewMode != nil) && iTerm2InputBlock(for: question.session) == nil
         case .relayUnavailable: return false
         }
     }
@@ -294,6 +295,9 @@ extension Companion {
         let key = QuestionAnswerPolicy.key(forOption: option)
         let live = liveCLI
         let rolloutRoot = Companion.rolloutRoot
+        let title = GhosttyMatch.title(current.session)
+        let iTerm2On = hostSwitches.mayContact(.iTerm2)
+        let iTerm2Running = iTerm2On && TerminalApps.isRunning(.iTerm2)
         navigationMessage = "Sending \(key)…"
         refresh()
         Task { @MainActor in
@@ -303,6 +307,11 @@ extension Companion {
                 let evidence = ReminderReader.currentEvidence(for: current.session, in: rolloutRoot)
                 guard QuestionAnswerGuard.stillPending(current, in: evidence) else {
                     return (false, "Codex already has an answer or the turn ended; nothing was sent.")
+                }
+                // ADR 0013 "Freshness": the title must be unique across every enabled inventory, so a
+                // fresh iTerm2 read comes last; a Ghostty decoy never gets the key (ADR 0017).
+                if let block = Companion.freshITerm2InputBlock(title: title, on: iTerm2On, running: iTerm2Running) {
+                    return (false, "\(block.line) Nothing was sent.")
                 }
                 return GhosttyNavigation.answer(session: current.session, live: live, keys: [key])
             }.value
