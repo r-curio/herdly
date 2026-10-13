@@ -310,6 +310,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Sessions a Ghostty inventory proved CLI by their session-id title, this launch. They stay CLI
     /// after the tab closes, and that closing ends them (`ReminderReader.scan`). Memory only.
     private var knownCLISessions: Set<UUID> = []
+    /// The newest titles each contactable host besides Ghostty and herdr showed, from inventories its
+    /// own scans already read (`recordHostTitles`). The reminder scan ends no daemon session a tab
+    /// here shows (#265). Memory only; a host Steer may no longer contact is dropped.
+    private var hostTitleReadings: [TerminalHost: TerminalHostTitles] = [:]
     /// Complete root inventories used to prove which canonical Claude sessions are live. Memory only.
     var liveClaudeSessions: [String: [String]] = [:]
     /// herdr monitor, hook pane records and latest scan (Companion+Herdr.swift).
@@ -1106,6 +1110,21 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
     }
 
+    /// Keeps the titles of `inventories`, read at `takenAt`, for each host Steer may still contact,
+    /// unless a newer reading is already held. Called by the host scans with reads they took anyway.
+    func recordHostTitles(_ inventories: [TerminalHost: TerminalHostInventory], takenAt: Double) {
+        for host in TerminalHostTitles.hosts where hostSwitches.mayContact(host) {
+            guard let inventory = inventories[host] else { continue }
+            if case .known(_, let held)? = hostTitleReadings[host], held > takenAt { continue }
+            hostTitleReadings[host] = TerminalHostTitles(inventory: inventory, takenAt: takenAt)
+        }
+    }
+
+    /// Forgets readings of hosts Steer may no longer contact, so one switched back on starts unknown.
+    func dropUncontactableHostTitles() {
+        hostTitleReadings = hostTitleReadings.filter { hostSwitches.mayContact($0.key) }
+    }
+
     func scanReminders() {
         let now = ProcessInfo.processInfo.systemUptime
         let hasClaudeInventoryRoot = claude.roots.contains { $0.capabilities.supported }
@@ -1133,6 +1152,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let known = knownCLISessions
         let daemonThreads = daemonClient.loadedThreads
         let herdrTitles = herdrPaneTitlesReader()
+        // The other hosts' latest titles (#265). Whether each terminal app runs comes from macOS and
+        // whether each multiplexer runs from the process list: neither contacts the host.
+        dropUncontactableHostTitles()
+        let switches = hostSwitches
+        let hostReadings = hostTitleReadings
+        let terminalsRunning = Set(TerminalHostTitles.hosts.filter { $0.kind == .terminal && TerminalApps.isRunning($0) })
         let observingSince = Companion.launchedAt
         let observationNow = Date().timeIntervalSince1970
         let claudeRoots = claude.roots.compactMap { root -> (scope: String, events: URL, installationID: String)? in
@@ -1151,12 +1176,18 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let branchDirectories = Set(agentQueue.items(at: observationNow).compactMap(rowDirectory(for:)))
         Task { @MainActor in
             let result = await Task.detached {
-                (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
-                                     daemonThreads: daemonThreads, herdrTitles: herdrTitles()), DesktopEventReader.read(from: events),
+                let processList = ProcessList.arguments()
+                let otherHosts = TerminalHostTitles.forScan(
+                    switches: switches, latest: hostReadings,
+                    running: terminalsRunning.union(TerminalHostTitles.multiplexersRunning(processList: processList)),
+                    now: Date().timeIntervalSince1970)
+                return (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
+                                            daemonThreads: daemonThreads, herdrTitles: herdrTitles(), otherHosts: otherHosts),
+                 DesktopEventReader.read(from: events),
                  readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
                  CodexUsageReader.latest(root: rolloutRoot),
                  SessionDiscovery.candidates(root: rolloutRoot, now: Date().timeIntervalSince1970),
-                 ProcessList.arguments().map(CodexCLIProcesses.isRunning(processList:)) ?? false,
+                 processList.map(CodexCLIProcesses.isRunning(processList:)) ?? false,
                  claudeInventoryRoots.map { root in
                      ClaudeSetupDetection.activeSessionInventory(root: root.root, capabilities: root.capabilities,
                                                                  observedAt: observationNow)
@@ -2372,6 +2403,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // tmux is contacted only while a terminal is on too (ADR 0014), so any switch can move its gate.
         tmuxSwitchChanged(hostSwitches.isOn(.tmux))
         zellijSwitchChanged(hostSwitches.isOn(.zellij))
+        dropUncontactableHostTitles()
     }
 
     func ghosttyChanged(_ enabled: Bool) {
