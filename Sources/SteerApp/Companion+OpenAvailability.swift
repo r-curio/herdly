@@ -119,8 +119,12 @@ extension Companion {
         let keys = Set(orderedAgentAttentionItems.compactMap { openLineKey($0.session) })
         updateOpenLines { $0.retain(keys) }
         let targets = openAvailabilityTargets
+        // A card the scan no longer covers loses its scan line on every tick, whether or not a scan runs.
+        updateOpenLines { $0.retainScanned(Set(targets.codex.keys).union(targets.claude.keys)) }
+        // Ghostty controls awaiting Automation are treated as off, as `otherTabHosts` reads them.
+        let ghosttyVerified = ghosttyEnabled && ghosttyPermissionVerified
         // A host whose Automation consent is not settled is never read on a schedule, so no scan raises
-        // macOS's prompt; Ghostty controls awaiting Automation cannot be read yet. A click still rechecks.
+        // macOS's prompt. A click still rechecks.
         func consentSettled(_ access: GhosttyAutomationAccess?) -> Bool {
             switch access {
             case nil, .consentRequired?: false
@@ -130,7 +134,7 @@ extension Companion {
         let consentPending = (hostSwitches.mayContact(.iTerm2) && (iTerm2.probing || !consentSettled(iTerm2.access)))
             || (terminalAppSwitchedOn && (terminalApp.probing || !consentSettled(terminalApp.access)))
         // A closed gate keeps the latest lines as they are (no flicker); cards that left are dropped above.
-        guard !targets.isEmpty, cliLivenessRead, !ghosttyEnabled || ghosttyPermissionVerified, !consentPending else { return }
+        guard !targets.isEmpty, cliLivenessRead, !consentPending else { return }
         let others = otherTabHosts
         let otherHostOn = others.iTerm2Running != nil || others.terminalAppOn || others.wezTermRunning != nil
             || others.tmuxOn || others.zellijOn
@@ -138,7 +142,7 @@ extension Companion {
         var ghosttySnapshot: GhosttySnapshot?
         var ghosttyRunning = others.ghosttyRunning
         if !otherHostOn {
-            ghosttyRunning = ghosttyEnabled && TerminalApps.isRunning(.ghostty)
+            ghosttyRunning = ghosttyVerified && TerminalApps.isRunning(.ghostty)
             ghosttySnapshot = knownGhosttySnapshot
             let fresh = Date().timeIntervalSince1970 - ghosttyInventoryAt <= Self.openAvailabilityGhosttyMaxAge
             if ghosttyRunning, ghosttySnapshot == nil || !fresh {
@@ -150,8 +154,14 @@ extension Companion {
         openAvailability.nextScan = uptime + Self.openAvailabilityInterval
         let terminalAppRunning: Bool? = terminalAppSwitchedOn ? TerminalApps.isRunning(.terminalApp) : nil
         let titles = Set(targets.codex.values.map(GhosttyMatch.title))
-        let switches = hostSwitches
-        let ghosttyOn = ghosttyEnabled
+        let observedSwitches = hostSwitches
+        let observedGhostty = (ghosttyEnabled, ghosttyPermissionVerified)
+        let switches: TerminalHostSwitches = {
+            var effective = observedSwitches
+            if !ghosttyVerified { effective.set(.ghostty, on: false) }
+            return effective
+        }()
+        let ghosttyOn = ghosttyVerified
         let live = liveCLI
         let lastSeen = lastSeenHosts
         let liveClaude = liveClaudeSessions.values.flatMap { $0 }
@@ -195,7 +205,7 @@ extension Companion {
             }.value
             openAvailability.scanning = false
             // A switch that moved during the scan makes its reads apply to nothing.
-            guard switches == hostSwitches, ghosttyOn == ghosttyEnabled else { return }
+            guard observedSwitches == hostSwitches, observedGhostty == (ghosttyEnabled, ghosttyPermissionVerified) else { return }
             let results = observed.routes.mapValues { entry in
                 entry.route.availability(agent: entry.agent, switches: switches, walks: observed.walks,
                                          ttyWrittenAt: observed.ttyWrittenAt, isRunning: TerminalApps.isRunning)

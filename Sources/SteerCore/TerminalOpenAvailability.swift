@@ -415,6 +415,13 @@ public struct OpenUnavailableLines<Key: Hashable & Sendable>: Equatable, Sendabl
         }
     }
 
+    /// Forgets the scan line of every session the scan no longer covers (its card left the terminal
+    /// route, such as one now bound by herdr, or every host was switched off), whether or not a scan
+    /// runs. Click lines keep their own rules.
+    public mutating func retainScanned(_ keys: Set<Key>) {
+        scanned = scanned.filter { keys.contains($0.key) }
+    }
+
     /// Forgets every line of a card no longer queued.
     public mutating func retain(_ keys: Set<Key>) {
         scanned = scanned.filter { keys.contains($0.key) }
