@@ -228,8 +228,8 @@ Live application proof: none. Not run; needs live acceptance (MVP acceptance §3
 ## iTerm2 Open (#238)
 
 iTerm2 sessions get Open, visits and a Settings card, and no typed input (ADR 0017). The
-switch and card stay hidden (`TerminalHost.showsCard`) until [#243](https://github.com/r-curio/steer/issues/243)
-records iTerm2's §3d run. Rules are pure SteerCore functions (`ITerm2.swift`,
+switch and card were hidden (`TerminalHost.showsCard`) until [#243](https://github.com/r-curio/steer/issues/243)
+recorded iTerm2's §3d run ([evidence](evidence/iterm2-acceptance.md)); they are shown since. Rules are pure SteerCore functions (`ITerm2.swift`,
 `TerminalTabOpen.swift`); SteerApp runs the bundled `ITerm2.js`, `ps` and the Automation check
 (`ITerm2Navigation.swift`, `Companion+ITerm2.swift`).
 
@@ -299,9 +299,9 @@ their verification including denial versus other script errors, the route mappin
 candidates including a failed walk, card lines, the typed-input block for a title in both
 Ghostty and iTerm2, an unreadable iTerm2 and iTerm2 off, the process start read, and that
 `ITerm2.js` compiles, never writes text and never reads `jobName`), plus `ClaudeInventoryTests`
-for the registered `procStart` carried with the PID. Not run — needs live acceptance (#243): §3d H1–H9 and
-the iTerm2 line in [MVP acceptance](mvp-acceptance.md), and the lab
-`scripts/terminal-lab/iterm2_lab.py`, which drives a real iTerm2.
+for the registered `procStart` carried with the PID. Live application proof: §3d H1–H9 and the iTerm2
+line in [MVP acceptance](mvp-acceptance.md) were run on 2026-10-13 (#243); results, the lines not run and
+the defects fixed along the way are in [iTerm2 acceptance](evidence/iterm2-acceptance.md).
 
 ## Terminal.app: Open and replies (#239)
 
@@ -390,3 +390,5 @@ MVP acceptance §3d H7 requires that Steer never launches a terminal app. In the
 Automated: `TerminalScriptTests` (the request argument carries the process id; no adapter builds an `Application` object; every adapter compiles with the layer; each adapter run for real against a process id that cannot exist answers its not-running status for every action, launching nothing; no process answers without running a script; the not-running replies read as not running for iTerm2 and Terminal.app and as no inventory for Ghostty; a Terminal `not_running` reply wrote nothing).
 
 Not run — manual live check with the build under test, one host at a time with its switch on and a session of that app queued, only with the operator's consent (it quits the real app): `python3 scripts/terminal-lab/quit_relaunch_lab.py iterm2|terminal|ghostty --i-understand-this-quits-the-app` checks Steer is running, sends SIGTERM to the app's own process and polls the process table for 120 s, reporting STAYED CLOSED (exit 0) or RELAUNCHED (exit 1). The card should read "<app> isn't running."; then start the app and confirm Steer reads its tabs again. Repeat each host's Open and, for Terminal.app, a reply once to confirm the raw events behave as the JXA object model did; that has not been run on any of the three apps. The older lab drivers (`scripts/terminal-lab/iterm2.js`, `terminal.js`, `scripts/ghostty_navigation.py`) still use `Application(bundleID)` and can relaunch a quit app.
+
+Live, 2026-10-13 (#243, build 464 from `fix/270` at 638a31f, [iTerm2 acceptance](evidence/iterm2-acceptance.md)): the quit lab on iTerm2 kept it closed three times with Steer running, and the card read "iTerm2 isn't running."; an iTerm2 Open past a decoy tab and a Ghostty Open from the notch worked. Terminal.app's quit lab, Open and reply under the raw events, and Ghostty's quit lab, are still not run.
