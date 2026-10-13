@@ -281,7 +281,7 @@ extension Companion {
         let codexSessions = terminalAppCodexSessions
         let claudeRows = terminalAppClaudeRows
         guard !terminalApp.scanning, !openingTask, uptime >= terminalApp.nextScan,
-              !codexSessions.isEmpty || !claudeRows.isEmpty else { return }
+              !codexSessions.isEmpty || !claudeRows.isEmpty || !codexSessionsAwaitingInventory.isEmpty else { return }
         guard TerminalApps.isRunning(.terminalApp) else {
             if terminalApp.readable != nil { resetTerminalAppScan() }
             return
@@ -321,6 +321,7 @@ extension Companion {
             terminalApp.readable = true
         }
         if case .tabs(let tabs) = reads.terminalApp.inventory { terminalApp.latestTitles = Set(tabs.compactMap(\.title)) }
+        recordHostTitles(reads.inventories, takenAt: takenAt)
         var diagnostics = ["Terminal.app inventory: \(reads.terminalApp.diagnostic)"]
         var codexRoutes: [UUID: TerminalReplyRoute] = [:]
         var codexSeen: Set<UUID> = []

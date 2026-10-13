@@ -56,6 +56,62 @@ public enum CodexCLIProcesses {
     }
 }
 
+/// One process in a Codex TUI's ancestry, from the TUI itself up: its executable's file name (from
+/// the kernel, so a path with spaces is whole) and, for an app's main executable, the app's bundle
+/// identifier.
+public struct ProcessAncestor: Equatable, Sendable {
+    public let command: String
+    public let bundleIdentifier: String?
+
+    public init(command: String, bundleIdentifier: String?) {
+        self.command = command
+        self.bundleIdentifier = bundleIdentifier
+    }
+}
+
+extension CodexCLIProcesses {
+    /// The processes in `ps -axo pid=,args=` output whose command line names Codex and is not the
+    /// app-server: the ones whose ancestry may be walked. Loose on purpose, since an executable path
+    /// may contain spaces; `hostReached` confirms each by its kernel-reported executable name.
+    public static func candidatePIDs(processList: String) -> [Int32] {
+        processList.split(separator: "\n").compactMap { line in
+            let trimmed = line.drop { $0 == " " }
+            guard let space = trimmed.firstIndex(of: " "), let pid = Int32(trimmed[..<space]) else { return nil }
+            let arguments = trimmed[space...]
+            guard arguments.contains("codex"), !arguments.contains("app-server") else { return nil }
+            return pid
+        }
+    }
+
+    /// `ps -axo pid=,args=` output without its pid column, for `isRunning`.
+    public static func arguments(processList: String) -> String {
+        processList.split(separator: "\n").map { line in
+            let trimmed = line.drop { $0 == " " }
+            guard let space = trimmed.firstIndex(of: " "), Int32(trimmed[..<space]) != nil else { return String(trimmed) }
+            return String(trimmed[space...].drop { $0 == " " })
+        }.joined(separator: "\n")
+    }
+
+    /// The host a Codex TUI runs in, from its ancestry: nil when the process is not a Codex
+    /// executable. Otherwise the nearest multiplexer server (tmux, Zellij, herdr), whose own parent
+    /// is not the terminal, or else the nearest app when it is a supported terminal. Nil when the
+    /// walk reaches neither.
+    public static func hostReached(by ancestry: [ProcessAncestor]) -> TerminalHost? {
+        guard let first = ancestry.first, isCodexExecutable(Substring(first.command)) else { return nil }
+        let multiplexers: [String: TerminalHost] = ["tmux": .tmux, "zellij": .zellij, "herdr": .herdr]
+        for ancestor in ancestry.dropFirst() {
+            if let host = multiplexers[ancestor.command] { return host }
+            if let identifier = ancestor.bundleIdentifier { return TerminalHost(bundleIdentifier: identifier) }
+        }
+        return nil
+    }
+
+    /// How many Codex TUIs in `ancestries` reach each host.
+    public static func hostsReached(by ancestries: [[ProcessAncestor]]) -> [TerminalHost: Int] {
+        ancestries.compactMap(hostReached(by:)).reduce(into: [:]) { $0[$1, default: 0] += 1 }
+    }
+}
+
 /// Finds sessions that are working right now from their rollouts alone.
 ///
 /// Codex opens every rollout with a `session_meta` line whose `source` names the surface (`"cli"`
