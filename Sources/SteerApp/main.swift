@@ -314,6 +314,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// own scans already read (`recordHostTitles`). The reminder scan ends no daemon session a tab
     /// here shows (#265). Memory only; a host Steer may no longer contact is dropped.
     private var hostTitleReadings: [TerminalHost: TerminalHostTitles] = [:]
+    /// The host whose inventory last showed each Codex session's title (`ReminderScan.surfaceHosts`),
+    /// so a session is not ended while that app is not running (H7). Memory only.
+    private var lastSeenHosts: [UUID: TerminalHost] = [:]
+    /// Daemon-held sessions whose end check waits on a switched-on host's inventory
+    /// (`ReminderScan.awaitingHostInventories`): the iTerm2, Terminal.app and WezTerm scans read while
+    /// this is not empty, even with nothing of theirs to show (#265).
+    private(set) var codexSessionsAwaitingInventory: Set<UUID> = []
     /// Complete root inventories used to prove which canonical Claude sessions are live. Memory only.
     var liveClaudeSessions: [String: [String]] = [:]
     /// herdr monitor, hook pane records and latest scan (Companion+Herdr.swift).
@@ -1113,16 +1120,26 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Keeps the titles of `inventories`, read at `takenAt`, for each host Steer may still contact,
     /// unless a newer reading is already held. Called by the host scans with reads they took anyway.
     func recordHostTitles(_ inventories: [TerminalHost: TerminalHostInventory], takenAt: Double) {
-        for host in TerminalHostTitles.hosts where hostSwitches.mayContact(host) {
-            guard let inventory = inventories[host] else { continue }
-            if case .known(_, let held)? = hostTitleReadings[host], held > takenAt { continue }
-            hostTitleReadings[host] = TerminalHostTitles(inventory: inventory, takenAt: takenAt)
-        }
+        hostTitleReadings = TerminalHostTitles.merged(hostTitleReadings, inventories: inventories, takenAt: takenAt,
+                                                      contactable: Set(TerminalHost.allCases.filter(hostSwitches.mayContact)))
     }
 
     /// Forgets readings of hosts Steer may no longer contact, so one switched back on starts unknown.
-    func dropUncontactableHostTitles() {
+    private func dropUncontactableHostTitles() {
         hostTitleReadings = hostTitleReadings.filter { hostSwitches.mayContact($0.key) }
+    }
+
+    /// The hosts the running Codex TUIs' process ancestry reaches (`CodexCLIProcesses.hostReached`),
+    /// from `ps -axo pid=,args=` output already read; every host when it could not be read, since none
+    /// can be ruled out. Walks only processes whose command line names Codex. Off the main actor.
+    nonisolated static func codexReach(processList: String?) -> Set<TerminalHost> {
+        guard let processList else { return Set(TerminalHost.allCases) }
+        let ancestries = CodexCLIProcesses.candidatePIDs(processList: processList).map { pid -> [ProcessAncestor] in
+            let chain = HerdrProcessTree.ancestry(of: pid)
+            guard chain.first?.pid == pid else { return [] }
+            return chain.map { ProcessAncestor(command: $0.command, bundleIdentifier: TerminalApps.appBundleIdentifier(of: $0.pid)) }
+        }
+        return CodexCLIProcesses.hostsReached(by: ancestries)
     }
 
     func scanReminders() {
@@ -1152,12 +1169,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let known = knownCLISessions
         let daemonThreads = daemonClient.loadedThreads
         let herdrTitles = herdrPaneTitlesReader()
-        // The other hosts' latest titles (#265). Whether each terminal app runs comes from macOS and
-        // whether each multiplexer runs from the process list: neither contacts the host.
+        // The other hosts' latest titles (#265). Whether each terminal app runs comes from macOS, and
+        // which hosts a Codex TUI runs under from the process list and its ancestry: none contacts a host.
         dropUncontactableHostTitles()
         let switches = hostSwitches
         let hostReadings = hostTitleReadings
-        let terminalsRunning = Set(TerminalHostTitles.hosts.filter { $0.kind == .terminal && TerminalApps.isRunning($0) })
+        let lastSeen = lastSeenHosts
+        let appsRunning = Set(TerminalHost.terminals.filter { TerminalApps.isRunning($0) })
         let observingSince = Companion.launchedAt
         let observationNow = Date().timeIntervalSince1970
         let claudeRoots = claude.roots.compactMap { root -> (scope: String, events: URL, installationID: String)? in
@@ -1176,18 +1194,18 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let branchDirectories = Set(agentQueue.items(at: observationNow).compactMap(rowDirectory(for:)))
         Task { @MainActor in
             let result = await Task.detached {
-                let processList = ProcessList.arguments()
-                let otherHosts = TerminalHostTitles.forScan(
-                    switches: switches, latest: hostReadings,
-                    running: terminalsRunning.union(TerminalHostTitles.multiplexersRunning(processList: processList)),
-                    now: Date().timeIntervalSince1970)
+                let processList = ProcessList.listing()
+                let otherHosts = TerminalHostTitles.forScan(switches: switches, latest: hostReadings, appsRunning: appsRunning,
+                                                            codexReach: Companion.codexReach(processList: processList),
+                                                            now: Date().timeIntervalSince1970)
                 return (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
-                                            daemonThreads: daemonThreads, herdrTitles: herdrTitles(), otherHosts: otherHosts),
+                                            daemonThreads: daemonThreads, herdrTitles: herdrTitles(), otherHosts: otherHosts,
+                                            ghosttyOn: switches.isOn(.ghostty), lastSeenHosts: lastSeen),
                  DesktopEventReader.read(from: events),
                  readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
                  CodexUsageReader.latest(root: rolloutRoot),
                  SessionDiscovery.candidates(root: rolloutRoot, now: Date().timeIntervalSince1970),
-                 processList.map(CodexCLIProcesses.isRunning(processList:)) ?? false,
+                 processList.map { CodexCLIProcesses.isRunning(processList: CodexCLIProcesses.arguments(processList: $0)) } ?? false,
                  claudeInventoryRoots.map { root in
                      ClaudeSetupDetection.activeSessionInventory(root: root.root, capabilities: root.capabilities,
                                                                  observedAt: observationNow)
@@ -1313,6 +1331,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             daemonCLISessions = scan.cliSessions.intersection(daemonThreads)
             liveCLI = scan.cliState.liveSessions.union(discoveredCLI)
             knownCLISessions.formUnion(scan.titledCLISessions)
+            lastSeenHosts.merge(scan.surfaceHosts) { _, latest in latest }
+            codexSessionsAwaitingInventory = scan.awaitingHostInventories
             let previous = Set(queue.items.map(\.id))
             // A receipt found on disk is not a verified live interaction: such a request enters handed
             // back and, when a real helper receipt exists, a no-decision record releases it to Codex at once.

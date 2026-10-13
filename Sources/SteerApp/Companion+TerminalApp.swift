@@ -281,7 +281,7 @@ extension Companion {
         let codexSessions = terminalAppCodexSessions
         let claudeRows = terminalAppClaudeRows
         guard !terminalApp.scanning, !openingTask, uptime >= terminalApp.nextScan,
-              !codexSessions.isEmpty || !claudeRows.isEmpty else { return }
+              !codexSessions.isEmpty || !claudeRows.isEmpty || !codexSessionsAwaitingInventory.isEmpty else { return }
         guard TerminalApps.isRunning(.terminalApp) else {
             if terminalApp.readable != nil { resetTerminalAppScan() }
             return

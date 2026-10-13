@@ -158,7 +158,7 @@ extension Companion {
         // ADR 0016: frontmost comes from macOS as the scan starts; WezTerm's own answer must agree.
         let frontmost = TerminalApps.frontmostHost()
         let inputSessions = Set(cliItems.map(\.session)).union(cliQuestions.map(\.session))
-        guard frontmost == .wezTerm || !inputSessions.isEmpty || !claudeOutcomes.isEmpty else {
+        guard frontmost == .wezTerm || !inputSessions.isEmpty || !claudeOutcomes.isEmpty || !codexSessionsAwaitingInventory.isEmpty else {
             wezTerm.visits.record(TerminalVisibilityScan(takenAt: takenAt, reading: .nothing))
             return
         }
