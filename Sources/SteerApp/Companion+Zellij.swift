@@ -136,6 +136,7 @@ extension Companion {
     private func applyZellijScan(_ reads: TerminalTabReads, claude: [AgentSessionIdentity: ClaudeTabProcess],
                                  codexSessions: Set<UUID>, hostFront: TerminalVisibilityReading<String>, takenAt: Double) {
         zellij.read = reads.zellij
+        recordHostTitles(reads.inventories, takenAt: takenAt)
         let snapshot = reads.zellij.snapshot
         let unreadable = reads.zellij.inventory == .unreadable
         var diagnostics = ["Zellij: \(Self.zellijDiagnostic(reads.zellij))"]

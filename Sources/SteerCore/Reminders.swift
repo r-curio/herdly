@@ -75,6 +75,13 @@ public struct ReminderScan: Sendable {
     /// Sessions whose session-id title was in this scan's Ghostty inventory. The app remembers them
     /// across scans so a session stays CLI, and can end, after its tab is gone.
     public var titledCLISessions: Set<UUID> = []
+    /// The host whose inventory showed each session's title in this scan (Ghostty first, then
+    /// `TerminalHostTitles.hosts` order). The app keeps the latest per session as `lastSeenHosts`.
+    public var surfaceHosts: [UUID: TerminalHost] = [:]
+    /// Daemon-held sessions no tab shows, past their grace, that would end but for a switched-on
+    /// host whose inventory is unknown or older than the grace. The app reads those hosts while
+    /// this is not empty, so the check is not held back indefinitely.
+    public var awaitingHostInventories: Set<UUID> = []
 }
 
 public struct ReminderQueue: Sendable {
@@ -342,9 +349,24 @@ public enum ReminderReader {
     /// ended for lacking a Ghostty tab. It does not make the session Ghostty-titled
     /// (`titledCLISessions`): its tab is herdr's, not its own. While the titles are `unknown`, a
     /// session may be on a pane Steer cannot see, so none is ended for lacking a Ghostty tab.
+    ///
+    /// `otherHosts` covers iTerm2, Terminal.app, WezTerm, tmux and Zellij, and Ghostty while switched
+    /// off (#265, `TerminalHostTitles.forScan`). A title on any switched-on host's tab or pane is a
+    /// live surface, as a Ghostty tab title is. The end check runs on Ghostty's inventory while
+    /// Ghostty is on (`ghosttyOn`; on but unreadable or not running, nothing ends), and on the other
+    /// switched-on hosts' inventories alone while it is off. A session a Ghostty title proved ends
+    /// when its Ghostty tab closes, whatever the other hosts say: a tab cannot move between apps. A
+    /// session known only from the daemon also needs every switched-on host's inventory known and
+    /// taken at least `surfaceGrace` after its start, and no `unseen` host: one a running Codex TUI
+    /// reaches but Steer cannot read, where product.md says its app cannot be identified, not that
+    /// it has ended. Neither ends while the terminal app whose inventory last showed it (`lastSeenHosts`,
+    /// from `surfaceHosts`) is not running (H7); a stopped multiplexer server holds nothing. The end
+    /// is dated at the newest inventory consulted.
     public static func scan(events: URL, rollouts: URL, ghostty: GhosttyInventory? = nil,
                             knownCLISessions: Set<UUID> = [], daemonThreads: Set<UUID> = [],
-                            herdrTitles: HerdrPaneTitles = .notInUse) -> ReminderScan {
+                            herdrTitles: HerdrPaneTitles = .notInUse,
+                            otherHosts: [TerminalHost: TerminalHostTitles] = [:], ghosttyOn: Bool = true,
+                            lastSeenHosts: [UUID: TerminalHost] = [:]) -> ReminderScan {
         let cliTitles = ghostty?.titles ?? []
         // The titles herdr's panes show, and whether a session lacking a Ghostty tab may end: not
         // while herdr may show its title on a pane Steer cannot read.
@@ -353,6 +375,25 @@ public enum ReminderReader {
         case .unknown: ([], false)
         case .known(let titles): (titles, true)
         }
+        // The other hosts' titles, the times of the inventories the end check consults, and whether a
+        // switched-on host is unread or a host Steer cannot read may hold a Codex TUI.
+        var hostTitles: [TerminalHost: Set<String>] = [:]
+        var hostTimes: [TerminalHost: Double] = [:]
+        var inventoryTimes = ghostty.map { [$0.takenAt] } ?? []
+        var hostUnknown = false, hostUnseen = false
+        for (host, titles) in otherHosts {
+            switch titles {
+            case .known(let shown, let takenAt):
+                hostTitles[host] = shown
+                hostTimes[host] = takenAt
+                inventoryTimes.append(takenAt)
+            case .notRunning(let takenAt): inventoryTimes.append(takenAt)
+            case .unknown: hostUnknown = true
+            case .unseen: hostUnseen = true
+            }
+        }
+        let shownElsewhere = paneTitles.union(hostTitles.values.joined())
+        let endCheckRuns = ghostty != nil || (!ghosttyOn && !inventoryTimes.isEmpty)
         var result = ReminderScan()
         guard let ordered = HookEventListing.entries(in: events) else { return result }
         var probes: [UUID: [ApprovalResolutionProbe]] = [:]
@@ -489,28 +530,53 @@ public enum ReminderReader {
                       let meta = event["payload"] as? [String: Any],
                       (meta["id"] as? String).flatMap(UUID.init(uuidString:)) == session,
                       meta["source"] as? String == "cli" || cliTitles.contains(GhosttyMatch.title(session))
-                        || paneTitles.contains(GhosttyMatch.title(session))
+                        || shownElsewhere.contains(GhosttyMatch.title(session))
                         || knownCLISessions.contains(session)
                         || (daemonThreads.contains(session) && meta["originator"] as? String != desktopOriginator) else { continue }
                 result.cliSessions.insert(session)
                 let sessionHooks = hooks.filter { $0.session_id == session }.sorted { $0.received_at < $1.received_at }
-                if cliTitles.contains(GhosttyMatch.title(session)) {
+                let title = GhosttyMatch.title(session)
+                if cliTitles.contains(title) {
                     result.titledCLISessions.insert(session)
-                } else if paneTitles.contains(GhosttyMatch.title(session)) {
+                    result.surfaceHosts[session] = .ghostty
+                } else if let host = TerminalHostTitles.hosts.first(where: { hostTitles[$0]?.contains(title) == true }) {
+                    // Its surface is another switched-on host's tab or pane (#265). Known only from
+                    // the daemon and shown only in readings at least the grace older than the newest
+                    // inventory: its tab may have closed since, so the app re-reads those hosts.
+                    result.surfaceHosts[session] = host
+                    let showing = TerminalHostTitles.hosts.filter { hostTitles[$0]?.contains(title) == true }
+                    if daemonThreads.contains(session), !knownCLISessions.contains(session), let newest = inventoryTimes.max(),
+                       showing.allSatisfy({ newest - (hostTimes[$0] ?? newest) >= surfaceGrace }) {
+                        result.awaitingHostInventories.insert(session)
+                    }
+                } else if paneTitles.contains(title) {
                     // Its surface is a herdr pane; the herdr snapshot is its tab inventory.
-                } else if let ghostty, tablessMayEnd, meta["source"] as? String != "cli",
+                } else if endCheckRuns, tablessMayEnd, meta["source"] as? String != "cli",
+                          let newest = inventoryTimes.max(), let oldest = inventoryTimes.min(),
                           case let started = sessionHooks.last(where: { $0.hook_event_name == "SessionStart" })
                             .flatMap({ RolloutTimestamp.parse($0.received_at) }),
                           !endedSinceLatestStart(result.sessionEnds[session], latestStart: started) {
-                    // No tab shows this session. Proved by title earlier: its tab closed. Known only
-                    // from the daemon: give a new session time for its tab to be inventoried first.
-                    // Timed from the latest start, so a resumed session gets the same grace. While
-                    // herdr's titles are unknown, a pane may still show the title: no end.
-                    let ended = knownCLISessions.contains(session)
-                        || (daemonThreads.contains(session) && started.map { ghostty.takenAt - $0 >= surfaceGrace } == true)
-                    if ended {
-                        result.sessionEnds[session] = ghostty.takenAt
-                        result.cliEvents.append(.sessionEnded(session: session, receivedAt: RolloutTimestamp.format(ghostty.takenAt)))
+                    // No tab shows this session. Proved by a Ghostty title earlier: its tab closed.
+                    // Known only from the daemon: give a new session time for its tab to be
+                    // inventoried first, in every host consulted. Timed from the latest start, so a
+                    // resumed session gets the same grace. While herdr's or a switched-on host's
+                    // titles are unknown, a tab may still show the title; while a host Steer cannot
+                    // read holds a Codex TUI, its app cannot be identified: no end for either. Its
+                    // last app not running is "<app> isn't running.", not ended; a stopped tmux or Zellij server is not.
+                    let lastHostDown: Bool = if let host = lastSeenHosts[session], host.kind == .terminal,
+                                                case .notRunning? = otherHosts[host] {
+                        true
+                    } else {
+                        false
+                    }
+                    let provedGone = ghostty != nil && knownCLISessions.contains(session)
+                    let daemonOnly = daemonThreads.contains(session) && !provedGone && !hostUnseen && !lastHostDown
+                    let pastGrace = started.map { newest - $0 >= surfaceGrace } == true
+                    let everyInventoryFresh = !hostUnknown && started.map { oldest - $0 >= surfaceGrace } == true
+                    if daemonOnly, pastGrace, !everyInventoryFresh { result.awaitingHostInventories.insert(session) }
+                    if !lastHostDown, provedGone || (daemonOnly && everyInventoryFresh) {
+                        result.sessionEnds[session] = newest
+                        result.cliEvents.append(.sessionEnded(session: session, receivedAt: RolloutTimestamp.format(newest)))
                     }
                 }
                 for hook in sessionHooks {

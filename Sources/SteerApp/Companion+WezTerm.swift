@@ -158,7 +158,7 @@ extension Companion {
         // ADR 0016: frontmost comes from macOS as the scan starts; WezTerm's own answer must agree.
         let frontmost = TerminalApps.frontmostHost()
         let inputSessions = Set(cliItems.map(\.session)).union(cliQuestions.map(\.session))
-        guard frontmost == .wezTerm || !inputSessions.isEmpty || !claudeOutcomes.isEmpty else {
+        guard frontmost == .wezTerm || !inputSessions.isEmpty || !claudeOutcomes.isEmpty || !codexSessionsAwaitingInventory.isEmpty else {
             wezTerm.visits.record(TerminalVisibilityScan(takenAt: takenAt, reading: .nothing))
             return
         }
@@ -207,6 +207,7 @@ extension Companion {
         case .notRunning: wezTerm.scan = .notRunning
         case .unreadable(let reason): wezTerm.scan = .unreadable(reason)
         }
+        recordHostTitles(reads.inventories, takenAt: takenAt)
         var diagnostics = ["scan: \(wezTerm.scan)",
                            "question digits: \(TerminalHost.wezTerm.typesQuestionDigits ? "on" : "off until proven live (#245)")"]
         var codexRoutes: [UUID: TerminalReplyRoute] = [:]
