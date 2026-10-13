@@ -110,6 +110,9 @@ public struct ReplyProgress<ID: Hashable & Sendable>: Equatable, Sendable {
     /// Codex's text counts as sent but its separate submit did not go: the text may be waiting in the
     /// composer. Steer never presses Enter later.
     public private(set) var composerMayHoldText = false
+    /// When the user's send began, if the caller said. A turn start at or after it confirms the reply
+    /// (`observing`); without it the moment the reply counted as sent stands in.
+    public private(set) var sendStartedAt: Double?
 
     public init(completion: ID) {
         self.completion = completion
@@ -133,12 +136,13 @@ public struct ReplyProgress<ID: Hashable & Sendable>: Equatable, Sendable {
         }
     }
 
-    /// `.ready` → `.sending` by `route`. The caller has already applied the policy.
-    public func startingSend(text: String, route: SessionReplyRoute = .daemon) -> ReplyProgress {
+    /// `.ready` → `.sending` by `route`, begun at `now` when given. The caller has already applied the policy.
+    public func startingSend(text: String, route: SessionReplyRoute = .daemon, at now: Double? = nil) -> ReplyProgress {
         guard phase == .ready, let trimmed = SessionReplyPolicy.sendableText(text) else { return self }
         var next = self
         next.phase = .sending(trimmed)
         next.route = route
+        next.sendStartedAt = now
         return next
     }
 
@@ -175,26 +179,62 @@ public struct ReplyProgress<ID: Hashable & Sendable>: Equatable, Sendable {
         return next
     }
 
-    /// Applies what Steer can see of the session now. A turn started after the send is the
-    /// confirmation, however late; silence inside the window keeps waiting, and silence past it is
-    /// reported as unconfirmed rather than described as an answer Codex has.
-    public func observing(sessionWorking: Bool, at now: Double) -> ReplyProgress {
+    /// Applies what Steer can see of the session now: whether it is in a turn, and the latest turn
+    /// start Steer has a record of (`ReplyTurnStarts`). A turn started after the send is the
+    /// confirmation, however late, whether a scan caught it running or only its start record remains
+    /// because it finished between scans (#271). Silence inside the window keeps waiting, and silence
+    /// past it is reported as unconfirmed rather than described as an answer Codex has.
+    public func observing(sessionWorking: Bool, latestTurnStart: Double? = nil, at now: Double) -> ReplyProgress {
         var next = self
         switch phase {
         case let .sent(text, at):
-            if sessionWorking { next.phase = .working(text: text) }
+            if sessionWorking || startedAfterSend(latestTurnStart, sentAt: at) { next.phase = .working(text: text) }
             else if now - at >= Self.confirmationWindow { next.phase = .unconfirmed(text: text, sentAt: at) }
-        case let .unconfirmed(text, _):
-            if sessionWorking { next.phase = .working(text: text) }
+        case let .unconfirmed(text, at):
+            if sessionWorking || startedAfterSend(latestTurnStart, sentAt: at) { next.phase = .working(text: text) }
         case .ready, .sending, .working, .failed:
             break
         }
         return next
     }
+
+    /// Hook records date a turn start to the whole second, truncated, and a turn can start before the
+    /// daemon's or the host's answer that marks the reply sent. So the start is compared with the
+    /// second in which the send began: a turn in that second or later counts, an earlier one never.
+    private func startedAfterSend(_ turnStart: Double?, sentAt: Double) -> Bool {
+        guard let turnStart, turnStart.isFinite else { return false }
+        return turnStart >= (sendStartedAt ?? sentAt).rounded(.down)
+    }
 }
 
 /// A Codex completion card's reply.
 public typealias SessionReplyProgress = ReplyProgress<CompletionIdentity>
+
+/// The evidence `ReplyProgress.observing` takes besides a running turn: each session's latest
+/// turn start on record (#271). A reply's turn can start and end between two scans, so it is never
+/// seen running; its `UserPromptSubmit` record stays. Both readers of the hook records count: the
+/// CLI events exist only for sessions the scan classified as CLI, while the hook reader decodes every
+/// record, so a session the scan did not classify as CLI this time is still confirmed.
+public enum ReplyTurnStarts {
+    /// The latest parseable turn start per session. A turn's end or a tool call starts nothing.
+    public static func latest(cliEvents: [CLIEvent], hookEvents: [DesktopEvent]) -> [UUID: Double] {
+        var latest: [UUID: Double] = [:]
+        func record(_ session: UUID, _ receivedAt: String) {
+            guard let at = RolloutTimestamp.parse(receivedAt), at.isFinite else { return }
+            latest[session] = max(latest[session] ?? at, at)
+        }
+        for case let .turnStarted(session, _, receivedAt) in cliEvents { record(session, receivedAt) }
+        for event in hookEvents {
+            switch event {
+            case let .turnStarted(session, _, receivedAt), let .promptSubmitted(session, _, _, receivedAt):
+                record(session, receivedAt)
+            default:
+                break
+            }
+        }
+        return latest
+    }
+}
 
 /// Whether one typed reply may leave Steer. Judges the queue's current copy of the completion and
 /// the availability as it is right now, never the row that was rendered.
@@ -325,8 +365,9 @@ public enum SessionReplySending {
         }
     }
 
+    /// `now` is when the user's send began: a turn start before that second never confirms the reply.
     public static func prepare(completion: AttentionCompletion?, availability: SessionReplyAvailability,
-                               progress: SessionReplyProgress, text: String) -> Plan {
+                               progress: SessionReplyProgress, text: String, at now: Double? = nil) -> Plan {
         // The target is resolved once and judged once; nothing downstream walks the evidence again.
         let target = completion.map { SessionReplyRouting.target(for: $0, availability: availability) }
             ?? .unavailable(.notInQueue)
@@ -338,10 +379,10 @@ public enum SessionReplySending {
             guard let params = SessionReplyRequest.params(thread: thread, text: text) else {
                 return Plan(outcome: .refused(.emptyText))
             }
-            return Plan(outcome: .sending(progress.startingSend(text: text)), params: params)
+            return Plan(outcome: .sending(progress.startingSend(text: text, at: now)), params: params)
         case let .terminal(pane):
             guard case let .success(trimmed) = TypedReplyText.sendable(text) else { return Plan(outcome: .refused(.emptyText)) }
-            return Plan(outcome: .sending(progress.startingSend(text: trimmed, route: .terminal(pane))),
+            return Plan(outcome: .sending(progress.startingSend(text: trimmed, route: .terminal(pane), at: now)),
                         terminal: TerminalSend(pane: pane, writes: TypedReplyWrites.plan(agent: .codex, text: trimmed)))
         case let .unavailable(reason):
             return Plan(outcome: .refused(reason))

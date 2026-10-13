@@ -1126,7 +1126,8 @@ struct Notch: View {
             }
             return typed ? "Typed “\(text)”. Waiting for \(name) to start the turn." : "Sent “\(text)”. Waiting for Codex to record the turn."
         case let .working(text):
-            return "Sent “\(text)”. \(name) started a turn; this session is working again."
+            // The turn may already have finished (#271), so this never claims the session is working.
+            return "Sent “\(text)”. \(name) started a turn after it."
         case let .unconfirmed(text, _):
             return typed ? "Typed “\(text)”, but \(name) has not started a turn. Check the session; Steer will not resend."
                 : "Sent “\(text)”, but Codex has not started a turn. Check Codex; Steer will not resend."
