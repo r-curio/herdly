@@ -6,8 +6,11 @@ import Testing
     #expect(TerminalHost.multiplexers == [.tmux, .zellij, .herdr])
     #expect(TerminalHost.allCases.map(\.displayName)
         == ["Ghostty", "iTerm2", "Terminal.app", "WezTerm", "tmux", "Zellij", "herdr"])
-    // Only hosts whose acceptance has passed show a card.
-    #expect(TerminalHost.allCases.filter(\.showsCard) == [.ghostty, .herdr])
+    // Only hosts whose acceptance has passed show a card: iTerm2 since #243; Terminal.app, WezTerm,
+    // tmux and Zellij stay hidden until theirs.
+    #expect(TerminalHost.allCases.filter(\.showsCard) == [.ghostty, .iTerm2, .herdr])
+    #expect(TerminalHost.terminals.filter(\.showsCard) == [.ghostty, .iTerm2])
+    #expect(TerminalHost.multiplexers.filter(\.showsCard) == [.herdr])
     // Ghostty keeps its existing preference key so its stored choice carries over unchanged.
     #expect(TerminalHost.ghostty.defaultsKey == "ghosttyControlsEnabled")
     #expect(Set(TerminalHost.allCases.map(\.defaultsKey)).count == TerminalHost.allCases.count)
