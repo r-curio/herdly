@@ -65,7 +65,7 @@ private func status(_ data: Data?) -> String? {
         let source = try #require(script.source(in: resources))
         try #require(!source.contains("Application("))
         for request in requests[script] ?? [] {
-            let reply = script.run(request, pid: absentPID, resources: resources)
+            let reply = script.run(request, pid: absentPID, resources: resources, deadline: 60)
             #expect(status(reply) == script.notRunningStatus, "\(script.rawValue) \(request["action"] ?? "")")
         }
     }
@@ -86,6 +86,21 @@ private func status(_ data: Data?) -> String? {
     // Ghostty's not-running reply is no inventory, as before.
     let ghostty = TerminalScript.ghostty.run(["action": "snapshot"], pid: nil, resources: nil)
     #expect(ghostty.flatMap { try? JSONDecoder().decode(GhosttySnapshot.self, from: $0) } == nil)
+}
+
+@Test func onlyTheAppsOwnGUIProcessIsAddressedNeverACommandLineRunOfItsBinary() {
+    typealias Candidate = TerminalAppProcess.Candidate
+    let ghostty = "com.mitchellh.ghostty"
+    // `ghostty +list-themes` run from a terminal started earlier than the app: it has a controlling tty.
+    let cli = Candidate(pid: 100, bundleIdentifier: ghostty, started: 10, hasControllingTerminal: true)
+    let app = Candidate(pid: 200, bundleIdentifier: ghostty, started: 20, hasControllingTerminal: false)
+    let laterApp = Candidate(pid: 300, bundleIdentifier: ghostty, started: 30, hasControllingTerminal: false)
+    let other = Candidate(pid: 50, bundleIdentifier: "com.googlecode.iterm2", started: 1, hasControllingTerminal: false)
+    let unknown = Candidate(pid: 40, bundleIdentifier: nil, started: 2, hasControllingTerminal: false)
+    #expect(TerminalAppProcess.choose([cli, laterApp, app, other, unknown], bundleIdentifier: ghostty) == 200)
+    #expect(TerminalAppProcess.choose([cli], bundleIdentifier: ghostty) == nil)
+    #expect(TerminalAppProcess.choose([other, unknown], bundleIdentifier: ghostty) == nil)
+    #expect(TerminalAppProcess.choose([], bundleIdentifier: ghostty) == nil)
 }
 
 @Test func terminalAppTypingIntoAQuitTerminalWroteNothing() {

@@ -40,9 +40,9 @@ enum TerminalScript: String, CaseIterable, Sendable {
             resources: Bundle.main.resourceURL)
     }
 
-    /// Runs the adapter in `resources` against process `pid` under a five-second deadline. Without a
-    /// process the reply is the not-running status, and no script runs.
-    func run(_ request: [String: Any], pid: pid_t?, resources: URL?) -> Data? {
+    /// Runs the adapter in `resources` against process `pid` under `deadline` (five seconds; only tests
+    /// under load pass more). Without a process the reply is the not-running status, and no script runs.
+    func run(_ request: [String: Any], pid: pid_t?, resources: URL?, deadline: TimeInterval = 5) -> Data? {
         guard let pid else { return Data(#"{"status":"\#(notRunningStatus)"}"#.utf8) }
         guard let resources, let source = source(in: resources),
               let argument = Self.argument(request, pid: pid) else { return nil }
@@ -54,7 +54,7 @@ enum TerminalScript: String, CaseIterable, Sendable {
         let done = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in done.signal() }
         do { try process.run() } catch { return nil }
-        guard done.wait(timeout: .now() + 5) == .success else {
+        guard done.wait(timeout: .now() + deadline) == .success else {
             process.terminate()
             return nil
         }
@@ -84,8 +84,20 @@ enum TerminalScript: String, CaseIterable, Sendable {
 /// The running process of a terminal app, read from the kernel's process table rather than
 /// `NSRunningApplication`, which was seen to come back empty intermittently off the main actor.
 enum TerminalAppProcess {
-    /// The process whose executable is the main executable of an app with `bundleIdentifier`; the
-    /// earliest started when several are. nil when there is none or the table could not be read.
+    /// One process running an app bundle's main executable.
+    struct Candidate: Equatable, Sendable {
+        let pid: pid_t
+        /// The enclosing app's bundle identifier; nil when the executable is not an app's.
+        let bundleIdentifier: String?
+        /// Start time, seconds since 1970.
+        let started: Double
+        /// Whether it has a controlling terminal: a command-line run of the binary (`ghostty
+        /// +list-themes` in a shell) has one; the app macOS launched has none.
+        let hasControllingTerminal: Bool
+    }
+
+    /// The app's own process: the earliest started process of an app with `bundleIdentifier` that has
+    /// no controlling terminal. nil when there is none or the table could not be read.
     static func pid(bundleIdentifier: String, command: String) -> pid_t? {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
         var size = 0
@@ -95,10 +107,21 @@ enum TerminalAppProcess {
         var processes = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
         guard sysctl(&mib, u_int(mib.count), &processes, &size, nil, 0) == 0 else { return nil }
         let name = String(command.prefix(Int(MAXCOMLEN)))
-        return processes.prefix(size / MemoryLayout<kinfo_proc>.stride)
+        let candidates = processes.prefix(size / MemoryLayout<kinfo_proc>.stride)
             .filter { commandName($0) == name && $0.kp_proc.p_stat != SZOMB }
-            .filter { TerminalApps.appBundleIdentifier(of: $0.kp_proc.p_pid) == bundleIdentifier }
-            .min { started($0) < started($1) }?.kp_proc.p_pid
+            .map { process in
+                Candidate(pid: process.kp_proc.p_pid,
+                          bundleIdentifier: TerminalApps.appBundleIdentifier(of: process.kp_proc.p_pid),
+                          started: started(process), hasControllingTerminal: process.kp_eproc.e_tdev != -1)
+            }
+        return choose(candidates, bundleIdentifier: bundleIdentifier)
+    }
+
+    /// The rule behind `pid`: an app process of `bundleIdentifier` without a controlling terminal, the
+    /// earliest started when several are (one instance is expected).
+    static func choose(_ candidates: [Candidate], bundleIdentifier: String) -> pid_t? {
+        candidates.filter { $0.bundleIdentifier == bundleIdentifier && !$0.hasControllingTerminal }
+            .min { $0.started < $1.started }?.pid
     }
 
     private static func commandName(_ process: kinfo_proc) -> String {

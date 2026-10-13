@@ -4,7 +4,7 @@ import Foundation
 import SteerCore
 
 /// Terminal.app's Apple Events and the window server's on-screen list (#239), through the bundled
-/// `TerminalApp.js` and the shared JXA runner (`GhosttyNavigation.request`). Only called while
+/// `TerminalApp.js` and the shared JXA runner (`TerminalScript`, by process id). Only called while
 /// Terminal.app's switch is on. Blocking: call off the main actor except where noted. Nothing here
 /// launches Terminal, creates a tab, or types anywhere but the one tab-window and tty passed in. `ps`
 /// and kernel reads are the shared `TerminalTTYReads`.
