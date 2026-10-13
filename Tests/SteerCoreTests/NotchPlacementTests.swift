@@ -621,3 +621,26 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     #expect(!NotchHover.pointerTouchesTopEdge(of: strip, pointer: CGPoint(x: 750, y: 981)))
     #expect(!NotchHover.pointerTouchesTopEdge(of: .zero, pointer: .zero))
 }
+
+@Test func panelMovedByTheWindowServerIsPutBackWhenTheTargetIsUnchanged() {
+    let strip = NotchPlacement.frame(on: builtIn, expanded: false, rows: 0, extraRows: false)
+    // After the display sleeps and wakes, the panel sits mid-screen while the computed frame is the same.
+    let midScreen = strip.offsetBy(dx: 0, dy: -400)
+
+    #expect(NotchFrameSync.action(target: strip, lastTarget: strip, actual: midScreen, animating: false) == .restoreDrifted)
+    #expect(NotchFrameSync.action(target: strip, lastTarget: strip, actual: strip.offsetBy(dx: 300, dy: 0), animating: false) == .restoreDrifted)
+    #expect(NotchFrameSync.action(target: strip, lastTarget: strip, actual: strip, animating: false) == .none)
+}
+
+@Test func frameSyncIgnoresRoundingAndRunningAnimationsButFollowsANewTarget() {
+    let strip = NotchPlacement.frame(on: builtIn, expanded: false, rows: 0, extraRows: false)
+    let open = NotchPlacement.frame(on: builtIn, expanded: true, rows: 3, extraRows: false)
+
+    // Backing-store rounding of a half-point origin is not drift.
+    #expect(NotchFrameSync.action(target: strip, lastTarget: strip, actual: strip.offsetBy(dx: 0.5, dy: -0.5), animating: false) == .none)
+    // Mid-animation the panel is between frames; that is not drift either.
+    #expect(NotchFrameSync.action(target: open, lastTarget: open, actual: strip, animating: true) == .none)
+    // A changed target always moves, animating or not.
+    #expect(NotchFrameSync.action(target: open, lastTarget: strip, actual: strip, animating: true) == .moveToNewTarget)
+    #expect(NotchFrameSync.action(target: open, lastTarget: strip, actual: strip, animating: false) == .moveToNewTarget)
+}
