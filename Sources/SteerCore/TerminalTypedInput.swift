@@ -293,13 +293,14 @@ public enum TerminalAppInput {
     }
 
     /// The delivery of one `do script` request. Steer's script finds the tab-window by id and tty first
-    /// and reports `gone` without typing when it is not there; Automation denied sends nothing. Any
-    /// other failure may have typed and counts as sent.
+    /// and reports `gone` without typing when it is not there, and `not_running` when no event reached
+    /// Terminal's process (#270); Automation denied sends nothing. Any other failure may have typed and
+    /// counts as sent.
     public static func delivery(_ result: TerminalAppScriptResult) -> TypedInputDelivery {
         if result == .denied { return .notWritten }
         switch result.status {
         case "ok": return .written
-        case "gone", "moved": return .notWritten
+        case "gone", "moved", "not_running": return .notWritten
         default: return .possiblyWritten
         }
     }

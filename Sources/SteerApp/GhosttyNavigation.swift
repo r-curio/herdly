@@ -6,28 +6,10 @@ import SteerCore
 /// Besides tab selection it relays one user-chosen digit for a Codex question to the exact
 /// matched terminal (ADR 0006). No text input and no approval keystrokes are supported.
 enum GhosttyNavigation {
-    /// Runs a bundled JXA adapter (`Ghostty.js` unless `resource` names another, such as `ITerm2.js`)
-    /// with one JSON request, under a five-second deadline; nil on any failure.
-    static func request(_ value: [String: Any], resource: String = "Ghostty") -> Data? {
-        guard let script = Bundle.main.url(forResource: resource, withExtension: "js"),
-              let bytes = try? JSONSerialization.data(withJSONObject: value),
-              let argument = String(data: bytes, encoding: .utf8) else { return nil }
-        let process = Process(), output = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-l", "JavaScript", script.path, argument]
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        let done = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in done.signal() }
-        do { try process.run() } catch { return nil }
-        guard done.wait(timeout: .now() + 5) == .success else {
-            process.terminate()
-            return nil
-        }
-        guard process.terminationStatus == 0,
-              let bytes = try? output.fileHandleForReading.read(upToCount: 2 * 1024 * 1024 + 1),
-              bytes.count <= 2 * 1024 * 1024 else { return nil }
-        return bytes
+    /// Runs a bundled JXA adapter (`Ghostty.js` unless `script` names another) with one JSON request,
+    /// addressed to the app's running process so it never launches the app (#270); nil on any failure.
+    static func request(_ value: [String: Any], script: TerminalScript = .ghostty) -> Data? {
+        script.request(value)
     }
     /// Takes a fresh inventory. Each terminal's `tty` is read only when the installed Ghostty's
     /// dictionary declares it, so a Ghostty without it gets exactly the same request as before.
