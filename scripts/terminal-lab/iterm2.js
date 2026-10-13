@@ -2,6 +2,8 @@
 //   osascript -l JavaScript iterm2.js '{"op": "...", ...}'
 // Every op addresses sessions by their GUID; none of them touches a session
 // the caller did not name, except `inventory`, which only reads.
+// Lab only: `Application(bundleID)` launches iTerm2 if it quit before an event, so this can relaunch a
+// quit iTerm2. Steer's own adapter addresses the process id instead (#270, Resources/AppleEvents.js).
 function run(argv) {
   const app = Application("com.googlecode.iterm2");
   const req = JSON.parse(argv[0]);
