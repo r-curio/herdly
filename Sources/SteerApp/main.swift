@@ -186,6 +186,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// that has sent one never sends another.
     @Published var replyProgress: [CompletionIdentity: SessionReplyProgress] = [:]
     private var replying = false
+    /// Each Codex session's latest turn start in the last scan's hook records (`ReplyTurnStarts`):
+    /// what confirms a sent reply whose turn finished before any scan saw it running (#271).
+    private var replyTurnStarts: [UUID: Double] = [:]
     /// Sessions Codex recorded as ended; a completion for one has nothing left to reply to.
     @Published var endedSessions: Set<UUID> = []
     /// The second client on Codex's app-server daemon socket, when one exists. Inert otherwise.
@@ -1348,6 +1351,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             queue.apply(discovered: discovered)
             acknowledgeCodexCompletions(Array(CodexReplyAcknowledgment.acknowledged(
                 queue.items.compactMap(\.completion), events: scan.cliEvents)))
+            replyTurnStarts = ReplyTurnStarts.latest(cliEvents: scan.cliEvents, hookEvents: desktopEvents)
             applyDesktopReadState(readState, enabled: readStateURL != nil)
             for request in unverified where ApprovalReceipts.existing(for: request.id, in: events) != nil {
                 _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision,
@@ -2106,7 +2110,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         guard !replying else { return }
         let current = queue.items.compactMap(\.completion).first { $0.id == completion.id }
         let plan = SessionReplySending.prepare(completion: current, availability: replyAvailability,
-                                               progress: reply(for: completion), text: text)
+                                               progress: reply(for: completion), text: text,
+                                               at: Date().timeIntervalSince1970)
         switch plan.outcome {
         case let .refused(rejection):
             navigationMessage = SessionReplyPolicy.message(for: rejection)
@@ -2147,14 +2152,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     /// Keeps a card's reply only while its completion is queued, and lets a sent one reach its final
-    /// state: confirmed by the session working again, or unconfirmed once the window passes.
+    /// state: confirmed by the session working again or by a turn start recorded after the send (a
+    /// turn that finished between scans, #271), or unconfirmed once the window passes.
     private func pruneReplyProgress() {
         guard !replyProgress.isEmpty else { return }
         let queued = Set(queue.items.compactMap { $0.completion?.id })
         let working = queue.sessionsInTurn
         let now = Date().timeIntervalSince1970
         let next = replyProgress.filter { queued.contains($0.key) }
-            .mapValues { $0.observing(sessionWorking: working.contains($0.completion.session), at: now) }
+            .mapValues { $0.observing(sessionWorking: working.contains($0.completion.session),
+                                      latestTurnStart: replyTurnStarts[$0.completion.session], at: now) }
         if next != replyProgress { replyProgress = next }
     }
     func decide(_ request: AttentionRequest, as decision: ApprovalDecision) {

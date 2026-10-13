@@ -156,3 +156,58 @@ private func reachable(_ session: UUID = session) -> SessionReplyAvailability {
     #expect(queue.items.isEmpty)
     #expect(queue.acknowledgedCompletions.contains(completion().id))
 }
+
+// #271: a reply whose turn started and finished between two scans was never seen working, and the
+// card said Codex had not started a turn. The session's turn-start record after the send confirms it.
+@Test func aTurnThatStartedAndFinishedBetweenScansConfirmsTheReply() {
+    // Clicked at 1000.4, the daemon answered at 1000.6; the hook dates its record to the whole second.
+    let sent = SessionReplyProgress(completion: completion().id).startingSend(text: "kilo", at: 1000.4).recordingSent(at: 1000.6)
+    let turnStart = RolloutTimestamp.parse("1970-01-01T00:16:40Z")!   // 1000, whole seconds
+    // Never seen working: the turn was over by the next scan. Its start record is the confirmation.
+    #expect(sent.observing(sessionWorking: false, latestTurnStart: turnStart, at: 1003).phase == .working(text: "kilo"))
+    // Still confirmed when the record is first read after the window passed.
+    #expect(sent.observing(sessionWorking: false, latestTurnStart: turnStart, at: 1020).phase == .working(text: "kilo"))
+    // An unconfirmed card that later reads the record is confirmed too, and never resent.
+    let quiet = sent.observing(sessionWorking: false, latestTurnStart: nil, at: 1011)
+    #expect(quiet.phase == .unconfirmed(text: "kilo", sentAt: 1000.6))
+    #expect(quiet.observing(sessionWorking: false, latestTurnStart: turnStart, at: 1030).phase == .working(text: "kilo"))
+}
+
+@Test func onlyATurnStartedBeforeTheSendLeavesTheReplyUnconfirmed() {
+    let sent = SessionReplyProgress(completion: completion().id).startingSend(text: "kilo", at: 1000.4).recordingSent(at: 1000.6)
+    // The completed turn the card is about started long before; one second before the send is earlier too.
+    for earlier in [Double(700), 999] {
+        let waiting = sent.observing(sessionWorking: false, latestTurnStart: earlier, at: 1005)
+        #expect(waiting.phase == .sent(text: "kilo", at: 1000.6))
+        let quiet = sent.observing(sessionWorking: false, latestTurnStart: earlier,
+                                   at: 1000.6 + SessionReplyProgress.confirmationWindow)
+        #expect(quiet.phase == .unconfirmed(text: "kilo", sentAt: 1000.6))
+        #expect(quiet.isFinished)
+        #expect(quiet.observing(sessionWorking: false, latestTurnStart: earlier, at: 2000).phase == quiet.phase)
+    }
+    // An unreadable start time confirms nothing.
+    #expect(sent.observing(sessionWorking: false, latestTurnStart: .nan, at: 1011).phase
+            == .unconfirmed(text: "kilo", sentAt: 1000.6))
+    // Without a recorded send start, the second the reply counted as sent is the bound.
+    let unanchored = SessionReplyProgress(completion: completion().id).startingSend(text: "kilo").recordingSent(at: 1000.6)
+    #expect(unanchored.observing(sessionWorking: false, latestTurnStart: 1000, at: 1001).phase == .working(text: "kilo"))
+    #expect(unanchored.observing(sessionWorking: false, latestTurnStart: 999, at: 1001).phase == .sent(text: "kilo", at: 1000.6))
+}
+
+// The turn starts a reply is confirmed by: each session's UserPromptSubmit records, read both as CLI
+// events and by the hook reader that decodes every record whatever surface the scan classified the
+// session as, so a reclassified session still confirms (#271).
+@Test func replyTurnStartsAreEachSessionsLatestPromptRecord() {
+    let other = UUID(uuidString: "01A11611-0AE8-7042-9F19-FD36707AB5D6")!
+    let next = UUID(uuidString: "01A13417-F3AF-7452-AC9D-67D0BB79846A")!
+    let cli: [CLIEvent] = [.turnStarted(session: session, turn: turn, receivedAt: "2026-10-13T07:05:19Z"),
+                           .turnCompleted(session: session, turn: turn, receivedAt: "2026-10-13T07:05:22Z"),
+                           .turnStarted(session: other, turn: turn, receivedAt: "not a time")]
+    let hooks: [DesktopEvent] = [.promptSubmitted(session: session, turn: next, prompt: "kilo", receivedAt: "2026-10-13T07:09:07Z"),
+                                 .turnCompleted(session: session, turn: next, receivedAt: "2026-10-13T07:09:10Z"),
+                                 .toolStarted(session: other, turn: next, useID: "t", action: nil, capturedAt: 1_791_875_400)]
+    let starts = ReplyTurnStarts.latest(cliEvents: cli, hookEvents: hooks)
+    // The later prompt wins; a turn's end, a tool call and an unreadable time start nothing.
+    #expect(starts == [session: RolloutTimestamp.parse("2026-10-13T07:09:07Z")!])
+    #expect(ReplyTurnStarts.latest(cliEvents: cli, hookEvents: [])[session] == RolloutTimestamp.parse("2026-10-13T07:05:19Z"))
+}
