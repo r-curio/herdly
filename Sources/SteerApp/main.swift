@@ -152,6 +152,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var taskID = ""
     @Published var navigationMessage = ""
     @Published var openingTask = false
+    /// Each terminal card's Open line: the latest scan's unavailable cause, or a click's (#267).
+    @Published var openLines = OpenUnavailableLines<String>()
     private static let launchedAt = Date().timeIntervalSince1970
     @Published var queue = AttentionQueue(snapshot: Companion.launchSnapshot, observingSince: Companion.launchedAt)
     /// Source-scoped queue for adapters that have bounded native observations. The legacy
@@ -307,6 +309,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// can be found there before it is proved live (ADR 0012).
     var daemonCLISessions: Set<UUID> = []
     var liveCLI: Set<UUID> = []
+    /// A reminder scan has set `liveCLI` at least once since launch, so a session missing from it ended.
+    private(set) var cliLivenessRead = false
     /// Sessions a Ghostty inventory proved CLI by their session-id title, this launch. They stay CLI
     /// after the tab closes, and that closing ends them (`ReminderReader.scan`). Memory only.
     private var knownCLISessions: Set<UUID> = []
@@ -316,7 +320,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var hostTitleReadings: [TerminalHost: TerminalHostTitles] = [:]
     /// The host whose inventory last showed each Codex session's title (`ReminderScan.surfaceHosts`),
     /// so a session is not ended while that app is not running (H7). Memory only.
-    private var lastSeenHosts: [UUID: TerminalHost] = [:]
+    private(set) var lastSeenHosts: [UUID: TerminalHost] = [:]
     /// Daemon-held sessions whose end check waits on a switched-on host's inventory
     /// (`ReminderScan.awaitingHostInventories`): the iTerm2, Terminal.app and WezTerm scans read while
     /// this is not empty, even with nothing of theirs to show (#265).
@@ -333,10 +337,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     let tmux = TmuxState()
     /// Zellij scan, visits and typed routes (Companion+Zellij.swift, #242).
     let zellij = ZellijState()
+    /// The scan behind each terminal card's Open line (Companion+OpenAvailability.swift, #267).
+    let openAvailability = OpenAvailabilityScanState()
     var claudeInventoryAvailable: [String: Bool] = [:]
     var claudeInventories: [String: ClaudeInventoryScan] = [:]
     /// Unix time of the inventory in `ghosttyFocusState`, for dating a session end at the tab's absence.
-    private var ghosttyInventoryAt: Double = 0
+    private(set) var ghosttyInventoryAt: Double = 0
     /// ADR 0016's visit interval and dwell run over Ghostty title-route tabs, one reading per Ghostty scan.
     private var ghosttyVisits = TerminalVisitTracker<GhosttyTarget>()
     private var checkingGhostty = false
@@ -1331,6 +1337,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             cliSessions = scan.cliSessions.union(discoveredCLI)
             daemonCLISessions = scan.cliSessions.intersection(daemonThreads)
             liveCLI = scan.cliState.liveSessions.union(discoveredCLI)
+            cliLivenessRead = true
             knownCLISessions.formUnion(scan.titledCLISessions)
             lastSeenHosts.merge(scan.surfaceHosts) { _, latest in latest }
             codexSessionsAwaitingInventory = scan.awaitingHostInventories
@@ -1504,6 +1511,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         checkWezTerm()
         checkTmux()
         checkZellij()
+        checkOpenAvailability()
         // App identity only: no window contents, task titles, or accessibility queries.
         // App activation affects notification delivery, never the notch's visibility.
         let codexForeground = previewMode == nil ? desktopAdapter.codexForeground() : false

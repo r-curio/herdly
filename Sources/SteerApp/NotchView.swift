@@ -992,8 +992,8 @@ struct Notch: View {
     /// The card's one sentence about where the answer stands. Every phase names what Steer knows
     /// and nothing more; a relayed key is never described as an answer Codex has.
     private func questionStatus(_ question: AttentionQuestion, progress: QuestionAnswerProgress, total: Int) -> String? {
-        // The card's one reason line already says to answer it in Codex (`herdrReasonLine`).
-        if unrelayedHerdrQuestion(question) { return nil }
+        // The card's one reason line already says to answer it in Codex (`herdrReasonLine`, `terminalOpenLine`).
+        if unrelayedQuestion(question) { return nil }
         let index = progress.questionIndex
         let destination = HerdrPresentation.keyDestination(for: model.route(for: question))
         switch progress.phase {
@@ -1018,13 +1018,16 @@ struct Notch: View {
         }
     }
 
-    /// A Codex question in a herdr session that no relay can answer while Open is unavailable too.
-    /// Its card shows only `HerdrPresentation.unrelayedQuestionLine`; why the relay failed stays in
-    /// diagnostics. With Open available the card keeps offering Open in Codex as before.
-    private func unrelayedHerdrQuestion(_ question: AttentionQuestion) -> Bool {
-        guard case .relayUnavailable = model.route(for: question),
-              case .unavailable = herdrOpen(CodexAttentionAdapter.session(question.session, surface: .cli)) else { return false }
-        return true
+    /// A Codex question that no relay can answer while Open is unavailable too, in herdr or in a
+    /// terminal host (#267). Its card shows only one line: "Answer this in Codex." then Open's reason
+    /// (`HerdrPresentation.unrelayedQuestionLine`, `OpenUnavailableLines.cardLine`); why the relay failed
+    /// stays in diagnostics. With Open still offered (a click-time line included) the card keeps its
+    /// typed-input sentence and Open as before.
+    private func unrelayedQuestion(_ question: AttentionQuestion) -> Bool {
+        guard case .relayUnavailable = model.route(for: question) else { return false }
+        let identity = CodexAttentionAdapter.session(question.session, surface: .cli)
+        if case .unavailable = herdrOpen(identity) { return true }
+        return !model.offersTerminalOpen(identity)
     }
 
     @ViewBuilder
@@ -1199,6 +1202,8 @@ struct Notch: View {
         let spotlightDetails = isSpotlight(item) ? model.spotlightDetails(for: item) : nil
         let subject = rowSubject(item)
         let herdr = herdrOpen(item.session)
+        // A Codex card offers Open unless herdr or the latest terminal scan rules it out (#267).
+        let codexOpen = herdr.offersOpen && model.offersTerminalOpen(item.session)
         let spotlit = isSpotlight(item)
         let earlierOpen = disclosure(earlierKey(item))
         let collapsed = item.kind == .earlierOutcome && !earlierOpen.wrappedValue && !spotlit
@@ -1329,6 +1334,8 @@ struct Notch: View {
                 }
                 if item.session.source == .codex, case let .unavailable(cause) = herdr {
                     herdrReasonLine(item, cause: cause)
+                } else if item.session.source == .codex, let reason = model.terminalOpenLine(item.session) {
+                    terminalOpenLine(item, reason: reason)
                 }
                 HStack(spacing: 6) {
                     switch item.kind {
@@ -1349,7 +1356,7 @@ struct Notch: View {
                                 .accessibilityLabel("Deny: \(subject)")
                                 .accessibilityHint("Denies this Claude \(Self.claudeRequestKind(approval)) request.")
                         }
-                        if item.session.source == .codex, herdr.offersOpen {
+                        if item.session.source == .codex, codexOpen {
                             NotchButton(title: "Open Session") {
                                 if let approval = item.approval { model.openAgentApproval(approval) }
                             }
@@ -1359,7 +1366,7 @@ struct Notch: View {
                         }
                         claudeReturnControl(item, subject: subject)
                     case .handedBackApproval:
-                        if item.session.source == .codex, herdr.offersOpen {
+                        if item.session.source == .codex, codexOpen {
                             NotchButton(title: "Open Session") { model.openAgent(item.session) }
                                 .disabled(model.openingTask)
                                 .accessibilityLabel("Open Session: \(subject)")
@@ -1367,7 +1374,7 @@ struct Notch: View {
                         }
                         claudeReturnControl(item, subject: subject)
                     case .statusUnavailable:
-                        if item.session.source == .codex, herdr.offersOpen {
+                        if item.session.source == .codex, codexOpen {
                             NotchButton(title: "Open Session") { model.openAgent(item.session) }
                                 .disabled(model.openingTask)
                                 .accessibilityLabel("Open Session: \(subject)")
@@ -1380,7 +1387,7 @@ struct Notch: View {
                             NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
                                 .accessibilityLabel("Set up Ghostty: \(subject)")
                                 .accessibilityHint("Opens Steer controls to enable Ghostty controls.")
-                        } else if herdr.offersOpen {
+                        } else if codexOpen {
                             NotchButton(title: "Open Session", emphasized: true) { model.openAgent(item.session) }
                                 .disabled(model.openingTask)
                                 .accessibilityLabel("Open Session: \(subject)")
@@ -1391,7 +1398,7 @@ struct Notch: View {
                                 .accessibilityLabel("Dismiss question: \(subject)")
                         }
                     case .outcome, .earlierOutcome:
-                        if item.session.source == .codex, herdr.offersOpen {
+                        if item.session.source == .codex, codexOpen {
                             NotchButton(title: "Open Session") { model.openAgent(item.session) }
                                 .disabled(model.openingTask)
                                 .accessibilityLabel("Open Session: \(subject)")
@@ -1401,7 +1408,7 @@ struct Notch: View {
                         NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
                             .accessibilityLabel("Dismiss completion: \(subject)")
                     case .waiting, .running:
-                        if item.session.source == .codex, herdr.offersOpen {
+                        if item.session.source == .codex, codexOpen {
                             NotchButton(title: "Open Session") { model.openAgent(item.session) }
                                 .disabled(model.openingTask)
                                 .accessibilityLabel("Open Session: \(subject)")
@@ -1497,7 +1504,7 @@ struct Notch: View {
     private func herdrReasonLine(_ item: AgentAttentionItem, cause: HerdrUnavailableCause) -> some View {
         let agent: HerdrAgentKind = item.session.source == .claude ? .claude : .codex
         let unrelayed = item.kind == .question
-            && item.question.flatMap(model.codexQuestion(for:)).map(unrelayedHerdrQuestion) == true
+            && item.question.flatMap(model.codexQuestion(for:)).map(unrelayedQuestion) == true
         let line = unrelayed ? HerdrPresentation.unrelayedQuestionLine(openCause: cause)
             : HerdrPresentation.cardLine(for: cause, agent: agent)
         Text(line)
@@ -1520,6 +1527,8 @@ struct Notch: View {
         } else if herdr == .notInHerdr, !model.isBackgroundClaudeSession(session), !model.canOpenClaude(session) {
             Text(model.claudeReturnUnavailableMessage)
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+        } else if herdr == .notInHerdr, let reason = model.terminalOpenLine(session) {
+            terminalOpenLine(item, reason: reason)
         }
     }
 
@@ -1528,22 +1537,45 @@ struct Notch: View {
         if item.session.source == .claude {
             let herdr = herdrOpen(item.session)
             if herdr == .available || (herdr == .notInHerdr && model.canOpenClaude(item.session)) {
-                NotchButton(title: "Open Session", emphasized: emphasized) {
-                    if let approval = item.approval {
-                        model.openAgentApproval(approval)
-                    } else {
-                        model.openAgent(item.session)
-                    }
+                // The terminal scan's line replaces Open with no disabled button (#267).
+                if herdr == .available || model.offersTerminalOpen(item.session) {
+                    claudeOpenButton(item, subject: subject, emphasized: emphasized)
                 }
-                    .disabled(model.openingTask)
-                    .accessibilityLabel("Open Session: \(subject)")
-                    .accessibilityHint("Open this Claude session in its terminal.")
             } else if herdr == .notInHerdr, !model.ghosttyEnabled {
                 NotchButton(title: "Set up Ghostty", emphasized: emphasized, action: model.showControls)
                     .accessibilityLabel("Set up Ghostty: \(subject)")
                     .accessibilityHint("Opens Steer controls to enable Ghostty controls.")
             }
         }
+    }
+
+    private func claudeOpenButton(_ item: AgentAttentionItem, subject: String, emphasized: Bool) -> some View {
+        NotchButton(title: "Open Session", emphasized: emphasized) {
+            if let approval = item.approval {
+                model.openAgentApproval(approval)
+            } else {
+                model.openAgent(item.session)
+            }
+        }
+            .disabled(model.openingTask)
+            .accessibilityLabel("Open Session: \(subject)")
+            .accessibilityHint("Open this Claude session in its terminal.")
+    }
+
+    /// The one line a terminal card shows when Open is unavailable (product.md, "Open unavailable"):
+    /// the scan's, which replaces Open, or a click's, beside Open until the next scan. A Codex question
+    /// whose option cannot be typed shares the line ("Answer this in Codex." first). Static text, so
+    /// nothing moves under Reduce Motion.
+    @ViewBuilder
+    private func terminalOpenLine(_ item: AgentAttentionItem, reason: OpenUnavailableReason) -> some View {
+        let unanswerable = item.kind == .question
+            && item.question.flatMap(model.codexQuestion(for:)).map(unrelayedQuestion) == true
+        let line = OpenUnavailableLines<String>.cardLine(reason, questionCannotBeTyped: unanswerable)
+        Text(line)
+            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .accessibilityLabel(model.offersTerminalOpen(item.session)
+                                ? "Open Session did not open. \(line)" : "Open Session unavailable. \(line)")
     }
 
     private var stripLabel: String {
