@@ -542,7 +542,7 @@ private var pendingEvidence: ReminderReader.RolloutEvidence {
     let switches = TerminalHostSwitches(enabled: [.ghostty, .wezTerm])
     #expect(TerminalKeyRelayCheck.hostsToRead(switches: switches) == [.wezTerm])
     let real = try #require(snapshot(listJSON(decoy: false))).inventory
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: switches, fresh: [.wezTerm: real]) == .noQuestionKeys(.wezTerm))
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: "other", switches: switches, fresh: [.wezTerm: real]) == nil)
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: "other", switches: switches, fresh: [.wezTerm: .unreadable]) == .otherHostUnreadable(.wezTerm))
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: switches, fresh: [.wezTerm: real]) == .noQuestionKeys(.wezTerm))
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: "other", processes: [:], switches: switches, fresh: [.wezTerm: real]) == nil)
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: "other", processes: [:], switches: switches, fresh: [.wezTerm: .unreadable]) == .otherHostUnreadable(.wezTerm))
 }

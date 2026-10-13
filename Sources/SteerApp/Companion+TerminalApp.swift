@@ -81,9 +81,10 @@ struct TerminalTabReads: Sendable {
     var wezTerm: WezTermSnapshot?
     var wezTermClients: WezTermClients?
 
-    /// Reads Terminal.app (while on) and the other enabled hosts, then `ps` for every Terminal.app tab and
-    /// tmux pane whose title is a shortened Codex identifier or whose tty is in `claudeTTYs`, then, when
-    /// `second`, Terminal.app and tmux again. Off the main actor.
+    /// Reads Terminal.app (while on) and the other enabled hosts, then `ps` for every tab or pane of a
+    /// tty-listing host (Terminal.app, iTerm2, WezTerm, tmux) whose title is a shortened Codex identifier
+    /// or whose tty is in `claudeTTYs`, so a title decoy is told apart from an unread tab (#268), then,
+    /// when `second`, Terminal.app, tmux and Zellij again. Off the main actor.
     static func take(others: OtherTabHosts, claudeTTYs: Set<String>, second: Bool) -> TerminalTabReads {
         let terminal: TerminalAppNavigation.Read = others.terminalAppOn ? TerminalAppNavigation.snapshot() : .notRunning
         var inventories: [TerminalHost: TerminalHostInventory] = [:]
@@ -333,7 +334,12 @@ extension Companion {
             // A scan's binding is for presentation and visits; Open and typed input re-run it on fresh
             // reads, a second inventory included, immediately before acting.
             let binding = codexBinding(session, reads: reads)
-            if reads.terminalAppCarries(title: GhosttyMatch.title(session)) { codexSeen.insert(session) }
+            // A title decoy here, or one beside a session another host holds, is not this host's (#268).
+            if case .tabs(let tabs) = reads.terminalApp.inventory,
+               TerminalTabOpen.codexStays(in: .terminalApp, carriesTitle: TerminalTabBindingRules.carriesCodexTitle(
+                   tabs, title: GhosttyMatch.title(session), processes: reads.processes), binding: binding) {
+                codexSeen.insert(session)
+            }
             if let route = TerminalReplyRoute.from(binding) { codexRoutes[session] = route }
             if case .bound(let target) = binding, target.host == .terminalApp { codexTargets[session] = target }
             diagnostics.append("Codex \(session.uuidString.lowercased()): \(binding)")

@@ -341,6 +341,13 @@ public enum TerminalTabBindingRules {
         return !read.contains { $0.foreground && $0.name == HerdrCodexBindingRules.processName }
     }
 
+    /// Whether a tab of `tabs` that is not a title decoy shows the Codex `title` (#268): the one question
+    /// typed input and route choice ask of a host. A titled tab whose `ps` was not read still carries it.
+    public static func carriesCodexTitle(_ tabs: [TerminalTab], title: String,
+                                         processes: [String: [TerminalProcess]]) -> Bool {
+        tabs.contains { $0.title == title && !isCodexTitleDecoy($0, processes: processes) }
+    }
+
     /// Every tab of every enabled terminal host and every pane of an enabled multiplexer whose titles
     /// count (`TerminalHost.titleCounted`: tmux and Zellij), in host order. Hosts switched off are never read, whatever
     /// `inventories` holds for them. The first enabled host whose inventory is unreadable or missing

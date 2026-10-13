@@ -315,6 +315,29 @@ private func tmuxReads(_ tmux: TmuxRead, iTerm2: TerminalHostInventory? = nil) -
     #expect(TerminalOpenScan.codex(session: session, liveSessions: [session], reads: scanReads) == .reachable)
 }
 
+@Test func aDecoyBesideATTYLessGhosttyTabLeavesTheSessionToGhosttysTitleRoute() throws {
+    // Review of #268: the real Codex is in a Ghostty tab without `tty`, so the binding reads
+    // `ttyUnknown(.ghostty)`. A tmux decoy pane must not keep the session and fall back through its clients.
+    let snapshot = try tmuxSnapshot()
+    let ghostty = try ghosttySnapshot([[title]])
+    let inventories: [TerminalHost: TerminalHostInventory] = [
+        .ghostty: .ghosttyTitles(ghostty, running: true), .tmux: snapshot.inventory,
+        .terminalApp: .tabs([tab("9882", tty: clientTTY, title: "tmux")]),
+    ]
+    var scanReads = reads([.ghostty, .tmux, .terminalApp], inventories, processes: [paneTTY: decoyPS], ghosttyOn: true,
+                          ghostty: ghostty, ghosttyRunning: true, tmux: .snapshot(snapshot))
+    scanReads.multiplexerClientTTYs = snapshot.clientTTYs
+    #expect(TerminalOpenScan.codex(session: session, liveSessions: [session], reads: scanReads) == .reachable)
+    // Each host's click asks the same question: only Ghostty keeps a session its tty-less tab holds.
+    let binding = TerminalTabBinding.unavailable(.ttyUnknown(.ghostty))
+    for host in [TerminalHost.tmux, .terminalApp, .wezTerm, .iTerm2] {
+        #expect(!TerminalTabOpen.codexStays(in: host, carriesTitle: true, binding: binding), "\(host)")
+    }
+    #expect(TerminalTabOpen.codexStays(in: .ghostty, carriesTitle: true, binding: binding))
+    // A Zellij pane holding the only candidate is Zellij's, whatever another host's decoy shows.
+    #expect(!TerminalTabOpen.codexStays(in: .tmux, carriesTitle: true, binding: .unavailable(.ttyUnknown(.zellij))))
+}
+
 // MARK: - Zellij (ADR 0014)
 
 private func zellijSnapshot() throws -> ZellijSnapshot {

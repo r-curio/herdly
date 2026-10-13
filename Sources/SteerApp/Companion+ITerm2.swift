@@ -429,7 +429,7 @@ extension Companion {
             }
             iTerm2.codexInputBlocks = Dictionary(uniqueKeysWithValues: inputSessions.compactMap { session in
                 HerdrCodexBindingRules.title(forSession: session.uuidString.lowercased())
-                    .flatMap { ITerm2TypedInput.codexBlock(title: $0, iTerm2: iTerm2Inventory) }
+                    .flatMap { ITerm2TypedInput.codexBlock(title: $0, processes: reads.processes, iTerm2: iTerm2Inventory) }
                     .map { (session, $0) }
             })
             // Frontmost as macOS reported it when the scan started: anything else shows nothing visible.
