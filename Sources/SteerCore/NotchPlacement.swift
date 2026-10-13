@@ -314,6 +314,29 @@ public enum NotchHover {
     }
 }
 
+/// How a refresh brings the panel to its computed frame. The window server can move the panel
+/// while a display sleeps, wakes, or is reconfigured, leaving it mid-screen while the computed
+/// frame is unchanged, so the panel's actual frame is checked as well as the last target.
+public enum NotchFrameSync: Equatable, Sendable {
+    /// The panel is where it belongs, or an animation toward the target is still running.
+    case none
+    /// The target changed: move to it, animated when the panel is visible.
+    case moveToNewTarget
+    /// The target is unchanged but the panel is elsewhere: put it back at once.
+    case restoreDrifted
+
+    /// Differences up to this many points are backing-store rounding, not drift.
+    public static let tolerance: CGFloat = 1
+
+    public static func action(target: CGRect, lastTarget: CGRect, actual: CGRect, animating: Bool) -> NotchFrameSync {
+        if target != lastTarget { return .moveToNewTarget }
+        guard !animating else { return .none }
+        let drifted = abs(actual.minX - target.minX) > tolerance || abs(actual.minY - target.minY) > tolerance
+            || abs(actual.width - target.width) > tolerance || abs(actual.height - target.height) > tolerance
+        return drifted ? .restoreDrifted : .none
+    }
+}
+
 /// The strip's content regions, inside the ears: `leading` left of the housing, `gap` over it
 /// (zero without a housing), `trailing` right of it, all `height` tall.
 public struct StripLayout: Equatable, Sendable {
