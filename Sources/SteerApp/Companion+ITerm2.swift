@@ -10,6 +10,8 @@ final class ITerm2State: ObservableObject {
     /// A live session was seen bound to an iTerm2 tab since the switch went on.
     @Published var inUse = false
     @Published var installed = false
+    /// iTerm2's bundle version, shown on the card for information only (product.md, "Settings").
+    @Published var version: String?
     /// Each session's latest Open in iTerm2, for Show diagnostics: verified, fallback or unavailable, with the reason.
     @Published var lastOpen: [String: String] = [:]
     /// Queued Codex sessions whose typed input iTerm2 withholds, from the latest scan (ADR 0017).
@@ -116,7 +118,9 @@ extension Companion {
     /// asks macOS for consent as Ghostty does. With it off, a silent check keeps a remembered denial's
     /// guidance on the card.
     func startITerm2() {
-        iTerm2.installed = NSWorkspace.shared.urlForApplication(withBundleIdentifier: ITerm2Navigation.bundleIdentifier) != nil
+        let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: ITerm2Navigation.bundleIdentifier)
+        iTerm2.installed = appURL != nil
+        iTerm2.version = appURL.flatMap { Bundle(url: $0)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
         if iTerm2.launchObserver == nil {
             iTerm2.launchObserver = NSWorkspace.shared.notificationCenter.addObserver(
                 forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
