@@ -137,16 +137,17 @@ private func codexBinding(_ inventory: TerminalHostInventory, second: TerminalHo
 
 @Test func aCodexPaneBindsByTitleAndItsOneForegroundCodexWhileTheDecoyBindsNothing() throws {
     let withDecoy = try #require(snapshot()).inventory
-    // The proof's decoy carries the same title: two candidates, so nothing binds.
-    #expect(codexBinding(withDecoy) == .unavailable(.duplicateTitles(2)))
+    // The proof's decoy carries the same title over `sleep`: it is no candidate, so the real pane binds (#268).
+    let bound = TerminalTabBinding.bound(TerminalTabTarget(host: .wezTerm, tabID: "1", tty: "/dev/ttys017"))
+    #expect(codexBinding(withDecoy) == bound)
     let real = try #require(snapshot(listJSON(decoy: false))).inventory
-    #expect(codexBinding(real) == .bound(TerminalTabTarget(host: .wezTerm, tabID: "1", tty: "/dev/ttys017")))
+    #expect(codexBinding(real) == bound)
 }
 
 @Test func aCodexTitleOverAnotherProgramNeverBinds() throws {
-    // Only the decoy is left: its tty runs `sleep`, not `codex`.
+    // Only the decoy is left: its tty runs `sleep`, not `codex`, so nothing carries the title.
     let decoyOnly = try #require(snapshot("[" + paneJSON(window: 1, tab: 3, pane: 3, title: codexTitle, tty: "/dev/ttys019") + "]"))
-    #expect(codexBinding(decoyOnly.inventory) == .unavailable(.foregroundProcesses(count: 0)))
+    #expect(codexBinding(decoyOnly.inventory) == .unavailable(.titleNotFound))
 }
 
 @Test func aSplitWezTermTabNeverBindsAndASecondReadMustAgree() throws {

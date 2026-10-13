@@ -121,12 +121,58 @@ private func codex(_ sessionID: String = codexSession, liveness: HerdrSessionLiv
     let decoyTTY = "/dev/ttys013"
     let decoy = tab("A3", tty: decoyTTY)
     let decoyPS = [decoyTTY: TerminalForegroundProcesses.parse(sleepPS)!]
-    // The real tab is gone: the decoy has the only title but no Codex in its foreground.
-    #expect(codex(inventories: [.iTerm2: .tabs([decoy])], processes: decoyPS)
-        == .unavailable(.foregroundProcesses(count: 0)))
-    // The real tab is still there: two tabs share the title, so neither binds.
-    #expect(codex(inventories: [.iTerm2: .tabs([tab("A1"), decoy])],
-                  processes: decoyPS.merging([realTTY: TerminalForegroundProcesses.parse(codexPS)!]) { $1 })
+    // The real tab is gone: a decoy without a foreground `codex` is no candidate, so nothing carries the title.
+    #expect(codex(inventories: [.iTerm2: .tabs([decoy])], processes: decoyPS) == .unavailable(.titleNotFound))
+}
+
+// #268 (user decision 2026-10-13): a titled tab whose `ps -t` shows no foreground `codex` neither binds
+// nor blocks the real tab, on every host whose tabs list a tty.
+@Test func aDecoyBesideTheRealTabLeavesTheRealTabBoundOnEveryTTYHost() {
+    let decoyTTY = "/dev/ttys013"
+    let processes = [realTTY: TerminalForegroundProcesses.parse(codexPS)!,
+                     decoyTTY: TerminalForegroundProcesses.parse(sleepPS)!]
+    for host in [TerminalHost.iTerm2, .terminalApp, .wezTerm, .ghostty, .tmux] {
+        // tmux is contacted only beside a terminal host (ADR 0014), here an iTerm2 that is not running.
+        var inventories: [TerminalHost: TerminalHostInventory] = [.iTerm2: .notRunning]
+        inventories[host] = .tabs([tab("decoy", tty: decoyTTY), tab("real")])
+        #expect(codex(switches: switches([host, .iTerm2]), inventories: inventories, processes: processes)
+            == .bound(TerminalTabTarget(host: host, tabID: "real", tty: realTTY)), "\(host)")
+    }
+    // The decoy may be in another enabled host than the real tab.
+    let across: [TerminalHost: TerminalHostInventory] = [
+        .terminalApp: .tabs([tab("window 9882", tty: decoyTTY)]),
+        .iTerm2: .tabs([tab("A1")]),
+    ]
+    #expect(codex(switches: switches([.iTerm2, .terminalApp]), inventories: across, processes: processes)
+        == .bound(TerminalTabTarget(host: .iTerm2, tabID: "A1", tty: realTTY)))
+    // The second read ignores the decoy the same way.
+    #expect(codex(switches: switches([.iTerm2, .terminalApp]), inventories: across, processes: processes,
+                  secondRead: across) == .bound(TerminalTabTarget(host: .iTerm2, tabID: "A1", tty: realTTY)))
+}
+
+@Test func twoTitledTabsThatBothRunCodexStayUnbound() {
+    let secondTTY = "/dev/ttys014"
+    let processes = [realTTY: TerminalForegroundProcesses.parse(codexPS)!,
+                     secondTTY: TerminalForegroundProcesses.parse(codexPS)!]
+    #expect(codex(inventories: [.iTerm2: .tabs([tab("A1"), tab("A2", tty: secondTTY)])], processes: processes)
+        == .unavailable(.duplicateTitles(2)))
+}
+
+@Test func aTitledTabWhoseProcessesCannotBeReadIsNeverTakenForADecoy() {
+    // `ps` failed for the second titled tab: it may run `codex`, so it still counts and nothing binds.
+    #expect(codex(inventories: [.iTerm2: .tabs([tab("A1"), tab("A2", tty: "/dev/ttys014")])])
+        == .unavailable(.duplicateTitles(2)))
+    // A titled tab first seen by the second read has no `ps` read at all: the binding is void.
+    #expect(codex(secondRead: [.iTerm2: .tabs([tab("A1"), tab("A2", tty: "/dev/ttys014")])])
+        == .unavailable(.titleChanged))
+}
+
+@Test func aSplitTitledTabStillCountsWithoutAForegroundCodex() {
+    // `ps -t` reads one pane's tty; another pane of the split may run the session, so it is no decoy.
+    let decoyTTY = "/dev/ttys013"
+    let processes = [realTTY: TerminalForegroundProcesses.parse(codexPS)!,
+                     decoyTTY: TerminalForegroundProcesses.parse(sleepPS)!]
+    #expect(codex(inventories: [.iTerm2: .tabs([tab("A1"), tab("A3", tty: decoyTTY, panes: 2)])], processes: processes)
         == .unavailable(.duplicateTitles(2)))
 }
 

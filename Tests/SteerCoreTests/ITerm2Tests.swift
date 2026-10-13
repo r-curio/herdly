@@ -135,12 +135,14 @@ private func claudeBinding(_ json: String, pid: Int32 = 6095, tty: String = "/de
                                    processes: processes)
 }
 
-@Test func codexBindsToItsITerm2SessionOnlyWithoutTheDecoy() {
-    // The decoy copies the title exactly, so a title alone never picks a tab.
-    #expect(codexBinding(snapshotJSON()) == .unavailable(.duplicateTitles(2)))
-    #expect(codexBinding(snapshotJSON(a3Title: nil)) == .bound(TerminalTabTarget(host: .iTerm2, tabID: a1, tty: "/dev/ttys030")))
-    // The decoy alone, its title over `sleep`: no foreground `codex`.
-    #expect(codexBinding(snapshotJSON(a1Title: nil)) == .unavailable(.foregroundProcesses(count: 0)))
+@Test func codexBindsToItsITerm2SessionAndNeverToTheDecoy() {
+    // The decoy copies the title exactly over `sleep`: it is no candidate, so the real tab binds (#268, the
+    // #243 live run).
+    let real = TerminalTabBinding.bound(TerminalTabTarget(host: .iTerm2, tabID: a1, tty: "/dev/ttys030"))
+    #expect(codexBinding(snapshotJSON()) == real)
+    #expect(codexBinding(snapshotJSON(a3Title: nil)) == real)
+    // The decoy alone binds nothing: no tab running `codex` carries the title.
+    #expect(codexBinding(snapshotJSON(a1Title: nil)) == .unavailable(.titleNotFound))
     // A second read in which the tab moved to another tty.
     #expect(codexBinding(snapshotJSON(a3Title: nil), second: snapshotJSON(a3Title: nil, a1TTY: "/dev/ttys040"))
             == .unavailable(.titleChanged))
@@ -307,17 +309,32 @@ private func runOpen(_ revalidated: Result<ITerm2OpenPlan, OpenMiss> = .success(
     let switches = TerminalHostSwitches(enabled: [.iTerm2, .ghostty])
     let carriers = TerminalTabOpen.codexCarriers(title: codexTitle, switches: switches, inventories: inventories,
                                                  processes: processes)
-    // A1 runs Codex; the decoy A3 has none to walk from; Ghostty's title-only tab is in Ghostty.
+    // A1 runs Codex; Ghostty's title-only tab is in Ghostty. The decoy A3 shows no foreground `codex`, so it
+    // is no candidate (ADR 0015's 2026-10-13 amendment, #268).
     #expect(Set(carriers) == [TerminalCodexCarrier(host: .iTerm2, tty: "/dev/ttys030", codexPID: 6090),
-                              TerminalCodexCarrier(host: .iTerm2, tty: "/dev/ttys032", codexPID: nil),
                               TerminalCodexCarrier(host: .ghostty, tty: nil, codexPID: nil)])
     let candidates = TerminalTabOpen.codexCandidates(carriers, walk: { pid in pid == 6090 ? .reached(.iTerm2) : .failed },
                                                      ttyWrittenAt: { $0 == "/dev/ttys030" ? 50 : 10 })
+    #expect(candidates.count == 2)
     #expect(candidates.contains(CodexOpenCandidate(walk: .reached(.iTerm2), ttyWrittenAt: 50)))
-    #expect(candidates.contains(CodexOpenCandidate(walk: .failed, ttyWrittenAt: 10)))
     #expect(candidates.contains(CodexOpenCandidate(walk: .reached(.ghostty), ttyWrittenAt: nil)))
-    // Any candidate whose app cannot be found leaves the app unidentified: never a guess.
+    // Two apps and a tty time that cannot be read: the app is unidentified, never a guess.
     #expect(OpenFallback.codexApp(candidates: candidates, switches: switches) == .failure(.appNotIdentified))
+    // Without Ghostty, the decoy no longer stops the fallback: the real tab's walk names iTerm2.
+    let iTerm2Only = TerminalTabOpen.codexCarriers(title: codexTitle, switches: onlyITerm2, inventories: inventories,
+                                                   processes: processes)
+    #expect(iTerm2Only == [TerminalCodexCarrier(host: .iTerm2, tty: "/dev/ttys030", codexPID: 6090)])
+    #expect(OpenFallback.codexApp(candidates: TerminalTabOpen.codexCandidates(iTerm2Only, walk: { _ in .reached(.iTerm2) },
+                                                                              ttyWrittenAt: { _ in nil }),
+                                  switches: switches) == .success(.iTerm2))
+    // A titled tab whose `ps` was not read stays a candidate with no `codex` to walk from: never a decoy.
+    var unread = processes
+    unread["/dev/ttys032"] = nil
+    let failed = TerminalTabOpen.codexCandidates(
+        TerminalTabOpen.codexCarriers(title: codexTitle, switches: onlyITerm2, inventories: inventories, processes: unread),
+        walk: { pid in pid == 6090 ? .reached(.iTerm2) : .failed }, ttyWrittenAt: { _ in nil })
+    #expect(failed.contains(CodexOpenCandidate(walk: .failed, ttyWrittenAt: nil)))
+    #expect(OpenFallback.codexApp(candidates: failed, switches: switches) == .failure(.appNotIdentified))
     // Without the decoy and Ghostty, the one walk names iTerm2.
     let alone = TerminalTabOpen.codexCandidates([TerminalCodexCarrier(host: .iTerm2, tty: "/dev/ttys030", codexPID: 6090)],
                                                 walk: { _ in .reached(.iTerm2) }, ttyWrittenAt: { _ in nil })

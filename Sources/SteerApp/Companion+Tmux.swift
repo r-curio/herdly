@@ -243,6 +243,13 @@ extension Companion {
                 return
             }
             let others = otherTabHosts
+            // A decoy pane here leaves a session whose tab is in another host to the other routes (#268).
+            let across = await Task.detached { TerminalTabReads.take(others: others, claudeTTYs: [], second: false) }.value
+            if !TerminalTabOpen.codexStays(in: .tmux, carriesTitle: true, binding: codexBinding(session, reads: across)) {
+                openingTask = false
+                otherwise()
+                return
+            }
             let record = MultiplexerOpenRecord()
             let result = await runTmuxOpen(agent: .codex, record: record, revalidate: { [weak self] in
                 let reads = await Task.detached { TerminalTabReads.take(others: others, claudeTTYs: [], second: true) }.value

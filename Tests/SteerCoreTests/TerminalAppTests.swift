@@ -115,16 +115,17 @@ private func codexBinding(_ inventory: TerminalHostInventory, switches: Terminal
         == .bound(TerminalTabTarget(host: .terminalApp, tabID: "9882", tty: "/dev/ttys005")))
 }
 
-@Test func aDecoyCarryingCodexsTitleInTerminalAppLeavesNoBinding() throws {
-    // T3's custom title became Codex's exact title over `sleep` in the live proof.
+@Test func aDecoyCarryingCodexsTitleInTerminalAppBindsNothingAndLeavesTheRealTabBound() throws {
+    // T3's custom title became Codex's exact title over `sleep` in the live proof. It runs no `codex`, so it
+    // is no candidate and the real tab binds (#268).
     let decoy = inventoryJSON.replacingOccurrences(of: #""tty":"/dev/ttys018","title":"Terminal""#,
                                                    with: #""tty":"/dev/ttys018","title":"\#(codexTitle)""#)
     let inventory = try #require(snapshot(decoy)).inventory
-    #expect(codexBinding(inventory) == .unavailable(.duplicateTitles(2)))
-    // With the real tab closed, the decoy alone fails the foreground check rather than binding.
+    #expect(codexBinding(inventory) == .bound(TerminalTabTarget(host: .terminalApp, tabID: "9882", tty: "/dev/ttys005")))
+    // With the real tab closed, the decoy alone binds nothing: no tab running `codex` carries the title.
     let alone = decoy.replacingOccurrences(of: #""tty":"/dev/ttys005","title":"\#(codexTitle)""#,
                                            with: #""tty":"/dev/ttys005","title":"Terminal""#)
-    #expect(codexBinding(try #require(snapshot(alone)).inventory) == .unavailable(.foregroundProcesses(count: 0)))
+    #expect(codexBinding(try #require(snapshot(alone)).inventory) == .unavailable(.titleNotFound))
 }
 
 @Test func aClaudeTabInTerminalAppBindsByItsProcessesTTY() throws {
@@ -249,10 +250,10 @@ private let t2 = TerminalTabTarget(host: .terminalApp, tabID: "9921", tty: "/dev
     let carriers = TerminalTabOpen.codexCarriers(title: codexTitle, switches: bothOn,
                                                  inventories: [.terminalApp: inventory, .ghostty: ghostty],
                                                  processes: ["/dev/ttys005": psCodex, "/dev/ttys018": psSleep])
-    // The walk starts from each Terminal.app tab's single foreground `codex`; the decoy has none.
+    // The walk starts from each Terminal.app tab's single foreground `codex`; the decoy has none, so it is
+    // skipped (ADR 0015's 2026-10-13 amendment, #268).
     #expect(carriers == [TerminalCodexCarrier(host: .ghostty, tty: nil, codexPID: nil),
-                         TerminalCodexCarrier(host: .terminalApp, tty: "/dev/ttys005", codexPID: 60859),
-                         TerminalCodexCarrier(host: .terminalApp, tty: "/dev/ttys018", codexPID: nil)])
+                         TerminalCodexCarrier(host: .terminalApp, tty: "/dev/ttys005", codexPID: 60859)])
     // Only a switched-on host contributes: a session in a switched-off app has no candidate.
     #expect(TerminalTabOpen.codexCarriers(title: codexTitle, switches: terminalOn,
                                           inventories: [.terminalApp: inventory, .ghostty: ghostty],
