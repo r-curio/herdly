@@ -393,20 +393,30 @@ private func runOpen(_ revalidated: Result<ITerm2OpenPlan, OpenMiss> = .success(
 @Test func noKeyIsTypedForACodexSessionWhoseTitleIsAlsoInITerm2() {
     // The same title in a Ghostty tab and an iTerm2 tab: the title is not unique across the enabled
     // inventories, so Ghostty's relay must not type, and the card shows iTerm2's line.
-    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, iTerm2: snapshot()!.inventory) == .inITerm2)
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, processes: [:], iTerm2: snapshot()!.inventory) == .inITerm2)
     #expect(ITerm2TypedInputBlock.inITerm2.line == "Steer can't type into iTerm2. Reply in the session.")
 }
 
+@Test func anITerm2TitleDecoyNeverBlocksTypedInput() {
+    // #268: only the decoy A3 carries the title, and its `ps` shows `sleep`: iTerm2 cannot hold the session.
+    let decoyOnly = snapshot(snapshotJSON(a1Title: nil))!.inventory
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, processes: processes, iTerm2: decoyOnly) == nil)
+    // The real tab A1 beside it still blocks.
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, processes: processes, iTerm2: snapshot()!.inventory) == .inITerm2)
+    // The decoy's `ps` was not read: it may run `codex`, so it blocks (fail closed).
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, processes: [:], iTerm2: decoyOnly) == .inITerm2)
+}
+
 @Test func anUnreadableEnabledITerm2MakesTypedInputUnavailable() {
-    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, iTerm2: .unreadable) == .iTerm2Unreadable)
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, processes: [:], iTerm2: .unreadable) == .iTerm2Unreadable)
     #expect(ITerm2TypedInputBlock.iTerm2Unreadable.line == "Steer can't reach this session's tab. Reply in the session.")
 }
 
 @Test func iTerm2OffNotRunningOrWithoutTheTitleLeavesGhosttyTypedInputUnchanged() {
     // nil: iTerm2's switch is off, so it is never read.
-    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, iTerm2: nil) == nil)
-    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, iTerm2: .notRunning) == nil)
-    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, iTerm2: snapshot(snapshotJSON(a1Title: nil, a3Title: nil))!.inventory) == nil)
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, processes: [:], iTerm2: nil) == nil)
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, processes: [:], iTerm2: .notRunning) == nil)
+    #expect(ITerm2TypedInput.codexBlock(title: codexTitle, processes: [:], iTerm2: snapshot(snapshotJSON(a1Title: nil, a3Title: nil))!.inventory) == nil)
 }
 
 // MARK: - Claude's process start (ADR 0013, ADR 0008)

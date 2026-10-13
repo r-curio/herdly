@@ -403,7 +403,7 @@ private func zellijCodexBinding(_ snapshot: ZellijSnapshot?, second: ZellijSnaps
     // And Ghostty's question key fails closed until Zellij is read fresh (cross-host freshness).
     let ghostty = TerminalHostSwitches(enabled: [.ghostty, .zellij])
     #expect(TerminalKeyRelayCheck.hostsToRead(switches: ghostty) == [.zellij])
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: ghostty,
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: ghostty,
                                               fresh: [.zellij: try #require(zellijSnapshot()).inventory])
             == .noQuestionKeys(.zellij))
 }

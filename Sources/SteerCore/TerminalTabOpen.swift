@@ -72,12 +72,17 @@ public enum TerminalTabOpen {
     /// Whether `host`'s own Open route keeps a Codex session, given whether one of its tabs or panes carries
     /// the session's title and the cross-host binding (ADR 0013) on the same reads. A title decoy (no
     /// foreground `codex`, #268) may sit in one host while the binding names a tab in another; that session
-    /// goes on to the route of the host holding it rather than falling back here. A session bound nowhere
-    /// stays with every host carrying its title, whose Open reports the miss.
+    /// goes on to the route of the host holding it rather than falling back here. So does a session whose
+    /// only candidate is in a host listing no tty (`ttyUnknown`): a tty-less Ghostty tab goes to Ghostty's
+    /// title route, a Zellij pane to Zellij's rule. A session bound nowhere else stays with every host
+    /// carrying its title, whose Open reports the miss.
     public static func codexStays(in host: TerminalHost, carriesTitle: Bool, binding: TerminalTabBinding) -> Bool {
         guard carriesTitle else { return false }
-        if case .bound(let target) = binding { return target.host == host }
-        return true
+        switch binding {
+        case .bound(let target): return target.host == host
+        case .unavailable(.ttyUnknown(let holder)): return holder == host
+        case .unavailable: return true
+        }
     }
 
     /// The route for a binding re-run on fresh reads, immediately before Open (ADR 0013, "Freshness").

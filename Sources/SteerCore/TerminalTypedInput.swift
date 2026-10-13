@@ -261,14 +261,18 @@ public enum TerminalKeyRelayCheck {
     }
 
     /// nil when the key may go. A host missing from `fresh` or unreadable fails closed; a host whose tab
-    /// carries `title` holds the session, which gets no Ghostty key.
-    public static func ghosttyVeto(title: String, switches: TerminalHostSwitches,
+    /// carries `title` holds the session, which gets no Ghostty key, unless that tab is a title decoy
+    /// (`TerminalTabBindingRules.isCodexTitleDecoy` over `processes`, `ps -t` read after `fresh`; #268). A
+    /// titled tab whose `ps` was not read still vetoes.
+    public static func ghosttyVeto(title: String, processes: [String: [TerminalProcess]], switches: TerminalHostSwitches,
                                    fresh: [TerminalHost: TerminalHostInventory]) -> HerdrQuestionRelayUnavailable? {
         for host in hostsToRead(switches: switches) {
             switch fresh[host] {
             case .notRunning?: continue
             case .tabs(let tabs)?:
-                if tabs.contains(where: { $0.title == title }) { return .noQuestionKeys(host) }
+                if TerminalTabBindingRules.carriesCodexTitle(tabs, title: title, processes: processes) {
+                    return .noQuestionKeys(host)
+                }
             case .unreadable?, nil:
                 return .otherHostUnreadable(host)
             }

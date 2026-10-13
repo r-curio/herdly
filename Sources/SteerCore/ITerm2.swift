@@ -357,13 +357,16 @@ public enum ITerm2TypedInput {
     /// - Parameters:
     ///   - title: the session's shortened identifier (ADR 0005).
     ///   - iTerm2: a fresh iTerm2 inventory, or nil while iTerm2's switch is off (never read).
+    ///   - processes: `ps -t` reads of the scan's titled ttys; a tab whose read shows no foreground `codex`
+    ///     is a title decoy (#268), and a titled tab whose `ps` was not read still blocks.
     /// - Returns: nil when iTerm2 cannot hold the session: switched off, not running, or no tab shows
-    ///   the title.
-    public static func codexBlock(title: String, iTerm2: TerminalHostInventory?) -> ITerm2TypedInputBlock? {
+    ///   the title except title decoys.
+    public static func codexBlock(title: String, processes: [String: [TerminalProcess]],
+                                  iTerm2: TerminalHostInventory?) -> ITerm2TypedInputBlock? {
         switch iTerm2 {
         case nil, .notRunning?: nil
         case .unreadable?: .iTerm2Unreadable
-        case .tabs(let tabs)?: tabs.contains { $0.title == title } ? .inITerm2 : nil
+        case .tabs(let tabs)?: TerminalTabBindingRules.carriesCodexTitle(tabs, title: title, processes: processes) ? .inITerm2 : nil
         }
     }
 }

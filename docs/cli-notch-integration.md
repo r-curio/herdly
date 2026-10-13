@@ -280,6 +280,8 @@ records iTerm2's §3d run. Rules are pure SteerCore functions (`ITerm2.swift`,
   the latest scan). Immediately before Ghostty's question key, the shared
   `TerminalKeyRelayCheck` reads every enabled host other than Ghostty fresh (iTerm2,
   Terminal.app and WezTerm today), so a Ghostty decoy never gets a key while the real session is in iTerm2.
+  Both checks ignore a title decoy (#268): `codexBlock` uses the scan's `ps` reads, and the key check
+  reads `ps -t` for the fresh inventories' titled tabs; a titled tab whose `ps` fails still blocks.
   With iTerm2 off nothing changes. herdr's key path hides its controls on the same block but has
   no fresh read at click time; Claude has no typed input to guard here.
 - **Permission and card:** turning the switch on asks macOS as Ghostty does; a denial turns it

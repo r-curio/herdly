@@ -220,7 +220,11 @@ extension Companion {
             // A scan's binding is for presentation and visits; Open and typed input re-run it on fresh
             // reads immediately before acting.
             let binding = wezTermCodexBinding(session, reads: reads)
-            if let title = HerdrCodexBindingRules.title(forSession: session.uuidString.lowercased()), reads.carries(title: title) {
+            // A title decoy here, or one beside a session another host holds, is not this host's (#268).
+            if let title = HerdrCodexBindingRules.title(forSession: session.uuidString.lowercased()),
+               case .tabs(let tabs) = reads.wezTerm.inventory,
+               TerminalTabOpen.codexStays(in: .wezTerm, carriesTitle: TerminalTabBindingRules.carriesCodexTitle(
+                   tabs, title: title, processes: reads.processes), binding: binding) {
                 codexSeen.insert(session)
             }
             if let route = TerminalReplyRoute.from(binding) { codexRoutes[session] = route }

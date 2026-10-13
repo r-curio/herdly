@@ -318,12 +318,18 @@ extension Companion {
                 }
                 // ADR 0013 "Freshness": Ghostty binds by title alone, so every other enabled host is read
                 // fresh last, closest to the key; an unreadable one, or one whose tab carries the title,
-                // sends no key, so a Ghostty decoy never gets it (ADR 0017).
+                // sends no key, so a Ghostty decoy never gets it (ADR 0017). A title decoy there, whose fresh
+                // `ps` shows no `codex`, holds nothing (#268); a titled tab whose `ps` fails still vetoes.
                 let hosts = TerminalKeyRelayCheck.hostsToRead(switches: switches)
-                if !hosts.isEmpty,
-                   let veto = TerminalKeyRelayCheck.ghosttyVeto(title: GhosttyMatch.title(current.session), switches: switches,
-                                                                fresh: Companion.freshInventories(hosts, running: running)) {
-                    return (false, veto.message)
+                if !hosts.isEmpty {
+                    let title = GhosttyMatch.title(current.session)
+                    let fresh = Companion.freshInventories(hosts, running: running)
+                    let processes = TerminalTTYReads.processes(
+                        on: TerminalTabReadAssembly<Void>.ttysToRead(fresh, codexTitles: [title], claudeTTYs: []))
+                    if let veto = TerminalKeyRelayCheck.ghosttyVeto(title: title, processes: processes, switches: switches,
+                                                                    fresh: fresh) {
+                        return (false, veto.message)
+                    }
                 }
                 return GhosttyNavigation.answer(session: current.session, live: live, keys: [key])
             }.value
