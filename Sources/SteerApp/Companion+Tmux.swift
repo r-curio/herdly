@@ -171,7 +171,14 @@ extension Companion {
         for session in codexSessions {
             let binding = codexBinding(session, reads: reads)
             let title = GhosttyMatch.title(session)
-            let carried = snapshot?.panes.contains { $0.title == title } == true
+            // A title decoy pane, or one beside a session another host holds, is not tmux's (#268).
+            let carried: Bool
+            if case .tabs(let panes) = reads.tmux.inventory {
+                carried = TerminalTabOpen.codexStays(in: .tmux, carriesTitle: TerminalTabBindingRules.carriesCodexTitle(
+                    panes, title: title, processes: reads.processes), binding: binding)
+            } else {
+                carried = false
+            }
             if carried { codexSeen.insert(session) }
             let boundHere: Bool
             if case .bound(let target) = binding, target.host == .tmux { boundHere = true; codexTargets[session] = target.tabID }
@@ -243,6 +250,13 @@ extension Companion {
                 return
             }
             let others = otherTabHosts
+            // A decoy pane here leaves a session whose tab is in another host to the other routes (#268).
+            let across = await Task.detached { TerminalTabReads.take(others: others, claudeTTYs: [], second: false) }.value
+            if !TerminalTabOpen.codexStays(in: .tmux, carriesTitle: true, binding: codexBinding(session, reads: across)) {
+                openingTask = false
+                otherwise()
+                return
+            }
             let record = MultiplexerOpenRecord()
             let result = await runTmuxOpen(agent: .codex, record: record, revalidate: { [weak self] in
                 let reads = await Task.detached { TerminalTabReads.take(others: others, claudeTTYs: [], second: true) }.value

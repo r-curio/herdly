@@ -2,8 +2,9 @@ import Foundation
 
 // Host-neutral (added by #238 for iTerm2; any tty-bound host can use it): where an Open goes from a
 // fresh ADR 0013 tab binding (the exact tab, Ghostty's title route, or a miss that ADR 0015 resolves to
-// a fallback or an unavailable line), and the Codex title carriers ADR 0015's amendment walks to find
-// the app. Pure; SteerApp takes the reads. Host-specific steps live in each host's own file.
+// a fallback or an unavailable line), the Codex title carriers ADR 0015's amendment walks to find the
+// app, and which host's route keeps a Codex session. Pure; SteerApp takes the reads. Host-specific steps
+// live in each host's own file.
 
 public enum TerminalTabOpenRoute: Equatable, Sendable {
     /// The session is bound to this tab; the host's Open selects, raises and verifies it (ADR 0016).
@@ -30,15 +31,19 @@ public struct TerminalCodexCarrier: Equatable, Hashable, Sendable {
 }
 
 public enum TerminalTabOpen {
-    /// Every tab of every enabled terminal host showing `title`. Hosts switched off, not running or
-    /// unreadable contribute nothing; an unreadable host already makes the Open unavailable.
+    /// Every tab of every enabled terminal host showing `title`, except a title decoy: its `ps -t` shows no
+    /// foreground `codex`, so it is skipped rather than failing the walk (ADR 0015's 2026-10-13 amendment,
+    /// #268; `TerminalTabBindingRules.isCodexTitleDecoy`). A titled tab whose `ps` was not read stays, with
+    /// no `codex` to walk from. Hosts switched off, not running or unreadable contribute nothing; an
+    /// unreadable host already makes the Open unavailable.
     public static func codexCarriers(title: String, switches: TerminalHostSwitches,
                                      inventories: [TerminalHost: TerminalHostInventory],
                                      processes: [String: [TerminalProcess]]) -> [TerminalCodexCarrier] {
         var carriers: [TerminalCodexCarrier] = []
         for host in TerminalHost.terminals where switches.mayContact(host) {
             guard case .tabs(let tabs)? = inventories[host] else { continue }
-            for tab in tabs where tab.title == title {
+            for tab in tabs where tab.title == title
+                && !TerminalTabBindingRules.isCodexTitleDecoy(tab, processes: processes) {
                 let tty = tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY)
                 let codex = tty.flatMap { processes[$0] }?
                     .filter { $0.foreground && $0.name == HerdrCodexBindingRules.processName }
@@ -61,6 +66,22 @@ public enum TerminalTabOpen {
             }
             return CodexOpenCandidate(walk: carrier.codexPID.map(walk) ?? .failed,
                                       ttyWrittenAt: carrier.tty.flatMap(ttyWrittenAt))
+        }
+    }
+
+    /// Whether `host`'s own Open route keeps a Codex session, given whether one of its tabs or panes carries
+    /// the session's title and the cross-host binding (ADR 0013) on the same reads. A title decoy (no
+    /// foreground `codex`, #268) may sit in one host while the binding names a tab in another; that session
+    /// goes on to the route of the host holding it rather than falling back here. So does a session whose
+    /// only candidate is in a host listing no tty (`ttyUnknown`): a tty-less Ghostty tab goes to Ghostty's
+    /// title route, a Zellij pane to Zellij's rule. A session bound nowhere else stays with every host
+    /// carrying its title, whose Open reports the miss.
+    public static func codexStays(in host: TerminalHost, carriesTitle: Bool, binding: TerminalTabBinding) -> Bool {
+        guard carriesTitle else { return false }
+        switch binding {
+        case .bound(let target): return target.host == host
+        case .unavailable(.ttyUnknown(let holder)): return holder == host
+        case .unavailable: return true
         }
     }
 

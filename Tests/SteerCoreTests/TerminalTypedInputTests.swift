@@ -130,39 +130,55 @@ private let terminalOn = TerminalHostSwitches(enabled: [.ghostty, .terminalApp])
     let elsewhere = TerminalHostInventory.tabs([TerminalTab(tabID: "9882", tty: "/dev/ttys005", title: codexTitle, paneCount: 1)])
     let unrelated = TerminalHostInventory.tabs([TerminalTab(tabID: "9935", tty: "/dev/ttys019", title: "Terminal", paneCount: 1)])
     // The session's title in Terminal.app: a Ghostty tab with that title is a decoy, so no key.
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: terminalOn, fresh: [.terminalApp: elsewhere])
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: terminalOn, fresh: [.terminalApp: elsewhere])
         == .noQuestionKeys(.terminalApp))
     // Unreadable or denied, or never read: fail closed.
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: terminalOn, fresh: [.terminalApp: .unreadable])
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: terminalOn, fresh: [.terminalApp: .unreadable])
         == .otherHostUnreadable(.terminalApp))
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: terminalOn, fresh: [:])
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: terminalOn, fresh: [:])
         == .otherHostUnreadable(.terminalApp))
     // Not running, or no tab with the title: the key may go.
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: terminalOn, fresh: [.terminalApp: .notRunning]) == nil)
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: terminalOn, fresh: [.terminalApp: unrelated]) == nil)
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: terminalOn, fresh: [.terminalApp: .notRunning]) == nil)
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: terminalOn, fresh: [.terminalApp: unrelated]) == nil)
     // Switched off: never read, unchanged behavior.
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: TerminalHostSwitches(enabled: [.ghostty]),
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: TerminalHostSwitches(enabled: [.ghostty]),
                                               fresh: [:]) == nil)
     #expect(TerminalKeyRelayCheck.hostsToRead(switches: terminalOn) == [.terminalApp])
     #expect(TerminalKeyRelayCheck.hostsToRead(switches: TerminalHostSwitches(enabled: [.ghostty, .herdr])).isEmpty)
     #expect(HerdrQuestionRelayUnavailable.otherHostUnreadable(.terminalApp).message.contains("nothing was sent"))
 }
 
+@Test func aTitleDecoyInAnotherHostNeverVetoesAGhosttyKey() {
+    // #268: Terminal.app's tab prints the title over `sleep`. Its fresh `ps` shows no `codex`, so it is a
+    // title decoy and the key may go to the Ghostty tab, which ADR 0005's title rule decides.
+    let titled = TerminalHostInventory.tabs([TerminalTab(tabID: "9882", tty: "/dev/ttys005", title: codexTitle, paneCount: 1)])
+    let sleeping = ["/dev/ttys005": [TerminalProcess(pid: 9, name: "sleep", foreground: true)]]
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: sleeping, switches: terminalOn,
+                                              fresh: [.terminalApp: titled]) == nil)
+    // Running `codex` there, the tab holds the session: no key.
+    let running = ["/dev/ttys005": [TerminalProcess(pid: 9, name: "codex", foreground: true)]]
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: running, switches: terminalOn,
+                                              fresh: [.terminalApp: titled]) == .noQuestionKeys(.terminalApp))
+    // Its `ps` was not read: fail closed.
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: terminalOn,
+                                              fresh: [.terminalApp: titled]) == .noQuestionKeys(.terminalApp))
+}
+
 @Test func theOneGhosttyKeyCheckCoversITerm2Too() {
     // Ported from #238's iTerm2-only check: title in iTerm2, iTerm2 unreadable, iTerm2 off.
     let iTerm2On = TerminalHostSwitches(enabled: [.ghostty, .iTerm2])
     let titled = TerminalHostInventory.tabs([TerminalTab(tabID: "w0t0p0", tty: "/dev/ttys009", title: codexTitle, paneCount: 1)])
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: iTerm2On, fresh: [.iTerm2: titled])
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: iTerm2On, fresh: [.iTerm2: titled])
         == .noQuestionKeys(.iTerm2))
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: iTerm2On, fresh: [.iTerm2: .unreadable])
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: iTerm2On, fresh: [.iTerm2: .unreadable])
         == .otherHostUnreadable(.iTerm2))
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: iTerm2On, fresh: [.iTerm2: .notRunning]) == nil)
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: TerminalHostSwitches(enabled: [.ghostty]),
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: iTerm2On, fresh: [.iTerm2: .notRunning]) == nil)
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: TerminalHostSwitches(enabled: [.ghostty]),
                                               fresh: [.iTerm2: titled]) == nil)
     // Both on: each is read, and either can veto.
     let both = TerminalHostSwitches(enabled: [.ghostty, .iTerm2, .terminalApp])
     #expect(TerminalKeyRelayCheck.hostsToRead(switches: both) == [.iTerm2, .terminalApp])
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: both,
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: both,
                                               fresh: [.iTerm2: .notRunning, .terminalApp: .unreadable])
         == .otherHostUnreadable(.terminalApp))
 }
