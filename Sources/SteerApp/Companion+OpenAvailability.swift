@@ -2,9 +2,10 @@ import AppKit
 import SteerCore
 
 // The Open line on terminal session cards (#267; product.md, Notch, "Open unavailable"). A scan every
-// three seconds, while a Codex or Claude CLI card outside herdr is queued, follows each card's Open
-// route on fresh reads of the hosts Steer may contact (SteerCore's `TerminalOpenScan`) and resolves its
-// fallback the way a click would. A card whose Open is unavailable shows the reason's line in place of
+// three seconds, while a Codex or Claude CLI card outside herdr (other than running work) is queued,
+// picks each card's Open route on `CodexTabReads` of the hosts Steer may contact (SteerCore's
+// `TerminalOpenScan`, which lists what it shares with a click) and resolves a miss with ADR 0015's
+// fallback rules. A card whose Open is unavailable shows the reason's line in place of
 // Open; a fallback shows nothing. A click's own recheck records its result too, so an Open the scan
 // offered but the click found unavailable shows the same line on that card until the next scan. herdr
 // sessions keep their own presentation (Companion+HerdrPresentation.swift).
@@ -19,6 +20,8 @@ final class OpenAvailabilityScanState {
 /// The sessions one scan classifies, read on the main actor.
 private struct OpenAvailabilityTargets: Sendable {
     var codex: [String: UUID] = [:]
+    /// A card other than running work is queued: only then does the scan run (review round 1, S3).
+    var openCardQueued = false
     var claude: [String: (identity: AgentSessionIdentity, rows: [ClaudeInventorySession], records: [HerdrHookPaneRecord])] = [:]
 
     var isEmpty: Bool { codex.isEmpty && claude.isEmpty }
@@ -83,12 +86,14 @@ extension Companion {
         for item in orderedAgentAttentionItems {
             let identity = item.session
             guard let key = openLineKey(identity) else { continue }
+            let openCard = item.kind != .running && item.kind != .waiting
             switch identity.source {
             case .codex:
                 guard cliTerminalHostOn, let session = codexSession(identity) else { continue }
                 let herdrRoute = herdrBinding(for: HerdrSessionKey(agent: .codex, sessionID: session.uuidString))
                 if herdrRoute != .notInHerdr, ghosttyEnabled || herdrRoute != .unavailable(.ghosttyControlsOff) { continue }
                 targets.codex[key] = session
+                if openCard { targets.openCardQueued = true }
             case .claude:
                 guard !isBackgroundClaudeSession(identity), canOpenClaude(identity) else { continue }
                 let herdrRoute = herdrBinding(for: HerdrSessionKey(agent: .claude, sessionID: identity.session))
@@ -96,14 +101,23 @@ extension Companion {
                 let rows = (claudeInventories[identity.sourceScope]?.sessions ?? [])
                     .filter { $0.kind == .interactive && $0.sessionID == identity.session }
                 targets.claude[key] = (identity, rows, newestHookRecords(forClaudeSession: identity.session))
+                if openCard { targets.openCardQueued = true }
             }
         }
         return targets
     }
 
-    /// Every three seconds while a terminal card is queued; one scan at a time, none during an Open, and
-    /// none before the first reminder scan has said which Codex sessions are live. Only hosts Steer may
-    /// contact are read (`otherTabHosts`); with Ghostty alone on, Ghostty's latest scan is reused.
+    /// Seconds between availability scans.
+    static let openAvailabilityInterval: Double = 3
+    /// The oldest Ghostty inventory, in seconds, the scan reuses while Ghostty is the only host on
+    /// (Ghostty's own scan runs every two seconds).
+    static let openAvailabilityGhosttyMaxAge: Double = 6
+
+    /// Every `openAvailabilityInterval` seconds while a terminal card other than running work is queued
+    /// (running cards are classified alongside); one scan at a time, none during an Open, and none before
+    /// the first reminder scan has said which Codex sessions are live. Hosts Steer may contact are read
+    /// through `CodexTabReads.read`, as the iTerm2 Open's revalidation reads them; with Ghostty alone on,
+    /// Ghostty's latest scan is reused and nothing is read.
     func checkOpenAvailability() {
         let uptime = ProcessInfo.processInfo.systemUptime
         guard previewMode == nil, !openAvailability.scanning, !openingTask, uptime >= openAvailability.nextScan else { return }
@@ -120,7 +134,7 @@ extension Companion {
         }
         let consentPending = (hostSwitches.mayContact(.iTerm2) && (iTerm2.probing || !consentSettled(iTerm2.access)))
             || (terminalAppSwitchedOn && (terminalApp.probing || !consentSettled(terminalApp.access)))
-        guard !targets.isEmpty, cliLivenessRead, !ghosttyEnabled || ghosttyPermissionVerified, !consentPending else {
+        guard !targets.isEmpty, targets.openCardQueued, cliLivenessRead, !ghosttyEnabled || ghosttyPermissionVerified, !consentPending else {
             updateOpenLines { $0.applyScan([:], startedAt: Date().timeIntervalSince1970) }
             return
         }
@@ -133,7 +147,7 @@ extension Companion {
         if !otherHostOn {
             ghosttyRunning = ghosttyEnabled && TerminalApps.isRunning(.ghostty)
             ghosttySnapshot = knownGhosttySnapshot
-            let fresh = Date().timeIntervalSince1970 - ghosttyInventoryAt <= 6
+            let fresh = Date().timeIntervalSince1970 - ghosttyInventoryAt <= Self.openAvailabilityGhosttyMaxAge
             if ghosttyRunning, ghosttySnapshot == nil || !fresh {
                 // Nothing current to follow the route on: no card keeps a stale scan line.
                 updateOpenLines { $0.applyScan([:], startedAt: Date().timeIntervalSince1970) }
@@ -141,7 +155,9 @@ extension Companion {
             }
         }
         openAvailability.scanning = true
-        openAvailability.nextScan = uptime + 3
+        openAvailability.nextScan = uptime + Self.openAvailabilityInterval
+        let terminalAppRunning: Bool? = terminalAppSwitchedOn ? TerminalApps.isRunning(.terminalApp) : nil
+        let titles = Set(targets.codex.values.map(GhosttyMatch.title))
         let switches = hostSwitches
         let ghosttyOn = ghosttyEnabled
         let live = liveCLI
@@ -156,8 +172,11 @@ extension Companion {
                 var reads = TerminalOpenScanReads(switches: switches, ghosttyOn: ghosttyOn, inventories: [:], processes: [:],
                                                   secondRead: [:], ghostty: snapshot, ghosttyRunning: running)
                 if otherHostOn {
-                    let taken = TerminalTabReads.take(others: others, claudeTTYs: Set(claudeProcesses.values.compactMap(\.tty)),
-                                                      second: true)
+                    let taken = CodexTabReads.read(titles: titles, claudeTTYs: Set(claudeProcesses.values.compactMap(\.tty)),
+                                                   ghosttyOn: others.ghosttyOn, ghosttyRunning: others.ghosttyRunning,
+                                                   iTerm2Running: others.iTerm2Running, terminalAppRunning: terminalAppRunning,
+                                                   wezTermRunning: others.wezTermRunning, tmuxOn: others.tmuxOn,
+                                                   zellijOn: others.zellijOn)
                     reads = TerminalOpenScanReads(switches: switches, ghosttyOn: ghosttyOn, inventories: taken.inventories,
                                                   processes: taken.processes, secondRead: taken.secondRead,
                                                   multiplexerClientTTYs: taken.multiplexerClientTTYs, tmux: taken.tmux,

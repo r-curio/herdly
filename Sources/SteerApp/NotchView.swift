@@ -1021,12 +1021,13 @@ struct Notch: View {
     /// A Codex question that no relay can answer while Open is unavailable too, in herdr or in a
     /// terminal host (#267). Its card shows only one line: "Answer this in Codex." then Open's reason
     /// (`HerdrPresentation.unrelayedQuestionLine`, `OpenUnavailableLines.cardLine`); why the relay failed
-    /// stays in diagnostics. With Open available the card keeps offering Open in Codex as before.
+    /// stays in diagnostics. With Open still offered (a click-time line included) the card keeps its
+    /// typed-input sentence and Open as before.
     private func unrelayedQuestion(_ question: AttentionQuestion) -> Bool {
         guard case .relayUnavailable = model.route(for: question) else { return false }
         let identity = CodexAttentionAdapter.session(question.session, surface: .cli)
         if case .unavailable = herdrOpen(identity) { return true }
-        return model.terminalOpenLine(identity) != nil
+        return !model.offersTerminalOpen(identity)
     }
 
     @ViewBuilder
