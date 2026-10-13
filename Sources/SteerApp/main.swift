@@ -1129,11 +1129,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         hostTitleReadings = hostTitleReadings.filter { hostSwitches.mayContact($0.key) }
     }
 
-    /// The hosts the running Codex TUIs' process ancestry reaches (`CodexCLIProcesses.hostReached`),
-    /// from `ps -axo pid=,args=` output already read; every host when it could not be read, since none
-    /// can be ruled out. Walks only processes whose command line names Codex. Off the main actor.
-    nonisolated static func codexReach(processList: String?) -> Set<TerminalHost> {
-        guard let processList else { return Set(TerminalHost.allCases) }
+    /// How many running Codex TUIs' process ancestry reaches each host (`CodexCLIProcesses.hostReached`),
+    /// from `ps -axo pid=,args=` output already read; every host, without bound, when it could not be
+    /// read, since none can be ruled out. Walks only processes whose command line names Codex. Off the
+    /// main actor.
+    nonisolated static func codexReach(processList: String?) -> [TerminalHost: Int] {
+        guard let processList else { return Dictionary(uniqueKeysWithValues: TerminalHost.allCases.map { ($0, Int.max) }) }
         let ancestries = CodexCLIProcesses.candidatePIDs(processList: processList).map { pid -> [ProcessAncestor] in
             let chain = HerdrProcessTree.ancestry(of: pid)
             guard chain.first?.pid == pid else { return [] }

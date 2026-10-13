@@ -15,8 +15,8 @@ public enum TerminalHostTitles: Equatable, Sendable {
     /// or after an unreadable one at `takenAt`. A tab there may show the title.
     case unknown(takenAt: Double)
     /// Steer cannot read this host's tabs (it is switched off, cannot be contacted, or is a
-    /// multiplexer whose default server is not running), and a running Codex TUI's process ancestry
-    /// reaches it. That TUI's session may be there: product.md says its app cannot be identified,
+    /// multiplexer some of whose Codex TUIs run on a server other than its default one), and a running
+    /// Codex TUI's process ancestry reaches it. That TUI's session may be there: product.md says its app cannot be identified,
     /// not that it has ended.
     case unseen
 
@@ -57,22 +57,24 @@ public enum TerminalHostTitles: Equatable, Sendable {
     }
 
     /// The scan's view of the hosts. `latest` holds the readings the host scans recorded,
-    /// `appsRunning` the terminal apps macOS reports running, and `codexReach` the hosts a running
-    /// Codex TUI's ancestry reaches (`CodexCLIProcesses.hostsReached`). Nothing here contacts a host.
+    /// `appsRunning` the terminal apps macOS reports running, and `codexReach` how many running Codex
+    /// TUIs' ancestry reaches each host (`CodexCLIProcesses.hostsReached`). Nothing here contacts a host.
     ///   - A contactable terminal app that is not running: `notRunning` as of `now`.
     ///   - A contactable host otherwise: its latest reading, `unknown` when it has none or when the
-    ///     reading says not running though macOS says the app is. A multiplexer whose default server
-    ///     was not running is `unseen` while a Codex TUI reaches it (a server on another socket).
+    ///     reading says not running though macOS says the app is. A multiplexer is `unseen` when more
+    ///     Codex TUIs run under its servers than its default server's reading shows Codex titles: some
+    ///     run on a server on another socket (or have not titled their pane yet), which Steer never reads.
     ///   - Any other host, Ghostty included while switched off: `unseen` while a Codex TUI reaches it,
     ///     absent otherwise, since then it holds no Codex session Steer could miss.
     public static func forScan(switches: TerminalHostSwitches, latest: [TerminalHost: TerminalHostTitles],
-                               appsRunning: Set<TerminalHost>, codexReach: Set<TerminalHost>,
+                               appsRunning: Set<TerminalHost>, codexReach: [TerminalHost: Int],
                                now: Double) -> [TerminalHost: TerminalHostTitles] {
         var result: [TerminalHost: TerminalHostTitles] = [:]
-        if !switches.isOn(.ghostty), codexReach.contains(.ghostty) { result[.ghostty] = .unseen }
+        if !switches.isOn(.ghostty), codexReach[.ghostty] != nil { result[.ghostty] = .unseen }
         for host in hosts {
+            let codexUnder = codexReach[host] ?? 0
             guard switches.mayContact(host) else {
-                if codexReach.contains(host) { result[host] = .unseen }
+                if codexUnder > 0 { result[host] = .unseen }
                 continue
             }
             if host.kind == .terminal, !appsRunning.contains(host) {
@@ -85,8 +87,11 @@ public enum TerminalHostTitles: Equatable, Sendable {
                 if host.kind == .terminal {
                     result[host] = .unknown(takenAt: takenAt)
                 } else {
-                    result[host] = codexReach.contains(host) ? .unseen : .notRunning(takenAt: takenAt)
+                    result[host] = codexUnder > 0 ? .unseen : .notRunning(takenAt: takenAt)
                 }
+            case .known(let titles, _)? where host.kind == .multiplexer
+                && codexUnder > titles.filter(HerdrBindingRules.isShortenedCodexSessionTitle).count:
+                result[host] = .unseen
             case let reading?: result[host] = reading
             }
         }

@@ -106,9 +106,9 @@ extension CodexCLIProcesses {
         return nil
     }
 
-    /// Every host some Codex TUI in `ancestries` reaches.
-    public static func hostsReached(by ancestries: [[ProcessAncestor]]) -> Set<TerminalHost> {
-        Set(ancestries.compactMap(hostReached(by:)))
+    /// How many Codex TUIs in `ancestries` reach each host.
+    public static func hostsReached(by ancestries: [[ProcessAncestor]]) -> [TerminalHost: Int] {
+        ancestries.compactMap(hostReached(by:)).reduce(into: [:]) { $0[$1, default: 0] += 1 }
     }
 }
 
