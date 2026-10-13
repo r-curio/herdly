@@ -28,61 +28,71 @@ final class ITerm2State: ObservableObject {
 }
 
 /// Reads behind one Codex binding across the enabled tab hosts (ADR 0013): two inventories with the
-/// `ps -t` reads between them.
-private struct CodexTabReads: Sendable {
+/// `ps -t` reads between them, in `TerminalTabReadAssembly`'s order. The iTerm2 Open, iTerm2's visit scan
+/// and the Open availability scan (#267) all read through here, so a scan never reads less than a click.
+struct CodexTabReads: Sendable {
+    /// What the first read held besides inventories.
+    struct FirstRead: Sendable {
+        var iTerm2: ITerm2Snapshot?
+        var ghostty: GhosttySnapshot?
+        var tmux: TmuxRead = .notRunning
+        var zellij: ZellijRead = .notRunning
+    }
+
     let inventories: [TerminalHost: TerminalHostInventory]
     let processes: [String: [TerminalProcess]]
     let secondRead: [TerminalHost: TerminalHostInventory]
     let iTerm2: ITerm2Snapshot?
     /// tmux's attached clients and Zellij's client processes in the first read (ADR 0014's title-count exclusion).
     var multiplexerClientTTYs: Set<String> = []
+    /// The first read's Ghostty, tmux and Zellij reads, for Ghostty's title route and the multiplexer plans.
+    var ghostty: GhosttySnapshot?
+    var tmux: TmuxRead = .notRunning
+    var zellij: ZellijRead = .notRunning
 
     /// Blocking: call off the main actor. Ghostty is read only while it is on and running, iTerm2 only
-    /// while running; `ps` only for tabs showing one of `titles` or on one of `claudeTTYs`.
+    /// while running; `ps` only for tabs and panes showing one of `titles` or on one of `claudeTTYs`.
+    ///   - iTerm2Running: nil while iTerm2 may not be contacted (never read); otherwise whether it runs.
     ///   - terminalAppRunning: nil while Terminal.app is off (never read); otherwise whether it runs (#239).
     ///   - wezTermRunning: likewise for WezTerm (#240), whose panes count toward title uniqueness.
     ///   - tmuxOn: tmux may be contacted, so its panes are read too (#241).
     ///   - zellijOn: Zellij may be contacted, so its panes count toward title uniqueness too (#242).
     static func read(titles: Set<String>, claudeTTYs: Set<String>, ghosttyOn: Bool, ghosttyRunning: Bool,
-                     iTerm2Running: Bool, terminalAppRunning: Bool? = nil, wezTermRunning: Bool? = nil,
+                     iTerm2Running: Bool?, terminalAppRunning: Bool? = nil, wezTermRunning: Bool? = nil,
                      tmuxOn: Bool = false, zellijOn: Bool = false) -> CodexTabReads {
-        var zellijClientTTYs: Set<String>?
-        var clientTTYs: Set<String> = []
-        var tmuxTTYs: Set<String> = []
-        func hosts() -> ([TerminalHost: TerminalHostInventory], ITerm2Snapshot?) {
+        func hosts() -> ([TerminalHost: TerminalHostInventory], FirstRead) {
             var result: [TerminalHost: TerminalHostInventory] = [:]
-            let reading = iTerm2Running ? ITerm2Navigation.snapshot() : .notRunning
-            result[.iTerm2] = ITerm2Navigation.inventory(reading)
+            var first = FirstRead()
+            if let iTerm2Running {
+                let reading = iTerm2Running ? ITerm2Navigation.snapshot() : .notRunning
+                result[.iTerm2] = ITerm2Navigation.inventory(reading)
+                if case .snapshot(let value)? = reading { first.iTerm2 = value }
+            }
             if let terminalAppRunning {
                 result[.terminalApp] = terminalAppRunning ? TerminalAppNavigation.snapshot().inventory : .notRunning
             }
             if let wezTermRunning { result[.wezTerm] = WezTermNavigation.read(running: wezTermRunning).0.inventory }
             if ghosttyOn {
-                result[.ghostty] = .ghosttyTitles(ghosttyRunning ? GhosttyNavigation.snapshot() : nil, running: ghosttyRunning)
+                first.ghostty = ghosttyRunning ? GhosttyNavigation.snapshot() : nil
+                result[.ghostty] = .ghosttyTitles(first.ghostty, running: ghosttyRunning)
             }
             if tmuxOn {
-                let tmux = TmuxRunner.read()
-                result[.tmux] = tmux.inventory
-                if clientTTYs.isEmpty, tmuxTTYs.isEmpty, let snapshot = tmux.snapshot {
-                    clientTTYs = snapshot.clientTTYs
-                    tmuxTTYs = snapshot.ttysToRead(claudeTTYs: claudeTTYs)
-                }
+                first.tmux = TmuxRunner.read()
+                result[.tmux] = first.tmux.inventory
             }
             if zellijOn {
-                let zellij = ZellijRunner.read()
-                result[.zellij] = zellij.inventory
-                if zellijClientTTYs == nil { zellijClientTTYs = zellij.snapshot?.clientTTYs ?? [] }
+                first.zellij = ZellijRunner.read()
+                result[.zellij] = first.zellij.inventory
             }
-            if case .snapshot(let value)? = reading { return (result, value) }
-            return (result, nil)
+            return (result, first)
         }
-        let (first, snapshot) = hosts()
-        let ttys = (snapshot?.ttysToRead(codexTitles: titles, claudeTTYs: claudeTTYs) ?? []).union(tmuxTTYs)
-        let processes = TerminalTTYReads.processes(on: ttys)
-        let firstClients = clientTTYs.union(zellijClientTTYs ?? [])
-        let (second, _) = hosts()
-        return CodexTabReads(inventories: first, processes: processes, secondRead: second, iTerm2: snapshot,
-                             multiplexerClientTTYs: firstClients)
+        let reads = TerminalTabReadAssembly.take(codexTitles: titles, claudeTTYs: claudeTTYs, readHosts: hosts,
+                                                 readProcesses: TerminalTTYReads.processes(on:))
+        let first = reads.extra
+        let clients = (first.tmux.snapshot?.clientTTYs ?? []).union(first.zellij.snapshot?.clientTTYs ?? [])
+        return CodexTabReads(inventories: reads.inventories, processes: reads.processes, secondRead: reads.secondRead,
+                             iTerm2: first.iTerm2, multiplexerClientTTYs: clients, ghostty: first.ghostty,
+                             tmux: first.tmux, zellij: first.zellij)
     }
 }
 

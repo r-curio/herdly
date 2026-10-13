@@ -102,6 +102,45 @@ private func codex(_ reads: TerminalOpenScanReads, live: Set<UUID> = [session],
             == "Steer can't tell which terminal this session is in.")
 }
 
+@Test func theSharedReadAssemblyReadsPsForAnITerm2TabSoItsCodexIsOffered() {
+    // Review round 1 (B1): the scan's reads must `ps` the iTerm2 tab carrying the title, as the click's do,
+    // or a bound tab reads `processesUnreadable` and loses Open.
+    var hostReads = 0
+    var asked: Set<String> = []
+    let assembled = TerminalTabReadAssembly<Void>.take(
+        codexTitles: [title], claudeTTYs: [],
+        readHosts: {
+            hostReads += 1
+            return ([.iTerm2: .tabs([tab("A1"), tab("A2", tty: "/dev/ttys040", title: "zsh")])], ())
+        },
+        readProcesses: { ttys in
+            asked = ttys
+            return Dictionary(uniqueKeysWithValues: ttys.map { ($0, TerminalForegroundProcesses.parse(codexPS)!) })
+        })
+    #expect(hostReads == 2)
+    #expect(asked == [codexTTY])
+    let scanReads = TerminalOpenScanReads(switches: TerminalHostSwitches(enabled: [.iTerm2]), ghosttyOn: false,
+                                          inventories: assembled.inventories, processes: assembled.processes,
+                                          secondRead: assembled.secondRead)
+    #expect(codex(scanReads) == .offered)
+    // Without the `ps` read the same tab could not be bound or identified.
+    var unread = scanReads
+    unread.processes = [:]
+    #expect(codex(unread).cardLine == "Steer can't tell which terminal this session is in.")
+}
+
+@Test func theSharedReadAssemblyReadsEveryTTYListingHostAndClaudeTTYs() {
+    let inventories: [TerminalHost: TerminalHostInventory] = [
+        .terminalApp: .tabs([tab("9882", tty: "/dev/ttys001")]),
+        .wezTerm: .tabs([tab("8", tty: "/dev/ttys002"), tab("9", tty: "/dev/ttys003", title: "claude")]),
+        .tmux: .tabs([tab("%0", tty: "/dev/ttys004")]),
+        .ghostty: .tabs([tab("g", tty: nil)]),
+        .zellij: .tabs([tab("lab/terminal_1", tty: nil)]),
+    ]
+    #expect(TerminalTabReadAssembly<Void>.ttysToRead(inventories, codexTitles: [title], claudeTTYs: ["ttys003"])
+            == ["/dev/ttys001", "/dev/ttys002", "/dev/ttys003", "/dev/ttys004"])
+}
+
 // MARK: - Terminal.app
 
 @Test func terminalAppCausesEachReplaceOpenWithTheirLine() {
@@ -377,6 +416,22 @@ private func claudeReads(_ hosts: Set<TerminalHost>, _ inventories: [TerminalHos
     lines.recordOpen(.unavailable(.appNotRunning(.iTerm2)), for: "a", at: 9)
     lines.recordOpen(.opened, for: "a", at: 10)
     #expect(lines.line(for: "a") == nil)
+}
+
+@Test func aScanStartedBeforeAnOpenThatWorkedIsIgnoredForThatSession() {
+    // Review round 1 (S1): the Open reached the session after the scan began, so its stale cause is dropped.
+    var lines = OpenUnavailableLines<String>()
+    lines.recordOpen(.opened, for: "a", at: 10)
+    lines.applyScan(["a": .unavailable(.hostUnreadable(.iTerm2)), "b": .unavailable(.sessionEnded)], startedAt: 9)
+    #expect(lines.offersOpen("a"))
+    #expect(lines.line(for: "a") == nil)
+    #expect(lines.line(for: "b") == .sessionEnded)
+    lines.recordOpen(.fellBack(.iTerm2, .unsupportedLayout), for: "a", at: 20)
+    lines.applyScan(["a": .unavailable(.appNotRunning(.iTerm2))], startedAt: 19)
+    #expect(lines.offersOpen("a"))
+    // A scan that started after the Open decides again.
+    lines.applyScan(["a": .unavailable(.appNotRunning(.iTerm2))], startedAt: 21)
+    #expect(!lines.offersOpen("a"))
 }
 
 @Test func linesForCardsThatLeftTheQueueAreForgotten() {

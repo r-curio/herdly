@@ -2,12 +2,17 @@ import Foundation
 
 // product.md, Notch, "Open unavailable" (#267): at scan time a Codex or Claude CLI card whose Open is
 // unavailable replaces Open with one reason line (`OpenUnavailableReason.cardLine`); an Open fallback
-// (ADR 0015) looks like any other Open. The scan follows the same route a click takes past herdr
+// (ADR 0015) looks like any other Open. The scan picks a route in the order a click tries them past herdr
 // (`Companion.openCLI`, `Companion.openClaude`): tmux, then Zellij, WezTerm, Terminal.app, iTerm2, then
-// Ghostty's title route or the session's own process, using the same binding, plan and fallback rules.
-// It is presentation only: a click still re-runs everything on fresh reads. Steps that only a click
-// can fail (a select that does not verify, an activation) are not predicted, so a bound target offers
-// Open. Pure: SteerApp takes the reads and walks the processes this asks for.
+// Ghostty's title route or the session's own process. What it shares with a click is the binding rules
+// (`TerminalTabBindingRules`, `ZellijBindingRules`), the multiplexer plans (`TmuxOpen.plan`,
+// `ZellijOpen.plan`), Ghostty's revalidation, ADR 0015's fallback resolution, and the read assembly
+// (`TerminalTabReadAssembly`, which the iTerm2 Open's reads use; the other hosts' click reads differ in
+// detail). It does not share a host's own plan for a bound tab (Terminal.app's tab alone in its window,
+// WezTerm's focused window), its select, verify or activation, so a bound target offers Open; nor the
+// click's fallback for the H7 last-seen app, which a click reports as an app it cannot identify. It is
+// presentation only: a click still re-runs everything on fresh reads. Pure: SteerApp takes the reads and
+// walks the processes this asks for.
 
 /// Whether a terminal card offers Open, as the latest scan saw it.
 public enum TerminalOpenAvailability: Equatable, Sendable {
@@ -145,6 +150,48 @@ public struct TerminalOpenScanReads: Sendable {
                                            holdsSession: holds)
     }
 }
+
+/// ADR 0013's reads in order, shared by the iTerm2 Open's revalidation, iTerm2's visit scan and the
+/// availability scan (`CodexTabReads.read`): a first read of every enabled host, `ps -t` for each tab or
+/// pane of a tty-listing host that shows one of the Codex titles asked about or runs on a Claude tty, then
+/// a second read of every enabled host. SteerApp supplies the host and `ps` readers; this only orders
+/// them and chooses the ttys, so the scan and the click cannot read differently.
+public struct TerminalTabReadAssembly<Extra> {
+    public let inventories: [TerminalHost: TerminalHostInventory]
+    /// What the first read returned besides inventories (snapshots a plan needs).
+    public let extra: Extra
+    public let processes: [String: [TerminalProcess]]
+    public let secondRead: [TerminalHost: TerminalHostInventory]
+
+    /// The ttys `ps` reads after `inventories`: every tab of a `TerminalHost.ttyBound` host titled with
+    /// one of `codexTitles` or on one of `claudeTTYs`, normalized.
+    public static func ttysToRead(_ inventories: [TerminalHost: TerminalHostInventory], codexTitles: Set<String>,
+                                  claudeTTYs: Set<String>) -> Set<String> {
+        let claude = Set(claudeTTYs.compactMap(GhosttyTTYMatch.normalizedTTY))
+        var ttys: Set<String> = []
+        for host in TerminalHost.ttyBound {
+            guard case .tabs(let tabs)? = inventories[host] else { continue }
+            for tab in tabs {
+                guard let tty = tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY) else { continue }
+                if claude.contains(tty) || tab.title.map(codexTitles.contains) == true { ttys.insert(tty) }
+            }
+        }
+        return ttys
+    }
+
+    /// Blocking when the readers are: call off the main actor. `readHosts` runs twice, `readProcesses` once
+    /// between them.
+    public static func take(codexTitles: Set<String>, claudeTTYs: Set<String>,
+                            readHosts: () -> ([TerminalHost: TerminalHostInventory], Extra),
+                            readProcesses: (Set<String>) -> [String: [TerminalProcess]]) -> TerminalTabReadAssembly {
+        let (first, extra) = readHosts()
+        let processes = readProcesses(ttysToRead(first, codexTitles: codexTitles, claudeTTYs: claudeTTYs))
+        let (second, _) = readHosts()
+        return TerminalTabReadAssembly(inventories: first, extra: extra, processes: processes, secondRead: second)
+    }
+}
+
+extension TerminalTabReadAssembly: Sendable where Extra: Sendable {}
 
 public enum TerminalOpenScan {
     /// A Codex CLI session's route past herdr, in the click's order.
@@ -336,6 +383,8 @@ public struct OpenUnavailableLines<Key: Hashable & Sendable>: Equatable, Sendabl
 
     private var scanned: [Key: OpenUnavailableReason] = [:]
     private var clicked: [Key: Clicked] = [:]
+    /// When an Open of the session last opened or fell back: a scan started before it is stale for it.
+    private var reached: [Key: Double] = [:]
 
     public init() {}
 
@@ -346,10 +395,12 @@ public struct OpenUnavailableLines<Key: Hashable & Sendable>: Equatable, Sendabl
     public func line(for key: Key) -> OpenUnavailableReason? { scanned[key] ?? clicked[key]?.reason }
 
     /// A scan that started at `startedAt` classified exactly the sessions in `results`. A session it did
-    /// not classify keeps no scan line (the click rechecks); a click line from before it gives way.
+    /// not classify keeps no scan line (the click rechecks); a click line from before it gives way. A
+    /// session whose Open opened or fell back after the scan started keeps no line from it.
     public mutating func applyScan(_ results: [Key: TerminalOpenAvailability], startedAt: Double) {
-        scanned = results.compactMapValues(\.reason)
+        scanned = results.filter { (reached[$0.key] ?? -.infinity) <= startedAt }.compactMapValues(\.reason)
         for key in results.keys where (clicked[key]?.at ?? .infinity) <= startedAt { clicked[key] = nil }
+        reached = reached.filter { $0.value > startedAt }
     }
 
     /// An Open of `key`'s session ended at `at`. Unavailable shows its line; an Open that reached the
@@ -360,6 +411,7 @@ public struct OpenUnavailableLines<Key: Hashable & Sendable>: Equatable, Sendabl
         case .opened, .fellBack:
             clicked[key] = nil
             scanned[key] = nil
+            reached[key] = at
         }
     }
 
@@ -367,6 +419,7 @@ public struct OpenUnavailableLines<Key: Hashable & Sendable>: Equatable, Sendabl
     public mutating func retain(_ keys: Set<Key>) {
         scanned = scanned.filter { keys.contains($0.key) }
         clicked = clicked.filter { keys.contains($0.key) }
+        reached = reached.filter { keys.contains($0.key) }
     }
 
     /// The card's one line. A Codex question whose option cannot be typed while Open is also unavailable
