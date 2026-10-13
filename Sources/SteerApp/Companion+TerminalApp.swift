@@ -426,6 +426,7 @@ extension Companion {
                 return OpenFallback.codexApp(candidates: candidates, switches: switches)
             }
             navigationMessage = message(for: result, opened: "Opened the matching Terminal tab.")
+            recordOpen(result, codex: session)
             let queued = cliItems.filter { $0.session == session }.map(TerminalCompletionCandidate.init)
             let acknowledged = TerminalVisitAcknowledgment.afterOpen(queued, result: result, preOpenAt: preOpenAt)
             if !acknowledged.isEmpty {
@@ -489,6 +490,7 @@ extension Companion {
                 return OpenFallback.processApp(walks: [walk], agent: .claude, switches: switches)
             }
             navigationMessage = message(for: result, opened: "Opened the matching Terminal tab.")
+            recordOpen(result, claude: identity)
             if case .unavailable = result {} else {
                 // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included.
                 if let approval,
@@ -812,12 +814,5 @@ extension TerminalAppNavigation.Read {
         case .snapshot(let snapshot): "\(snapshot.windows.count) windows"
         case .unreadable: "unreadable"
         }
-    }
-}
-
-extension TerminalTabBinding {
-    var unavailableReason: TerminalTabUnavailable? {
-        if case .unavailable(let reason) = self { return reason }
-        return nil
     }
 }

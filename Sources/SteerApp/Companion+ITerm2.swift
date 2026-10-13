@@ -264,6 +264,7 @@ extension Companion {
             }
             iTerm2.lastOpen[session.uuidString] = Self.iTerm2Diagnostic(run, result: result)
             navigationMessage = message(for: result, opened: opened)
+            recordOpen(result, codex: session)
             endVisitIntervalsAfterOpen()
             openingTask = false
             refresh()
