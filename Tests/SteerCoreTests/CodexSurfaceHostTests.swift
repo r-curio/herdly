@@ -112,14 +112,14 @@ func aDaemonSessionWhoseTabClosedInASwitchedOnHostEnds(host: TerminalHost) throw
     // Terminal.app and iTerm2 running with their switches off, and no Codex TUI under either: they
     // are irrelevant, and a daemon session whose tab closed while Steer was down ends as before.
     let idle = TerminalHostTitles.forScan(switches: ghosttyOnly, latest: [:], appsRunning: [.terminalApp, .iTerm2],
-                                          codexReach: [.ghostty], now: fixture.later)
+                                          codexReach: [.ghostty: 1], now: fixture.later)
     #expect(idle.isEmpty)
     #expect(fixture.scan(otherHosts: idle).endedSessions == [fixture.session])
     // A Codex TUI whose ancestry reaches switched-off Terminal.app, or a tmux server: its session may
     // be the one no tab shows. Open says "Steer can't tell which terminal this session is in." (H8).
     for reach: TerminalHost in [.terminalApp, .iTerm2, .wezTerm, .tmux, .zellij] {
         let held = TerminalHostTitles.forScan(switches: ghosttyOnly, latest: [:], appsRunning: [.terminalApp],
-                                              codexReach: [reach], now: fixture.later)
+                                              codexReach: [reach: 1], now: fixture.later)
         #expect(held == [reach: .unseen])
         let scan = fixture.scan(otherHosts: held)
         #expect(scan.cliState.liveSessions == [fixture.session] && scan.endedSessions.isEmpty, Comment(rawValue: reach.rawValue))
@@ -128,7 +128,7 @@ func aDaemonSessionWhoseTabClosedInASwitchedOnHostEnds(host: TerminalHost) throw
     // Ghostty itself switched off with a Codex TUI under it, and iTerm2 on and read.
     let iTerm2Only = TerminalHostSwitches(enabled: [.iTerm2])
     let ghosttyOff = TerminalHostTitles.forScan(switches: iTerm2Only, latest: [.iTerm2: .known(["zsh"], takenAt: fixture.later)],
-                                                appsRunning: [.iTerm2], codexReach: [.ghostty], now: fixture.later)
+                                                appsRunning: [.iTerm2], codexReach: [.ghostty: 1], now: fixture.later)
     #expect(ghosttyOff == [.iTerm2: .known(["zsh"], takenAt: fixture.later), .ghostty: .unseen])
     #expect(fixture.scan(otherHosts: ghosttyOff, ghostty: .some(nil), ghosttyOn: false).endedSessions.isEmpty)
 }
@@ -172,12 +172,12 @@ func aDaemonSessionWhoseTabClosedInASwitchedOnHostEnds(host: TerminalHost) throw
     let switches = TerminalHostSwitches(enabled: [.ghostty, .tmux, .zellij])
     let latest: [TerminalHost: TerminalHostTitles] = [.tmux: .notRunning(takenAt: 7), .zellij: .notRunning(takenAt: 7)]
     // A Codex TUI under a tmux server on another socket: its session may be there.
-    #expect(TerminalHostTitles.forScan(switches: switches, latest: latest, appsRunning: [], codexReach: [.tmux], now: 9)
+    #expect(TerminalHostTitles.forScan(switches: switches, latest: latest, appsRunning: [], codexReach: [.tmux: 1], now: 9)
             == [.tmux: .unseen, .zellij: .notRunning(takenAt: 7)])
-    #expect(TerminalHostTitles.forScan(switches: switches, latest: latest, appsRunning: [], codexReach: [.zellij], now: 9)
+    #expect(TerminalHostTitles.forScan(switches: switches, latest: latest, appsRunning: [], codexReach: [.zellij: 1], now: 9)
             == [.tmux: .notRunning(takenAt: 7), .zellij: .unseen])
     // No Codex TUI under either: no server holds a session.
-    #expect(TerminalHostTitles.forScan(switches: switches, latest: latest, appsRunning: [], codexReach: [], now: 9)
+    #expect(TerminalHostTitles.forScan(switches: switches, latest: latest, appsRunning: [], codexReach: [:], now: 9)
             == latest)
 }
 
@@ -186,7 +186,7 @@ func aDaemonSessionWhoseTabClosedInASwitchedOnHostEnds(host: TerminalHost) throw
     let latest: [TerminalHost: TerminalHostTitles] = [.iTerm2: .known(["a"], takenAt: 5), .terminalApp: .notRunning(takenAt: 4),
                                                        .zellij: .known(["z"], takenAt: 1)]
     let titles = TerminalHostTitles.forScan(switches: switches, latest: latest, appsRunning: [.iTerm2, .terminalApp],
-                                            codexReach: [], now: 50)
+                                            codexReach: [:], now: 50)
     // iTerm2 read; Terminal.app relaunched since its "not running" reading: unknown; WezTerm not
     // running: no tab as of now; tmux never read: unknown; Zellij off: absent whatever it said.
     #expect(titles == [.iTerm2: .known(["a"], takenAt: 5), .terminalApp: .unknown(takenAt: 4),
@@ -194,8 +194,8 @@ func aDaemonSessionWhoseTabClosedInASwitchedOnHostEnds(host: TerminalHost) throw
     // A multiplexer on with no terminal on cannot be contacted: treated as off.
     let tmuxAlone = TerminalHostSwitches(enabled: [.tmux])
     #expect(TerminalHostTitles.forScan(switches: tmuxAlone, latest: [.tmux: .known([], takenAt: 1)], appsRunning: [],
-                                       codexReach: [.tmux], now: 50) == [.tmux: .unseen])
-    #expect(TerminalHostTitles.forScan(switches: tmuxAlone, latest: [:], appsRunning: [], codexReach: [], now: 50).isEmpty)
+                                       codexReach: [.tmux: 1], now: 50) == [.tmux: .unseen])
+    #expect(TerminalHostTitles.forScan(switches: tmuxAlone, latest: [:], appsRunning: [], codexReach: [:], now: 50).isEmpty)
 }
 
 @Test func theNewestReadingWinsWhateverOrderScansFinishIn() {
@@ -234,7 +234,57 @@ func aDaemonSessionWhoseTabClosedInASwitchedOnHostEnds(host: TerminalHost) throw
     #expect(CodexCLIProcesses.hostReached(by: chain(("codex", nil), ("Code Helper", "com.microsoft.VSCode"), ("iTerm2", iTerm2))) == nil)
     #expect(CodexCLIProcesses.hostReached(by: chain(("codex", nil), ("zsh", nil))) == nil)
     #expect(CodexCLIProcesses.hostsReached(by: [chain(("codex", nil), ("tmux", nil)), chain(("codex", nil), ("iTerm2", iTerm2)),
-                                                chain(("vim", nil), ("Terminal", terminal))]) == [.tmux, .iTerm2])
+                                                chain(("codex", nil), ("bash", nil), ("tmux", nil)),
+                                                chain(("vim", nil), ("Terminal", terminal))]) == [.tmux: 2, .iTerm2: 1])
+}
+
+@Test(arguments: [TerminalHost.tmux, .zellij])
+func aSessionLastSeenInAMultiplexerWhoseServerStoppedEnds(host: TerminalHost) throws {
+    let fixture = try DaemonSessionFixture()
+    defer { fixture.remove() }
+    // The user exits Codex in a lone tmux session and the server exits with it: no Codex TUI runs
+    // under it, so its "not running" reading holds nothing, and the session ends.
+    let switches = TerminalHostSwitches(enabled: [.ghostty, host])
+    let others = TerminalHostTitles.forScan(switches: switches, latest: [host: .notRunning(takenAt: fixture.later)],
+                                            appsRunning: [], codexReach: [:], now: fixture.later)
+    #expect(others == [host: .notRunning(takenAt: fixture.later)])
+    let scan = fixture.scan(otherHosts: others, lastSeenHosts: [fixture.session: host])
+    #expect(scan.endedSessions == [fixture.session])
+}
+
+@Test(arguments: [TerminalHost.tmux, .zellij])
+func aCodexTUIOnAnotherMultiplexerServerMakesItUnseen(host: TerminalHost) throws {
+    let fixture = try DaemonSessionFixture()
+    defer { fixture.remove() }
+    let switches = TerminalHostSwitches(enabled: [.ghostty, host])
+    let other = GhosttyMatch.title(UUID())
+    // The default server shows one Codex pane, but two Codex TUIs run under that multiplexer's
+    // servers: one is on a server Steer does not read, and its session may be the one no tab shows.
+    let busy = TerminalHostTitles.forScan(switches: switches, latest: [host: .known(["zsh", other], takenAt: fixture.later)],
+                                          appsRunning: [], codexReach: [host: 2], now: fixture.later)
+    #expect(busy == [host: .unseen])
+    #expect(fixture.scan(otherHosts: busy).endedSessions.isEmpty)
+    // Every Codex TUI accounted for by a Codex title on the default server: its reading stands, and
+    // a pane that closed (killing its TUI) still ends its session.
+    let accounted = TerminalHostTitles.forScan(switches: switches, latest: [host: .known(["zsh", other], takenAt: fixture.later)],
+                                               appsRunning: [], codexReach: [host: 1], now: fixture.later)
+    #expect(accounted == [host: .known(["zsh", other], takenAt: fixture.later)])
+    #expect(fixture.scan(otherHosts: accounted).endedSessions == [fixture.session])
+}
+
+@Test func aDaemonSessionShownOnlyInAStaleReadingAsksForARead() throws {
+    let fixture = try DaemonSessionFixture()
+    defer { fixture.remove() }
+    // iTerm2 last read a grace before Ghostty: the tab may have closed since. Still live, but iTerm2 is re-read.
+    let stale = fixture.scan(otherHosts: [.iTerm2: .known([fixture.title], takenAt: fixture.later - ReminderReader.surfaceGrace)])
+    #expect(stale.cliState.liveSessions == [fixture.session] && stale.endedSessions.isEmpty)
+    #expect(stale.awaitingHostInventories == [fixture.session])
+    // A recent reading, or a Ghostty-proved session, asks for nothing.
+    let recent = fixture.scan(otherHosts: [.iTerm2: .known([fixture.title], takenAt: fixture.later - ReminderReader.surfaceGrace + 1)])
+    #expect(recent.awaitingHostInventories.isEmpty)
+    let proved = fixture.scan(otherHosts: [.iTerm2: .known([fixture.title], takenAt: fixture.later - ReminderReader.surfaceGrace)],
+                              knownCLISessions: [fixture.session])
+    #expect(proved.awaitingHostInventories.isEmpty)
 }
 
 @Test func codexCandidatesComeFromThePIDListing() {

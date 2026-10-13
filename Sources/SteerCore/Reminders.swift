@@ -359,8 +359,9 @@ public enum ReminderReader {
     /// session known only from the daemon also needs every switched-on host's inventory known and
     /// taken at least `surfaceGrace` after its start, and no `unseen` host: one a running Codex TUI
     /// reaches but Steer cannot read, where product.md says its app cannot be identified, not that
-    /// it has ended. Neither ends while the host whose inventory last showed it (`lastSeenHosts`,
-    /// from `surfaceHosts`) is not running (H7). The end is dated at the newest inventory consulted.
+    /// it has ended. Neither ends while the terminal app whose inventory last showed it (`lastSeenHosts`,
+    /// from `surfaceHosts`) is not running (H7); a stopped multiplexer server holds nothing. The end
+    /// is dated at the newest inventory consulted.
     public static func scan(events: URL, rollouts: URL, ghostty: GhosttyInventory? = nil,
                             knownCLISessions: Set<UUID> = [], daemonThreads: Set<UUID> = [],
                             herdrTitles: HerdrPaneTitles = .notInUse,
@@ -377,12 +378,14 @@ public enum ReminderReader {
         // The other hosts' titles, the times of the inventories the end check consults, and whether a
         // switched-on host is unread or a host Steer cannot read may hold a Codex TUI.
         var hostTitles: [TerminalHost: Set<String>] = [:]
+        var hostTimes: [TerminalHost: Double] = [:]
         var inventoryTimes = ghostty.map { [$0.takenAt] } ?? []
         var hostUnknown = false, hostUnseen = false
         for (host, titles) in otherHosts {
             switch titles {
             case .known(let shown, let takenAt):
                 hostTitles[host] = shown
+                hostTimes[host] = takenAt
                 inventoryTimes.append(takenAt)
             case .notRunning(let takenAt): inventoryTimes.append(takenAt)
             case .unknown: hostUnknown = true
@@ -537,8 +540,15 @@ public enum ReminderReader {
                     result.titledCLISessions.insert(session)
                     result.surfaceHosts[session] = .ghostty
                 } else if let host = TerminalHostTitles.hosts.first(where: { hostTitles[$0]?.contains(title) == true }) {
-                    // Its surface is another switched-on host's tab or pane (#265).
+                    // Its surface is another switched-on host's tab or pane (#265). Known only from
+                    // the daemon and shown only in readings at least the grace older than the newest
+                    // inventory: its tab may have closed since, so the app re-reads those hosts.
                     result.surfaceHosts[session] = host
+                    let showing = TerminalHostTitles.hosts.filter { hostTitles[$0]?.contains(title) == true }
+                    if daemonThreads.contains(session), !knownCLISessions.contains(session), let newest = inventoryTimes.max(),
+                       showing.allSatisfy({ newest - (hostTimes[$0] ?? newest) >= surfaceGrace }) {
+                        result.awaitingHostInventories.insert(session)
+                    }
                 } else if paneTitles.contains(title) {
                     // Its surface is a herdr pane; the herdr snapshot is its tab inventory.
                 } else if endCheckRuns, tablessMayEnd, meta["source"] as? String != "cli",
@@ -552,8 +562,9 @@ public enum ReminderReader {
                     // resumed session gets the same grace. While herdr's or a switched-on host's
                     // titles are unknown, a tab may still show the title; while a host Steer cannot
                     // read holds a Codex TUI, its app cannot be identified: no end for either. Its
-                    // last host not running is "<app> isn't running.", not ended.
-                    let lastHostDown: Bool = if let host = lastSeenHosts[session], case .notRunning? = otherHosts[host] {
+                    // last app not running is "<app> isn't running.", not ended; a stopped tmux or Zellij server is not.
+                    let lastHostDown: Bool = if let host = lastSeenHosts[session], host.kind == .terminal,
+                                                case .notRunning? = otherHosts[host] {
                         true
                     } else {
                         false
