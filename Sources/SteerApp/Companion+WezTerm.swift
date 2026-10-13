@@ -73,8 +73,11 @@ struct WezTermTabReads: Sendable {
         // Zellij beside it (#242): its panes count toward uniqueness, and its clients' host tabs do not.
         let zellij: ZellijRead = others.zellijOn ? ZellijRunner.read() : .notRunning
         if others.zellijOn { inventories[.zellij] = zellij.inventory }
+        // Every tab of every tty-listing host carrying one of `codexTitles`, so a title decoy is told apart
+        // from a tab whose `ps` was not read, which fails closed (#268).
         let ttys = (read.snapshot?.ttysToRead(codexTitles: codexTitles, claudeTTYs: claudeTTYs) ?? [])
             .union(tmux.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
+            .union(TerminalTabReadAssembly<Void>.ttysToRead(inventories, codexTitles: codexTitles, claudeTTYs: claudeTTYs))
         let processes = TerminalTTYReads.processes(on: ttys)
         var secondRead = inventories
         if second {
@@ -289,8 +292,11 @@ extension Companion {
             let first = await Task.detached {
                 WezTermTabReads.take(running: running, others: others, codexTitles: [title], claudeTTYs: [], second: false)
             }.value
+            // A decoy pane here leaves a session whose tab is in another host to that host's route (#268).
+            let holds = TerminalTabOpen.codexStays(in: .wezTerm, carriesTitle: first.carries(title: title),
+                                                   binding: wezTermCodexBinding(session, reads: first))
             if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: otherRouteOn, inventory: first.wezTerm.inventory,
-                                                  holdsSession: first.carries(title: title)) {
+                                                  holdsSession: holds) {
                 openingTask = false
                 otherwise()
                 return

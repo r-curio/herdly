@@ -197,7 +197,9 @@ public enum TerminalTabBindingRules {
     ///     client, so it is left out of the title count (ADR 0014, "Codex title count").
     /// - Returns: `.bound` only when every rule holds on both reads; otherwise the first failing
     ///   reason. The order of hosts and tabs in the inputs does not matter. A tmux pane binds as a
-    ///   tab does, with its host `.tmux` and its `%pane` id (ADR 0014).
+    ///   tab does, with its host `.tmux` and its `%pane` id (ADR 0014). A title decoy
+    ///   (`isCodexTitleDecoy`) is left out of both reads' title counts (ADR 0013's 2026-10-13
+    ///   amendment, #268).
     public static func codex(sessionID: String, liveness: HerdrSessionLiveness, liveSessions: Set<String>,
                              switches: TerminalHostSwitches, inventories: [TerminalHost: TerminalHostInventory],
                              processes: [String: [TerminalProcess]],
@@ -215,7 +217,8 @@ public enum TerminalTabBindingRules {
         guard sharing == 1 else { return .unavailable(.sessionPrefixNotUnique(sharing)) }
 
         let target: TerminalTabTarget
-        switch titledTab(title, switches: switches, inventories: inventories, excluding: multiplexerClientTTYs) {
+        switch titledTab(title, switches: switches, inventories: inventories, processes: processes,
+                         excluding: multiplexerClientTTYs) {
         case .success(let value): target = value
         case .failure(let reason): return .unavailable(reason)
         }
@@ -223,7 +226,8 @@ public enum TerminalTabBindingRules {
         let count = read.filter { $0.foreground && $0.name == HerdrCodexBindingRules.processName }.count
         guard count == 1 else { return .unavailable(.foregroundProcesses(count: count)) }
 
-        switch titledTab(title, switches: switches, inventories: secondRead, excluding: multiplexerClientTTYs) {
+        switch titledTab(title, switches: switches, inventories: secondRead, processes: processes,
+                         excluding: multiplexerClientTTYs) {
         case .success(let again) where again == target: return .bound(target)
         case .success: return .unavailable(.titleChanged)
         case .failure(.hostUnreadable(let host)): return .unavailable(.hostUnreadable(host))
@@ -289,12 +293,13 @@ public enum TerminalTabBindingRules {
     typealias HostTab = (host: TerminalHost, tab: TerminalTab)
 
     /// The one unsplit tab with a tty that shows `title` across the enabled inventories. A terminal tab
-    /// whose tty is in `excluding` (a multiplexer client's) is not counted.
+    /// whose tty is in `excluding` (a multiplexer client's) and a title decoy are not counted.
     private static func titledTab(_ title: String, switches: TerminalHostSwitches,
                                   inventories: [TerminalHost: TerminalHostInventory],
+                                  processes: [String: [TerminalProcess]],
                                   excluding clientTTYs: Set<String>) -> Result<TerminalTabTarget, TerminalTabUnavailable> {
         let titled: [HostTab]
-        switch titledTabs(title, switches: switches, inventories: inventories, excluding: clientTTYs) {
+        switch titledTabs(title, switches: switches, inventories: inventories, processes: processes, excluding: clientTTYs) {
         case .success(let tabs): titled = tabs
         case .failure(let reason): return .failure(reason)
         }
@@ -308,18 +313,32 @@ public enum TerminalTabBindingRules {
     }
 
     /// Every enabled tab or pane showing `title`, a terminal tab on one of `clientTTYs` (a multiplexer
-    /// client's) left out; Zellij's rule counts with it too (#242).
+    /// client's) and a title decoy (`isCodexTitleDecoy` over `processes`) left out; Zellij's rule counts
+    /// with it too (#242).
     static func titledTabs(_ title: String, switches: TerminalHostSwitches,
                            inventories: [TerminalHost: TerminalHostInventory],
+                           processes: [String: [TerminalProcess]],
                            excluding clientTTYs: Set<String>) -> Result<[HostTab], TerminalTabUnavailable> {
         enabledTabs(switches: switches, inventories: inventories).map { tabs in
             tabs.filter { entry in
-                guard entry.tab.title == title else { return false }
+                guard entry.tab.title == title, !isCodexTitleDecoy(entry.tab, processes: processes) else { return false }
                 guard entry.host.kind == .terminal, !clientTTYs.isEmpty,
                       let tty = entry.tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY) else { return true }
                 return !clientTTYs.contains(tty)
             }
         }
+    }
+
+    /// ADR 0013's 2026-10-13 amendment (#268, the user's decision): a tab showing a Codex title is a
+    /// decoy, and no candidate, when it is an unsplit tab with a tty whose `ps -t` read succeeded and shows
+    /// no foreground `codex`. Every other titled tab still counts: one whose `ps` was not read or failed
+    /// (it may run `codex`, so an unreadable read fails closed), a split (`ps` reads one pane's tty), one
+    /// showing several foreground `codex`, and a tab or pane listing no tty (Ghostty without `tty` keeps
+    /// ADR 0005's title rule; a Zellij pane keeps ADR 0014's).
+    public static func isCodexTitleDecoy(_ tab: TerminalTab, processes: [String: [TerminalProcess]]) -> Bool {
+        guard tab.paneCount == 1, let tty = tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY),
+              let read = processes[tty] else { return false }
+        return !read.contains { $0.foreground && $0.name == HerdrCodexBindingRules.processName }
     }
 
     /// Every tab of every enabled terminal host and every pane of an enabled multiplexer whose titles

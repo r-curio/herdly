@@ -118,15 +118,24 @@ private func codexBinding(tmux: TerminalHostInventory?, terminal: TerminalHostIn
 @Test func tmuxCodexPaneBindsByTitleAndOneForegroundCodex() throws {
     let tmux = try #require(snapshot()).inventory
     #expect(codexBinding(tmux: tmux) == .bound(TerminalTabTarget(host: .tmux, tabID: "%0", tty: "/dev/ttys017")))
-    // No foreground `codex` on the pane's tty: not bound.
+    // No foreground `codex` on the pane's tty: a title decoy, so nothing carries the title (#268).
     #expect(codexBinding(tmux: tmux, processes: ["/dev/ttys017": [TerminalProcess(pid: 9, name: "zsh", foreground: true)]])
-            == .unavailable(.foregroundProcesses(count: 0)))
+            == .unavailable(.titleNotFound))
 }
 
-@Test func tmuxDecoyPaneCarryingTheTitleLeavesTheSessionUnbound() throws {
+@Test func tmuxDecoyPaneCarryingTheTitleLeavesTheRealPaneBound() throws {
     let decoy = "%2|/dev/ttys019|@2|1|$0|1|0|0|0|0|\(codexTitle)\n"
     let tmux = try #require(snapshot(panes: panesOutput + decoy)).inventory
+    // The decoy's `ps` was not read: it may run `codex`, so it still counts.
     #expect(codexBinding(tmux: tmux) == .unavailable(.duplicateTitles(2)))
+    // Its `ps` shows no foreground `codex`: it is no candidate, and the real pane binds (#268).
+    var withDecoyPS = codexInPane
+    withDecoyPS["/dev/ttys019"] = [TerminalProcess(pid: 9, name: "zsh", foreground: true)]
+    #expect(codexBinding(tmux: tmux, processes: withDecoyPS)
+            == .bound(TerminalTabTarget(host: .tmux, tabID: "%0", tty: "/dev/ttys017")))
+    // A second pane that runs `codex` too still leaves the session unbound.
+    withDecoyPS["/dev/ttys019"] = [TerminalProcess(pid: 10, name: "codex", foreground: true)]
+    #expect(codexBinding(tmux: tmux, processes: withDecoyPS) == .unavailable(.duplicateTitles(2)))
 }
 
 @Test func tmuxClientsHostTabMirroringThePaneTitleIsLeftOutOfTheCodexTitleCount() throws {

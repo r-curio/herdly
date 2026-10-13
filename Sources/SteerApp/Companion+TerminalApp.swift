@@ -117,8 +117,11 @@ struct TerminalTabReads: Sendable {
         // Zellij beside them (#242): its panes count toward Codex title uniqueness; it lists no tty to read.
         let zellij: ZellijRead = others.zellijOn ? ZellijRunner.read() : .notRunning
         if others.zellijOn { inventories[.zellij] = zellij.inventory }
+        // Every titled tab of every tty-listing host (iTerm2's too), so a title decoy is told apart from a
+        // tab whose `ps` was not read, which fails closed (#268).
         let ttys = (terminal.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
             .union(wezTermTTYs).union(tmux.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
+            .union(TerminalTabReadAssembly<Void>.ttysToRead(inventories, claudeTTYs: claudeTTYs))
         let processes = TerminalTTYReads.processes(on: ttys)
         var secondRead = inventories
         if second {
@@ -395,10 +398,12 @@ extension Companion {
             let first = await Task.detached {
                 TerminalTabReads.take(others: others, claudeTTYs: [], second: false)
             }.value
-            // Ghostty's title route or iTerm2's cross-host Open decides a title no Terminal.app tab carries.
+            // Ghostty's title route or iTerm2's cross-host Open decides a title no Terminal.app tab carries, or
+            // one only a decoy here carries while the session's tab is in another host (#268).
+            let holds = TerminalTabOpen.codexStays(in: .terminalApp, carriesTitle: first.terminalAppCarries(title: title),
+                                                   binding: codexBinding(session, reads: first))
             if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: ghosttyEnabled || hostSwitches.mayContact(.iTerm2),
-                                                  inventory: first.terminalApp.inventory,
-                                                  holdsSession: first.terminalAppCarries(title: title)) {
+                                                  inventory: first.terminalApp.inventory, holdsSession: holds) {
                 openingTask = false
                 otherwise()
                 return

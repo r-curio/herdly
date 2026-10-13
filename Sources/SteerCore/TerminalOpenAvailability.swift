@@ -179,6 +179,17 @@ public struct TerminalTabReadAssembly<Extra> {
         return ttys
     }
 
+    /// As above for every tab titled with any shortened Codex identifier, for reads taken without knowing
+    /// which sessions are live (Terminal.app's and the multiplexers'). Every titled tab of every tty-listing
+    /// host needs its `ps`, or it could not be told from a title decoy (#268) and the binding fails closed.
+    public static func ttysToRead(_ inventories: [TerminalHost: TerminalHostInventory], claudeTTYs: Set<String>) -> Set<String> {
+        let titles = TerminalHost.ttyBound.reduce(into: Set<String>()) { titles, host in
+            guard case .tabs(let tabs)? = inventories[host] else { return }
+            titles.formUnion(tabs.compactMap(\.title).filter(HerdrBindingRules.isShortenedCodexSessionTitle))
+        }
+        return ttysToRead(inventories, codexTitles: titles, claudeTTYs: claudeTTYs)
+    }
+
     /// Blocking when the readers are: call off the main actor. `readHosts` runs twice, `readProcesses` once
     /// between them.
     public static func take(codexTitles: Set<String>, claudeTTYs: Set<String>,
@@ -217,9 +228,13 @@ public enum TerminalOpenScan {
             liveSessions: Set(liveSessions.map(\.uuidString)), switches: switches,
             inventories: reads.inventories, processes: reads.processes, secondRead: reads.secondRead,
             multiplexerClientTTYs: reads.multiplexerClientTTYs)
-        // tmux (#241): a pane of the default server carries the title, or the server cannot be read.
+        // tmux (#241): a pane of the default server carries the title, or the server cannot be read. A decoy
+        // pane leaves a session bound to another host's tab to that host (#268).
         if switches.mayContact(.tmux), reads.tmux != .notRunning,
-           reads.tmux.snapshot.map({ $0.panes.contains { $0.title == title } }) != false {
+           reads.tmux.snapshot.map({ snapshot in
+               TerminalTabOpen.codexStays(in: .tmux, carriesTitle: snapshot.panes.contains { $0.title == title },
+                                          binding: binding)
+           }) != false {
             var panes = Set(reads.tmux.snapshot?.panes.filter { $0.title == title }.map(\.paneID) ?? [])
             if case .bound(let target) = binding, target.host == .tmux { panes = [target.tabID] }
             return tmux(binding, panes: panes, reads: reads)
@@ -234,16 +249,19 @@ public enum TerminalOpenScan {
                 multiplexerClientTTYs: reads.multiplexerClientTTYs, zellij: reads.zellij.snapshot)
             return zellij(zellijBinding, reads: reads)
         }
-        let carries: (TerminalTab) -> Bool = { $0.title == title }
+        // A host keeps the session only when the binding names none of another host's tabs (#268).
+        let holds: (TerminalHost) -> Bool = { host in
+            TerminalTabOpen.codexStays(in: host, carriesTitle: reads.holds(host) { $0.title == title }, binding: binding)
+        }
         let bindingRoute = codexBindingRoute(binding, title: title, reads: reads)
         if switches.isOn(.wezTerm),
            !reads.leaves(.wezTerm, otherRouteOn: reads.ghosttyOn || switches.isOn(.terminalApp) || switches.mayContact(.iTerm2),
-                         holds: reads.holds(.wezTerm, carries)) {
+                         holds: holds(.wezTerm)) {
             return bindingRoute
         }
         if switches.isOn(.terminalApp),
            !reads.leaves(.terminalApp, otherRouteOn: reads.ghosttyOn || switches.mayContact(.iTerm2),
-                         holds: reads.holds(.terminalApp, carries)) {
+                         holds: holds(.terminalApp)) {
             return bindingRoute
         }
         if switches.mayContact(.iTerm2) { return bindingRoute }

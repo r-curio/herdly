@@ -59,14 +59,52 @@ private func codex(_ reads: TerminalOpenScanReads, live: Set<UUID> = [session],
     #expect(availability.cardLine == "This session has ended.")
 }
 
-@Test func iTerm2DecoyCarryingTheTitleCannotBeIdentified() {
-    // The live #243 run: a decoy tab printed the Codex title. Neither tab is unique (ADR 0013), and the
-    // decoy has no foreground `codex` to walk from, so the app cannot be identified (ADR 0015 amendment).
-    let decoyTTY = "/dev/ttys013"
-    let availability = codex(reads([.iTerm2], [.iTerm2: .tabs([tab("A1"), tab("A3", tty: decoyTTY)])],
-                                   processes: [codexTTY: TerminalForegroundProcesses.parse(codexPS)!,
-                                               decoyTTY: TerminalForegroundProcesses.parse("  903 S+     sleep\n")!]))
-    #expect(availability.cardLine == "Steer can't tell which terminal this session is in.")
+private let decoyTTY = "/dev/ttys013"
+private let decoyPS = TerminalForegroundProcesses.parse("  903 S+     sleep\n")!
+private let realAndDecoyPS = [codexTTY: TerminalForegroundProcesses.parse(codexPS)!, decoyTTY: decoyPS]
+
+@Test func iTerm2DecoyCarryingTheTitleLeavesTheRealTabReachable() {
+    // The live #243 run: a decoy tab printed the Codex title. It runs no `codex`, so it is no candidate
+    // (ADR 0013's 2026-10-13 amendment, #268) and the real tab is the exact target.
+    let scanReads = reads([.iTerm2], [.iTerm2: .tabs([tab("A3", tty: decoyTTY), tab("A1")])], processes: realAndDecoyPS)
+    #expect(TerminalOpenScan.codex(session: session, liveSessions: [session], reads: scanReads) == .reachable)
+    #expect(codex(scanReads) == .offered)
+    // Two tabs that both run `codex` still bind neither; both walks name iTerm2, so the fallback is offered.
+    let twoReal = reads([.iTerm2], [.iTerm2: .tabs([tab("A1"), tab("A2", tty: decoyTTY)])],
+                        processes: [codexTTY: TerminalForegroundProcesses.parse(codexPS)!,
+                                    decoyTTY: TerminalForegroundProcesses.parse("  904 S+     codex\n")!])
+    #expect(codex(twoReal, walks: [codexPID: .reached(.iTerm2), 904: .reached(.iTerm2)]) == .offered)
+    guard case .miss(.fallBack(.noUniqueTarget, candidates: 2), _) =
+            TerminalOpenScan.codex(session: session, liveSessions: [session], reads: twoReal) else {
+        Issue.record("two real tabs must stay unbound")
+        return
+    }
+}
+
+@Test func aDecoyAloneOrAnUnreadableDecoyNeverOffersAnExactOpen() {
+    // The real tab is gone: the decoy is no candidate, and nothing names the app.
+    let alone = reads([.iTerm2], [.iTerm2: .tabs([tab("A3", tty: decoyTTY)])], processes: [decoyTTY: decoyPS])
+    #expect(codex(alone).cardLine == "Steer can't tell which terminal this session is in.")
+    // `ps` failed for the second titled tab: it is never taken for a decoy, so Open fails closed.
+    let unreadable = reads([.iTerm2], [.iTerm2: .tabs([tab("A3", tty: decoyTTY), tab("A1")])])
+    #expect(codex(unreadable).cardLine == "Steer can't tell which terminal this session is in.")
+}
+
+@Test func aDecoyInAnotherHostLeavesTheSessionToTheHostThatHoldsIt() {
+    // Terminal.app carries a decoy while iTerm2 holds the real tab: Terminal.app's route does not keep it.
+    let inventories: [TerminalHost: TerminalHostInventory] = [
+        .terminalApp: .tabs([tab("9882", tty: decoyTTY)]), .iTerm2: .tabs([tab("A1")]),
+    ]
+    let scanReads = reads([.iTerm2, .terminalApp], inventories, processes: realAndDecoyPS)
+    #expect(TerminalOpenScan.codex(session: session, liveSessions: [session], reads: scanReads) == .reachable)
+    let binding = TerminalTabBindingRules.codex(sessionID: session.uuidString, liveness: .live,
+                                                liveSessions: [session.uuidString], switches: scanReads.switches,
+                                                inventories: inventories, processes: realAndDecoyPS, secondRead: inventories)
+    #expect(!TerminalTabOpen.codexStays(in: .terminalApp, carriesTitle: true, binding: binding))
+    #expect(TerminalTabOpen.codexStays(in: .iTerm2, carriesTitle: true, binding: binding))
+    // A host keeps a session it carries that is bound nowhere: its own Open reports the miss.
+    #expect(TerminalTabOpen.codexStays(in: .wezTerm, carriesTitle: true, binding: .unavailable(.duplicateTitles(2))))
+    #expect(!TerminalTabOpen.codexStays(in: .wezTerm, carriesTitle: false, binding: .unavailable(.titleNotFound)))
 }
 
 @Test func iTerm2SplitTabIsASilentFallback() {
@@ -139,6 +177,13 @@ private func codex(_ reads: TerminalOpenScanReads, live: Set<UUID> = [session],
     ]
     #expect(TerminalTabReadAssembly<Void>.ttysToRead(inventories, codexTitles: [title], claudeTTYs: ["ttys003"])
             == ["/dev/ttys001", "/dev/ttys002", "/dev/ttys003", "/dev/ttys004"])
+    // Without the live titles (Terminal.app's and the multiplexers' reads), every tab of every tty-listing
+    // host showing any shortened Codex identifier is read, the iTerm2 decoy's too (#268).
+    var withITerm2 = inventories
+    withITerm2[.iTerm2] = .tabs([tab("A3", tty: "/dev/ttys005", title: "9f3c2b10-1111-4222-8333-44445..."),
+                                 tab("A4", tty: "/dev/ttys006", title: "zsh")])
+    #expect(TerminalTabReadAssembly<Void>.ttysToRead(withITerm2, claudeTTYs: ["ttys003"])
+            == ["/dev/ttys001", "/dev/ttys002", "/dev/ttys003", "/dev/ttys004", "/dev/ttys005"])
 }
 
 // MARK: - Terminal.app
@@ -255,6 +300,19 @@ private func tmuxReads(_ tmux: TmuxRead, iTerm2: TerminalHostInventory? = nil) -
     #expect(codex(reads([.iTerm2, .tmux], inventories, tmux: .snapshot(empty))) == .offered)
     inventories[.tmux] = .notRunning
     #expect(codex(reads([.iTerm2, .tmux], inventories, tmux: .notRunning)) == .offered)
+}
+
+@Test func aTmuxDecoyPaneLeavesTheSessionToTheTabThatRunsCodex() throws {
+    // A tmux pane prints the title but runs no `codex`; the real tab is in iTerm2 (#268).
+    let snapshot = try tmuxSnapshot()
+    let inventories: [TerminalHost: TerminalHostInventory] = [
+        .iTerm2: .tabs([tab("A1"), tab("A2", tty: clientTTY, title: "tmux")]), .tmux: snapshot.inventory,
+    ]
+    var scanReads = reads([.iTerm2, .tmux], inventories,
+                          processes: [codexTTY: TerminalForegroundProcesses.parse(codexPS)!, paneTTY: decoyPS],
+                          tmux: .snapshot(snapshot))
+    scanReads.multiplexerClientTTYs = snapshot.clientTTYs
+    #expect(TerminalOpenScan.codex(session: session, liveSessions: [session], reads: scanReads) == .reachable)
 }
 
 // MARK: - Zellij (ADR 0014)
