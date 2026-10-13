@@ -352,7 +352,8 @@ extension Companion {
 
     /// Every two seconds while iTerm2 is on. Visibility needs macOS to report iTerm2 frontmost; when it
     /// is not, nothing there is visible, and iTerm2 is read only while a queued CLI question or
-    /// completion could show input controls (to keep their iTerm2 line current). One check at a time;
+    /// completion could show input controls (to keep their iTerm2 line current), or while a daemon
+    /// session's end check waits on a fresh inventory (`codexSessionsAwaitingInventory`, #265). One check at a time;
     /// none during an Open.
     func checkITerm2Visits() {
         let uptime = ProcessInfo.processInfo.systemUptime
@@ -366,7 +367,7 @@ extension Companion {
         let takenAt = Date().timeIntervalSince1970
         let frontmost = TerminalApps.frontmostHost()
         let inputSessions = Set(cliItems.map(\.session)).union(cliQuestions.map(\.session))
-        guard frontmost == .iTerm2 || !inputSessions.isEmpty else {
+        guard frontmost == .iTerm2 || !inputSessions.isEmpty || !codexSessionsAwaitingInventory.isEmpty else {
             iTerm2.visits.record(TerminalVisibilityScan(takenAt: takenAt, reading: .nothing))
             return
         }
