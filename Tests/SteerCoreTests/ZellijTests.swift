@@ -307,15 +307,17 @@ private func wezTermTabs(clientTitle: String = "lab | \(codexTitle)", extra: [Te
 }
 
 private func zellijCodexBinding(_ snapshot: ZellijSnapshot?, second: ZellijSnapshot?? = nil,
-                                wezTerm: TerminalHostInventory? = nil,
+                                wezTerm: TerminalHostInventory? = nil, secondWezTerm: TerminalHostInventory? = nil,
+                                processes: [String: [TerminalProcess]] = [:],
                                 switches: TerminalHostSwitches = zellijSwitches) -> ZellijBinding {
     var inventories: [TerminalHost: TerminalHostInventory] = [.wezTerm: wezTerm ?? wezTermTabs()]
     if switches.isOn(.zellij) { inventories[.zellij] = snapshot.map(\.inventory) ?? .unreadable }
     var secondRead = inventories
     if let second { secondRead[.zellij] = second.map(\.inventory) ?? .unreadable }
+    if let secondWezTerm { secondRead[.wezTerm] = secondWezTerm }
     return ZellijBindingRules.codex(sessionID: codexSession.uuidString, liveness: .live,
                                     liveSessions: [codexSession.uuidString], switches: switches,
-                                    inventories: inventories, processes: [:], secondRead: secondRead,
+                                    inventories: inventories, processes: processes, secondRead: secondRead,
                                     multiplexerClientTTYs: snapshot?.clientTTYs ?? [], zellij: snapshot)
 }
 
@@ -333,6 +335,18 @@ private func zellijCodexBinding(_ snapshot: ZellijSnapshot?, second: ZellijSnaps
     let titled = TerminalTab(tabID: "14", tty: "/dev/ttys031", title: codexTitle, paneCount: 1)
     #expect(zellijCodexBinding(try #require(zellijSnapshot()), wezTerm: wezTermTabs(extra: [titled]))
             == .unavailable(.terminal(.duplicateTitles(2))))
+}
+
+@Test func aTerminalTabDecoyBesideAZellijCodexPaneLeavesThePaneBound() throws {
+    // #268: a WezTerm tab prints the title over `sleep`. Its `ps` shows no `codex`, so it is no candidate
+    // on either read. A Zellij pane lists no tty and keeps counting by title (ADR 0014), as tested above.
+    let titled = TerminalTab(tabID: "14", tty: "/dev/ttys031", title: codexTitle, paneCount: 1)
+    let sleeping = ["/dev/ttys031": [TerminalProcess(pid: 77, name: "sleep", foreground: true)]]
+    #expect(zellijCodexBinding(try #require(zellijSnapshot()), wezTerm: wezTermTabs(extra: [titled]), processes: sleeping)
+            == .bound(ZellijPaneTarget(session: "lab", paneID: 1)))
+    // A decoy that appears only in the second read had no `ps` read: the binding is void.
+    #expect(zellijCodexBinding(try #require(zellijSnapshot()), secondWezTerm: wezTermTabs(extra: [titled]))
+            == .unavailable(.titleChanged))
 }
 
 @Test func zellijDecoyAloneNeedsCodexAsItsPaneCommandAndUnderTheServer() throws {
@@ -389,7 +403,7 @@ private func zellijCodexBinding(_ snapshot: ZellijSnapshot?, second: ZellijSnaps
     // And Ghostty's question key fails closed until Zellij is read fresh (cross-host freshness).
     let ghostty = TerminalHostSwitches(enabled: [.ghostty, .zellij])
     #expect(TerminalKeyRelayCheck.hostsToRead(switches: ghostty) == [.zellij])
-    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, switches: ghostty,
+    #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: ghostty,
                                               fresh: [.zellij: try #require(zellijSnapshot()).inventory])
             == .noQuestionKeys(.zellij))
 }

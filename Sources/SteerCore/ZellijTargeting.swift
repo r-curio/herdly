@@ -205,7 +205,7 @@ public enum ZellijBindingRules {
         guard !zellij.processes.processes(named: HerdrCodexBindingRules.processName, under: server.pid).isEmpty else {
             return .unavailable(.codexNotUnderServer)
         }
-        switch TerminalTabBindingRules.titledTabs(title, switches: switches, inventories: secondRead,
+        switch TerminalTabBindingRules.titledTabs(title, switches: switches, inventories: secondRead, processes: processes,
                                                   excluding: multiplexerClientTTYs) {
         case .failure(.hostUnreadable(let host)): return .unavailable(.terminal(.hostUnreadable(host)))
         case .failure: return .unavailable(.titleChanged)
