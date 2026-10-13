@@ -42,11 +42,11 @@ public enum TerminalHost: String, CaseIterable, Hashable, Sendable {
     }
 
     /// Whether Settings shows this host's card. A host's acceptance ticket turns its card on once
-    /// its live run in MVP acceptance passes.
+    /// its live run in MVP acceptance passes: iTerm2 passed on 2026-10-13 (#243).
     public var showsCard: Bool {
         switch self {
-        case .ghostty, .herdr: true
-        case .iTerm2, .terminalApp, .wezTerm, .tmux, .zellij: false
+        case .ghostty, .herdr, .iTerm2: true
+        case .terminalApp, .wezTerm, .tmux, .zellij: false
         }
     }
 

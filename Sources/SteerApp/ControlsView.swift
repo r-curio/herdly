@@ -1078,8 +1078,8 @@ private struct HerdrControls: View {
     }
 }
 
-/// The iTerm2 card (product.md, "Agreed terminal host presentation"), hidden until iTerm2's acceptance
-/// run passes (`TerminalHost.showsCard`). Its switch asks macOS for Automation access as Ghostty's does.
+/// The iTerm2 card (product.md, "Agreed terminal host presentation"), shown since iTerm2's acceptance
+/// run passed (#243, `TerminalHost.showsCard`). Its switch asks macOS for Automation access as Ghostty's does.
 private struct ITerm2Controls: View {
     @ObservedObject var model: Companion
     @ObservedObject var state: ITerm2State
@@ -1097,6 +1097,10 @@ private struct ITerm2Controls: View {
                                                set: { model.setHostSwitch(.iTerm2, on: $0) }))
                     .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                     .accessibilityLabel("Enable iTerm2")
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Version", detail: nil) {
+                Text(state.installed ? (state.version ?? "Installed") : "Not installed").foregroundStyle(.secondary)
             }
             Divider().padding(.horizontal, SettingsStyle.rowInset)
             SettingsRow(title: "Automation permission", detail: nil) {
