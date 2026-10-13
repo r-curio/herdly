@@ -114,6 +114,20 @@ private func availability(daemon: Bool = false, route: TerminalReplyRoute? = .pa
     #expect(daemon.params != nil && daemon.terminal == nil)
 }
 
+// #271: either route remembers when the send began. Codex's typed submit lands a second after its
+// text, so the turn can start before the run settles as sent; that turn still confirms the reply.
+@Test func eitherRouteConfirmsATurnStartedAfterTheSendBegan() {
+    let progress = SessionReplyProgress(completion: completion().id)
+    for daemon in [false, true] {
+        let plan = SessionReplySending.prepare(completion: completion(), availability: availability(daemon: daemon),
+                                               progress: progress, text: "now add tests", at: 1000.4)
+        guard case let .sending(next) = plan.outcome else { Issue.record("expected a send"); return }
+        let sent = next.settling(.sent, at: 1002.3)
+        #expect(sent.observing(sessionWorking: false, latestTurnStart: 1001, at: 1004).phase == .working(text: "now add tests"))
+        #expect(sent.observing(sessionWorking: false, latestTurnStart: 999, at: 1004).phase == .sent(text: "now add tests", at: 1002.3))
+    }
+}
+
 // MARK: - Delivery
 
 @Test func aTabThatMovedOrGainedATabIsNotTypedInto() {
