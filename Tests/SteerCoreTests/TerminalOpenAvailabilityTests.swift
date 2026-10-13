@@ -434,6 +434,19 @@ private func claudeReads(_ hosts: Set<TerminalHost>, _ inventories: [TerminalHos
     #expect(!lines.offersOpen("a"))
 }
 
+@Test func aCardTheScanNoLongerCoversDropsItsScanLineButKeepsItsClickLine() {
+    // Review round 3: a Codex card later bound by herdr, or every terminal host switched off, leaves the
+    // scan's targets while the card stays queued; its old scan line must not hide Open.
+    var lines = OpenUnavailableLines<String>()
+    lines.applyScan(["a": .unavailable(.hostUnreadable(.iTerm2)), "b": .unavailable(.sessionEnded)], startedAt: 1)
+    lines.recordOpen(.unavailable(.appNotIdentified), for: "c", at: 2)
+    lines.retainScanned(["b"])
+    #expect(lines.offersOpen("a"))
+    #expect(lines.line(for: "a") == nil)
+    #expect(lines.line(for: "b") == .sessionEnded)
+    #expect(lines.line(for: "c") == .appNotIdentified)
+}
+
 @Test func linesForCardsThatLeftTheQueueAreForgotten() {
     var lines = OpenUnavailableLines<String>()
     lines.applyScan(["a": .unavailable(.sessionEnded)], startedAt: 1)
