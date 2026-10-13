@@ -332,6 +332,7 @@ extension Companion {
             }
             wezTerm.lastOpen[session.uuidString.lowercased()] = Self.wezTermDiagnostic(run, result: result)
             navigationMessage = message(for: result, opened: "Opened the matching WezTerm tab.")
+            recordOpen(result, codex: session)
             endVisitIntervalsAfterOpen()
             openingTask = false
             refresh()
@@ -395,6 +396,7 @@ extension Companion {
             }
             wezTerm.lastOpen[identity.session] = Self.wezTermDiagnostic(run, result: result)
             navigationMessage = message(for: result, opened: "Opened the matching WezTerm tab.")
+            recordOpen(result, claude: identity)
             if case .unavailable = result {} else {
                 // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included.
                 if let approval,

@@ -192,6 +192,7 @@ extension Companion {
             }
             navigationMessage = result.map { message(for: $0, opened: "Opened the matching Claude tab.") }
                 ?? claudeReturnUnavailableMessage
+            if let result { recordOpen(result, claude: identity) }
             switch result {
             case .opened?, .fellBack?:
                 // ADR 0015: an Open on an actionable request hands it back with no decision, fallback
@@ -346,6 +347,7 @@ extension Companion {
                 OpenFallback.codexApp(candidates: GhosttyTitleOpen.codexCandidates(count: count), switches: switches)
             }
             navigationMessage = message(for: result, opened: "Opened the matching Ghostty tab.")
+            recordOpen(result, codex: session)
             let queued = cliItems.filter { $0.session == session }
                 .map(TerminalCompletionCandidate.init)
             let acknowledged = TerminalVisitAcknowledgment.afterOpen(queued, result: result, preOpenAt: preOpenAt)

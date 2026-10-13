@@ -224,6 +224,7 @@ extension Companion {
                 if !acknowledged.isEmpty { acknowledgeCodexCompletions(Array(acknowledged)); saveCompletions() }
             }
             navigationMessage = message(for: result.open, opened: "Opened the matching Zellij pane.")
+            recordOpen(result.open, codex: session)
             endVisitIntervalsAfterOpen()
             openingTask = false
             refresh()
@@ -275,6 +276,7 @@ extension Companion {
                 return self.zellijClaudeBinding(identity, process: process, read: reads.zellij)
             })
             navigationMessage = message(for: result.open, opened: "Opened the matching Zellij pane.")
+            recordOpen(result.open, claude: identity)
             if case .unavailable = result.open {} else {
                 // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included.
                 if let approval,
