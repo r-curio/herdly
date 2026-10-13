@@ -10,7 +10,7 @@ enum ITerm2Navigation {
 
     /// A fresh inventory; nil when the script failed, timed out, was denied or replied malformed.
     static func snapshot() -> ITerm2Reading? {
-        GhosttyNavigation.request(["action": "snapshot"], resource: "ITerm2").flatMap(ITerm2Reading.parse)
+        GhosttyNavigation.request(["action": "snapshot"], script: .iTerm2).flatMap(ITerm2Reading.parse)
     }
 
     /// The inventory as ADR 0013 reads it: a failed read of a running iTerm2 is unreadable.
@@ -28,7 +28,7 @@ enum ITerm2Navigation {
     /// timeout (a fallback, ADR 0016).
     static func select(_ plan: ITerm2OpenPlan) -> ITerm2SelectReply {
         guard let data = GhosttyNavigation.request(["action": "select", "session": plan.target.tabID,
-                                                     "tty": plan.target.tty], resource: "ITerm2"),
+                                                     "tty": plan.target.tty], script: .iTerm2),
               let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let status = value["status"] as? String else {
             let access = GhosttyAutomationPermission.check(askIfNeeded: false, target: bundleIdentifier)

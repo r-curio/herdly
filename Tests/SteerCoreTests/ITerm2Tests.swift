@@ -102,7 +102,7 @@ private let iTerm2Script = URL(fileURLWithPath: #filePath).deletingLastPathCompo
     process.waitUntilExit()
     #expect(process.terminationStatus == 0, "\(message)")
     let source = try String(contentsOf: iTerm2Script, encoding: .utf8)
-    for forbidden in [".write(", "'jobName'", "\"jobName\"", "launch(", "deepestJob"] {
+    for forbidden in [".write(", "Itrmsntx", "'jobName'", "\"jobName\"", "launch(", "deepestJob"] {
         #expect(!source.contains(forbidden), "\(forbidden)")
     }
 }

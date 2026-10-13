@@ -33,7 +33,12 @@ enum TerminalAppNavigation {
     }
 
     static func snapshot() -> Read {
-        let result = request(["action": "snapshot"])
+        read(request(["action": "snapshot"]))
+    }
+
+    /// A snapshot request's result as a read: Terminal not running, or quit during the read (#270), is
+    /// `notRunning`; any other failure of a running Terminal is unreadable.
+    static func read(_ result: TerminalAppScriptResult) -> Read {
         guard case .reply(let data) = result else { return .unreadable }
         if result.status == "not_running" { return .notRunning }
         return TerminalAppSnapshot.parse(data).map(Read.snapshot) ?? .unreadable
@@ -74,7 +79,7 @@ enum TerminalAppNavigation {
     /// Without a reply, a fresh consent check tells an Automation denial from any other failure, as
     /// iTerm2's select does (#238).
     private static func request(_ value: [String: Any]) -> TerminalAppScriptResult {
-        if let data = GhosttyNavigation.request(value, resource: "TerminalApp") { return .reply(data) }
+        if let data = GhosttyNavigation.request(value, script: .terminalApp) { return .reply(data) }
         let access = GhosttyAutomationPermission.check(askIfNeeded: false, target: bundleIdentifier)
         return access == .denied ? .denied : .failed
     }

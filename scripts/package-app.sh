@@ -34,6 +34,7 @@ plutil -lint "$app/Contents/Info.plist" >/dev/null || fail "Info.plist is not a 
 for f in Contents/MacOS/Steer Contents/Helpers/SteerHook; do
     [ -x "$app/$f" ] || fail "missing executable $f"
 done
+[ -f "$app/Contents/Resources/AppleEvents.js" ] || fail "missing Contents/Resources/AppleEvents.js"
 [ -f "$app/Contents/Resources/Ghostty.js" ] || fail "missing Contents/Resources/Ghostty.js"
 [ -f "$app/Contents/Resources/ITerm2.js" ] || fail "missing Contents/Resources/ITerm2.js"
 [ -f "$app/Contents/Resources/TerminalApp.js" ] || fail "missing Contents/Resources/TerminalApp.js"
