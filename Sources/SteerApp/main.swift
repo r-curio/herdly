@@ -574,6 +574,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     static let spotlightPreviewModes: Set<String> = ["spotlight", "spotlight-approval", "spotlight-handed-back",
                                                        "spotlight-question", "spotlight-claude-question"]
     private var targetFrame: CGRect = .zero
+    /// The frame animation in flight, so a refresh mid-animation does not mistake it for drift.
+    private var frameAnimation: UUID?
     /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|expanded>`
     /// seeds in-memory sample items for screenshots;
     /// `empty-collapsed`, `empty-expanded`, and `empty-not-connected` seed only the usage readouts, to show the empty notch.
@@ -1717,16 +1719,31 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if NotchTuck.isTucked(display: display, pointer: NSEvent.mouseLocation, interacting: interacting, open: expanded) {
             frame = NotchTuck.tuckedFrame(frame)
         }
-        if targetFrame != frame {
+        switch NotchFrameSync.action(target: frame, lastTarget: targetFrame, actual: panel.frame,
+                                     animating: frameAnimation != nil) {
+        case .none:
+            break
+        case .restoreDrifted:
+            // The window server moved the panel (a display slept, woke, or was reconfigured).
+            panel.setFrame(frame, display: true)
+        case .moveToNewTarget:
             let opening = frame.height > panel.frame.height
             targetFrame = frame
             if reduceMotion || !panel.isVisible {
+                frameAnimation = nil
                 panel.setFrame(frame, display: true)
             } else {
+                // Only the newest animation's completion clears the flag; a superseded one may finish first.
+                let animation = UUID()
+                frameAnimation = animation
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = opening ? 0.16 : 0.2
                     context.timingFunction = CAMediaTimingFunction(name: opening ? .easeOut : .easeInEaseOut)
                     panel.animator().setFrame(frame, display: true)
+                } completionHandler: { [weak self] in
+                    Task { @MainActor in
+                        if self?.frameAnimation == animation { self?.frameAnimation = nil }
+                    }
                 }
             }
         }
