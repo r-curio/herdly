@@ -161,6 +161,7 @@ extension Companion {
                                codexSessions: Set<UUID>, processes: [TmuxSessionProcess],
                                hostFront: TerminalVisibilityReading<String>, takenAt: Double) {
         tmux.read = reads.tmux
+        recordHostTitles(reads.inventories, takenAt: takenAt)
         let snapshot = reads.tmux.snapshot
         let unreadable = reads.tmux.inventory == .unreadable
         var diagnostics = ["tmux: \(Self.tmuxDiagnostic(reads.tmux))"]

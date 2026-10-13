@@ -207,6 +207,7 @@ extension Companion {
         case .notRunning: wezTerm.scan = .notRunning
         case .unreadable(let reason): wezTerm.scan = .unreadable(reason)
         }
+        recordHostTitles(reads.inventories, takenAt: takenAt)
         var diagnostics = ["scan: \(wezTerm.scan)",
                            "question digits: \(TerminalHost.wezTerm.typesQuestionDigits ? "on" : "off until proven live (#245)")"]
         var codexRoutes: [UUID: TerminalReplyRoute] = [:]

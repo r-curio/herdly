@@ -408,6 +408,7 @@ extension Companion {
             iTerm2.checking = false
             guard generation == iTerm2.generation, hostSwitches.mayContact(.iTerm2) else { return }
             let reads = observed.0
+            recordHostTitles(reads.inventories, takenAt: takenAt)
             let iTerm2Inventory = reads.inventories[.iTerm2] ?? .unreadable
             switch iTerm2Inventory {
             case .tabs(let tabs): iTerm2.scan = .read; iTerm2.access = .granted; iTerm2.latestTitles = Set(tabs.compactMap(\.title))

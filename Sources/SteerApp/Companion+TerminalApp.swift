@@ -321,6 +321,7 @@ extension Companion {
             terminalApp.readable = true
         }
         if case .tabs(let tabs) = reads.terminalApp.inventory { terminalApp.latestTitles = Set(tabs.compactMap(\.title)) }
+        recordHostTitles(reads.inventories, takenAt: takenAt)
         var diagnostics = ["Terminal.app inventory: \(reads.terminalApp.diagnostic)"]
         var codexRoutes: [UUID: TerminalReplyRoute] = [:]
         var codexSeen: Set<UUID> = []
