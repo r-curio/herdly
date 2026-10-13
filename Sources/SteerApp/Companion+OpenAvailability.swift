@@ -2,7 +2,7 @@ import AppKit
 import SteerCore
 
 // The Open line on terminal session cards (#267; product.md, Notch, "Open unavailable"). A scan every
-// three seconds, while a Codex or Claude CLI card outside herdr (other than running work) is queued,
+// three seconds, while a Codex or Claude CLI card outside herdr that shows Open is queued,
 // picks each card's Open route on `CodexTabReads` of the hosts Steer may contact (SteerCore's
 // `TerminalOpenScan`, which lists what it shares with a click) and resolves a miss with ADR 0015's
 // fallback rules. A card whose Open is unavailable shows the reason's line in place of
@@ -20,8 +20,6 @@ final class OpenAvailabilityScanState {
 /// The sessions one scan classifies, read on the main actor.
 private struct OpenAvailabilityTargets: Sendable {
     var codex: [String: UUID] = [:]
-    /// A card other than running work is queued: only then does the scan run (review round 1, S3).
-    var openCardQueued = false
     var claude: [String: (identity: AgentSessionIdentity, rows: [ClaudeInventorySession], records: [HerdrHookPaneRecord])] = [:]
 
     var isEmpty: Bool { codex.isEmpty && claude.isEmpty }
@@ -86,14 +84,12 @@ extension Companion {
         for item in orderedAgentAttentionItems {
             let identity = item.session
             guard let key = openLineKey(identity) else { continue }
-            let openCard = item.kind != .running && item.kind != .waiting
             switch identity.source {
             case .codex:
                 guard cliTerminalHostOn, let session = codexSession(identity) else { continue }
                 let herdrRoute = herdrBinding(for: HerdrSessionKey(agent: .codex, sessionID: session.uuidString))
                 if herdrRoute != .notInHerdr, ghosttyEnabled || herdrRoute != .unavailable(.ghosttyControlsOff) { continue }
                 targets.codex[key] = session
-                if openCard { targets.openCardQueued = true }
             case .claude:
                 guard !isBackgroundClaudeSession(identity), canOpenClaude(identity) else { continue }
                 let herdrRoute = herdrBinding(for: HerdrSessionKey(agent: .claude, sessionID: identity.session))
@@ -101,7 +97,6 @@ extension Companion {
                 let rows = (claudeInventories[identity.sourceScope]?.sessions ?? [])
                     .filter { $0.kind == .interactive && $0.sessionID == identity.session }
                 targets.claude[key] = (identity, rows, newestHookRecords(forClaudeSession: identity.session))
-                if openCard { targets.openCardQueued = true }
             }
         }
         return targets
@@ -113,8 +108,8 @@ extension Companion {
     /// (Ghostty's own scan runs every two seconds).
     static let openAvailabilityGhosttyMaxAge: Double = 6
 
-    /// Every `openAvailabilityInterval` seconds while a terminal card other than running work is queued
-    /// (running cards are classified alongside); one scan at a time, none during an Open, and none before
+    /// Every `openAvailabilityInterval` seconds while a terminal card that shows Open is queued, running
+    /// and waiting cards included; one scan at a time, none during an Open, and none before
     /// the first reminder scan has said which Codex sessions are live. Hosts Steer may contact are read
     /// through `CodexTabReads.read`, as the iTerm2 Open's revalidation reads them; with Ghostty alone on,
     /// Ghostty's latest scan is reused and nothing is read.
@@ -134,10 +129,8 @@ extension Companion {
         }
         let consentPending = (hostSwitches.mayContact(.iTerm2) && (iTerm2.probing || !consentSettled(iTerm2.access)))
             || (terminalAppSwitchedOn && (terminalApp.probing || !consentSettled(terminalApp.access)))
-        guard !targets.isEmpty, targets.openCardQueued, cliLivenessRead, !ghosttyEnabled || ghosttyPermissionVerified, !consentPending else {
-            updateOpenLines { $0.applyScan([:], startedAt: Date().timeIntervalSince1970) }
-            return
-        }
+        // A closed gate keeps the latest lines as they are (no flicker); cards that left are dropped above.
+        guard !targets.isEmpty, cliLivenessRead, !ghosttyEnabled || ghosttyPermissionVerified, !consentPending else { return }
         let others = otherTabHosts
         let otherHostOn = others.iTerm2Running != nil || others.terminalAppOn || others.wezTermRunning != nil
             || others.tmuxOn || others.zellijOn
@@ -149,8 +142,7 @@ extension Companion {
             ghosttySnapshot = knownGhosttySnapshot
             let fresh = Date().timeIntervalSince1970 - ghosttyInventoryAt <= Self.openAvailabilityGhosttyMaxAge
             if ghosttyRunning, ghosttySnapshot == nil || !fresh {
-                // Nothing current to follow the route on: no card keeps a stale scan line.
-                updateOpenLines { $0.applyScan([:], startedAt: Date().timeIntervalSince1970) }
+                // Nothing current to follow the route on: the latest lines stay until Ghostty's scan catches up.
                 return
             }
         }
