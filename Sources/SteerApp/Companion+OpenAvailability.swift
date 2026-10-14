@@ -31,6 +31,8 @@ private struct OpenAvailabilityObservations: Sendable {
     var routes: [String: (route: OpenScanRoute, agent: AgentSource)] = [:]
     var walks: [Int32: TerminalAppWalk] = [:]
     var ttyWrittenAt: [String: Double] = [:]
+    /// The terminal app each Claude card's verified registry process walked to (#280).
+    var claudeHosts: [String: TerminalHost] = [:]
 }
 
 extension Companion {
@@ -196,6 +198,10 @@ extension Companion {
                                                         observed: process.observed, newestRecords: target.records,
                                                         liveSessionIDs: liveClaude, reads: reads)
                     result.routes[key] = (route, .claude)
+                    if let pid = ClaudeLastSeenHost.pidToWalk(process: process.process, observed: process.observed),
+                       let host = ClaudeLastSeenHost.host(from: TerminalApps.walk(from: pid)) {
+                        result.claudeHosts[key] = host
+                    }
                 }
                 for pid in Set(result.routes.values.flatMap(\.route.pidsToWalk)) { result.walks[pid] = TerminalApps.walk(from: pid) }
                 for tty in Set(result.routes.values.flatMap(\.route.ttysToTime)) {
@@ -204,6 +210,8 @@ extension Companion {
                 return result
             }.value
             openAvailability.scanning = false
+            // A walk names the process's app whatever the switches, so it is kept even when the lines are not.
+            lastSeenClaudeHosts.merge(observed.claudeHosts) { _, latest in latest }
             // A switch that moved during the scan makes its reads apply to nothing.
             guard observedSwitches == hostSwitches, observedGhostty == (ghosttyEnabled, ghosttyPermissionVerified) else { return }
             let results = observed.routes.mapValues { entry in
