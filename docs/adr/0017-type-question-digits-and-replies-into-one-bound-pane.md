@@ -65,6 +65,6 @@ Claude questions are never typed. They are answered only through `updatedInput` 
 
 ## Not yet shown live
 
-- A Codex question digit committing in WezTerm, tmux and Zellij.
+- A Codex question digit committing in tmux and Zellij. WezTerm's was shown on 2026-10-15 with a lone `send-text --no-paste` digit ([evidence](../evidence/wezterm-acceptance.md)), not yet through Steer's own route.
 - `input text` plus a separate Enter submitting in Ghostty, and a pane-addressed text send in herdr.
 - Any typed input sent from a Steer code path on the new hosts, including the race against a manual answer and the copy-mode check.

@@ -6,7 +6,7 @@ in it ends, including any running Codex or Claude session. Run it only with the
 operator's explicit consent, from a terminal app other than the one named, and only
 after saving any work in that app. It never launches, types into or scripts any app.
 
-    python3 scripts/terminal-lab/quit_relaunch_lab.py iterm2|terminal|ghostty \
+    python3 scripts/terminal-lab/quit_relaunch_lab.py iterm2|terminal|ghostty|wezterm \
         --i-understand-this-quits-the-app [--seconds 120]
 
 It checks that Steer is running and the named app is running (its own process, with
@@ -27,6 +27,7 @@ APPS = {
     "iterm2": "/iTerm.app/Contents/MacOS/iTerm2",
     "terminal": "/Terminal.app/Contents/MacOS/Terminal",
     "ghostty": "/Ghostty.app/Contents/MacOS/ghostty",
+    "wezterm": "/WezTerm.app/Contents/MacOS/wezterm-gui",
 }
 STEER = "/Steer.app/Contents/MacOS/Steer"
 
