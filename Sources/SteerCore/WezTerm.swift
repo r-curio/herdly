@@ -188,6 +188,23 @@ public enum WezTermCLI {
         ["HOME": home, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "WEZTERM_UNIX_SOCKET": socket]
     }
 
+    public static let versionArguments = ["--version"]
+
+    /// `--version` talks to no socket, so its environment carries none.
+    public static func versionEnvironment(home: String) -> [String: String] {
+        ["HOME": home, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+    }
+
+    /// The version from `wezterm --version` ("wezterm 20240203-110809-5046fc22"); nil for anything else.
+    public static func version(_ stdout: Data) -> String? {
+        guard stdout.count <= 256 else { return nil }
+        let words = String(decoding: stdout, as: UTF8.self).split(whereSeparator: \.isWhitespace)
+        guard words.count == 2, words[0] == "wezterm",
+              words[1].allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "-._+".contains($0)) })
+        else { return nil }
+        return String(words[1])
+    }
+
     public static let list = ["cli", "--no-auto-start", "list", "--format", "json"]
     public static let listClients = ["cli", "--no-auto-start", "list-clients", "--format", "json"]
 

@@ -16,7 +16,7 @@ final class WezTermState: ObservableObject {
     @Published var scan: WezTermScanStatus = .notRead
     /// A live session was seen bound to a WezTerm pane since the switch went on.
     @Published var inUse = false
-    /// WezTerm's bundle version, shown on the card for information only (product.md, "Settings").
+    /// `wezterm --version`, shown on the card for information only (product.md, "Settings").
     @Published var version: String?
     /// Each session's latest Open in WezTerm, for Show diagnostics.
     @Published var lastOpen: [String: String] = [:]
@@ -124,12 +124,12 @@ extension Companion {
 
     // MARK: - Switch
 
-    /// At launch: whether a `wezterm` binary is in its fixed locations. WezTerm needs no Automation access.
+    /// At launch: whether a `wezterm` binary is in its fixed locations, and its version for the card.
+    /// WezTerm needs no Automation access.
     func startWezTerm() {
-        wezTerm.version = NSWorkspace.shared.urlForApplication(withBundleIdentifier: WezTermNavigation.bundleIdentifier)
-            .flatMap { Bundle(url: $0)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
         Task { @MainActor in
             wezTerm.installed = await Task.detached { WezTermNavigation.binary() != nil }.value
+            wezTerm.version = await Task.detached { WezTermNavigation.version() }.value
         }
     }
 

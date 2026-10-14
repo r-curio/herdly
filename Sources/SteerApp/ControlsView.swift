@@ -916,7 +916,7 @@ private struct WezTermControls: View {
             }
             Divider().padding(.horizontal, SettingsStyle.rowInset)
             SettingsRow(title: "Version", detail: nil) {
-                Text(state.version ?? "Not installed").foregroundStyle(.secondary)
+                Text(state.installed ? state.version ?? "Unknown" : "Not installed").foregroundStyle(.secondary)
             }
             Divider().padding(.horizontal, SettingsStyle.rowInset)
             SettingsRow(title: "Status", detail: nil) {

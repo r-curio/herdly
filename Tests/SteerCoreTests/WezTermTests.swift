@@ -550,3 +550,12 @@ private var pendingEvidence: ReminderReader.RolloutEvidence {
     #expect(TerminalKeyRelayCheck.ghosttyVeto(title: "other", processes: [:], switches: switches, fresh: [.wezTerm: real]) == nil)
     #expect(TerminalKeyRelayCheck.ghosttyVeto(title: "other", processes: [:], switches: switches, fresh: [.wezTerm: .unreadable]) == .otherHostUnreadable(.wezTerm))
 }
+
+@Test func theCardsVersionComesFromTheBinarysVersionLineOnly() {
+    #expect(WezTermCLI.version(Data("wezterm 20240203-110809-5046fc22\n".utf8)) == "20240203-110809-5046fc22")
+    #expect(WezTermCLI.version(Data("wezterm\n".utf8)) == nil)
+    #expect(WezTermCLI.version(Data("error: no socket\n".utf8)) == nil)
+    #expect(WezTermCLI.version(Data("wezterm 1 2\n".utf8)) == nil)
+    #expect(WezTermCLI.version(Data(("wezterm " + String(repeating: "1", count: 300)).utf8)) == nil)
+    #expect(WezTermCLI.versionEnvironment(home: "/Users/a")["WEZTERM_UNIX_SOCKET"] == nil)
+}
