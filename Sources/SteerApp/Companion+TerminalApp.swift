@@ -3,7 +3,7 @@ import SteerCore
 
 // Terminal.app (#239): its Automation permission, the two-second binding and visit scan, Open through
 // ADR 0016's sequence with ADR 0015's fallback, and replies typed into the bound tab (ADR 0017).
-// Everything runs only while Terminal.app's switch is on; the switch and card stay hidden until its
+// Everything runs only while Terminal.app's switch is on; the switch and card are shown since its
 // acceptance (#244). Rules are SteerCore's (`TerminalAppHost.swift`, `TerminalTabBinding.swift`,
 // `TerminalTypedInput.swift`); this file reads, sends and schedules.
 
@@ -38,6 +38,8 @@ final class TerminalAppState {
     /// The exact internal reasons, for the card's diagnostics only.
     var diagnostics: [String] = []
     var launchObserver: NSObjectProtocol?
+    /// Terminal.app's bundle version, shown on the card for information only (product.md, "Settings").
+    var version: String?
 }
 
 /// The enabled hosts a read is taken across, for ADR 0013's cross-host uniqueness: Terminal.app's
@@ -199,6 +201,8 @@ extension Companion {
 
     /// Restores a remembered switch at launch: check consent again, asking only if no decision exists.
     func startTerminalApp() {
+        terminalApp.version = NSWorkspace.shared.urlForApplication(withBundleIdentifier: TerminalAppNavigation.bundleIdentifier)
+            .flatMap { Bundle(url: $0)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
         observeTerminalAppLaunches()
         if hostSwitches.isOn(.terminalApp) { probeTerminalAppAccess() }
     }
