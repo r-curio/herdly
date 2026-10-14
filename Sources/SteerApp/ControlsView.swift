@@ -854,8 +854,8 @@ private struct TerminalControls: View {
     }
 }
 
-/// The Terminal.app card (product.md, "Agreed terminal host presentation"; #239). Shown only once
-/// `TerminalHost.terminalApp.showsCard` is turned on by its acceptance (#244).
+/// The Terminal.app card (product.md, "Agreed terminal host presentation"; #239), shown since
+/// Terminal.app's acceptance run passed (#244, `TerminalHost.showsCard`).
 private struct TerminalAppControls: View {
     @ObservedObject var model: Companion
 
@@ -867,6 +867,10 @@ private struct TerminalAppControls: View {
                                                      set: { model.setHostSwitch(.terminalApp, on: $0) }))
                     .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                     .accessibilityLabel("Enable Terminal.app")
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Version", detail: nil) {
+                Text(model.terminalApp.version ?? "Not installed").foregroundStyle(.secondary)
             }
             Divider().padding(.horizontal, SettingsStyle.rowInset)
             SettingsRow(title: "Automation permission", detail: nil) {
