@@ -875,7 +875,7 @@ private struct TerminalAppControls: View {
             Divider().padding(.horizontal, SettingsStyle.rowInset)
             SettingsRow(title: "Automation permission", detail: nil) {
                 HStack(spacing: 10) {
-                    if model.terminalApp.access == .denied {
+                    if model.terminalApp.shownAccess == .denied {
                         Button("Open Settings…", action: GhosttyAutomationPermission.openSettings)
                     }
                     StatusBadge(title: row.permission, color: row.permission == "Allowed" ? .green : .orange)

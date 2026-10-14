@@ -197,6 +197,38 @@ public struct TerminalAppSettingsRow: Equatable, Sendable {
     public let problems: [String]
 }
 
+/// What the latest scan that could tell showed about Terminal.app's Automation permission (#279). A scan
+/// meeting a denial keeps the switch on and the checked answer as it is, so scanning goes on; the
+/// Permission row shows Not allowed until a readable scan. Any other failure tells nothing.
+public enum TerminalAppScanPermission: Equatable, Sendable {
+    case allowed
+    case denied
+
+    /// How one scan's Terminal.app read ended, as far as permission goes.
+    public enum Outcome: Equatable, Sendable {
+        /// An inventory was read.
+        case readable
+        /// macOS refused the Apple Event (-1743), confirmed by a fresh consent check.
+        case denied
+        /// Anything else: a script error, a timeout, Terminal quitting or an unparseable reply.
+        case other
+    }
+
+    /// The scan permission after `outcome`; any other outcome keeps `previous`.
+    public static func after(_ previous: Self?, _ outcome: Outcome) -> Self? {
+        switch outcome {
+        case .readable: .allowed
+        case .denied: .denied
+        case .other: previous
+        }
+    }
+
+    /// The Automation answer the Permission row shows: a scan's denial overrides the last check.
+    public static func shown(checked: GhosttyAutomationAccess?, scan: Self?) -> GhosttyAutomationAccess? {
+        scan == .denied ? .denied : checked
+    }
+}
+
 public enum TerminalAppPresentation {
     public static let unreadableLine =
         "Steer can't read Terminal.app. Allow Steer under System Settings › Privacy & Security › Automation › Terminal."
