@@ -461,3 +461,45 @@ extension TerminalTabBinding {
         return nil
     }
 }
+
+/// Whether complete Claude inventories list a session as live (`Companion.canOpenClaude`'s gate).
+public enum ClaudeInventoryPresence: Equatable, Sendable {
+    /// Listed exactly once.
+    case live
+    /// Every configured root's inventory is complete and none lists the session.
+    case absent
+    /// Inventories are incomplete, or the session is listed more than once.
+    case unknown
+}
+
+/// H7 for a Claude CLI card that is no longer live (#280). A Claude process ends with the terminal app it
+/// runs in, so once that app quits the card cannot reach Open and the scan no longer follows it. The app
+/// the session's own process last walked to (ADR 0015) names the line instead, as `lastSeenHosts` does for
+/// a Codex card: "<app> isn't running." while that app is not running, then "This session has ended." once
+/// it runs again without the session. Pure: SteerApp walks the process and asks macOS what is running.
+public enum ClaudeLastSeenHost {
+    /// The registered process a scan walks to record the session's app: only one whose fresh kernel read
+    /// is the registered process (same PID and, when Claude recorded one, the same start), so a reused
+    /// PID never names an app.
+    public static func pidToWalk(process: TerminalSessionProcess, observed: TerminalProcessObservation?) -> Int32? {
+        guard case .registered(let registered) = process, let observed, observed.pid == registered.pid else { return nil }
+        if let recorded = registered.procStart, observed.procStart != recorded { return nil }
+        return registered.pid
+    }
+
+    /// The terminal app a walk names, nil for anything else: a multiplexer's process walks to no app, and
+    /// a stopped multiplexer server is never "isn't running".
+    public static func host(from walk: TerminalAppWalk) -> TerminalHost? {
+        guard case .reached(let host) = walk, host.kind == .terminal else { return nil }
+        return host
+    }
+
+    /// The line a Claude card that is not offered Open shows in place of
+    /// `claudeReturnUnavailableMessage`; nil keeps that message. A live session keeps its own route.
+    public static func openLine(lastSeen: TerminalHost?, presence: ClaudeInventoryPresence,
+                                isRunning: (TerminalHost) -> Bool) -> OpenUnavailableReason? {
+        guard presence != .live, let host = lastSeen, host.kind == .terminal else { return nil }
+        if !isRunning(host) { return .appNotRunning(host) }
+        return presence == .absent ? .sessionEnded : nil
+    }
+}

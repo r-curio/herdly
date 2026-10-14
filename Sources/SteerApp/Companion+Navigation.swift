@@ -39,6 +39,27 @@ extension Companion {
             && liveClaudeSessions.values.flatMap({ $0 }).filter({ $0 == identity.session }).count == 1
     }
 
+    /// Whether complete inventories list a Claude CLI session as live, under `canOpenClaude`'s inventory gate.
+    func claudeInventoryPresence(_ identity: AgentSessionIdentity) -> ClaudeInventoryPresence {
+        guard let configuredScopes = configuredClaudeNavigationScopes(),
+              Set(liveClaudeSessions.keys) == configuredScopes,
+              Set(claudeInventoryAvailable.keys) == configuredScopes,
+              claudeInventoryAvailable.values.allSatisfy({ $0 }) else { return .unknown }
+        let everywhere = liveClaudeSessions.values.flatMap({ $0 }).filter({ $0 == identity.session }).count
+        if everywhere == 0 { return .absent }
+        let own = liveClaudeSessions[identity.sourceScope]?.filter({ $0 == identity.session }).count
+        return own == 1 && everywhere == 1 ? .live : .unknown
+    }
+
+    /// H7 for a Claude CLI card not offered Open (#280): "<app> isn't running." for the terminal app its
+    /// process last walked to, then "This session has ended."; nil keeps `claudeReturnUnavailableMessage`.
+    /// Only reads whether the app runs; Steer never launches it (#270).
+    func claudeLastSeenLine(_ identity: AgentSessionIdentity) -> OpenUnavailableReason? {
+        guard let key = openLineKey(identity) else { return nil }
+        return ClaudeLastSeenHost.openLine(lastSeen: lastSeenClaudeHosts[key], presence: claudeInventoryPresence(identity),
+                                           isRunning: TerminalApps.isRunning)
+    }
+
     func isBackgroundClaudeSession(_ identity: AgentSessionIdentity) -> Bool {
         identity.source == .claude && claudeInventories[identity.sourceScope]?.isBackgroundSession(identity.session) == true
     }
