@@ -369,3 +369,55 @@ public enum TerminalHookIdentifiers {
         }
     }
 }
+
+/// The bytes of hook record files read by earlier scans, reused while a file's `FileStamp` is
+/// unchanged. Helpers write each record once, atomically, so normally only new records are opened.
+/// Each scan carries forward only the files it read; readers apply their own size limits to the
+/// cached bytes, which hold at most `maximumBytes + 1`.
+public struct HookFileCache: Sendable {
+    /// The largest limit any reader of this cache applies (`DesktopEventReader.maximumRecordSize`).
+    static let maximumBytes = 128 * 1024
+
+    struct Entry: Sendable {
+        let stamp: FileStamp
+        let bytes: Data?
+    }
+
+    var entries: [String: Entry] = [:]
+
+    public init() {}
+
+    /// Number of files held, for tests.
+    var count: Int { entries.count }
+
+    /// The files either cache read; `other`'s entry wins for a file both hold.
+    public func merging(_ other: HookFileCache) -> HookFileCache {
+        var merged = self
+        merged.entries.merge(other.entries) { _, latest in latest }
+        return merged
+    }
+
+    /// The file's bytes when it holds at most `limit` (≤ `maximumBytes`); nil when it is larger or
+    /// unreadable. Reused from this cache while the file's stamp is unchanged; the read is recorded
+    /// in `next` either way. A file that cannot be stat'ed is read uncached.
+    func bytes(_ url: URL, limit: Int, next: inout HookFileCache) -> Data? {
+        precondition(limit <= Self.maximumBytes)
+        let stamp = FileStamp(url, followingLinks: true)
+        let bytes: Data?
+        if let stamp, let entry = entries[url.path] ?? next.entries[url.path], entry.stamp == stamp {
+            next.entries[url.path] = entry
+            bytes = entry.bytes
+        } else {
+            bytes = Self.read(url)
+            if let stamp { next.entries[url.path] = Entry(stamp: stamp, bytes: bytes) }
+        }
+        guard let bytes, bytes.count <= limit else { return nil }
+        return bytes
+    }
+
+    private static func read(_ url: URL) -> Data? {
+        guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? file.close() }
+        return try? file.read(upToCount: maximumBytes + 1)
+    }
+}

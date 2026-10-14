@@ -524,6 +524,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     private var scanning = false
     var nextScan: Double = 0
+    /// What the last scan decoded, so unchanged rollouts and Claude records are not reread every scan.
+    private var rolloutCache = RolloutCache()
+    /// Codex hook record bytes, shared by the reminder and desktop readers within a scan.
+    private var hookCache = HookFileCache()
+    /// Per Claude events directory path.
+    private var claudeRecordCaches: [String: ClaudeRecordCache] = [:]
     private var pruningEvents = false
     /// Next due time per events directory, so a Claude root that loads after launch is pruned
     /// on the next refresh instead of waiting out another directory's interval.
@@ -1204,16 +1210,30 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             return (root.url.standardizedFileURL.path, URL(fileURLWithPath: root.usagePath, isDirectory: true))
         }
         let branchDirectories = Set(agentQueue.items(at: observationNow).compactMap(rowDirectory(for:)))
+        let rolloutCache = rolloutCache
+        let hookCache = hookCache
+        let claudeRecordCaches = claudeRecordCaches
         Task { @MainActor in
             let result = await Task.detached {
                 let processList = ProcessList.listing()
+                let claudeScans = claudeRoots.map { root in
+                    ClaudeObservationReader.scan(events: root.events, sourceScope: root.scope,
+                                                 installationID: root.installationID, observingSince: observingSince,
+                                                 now: observationNow,
+                                                 cache: claudeRecordCaches[root.events.path] ?? ClaudeRecordCache())
+                }
                 let otherHosts = TerminalHostTitles.forScan(switches: switches, latest: hostReadings, appsRunning: appsRunning,
                                                             codexReach: Companion.codexReach(processList: processList),
                                                             now: Date().timeIntervalSince1970)
-                return (ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory, knownCLISessions: known,
-                                            daemonThreads: daemonThreads, herdrTitles: herdrTitles(), otherHosts: otherHosts,
-                                            ghosttyOn: switches.isOn(.ghostty), lastSeenHosts: lastSeen),
-                 DesktopEventReader.read(from: events),
+                let reminders = ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory,
+                                                    knownCLISessions: known, daemonThreads: daemonThreads,
+                                                    herdrTitles: herdrTitles(), otherHosts: otherHosts,
+                                                    ghosttyOn: switches.isOn(.ghostty), lastSeenHosts: lastSeen,
+                                                    rolloutCache: rolloutCache, hookCache: hookCache)
+                // The desktop reader reads the same window, so it starts from the reminder scan's reads.
+                let desktop = DesktopEventReader.read(from: events, cache: reminders.hookCache)
+                return (reminders,
+                 desktop.events,
                  readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
                  CodexUsageReader.latest(root: rolloutRoot),
                  SessionDiscovery.candidates(root: rolloutRoot, now: Date().timeIntervalSince1970),
@@ -1222,11 +1242,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                      ClaudeSetupDetection.activeSessionInventory(root: root.root, capabilities: root.capabilities,
                                                                  observedAt: observationNow)
                  },
-                 claudeRoots.map { root in
-                     ClaudeObservationReader.scan(events: root.events, sourceScope: root.scope,
-                                                  installationID: root.installationID, observingSince: observingSince,
-                                                  now: observationNow)
-                 },
+                 claudeScans.map(\.scan),
                  claudeRoots.map { root in
                      ClaudeQuestionStore.pending(in: root.events, installationID: root.installationID,
                                                  observingSince: observingSince, now: observationNow)
@@ -1239,12 +1255,18 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                  },
                  branchDirectories.reduce(into: [String: String]()) { result, directory in
                      result[directory] = GitBranchReader.branch(forDirectory: directory)
-                 })
+                 },
+                 claudeScans.map(\.cache),
+                 reminders.hookCache.merging(desktop.cache))
             }.value
             let scan = result.0
             let desktopEvents = result.1
             let readState = result.2
             guard eventsPath.isEmpty || eventsPath == events.path else { scanning = false; refresh(); return }
+            self.rolloutCache = scan.rolloutCache
+            self.hookCache = result.13
+            // Roots no longer connected drop out with their caches.
+            self.claudeRecordCaches = Dictionary(zip(claudeRoots.map(\.events.path), result.12)) { _, latest in latest }
             let previousAgent = Set(agentQueue.items(at: Date().timeIntervalSince1970).map(\.id))
             let scanNow = Date().timeIntervalSince1970
             var approvalReceiptWork: [ClaudeApprovalReceiptWork] = []
