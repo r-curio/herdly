@@ -82,6 +82,52 @@ public struct ReminderScan: Sendable {
     /// host whose inventory is unknown or older than the grace. The app reads those hosts while
     /// this is not empty, so the check is not held back indefinitely.
     public var awaitingHostInventories: Set<UUID> = []
+    /// The rollout reads this scan used, for the next scan to reuse (`ReminderReader.scan`).
+    public var rolloutCache = RolloutCache()
+    /// The hook record files this scan read, for `DesktopEventReader` and the next scan to reuse.
+    public var hookCache = HookFileCache()
+}
+
+/// What earlier scans decoded from rollout files, reused while a file's `FileStamp` is unchanged so
+/// an idle rollout is not reread and reparsed every two seconds. A scan carries forward only the
+/// entries it used, so ended sessions drop out once they leave the hook window.
+public struct RolloutCache: Sendable {
+    struct Key: Hashable, Sendable {
+        let path: String
+        let session: UUID
+        let owner: UUID?
+    }
+
+    /// The `session_meta` fields `scan` reads from a rollout's first line.
+    struct Header: Equatable, Sendable {
+        let id: UUID?
+        let source: String?
+        let originator: String?
+    }
+
+    /// One rollout as read: nil when `compactedRollout` could not read it.
+    struct Read: Sendable {
+        let evidence: ReminderReader.RolloutEvidence
+        let header: Header?
+    }
+
+    struct Entry: Sendable {
+        let stamp: FileStamp
+        let read: Read?
+    }
+
+    struct Head: Sendable {
+        let stamp: FileStamp
+        let parent: (session: UUID, parent: UUID?)?
+    }
+
+    var entries: [Key: Entry] = [:]
+    var heads: [String: Head] = [:]
+
+    public init() {}
+
+    /// Number of rollout reads held, for tests.
+    var count: Int { entries.count }
 }
 
 public struct ReminderQueue: Sendable {
@@ -314,6 +360,46 @@ public enum ReminderReader {
         return evidence(in: bytes, session: session)
     }
 
+    /// The `session_meta` fields of a rollout's first non-empty line; nil when it is not one.
+    static func header(in bytes: Data) -> RolloutCache.Header? {
+        guard let first = bytes.split(separator: 10).first,
+              let event = try? JSONSerialization.jsonObject(with: Data(first)) as? [String: Any],
+              event["type"] as? String == "session_meta",
+              let meta = event["payload"] as? [String: Any] else { return nil }
+        return RolloutCache.Header(id: (meta["id"] as? String).flatMap(UUID.init(uuidString:)),
+                                   source: meta["source"] as? String, originator: meta["originator"] as? String)
+    }
+
+    /// The rollout at `url` read for `session` (and `owner`, for a sub-agent's), reused from `cache`
+    /// while its stamp is unchanged and recorded in `next` either way. `keepBytes` forces a fresh read
+    /// and returns the bytes, for callers that need more than the evidence. Uncached when the file
+    /// cannot be stat'ed.
+    static func cachedRollout(_ url: URL, session: UUID, owner: UUID? = nil, keepBytes: Bool = false,
+                              cache: RolloutCache, next: inout RolloutCache) -> (read: RolloutCache.Read?, bytes: Data?) {
+        let key = RolloutCache.Key(path: url.path, session: session, owner: owner)
+        let stamp = FileStamp(url, followingLinks: true)
+        if !keepBytes, let stamp, let entry = cache.entries[key], entry.stamp == stamp {
+            next.entries[key] = entry
+            return (entry.read, nil)
+        }
+        let bytes = compactedRollout(url)
+        let read = bytes.map { RolloutCache.Read(evidence: evidence(in: $0, session: session, owner: owner), header: header(in: $0)) }
+        if let stamp { next.entries[key] = RolloutCache.Entry(stamp: stamp, read: read) }
+        return (read, bytes)
+    }
+
+    /// `rolloutParent(_:)`, reused from `cache` while the file's stamp is unchanged.
+    static func cachedParent(_ url: URL, cache: RolloutCache, next: inout RolloutCache) -> (session: UUID, parent: UUID?)? {
+        let stamp = FileStamp(url, followingLinks: true)
+        if let stamp, let head = cache.heads[url.path], head.stamp == stamp {
+            next.heads[url.path] = head
+            return head.parent
+        }
+        let parent = rolloutParent(url)
+        if let stamp { next.heads[url.path] = RolloutCache.Head(stamp: stamp, parent: parent) }
+        return parent
+    }
+
     /// How long after its SessionStart a daemon-loaded terminal session may go without a tab title
     /// in a Ghostty inventory before `scan` ends it, so a new tab can be inventoried first.
     public static let surfaceGrace: Double = 15
@@ -362,11 +448,17 @@ public enum ReminderReader {
     /// it has ended. Neither ends while the terminal app whose inventory last showed it (`lastSeenHosts`,
     /// from `surfaceHosts`) is not running (H7); a stopped multiplexer server holds nothing. The end
     /// is dated at the newest inventory consulted.
+    ///
+    /// `rolloutCache` and `hookCache` are the previous scan's: rollouts and hook records whose stamp
+    /// has not changed are not reread. A session with an approval probe is always read fresh.
+    /// Approval request files are always read fresh.
     public static func scan(events: URL, rollouts: URL, ghostty: GhosttyInventory? = nil,
                             knownCLISessions: Set<UUID> = [], daemonThreads: Set<UUID> = [],
                             herdrTitles: HerdrPaneTitles = .notInUse,
                             otherHosts: [TerminalHost: TerminalHostTitles] = [:], ghosttyOn: Bool = true,
-                            lastSeenHosts: [UUID: TerminalHost] = [:]) -> ReminderScan {
+                            lastSeenHosts: [UUID: TerminalHost] = [:],
+                            rolloutCache: RolloutCache = RolloutCache(),
+                            hookCache: HookFileCache = HookFileCache()) -> ReminderScan {
         let cliTitles = ghostty?.titles ?? []
         // The titles herdr's panes show, and whether a session lacking a Ghostty tab may end: not
         // while herdr may show its title on a pane Steer cannot read.
@@ -454,7 +546,7 @@ public enum ReminderReader {
             let received_at: String
         }
         func hook(_ url: URL) -> Hook? {
-            guard let bytes = bounded(url, limit: 65536) else { return nil }
+            guard let bytes = hookCache.bytes(url, limit: 65536, next: &result.hookCache) else { return nil }
             return try? JSONDecoder().decode(Hook.self, from: bytes)
         }
         let window = HookEventListing.newestRecords(ordered)
@@ -503,17 +595,20 @@ public enum ReminderReader {
             for url in rolloutFiles where url.lastPathComponent > parentName && url != parentFile[0] {
                 headReads += 1
                 if headReads > maximumChildProbes { break }
-                guard let head = rolloutParent(url), head.parent == session,
-                      let bytes = compactedRollout(url) else { continue }
-                let child = evidence(in: bytes, session: head.session, owner: session)
+                guard let head = cachedParent(url, cache: rolloutCache, next: &result.rolloutCache), head.parent == session,
+                      let child = cachedRollout(url, session: head.session, owner: session, cache: rolloutCache,
+                                                next: &result.rolloutCache).read?.evidence else { continue }
                 result.completed.formUnion(child.completed.map { TurnIdentity(session: session, turn: $0.turn) })
                 result.canceled.formUnion(child.canceled.map { TurnIdentity(session: session, turn: $0.turn) })
             }
         }
-        // ponytail: bounded full rereads every two seconds; use cursors if histories grow.
+        // An unchanged rollout is reused from the last scan; a changed one is reread in full.
         for (session, urls) in paths where urls.count == 1 {
-            if let bytes = compactedRollout(urls[0]) {
-                let terminal = evidence(in: bytes, session: session)
+            let sessionProbes = probes[session]
+            let rollout = cachedRollout(urls[0], session: session, keepBytes: sessionProbes != nil,
+                                        cache: rolloutCache, next: &result.rolloutCache)
+            if let read = rollout.read {
+                let terminal = read.evidence
                 let finished = terminal.completed
                 result.completed.formUnion(finished)
                 result.canceled.formUnion(terminal.canceled)
@@ -521,18 +616,14 @@ public enum ReminderReader {
                 result.turnContexts.merge(terminal.turnContexts) { _, latest in latest }
                 result.questions += terminal.pendingQuestions
                 result.answeredQuestions.formUnion(terminal.answeredQuestions)
-                if let sessionProbes = probes[session] {
+                if let sessionProbes, let bytes = rollout.bytes {
                     result.resolvedRequests += ApprovalResolutionReader.resolutions(in: bytes, session: session, probes: sessionProbes)
                 }
-                guard let first = bytes.split(separator: 10).first,
-                      let event = try? JSONSerialization.jsonObject(with: Data(first)) as? [String: Any],
-                      event["type"] as? String == "session_meta",
-                      let meta = event["payload"] as? [String: Any],
-                      (meta["id"] as? String).flatMap(UUID.init(uuidString:)) == session,
-                      meta["source"] as? String == "cli" || cliTitles.contains(GhosttyMatch.title(session))
+                guard let meta = read.header, meta.id == session,
+                      meta.source == "cli" || cliTitles.contains(GhosttyMatch.title(session))
                         || shownElsewhere.contains(GhosttyMatch.title(session))
                         || knownCLISessions.contains(session)
-                        || (daemonThreads.contains(session) && meta["originator"] as? String != desktopOriginator) else { continue }
+                        || (daemonThreads.contains(session) && meta.originator != desktopOriginator) else { continue }
                 result.cliSessions.insert(session)
                 let sessionHooks = hooks.filter { $0.session_id == session }.sorted { $0.received_at < $1.received_at }
                 let title = GhosttyMatch.title(session)
@@ -551,7 +642,7 @@ public enum ReminderReader {
                     }
                 } else if paneTitles.contains(title) {
                     // Its surface is a herdr pane; the herdr snapshot is its tab inventory.
-                } else if endCheckRuns, tablessMayEnd, meta["source"] as? String != "cli",
+                } else if endCheckRuns, tablessMayEnd, meta.source != "cli",
                           let newest = inventoryTimes.max(), let oldest = inventoryTimes.min(),
                           case let started = sessionHooks.last(where: { $0.hook_event_name == "SessionStart" })
                             .flatMap({ RolloutTimestamp.parse($0.received_at) }),
