@@ -288,6 +288,33 @@ private let t2 = TerminalTabTarget(host: .terminalApp, tabID: "9921", tty: "/dev
         == "Steer returns to unsplit tabs; otherwise Open raises Terminal.app. Replies are typed into the exact tab; Codex questions are answered in Codex.")
 }
 
+@Test func aScanMeetingAnAutomationDenialShowsNotAllowedUntilAReadableScan() {
+    // The checked answer stays granted, so scanning goes on; the row shows the scan's denial (#279).
+    let denied = TerminalAppScanPermission.after(nil, .denied)
+    #expect(denied == .denied)
+    let shown = TerminalAppScanPermission.shown(checked: .granted, scan: denied)
+    #expect(shown == .denied)
+    let row = TerminalAppPresentation.settingsRow(on: true, access: shown, readable: false, sessionsSeen: true)
+    #expect(row.permission == "Not allowed" && row.badge == .needsAttention)
+    // A later readable scan returns the row to Allowed.
+    let recovered = TerminalAppScanPermission.after(denied, .readable)
+    #expect(recovered == .allowed)
+    let shownAgain = TerminalAppScanPermission.shown(checked: .granted, scan: recovered)
+    #expect(TerminalAppPresentation.settingsRow(on: true, access: shownAgain, readable: true,
+                                                sessionsSeen: true).permission == "Allowed")
+}
+
+@Test func aScanFailingForAnyOtherReasonLeavesThePermissionBadgeAsItWas() {
+    #expect(TerminalAppScanPermission.after(nil, .other) == nil)
+    #expect(TerminalAppScanPermission.after(.allowed, .other) == .allowed)
+    #expect(TerminalAppScanPermission.after(.denied, .other) == .denied)
+    #expect(TerminalAppScanPermission.shown(checked: .granted, scan: .allowed) == .granted)
+    #expect(TerminalAppScanPermission.shown(checked: .granted, scan: nil) == .granted)
+    // Before any scan, the last check is shown as it was.
+    #expect(TerminalAppScanPermission.shown(checked: nil, scan: nil) == nil)
+    #expect(TerminalAppScanPermission.shown(checked: .denied, scan: .allowed) == .denied)
+}
+
 // MARK: - Ghostty beside Terminal.app
 
 private func ghosttySnapshot(titles: [String], tty: String? = nil) -> GhosttySnapshot {

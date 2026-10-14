@@ -12,6 +12,12 @@ import SteerCore
 final class TerminalAppState {
     /// macOS's Automation answer, nil before the first check.
     var access: GhosttyAutomationAccess?
+    /// What the latest scan that could tell showed about Automation (#279); nil before one.
+    var scanPermission: TerminalAppScanPermission?
+    /// The answer the Permission row shows: a scan's denial overrides `access` without stopping scans.
+    var shownAccess: GhosttyAutomationAccess? {
+        TerminalAppScanPermission.shown(checked: access, scan: scanPermission)
+    }
     var probing = false
     /// Bumped on every switch change, so a check started before it applies to nothing.
     var generation = 0
@@ -211,6 +217,7 @@ extension Companion {
     func terminalAppSwitchChanged(_ on: Bool) {
         terminalApp.generation += 1
         resetTerminalAppScan()
+        terminalApp.scanPermission = nil
         if on { terminalApp.access = nil; probeTerminalAppAccess() }
     }
 
@@ -323,11 +330,14 @@ extension Companion {
                                       takenAt: Double) {
         if case .unreadable = reads.terminalApp {
             // A denial while scanning keeps the switch and access as they are: the host stays enabled
-            // and unreadable, so its sessions are unavailable and Ghostty keys fail closed.
+            // and unreadable, so its sessions are unavailable and Ghostty keys fail closed. The Permission
+            // row shows the denial until a readable scan (#279).
             terminalApp.readable = false
         } else {
             terminalApp.readable = true
         }
+        terminalApp.scanPermission = TerminalAppScanPermission.after(terminalApp.scanPermission,
+                                                                     reads.terminalApp.permissionOutcome)
         if case .tabs(let tabs) = reads.terminalApp.inventory { terminalApp.latestTitles = Set(tabs.compactMap(\.title)) }
         recordHostTitles(reads.inventories, takenAt: takenAt)
         var diagnostics = ["Terminal.app inventory: \(reads.terminalApp.diagnostic)"]
@@ -804,7 +814,7 @@ extension Companion {
     // MARK: - Settings
 
     var terminalAppSettingsRow: TerminalAppSettingsRow {
-        TerminalAppPresentation.settingsRow(on: hostSwitches.isOn(.terminalApp), access: terminalApp.access,
+        TerminalAppPresentation.settingsRow(on: hostSwitches.isOn(.terminalApp), access: terminalApp.shownAccess,
                                             readable: terminalApp.readable, sessionsSeen: terminalApp.sessionsSeen)
     }
 }
@@ -827,7 +837,7 @@ extension TerminalAppNavigation.Read {
         switch self {
         case .notRunning: "not running"
         case .snapshot(let snapshot): "\(snapshot.windows.count) windows"
-        case .unreadable: "unreadable"
+        case .unreadable(let denied): denied ? "unreadable (Automation denied)" : "unreadable"
         }
     }
 }
