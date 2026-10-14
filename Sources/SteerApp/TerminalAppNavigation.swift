@@ -15,14 +15,23 @@ enum TerminalAppNavigation {
     enum Read: Equatable, Sendable {
         case notRunning
         case snapshot(TerminalAppSnapshot)
-        /// Running, but the read failed or was refused.
-        case unreadable
+        /// Running, but the read failed or was refused; `denied` when macOS refused the Apple Event (#279).
+        case unreadable(denied: Bool)
 
         var inventory: TerminalHostInventory {
             switch self {
             case .notRunning: .notRunning
             case .snapshot(let snapshot): snapshot.inventory
             case .unreadable: .unreadable
+            }
+        }
+
+        /// What this read tells the Permission row (#279).
+        var permissionOutcome: TerminalAppScanPermission.Outcome {
+            switch self {
+            case .snapshot: .readable
+            case .unreadable(denied: true): .denied
+            case .notRunning, .unreadable(denied: false): .other
             }
         }
 
@@ -37,11 +46,11 @@ enum TerminalAppNavigation {
     }
 
     /// A snapshot request's result as a read: Terminal not running, or quit during the read (#270), is
-    /// `notRunning`; any other failure of a running Terminal is unreadable.
+    /// `notRunning`; any other failure of a running Terminal is unreadable, marked when it was a denial.
     static func read(_ result: TerminalAppScriptResult) -> Read {
-        guard case .reply(let data) = result else { return .unreadable }
+        guard case .reply(let data) = result else { return .unreadable(denied: result == .denied) }
         if result.status == "not_running" { return .notRunning }
-        return TerminalAppSnapshot.parse(data).map(Read.snapshot) ?? .unreadable
+        return TerminalAppSnapshot.parse(data).map(Read.snapshot) ?? .unreadable(denied: false)
     }
 
     /// ADR 0016 step 3, sent once: set the tab-window's `frontmost`, then activate Terminal.
