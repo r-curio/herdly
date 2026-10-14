@@ -898,8 +898,8 @@ private struct TerminalAppControls: View {
     }
 }
 
-/// The WezTerm card (product.md, "Agreed terminal host presentation"; #240), hidden until WezTerm's
-/// acceptance run passes (`TerminalHost.showsCard`, #245). WezTerm needs no Automation access, so the card
+/// The WezTerm card (product.md, "Agreed terminal host presentation"; #240), shown since WezTerm's
+/// acceptance run passed (#245, `TerminalHost.showsCard`). WezTerm needs no Automation access, so the card
 /// has no Permission row.
 private struct WezTermControls: View {
     @ObservedObject var model: Companion
@@ -913,6 +913,10 @@ private struct WezTermControls: View {
                                                 set: { model.setHostSwitch(.wezTerm, on: $0) }))
                     .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                     .accessibilityLabel("Enable WezTerm")
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Version", detail: nil) {
+                Text(state.version ?? "Not installed").foregroundStyle(.secondary)
             }
             Divider().padding(.horizontal, SettingsStyle.rowInset)
             SettingsRow(title: "Status", detail: nil) {
