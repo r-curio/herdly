@@ -13,6 +13,26 @@ public struct ClaudeObservationScan: Equatable, Sendable {
     }
 }
 
+/// What earlier scans decoded from one Claude hook directory, reused while a record file's
+/// `FileStamp` is unchanged. The helper writes each record once, atomically, under a new name, so
+/// normally only new records are opened. A scan carries forward only the files it listed, and the
+/// whole cache resets when the installation or observation start differs.
+public struct ClaudeRecordCache: Sendable {
+    fileprivate struct Entry: Sendable {
+        let stamp: FileStamp
+        let record: ClaudeObservationReader.Record?
+    }
+
+    fileprivate var installationID: String?
+    fileprivate var observingSince: Double?
+    fileprivate var entries: [String: Entry] = [:]
+
+    public init() {}
+
+    /// Number of record files held, for tests.
+    var count: Int { entries.count }
+}
+
 /// Reads only Steer's normalized Claude records. A malformed record is ignored; an unreadable
 /// directory makes the whole root unavailable so it cannot clear another root's state.
 public enum ClaudeObservationReader {
@@ -25,7 +45,10 @@ public enum ClaudeObservationReader {
     public static let promptShortenedKey = "prompt_shortened"
     public static let maximumToolFreshness: Double = 30
 
-    private struct Record {
+    // `@unchecked Sendable`: `toolInput` holds only the immutable Foundation property-list values
+    // `JSONSerialization` returned (read without mutable-container options), and a record is never
+    // mutated after decoding, so sharing it between scans on different threads is safe.
+    fileprivate struct Record: @unchecked Sendable {
         let fileName: String
         let event: String
         let session: String
@@ -70,13 +93,36 @@ public enum ClaudeObservationReader {
     public static func scan(events: URL, sourceScope: String, installationID: String,
                             observingSince: Double = -.infinity,
                             now: Double = Date().timeIntervalSince1970) -> ClaudeObservationScan {
+        scan(events: events, sourceScope: sourceScope, installationID: installationID, observingSince: observingSince,
+             now: now, cache: ClaudeRecordCache()).scan
+    }
+
+    /// `scan`, reusing records decoded by the previous scan of the same directory (`cache`, as the
+    /// previous call returned it) while their files are unchanged.
+    public static func scan(events: URL, sourceScope: String, installationID: String,
+                            observingSince: Double = -.infinity, now: Double = Date().timeIntervalSince1970,
+                            cache: ClaudeRecordCache) -> (scan: ClaudeObservationScan, cache: ClaudeRecordCache) {
         let scope = normalizedScope(sourceScope)
         guard isDirectory(events),
               let entries = HookEventListing.entries(in: events) else {
-            return ClaudeObservationScan(sourceScope: scope, available: false)
+            return (ClaudeObservationScan(sourceScope: scope, available: false), cache)
         }
+        let reusable = cache.installationID == installationID && cache.observingSince == observingSince
+        var next = ClaudeRecordCache()
+        next.installationID = installationID
+        next.observingSince = observingSince
         let records = HookEventListing.newestRecords(entries)
-            .compactMap { record(at: $0, installationID: installationID, observingSince: observingSince) }
+            .compactMap { url -> Record? in
+                // A link or a path that cannot be stat'ed is never a record, as `record(at:)` decides.
+                guard let stamp = FileStamp(url, followingLinks: false) else { return nil }
+                if reusable, let entry = cache.entries[url.path], entry.stamp == stamp {
+                    next.entries[url.path] = entry
+                    return entry.record
+                }
+                let record = stamp.isRegularFile ? record(at: url, installationID: installationID, observingSince: observingSince) : nil
+                next.entries[url.path] = ClaudeRecordCache.Entry(stamp: stamp, record: record)
+                return record
+            }
             .sorted {
                 if $0.capturedAt != $1.capturedAt { return $0.capturedAt < $1.capturedAt }
                 if $0.session != $1.session { return $0.session < $1.session }
@@ -324,7 +370,7 @@ public enum ClaudeObservationReader {
             }
             return result
         }
-        return ClaudeObservationScan(sourceScope: scope, observations: observations)
+        return (ClaudeObservationScan(sourceScope: scope, observations: observations), next)
     }
 
     private static func record(at url: URL, installationID: String, observingSince: Double) -> Record? {
