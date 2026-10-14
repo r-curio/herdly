@@ -324,6 +324,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The host whose inventory last showed each Codex session's title (`ReminderScan.surfaceHosts`),
     /// so a session is not ended while that app is not running (H7). Memory only.
     private(set) var lastSeenHosts: [UUID: TerminalHost] = [:]
+    /// The terminal app each Claude CLI card's registry process last walked to, keyed by its Open line
+    /// key (`ClaudeLastSeenHost`, #280), so a card no longer live says that app isn't running. Memory only.
+    var lastSeenClaudeHosts: [String: TerminalHost] = [:]
     /// Daemon-held sessions whose end check waits on a switched-on host's inventory
     /// (`ReminderScan.awaitingHostInventories`): the iTerm2, Terminal.app and WezTerm scans read while
     /// this is not empty, even with nothing of theirs to show (#265).

@@ -1528,8 +1528,13 @@ struct Notch: View {
         if case let .unavailable(cause) = herdr {
             herdrReasonLine(item, cause: cause)
         } else if herdr == .notInHerdr, !model.isBackgroundClaudeSession(session), !model.canOpenClaude(session) {
-            Text(model.claudeReturnUnavailableMessage)
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+            // H7 (#280): the app the session's process last walked to names the line once it is not live.
+            if let reason = model.claudeLastSeenLine(session) {
+                terminalOpenLine(item, reason: reason, replacesOpen: true)
+            } else {
+                Text(model.claudeReturnUnavailableMessage)
+                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+            }
         } else if herdr == .notInHerdr, let reason = model.terminalOpenLine(session) {
             terminalOpenLine(item, reason: reason)
         }
@@ -1544,7 +1549,7 @@ struct Notch: View {
                 if herdr == .available || model.offersTerminalOpen(item.session) {
                     claudeOpenButton(item, subject: subject, emphasized: emphasized)
                 }
-            } else if herdr == .notInHerdr, !model.ghosttyEnabled {
+            } else if herdr == .notInHerdr, !model.ghosttyEnabled, model.claudeLastSeenLine(item.session) == nil {
                 NotchButton(title: "Set up Ghostty", emphasized: emphasized, action: model.showControls)
                     .accessibilityLabel("Set up Ghostty: \(subject)")
                     .accessibilityHint("Opens Steer controls to enable Ghostty controls.")
@@ -1566,19 +1571,21 @@ struct Notch: View {
     }
 
     /// The one line a terminal card shows when Open is unavailable (product.md, "Open unavailable"):
-    /// the scan's, which replaces Open, or a click's, beside Open until the next scan. A Codex question
+    /// the scan's, which replaces Open, or a click's, beside Open until the next scan. `replacesOpen` marks a
+    /// line shown where Open is not offered at all (a Claude card's last-seen app, #280). A Codex question
     /// whose option cannot be typed shares the line ("Answer this in Codex." first). Static text, so
     /// nothing moves under Reduce Motion.
     @ViewBuilder
-    private func terminalOpenLine(_ item: AgentAttentionItem, reason: OpenUnavailableReason) -> some View {
+    private func terminalOpenLine(_ item: AgentAttentionItem, reason: OpenUnavailableReason,
+                                  replacesOpen: Bool = false) -> some View {
         let unanswerable = item.kind == .question
             && item.question.flatMap(model.codexQuestion(for:)).map(unrelayedQuestion) == true
         let line = OpenUnavailableLines<String>.cardLine(reason, questionCannotBeTyped: unanswerable)
         Text(line)
             .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
-            .accessibilityLabel(model.offersTerminalOpen(item.session)
-                                ? "Open Session did not open. \(line)" : "Open Session unavailable. \(line)")
+            .accessibilityLabel(replacesOpen || !model.offersTerminalOpen(item.session)
+                                ? "Open Session unavailable. \(line)" : "Open Session did not open. \(line)")
     }
 
     private var stripLabel: String {
