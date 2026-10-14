@@ -54,9 +54,11 @@ Run 2026-10-14 on this change's head (`feat/244-accept-terminal-app`): `swift te
 - H8's offer to turn Terminal.app back on (not built; #248).
 - The cross-host line (same Codex title in two apps).
 
-## Open questions
+## Decisions
 
-- **H5 for Terminal.app.** Terminal's split view and tab groups are invisible to its scripting, and a split shows one session twice, so Open reaches the exact session instead of falling back. Accept this as Terminal.app's H5 result and reword §3d and CLI integration's fallback list, or treat it as a gap?
-- **H6 Permission badge.** After a scan meets a denial, the badge still reads Allowed beside the "can't read" problem line. Should a scan-time denial update the badge?
-- **H6 problem line while off.** After the permission check turns the switch off, Settings shows Not allowed and Open Settings… but no problem line. §3d's "and the denial's problem line" or the card's Off rule: which governs?
-- **H7 Claude line.** When Terminal.app quits, the Claude card shows the liveness line rather than "Terminal.app isn't running." Acceptable?
+The operator decided the run's open questions on 2026-10-14:
+
+- **H5 (accepted as is).** Terminal's split view and tab groups are invisible to its scripting, and a split shows one session twice, so Open reaching the exact session is Terminal.app's H5 result. §3d's Terminal.app line and CLI integration's fallback note say so.
+- **H6 Permission badge (change).** A denial met by a scan should turn the badge to Not allowed, not leave it at Allowed. Follow-up ticket.
+- **H6 problem line while off (accepted as is).** Once the permission check turns the switch off, Settings shows Not allowed with Open Settings… and no problem line: the Off rule governs for Terminal.app. §3d H6 says so. iTerm2's card still lists its denial line while off.
+- **H7 Claude line (change).** When Terminal.app quits, the Claude card should say "Terminal.app isn't running." like the Codex card. Follow-up ticket.
