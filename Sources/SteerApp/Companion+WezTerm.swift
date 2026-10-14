@@ -113,12 +113,15 @@ extension Companion {
         previewMode == nil && hostSwitches.mayContact(.wezTerm)
     }
 
-    /// The other enabled hosts a WezTerm read is taken beside (ADR 0013). Read on the main actor.
+    /// The other enabled hosts a WezTerm read is taken beside (ADR 0013). Read on the main actor. Terminal.app
+    /// counts by its switch, as for every other host: a Terminal.app that isn't running holds nothing even
+    /// before its Automation access is verified (which needs it running), and one that is running but not
+    /// yet allowed reads as unreadable (#245).
     var wezTermOtherHosts: OtherTabHosts {
         let ghosttyOn = ghosttyEnabled && ghosttyPermissionVerified
         return OtherTabHosts(ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyOn && TerminalApps.isRunning(.ghostty),
                              iTerm2Running: hostSwitches.mayContact(.iTerm2) ? TerminalApps.isRunning(.iTerm2) : nil,
-                             terminalAppRunning: terminalAppActive ? TerminalApps.isRunning(.terminalApp) : nil,
+                             terminalAppRunning: terminalAppSwitchedOn ? TerminalApps.isRunning(.terminalApp) : nil,
                              tmuxOn: tmuxContactAllowed, zellijOn: zellijContactAllowed)
     }
 
