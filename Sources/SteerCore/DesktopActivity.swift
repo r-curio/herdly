@@ -163,20 +163,20 @@ public enum DesktopEventReader {
         let tool_input: [String: String]?
     }
 
-    private static func bounded(_ url: URL, limit: Int) -> Data? {
-        guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? file.close() }
-        guard let data = try? file.read(upToCount: limit + 1), data.count <= limit else { return nil }
-        return data
-    }
-
     /// Replays only the newest `HookEventListing.maximumRecords` records; an overgrown or
     /// unreadable directory yields no events.
     public static func read(from directory: URL) -> [DesktopEvent] {
-        guard let entries = HookEventListing.entries(in: directory) else { return [] }
-        return HookEventListing.newestRecords(entries)
+        read(from: directory, cache: HookFileCache()).events
+    }
+
+    /// `read(from:)`, reusing record bytes from `cache` (usually the same scan's
+    /// `ReminderScan.hookCache`) while their files are unchanged.
+    public static func read(from directory: URL, cache: HookFileCache) -> (events: [DesktopEvent], cache: HookFileCache) {
+        var next = HookFileCache()
+        guard let entries = HookEventListing.entries(in: directory) else { return ([], next) }
+        let events: [DesktopEvent] = HookEventListing.newestRecords(entries)
             .compactMap { url -> (Record, String)? in
-                guard let data = bounded(url, limit: maximumRecordSize),
+                guard let data = cache.bytes(url, limit: maximumRecordSize, next: &next),
                       let record = try? JSONDecoder().decode(Record.self, from: data) else { return nil }
                 return (record, url.lastPathComponent)
             }
@@ -209,5 +209,6 @@ public enum DesktopEventReader {
                 default: return nil
                 }
             }
+        return (events, next)
     }
 }
