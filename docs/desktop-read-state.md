@@ -20,8 +20,9 @@ The set of flagged ids is persisted in `~/.codex/.codex-global-state.json`, debo
 `DesktopReadAcknowledgment` acknowledges a queued desktop completion when all of these hold:
 
 1. The completion's source is desktop. CLI completions are never touched.
-2. The file was written at least 3 seconds after the completion arrived. This covers the app's persistence debounce, so a file written before the flag was raised cannot be read as a cleared flag.
-3. The completion's session is absent from the unread set.
+2. The session's rollout header names the desktop app as originator (`Codex Desktop`). A terminal session on Codex's app-server daemon (rollout `source: vscode`, originator `codex-tui` or `steer`) is labelled desktop until Steer proves it CLI, and the desktop app never flags its thread unread, so its absence from the set is no evidence (#284). Its completion stays until dismissed or until it is relabelled CLI.
+3. The file was written at least 3 seconds after the completion arrived. This covers the app's persistence debounce, so a file written before the flag was raised cannot be read as a cleared flag.
+4. The completion's session is absent from the unread set.
 
 A session still in the set stays queued. A file older than the margin is no evidence. A missing or foreign-format file changes nothing, and the controls window says so. Acknowledgment only removes items; nothing is ever marked unread, replayed, or dismissed on error. Uncertain completions restored after a restart follow the same rule, which is how an unobserved visit while Steer was quit gets recognized.
 
@@ -33,7 +34,7 @@ Each two-second scan reads the file off the main actor alongside the hook events
 
 ## Verification
 
-Automated: `Tests/SteerCoreTests/DesktopReadStateTests.swift` covers parsing of both real shapes, fail-closed cases (missing key, wrong host shape, no or several identities, no or several local hosts, unknown version, non-UUID entry, symlink, oversize), the margin boundary, CLI exclusion, uncertain completions, and persistence of the acknowledgment through rescan and restart.
+Automated: `Tests/SteerCoreTests/DesktopReadStateTests.swift` covers parsing of both real shapes, fail-closed cases (missing key, wrong host shape, no or several identities, no or several local hosts, unknown version, non-UUID entry, symlink, oversize), the margin boundary, CLI exclusion, exclusion of threads the desktop app did not originate, uncertain completions, and persistence of the acknowledgment through rescan and restart.
 
 Read-only probe: `python3 scripts/probe_desktop_read_state.py [--watch]` prints the file's write time and unread count and applies the rule to the desktop completions in Steer's snapshot, so a human can compare with what the running app cleared.
 

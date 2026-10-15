@@ -1379,7 +1379,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             acknowledgeCodexCompletions(Array(CodexReplyAcknowledgment.acknowledged(
                 queue.items.compactMap(\.completion), events: scan.cliEvents)))
             replyTurnStarts = ReplyTurnStarts.latest(cliEvents: scan.cliEvents, hookEvents: desktopEvents)
-            applyDesktopReadState(readState, enabled: readStateURL != nil)
+            applyDesktopReadState(readState, enabled: readStateURL != nil, desktopThreads: scan.desktopOriginatedSessions)
             for request in unverified where ApprovalReceipts.existing(for: request.id, in: events) != nil {
                 _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision,
                                                                  decidedAt: Date().timeIntervalSince1970), in: events)
@@ -1891,14 +1891,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     /// Acknowledges desktop completions the Codex desktop app itself no longer flags as unread.
     /// Only ever removes items; a missing or unparsable file changes nothing and says so.
-    private func applyDesktopReadState(_ snapshot: DesktopReadStateSnapshot?, enabled: Bool) {
+    private func applyDesktopReadState(_ snapshot: DesktopReadStateSnapshot?, enabled: Bool, desktopThreads: Set<UUID>) {
         guard enabled else { desktopReadStateMessage = "Desktop read state: off. Desktop completions clear only by dismissal."; return }
         guard let snapshot else {
             desktopReadStateMessage = "Desktop read state: unavailable (\(Companion.desktopReadStateURL.lastPathComponent) missing or in an unexpected format). Desktop completions clear only by dismissal."
             return
         }
         let queued = queue.items.compactMap(\.completion)
-        let acknowledged = DesktopReadAcknowledgment.acknowledged(queued, snapshot: snapshot)
+        let acknowledged = DesktopReadAcknowledgment.acknowledged(queued, snapshot: snapshot, desktopThreads: desktopThreads)
         acknowledgeCodexCompletions(Array(acknowledged))
         let written = Date(timeIntervalSince1970: snapshot.modifiedAt).formatted(date: .omitted, time: .standard)
         let tested = CodexSetupRequirements.minimumDesktopVersion
