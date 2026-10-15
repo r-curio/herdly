@@ -526,6 +526,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         queue.items.compactMap(\.completion).filter { $0.source == .cli }
     }
     private var scanning = false
+    /// A git branch read is in flight (`readGitBranches`).
+    private var readingGitBranches = false
     var nextScan: Double = 0
     /// What the last scan decoded, so unchanged rollouts and Claude records are not reread every scan.
     private var rolloutCache = RolloutCache()
@@ -1163,6 +1165,24 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return CodexCLIProcesses.hostsReached(by: ancestries)
     }
 
+    /// Reads each queue row's git branch apart from the attention scan, one read at a time. A row's
+    /// folder can be in a protected location: reading it may wait on a macOS privacy prompt, or on a
+    /// file provider, for as long as nobody answers. Only the branch labels wait for it; the scan,
+    /// and with it every completion, question and approval, never does (#284).
+    private func readGitBranches(_ directories: Set<String>) {
+        guard !readingGitBranches else { return }
+        readingGitBranches = true
+        Task { @MainActor in
+            let branches = await Task.detached {
+                directories.reduce(into: [String: String]()) { result, directory in
+                    result[directory] = GitBranchReader.branch(forDirectory: directory)
+                }
+            }.value
+            readingGitBranches = false
+            if gitBranches != branches { gitBranches = branches }
+        }
+    }
+
     func scanReminders() {
         let now = ProcessInfo.processInfo.systemUptime
         let hasClaudeInventoryRoot = claude.roots.contains { $0.capabilities.supported }
@@ -1212,7 +1232,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             guard claude.usageEnabled(for: root), !root.usagePath.isEmpty else { return nil }
             return (root.url.standardizedFileURL.path, URL(fileURLWithPath: root.usagePath, isDirectory: true))
         }
-        let branchDirectories = Set(agentQueue.items(at: observationNow).compactMap(rowDirectory(for:)))
+        readGitBranches(Set(agentQueue.items(at: observationNow).compactMap(rowDirectory(for:))))
         let rolloutCache = rolloutCache
         let hookCache = hookCache
         let claudeRecordCaches = claudeRecordCaches
@@ -1256,9 +1276,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                          result[root.scope] = reading
                      }
                  },
-                 branchDirectories.reduce(into: [String: String]()) { result, directory in
-                     result[directory] = GitBranchReader.branch(forDirectory: directory)
-                 },
                  claudeScans.map(\.cache),
                  reminders.hookCache.merging(desktop.cache))
             }.value
@@ -1267,9 +1284,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let readState = result.2
             guard eventsPath.isEmpty || eventsPath == events.path else { scanning = false; refresh(); return }
             self.rolloutCache = scan.rolloutCache
-            self.hookCache = result.13
+            self.hookCache = result.12
             // Roots no longer connected drop out with their caches.
-            self.claudeRecordCaches = Dictionary(zip(claudeRoots.map(\.events.path), result.12)) { _, latest in latest }
+            self.claudeRecordCaches = Dictionary(zip(claudeRoots.map(\.events.path), result.11)) { _, latest in latest }
             let previousAgent = Set(agentQueue.items(at: Date().timeIntervalSince1970).map(\.id))
             let scanNow = Date().timeIntervalSince1970
             var approvalReceiptWork: [ClaudeApprovalReceiptWork] = []
@@ -1351,7 +1368,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             if threadNames != result.3 { threadNames = result.3 }
             if usage != result.4 { usage = result.4 }
             if claudeUsage != result.10 { claudeUsage = result.10 }
-            if gitBranches != result.11 { gitBranches = result.11 }
             // Sessions already working before their first hook event: shown only with liveness
             // evidence, and only as working (see docs/session-discovery.md).
             let candidates = result.5
