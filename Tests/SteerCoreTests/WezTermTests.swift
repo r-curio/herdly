@@ -359,10 +359,11 @@ private let codexTarget = TerminalTabTarget(host: .wezTerm, tabID: "1", tty: "/d
 
 private let pane1 = TypedInputPane(host: .wezTerm, paneID: "1", tty: "/dev/ttys017")
 
-@Test func wezTermTypesRepliesIntoTheBoundPaneButNoQuestionDigitUntilProvenLive() {
+@Test func wezTermTypesRepliesAndQuestionDigitsIntoTheBoundPane() {
     #expect(TerminalHost.wezTerm.typesReplies)
-    #expect(!WezTermInput.questionDigitsProvenLive)
-    #expect(!TerminalHost.wezTerm.typesQuestionDigits)
+    // Proven live in WezTerm's acceptance run (#245): the digit alone commits Codex's answer.
+    #expect(WezTermInput.questionDigitsProvenLive)
+    #expect(TerminalHost.wezTerm.typesQuestionDigits)
     #expect(TerminalReplyRoute.from(.bound(codexTarget)) == .pane(pane1))
     #expect(TerminalReplyRoute.from(.unavailable(.split)) == .unreachable)
 }
@@ -413,10 +414,13 @@ private var pendingEvidence: ReminderReader.RolloutEvidence {
     return evidence
 }
 
-@Test func aWezTermQuestionIsAnsweredInCodexWhileTheDigitGateIsOff() {
+@Test func aWezTermQuestionUsesItsPaneByDefaultAndIsAnsweredInCodexWithTheGateOff() {
+    #expect(QuestionRelayRouting.route(for: question, book: AppServerQuestionBook(), daemonConnected: false,
+                                       ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
+                                       terminalHost: .wezTerm) == .terminalRelay)
     let route = QuestionRelayRouting.route(for: question, book: AppServerQuestionBook(), daemonConnected: false,
                                            ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
-                                           terminalHost: .wezTerm)
+                                           terminalHost: .wezTerm, typesDigits: { _ in false })
     #expect(route == .relayUnavailable(.noQuestionKeys(.wezTerm)))
     #expect(HerdrQuestionRelayUnavailable.noQuestionKeys(.wezTerm).message == "Answer this in Codex.")
 }
@@ -466,8 +470,8 @@ private var pendingEvidence: ReminderReader.RolloutEvidence {
 
 // MARK: - Card and lines (product.md, "Agreed terminal host presentation")
 
-@Test func theWezTermCardStaysHiddenUntilAcceptanceAndHasNoPermissionRow() {
-    #expect(!TerminalHost.wezTerm.showsCard)
+@Test func theWezTermCardIsShownSinceAcceptanceAndHasNoPermissionRow() {
+    #expect(TerminalHost.wezTerm.showsCard)
     #expect(TerminalHost.wezTerm.bundleIdentifier == "com.github.wez.wezterm")
     let off = WezTermPresentation.settingsRow(on: false, installed: true, scan: .notRead, inUse: false)
     #expect(off.badge == .off)
@@ -545,4 +549,13 @@ private var pendingEvidence: ReminderReader.RolloutEvidence {
     #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: switches, fresh: [.wezTerm: real]) == .noQuestionKeys(.wezTerm))
     #expect(TerminalKeyRelayCheck.ghosttyVeto(title: "other", processes: [:], switches: switches, fresh: [.wezTerm: real]) == nil)
     #expect(TerminalKeyRelayCheck.ghosttyVeto(title: "other", processes: [:], switches: switches, fresh: [.wezTerm: .unreadable]) == .otherHostUnreadable(.wezTerm))
+}
+
+@Test func theCardsVersionComesFromTheBinarysVersionLineOnly() {
+    #expect(WezTermCLI.version(Data("wezterm 20240203-110809-5046fc22\n".utf8)) == "20240203-110809-5046fc22")
+    #expect(WezTermCLI.version(Data("wezterm\n".utf8)) == nil)
+    #expect(WezTermCLI.version(Data("error: no socket\n".utf8)) == nil)
+    #expect(WezTermCLI.version(Data("wezterm 1 2\n".utf8)) == nil)
+    #expect(WezTermCLI.version(Data(("wezterm " + String(repeating: "1", count: 300)).utf8)) == nil)
+    #expect(WezTermCLI.versionEnvironment(home: "/Users/a")["WEZTERM_UNIX_SOCKET"] == nil)
 }
