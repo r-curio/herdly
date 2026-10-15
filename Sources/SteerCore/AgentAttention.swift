@@ -246,6 +246,9 @@ public struct AgentAttentionQueue: Sendable {
     /// running row. Claude's registry can still read idle for a moment after a prompt is submitted;
     /// a session doing long work without hooks reads busy, so it never qualifies.
     public static let idleRunningGrace: Double = 2 * 60
+    /// How long a Claude Working or Waiting row may go without any evidence (a hook event or a
+    /// registry status change) before Steer offers to remove it as possibly stuck.
+    public static let staleRunningAfter: Double = 30 * 60
 
     private var approvals: [AgentCallIdentity: AgentApproval] = [:]
     private var questions: [AgentCallIdentity: AgentQuestion] = [:]
@@ -265,6 +268,11 @@ public struct AgentAttentionQueue: Sendable {
     /// repeats a session's lifecycle every scan, so a removed session's inventory row and ambiguity stay
     /// hidden until the scan stops reporting the session active, or new hook activity arrives.
     private var removedClaudeSessions: Set<AgentSessionIdentity> = []
+    /// Per source scope, the sessions a live Claude process holds in the latest available scan; absent
+    /// while no scan is available, so a missing session then proves nothing.
+    private var liveClaudeSessions: [String: Set<String>] = [:]
+    /// Each Claude session's latest registry status change, as further evidence its row is current.
+    private var claudeStatusChangedAt: [AgentSessionIdentity: Double] = [:]
     /// Each session's latest prompt submission, so an outcome observed after the reply is still acknowledged.
     private var latestReplies: [AgentSessionIdentity: (turn: String, at: Double)] = [:]
     private var now: Double = 0
@@ -492,7 +500,11 @@ public struct AgentAttentionQueue: Sendable {
             ambiguousClaudeSessions = ambiguousClaudeSessions.filter { $0.sourceScope != scope }
         }
         ambiguousClaudeSessions.formUnion(ambiguous.subtracting(removedClaudeSessions))
-        guard scan.available else { return }
+        guard scan.available else {
+            liveClaudeSessions.removeValue(forKey: scope)
+            return
+        }
+        liveClaudeSessions[scope] = Set(scan.sessions.map(\.sessionID)).union(scan.backgroundSessionIDs)
         let sessions = scan.sessions.filter { $0.sessionID.isEmpty == false }
         let incoming = Set(sessions.filter { $0.kind == .interactive }.map {
             AgentSessionIdentity(source: .claude, sourceScope: scope, session: $0.sessionID, surface: .cli)
@@ -513,6 +525,7 @@ public struct AgentAttentionQueue: Sendable {
                                                 session: session.sessionID, surface: .cli)
             if session.kind == .interactive, let changedAt = session.statusUpdatedAt {
                 handBackAnsweredClaudeApprovals(in: identity, statusChangedAt: changedAt)
+                if changedAt.isFinite { claudeStatusChangedAt[identity] = max(claudeStatusChangedAt[identity] ?? changedAt, changedAt) }
             }
             if session.lifecycle.isIdleInteractive {
                 if let stop = provisionalStops[identity], scan.observedAt > stop.arrivedAt {
@@ -633,6 +646,25 @@ public struct AgentAttentionQueue: Sendable {
             inventoryRunning.removeValue(forKey: identity.session)
         case let .unavailable(identity):
             ambiguousClaudeSessions.remove(identity)
+        }
+    }
+
+    /// Whether a row looks stuck, so the notch offers Remove: a Claude Status unavailable row, or a
+    /// Claude Working or Waiting row whose session no live Claude process holds in the latest available
+    /// scan, or that has had no hook event or registry status change for `staleRunningAfter`.
+    public func isRemovable(_ item: AgentAttentionItem, at now: Double) -> Bool {
+        guard item.session.source == .claude else { return false }
+        switch item.kind {
+        case .statusUnavailable:
+            return true
+        case .running, .waiting:
+            if let live = liveClaudeSessions[item.session.sourceScope], !live.contains(item.session.session) {
+                return true
+            }
+            let evidence = max(item.lastUpdate, claudeStatusChangedAt[item.session] ?? -.infinity)
+            return now - evidence >= Self.staleRunningAfter
+        case .actionableApproval, .question, .handedBackApproval, .outcome, .earlierOutcome:
+            return false
         }
     }
 
