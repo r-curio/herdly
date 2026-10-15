@@ -255,12 +255,16 @@ private func started(_ question: AttentionQuestion, progress: QuestionAnswerProg
     #expect(HerdrQuestionRelayUnavailable.noQuestionKeys(.iTerm2).message == "Steer can't type into iTerm2. Reply in the session.")
     #expect(HerdrQuestionRelayUnavailable.noQuestionKeys(.terminalApp).message == "Answer this in Codex.")
     #expect(HerdrPresentation.relayUnavailableLine(for: .noQuestionKeys(.terminalApp)) == "Answer this in Codex.")
-    // Another host's digits never go to Ghostty: every non-Ghostty host lacks a relay here for now.
-    for host: TerminalHost in [.wezTerm, .tmux, .zellij, .iTerm2, .terminalApp] {
+    // Another host's digits never go to Ghostty: a host without digits says so, and WezTerm, whose digits
+    // were proven live (#245), uses its own pane's relay.
+    for host: TerminalHost in [.tmux, .zellij, .iTerm2, .terminalApp] {
         #expect(QuestionRelayRouting.route(for: call, book: AppServerQuestionBook(), daemonConnected: false,
                                            ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
                                            terminalHost: host) == .relayUnavailable(.noQuestionKeys(host)))
     }
+    #expect(QuestionRelayRouting.route(for: call, book: AppServerQuestionBook(), daemonConnected: false,
+                                       ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
+                                       terminalHost: .wezTerm) == .terminalRelay)
     // An enabled host that is unread or unreadable could hold the session: no Ghostty key.
     #expect(QuestionRelayRouting.route(for: call, book: AppServerQuestionBook(), daemonConnected: false,
                                        ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
