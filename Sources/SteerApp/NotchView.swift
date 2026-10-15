@@ -1559,12 +1559,13 @@ struct Notch: View {
         }
     }
 
-    /// Remove clears a Claude row Steer cannot end on its own, such as a session whose terminal closed
-    /// without a Stop. It never contacts Claude; new activity shows the session again.
+    /// Remove clears a Claude row that looks stuck: its status is unavailable, no live Claude process
+    /// holds its session, or it has had no evidence for 30 minutes. It never contacts Claude; new
+    /// activity shows the session again.
     @ViewBuilder
     private func claudeRemoveControl(_ item: AgentAttentionItem, subject: String) -> some View {
-        if item.session.source == .claude {
-            NotchButton(title: "Remove") { model.removeAgentRow(item.id) }
+        if model.canRemoveAgentRow(item) {
+            NotchButton(title: "Remove") { model.removeAgentRow(item) }
                 .accessibilityLabel("Remove: \(subject)")
                 .accessibilityHint("Removes this row from Steer until the session shows new activity. Claude is not changed.")
         }
