@@ -74,10 +74,24 @@ enum WezTermNavigation {
         case .failure(let reason): return .notRun(reason)
         case .success(let path): socket = path
         }
+        return execute(binary, arguments, environment: WezTermCLI.environment(home: NSHomeDirectory(), socket: socket))
+    }
+
+    /// The installed `wezterm --version`, for the card only; nil when it can't be read. WezTerm's app
+    /// bundle reports a placeholder version, so the binary is asked. Needs no socket and no running WezTerm.
+    static func version() -> String? {
+        guard let binary = binary(),
+              case .exited(0, let stdout, _) = execute(binary, WezTermCLI.versionArguments,
+                                                       environment: WezTermCLI.versionEnvironment(home: NSHomeDirectory()))
+        else { return nil }
+        return WezTermCLI.version(stdout)
+    }
+
+    private static func execute(_ binary: String, _ arguments: [String], environment: [String: String]) -> WezTermCommandResult {
         let process = Process(), output = Pipe(), errors = Pipe()
         process.executableURL = URL(fileURLWithPath: binary)
         process.arguments = arguments
-        process.environment = WezTermCLI.environment(home: NSHomeDirectory(), socket: socket)
+        process.environment = environment
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = output
         process.standardError = errors

@@ -2,9 +2,9 @@ import AppKit
 import SteerCore
 
 // WezTerm (#240): the two-second binding and visit scan, Open through ADR 0016's sequence with ADR 0015's
-// fallback, replies typed into the bound pane (ADR 0017), and the Codex question-digit relay, built but
-// offered only once `WezTermInput.questionDigitsProvenLive` is turned on by a live proof (#245).
-// Everything runs only while WezTerm's switch is on; the switch and card stay hidden until its
+// fallback, replies typed into the bound pane (ADR 0017), and the Codex question-digit relay, offered
+// since a live proof turned on `WezTermInput.questionDigitsProvenLive` (#245).
+// Everything runs only while WezTerm's switch is on; the switch and card are shown since its
 // acceptance (#245). Rules are SteerCore's (`WezTerm.swift`, `TerminalTabBinding.swift`,
 // `TerminalTypedInput.swift`, `TerminalQuestionKeys.swift`); this file reads, sends and schedules.
 
@@ -16,6 +16,8 @@ final class WezTermState: ObservableObject {
     @Published var scan: WezTermScanStatus = .notRead
     /// A live session was seen bound to a WezTerm pane since the switch went on.
     @Published var inUse = false
+    /// `wezterm --version`, shown on the card for information only (product.md, "Settings").
+    @Published var version: String?
     /// Each session's latest Open in WezTerm, for Show diagnostics.
     @Published var lastOpen: [String: String] = [:]
     /// The latest scan's exact binding reasons, for Show diagnostics.
@@ -111,21 +113,26 @@ extension Companion {
         previewMode == nil && hostSwitches.mayContact(.wezTerm)
     }
 
-    /// The other enabled hosts a WezTerm read is taken beside (ADR 0013). Read on the main actor.
+    /// The other enabled hosts a WezTerm read is taken beside (ADR 0013). Read on the main actor. Terminal.app
+    /// counts by its switch, as for every other host: a Terminal.app that isn't running holds nothing even
+    /// before its Automation access is verified (which needs it running), and one that is running but not
+    /// yet allowed reads as unreadable (#245).
     var wezTermOtherHosts: OtherTabHosts {
         let ghosttyOn = ghosttyEnabled && ghosttyPermissionVerified
         return OtherTabHosts(ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyOn && TerminalApps.isRunning(.ghostty),
                              iTerm2Running: hostSwitches.mayContact(.iTerm2) ? TerminalApps.isRunning(.iTerm2) : nil,
-                             terminalAppRunning: terminalAppActive ? TerminalApps.isRunning(.terminalApp) : nil,
+                             terminalAppRunning: terminalAppSwitchedOn ? TerminalApps.isRunning(.terminalApp) : nil,
                              tmuxOn: tmuxContactAllowed, zellijOn: zellijContactAllowed)
     }
 
     // MARK: - Switch
 
-    /// At launch: whether a `wezterm` binary is in its fixed locations. WezTerm needs no Automation access.
+    /// At launch: whether a `wezterm` binary is in its fixed locations, and its version for the card.
+    /// WezTerm needs no Automation access.
     func startWezTerm() {
         Task { @MainActor in
             wezTerm.installed = await Task.detached { WezTermNavigation.binary() != nil }.value
+            wezTerm.version = await Task.detached { WezTermNavigation.version() }.value
         }
     }
 

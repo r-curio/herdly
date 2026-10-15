@@ -104,19 +104,62 @@ private func identityState(_ identities: [String: [String: Any]], version: Any =
         AttentionCompletion(source: .desktop, session: viewed, turn: UUID(), arrivedAt: 900, uncertain: true),
     ]
     let snapshot = DesktopReadStateSnapshot(unread: [stillUnread], modifiedAt: 2_000)
-    let acknowledged = DesktopReadAcknowledgment.acknowledged(completions, snapshot: snapshot)
+    let desktopThreads: Set<UUID> = [viewed, stillUnread, fresh]
+    let acknowledged = DesktopReadAcknowledgment.acknowledged(completions, snapshot: snapshot, desktopThreads: desktopThreads)
     // Viewed thread: both turns, including the uncertain restored one. Fresh completion: the file
     // was written under the margin after it arrived, so its flag may not be persisted yet.
     #expect(Set(acknowledged) == Set([completions[0].id, completions[4].id]))
 
     let exactlyAtMargin = DesktopReadStateSnapshot(unread: [], modifiedAt: 1_998 + DesktopReadAcknowledgment.settleMargin)
-    #expect(Set(DesktopReadAcknowledgment.acknowledged(completions, snapshot: exactlyAtMargin))
+    #expect(Set(DesktopReadAcknowledgment.acknowledged(completions, snapshot: exactlyAtMargin, desktopThreads: desktopThreads))
             == Set(completions.filter { $0.source == .desktop }.map(\.id)))
 
     let stale = DesktopReadStateSnapshot(unread: [], modifiedAt: 500)
-    #expect(DesktopReadAcknowledgment.acknowledged(completions, snapshot: stale).isEmpty)
+    #expect(DesktopReadAcknowledgment.acknowledged(completions, snapshot: stale, desktopThreads: desktopThreads).isEmpty)
     let badTime = [AttentionCompletion(source: .desktop, session: viewed, turn: UUID(), arrivedAt: .infinity)]
-    #expect(DesktopReadAcknowledgment.acknowledged(badTime, snapshot: snapshot).isEmpty)
+    #expect(DesktopReadAcknowledgment.acknowledged(badTime, snapshot: snapshot, desktopThreads: desktopThreads).isEmpty)
+}
+
+// Issue #284: a daemon-run terminal session is labelled desktop until Steer proves it CLI. The
+// desktop app never flags its thread unread, so absence from the unread set is no evidence.
+@Test func readAcknowledgmentIgnoresThreadsTheDesktopAppDidNotCreate() {
+    let desktop = UUID(), daemonRun = UUID()
+    let completions = [
+        AttentionCompletion(source: .desktop, session: desktop, turn: UUID(), arrivedAt: 1_000),
+        AttentionCompletion(source: .desktop, session: daemonRun, turn: UUID(), arrivedAt: 1_000),
+    ]
+    let snapshot = DesktopReadStateSnapshot(unread: [], modifiedAt: 2_000)
+    #expect(DesktopReadAcknowledgment.acknowledged(completions, snapshot: snapshot, desktopThreads: [desktop])
+            == [completions[0].id])
+    #expect(DesktopReadAcknowledgment.acknowledged(completions, snapshot: snapshot, desktopThreads: []).isEmpty)
+}
+
+@Test(arguments: [("Codex Desktop", true), ("codex-tui", false), ("steer", false), (nil, false)] as [(String?, Bool)])
+func scanNamesOnlyDesktopOriginatedSessions(originator: String?, desktop: Bool) throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("steer-originator-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = UUID(), turn = UUID()
+    for (event, time) in [("SessionStart", "2026-10-15T01:19:59Z"), ("Stop", "2026-10-15T01:20:00Z")] {
+        let object: [String: Any] = ["session_id": session.uuidString, "hook_event_name": event,
+                                     "turn_id": turn.uuidString, "received_at": time]
+        try JSONSerialization.data(withJSONObject: object).write(to: root.appendingPathComponent(UUID().uuidString + ".json"))
+    }
+    var meta: [String: Any] = ["id": session.uuidString, "source": "vscode"]
+    if let originator { meta["originator"] = originator }
+    let header = try JSONSerialization.data(withJSONObject: ["type": "session_meta", "payload": meta])
+    try (header + Data("\n{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"\(turn)\"}}\n".utf8))
+        .write(to: root.appendingPathComponent("rollout-" + session.uuidString.lowercased() + ".jsonl"))
+    let scan = ReminderReader.scan(events: root, rollouts: root)
+    #expect(scan.desktopOriginatedSessions == (desktop ? [session] : []))
+    // Not yet proved CLI either way: its completion stays desktop-labelled, and only a desktop
+    // thread's completion can be read-acknowledged.
+    #expect(scan.cliSessions.isEmpty)
+    let completion = AttentionCompletion(source: .desktop, session: session, turn: turn, arrivedAt: 1_000)
+    let acknowledged = DesktopReadAcknowledgment.acknowledged(
+        [completion], snapshot: DesktopReadStateSnapshot(unread: [], modifiedAt: 2_000),
+        desktopThreads: scan.desktopOriginatedSessions)
+    #expect(acknowledged == (desktop ? [completion.id] : []))
 }
 
 @Test func readAcknowledgmentDismissesQueuedDesktopCompletionsAndPersists() {
@@ -126,7 +169,8 @@ private func identityState(_ identities: [String: [String: Any]], version: Any =
     let b = AttentionCompletion(source: .desktop, session: unread, turn: UUID(), arrivedAt: 10)
     queue.apply(completions: [a, b])
     let snapshot = DesktopReadStateSnapshot(unread: [unread], modifiedAt: 100)
-    for id in DesktopReadAcknowledgment.acknowledged(queue.items.compactMap(\.completion), snapshot: snapshot) {
+    for id in DesktopReadAcknowledgment.acknowledged(queue.items.compactMap(\.completion), snapshot: snapshot,
+                                                         desktopThreads: [viewed, unread]) {
         queue.dismiss(.completion(id))
     }
     #expect(queue.items.compactMap(\.completion).map(\.id) == [b.id])
