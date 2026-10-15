@@ -2057,10 +2057,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         saveCompletions()
         refresh()
     }
-    /// Removes a Claude running, waiting, or status-unavailable row the user judges stale. Claude is
-    /// not contacted; the row returns on new activity (`AgentAttentionQueue.remove`).
-    func removeAgentRow(_ id: AgentAttentionID) {
-        agentQueue.remove(id)
+    /// Whether a row looks stuck enough to offer Remove (`AgentAttentionQueue.isRemovable`).
+    func canRemoveAgentRow(_ item: AgentAttentionItem) -> Bool {
+        agentQueue.isRemovable(item, at: Date().timeIntervalSince1970)
+    }
+    /// Removes a stuck Claude running, waiting, or status-unavailable row. Claude is not contacted;
+    /// the row returns on new activity (`AgentAttentionQueue.remove`).
+    func removeAgentRow(_ item: AgentAttentionItem) {
+        guard canRemoveAgentRow(item) else { return }
+        agentQueue.remove(item.id)
         refresh()
     }
     func dismissAttention(_ item: AttentionCompletion) {

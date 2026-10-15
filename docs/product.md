@@ -155,9 +155,12 @@ not identify a target or claim who supplied it. Live rows read Working or Waitin
 or stopped turn keeps that terminal label; when the current or terminal state cannot be classified,
 the row says Status unavailable.
 
-Requested by the user on 2026-10-15: a Claude Working, Waiting, or Status unavailable row carries a
-Remove action, so a row Steer cannot end on its own (a session whose terminal closed without a Stop,
-or one whose pane cannot be verified) does not stay in the queue indefinitely. Remove changes only
+Requested by the user on 2026-10-15: a Claude row that looks stuck carries a Remove action, so a row
+Steer cannot end on its own (a session whose terminal closed without a Stop, or one whose pane cannot
+be verified) does not stay in the queue indefinitely. Remove is offered only on a Status unavailable
+row, or on a Working or Waiting row whose session no live Claude process holds in the latest readable
+session registry, or that has had no hook event or registry status change for 30 minutes. Live,
+recently updated rows never show it. Remove changes only
 Steer's queue: it never contacts Claude, creates no result, and acknowledges nothing. The removed turn's
 recorded evidence cannot bring the row back, and while Claude's inventory keeps reporting the session
 active or its status ambiguous the row stays hidden. Newer hook activity for the session, or the session

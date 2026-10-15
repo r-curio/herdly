@@ -284,6 +284,44 @@ private func inventory(_ status: String, at observedAt: Double) -> ClaudeInvento
     #expect(queue.items.compactMap(\.running).first?.updatedAt == 10 + grace + 5)
 }
 
+@Test func removeIsOfferedOnlyForRowsThatLookStuck() throws {
+    let live = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    let gone = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "gone", surface: .cli)
+    let stale = AgentAttentionQueue.staleRunningAfter
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: live, turn: "prompt", arrivedAt: 1, updatedAt: 10)))
+    queue.apply(.running(AgentRunning(session: gone, turn: "prompt", arrivedAt: 2, updatedAt: 10)))
+    func removable(_ session: AgentSessionIdentity, at now: Double) throws -> Bool {
+        let item = try #require(queue.items(at: now).first { $0.session == session })
+        return queue.isRemovable(item, at: now)
+    }
+
+    // Before any registry scan, only time can mark a row stuck.
+    #expect(try !removable(gone, at: 11))
+    #expect(try removable(gone, at: 10 + stale))
+
+    // A live busy process with a recent status change keeps its quiet hook row; a session no live
+    // process holds is stuck at once.
+    queue.apply(inventory("busy", at: 20, statusChangedAt: 15))
+    #expect(try !removable(live, at: 21))
+    #expect(try removable(gone, at: 21))
+    #expect(try !removable(live, at: 15 + stale - 1))
+    #expect(try removable(live, at: 15 + stale))
+
+    // An unreadable registry proves nothing about which sessions are gone.
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 30, available: false))
+    #expect(try !removable(gone, at: 31))
+
+    // Status unavailable is always offered; approvals, outcomes, and Codex rows never are.
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 40, ambiguousSessionIDs: [interactiveID]))
+    #expect(try removable(live, at: 41))
+    let codex = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "codex", surface: .cli)
+    queue.apply(.running(AgentRunning(session: codex, turn: "turn", arrivedAt: 1)))
+    queue.apply(.approval(AgentApproval(session: gone, turn: "prompt", call: "write", arrivedAt: 42)))
+    #expect(try !removable(codex, at: 10 * stale))
+    #expect(try !removable(gone, at: 10 * stale))
+}
+
 @Test func removedStaleRunningRowStaysGoneUntilNewActivity() {
     let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
     let other = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "other", surface: .cli)
