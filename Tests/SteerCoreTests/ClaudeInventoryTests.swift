@@ -284,6 +284,84 @@ private func inventory(_ status: String, at observedAt: Double) -> ClaudeInvento
     #expect(queue.items.compactMap(\.running).first?.updatedAt == 10 + grace + 5)
 }
 
+@Test func removedStaleRunningRowStaysGoneUntilNewActivity() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    let other = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "other", surface: .cli)
+    var queue = AgentAttentionQueue()
+    // A session whose terminal closed mid-turn: the registry still reads busy and no Stop arrives.
+    let stale = AgentRunning(session: identity, turn: "prompt", arrivedAt: 1, updatedAt: 10, prompt: "close it")
+    queue.apply(.running(stale))
+    queue.apply(.running(AgentRunning(session: other, turn: "other-prompt", arrivedAt: 2)))
+    queue.apply(.outcome(AgentOutcome(session: identity, turn: "earlier", status: .finished, arrivedAt: 0)))
+    queue.apply(inventory("busy", at: 20))
+
+    queue.remove(.running(stale.id))
+    #expect(queue.items.compactMap(\.running).map(\.identity.session) == [other])
+    #expect(queue.workingCount == 1)
+    // Removal acknowledges nothing and creates no outcome.
+    #expect(queue.items.compactMap(\.outcome).map(\.turn) == ["earlier"])
+    #expect(queue.acknowledgedOutcomes.isEmpty)
+
+    // Repeated hook evidence and a still-busy registry cannot bring it back.
+    queue.apply(.running(stale))
+    queue.apply(inventory("busy", at: 30))
+    #expect(queue.items.compactMap(\.running).map(\.identity.session) == [other])
+
+    // Newer hook activity is live work again.
+    queue.apply(.running(AgentRunning(session: identity, turn: "prompt", arrivedAt: 1, updatedAt: 40)))
+    #expect(queue.items.compactMap(\.running).first { $0.identity.session == identity }?.updatedAt == 40)
+}
+
+@Test func removedInventoryRowReturnsOnlyAfterTheSessionReadsIdle() throws {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(inventory("busy", at: 1))
+    let row = try #require(queue.items.first)
+    #expect(row.kind == .running)
+
+    queue.remove(row.id)
+    queue.apply(inventory("busy", at: 2))
+    #expect(queue.items.isEmpty)
+    // An unavailable scan keeps the removal.
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 3, available: false))
+    queue.apply(inventory("busy", at: 4))
+    #expect(queue.items.isEmpty)
+
+    queue.apply(inventory("idle", at: 5))
+    queue.apply(inventory("busy", at: 6))
+    #expect(queue.items.map(\.session) == [identity])
+}
+
+@Test func removedStatusUnavailableRowStaysGoneWhileAmbiguous() {
+    let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    let ambiguous = ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 1, ambiguousSessionIDs: [interactiveID])
+    var queue = AgentAttentionQueue()
+    queue.apply(ambiguous)
+    #expect(queue.items.map(\.kind) == [.statusUnavailable])
+
+    queue.remove(.unavailable(identity))
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 2, ambiguousSessionIDs: [interactiveID]))
+    #expect(queue.items.isEmpty)
+    #expect(queue.toCheckCount == 0)
+
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 3))
+    queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 4, ambiguousSessionIDs: [interactiveID]))
+    #expect(queue.items.map(\.kind) == [.statusUnavailable])
+}
+
+@Test func removeIgnoresCodexAndActionableRows() {
+    let codex = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "codex", surface: .cli)
+    let claude = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    var queue = AgentAttentionQueue()
+    let running = AgentRunning(session: codex, turn: "turn", arrivedAt: 1)
+    let approval = AgentApproval(session: claude, turn: "prompt", call: "write", arrivedAt: 2)
+    queue.apply(.running(running), now: 2)
+    queue.apply(.approval(approval), now: 2)
+    queue.remove(.running(running.id))
+    queue.remove(.approval(approval.id))
+    #expect(queue.items(at: 2).count == 2)
+}
+
 @Test func quietRunningRowStaysWhileClaudeReportsTheSessionBusyOrWaiting() {
     let identity = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
     var queue = AgentAttentionQueue()

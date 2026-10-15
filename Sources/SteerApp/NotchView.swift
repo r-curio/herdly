@@ -1383,6 +1383,7 @@ struct Notch: View {
                                 .accessibilityLabel("Open Session: \(subject)")
                                 .accessibilityHint("Open this session in Codex.")
                         }
+                        claudeRemoveControl(item, subject: subject)
                     case .question:
                         if item.session.source == .claude {
                             claudeReturnControl(item, subject: subject, emphasized: true)
@@ -1418,6 +1419,7 @@ struct Notch: View {
                                 .accessibilityHint("Open this session in Codex.")
                         }
                         claudeReturnControl(item, subject: subject)
+                        claudeRemoveControl(item, subject: subject)
                     }
                 }
                 if let outcome = item.outcome, outcome.session.source == .codex, let completion = model.codexCompletion(for: outcome),
@@ -1554,6 +1556,17 @@ struct Notch: View {
                     .accessibilityLabel("Set up Ghostty: \(subject)")
                     .accessibilityHint("Opens Steer controls to enable Ghostty controls.")
             }
+        }
+    }
+
+    /// Remove clears a Claude row Steer cannot end on its own, such as a session whose terminal closed
+    /// without a Stop. It never contacts Claude; new activity shows the session again.
+    @ViewBuilder
+    private func claudeRemoveControl(_ item: AgentAttentionItem, subject: String) -> some View {
+        if item.session.source == .claude {
+            NotchButton(title: "Remove") { model.removeAgentRow(item.id) }
+                .accessibilityLabel("Remove: \(subject)")
+                .accessibilityHint("Removes this row from Steer until the session shows new activity. Claude is not changed.")
         }
     }
 

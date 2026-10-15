@@ -2057,6 +2057,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         saveCompletions()
         refresh()
     }
+    /// Removes a Claude running, waiting, or status-unavailable row the user judges stale. Claude is
+    /// not contacted; the row returns on new activity (`AgentAttentionQueue.remove`).
+    func removeAgentRow(_ id: AgentAttentionID) {
+        agentQueue.remove(id)
+        refresh()
+    }
     func dismissAttention(_ item: AttentionCompletion) {
         switch item.source {
         case .desktop:
