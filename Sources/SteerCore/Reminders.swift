@@ -489,6 +489,15 @@ public enum ReminderReader {
         }
         let shownElsewhere = paneTitles.union(hostTitles.values.joined())
         let endCheckRuns = ghostty != nil || (!ghosttyOn && !inventoryTimes.isEmpty)
+        // A direct (`source: cli`) session killed with its tab writes no SessionEnd (#285). With no tab
+        // showing its title, it ends once the app or multiplexer that last showed it reads without it,
+        // or, proved by a Ghostty title, once a Ghostty inventory no longer shows it: a tab cannot move
+        // between apps. Never seen in a readable host, it still ends only by its own hook.
+        func directSessionTabGone(_ session: UUID) -> Bool {
+            if ghostty != nil, knownCLISessions.contains(session) { return true }
+            guard let host = lastSeenHosts[session], host != .ghostty, case .known? = otherHosts[host] else { return false }
+            return true
+        }
         var result = ReminderScan()
         guard let ordered = HookEventListing.entries(in: events) else { return result }
         var probes: [UUID: [ApprovalResolutionProbe]] = [:]
@@ -648,7 +657,8 @@ public enum ReminderReader {
                     }
                 } else if paneTitles.contains(title) {
                     // Its surface is a herdr pane; the herdr snapshot is its tab inventory.
-                } else if endCheckRuns, tablessMayEnd, meta.source != "cli",
+                } else if case let directGone = meta.source == "cli" && directSessionTabGone(session),
+                          (endCheckRuns && meta.source != "cli") || directGone, tablessMayEnd,
                           let newest = inventoryTimes.max(), let oldest = inventoryTimes.min(),
                           case let started = sessionHooks.last(where: { $0.hook_event_name == "SessionStart" })
                             .flatMap({ RolloutTimestamp.parse($0.received_at) }),
@@ -671,7 +681,7 @@ public enum ReminderReader {
                     let pastGrace = started.map { newest - $0 >= surfaceGrace } == true
                     let everyInventoryFresh = !hostUnknown && started.map { oldest - $0 >= surfaceGrace } == true
                     if daemonOnly, pastGrace, !everyInventoryFresh { result.awaitingHostInventories.insert(session) }
-                    if !lastHostDown, provedGone || (daemonOnly && everyInventoryFresh) {
+                    if !lastHostDown, directGone || provedGone || (daemonOnly && everyInventoryFresh) {
                         result.sessionEnds[session] = newest
                         result.cliEvents.append(.sessionEnded(session: session, receivedAt: RolloutTimestamp.format(newest)))
                     }

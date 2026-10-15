@@ -302,3 +302,67 @@ func aCodexTUIOnAnotherMultiplexerServerMakesItUnseen(host: TerminalHost) throws
     #expect(CodexCLIProcesses.isRunning(processList: arguments))
     #expect(!CodexCLIProcesses.isRunning(processList: CodexCLIProcesses.arguments(processList: "  1 /sbin/launchd\n")))
 }
+
+// Issue #285: a direct (`source: cli`, `--no-daemon`) session killed with its tab writes no
+// SessionEnd. It ends once the host that last showed its title reads without it, or once Ghostty,
+// which proved it, no longer shows it. Otherwise it still ends only by its own hook.
+
+private func directSession(_ fixture: DaemonSessionFixture) throws {
+    let rollout = try FileManager.default.contentsOfDirectory(at: fixture.rollouts, includingPropertiesForKeys: nil)[0]
+    let header = "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(fixture.session)\",\"source\":\"cli\",\"originator\":\"codex-tui\"}}\n"
+    try header.write(to: rollout, atomically: true, encoding: .utf8)
+}
+
+@Test(arguments: TerminalHostTitles.hosts)
+func aDirectSessionWhoseLastHostNoLongerShowsItEnds(host: TerminalHost) throws {
+    let fixture = try DaemonSessionFixture()
+    defer { fixture.remove() }
+    try directSession(fixture)
+    let closed = fixture.scan(otherHosts: [host: .known(["zsh"], takenAt: fixture.later + 3)], lastSeenHosts: [fixture.session: host])
+    #expect(closed.endedSessions == [fixture.session])
+    #expect(closed.sessionEnds[fixture.session] == fixture.later + 3)
+    // A tab cannot move between apps: another host unread or unseen changes nothing.
+    let others = TerminalHostTitles.hosts.filter { $0 != host }
+    var readings: [TerminalHost: TerminalHostTitles] = [host: .known(["zsh"], takenAt: fixture.later)]
+    readings[others[0]] = .unknown(takenAt: 0)
+    readings[others[1]] = .unseen
+    let unread = fixture.scan(otherHosts: readings, lastSeenHosts: [fixture.session: host])
+    #expect(unread.endedSessions == [fixture.session])
+}
+
+@Test func aDirectSessionIsNotEndedWithoutEvidenceItsTabClosed() throws {
+    let fixture = try DaemonSessionFixture()
+    defer { fixture.remove() }
+    try directSession(fixture)
+    let empty = TerminalHostTitles.known(["zsh"], takenAt: fixture.later)
+    // Never seen in a host: its app is unknown, so it ends only by its own hook.
+    #expect(fixture.scan(otherHosts: [.wezTerm: empty]).endedSessions.isEmpty)
+    // Still shown.
+    let shown = fixture.scan(otherHosts: [.wezTerm: .known([fixture.title], takenAt: fixture.later)],
+                             lastSeenHosts: [fixture.session: .wezTerm])
+    #expect(shown.endedSessions.isEmpty && shown.cliState.liveSessions == [fixture.session])
+    // Its last host unread, switched off (no reading) or not running.
+    for reading: TerminalHostTitles? in [.unknown(takenAt: fixture.later), nil, .notRunning(takenAt: fixture.later)] {
+        let others: [TerminalHost: TerminalHostTitles] = reading.map { [.wezTerm: $0] } ?? [:]
+        #expect(fixture.scan(otherHosts: others, lastSeenHosts: [fixture.session: .wezTerm]).endedSessions.isEmpty,
+                Comment(rawValue: "\(String(describing: reading))"))
+    }
+    // herdr's titles unknown: a pane may still show it.
+    let herdrUnknown = ReminderReader.scan(events: fixture.events, rollouts: fixture.rollouts,
+                                           ghostty: GhosttyInventory(titles: ["zsh"], takenAt: fixture.later),
+                                           herdrTitles: .unknown, otherHosts: [.wezTerm: empty],
+                                           lastSeenHosts: [fixture.session: .wezTerm])
+    #expect(herdrUnknown.endedSessions.isEmpty)
+}
+
+@Test func aDirectSessionProvedByGhosttyEndsWhenItsTabCloses() throws {
+    let fixture = try DaemonSessionFixture()
+    defer { fixture.remove() }
+    try directSession(fixture)
+    let closed = fixture.scan(otherHosts: [:], knownCLISessions: [fixture.session])
+    #expect(closed.endedSessions == [fixture.session])
+    // Ghostty unreadable or not running: no inventory, no end.
+    let unread = ReminderReader.scan(events: fixture.events, rollouts: fixture.rollouts, ghostty: nil,
+                                     knownCLISessions: [fixture.session], otherHosts: [:])
+    #expect(unread.endedSessions.isEmpty)
+}
