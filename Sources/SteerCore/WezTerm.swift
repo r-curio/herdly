@@ -188,6 +188,23 @@ public enum WezTermCLI {
         ["HOME": home, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "WEZTERM_UNIX_SOCKET": socket]
     }
 
+    public static let versionArguments = ["--version"]
+
+    /// `--version` talks to no socket, so its environment carries none.
+    public static func versionEnvironment(home: String) -> [String: String] {
+        ["HOME": home, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+    }
+
+    /// The version from `wezterm --version` ("wezterm 20240203-110809-5046fc22"); nil for anything else.
+    public static func version(_ stdout: Data) -> String? {
+        guard stdout.count <= 256 else { return nil }
+        let words = String(decoding: stdout, as: UTF8.self).split(whereSeparator: \.isWhitespace)
+        guard words.count == 2, words[0] == "wezterm",
+              words[1].allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "-._+".contains($0)) })
+        else { return nil }
+        return String(words[1])
+    }
+
     public static let list = ["cli", "--no-auto-start", "list", "--format", "json"]
     public static let listClients = ["cli", "--no-auto-start", "list-clients", "--format", "json"]
 
@@ -417,8 +434,8 @@ public enum WezTermSettingsProblem: Equatable, Hashable, Sendable {
     }
 }
 
-/// The WezTerm card's state: the status badge and every problem that applies. Hidden until acceptance
-/// (#245): `TerminalHost.showsCard` stays false.
+/// The WezTerm card's state: the status badge and every problem that applies. Shown since WezTerm's
+/// acceptance (#245, `TerminalHost.showsCard`).
 public struct WezTermSettingsRow: Equatable, Sendable {
     public let badge: HerdrReadinessBadge
     public let problems: [WezTermSettingsProblem]
@@ -431,8 +448,8 @@ public struct WezTermSettingsRow: Equatable, Sendable {
 
 public enum WezTermPresentation {
     /// The card's targeting rule and what Open does otherwise; a fallback is silent on notch cards (ADR
-    /// 0015), so this is where it is explained. It says nothing about question digits, so it stays true
-    /// when `WezTermInput.questionDigitsProvenLive` is turned on (#245).
+    /// 0015), so this is where it is explained. It says nothing about question digits, so it holds
+    /// whether or not `WezTermInput.questionDigitsProvenLive` is on.
     public static let footer =
         "Steer returns to unsplit tabs in WezTerm's front window; otherwise Open raises WezTerm. Replies are typed into the exact pane."
 
@@ -459,10 +476,10 @@ public enum WezTermPresentation {
 /// WezTerm's send: `send-text --no-paste --pane-id <id>`, which types into that pane alone (live proof).
 public enum WezTermInput {
     /// Whether WezTerm may carry a Codex question's digit. ADR 0017 keeps a host's question route off
-    /// until a live run shows the digit alone commits there; no run has shown it in WezTerm yet. The
-    /// relay is built and tested behind this gate; WezTerm's acceptance (#245) flips it once §3d H9's
-    /// question line passes. Until then a Codex question in WezTerm shows "Answer this in Codex."
-    public static let questionDigitsProvenLive = false
+    /// until a live run shows the digit alone commits there; WezTerm's acceptance run (#245) showed it
+    /// (`docs/evidence/wezterm-acceptance.md`). Turning this off again makes a Codex question in WezTerm
+    /// show "Answer this in Codex."
+    public static let questionDigitsProvenLive = true
 
     /// What one `send-text` carries for a write: Claude's text and CR together; Codex's text, then a CR
     /// alone (the live proof: Codex leaves text plus CR in its composer).
