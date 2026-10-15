@@ -333,6 +333,7 @@ public enum CodexSetupPlanner {
         // edit. Unknown TOML constructs are refused instead of being rewritten.
         var section = ""
         var seenSections = Set<String>()
+        var seenArrayTables = Set<String>()
         var seenKeysBySection = [String: Set<String>]()
         var pending = ""
         for rawLine in value.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
@@ -357,14 +358,45 @@ public enum CodexSetupPlanner {
                 pending = ""
                 continue
             }
+            if trimmed.hasPrefix("[[") && trimmed.hasSuffix("]]") && trimmed.count > 4 {
+                // Arrays of tables (such as Codex's `[[skills.config]]`) repeat, so each element starts
+                // with fresh keys. Steer never edits them, but one rooted where Steer writes would make
+                // its appended `[tui]`, `[features]`, or `[hooks.state.…]` tables ambiguous, so refuse it.
+                let header = String(trimmed.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespaces)
+                guard !header.isEmpty, validHeader(header), !seenSections.contains(header),
+                      !steerOwnedRoots.contains(unquotedFirstSegment(header)) else { return false }
+                seenArrayTables.insert(header)
+                section = "[[\(header)]]"
+                seenKeysBySection[section] = []
+                continue
+            }
             guard trimmed.hasPrefix("[") && trimmed.hasSuffix("]"),
                   !trimmed.hasPrefix("[[") && !trimmed.hasSuffix("]]"),
                   trimmed.count > 2 else { return false }
             let header = String(trimmed.dropFirst().dropLast()).trimmingCharacters(in: .whitespaces)
-            guard !header.isEmpty, validHeader(header), seenSections.insert(header).inserted else { return false }
+            guard !header.isEmpty, validHeader(header), !seenArrayTables.contains(header),
+                  seenSections.insert(header).inserted else { return false }
             section = header
         }
         return pending.isEmpty
+    }
+
+    /// Top-level tables Steer writes into; see `configWithSessionTitle`, `configWithHooksEnabled`, and `CodexHookTrust`.
+    private static let steerOwnedRoots: Set<String> = ["tui", "features", "hooks"]
+
+    /// The first segment of an already validated key, without the quotes a quoted segment carries.
+    private static func unquotedFirstSegment(_ key: String) -> String {
+        guard let quote = key.first, quote == "\"" || quote == "'" else {
+            return String(key.prefix { $0 != "." })
+        }
+        var escaped = false
+        for index in key.indices.dropFirst() {
+            let character = key[index]
+            if character == "\\" && quote == "\"" { escaped.toggle(); continue }
+            if character == quote && !escaped { return String(key[key.index(after: key.startIndex)..<index]) }
+            escaped = false
+        }
+        return key
     }
 
     private static func findUnquoted(_ value: String, character: Character) -> String.Index? {

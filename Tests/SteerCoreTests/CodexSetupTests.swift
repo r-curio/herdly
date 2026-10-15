@@ -612,3 +612,41 @@ func setupMigratesLegacySteerTimeoutWithoutAddingDuplicateHandlers(legacyTimeout
     #expect(installer.status(roots: roots, capabilities: capabilities)
             == .configuredAwaitingRestart("Configured; start a new Codex session to verify delivery. Existing sessions keep running without Steer's hooks."))
 }
+
+@Test func setupAcceptsArraysOfTablesOutsideSteerOwnedTables() throws {
+    let capabilities = CodexCapabilities(cli: true, desktop: false, ghostty: true, supported: true)
+    // Codex writes one `[[skills.config]]` element per disabled skill.
+    let config = "model = \"gpt-5\"\n\n[[skills.config]]\npath = \"/tmp/a/SKILL.md\"\nenabled = false\n\n"
+        + "[[skills.config]]\npath = \"/tmp/b/SKILL.md\"\nenabled = false\n"
+    let plan = CodexSetupPlanner.plan(capabilities: capabilities, config: config, hooks: Data("{}".utf8),
+                                      helperPath: URL(fileURLWithPath: "/tmp/helper"), eventsPath: URL(fileURLWithPath: "/tmp/events"))
+    #expect(plan.status == .ready)
+    #expect(plan.configChange.hasPrefix(config))
+    #expect(CodexSetupValidator.hasSessionTitle(in: plan.configChange))
+    #expect(CodexSetupValidator.hasHooksEnabled(in: plan.configChange))
+    #expect(CodexSetupPlanner.isSafeTOML(plan.configChange))
+
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let configRoot = root.appendingPathComponent("codex")
+    let helperRoot = root.appendingPathComponent("Steer")
+    try FileManager.default.createDirectory(at: configRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data(config.utf8).write(to: configRoot.appendingPathComponent("config.toml"))
+    try Data("{}".utf8).write(to: configRoot.appendingPathComponent("hooks.json"))
+    let roots = CodexSetupRoots(configDirectory: configRoot, helperDirectory: helperRoot,
+                                eventsDirectory: helperRoot.appendingPathComponent("events"))
+    let installable = CodexSetupPlanner.plan(capabilities: capabilities, config: config, hooks: Data("{}".utf8),
+                                             helperPath: roots.helperURL, eventsPath: roots.eventsDirectory, hooksPath: roots.hooksURL)
+    let installer = CodexSetupInstaller()
+    _ = try installer.install(installable, roots: roots, helper: Data("helper".utf8), capabilities: capabilities)
+    #expect(installer.status(roots: roots, capabilities: capabilities)
+        == .configuredAwaitingRestart("Configured; start a new Codex session to verify delivery. Existing sessions keep running without Steer's hooks."))
+}
+
+@Test func setupRefusesArraysOfTablesItCannotEditAround() {
+    for config in ["[[tui]]\na = 1\n", "[[features]]\na = 1\n", "[[hooks.state]]\na = 1\n", "[[\"tui\"]]\na = 1\n",
+                   "[skills]\na = 1\n[[skills]]\nb = 1\n", "[[skills]]\na = 1\n[skills]\nb = 1\n",
+                   "[[skills.config]]\npath = \"a\"\npath = \"b\"\n", "[[]]\n", "[[skills.config]\n", "[[bad key]]\n"] {
+        #expect(!CodexSetupPlanner.isSafeTOML(config), "\(config)")
+    }
+}
