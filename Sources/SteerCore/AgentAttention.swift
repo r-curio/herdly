@@ -261,6 +261,10 @@ public struct AgentAttentionQueue: Sendable {
     /// idle fallback below. Hook events stay on disk, so every scan repeats a turn's running evidence;
     /// evidence no newer than this cannot reopen the row.
     private var endedTurns: [AgentTurnIdentity: Double] = [:]
+    /// Claude sessions whose running, waiting, or status-unavailable row the user removed. Inventory
+    /// repeats a session's lifecycle every scan, so a removed session's inventory row and ambiguity stay
+    /// hidden until the scan stops reporting the session active, or new hook activity arrives.
+    private var removedClaudeSessions: Set<AgentSessionIdentity> = []
     /// Each session's latest prompt submission, so an outcome observed after the reply is still acknowledged.
     private var latestReplies: [AgentSessionIdentity: (turn: String, at: Double)] = [:]
     private var now: Double = 0
@@ -446,6 +450,7 @@ public struct AgentAttentionQueue: Sendable {
             }
             running[active.identity.session] = active
             inventoryRunning.removeValue(forKey: active.identity.session)
+            removedClaudeSessions.remove(active.identity.session)
             provisionalStops = provisionalStops.filter { $0.key != active.identity.session }
         case let .provisionalStop(stop):
             guard stop.arrivedAt.isFinite else { return }
@@ -486,12 +491,20 @@ public struct AgentAttentionQueue: Sendable {
         if scan.available {
             ambiguousClaudeSessions = ambiguousClaudeSessions.filter { $0.sourceScope != scope }
         }
-        ambiguousClaudeSessions.formUnion(ambiguous)
+        ambiguousClaudeSessions.formUnion(ambiguous.subtracting(removedClaudeSessions))
         guard scan.available else { return }
         let sessions = scan.sessions.filter { $0.sessionID.isEmpty == false }
         let incoming = Set(sessions.filter { $0.kind == .interactive }.map {
             AgentSessionIdentity(source: .claude, sourceScope: scope, session: $0.sessionID, surface: .cli)
         })
+        // A removal lasts while the scan keeps reporting the session active or ambiguous; once it
+        // reads idle, ends, or leaves the registry, later activity is new and shows again.
+        let stillActive = incoming.filter { identity in
+            sessions.contains { $0.kind == .interactive && $0.sessionID == identity.session && $0.lifecycle.isActive }
+        }.union(ambiguous)
+        removedClaudeSessions = removedClaudeSessions.filter {
+            $0.sourceScope != scope || stillActive.contains($0)
+        }
         inventoryRunning = inventoryRunning.filter { identity, _ in
             identity.source != .claude || identity.sourceScope != scope || incoming.contains(identity)
         }
@@ -533,7 +546,7 @@ public struct AgentAttentionQueue: Sendable {
             if let stop = provisionalStops[identity], scan.observedAt > stop.arrivedAt {
                 provisionalStops.removeValue(forKey: identity)
             }
-            guard running[identity] == nil else { continue }
+            guard running[identity] == nil, !removedClaudeSessions.contains(identity) else { continue }
             let status: AgentRunningStatus = switch session.lifecycle {
             case .interactive(status: "waiting"), .background(state: "blocked"): .waiting
             default: .working
@@ -621,6 +634,29 @@ public struct AgentAttentionQueue: Sendable {
         case let .unavailable(identity):
             ambiguousClaudeSessions.remove(identity)
         }
+    }
+
+    /// The user removed a Claude running, waiting, or status-unavailable row Steer could not clear on
+    /// its own, such as a session whose terminal closed without a Stop. Claude itself is not changed.
+    /// The removed turn's evidence cannot reopen it, and the session's inventory row stays hidden
+    /// until the session reads idle or ends; newer hook activity shows the session again. Removal
+    /// creates no outcome and acknowledges nothing. Other rows and sessions are unaffected.
+    public mutating func remove(_ id: AgentAttentionID) {
+        let session: AgentSessionIdentity
+        switch id {
+        case let .running(identity): session = identity.session
+        case let .unavailable(identity): session = identity
+        case .approval, .question, .outcome: return
+        }
+        guard session.source == .claude else { return }
+        if let active = running[session] {
+            endedTurns[active.id] = max(endedTurns[active.id] ?? -.infinity, active.updatedAt)
+            running.removeValue(forKey: session)
+        }
+        inventoryRunning.removeValue(forKey: session)
+        provisionalStops.removeValue(forKey: session)
+        ambiguousClaudeSessions.remove(session)
+        removedClaudeSessions.insert(session)
     }
 
     /// A reply acknowledges an outcome of another turn that arrived strictly before it was submitted. An
