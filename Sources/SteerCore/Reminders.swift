@@ -66,6 +66,9 @@ public struct ReminderScan: Sendable {
     public var cliEvents: [CLIEvent] = []
     public var cliCompletions: [CLICompletion] = []
     public var cliSessions: Set<UUID> = []
+    /// Sessions whose rollout header names the desktop app as originator (`desktopOriginator`). Only
+    /// these threads carry the desktop app's unread flag, so only they can be read-acknowledged (#284).
+    public var desktopOriginatedSessions: Set<UUID> = []
     public var liveCLISessions: Set<UUID> = []
     public var cliState = CLIState()
     /// Sessions that ended and did not start again. `sessionEnds` keeps a session's latest end even
@@ -618,6 +621,9 @@ public enum ReminderReader {
                 result.answeredQuestions.formUnion(terminal.answeredQuestions)
                 if let sessionProbes, let bytes = rollout.bytes {
                     result.resolvedRequests += ApprovalResolutionReader.resolutions(in: bytes, session: session, probes: sessionProbes)
+                }
+                if let meta = read.header, meta.id == session, meta.originator == desktopOriginator {
+                    result.desktopOriginatedSessions.insert(session)
                 }
                 guard let meta = read.header, meta.id == session,
                       meta.source == "cli" || cliTitles.contains(GhosttyMatch.title(session))

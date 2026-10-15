@@ -111,10 +111,15 @@ public enum DesktopReadStateReader {
 public enum DesktopReadAcknowledgment {
     public static let settleMargin: Double = 3
 
-    public static func acknowledged(_ completions: [AttentionCompletion],
-                                    snapshot: DesktopReadStateSnapshot) -> [CompletionIdentity] {
+    /// `desktopThreads` are the sessions whose rollout names the desktop app as originator
+    /// (`ReminderScan.desktopOriginatedSessions`). A daemon-run terminal session can be labelled
+    /// desktop until Steer proves it CLI, but the desktop app never flags its thread unread, so
+    /// absence from the set says nothing about it (#284).
+    public static func acknowledged(_ completions: [AttentionCompletion], snapshot: DesktopReadStateSnapshot,
+                                    desktopThreads: Set<UUID>) -> [CompletionIdentity] {
         completions.filter { completion in
             completion.source == .desktop
+                && desktopThreads.contains(completion.session)
                 && completion.arrivedAt.isFinite
                 && snapshot.modifiedAt >= completion.arrivedAt + settleMargin
                 && !snapshot.unread.contains(completion.session)
