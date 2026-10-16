@@ -567,6 +567,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// How the strip splits around the housing on the current display; the view lays out by it.
     @Published var stripLayout = StripLayout(leading: 140, gap: 0, trailing: 60, height: NotchPlacement.collapsedHeight)
     var hovering = false
+    /// Whether a text field on screen in the notch holds unsent text (`DraftInProgressKey`).
+    var notchDraftInProgress = false
     private var hoverHold = HoverHold()
     private var hoverHeld = false
     private var hoverExitTask: Task<Void, Never>?
@@ -1609,7 +1611,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let freshQuestions = agentItems.filter { freshAgentQuestionIDs.contains($0.id) }
         let eligibleFreshQuestions = freshQuestions.filter(questionIsEligible)
         let canPresentQuestion = agentItems.contains(where: questionIsEligible)
-        let agentSpotlightAvailable = !notchPresentation.agentSpotlightIsActive(interacting: interacting, now: now)
+        let agentSpotlightAvailable = notchPresentation.acceptsAgentSpotlight(interacting: interacting,
+                                                                             draftInProgress: notchDraftInProgress, now: now)
         var freshAgentSpotlightCandidates = Set<AgentAttentionID>()
         if agentSpotlightAvailable {
             freshAgentSpotlightCandidates.formUnion(freshRequests.map(\.id))
@@ -1691,7 +1694,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             notchPresentation.present(id, now: now, holdUntilInteraction: keepCardsOpen)
         }
         if let mode = previewMode, Self.spotlightPreviewModes.contains(mode), let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
-        let resolvedPresentation = notchPresentation.update(interacting: interacting, now: now, legacyPopup: attention.expanded)
+        let resolvedPresentation = notchPresentation.update(interacting: interacting, draftInProgress: notchDraftInProgress,
+                                                            now: now, legacyPopup: attention.expanded)
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
         case "expanded", "empty-expanded", "empty-not-connected": presentationMode = .queue
