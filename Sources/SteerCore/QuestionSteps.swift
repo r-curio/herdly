@@ -1,9 +1,7 @@
 import Foundation
 
-/// How a question card names the questions of one call and the answers already given there: a
-/// step rail across the top, and one label-and-value line per earlier question. Display only; it
-/// never decides which question Codex or Claude is on, and an answer shown here is only what Steer
-/// itself drafted or sent.
+/// Display-only question rail. The viewed step is independent of answer progress; summaries
+/// describe only answers Steer itself drafted or sent, never source acknowledgment.
 public struct QuestionSteps: Equatable, Sendable {
     public enum State: Equatable, Sendable {
         case answered
@@ -11,9 +9,12 @@ public struct QuestionSteps: Equatable, Sendable {
         case upcoming
     }
 
-    public struct Step: Equatable, Sendable {
+    public struct Step: Equatable, Sendable, Identifiable {
+        public let id: Int
         public let label: String
         public let state: State
+        public let summary: String?
+        public let canEdit: Bool
     }
 
     public struct Answered: Equatable, Sendable {
@@ -30,16 +31,25 @@ public struct QuestionSteps: Equatable, Sendable {
     ///   - prompts: the call's questions in order.
     ///   - current: the question the card is on; clamped to the list.
     ///   - answer: the answer Steer holds for a question index, if any.
-    public static func make(_ prompts: [QuestionPrompt], current: Int,
-                            answer: (Int) -> ChosenAnswer?) -> QuestionSteps {
+    public static func make(_ prompts: [QuestionPrompt], current: Int, viewed: Int? = nil,
+                            editable: Bool = false, currentStatus: String? = "Answering now", answer: (Int) -> ChosenAnswer?) -> QuestionSteps {
         guard !prompts.isEmpty else { return QuestionSteps(steps: [], answered: []) }
         let current = min(max(current, 0), prompts.count - 1)
+        let viewed = min(max(viewed ?? current, 0), prompts.count - 1)
         var steps: [Step] = []
         var answered: [Answered] = []
         for (index, prompt) in prompts.enumerated() {
             let label = label(prompt, index: index)
-            let state: State = index < current ? .answered : (index == current ? .current : .upcoming)
-            steps.append(Step(label: label, state: state))
+            let state: State = index == viewed ? .current : (index < current ? .answered : .upcoming)
+            let summary: String?
+            switch answer(index) {
+            case let .option(option):
+                summary = prompt.options.indices.contains(option) ? QuestionOptionLabel(prompt.options[option]).text : "Option \(option + 1)"
+            case let .text(text): summary = text
+            case nil: summary = index == current ? currentStatus : (currentStatus == nil ? nil : "Not answered yet")
+            }
+            steps.append(Step(id: index, label: label, state: state, summary: summary,
+                              canEdit: editable && index < current && index != viewed && answer(index) != nil))
             guard index < current, let chosen = answer(index) else { continue }
             switch chosen {
             case let .option(option):
@@ -62,5 +72,17 @@ public struct QuestionSteps: Equatable, Sendable {
     public static func answerElsewhere(count: Int, agent: String) -> String {
         count > 1 ? "\(agent) is asking \(count) questions. Answer them in \(agent)."
                   : "\(agent) is asking a question. Answer it in \(agent)."
+    }
+}
+
+/// Display only: the original option label remains the exact value sent to the agent.
+public struct QuestionOptionLabel: Equatable, Sendable {
+    public let text: String
+    public let recommended: Bool
+
+    public init(_ label: String) {
+        let suffix = " (Recommended)"
+        recommended = label.hasSuffix(suffix) && label.count > suffix.count
+        text = recommended ? String(label.dropLast(suffix.count)) : label
     }
 }

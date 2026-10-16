@@ -366,3 +366,13 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - A list of the macOS system sounds, with a check mark for the selection and a play button to preview it.
   - Glass is marked Default.
   - Choosing a sound plays it once.
+
+## Question cards — Paper redesign
+
+The [Paper reference](https://app.paper.design/file/01M51985RZGVMFW23BNQWAFNY5/p-1-0), accepted on 2026-10-16, supersedes the earlier question-card composition. It applies to Codex and Claude, in spotlight and the full queue. Other card types and the shared strip retain their existing typography and layout.
+
+Question cards use bundled JetBrains Mono Regular and SemiBold (v2.304, OFL-1.1), at 10pt for rail headings and recommendation labels, 11pt for options and metadata, and 12pt for the session heading and question. The reference's 560pt body is a visual comparison size, not a replacement for the user's Standard/Wide/Extra wide setting. Keep the existing session color and chosen indicator; the reference's amber is one session, not a global accent.
+
+Reading order: session heading with project/branch and age; source and working directory; question rail with answer summaries; the viewed question; full-width option wells; typed answer when supported; navigation left and Open Session/Dismiss right. Use 14pt section gaps, 10pt question-to-options spacing, 4pt option gaps, 8pt horizontal/7pt vertical option padding, and 5pt control corners. The shared panel retains its placement contract and housing shape. Real metadata alone populates the heading; missing fields are omitted.
+
+The viewed rail segment is bright. Earlier answers live beneath their segment heading; an editable unsent draft offers `change`. Long content wraps, and the rail stacks when its headings cannot fit horizontally. `Recommended` is separated from an exact trailing ` (Recommended)` in an agent-supplied label for display only; the original label remains the answer sent. Selection uses the session body color and black ink, with a spoken selected value. A reviewed terminal answer stays selected but cannot be pressed or typed over. Unknown, unavailable, and unconfirmed states retain their explanations.
