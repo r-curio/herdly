@@ -177,7 +177,10 @@ their exact tab return is unavailable until targeting is verified. Automated che
 helper trace cover the response shape; integrated Steer behavior for each answer
 kind and native fallback after timeout has not yet been observed in use. Claude completion
 cards retain Dismiss and explain the unavailable return action without rendering an unsupported Open
-control.
+control. Claude question cards always offer Dismiss as well (#293): a session whose pane or tab closed
+mid-question never sends resolution evidence, so Dismiss is the way to clear it. Dismissing sends
+nothing to Claude, and the same question read again from its hook record stays dismissed until a
+companion restart.
 Direct approval decisions beyond Bash and the file and web families stay unavailable until their
 transports are separately proven; the card explains that limitation instead of guessing a target.
 Agreed on 2026-10-11 (ADR 0017): a Claude session bound to a pane whose host accepts typed replies
@@ -299,7 +302,7 @@ Rows never name the terminal or multiplexer a session runs in. An Open fallback,
 | herdr's Claude integration missing or not current | run `herdr integration install claude` |
 | The app isn't running | "iTerm2 isn't running." |
 | The app can't be identified | "Steer can't tell which terminal this session is in." |
-| The session has ended | "This session has ended." |
+| The session has ended, including a herdr pane herdr no longer lists (#293) | "This session has ended." |
 
 The old groups "Ghostty too old" and "Layout not supported" no longer appear on cards: those cases are Open fallbacks.
 

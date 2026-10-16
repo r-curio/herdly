@@ -13,6 +13,8 @@ public enum HerdrReasonGroup: Equatable, Hashable, Sendable {
     case integration(HerdrAgentKind)
     /// A split, several herdr clients, a named herdr session, or a Ghostty tab in another window.
     case layoutNotSupported
+    /// The session ended, or herdr no longer lists the pane Steer recorded for it.
+    case sessionEnded
     /// Everything else.
     case generic
 }
@@ -159,9 +161,10 @@ public enum HerdrPresentation {
         switch reason {
         case .integrationNotCurrent(let agent, _): .integration(agent)
         case .split, .namedSession, .multipleClients: .layoutNotSupported
-        case .sessionEnded, .noHookRecord, .notInHerdr, .conflictingHookRecords, .unsupportedProtocol,
+        case .sessionEnded, .paneMissing: .sessionEnded
+        case .noHookRecord, .notInHerdr, .conflictingHookRecords, .unsupportedProtocol,
              .socketUnknown, .herdrRestarted, .paneReusedBySession, .conflictingPaneObservations,
-             .duplicateMatches, .paneMissing, .agentSessionNull, .agentSessionMismatch, .conflictingTitle,
+             .duplicateMatches, .agentSessionNull, .agentSessionMismatch, .conflictingTitle,
              .noClient, .nonGhosttyClient, .titleNotInHerdr, .duplicateTitles, .sessionPrefixNotUnique,
              .titleInHerdrAndGhostty, .detectedAgent, .processInfoUnavailable, .foregroundProcesses,
              .agentProcessNotInForeground, .agentProcessAmbiguous: .generic
@@ -218,6 +221,8 @@ public enum HerdrPresentation {
             "Run \(installCommand(integrationAgent)) to return to herdr panes."
         case .layoutNotSupported:
             "Steer returns only to a single-pane herdr tab in one Ghostty window."
+        case .sessionEnded:
+            "This session has ended."
         case .generic:
             "\(openTitle(agent)) is unavailable until Steer can verify the exact herdr pane."
         }
