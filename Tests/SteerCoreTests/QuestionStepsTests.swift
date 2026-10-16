@@ -43,3 +43,24 @@ private let unnamed = QuestionPrompt(header: "  ", question: "Anything else?", o
     #expect(QuestionSteps.answerElsewhere(count: 3, agent: "Claude") == "Claude is asking 3 questions. Answer them in Claude.")
     #expect(QuestionSteps.answerElsewhere(count: 1, agent: "Codex") == "Codex is asking a question. Answer it in Codex.")
 }
+
+@Test func reviewingAnEarlierQuestionDoesNotChangeTheAnsweringPosition() {
+    let steps = QuestionSteps.make([player, purpose], current: 1, viewed: 0, editable: true,
+                                   currentStatus: "Not answered yet") { $0 == 0 ? .option(0) : nil }
+    #expect(steps.steps.map(\.state) == [.current, .upcoming])
+    #expect(steps.steps.map(\.summary) == ["Casual", "Not answered yet"])
+    #expect(!steps.steps[0].canEdit)
+    let forward = QuestionSteps.make([player, purpose], current: 1, editable: true) { $0 == 0 ? .text("Other") : nil }
+    #expect(forward.steps[0].canEdit && forward.steps[0].summary == "Other")
+    let terminal = QuestionSteps.make([player, purpose], current: 1, viewed: 0,
+                                      currentStatus: "Codex is here now") { $0 == 0 ? .option(0) : nil }
+    #expect(terminal.steps.allSatisfy { !$0.canEdit })
+    #expect(terminal.steps[1].summary == "Codex is here now")
+}
+
+@Test func recommendationIsPresentationOnlyAndMustComeFromTheLabel() {
+    #expect(QuestionOptionLabel("Standard stays only (Recommended)").text == "Standard stays only")
+    #expect(QuestionOptionLabel("Standard stays only (Recommended)").recommended)
+    #expect(!QuestionOptionLabel("Recommended by someone").recommended)
+    #expect(!QuestionOptionLabel(" (Recommended)").recommended)
+}

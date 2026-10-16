@@ -148,7 +148,7 @@ private func fullBook() -> (AppServerQuestionBook, AppServerQuestionRequest) {
     #expect(P.rejection(for: question, book: book, progress: second, question: 1, answer: .text("   ")) == .emptyText)
     #expect(P.rejection(for: question, book: book, progress: second, question: 1,
                         answer: .text(String(repeating: "a", count: P.maximumText + 1))) == .textTooLong)
-    #expect(P.rejection(for: question, book: book, progress: second, question: 0, answer: .option(1)) == .wrongQuestion)
+    #expect(P.rejection(for: question, book: book, progress: second, question: 0, answer: .option(1)) == nil)
     // Every non-ready phase refuses, and so does a question Steer already answered.
     let sending = second.startingSend(question: 1, option: 0)
     #expect(P.rejection(for: question, book: book, progress: sending, question: 1, answer: .text("x")) == .notReady)
@@ -366,4 +366,65 @@ private func bindSocket(_ path: String) throws -> Int32 {
     try fm.createSymbolicLink(atPath: link, withDestinationPath: target)
     chmod(target, 0o666)
     #expect(AppServerSocketCheck.problem(at: link, followsPrivateLink: true) == .sharedPermissions)
+}
+
+@Test func daemonDraftEditsPreservePositionAndSubmitOnlyTheReplacement() throws {
+    let (book, _) = fullBook()
+    let question = rolloutQuestion()
+    let first = AppServerAnswering.prepare(current: question, book: book, progress: QuestionAnswerProgress(call: question.id),
+                                           question: 0, answer: .option(0), stillPending: { true }, now: 1)
+    guard case let .drafted(draft) = first.outcome else { Issue.record("Expected draft"); return }
+    let edit = AppServerAnswering.prepare(current: question, book: book, progress: draft,
+                                          question: 0, answer: .option(1), stillPending: { true }, now: 2)
+    guard case let .drafted(changed) = edit.outcome else { Issue.record("Expected replacement draft"); return }
+    #expect(edit.message == nil && !edit.book.hasAnswered(question))
+    #expect(changed.questionIndex == 1 && changed.answer(for: 0) == .option(1))
+    let final = AppServerAnswering.prepare(current: question, book: edit.book, progress: changed,
+                                           question: 1, answer: .text("Steer"), stillPending: { true }, now: 3)
+    let result = try #require(final.message?["result"] as? [String: Any])
+    let answers = try #require(result["answers"] as? [String: [String: [String]]])
+    #expect(answers["variant_shape"]?["answers"] == ["Same levels"])
+    #expect(answers["name"]?["answers"] == ["Steer"])
+    #expect(final.book.hasAnswered(question))
+    let duplicate = AppServerAnswering.prepare(current: question, book: final.book, progress: changed,
+                                               question: 0, answer: .option(0), stillPending: { true }, now: 4)
+    #expect(duplicate.outcome == .refused(.alreadyAnswered) && duplicate.message == nil)
+}
+
+@Test func daemonDraftReplacementClearsTheOtherAnswerKindAndPreservesOtherDrafts() {
+    let question = rolloutQuestion()
+    let draft = QuestionAnswerProgress(call: question.id).recordingDraft(question: 0, answer: .option(0))
+        .recordingDraft(question: 1, answer: .text("Keep this"))
+    let typed = draft.replacingDraft(question: 0, answer: .text("New answer"))
+    #expect(typed.picks[0] == nil && typed.answer(for: 0) == .text("New answer"))
+    #expect(typed.answer(for: 1) == .text("Keep this") && typed.questionIndex == 2)
+    let option = typed.replacingDraft(question: 0, answer: .option(1))
+    #expect(option.texts[0] == nil && option.answer(for: 0) == .option(1))
+    #expect(option.replacingDraft(question: -1, answer: .text("x")) == option)
+    #expect(option.replacingDraft(question: 2, answer: .text("x")) == option)
+}
+
+@Test func daemonDraftEditsRefuseStaleDisconnectedAndSendingRequests() {
+    let (book, _) = fullBook()
+    let question = rolloutQuestion()
+    let draft = QuestionAnswerProgress(call: question.id).recordingDraft(question: 0, answer: .option(0))
+    let stale = AppServerAnswering.prepare(current: question, book: book, progress: draft,
+                                           question: 0, answer: .option(1), stillPending: { false }, now: 2)
+    #expect(stale.outcome == .refused(.notPendingInRollout) && stale.message == nil)
+    var disconnected = book
+    disconnected.disconnect()
+    #expect(AppServerAnswerPolicy.rejection(for: question, book: disconnected, progress: draft,
+                                            question: 0, answer: .option(1)) == .noDaemonRequest)
+    let sending = draft.startingSend(question: 1)
+    #expect(AppServerAnswerPolicy.rejection(for: question, book: book, progress: sending,
+                                            question: 0, answer: .option(1)) == .notReady)
+    #expect(sending.replacingDraft(question: 0, answer: .option(1)) == sending)
+    let otherTurn = AttentionQuestion(source: question.source, session: question.session, turn: UUID(),
+                                      callID: question.callID, arrivedAt: 1, prompts: question.prompts)
+    #expect(book.request(for: otherTurn) == nil)
+    #expect(AppServerAnswerPolicy.rejection(for: rolloutQuestion(session: UUID()), book: book, progress: draft,
+                                            question: 0, answer: .option(1)) == .notInQueue)
+    // Terminal policies still refuse the earlier index, even though the daemon permits draft edits.
+    #expect(QuestionAnswerPolicy.rejection(for: question, ghosttyEnabled: true, progress: draft,
+                                           question: 0, option: 1) == .wrongQuestion)
 }

@@ -132,6 +132,9 @@ private let threeOptions = QuestionPrompt(header: "Release", question: "Scope?",
     var otherCall = ReminderReader.RolloutEvidence()
     otherCall.pendingQuestions = [AttentionQuestion(session: call.session, turn: call.turn, callID: "call_9", arrivedAt: 1)]
     #expect(!QuestionAnswerGuard.stillPending(call, in: otherCall))
+    var otherTurn = ReminderReader.RolloutEvidence()
+    otherTurn.pendingQuestions = [AttentionQuestion(session: call.session, turn: UUID(), callID: call.callID, arrivedAt: 1)]
+    #expect(!QuestionAnswerGuard.stillPending(call, in: otherTurn))
 }
 
 @Test func desktopPickIsRecordedWithoutSendingAnything() {

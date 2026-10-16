@@ -166,7 +166,8 @@ public struct AppServerQuestionBook: Equatable, Sendable {
     public func request(for question: AttentionQuestion) -> AppServerQuestionRequest? {
         let key = Key(thread: question.session, itemID: question.callID)
         guard !answered.contains(key) else { return nil }
-        return pending[key]
+        guard let request = pending[key], request.turn == question.turn else { return nil }
+        return request
     }
 
     public func hasAnswered(_ question: AttentionQuestion) -> Bool {
@@ -229,7 +230,8 @@ public enum AppServerAnswerPolicy {
         guard let current, current.id == progress.call else { return .notInQueue }
         guard !book.hasAnswered(current) else { return .alreadyAnswered }
         guard let request = book.request(for: current) else { return .noDaemonRequest }
-        guard index == progress.questionIndex else { return .wrongQuestion }
+        let editing = index < progress.questionIndex && progress.answer(for: index) != nil
+        guard index == progress.questionIndex || editing else { return .wrongQuestion }
         guard index >= 0, index < request.questions.count else { return .wrongQuestion }
         let question = request.questions[index]
         guard !question.isSecret else { return .secret }
@@ -243,7 +245,7 @@ public enum AppServerAnswerPolicy {
             guard !trimmed.isEmpty else { return .emptyText }
             guard trimmed.count <= maximumText else { return .textTooLong }
         }
-        guard progress.phase == .ready, progress.answer(for: index) == nil else { return .notReady }
+        guard progress.phase == .ready, editing || progress.answer(for: index) == nil else { return .notReady }
         return nil
     }
 
@@ -312,6 +314,10 @@ public enum AppServerAnswering {
         }
         guard let current, let request = book.request(for: current) else {
             return Plan(outcome: .refused(.noDaemonRequest), message: nil, book: book)
+        }
+        if index < progress.questionIndex {
+            guard stillPending() else { return Plan(outcome: .refused(.notPendingInRollout), message: nil, book: book) }
+            return Plan(outcome: .drafted(progress.replacingDraft(question: index, answer: answer)), message: nil, book: book)
         }
         if index + 1 < request.questions.count {
             return Plan(outcome: .drafted(progress.recordingDraft(question: index, answer: answer)), message: nil, book: book)

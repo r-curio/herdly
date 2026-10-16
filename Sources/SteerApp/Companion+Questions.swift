@@ -125,6 +125,7 @@ extension Companion {
     }
 
     func canAnswerAgentQuestion(_ question: AgentQuestion) -> Bool {
+        if previewMode == "spotlight-claude-multiselect", question.helperRequestID == "preview-helper" { return true }
         if question.identity.session.source == .claude {
             return liveClaudeQuestion(for: question) != nil && question.prompts.count == 1
                 && question.prompts.first?.question != nil
@@ -153,6 +154,11 @@ extension Companion {
     }
 
     func answerClaudeQuestion(_ question: AgentQuestion, kind: ClaudeQuestionAnswerKind, answer: String) {
+        if previewMode != nil {
+            navigationMessage = "Preview answer: \(answer)"
+            refresh()
+            return
+        }
         guard let live = liveClaudeQuestion(for: question) else {
             navigationMessage = "Claude's question answer control is unavailable; check Claude's native question."
             refresh()
@@ -211,7 +217,12 @@ extension Companion {
         let progress = answerProgress[question.id] ?? QuestionAnswerProgress(call: question.id)
         // A desktop pick made before the daemon delivered the request opened Codex and nothing more;
         // the daemon card starts from its first question.
-        if case .daemon = route(for: question) { return progress.reopeningForDaemon() }
+        if case let .daemon(request) = route(for: question) {
+            if let draftedFor = daemonDraftRequests[question.id], draftedFor != request {
+                return QuestionAnswerProgress(call: question.id)
+            }
+            return progress.reopeningForDaemon()
+        }
         return progress
     }
 
@@ -433,26 +444,51 @@ extension Companion {
     /// One answer through the daemon. A non-last question's answer is only drafted; the last one
     /// sends the whole call as one JSON-RPC response, after re-reading the rollout, and marks the
     /// request answered before the write so nothing is ever sent twice. Never on a timer or error.
-    private func answerThroughDaemon(_ question: AttentionQuestion, question index: Int, answer: ChosenAnswer) {
+    func answerThroughDaemon(_ question: AttentionQuestion, question index: Int, answer: ChosenAnswer,
+                             expectedRequest: AppServerQuestionRequest? = nil) {
         guard !answering else { return }
         let current = queue.items.compactMap(\.question).first { $0.id == question.id }
         if let rejection = AppServerAnswerPolicy.rejection(for: current, book: daemonBook, progress: progress(for: question),
                                                            question: index, answer: answer) {
             navigationMessage = AppServerAnswerPolicy.message(for: rejection); refresh(); return
         }
-        guard let current, previewMode == nil, let request = daemonBook.request(for: current) else { return }
+        guard let current, current.turn == question.turn, let request = daemonBook.request(for: current),
+              expectedRequest == nil || expectedRequest == request else { return }
+        if previewMode != nil {
+            let plan = AppServerAnswering.prepare(current: current, book: daemonBook, progress: progress(for: question),
+                                                  question: index, answer: answer, stillPending: { true }, now: 0)
+            if case let .drafted(next) = plan.outcome {
+                previewViewedQuestion = nil
+                answerProgress[question.id] = next
+                daemonDraftRequests[question.id] = request
+            }
+            // Preview completion never writes to a real transport.
+            if case let .sending(next) = plan.outcome {
+                answerProgress[question.id] = next.recordingSent(question: index, answer: answer, of: current, at: Date().timeIntervalSince1970)
+                daemonBook = plan.book
+            }
+            refresh()
+            return
+        }
         let isLast = index + 1 >= request.questions.count
+        let editing = index < progress(for: question).questionIndex
         answering = true
         navigationMessage = ""
         let rolloutRoot = Companion.rolloutRoot
         Task { @MainActor in
             // The rollout as of this instant, only when the answer would leave Steer: an answer Codex
             // already recorded, or an ended turn, means the daemon request is stale.
-            let pending = isLast ? await Task.detached {
+            let pending = (isLast || editing) ? await Task.detached {
                 QuestionAnswerGuard.stillPending(current, in: ReminderReader.currentEvidence(for: current.session, in: rolloutRoot))
             }.value : true
             let now = Date().timeIntervalSince1970
             let latest = queue.items.compactMap(\.question).first { $0.id == question.id }
+            guard latest?.turn == current.turn, daemonBook.request(for: current) == request else {
+                answering = false
+                navigationMessage = "This question changed or is no longer waiting; nothing was sent."
+                refresh()
+                return
+            }
             let plan = AppServerAnswering.prepare(current: latest, book: daemonBook, progress: progress(for: question),
                                                   question: index, answer: answer, stillPending: { pending }, now: now)
             daemonBook = plan.book
@@ -461,6 +497,7 @@ extension Companion {
                 navigationMessage = AppServerAnswerPolicy.message(for: rejection)
             case let .drafted(next):
                 answerProgress[question.id] = next
+                daemonDraftRequests[question.id] = request
             case let .sending(next):
                 answerProgress[question.id] = next
                 let written = plan.message.map { daemonClient.send($0) } ?? false
@@ -479,6 +516,7 @@ extension Companion {
     /// Drops progress for questions no longer waiting and turns an unconfirmed send into its final state.
     func pruneAnswerProgress() {
         let waiting = Set(queue.items.compactMap { $0.question?.id })
+        daemonDraftRequests = daemonDraftRequests.filter { waiting.contains($0.key) }
         var ledger = relayLedger
         ledger.prune(keeping: waiting)
         if ledger != relayLedger { relayLedger = ledger }
