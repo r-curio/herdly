@@ -340,3 +340,18 @@ import Testing
     let empty = AgentStripSummary.make(items: onlyEarlier.items(at: 500))
     #expect(empty.toCheck == 0 && empty.sessions.isEmpty && empty.subject == "idle")
 }
+
+@Test func dismissingAClaudeQuestionClearsOnlyThatQuestionAndKeepsItCleared() {
+    let claude = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "claude", surface: .cli)
+    let stuck = AgentQuestion(session: claude, turn: "turn", call: "question", arrivedAt: 2)
+    var queue = AgentAttentionQueue()
+    queue.apply(.question(stuck))
+    queue.apply(.question(AgentQuestion(session: claude, turn: "turn", call: "other", arrivedAt: 3)))
+
+    // #293: a question whose pane closed never gets resolution evidence, so Dismiss is the way out.
+    queue.dismiss(.question(stuck.id))
+    #expect(queue.items(at: 10).compactMap(\.question).map(\.id.call) == ["other"])
+    // The same question read again from its hook record stays dismissed.
+    queue.apply(.question(stuck))
+    #expect(queue.items(at: 10).compactMap(\.question).map(\.id.call) == ["other"])
+}

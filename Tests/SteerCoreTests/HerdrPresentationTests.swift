@@ -60,7 +60,7 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
 
 @Test func herdrPresentationGroupsEveryBindingReason() {
     let cases: [(HerdrBindingUnavailable, HerdrReasonGroup)] = [
-        (.sessionEnded, .generic),
+        (.sessionEnded, .sessionEnded),
         (.noHookRecord, .generic),
         (.notInHerdr, .generic),
         (.conflictingHookRecords, .generic),
@@ -72,7 +72,7 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
         (.paneReusedBySession("other"), .generic),
         (.conflictingPaneObservations, .generic),
         (.duplicateMatches(["w1:p1", "w1:p2"]), .generic),
-        (.paneMissing, .generic),
+        (.paneMissing, .sessionEnded),
         (.agentSessionNull, .generic),
         (.agentSessionMismatch, .generic),
         (.conflictingTitle, .generic),
@@ -119,6 +119,7 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
     #expect(HerdrPresentation.cardLine(for: .layoutNotSupported, agent: .claude) == layoutLine)
     #expect(HerdrPresentation.cardLine(for: .generic, agent: .codex) == genericCodex)
     #expect(HerdrPresentation.cardLine(for: .generic, agent: .claude) == genericClaude)
+    #expect(HerdrPresentation.cardLine(for: .sessionEnded, agent: .claude) == "This session has ended.")
     #expect(HerdrPresentation.cardLine(for: .integration(.codex), agent: .codex)
         == "Run herdr integration install codex to return to herdr panes.")
     #expect(HerdrPresentation.cardLine(for: .integration(.claude), agent: .claude)
