@@ -8,7 +8,8 @@ let package = Package(
                .executable(name: "SteerHook", targets: ["SteerHook"])],
     targets: [
         .target(name: "SteerCore"),
-        .executableTarget(name: "SteerApp", dependencies: ["SteerCore"], exclude: ["Resources"]),
+        .executableTarget(name: "SteerApp", dependencies: ["SteerCore"], exclude: ["Resources/AppleEvents.js", "Resources/Ghostty.js", "Resources/ITerm2.js", "Resources/TerminalApp.js"],
+                          resources: [.copy("Resources/Fonts")]),
         .executableTarget(name: "SteerHook", dependencies: ["SteerCore"]),
         .testTarget(name: "SteerCoreTests", dependencies: ["SteerCore", "SteerApp"])
     ]
