@@ -194,3 +194,30 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
     #expect(!requestsOnly.foldsWorking && requestsOnly.working.isEmpty)
     #expect(requestsOnly.attention.map(\.heading) == [nil])
 }
+
+@Test func unsentTextKeepsTheCardOpenThroughAnInteractionGap() {
+    let id = AgentAttentionID.question(AgentCallIdentity(session: session("asks", .claude), turn: "t1", call: "q1"))
+    var presentation = NotchPresentationController()
+    presentation.present(id, now: 0)
+
+    // The pointer slips off and focus is lost while an answer is half typed: the card stays.
+    #expect(presentation.update(interacting: true, now: 1) == .agentSpotlight(id))
+    #expect(presentation.update(interacting: false, draftInProgress: true, now: 10) == .agentSpotlight(id))
+    #expect(presentation.update(interacting: true, draftInProgress: true, now: 11) == .agentSpotlight(id))
+    // Once the text is sent or cleared, it closes when interaction ends, as before.
+    #expect(presentation.update(interacting: false, now: 12) == .collapsed)
+}
+
+@Test func unsentTextBlocksAFreshSpotlightButOpensNothingByItself() {
+    let id = AgentAttentionID.question(AgentCallIdentity(session: session("asks", .claude), turn: "t1", call: "q1"))
+    var presentation = NotchPresentationController()
+
+    #expect(presentation.acceptsAgentSpotlight(interacting: true, draftInProgress: true, now: 0) == false)
+    #expect(presentation.acceptsAgentSpotlight(interacting: true, draftInProgress: false, now: 0))
+    #expect(presentation.update(interacting: false, draftInProgress: true, now: 0) == .collapsed)
+
+    // Escape collapses even with text still in the field.
+    presentation.present(id, now: 1)
+    presentation.collapse()
+    #expect(presentation.update(interacting: false, draftInProgress: true, now: 1.1) == .collapsed)
+}

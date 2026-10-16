@@ -353,7 +353,15 @@ struct DraftField: View {
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityLabel(sendLabel)
         }
+        .preference(key: DraftInProgressKey.self, value: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
+}
+
+/// True while any `DraftField` on screen holds unsent text. Only rendered fields report, so text
+/// left in a card that has since gone away holds nothing open.
+struct DraftInProgressKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
 }
 
 /// One answer option: its digit in the session's colour, the label in ink. The option the user
@@ -1777,6 +1785,7 @@ struct Notch: View {
         .onPreferenceChange(ContentHeightKey.self) { height in
             if abs(model.contentHeight - height) > 0.5 { model.contentHeight = height }
         }
+        .onPreferenceChange(DraftInProgressKey.self) { model.notchDraftInProgress = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Steer notch")
         .padding(.horizontal, NotchPlacement.earRadius + 8)
