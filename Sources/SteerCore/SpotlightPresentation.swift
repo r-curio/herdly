@@ -53,11 +53,20 @@ public struct NotchPresentationController: Equatable, Sendable {
     public func agentSpotlightIsActive(interacting: Bool, now: Double) -> Bool {
         agentSpotlight.isActive(interacting: interacting, now: now)
     }
+    /// Whether a fresh card may take the spotlight now. Never while one is active, and never while
+    /// the user has unsent text in a field on screen, which a new card would take away.
+    public func acceptsAgentSpotlight(interacting: Bool, draftInProgress: Bool, now: Double) -> Bool {
+        !draftInProgress && !agentSpotlight.isActive(interacting: interacting, now: now)
+    }
     public mutating func openQueue() { manualOpen = true }
     public mutating func collapse() { manualOpen = false; spotlight.clear(); agentSpotlight.clear() }
-    public mutating func update(interacting: Bool, now: Double, legacyPopup: Bool = false) -> NotchPresentationMode {
+    /// `draftInProgress` (unsent text in a field on screen) keeps the current card open like
+    /// interaction does, so a hover or focus gap cannot swap it for the queue mid-answer. It does
+    /// not open anything by itself; Escape still collapses through `collapse()`.
+    public mutating func update(interacting: Bool, draftInProgress: Bool = false, now: Double,
+                                legacyPopup: Bool = false) -> NotchPresentationMode {
         if !interacting { manualOpen = false }
-        if let id = agentSpotlight.update(interacting: interacting, now: now) {
+        if let id = agentSpotlight.update(interacting: interacting || draftInProgress, now: now) {
             return manualOpen ? .queue : .agentSpotlight(id)
         }
         return NotchPresentationMode.resolve(spotlight: spotlight.update(interacting: interacting, now: now),
