@@ -1397,10 +1397,9 @@ struct Notch: View {
                                 .accessibilityLabel("Open Session: \(subject)")
                                 .accessibilityHint("Answer the question in Codex's own panel.")
                         }
-                        if item.session.source == .codex {
-                            NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
-                                .accessibilityLabel("Dismiss question: \(subject)")
-                        }
+                        // Dismiss only clears the card; nothing is sent, so the agent's own question stays authoritative.
+                        NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+                            .accessibilityLabel("Dismiss question: \(subject)")
                     case .outcome, .earlierOutcome:
                         if item.session.source == .codex, codexOpen {
                             NotchButton(title: "Open Session") { model.openAgent(item.session) }
