@@ -179,6 +179,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Steer's own bookkeeping of what it relayed for each waiting question. Memory only: a restart
     /// returns every question as plain pending and nothing is ever re-sent.
     @Published var answerProgress: [QuestionIdentity: QuestionAnswerProgress] = [:]
+    var daemonDraftRequests: [QuestionIdentity: AppServerQuestionRequest] = [:]
     var answering = false
     /// The keys Steer may have sent per call and question index, and the last relay failure per call.
     @Published var relayLedger = QuestionRelayLedger()
@@ -580,10 +581,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var freshAgentRequestIDs: Set<AgentAttentionID> = []
     private var freshAgentCompletionIDs: Set<AgentAttentionID> = []
     private var freshAgentQuestionIDs: Set<AgentAttentionID> = []
+    var previewViewedQuestion: Int?
     private var previewSpotlightAgent: AgentAttentionID?
     /// `--preview-queue` modes that open the sample item in the spotlight.
     static let spotlightPreviewModes: Set<String> = ["spotlight", "spotlight-approval", "spotlight-handed-back",
-                                                       "spotlight-question", "spotlight-claude-question"]
+                                                       "spotlight-question", "spotlight-question-edit", "spotlight-question-review",
+                                                       "spotlight-question-long", "spotlight-question-unavailable", "spotlight-claude-question", "spotlight-claude-multiselect"]
     private var targetFrame: CGRect = .zero
     /// The frame animation in flight, so a refresh mid-animation does not mistake it for drift.
     private var frameAnimation: UUID?
@@ -737,6 +740,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if previewMode == nil, launchAtLogin.shouldOpenUnconfiguredControls,
            !FileManager.default.fileExists(atPath: setupRoots.stateURL.path) { showControls() }
         if CommandLine.arguments.contains("--smoke-test") {
+            precondition(QuestionCardStyle.fontsRegistered, "Bundled question fonts must load from the packaged app")
             showControls()
             precondition(controls?.isVisible == true && controls?.contentView != nil)
             // The title follows the selected pane (DESIGN.md, Settings Window) and starts as "Steer".
@@ -2385,7 +2389,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
 
     private func seedPreview(_ mode: String) {
         eventsPath = ""
+        if let width = Self.argumentValue(for: "--preview-width").flatMap(PanelWidth.init(rawValue:)) {
+            for profile in DisplayProfile.allCases { appearances[profile]?.panelWidth = width }
+        }
         let now = Date().timeIntervalSince1970
+        queue = AttentionQueue(observingSince: now)
+        agentQueue = AgentAttentionQueue()
+
         usage = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 37, resetsAt: now + 3 * 86400),
                                   fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: now + 2 * 3600))
         claudeUsage = ["~/.claude": ClaudeUsageReading(sourceScope: "~/.claude", sessionID: "00000000-0000-4000-8000-000000000001",
@@ -2402,12 +2412,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let completion = AttentionCompletion(source: .desktop, session: finished, turn: UUID(), arrivedAt: now - 2)
         let running = AttentionRunning(source: .cli, session: working, turn: UUID(), arrivedAt: now - 60)
         let question = AttentionQuestion(source: .cli, session: working, turn: UUID(), callID: "call_preview", arrivedAt: now - 3,
-                                         prompts: [QuestionPrompt(header: "List shape",
-                                                                  question: "Should the list allow nested levels?",
-                                                                  options: ["Nested levels (Recommended)", "One level only"]),
-                                                   QuestionPrompt(header: "First release",
-                                                                  question: "Should the first release also support checkout?",
-                                                                  options: ["View only (Recommended)", "Include export"])])
+                                         prompts: [QuestionPrompt(id: "packages", header: "Packages",
+                                                                  question: "Which stays should recalculated package prices apply to?",
+                                                                  options: ["Standard stays only (Recommended)", "All stays, including group bookings"], isOther: true),
+                                                   QuestionPrompt(id: "payments", header: "Payments",
+                                                                  question: "For paid or partly paid stays, how should recalculated totals affect money already collected?",
+                                                                  options: ["Adjust balance only (Recommended)", "Unpaid stays only"], isOther: true)])
         let desktopQuestion = AttentionQuestion(source: .desktop, session: finished, turn: UUID(), callID: "call_preview_desktop",
                                                 arrivedAt: now - 4,
                                                 prompts: [QuestionPrompt(header: "Storage",
@@ -2431,15 +2441,34 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         _ = daemonBook.apply(message: ["jsonrpc": "2.0", "id": 1, "method": "item/tool/requestUserInput",
                                        "params": ["threadId": working.uuidString, "turnId": question.turn.uuidString,
                                                   "itemId": "call_preview",
-                                                  "questions": [["id": "shape", "header": "List shape",
-                                                                 "question": "Should the list allow nested levels?",
-                                                                 "options": [["label": "Nested levels (Recommended)", "description": ""],
-                                                                             ["label": "One level only", "description": ""]]],
-                                                                ["id": "name", "header": "Name",
-                                                                 "question": "What should the first release be called?", "isOther": true,
-                                                                 "options": [["label": "View only (Recommended)", "description": ""],
-                                                                             ["label": "Include export", "description": ""]]]]]],
-                             now: now)
+                                                  "questions": question.prompts.map { prompt in
+                                                      ["id": prompt.id ?? "", "header": prompt.header ?? "", "question": prompt.question ?? "",
+                                                       "isOther": true, "options": prompt.options.map { ["label": $0, "description": ""] }] as [String: Any]
+                                                  }]], now: now)
+        if mode.hasPrefix("spotlight-question") {
+            threadNames[working] = "Check Paper MCP access"
+            let project = NSHomeDirectory() + "/code/myproject"
+            spotlightContexts[.question(question.id)] = SpotlightRecordContext(workingDirectory: project)
+            gitBranches[project] = "main"
+            answerProgress[question.id] = QuestionAnswerProgress(call: question.id).recordingDraft(question: 0, answer: .option(0))
+            if mode == "spotlight-question-edit" || mode == "spotlight-question-review" { previewViewedQuestion = 0 }
+            if mode == "spotlight-question-review" {
+                daemonBook.disconnect()
+                _ = relayLedger.spend(question.id, question: 0, route: .ghostty)
+            }
+            if mode == "spotlight-question-unavailable" {
+                daemonBook.disconnect()
+                answerProgress[question.id] = QuestionAnswerProgress(call: question.id)
+                    .startingSend(question: 0).recordingFailure("This question is no longer available here. Answer it in Codex.")
+            }
+            if mode == "spotlight-question-long" {
+                answerProgress[question.id] = QuestionAnswerProgress(call: question.id)
+                    .recordingDraft(question: 0, answer: .text(String(repeating: "A longer answer to review. ", count: 6)))
+            }
+        }
+        if let request = daemonBook.request(for: question), answerProgress[question.id] != nil {
+            daemonDraftRequests[question.id] = request
+        }
         completionPresentation = Attention(restored: true)
         reminderPresentation = Attention(restored: true)
         questionPresentation = Attention(restored: true)
@@ -2455,7 +2484,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                                           options: ["Portfolio / learning", "User-test the concept", "Seed of a real product"])])),
                          now: now)
         previewSpotlightAgent = .outcome(CodexAttentionAdapter.outcome(from: completion).id)
-        if mode == "spotlight-question" { previewSpotlightAgent = .question(CodexAttentionAdapter.question(from: question).id) }
+        if mode.hasPrefix("spotlight-question") { previewSpotlightAgent = .question(CodexAttentionAdapter.question(from: question).id) }
+        if mode == "spotlight-claude-multiselect" {
+            let sample = AgentQuestion(session: claudeSession, turn: "preview-multi", call: "toolu_multi", arrivedAt: now,
+                                       prompts: [QuestionPrompt(header: "Checks", question: "Which checks should run before handing this back?",
+                                                                options: ["Core suite (Recommended)", "Package smoke check", "Visual review"], multiSelect: true)],
+                                       helperRequestID: "preview-helper")
+            agentQueue.apply(.question(sample), now: now)
+            previewSpotlightAgent = .question(sample.id)
+        }
         if mode == "spotlight-claude-question" {
             previewSpotlightAgent = .question(AgentCallIdentity(session: claudeSession, turn: "preview-turn", call: "toolu_preview"))
         }
@@ -2476,6 +2513,23 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             syncAgentQueueWithCodex(now: now)
             previewSpotlightAgent = .approval(CodexAttentionAdapter.approval(from: fetch).id)
         }
+        if mode.hasPrefix("spotlight-question") || mode.hasPrefix("spotlight-claude-") {
+            let selected = agentQueue.items(at: now).first { $0.id == previewSpotlightAgent }?.question
+            queue = AttentionQueue(observingSince: now)
+            agentQueue = AgentAttentionQueue()
+            if let selected {
+                if selected.identity.session.source == .codex { queue.apply(questions: [question]) }
+                agentQueue.apply(.question(selected), now: now)
+            }
+            ghosttyEnabled = true
+            claudeUsage = [:]
+            usage = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 34, resetsAt: now + 86400), fiveHour: nil)
+            for profile in DisplayProfile.allCases {
+                appearances[profile]?.usage = .weeklyOnly
+                appearances[profile]?.centerLabel = .off
+            }
+        }
+
     }
 
     func desktopReadStateChanged(_ enabled: Bool) {

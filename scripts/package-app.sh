@@ -38,6 +38,9 @@ done
 [ -f "$app/Contents/Resources/Ghostty.js" ] || fail "missing Contents/Resources/Ghostty.js"
 [ -f "$app/Contents/Resources/ITerm2.js" ] || fail "missing Contents/Resources/ITerm2.js"
 [ -f "$app/Contents/Resources/TerminalApp.js" ] || fail "missing Contents/Resources/TerminalApp.js"
+for font in JetBrainsMono-Regular.ttf JetBrainsMono-SemiBold.ttf OFL.txt; do
+    [ -f "$app/Contents/Resources/Steer_SteerApp.bundle/Fonts/$font" ] || fail "missing question font resource $font"
+done
 "$app/Contents/Helpers/SteerHook" --self-test || fail "SteerHook --self-test failed"
 
 # 3. Sign. The helper is signed first so the app's nested-code seal covers it.

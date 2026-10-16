@@ -10,12 +10,12 @@ struct ClaudeQuestionViewStateKey: Hashable, Sendable {
     let requestID: String
     let index: Int
 
-    init(question: AgentQuestion, index: Int) {
+    init(question: AgentQuestion, index: Int, requestID: String? = nil) {
         sourceScope = question.identity.session.sourceScope
         sessionID = question.identity.session.session
         promptID = question.identity.turn
         toolUseID = question.identity.call
-        requestID = question.helperRequestID ?? ""
+        self.requestID = requestID ?? question.helperRequestID ?? ""
         self.index = index
     }
 
@@ -293,17 +293,18 @@ struct NotchButtonStyle: ButtonStyle {
     var emphasized = false
     /// A choice the user made here: drawn in the pressed look until Codex records the answer.
     var selected = false
+    @Environment(\.questionCard) private var questionCard
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         let inverted = configuration.isPressed || selected
         configuration.label
-            .font(NotchStyle.mono(11, emphasized ? .semibold : .regular))
+            .font(questionCard ? QuestionCardStyle.font(11) : NotchStyle.mono(11, emphasized ? .semibold : .regular))
             .foregroundStyle(inverted ? Color.black : (enabled ? NotchStyle.ink : NotchStyle.dim))
-            .padding(.horizontal, 8).padding(.vertical, 4)
+            .padding(.horizontal, questionCard ? 9 : 8).padding(.vertical, questionCard ? 5 : 4)
             .background(inverted ? NotchStyle.ink : NotchStyle.well,
                         in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-            .opacity(enabled ? 1 : 0.6)
+            .opacity(enabled || questionCard ? 1 : 0.6)
     }
 }
 
@@ -334,16 +335,18 @@ struct DraftField: View {
     let fieldLabel: String
     let sendLabel: String
     var hint: String?
+    var committedText: String?
     let onEscape: () -> Void
     let send: () -> Void
+    @Environment(\.questionCard) private var questionCard
     @Environment(\.isEnabled) private var enabled
 
     var body: some View {
         HStack(spacing: 6) {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
-                .padding(.horizontal, 8).padding(.vertical, 4)
+                .font(questionCard ? QuestionCardStyle.font(11) : NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
+                .padding(.horizontal, 8).padding(.vertical, questionCard ? 6 : 4)
                 .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
                 .onSubmit { if enabled { send() } }
                 .onExitCommand(perform: onEscape)
@@ -353,7 +356,7 @@ struct DraftField: View {
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityLabel(sendLabel)
         }
-        .preference(key: DraftInProgressKey.self, value: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .preference(key: DraftInProgressKey.self, value: text != committedText && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 }
 
@@ -377,77 +380,93 @@ struct OptionButton: View {
     @FocusState private var focused: Bool
     @Environment(\.isEnabled) private var enabled
     var body: some View {
+        let display = QuestionOptionLabel(label)
         Button(action: action) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("\(number)").monospacedDigit().foregroundStyle(selected ? Color.black : (enabled ? tone.light : NotchStyle.dim))
                     .frame(width: 14, alignment: .leading)
-                Text(label).foregroundStyle(selected ? Color.black : (enabled ? NotchStyle.ink : NotchStyle.dim))
+                Text(display.text).foregroundStyle(selected ? Color.black : (enabled ? NotchStyle.ink : NotchStyle.dim))
                     .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if display.recommended {
+                    Text("Recommended").font(QuestionCardStyle.font(10))
+                        .foregroundStyle(selected ? Color.black.opacity(0.8) : NotchStyle.dim)
+                        .fixedSize()
+                }
             }
-            .font(NotchStyle.mono(11, selected ? .semibold : .regular))
+            .font(QuestionCardStyle.font(11, selected ? .semibold : .regular))
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 8).padding(.vertical, 4)
+            .padding(.horizontal, 8).padding(.vertical, 7)
             .background(selected ? tone.body : NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-            .opacity(enabled || selected ? 1 : 0.6)
+
         }
-        .buttonStyle(.plain)
+        .accessibilityValue(selected ? "Selected" : "")
+        .buttonStyle(QuestionOptionButtonStyle())
         .focused($focused)
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .stroke(NotchStyle.ink.opacity(focused ? 0.9 : 0), lineWidth: 1.5).padding(-2))
     }
 }
 
-/// The questions of one call as a rail of steps: a short bar per question with its header beneath,
-/// in ink for the current one and dim for the rest; an upcoming bar is a well. When the headers do
-/// not all fit whole, the rail keeps only its bars and names the current question beneath them,
-/// so no header is cut.
+private struct QuestionOptionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        // PlainButtonStyle dims disabled selections, obscuring the answer being reviewed.
+        configuration.label.opacity(configuration.isPressed ? 0.8 : 1)
+    }
+}
+
+/// Viewed position and answer progress are independent; changing a step only navigates.
 struct QuestionStepRail: View {
     let steps: [QuestionSteps.Step]
+    let show: (Int) -> Void
+    @FocusState private var focusedStep: Int?
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: 4) {
-                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
-                    VStack(alignment: .leading, spacing: 5) {
-                        bar(step.state)
-                        Text(step.label).font(NotchStyle.mono(10))
-                            .foregroundStyle(step.state == .current ? NotchStyle.ink : NotchStyle.dim)
-                            .fixedSize()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
+                ForEach(steps) { step in cell(step, inline: true).frame(maxWidth: .infinity, alignment: .leading) }
             }
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 4) {
-                    ForEach(Array(steps.enumerated()), id: \.offset) { _, step in bar(step.state) }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(steps) { step in cell(step) }
+            }
+        }
+    }
+
+    private func cell(_ step: QuestionSteps.Step, inline: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Button { show(step.id) } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    RoundedRectangle(cornerRadius: 1).fill(step.state == .current ? NotchStyle.ink :
+                        (step.state == .answered ? NotchStyle.dim : NotchStyle.well)).frame(height: 2)
+                    Text("\(step.id + 1) \(step.label)")
+                        .font(QuestionCardStyle.font(10, step.state == .current ? .semibold : .regular))
+                        .foregroundStyle(step.state == .current ? NotchStyle.ink : NotchStyle.dim)
+                        .fixedSize(horizontal: inline, vertical: !inline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if let index = steps.firstIndex(where: { $0.state == .current }) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(steps[index].label).foregroundStyle(NotchStyle.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("\(index + 1) of \(steps.count)").foregroundStyle(NotchStyle.dim).fixedSize()
-                    }
-                    .font(NotchStyle.mono(10))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focused($focusedStep, equals: step.id)
+            .overlay(RoundedRectangle(cornerRadius: 3)
+                .stroke(NotchStyle.ink.opacity(focusedStep == step.id ? 0.9 : 0), lineWidth: 1).padding(-2))
+            .accessibilityLabel("View question \(step.id + 1): \(step.label)")
+            .accessibilityValue(step.state == .current ? "Viewing" : "")
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let summary = step.summary {
+                    Text(summary).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if step.canEdit {
+                    Button("change") { show(step.id) }
+                        .buttonStyle(.plain).underline().fixedSize()
+                        .font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.dim)
+                        .accessibilityLabel("Change answer to \(step.label)")
                 }
             }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spoken)
-    }
-
-    private var spoken: String {
-        guard let index = steps.firstIndex(where: { $0.state == .current }) else { return "" }
-        return "Question \(index + 1) of \(steps.count): \(steps[index].label)"
-    }
-
-    private func bar(_ state: QuestionSteps.State) -> some View {
-        let fill = switch state {
-        case .answered: NotchStyle.dim
-        case .current: NotchStyle.ink
-        case .upcoming: NotchStyle.well
-        }
-        return RoundedRectangle(cornerRadius: 1, style: .continuous).fill(fill).frame(maxWidth: .infinity).frame(height: 2)
+        .padding(.bottom, 6)
     }
 }
 
@@ -562,6 +581,8 @@ struct Notch: View {
     @State private var openDisclosures: Set<String> = []
     /// Typed answers being composed, by call id and question index; sent only on Return or Send.
     @State private var drafts: [String: String] = [:]
+    @State private var questionDrafts: [ClaudeQuestionViewStateKey: String] = [:]
+    @State private var viewedQuestions: [ClaudeQuestionViewStateKey: Int] = [:]
     /// Whether the user opened the "N working" fold; closed again whenever the panel collapses.
     @State private var workingOpen = false
     /// Multi-select labels are kept in the view until the user presses Send.
@@ -579,7 +600,62 @@ struct Notch: View {
     }
 
     private func claudeSelectionKey(_ question: AgentQuestion, _ index: Int) -> ClaudeQuestionViewStateKey {
-        ClaudeQuestionViewStateKey(question: question, index: index)
+        let requestID: String?
+        if let legacy = model.codexQuestion(for: question), case let .daemon(request) = model.route(for: legacy) {
+            requestID = "\(request.requestID):\(request.receivedAt)"
+        } else {
+            requestID = nil
+        }
+        return ClaudeQuestionViewStateKey(question: question, index: index, requestID: requestID)
+    }
+
+    private func questionDraft(_ question: AgentQuestion, index: Int, answer: ChosenAnswer? = nil) -> Binding<String> {
+        let key = claudeSelectionKey(question, index)
+        return Binding(get: {
+            if let text = questionDrafts[key] { return text }
+            if case let .text(text) = answer { return text }
+            return ""
+        }, set: { questionDrafts[key] = $0 })
+    }
+
+    private func questionPrompts(_ question: AgentQuestion) -> [QuestionPrompt] {
+        if let legacy = model.codexQuestion(for: question), case let .daemon(request) = model.route(for: legacy) {
+            return request.questions.map(\.displayPrompt)
+        }
+        if let legacy = model.codexQuestion(for: question), legacy.questionCount > question.prompts.count {
+            let unread = QuestionPrompt(header: nil, question: nil, options: [])
+            return question.prompts + Array(repeating: unread, count: legacy.questionCount - question.prompts.count)
+        }
+        return question.prompts
+    }
+
+    private func viewedQuestion(_ question: AgentQuestion, current: Int, count: Int) -> Int {
+        min(max(viewedQuestions[claudeSelectionKey(question, 0)] ?? model.previewViewedQuestion ?? current, 0), max(0, count - 1))
+    }
+
+    private func showQuestion(_ index: Int, of question: AgentQuestion) {
+        viewedQuestions[claudeSelectionKey(question, 0)] = index
+    }
+
+    @ViewBuilder
+    private func questionNavigation(_ question: AgentQuestion) -> some View {
+        let prompts = questionPrompts(question)
+        let current = model.codexQuestion(for: question).map { model.progress(for: $0).questionIndex } ?? 0
+        let viewed = viewedQuestion(question, current: current, count: prompts.count)
+        if prompts.count > 1 {
+            if viewed > 0 {
+                NotchButton(title: "← \(QuestionSteps.label(prompts[viewed - 1], index: viewed - 1))") {
+                    showQuestion(viewed - 1, of: question)
+                }
+                .accessibilityLabel("Previous question: \(QuestionSteps.label(prompts[viewed - 1], index: viewed - 1))")
+            }
+            if viewed + 1 < prompts.count {
+                NotchButton(title: "\(QuestionSteps.label(prompts[viewed + 1], index: viewed + 1)) →") {
+                    showQuestion(viewed + 1, of: question)
+                }
+                .accessibilityLabel("Next question: \(QuestionSteps.label(prompts[viewed + 1], index: viewed + 1))")
+            }
+        }
     }
 
     private func toggleClaudeSelection(_ question: AgentQuestion, index: Int, option: Int) {
@@ -655,11 +731,6 @@ struct Notch: View {
         return sessionLabel(item.session)
     }
 
-    private func spriteColor(for session: UUID) -> Int {
-        let identity = CodexAttentionAdapter.session(session, surface: .cli)
-        return strip.sessions.first { $0.session == identity }?.color ?? AgentStripSummary.preferredColor(for: identity)
-    }
-
     @ViewBuilder
     private func agentQuestionBody(_ question: AgentQuestion, subject: String) -> some View {
         if question.identity.session.source == .claude {
@@ -671,28 +742,21 @@ struct Notch: View {
                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
         } else {
             // Not in the queue Steer answers from, so nothing here is pressable.
-            readOnlyQuestions(question.prompts, agent: "Codex", key: "questions:\(question.id)", subject: subject,
+            readOnlyQuestions(question.prompts, agent: "Codex", question: question, subject: subject,
                               tone: spriteColor(for: question.identity.session))
         }
     }
 
-    /// A question Steer cannot answer: one sentence saying where to answer it, then the questions
-    /// as a reference list (behind a disclosure when there are several), never as controls.
+    /// Unsupported routes can browse the questions, but never acquire answer controls.
     @ViewBuilder
-    private func readOnlyQuestions(_ prompts: [QuestionPrompt], agent: String, key: String, subject: String,
+    private func readOnlyQuestions(_ prompts: [QuestionPrompt], agent: String, question: AgentQuestion, subject: String,
                                    tone: Int) -> some View {
         Text(QuestionSteps.answerElsewhere(count: prompts.count, agent: agent))
-            .font(NotchStyle.mono(12)).foregroundStyle(NotchStyle.ink).fixedSize(horizontal: false, vertical: true)
-        if prompts.count == 1, let only = prompts.first {
-            referenceQuestion(only, index: 0, tone: tone)
-        } else {
-            NotchDisclosure(title: "Show questions", subject: subject, expanded: disclosure(key)) {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(Array(prompts.enumerated()), id: \.offset) { offset, prompt in
-                        referenceQuestion(prompt, index: offset, tone: tone)
-                    }
-                }
-            }
+            .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+        let viewed = viewedQuestion(question, current: 0, count: prompts.count)
+        questionHead(prompts, question: question, current: 0, viewed: viewed, currentStatus: nil) { _ in nil }
+        if prompts.indices.contains(viewed) {
+            prompt(prompts[viewed], subject: subject, tone: tone, agent: agent)
         }
     }
 
@@ -702,13 +766,13 @@ struct Notch: View {
         let tone = spriteColor(for: question.identity.session)
         if question.prompts.isEmpty {
             Text("Claude asked a question Steer could not read; answer it in Claude.")
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+                .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
         } else if !controls {
-            readOnlyQuestions(question.prompts, agent: "Claude", key: "questions:\(question.id)", subject: subject, tone: tone)
+            readOnlyQuestions(question.prompts, agent: "Claude", question: question, subject: subject, tone: tone)
         } else {
             // Claude's answer control takes exactly one question (`canAnswerAgentQuestion`).
             ForEach(Array(question.prompts.enumerated()), id: \.offset) { index, prompt in
-                questionHead(question.prompts, current: index) { _ in nil }
+                questionHead(question.prompts, question: question, current: index, viewed: index) { _ in nil }
                 if let text = prompt.question { questionText(text) }
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(prompt.options.enumerated()), id: \.offset) { option, label in
@@ -737,70 +801,34 @@ struct Notch: View {
                     .accessibilityLabel("Send selected answers for \(subject)")
                 }
                 DraftField(placeholder: prompt.options.isEmpty ? "Type your answer" : "Or type another answer",
-                           text: draft(claudeSelectionKey(question, index).storageKey), sendTitle: "Send",
+                           text: questionDraft(question, index: index), sendTitle: "Send",
                            fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
                            onEscape: model.collapse) {
                     model.answerClaudeQuestion(question, kind: .text,
-                                               answer: drafts[claudeSelectionKey(question, index).storageKey] ?? "")
-                    drafts[claudeSelectionKey(question, index).storageKey] = nil
+                                               answer: questionDrafts[claudeSelectionKey(question, index)] ?? "")
+                    questionDrafts[claudeSelectionKey(question, index)] = nil
                 }
             }
         }
     }
 
-    /// What sits above the current question: with several questions, the step rail and a line for
-    /// each answer already given; with one, its header alone in dim, when it has one.
     @ViewBuilder
-    private func questionHead(_ prompts: [QuestionPrompt], current: Int,
-                              answer: @escaping (Int) -> ChosenAnswer?) -> some View {
+    private func questionHead(_ prompts: [QuestionPrompt], question: AgentQuestion, current: Int, viewed: Int,
+                              editable: Bool = false, currentStatus: String? = "Answering now",
+                              answer: (Int) -> ChosenAnswer?) -> some View {
         if prompts.count > 1 {
-            let steps = QuestionSteps.make(prompts, current: current, answer: answer)
-            QuestionStepRail(steps: steps.steps)
-            if !steps.answered.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(Array(steps.answered.enumerated()), id: \.offset) { _, line in
-                        detail(line.label, line.answer)
-                    }
-                }
-            }
+            let steps = QuestionSteps.make(prompts, current: current, viewed: viewed, editable: editable,
+                                           currentStatus: currentStatus, answer: answer)
+            QuestionStepRail(steps: steps.steps) { showQuestion($0, of: question) }
         } else if let only = prompts.first, only.header?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
-            Text(QuestionSteps.label(only, index: 0)).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+            Text(QuestionSteps.label(only, index: 0)).font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.dim)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    /// The question being asked now: read first, so it is in ink at the title size.
     private func questionText(_ text: String) -> some View {
-        Text(text).font(NotchStyle.mono(12)).foregroundStyle(NotchStyle.ink).textSelection(.enabled)
+        Text(text).font(QuestionCardStyle.font(12)).lineSpacing(2).foregroundStyle(NotchStyle.ink).textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// One question for reference, not to answer here: its header in the detail label column, the
-    /// question in ink, and the options as a numbered list in the reading gray. The option Steer
-    /// sent or drafted carries the session's highlight on its digit, and typed text is shown as typed.
-    private func referenceQuestion(_ prompt: QuestionPrompt, index: Int, tone: Int,
-                                   pick: Int? = nil, typed: String? = nil) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(QuestionSteps.label(prompt, index: index)).foregroundStyle(NotchStyle.dim)
-                .frame(width: 58, alignment: .leading)
-            VStack(alignment: .leading, spacing: 3) {
-                if let text = prompt.question {
-                    Text(text).foregroundStyle(NotchStyle.ink).textSelection(.enabled)
-                }
-                ForEach(Array(prompt.options.enumerated()), id: \.offset) { offset, label in
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("\(offset + 1)").monospacedDigit()
-                            .foregroundStyle(pick == offset ? NotchStyle.spriteColor(tone).light : NotchStyle.dim)
-                            .frame(width: 14, alignment: .leading)
-                        Text(label).foregroundStyle(pick == offset ? NotchStyle.ink : NotchStyle.text)
-                    }
-                }
-                if let typed {
-                    Text("Typed: \(typed)").foregroundStyle(NotchStyle.ink)
-                }
-            }
-        }
-        .font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
     }
 
     /// Which rows the open panel shows: the explicit queue, or only the notification that opened it.
@@ -901,72 +929,61 @@ struct Notch: View {
         }
     }
 
-    /// The question Codex is on, as Codex's own panel shows it: the question and the option labels,
-    /// beneath the rail `questionHead` draws. Descriptions and the free-text field stay in Codex.
-    /// With `choose` set the options are controls; `pick` is the one the user chose here.
     @ViewBuilder
-    private func prompt(_ prompt: QuestionPrompt, subject: String = "", tone: Int = 0,
-                        pick: Int? = nil, typed: String? = nil, enabled: Bool = true, choose: ((Int) -> Void)? = nil) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func prompt(_ prompt: QuestionPrompt, subject: String = "", tone: Int = 0, agent: String = "Codex",
+                        pick: Int? = nil, typed: String? = nil, choose: ((Int) -> Void)? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             if let question = prompt.question { questionText(question) }
+            else { Text("Steer could not read this question; continue in \(agent).")
+                .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim) }
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(prompt.options.enumerated()), id: \.offset) { offset, label in
-                    if let choose {
-                        OptionButton(number: offset + 1, label: label, tone: NotchStyle.spriteColor(tone), selected: pick == offset) { choose(offset) }
-                            .disabled(!enabled)
-                            .accessibilityLabel("Answer \(offset + 1): \(label), for \(subject)")
-                            .accessibilityHint(pick == offset ? "Your pick." : "Sends \(offset + 1) as your answer.")
-                    } else {
-                        HStack(alignment: .top, spacing: 8) {
-                            Text("\(offset + 1)").monospacedDigit()
-                                .foregroundStyle(pick == offset ? NotchStyle.spriteColor(tone).light : NotchStyle.dim)
-                                .frame(width: 14, alignment: .leading)
-                            Text(pick == offset ? "\(label) (sent)" : label).foregroundStyle(pick == offset ? NotchStyle.ink : NotchStyle.text)
-                        }
-                        .font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
-                        .padding(.leading, 8)
+                    OptionButton(number: offset + 1, label: label, tone: NotchStyle.spriteColor(tone), selected: pick == offset) {
+                        choose?(offset)
                     }
+                    .disabled(choose == nil)
+                    .accessibilityLabel("Option \(offset + 1): \(label), for \(subject)")
+                    .accessibilityHint(choose == nil ? "Reference only." : "Choose this answer.")
                 }
             }
             if let typed {
-                Text("Typed: \(typed)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink).fixedSize(horizontal: false, vertical: true)
+                Text("Typed: \(typed)").font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.ink)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if prompt.truncated {
-                Text("Shortened; the full question is in Codex.").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                Text("Shortened; the full question is in \(agent).").font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
             }
         }
     }
 
-    /// One question as the daemon describes it, complete: every option Codex lists is a control,
-    /// and a question that takes typed text gets a field. The answer goes back by call id.
     @ViewBuilder
-    private func daemonPrompt(_ question: AppServerQuestion, index: Int, of total: Int, callID: String, subject: String,
+    private func daemonPrompt(_ prompt: AppServerQuestion, index: Int, question: AgentQuestion, subject: String,
                               tone: Int, answer: ChosenAnswer?, enabled: Bool,
                               choose: @escaping (ChosenAnswer) -> Void) -> some View {
         let pick: Int? = { if case let .option(option) = answer { return option }; return nil }()
-        let shown = question.displayPrompt
-        VStack(alignment: .leading, spacing: 8) {
+        let shown = prompt.displayPrompt
+        VStack(alignment: .leading, spacing: 10) {
             if let text = shown.question { questionText(text) }
-            if question.isSecret {
-                Text("Codex asked for a secret; answer it in Codex.").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+            if prompt.isSecret {
+                Text("Codex asked for a secret; answer it in Codex.").font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(shown.options.enumerated()), id: \.offset) { offset, label in
-                        OptionButton(number: offset + 1, label: label,
-                                     tone: NotchStyle.spriteColor(tone), selected: pick == offset) { choose(.option(offset)) }
-                            .disabled(!enabled)
-                            .accessibilityLabel("Answer \(offset + 1): \(label), for \(subject)")
-                            .accessibilityHint(pick == offset ? "Your answer." : "Answers with this option through Codex's daemon.")
+                        OptionButton(number: offset + 1, label: label, tone: NotchStyle.spriteColor(tone), selected: pick == offset) {
+                            choose(.option(offset))
+                        }
+                        .disabled(!enabled)
+                        .accessibilityLabel("Answer \(offset + 1): \(label), for \(subject)")
                     }
                 }
-                if question.takesText {
-                    let key = "\(callID):\(index)"
-                    DraftField(placeholder: question.isOther ? "Or type another answer" : "Type your answer",
-                               text: draft(key), sendTitle: index + 1 < total ? "Next" : "Send",
+                if prompt.takesText {
+                    let binding = questionDraft(question, index: index, answer: answer)
+                    let committed: String? = { if case let .text(text) = answer { return text }; return nil }()
+                    DraftField(placeholder: prompt.isOther ? "Or type another answer" : "Type your answer",
+                               text: binding, sendTitle: "Send",
                                fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
-                               onEscape: model.collapse) {
-                        choose(.text(drafts[key] ?? ""))
-                        drafts[key] = nil
+                               committedText: committed, onEscape: model.collapse) {
+                        choose(.text(binding.wrappedValue))
                     }
                     .disabled(!enabled)
                 }
@@ -976,13 +993,9 @@ struct Notch: View {
 
     /// The daemon card's status sentence: which path, and where the answer stands.
     private func daemonStatus(_ question: AttentionQuestion, request: AppServerQuestionRequest?, progress: QuestionAnswerProgress) -> String? {
-        let total = request?.questions.count ?? question.questionCount
         switch progress.phase {
         case .ready:
             // Nothing sent yet: the controls speak for themselves. The path is named once something is.
-            if progress.questionIndex > 0, progress.questionIndex < total {
-                return "Answer kept. Question \(progress.questionIndex + 1) of \(total); the whole call is sent after the last one."
-            }
             return nil
         case .sending: return "Sending to Codex's daemon…"
         case .sent: return "Answered through Codex's daemon. Waiting for Codex to record it."
@@ -1010,7 +1023,6 @@ struct Notch: View {
             if case let .continueInCodex(reason) = QuestionAnswerProgress.offer(question, at: index) { return reason }
             if case let .relayUnavailable(reason) = model.route(for: question) { return HerdrPresentation.relayUnavailableLine(for: reason) }
             if question.source == .cli, !model.showsOptionControls(for: question) { return "\(noDaemon); enable Ghostty controls to answer from here, or answer in Codex." }
-            if index > 0, let previous = progress.picks[index - 1] { return "Sent \(previous + 1) as a key to \(destination.place). Codex should now show question \(index + 1)." }
             // Nothing sent yet: no sentence. The path is named once something is.
             return nil
         case .sending:
@@ -1040,78 +1052,50 @@ struct Notch: View {
 
     @ViewBuilder
     private func questionBody(_ question: AttentionQuestion, subject: String) -> some View {
+        let agent = CodexAttentionAdapter.question(from: question)
         let progress = model.progress(for: question)
         let index = progress.questionIndex
-        let total = max(question.questionCount, question.prompts.count)
         let route = model.route(for: question)
-        let tone = spriteColor(for: question.session)
-        if case let .daemon(request) = route {
-            let current = min(max(index, 0), request.questions.count - 1)
-            let prompts = request.questions.map(\.displayPrompt)
-            questionHead(prompts, current: current, answer: progress.answer(for:))
-            daemonPrompt(request.questions[current], index: current, of: request.questions.count, callID: question.callID,
-                         subject: subject, tone: tone, answer: progress.answer(for: current),
-                         enabled: progress.phase == .ready && index == current) { answer in
-                switch answer {
-                case let .option(option): model.chooseOption(question, question: index, option: option)
-                case let .text(text): model.answerText(question, question: index, text: text)
-                }
+        let tone = spriteColor(for: agent.identity.session)
+        let prompts = questionPrompts(agent)
+        let viewed = viewedQuestion(agent, current: index, count: prompts.count)
+        if case let .daemon(request) = route, !request.questions.isEmpty {
+            let editable = progress.phase == .ready
+            questionHead(prompts, question: agent, current: index, viewed: viewed, editable: editable,
+                         currentStatus: viewed == index ? "Answering now" : "Not answered yet", answer: progress.answer(for:))
+            daemonPrompt(request.questions[viewed], index: viewed, question: agent, subject: subject, tone: tone,
+                         answer: progress.answer(for: viewed), enabled: editable && viewed <= index) { answer in
+                model.answerThroughDaemon(question, question: viewed, answer: answer, expectedRequest: request)
             }
-            upcomingQuestions(prompts, after: current, key: "questions:\(question.callID)", subject: subject, tone: tone)
             if let status = daemonStatus(question, request: request, progress: progress) {
-                Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                Text(status).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
             }
-        } else if route == .daemonAnswered {
-            if let first = question.prompts.first {
-                questionHead([first], current: 0) { _ in nil }
-                prompt(first, tone: tone, pick: progress.picks[0], typed: progress.texts[0])
-            }
-            if let status = daemonStatus(question, request: nil, progress: progress) {
-                Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-            }
-        } else if question.prompts.isEmpty {
+        } else if prompts.isEmpty {
             Text("Codex asked a question Steer could not read; answer it in Codex.")
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+                .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
         } else {
-            let current = min(index, question.prompts.count - 1)
             let offer = QuestionAnswerProgress.offer(question, at: index)
             let interactive: Bool = {
-                guard index == current, model.showsOptionControls(for: question), case .options = offer else { return false }
+                guard viewed == index, model.showsOptionControls(for: question), case .options = offer else { return false }
                 switch progress.phase {
                 case .ready, .pickedInCodex: return true
                 case .sending, .sent, .unconfirmed, .failed: return false
                 }
             }()
-            // Codex may ask more questions than Steer could read; the rail still counts every one.
-            let unread = QuestionPrompt(header: nil, question: nil, options: [])
-            let railPrompts = question.prompts + Array(repeating: unread, count: total - question.prompts.count)
-            questionHead(railPrompts, current: min(index, total - 1), answer: progress.answer(for:))
-            prompt(question.prompts[current], subject: subject, tone: tone,
-                   pick: progress.picks[current], enabled: progress.phase != .sending,
-                   choose: interactive ? { option in model.chooseOption(question, question: index, option: option) } : nil)
-            upcomingQuestions(question.prompts, after: current, key: "questions:\(question.callID)", subject: subject, tone: tone)
-        }
-        if let status = questionStatus(question, progress: progress, total: total) {
-            Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    /// The questions after the current one, for reference behind a disclosure; the rail already
-    /// names them, and the answers before the current one sit above it.
-    @ViewBuilder
-    private func upcomingQuestions(_ prompts: [QuestionPrompt], after current: Int, key: String, subject: String,
-                                   tone: Int) -> some View {
-        let remaining = prompts.count - current - 1
-        if remaining > 0 {
-            NotchDisclosure(title: remaining == 1 ? "Show the next question" : "Show the next \(remaining) questions",
-                            expandedTitle: remaining == 1 ? "Hide the next question" : "Hide the next \(remaining) questions",
-                            subject: subject, expanded: disclosure(key)) {
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(Array(prompts.enumerated()).filter { $0.offset > current }, id: \.offset) { offset, rest in
-                        referenceQuestion(rest, index: offset, tone: tone)
-                    }
-                }
+            questionHead(prompts, question: agent, current: index, viewed: viewed,
+                         currentStatus: progress.phase == .ready ? (viewed == index ? "Answering now" : "Codex is here now") : nil,
+                         answer: progress.answer(for:))
+            prompt(prompts[viewed], subject: subject, tone: tone, pick: progress.picks[viewed], typed: progress.texts[viewed],
+                   choose: interactive ? { option in
+                       model.chooseOption(question, question: viewed, option: option)
+                          } : nil)
+            if route == .daemonAnswered, let status = daemonStatus(question, request: nil, progress: progress) {
+                Text(status).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
             }
+        }
+        if case .daemon = route {} else if route != .daemonAnswered,
+            let status = questionStatus(question, progress: progress, total: max(question.questionCount, prompts.count)) {
+            Text(status).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1218,33 +1202,37 @@ struct Notch: View {
         let spotlit = isSpotlight(item)
         let earlierOpen = disclosure(earlierKey(item))
         let collapsed = item.kind == .earlierOutcome && !earlierOpen.wrappedValue && !spotlit
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: item.kind == .question ? 14 : 8) {
             // Every row is headed by its session's mark and name; the mark steps only while the
             // session is working, and the tag says what, if anything, the row needs from the user.
             let folded = item.kind == .earlierOutcome && !spotlit
             let marked = !folded
             let indicator = model.appearance.indicator
             let working = item.running?.status == .working
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                if marked && indicator != .tint {
-                    SessionMark(style: indicator, working: working, reduceMotion: model.reduceMotion,
-                                color: spriteColor(for: item.session)).offset(y: -1)
+            if item.kind == .question {
+                questionHeader(item)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    if marked && indicator != .tint {
+                        SessionMark(style: indicator, working: working, reduceMotion: model.reduceMotion,
+                                    color: spriteColor(for: item.session)).offset(y: -1)
+                    }
+                    if folded {
+                        earlierToggle(item, open: earlierOpen)
+                    } else {
+                        rowHeader(item)
+                    }
+                    Spacer(minLength: 8)
+                    if !folded { RowTag(text: QueueRowPresentation.sourceTag(item.session)) }
+                    rowAge(item)
                 }
-                if folded {
-                    earlierToggle(item, open: earlierOpen)
-                } else {
-                    rowHeader(item)
-                }
-                Spacer(minLength: 8)
-                if !folded { RowTag(text: QueueRowPresentation.sourceTag(item.session)) }
-                rowAge(item)
+                .modifier(SessionTint(active: marked && indicator == .tint, working: working,
+                                      reduceMotion: model.reduceMotion, color: spriteColor(for: item.session)))
             }
-            .modifier(SessionTint(active: marked && indicator == .tint, working: working,
-                                  reduceMotion: model.reduceMotion, color: spriteColor(for: item.session)))
             if !collapsed {
                 if let request = spotlightDetails?.request {
                     spotlightRequest(request, item: item, subject: subject)
-                } else if let directory = spotlightDetails?.directory {
+                } else if item.kind != .question, let directory = spotlightDetails?.directory {
                     directoryLine(directory)
                 }
                 if let details = item.approval?.details, spotlightDetails == nil {
@@ -1349,6 +1337,10 @@ struct Notch: View {
                     terminalOpenLine(item, reason: reason)
                 }
                 HStack(spacing: 6) {
+                    if let question = item.question {
+                        questionNavigation(question)
+                        Spacer(minLength: 6)
+                    }
                     switch item.kind {
                     case .actionableApproval:
                         if item.session.source == .codex && item.session.surface == .cli {
@@ -1450,6 +1442,7 @@ struct Notch: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(rowHeading(item)), \(subject)")
+        .environment(\.questionCard, item.kind == .question)
     }
 
     /// The spoken heading: the session's name, its place when known, then the full reading the
@@ -1466,6 +1459,38 @@ struct Notch: View {
         EarlierFold(name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
                     tag: QueueRowPresentation.attentionTag(item), spoken: rowHeading(item),
                     subject: rowSubject(item), reduceMotion: model.reduceMotion, open: open)
+    }
+
+    private func questionHeader(_ item: AgentAttentionItem) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if model.appearance.indicator != .tint {
+                    SessionMark(style: model.appearance.indicator, working: false, reduceMotion: model.reduceMotion,
+                                color: spriteColor(for: item.session))
+                }
+                Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
+                    .font(QuestionCardStyle.font(12, .semibold)).foregroundStyle(NotchStyle.ink)
+                    .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                if let place = model.rowPlace(for: item) {
+                    Text(place).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
+                        .lineLimit(1).help(place)
+                }
+                Spacer(minLength: 0)
+                rowAge(item)
+            }
+            .modifier(SessionTint(active: model.appearance.indicator == .tint, working: false,
+                                  reduceMotion: model.reduceMotion, color: spriteColor(for: item.session)))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(rowHeading(item))
+            .accessibilityAddTraits(.isHeader)
+            let directory = model.rowDirectory(for: item)
+            let source = item.session.source == .claude ? "Claude Code" : (item.session.surface == .cli ? "Codex CLI" : "Codex Desktop")
+            Text(source + (directory.map { " · " + ($0 as NSString).abbreviatingWithTildeInPath } ?? ""))
+                .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
+                .padding(.leading, model.appearance.indicator == .tint ? 0 : 20)
+                .fixedSize(horizontal: false, vertical: true)
+                .help(directory ?? source)
+        }
     }
 
     /// The row's one-line heading: the session's name, then "· project @ branch" when Steer has seen
@@ -1493,7 +1518,7 @@ struct Notch: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             let now = context.date.timeIntervalSince1970
             Text(QueueRowPresentation.age(since: item.lastUpdate, now: now))
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).monospacedDigit()
+                .font(item.kind == .question ? QuestionCardStyle.font(11) : NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).monospacedDigit()
                 .lineLimit(1).fixedSize()
                 .frame(minWidth: 36, alignment: .trailing)
                 .accessibilityLabel(QueueRowPresentation.spokenAge(since: item.lastUpdate, now: now))
@@ -1661,6 +1686,12 @@ struct Notch: View {
         }
     }
 
+    private var questionStateKeys: Set<ClaudeQuestionViewStateKey> {
+        Set(model.orderedAgentAttentionItems.compactMap(\.question).flatMap { question in
+            (0..<max(1, questionPrompts(question).count)).map { claudeSelectionKey(question, $0) }
+        })
+    }
+
     var body: some View {
         let summary = strip
         VStack(alignment: .leading, spacing: 0) {
@@ -1795,6 +1826,26 @@ struct Notch: View {
         .preferredColorScheme(.dark)
         .onHover(perform: model.setHovering)
         .onChange(of: model.expanded) { _, expanded in if !expanded { workingOpen = false } }
+        .onChange(of: model.answerProgress) { previous, next in
+            for question in model.orderedAgentAttentionItems.compactMap(\.question) {
+                guard let legacy = model.codexQuestion(for: question), let progress = next[legacy.id],
+                      progress.questionIndex != previous[legacy.id]?.questionIndex || progress.picks != previous[legacy.id]?.picks
+                        || progress.texts != previous[legacy.id]?.texts else { continue }
+                viewedQuestions[claudeSelectionKey(question, 0)] = nil
+                for index in questionPrompts(question).indices {
+                    let key = claudeSelectionKey(question, index)
+                    if case let .text(text) = progress.answer(for: index),
+                       questionDrafts[key]?.trimmingCharacters(in: .whitespacesAndNewlines) == text.trimmingCharacters(in: .whitespacesAndNewlines) {
+                        questionDrafts[key] = nil
+                    }
+                }
+            }
+        }
+        .onChange(of: questionStateKeys) { _, keys in
+            viewedQuestions = viewedQuestions.filter { keys.contains($0.key) }
+            questionDrafts = questionDrafts.filter { keys.contains($0.key) }
+            claudeSelections = claudeSelections.filter { keys.contains($0.key) }
+        }
         .onAppear { ghosttyTTY.refreshIfStale() }
         .onChange(of: model.herdrScanOutcome) { _, _ in ghosttyTTY.refreshIfStale() }
     }

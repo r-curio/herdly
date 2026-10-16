@@ -111,6 +111,14 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
         return next
     }
 
+    /// Only the daemon policy may replace an unsent draft; terminal progress never calls this.
+    public func replacingDraft(question index: Int, answer: ChosenAnswer) -> QuestionAnswerProgress {
+        guard phase == .ready, index >= 0, index < questionIndex, self.answer(for: index) != nil else { return self }
+        var next = self
+        next.store(answer, at: index)
+        return next
+    }
+
     /// Records a delivered key. A non-last question advances the expected pane position and stays
     /// ready; the last question waits for the rollout output.
     public func recordingSent(question index: Int, option: Int, of question: AttentionQuestion, at now: Double) -> QuestionAnswerProgress {
@@ -134,8 +142,8 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
 
     private mutating func store(_ answer: ChosenAnswer, at index: Int) {
         switch answer {
-        case let .option(option): picks[index] = option
-        case let .text(text): texts[index] = text
+        case let .option(option): picks[index] = option; texts[index] = nil
+        case let .text(text): texts[index] = text; picks[index] = nil
         }
     }
 
@@ -213,6 +221,6 @@ public enum QuestionAnswerGuard {
     public static func stillPending(_ question: AttentionQuestion, in evidence: ReminderReader.RolloutEvidence) -> Bool {
         let turn = TurnIdentity(session: question.session, turn: question.turn)
         guard !evidence.completed.contains(turn), !evidence.canceled.contains(turn) else { return false }
-        return evidence.pendingQuestions.contains { $0.session == question.session && $0.callID == question.callID }
+        return evidence.pendingQuestions.contains { $0.session == question.session && $0.turn == question.turn && $0.callID == question.callID }
     }
 }
