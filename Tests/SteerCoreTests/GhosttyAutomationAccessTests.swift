@@ -17,6 +17,14 @@ import Testing
     #expect(GhosttyControlsPolicy.outcome(for: .unknown(-1)) == .unverified)
 }
 
+@Test func failedScanWithAccessGrantedKeepsGhosttyControlsOn() {
+    #expect(GhosttyControlsPolicy.afterFailedScan(.granted) == .retry)
+    #expect(GhosttyControlsPolicy.afterFailedScan(.consentRequired) == .retry)
+    #expect(GhosttyControlsPolicy.afterFailedScan(.unknown(-1)) == .retry)
+    #expect(GhosttyControlsPolicy.afterFailedScan(.denied) == .applyAccess)
+    #expect(GhosttyControlsPolicy.afterFailedScan(.ghosttyNotRunning) == .applyAccess)
+}
+
 @Test func firstRunOfferAppearsOnceBeforeAnyChoice() {
     #expect(GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: false, storedPreference: nil))
     #expect(!GhosttyControlsPolicy.shouldOfferFirstRun(offeredBefore: true, storedPreference: nil))
