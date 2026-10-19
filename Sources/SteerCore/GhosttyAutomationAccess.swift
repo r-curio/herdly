@@ -45,6 +45,22 @@ public enum GhosttyControlsPolicy {
         }
     }
 
+    /// What a failed tab scan does, given the silent consent check that follows it.
+    public enum ScanFailure: Equatable, Sendable {
+        /// A denial or Ghostty not running: apply `outcome(for:)` as for any consent check.
+        case applyAccess
+        /// Access is not refused, so the failure is a passing one (Ghostty busy, starting or past
+        /// the scan deadline): keep controls on, treat tabs as unknown, and scan again.
+        case retry
+    }
+
+    public static func afterFailedScan(_ access: GhosttyAutomationAccess) -> ScanFailure {
+        switch access {
+        case .denied, .ghosttyNotRunning: .applyAccess
+        case .granted, .consentRequired, .unknown: .retry
+        }
+    }
+
     /// Offer Ghostty controls once, only before the user has ever chosen. Callers skip preview and
     /// probe launches before asking.
     public static func shouldOfferFirstRun(offeredBefore: Bool, storedPreference: Bool?) -> Bool {
