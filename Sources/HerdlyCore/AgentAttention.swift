@@ -239,7 +239,7 @@ public typealias AgentAttentionSnapshot = AttentionSnapshot
 
 /// One source-qualified queue. Native adapters only need to emit observations; ordering and
 /// deadline/decay rules stay here.
-public struct AgentAttentionQueue: Sendable {
+public struct AgentAttentionQueue: Equatable, Sendable {
     /// The default "Earlier" delay; the user can choose another `EarlierDelay`.
     public static let earlierAfter: Double = 5 * 60
     /// How long a hook-observed Claude turn must be quiet before an idle inventory reading ends its
@@ -274,7 +274,7 @@ public struct AgentAttentionQueue: Sendable {
     /// Each Claude session's latest registry status change, as further evidence its row is current.
     private var claudeStatusChangedAt: [AgentSessionIdentity: Double] = [:]
     /// Each session's latest prompt submission, so an outcome observed after the reply is still acknowledged.
-    private var latestReplies: [AgentSessionIdentity: (turn: String, at: Double)] = [:]
+    private var latestReplies: [AgentSessionIdentity: LatestReply] = [:]
     private var now: Double = 0
 
     public init(acknowledged: Set<AgentTurnIdentity> = []) {
@@ -469,7 +469,7 @@ public struct AgentAttentionQueue: Sendable {
         case let .replied(prompt, submittedAt):
             guard submittedAt.isFinite else { return }
             if let current = latestReplies[prompt.session], current.at >= submittedAt { return }
-            let reply = (turn: prompt.turn, at: submittedAt)
+            let reply = LatestReply(turn: prompt.turn, at: submittedAt)
             latestReplies[prompt.session] = reply
             for outcome in outcomes.values where outcome.session == prompt.session
                 && Self.reply(reply, acknowledges: outcome) {
@@ -693,7 +693,13 @@ public struct AgentAttentionQueue: Sendable {
 
     /// A reply acknowledges an outcome of another turn that arrived strictly before it was submitted. An
     /// outcome arriving after the prompt (a turn still finishing when the user typed) stays queued.
-    private static func reply(_ reply: (turn: String, at: Double), acknowledges outcome: AgentOutcome) -> Bool {
+    /// A session's newest submitted prompt; a struct rather than a tuple so the queue is `Equatable`.
+    private struct LatestReply: Equatable, Sendable {
+        let turn: String
+        let at: Double
+    }
+
+    private static func reply(_ reply: LatestReply, acknowledges outcome: AgentOutcome) -> Bool {
         outcome.turn != reply.turn && outcome.arrivedAt.isFinite && outcome.arrivedAt < reply.at
     }
 

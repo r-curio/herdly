@@ -359,7 +359,7 @@ enum ClaudeSetupDetection {
 
 @MainActor
 final class ClaudeSetupModel: ObservableObject {
-    struct Root: Identifiable, Sendable {
+    struct Root: Identifiable, Equatable, Sendable {
         let url: URL
         let capabilities: ClaudeCapabilities
         let plan: ClaudeSetupPlan?
@@ -429,7 +429,7 @@ final class ClaudeSetupModel: ObservableObject {
             }.value
             guard token == refreshToken else { return }
             if updatedHelpers > 0 { message = "Updated Herdly's Claude helper to match this version of Herdly." }
-            roots = snapshots.map { snapshot in
+            let next = snapshots.map { snapshot in
                 Root(url: snapshot.root, capabilities: snapshot.capabilities, plan: snapshot.plan, status: snapshot.status,
                      helperPath: snapshot.helperPath, eventsPath: snapshot.eventsPath,
                      settingsPath: snapshot.settingsPath, statePath: snapshot.statePath,
@@ -437,6 +437,8 @@ final class ClaudeSetupModel: ObservableObject {
                      usageStatus: snapshot.usageStatus, usageInstalled: snapshot.usageInstalled,
                      activeSessionStatus: snapshot.activeSessionStatus)
             }
+            // Unchanged roots are not written back: the notch observes this model (#306).
+            if next != roots { roots = next }
             checked = true
         }
     }
@@ -452,7 +454,7 @@ final class ClaudeSetupModel: ObservableObject {
                                                               sourceScope: root.url.standardizedFileURL.path))
                 })
             }.value
-            roots = roots.map { root in
+            let next = roots.map { root in
                 guard enabled.contains(root.url.standardizedFileURL.path) else { return root }
                 return Root(url: root.url, capabilities: root.capabilities, plan: root.plan, status: root.status,
                             helperPath: root.helperPath, eventsPath: root.eventsPath, settingsPath: root.settingsPath,
@@ -461,6 +463,7 @@ final class ClaudeSetupModel: ObservableObject {
                             usageInstalled: root.usageInstalled,
                             activeSessionStatus: root.activeSessionStatus)
             }
+            if next != roots { roots = next }
         }
     }
 
