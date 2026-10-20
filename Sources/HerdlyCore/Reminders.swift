@@ -581,19 +581,16 @@ public enum ReminderReader {
             result.sessionEnds[hook.session_id] = max(result.sessionEnds[hook.session_id] ?? 0, ended)
         }
         let sessions = Set(result.attentionRequests.map(\.session)).union(hooks.map(\.session_id))
-        guard !sessions.isEmpty,
-              let enumerator = FileManager.default.enumerator(at: rollouts, includingPropertiesForKeys: nil,
-                                                               options: [.skipsHiddenFiles]) else { return result }
+        guard !sessions.isEmpty, let tree = RolloutTree.index(rollouts), !tree.tooLarge else { return result }
+        // A rollout belongs to the session its name ends with: one lookup per file instead of a
+        // comparison per session (#306).
+        let suffixes = Dictionary(uniqueKeysWithValues: sessions.map { ($0.uuidString.lowercased() + ".jsonl", $0) })
+        let suffixLength = UUID().uuidString.count + ".jsonl".count
         var paths: [UUID: [URL]] = [:]
-        var count = 0
-        var rolloutFiles: [URL] = []
-        while let url = enumerator.nextObject() as? URL {
-            count += 1
-            if count > 50000 { return result }
-            guard url.pathExtension == "jsonl" else { continue }
-            rolloutFiles.append(url)
-            for session in sessions where url.lastPathComponent.lowercased().hasSuffix(session.uuidString.lowercased() + ".jsonl") {
-                paths[session, default: []].append(url)
+        let rolloutFiles = tree.files.map(\.url)
+        for file in tree.files {
+            if let session = suffixes[String(file.lowercasedName.suffix(suffixLength))] {
+                paths[session, default: []].append(file.url)
             }
         }
         // A request raised by a sub-agent thread carries the parent's session id and the sub-agent's
