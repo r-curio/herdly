@@ -19,11 +19,17 @@ public enum HookEventListing {
     /// creation date never changes, and a name replaced by another file has a new inode. The stamp is
     /// taken before listing, so a change during the listing shows up as a new stamp next call.
     public static func entries(in directory: URL, limit: Int = maximumEntries) -> [URL]? {
+        listing(in: directory, limit: limit)?.entries
+    }
+
+    /// `entries(in:)` with its `newestRecords`, worked out once per directory change rather than by
+    /// every reader on every scan (#302).
+    public static func listing(in directory: URL, limit: Int = maximumEntries) -> (entries: [URL], records: ArraySlice<URL>)? {
         let stamp = FileStamp(directory, followingLinks: true)
         let key = directory.standardizedFileURL.path
         let previous = listings.entry(key)
         if let stamp, let previous, previous.stamp == stamp {
-            return previous.urls.count <= limit ? previous.urls : nil
+            return previous.urls.count <= limit ? (previous.urls, previous.records) : nil
         }
         guard let names = names(in: directory), names.count <= limit else { return nil }
         var dates: [String: Dated] = [:]
@@ -52,8 +58,16 @@ public enum HookEventListing {
             order = dates.values.sorted(by: Dated.older).map(\.name)
         }
         let ordered = order.compactMap { dates[$0]?.url }
-        if let stamp { listings.store(ListingCache.Entry(stamp: stamp, urls: ordered, order: order, dates: dates), for: key) }
-        return ordered
+        let records = order.filter(isRecordName).compactMap { dates[$0]?.url }.suffix(maximumRecords)
+        if let stamp {
+            listings.store(ListingCache.Entry(stamp: stamp, urls: ordered, records: records, order: order, dates: dates), for: key)
+        }
+        return (ordered, records)
+    }
+
+    /// A `.json` record by name alone: `pathExtension` parses each URL, and listings hold thousands.
+    private static func isRecordName(_ name: String) -> Bool {
+        name.hasSuffix(".json") && name != ".json"
     }
 
     /// One listed entry with the inode its creation date was read under.
@@ -92,6 +106,7 @@ public enum HookEventListing {
         struct Entry {
             let stamp: FileStamp
             let urls: [URL]
+            let records: ArraySlice<URL>
             /// `urls`' names, in the same order.
             let order: [String]
             let dates: [String: Dated]
@@ -114,8 +129,7 @@ public enum HookEventListing {
 
     /// The newest `.json` hook records among `entries`, still oldest first.
     public static func newestRecords(_ entries: [URL]) -> ArraySlice<URL> {
-        // A name suffix check: `pathExtension` parses each URL, and listings hold thousands (#301).
-        entries.filter { $0.lastPathComponent.hasSuffix(".json") && $0.lastPathComponent != ".json" }.suffix(maximumRecords)
+        entries.filter { isRecordName($0.lastPathComponent) }.suffix(maximumRecords)
     }
 
     static func created(_ url: URL) -> Date {

@@ -78,7 +78,10 @@ extension CodexCLIProcesses {
             let trimmed = line.drop { $0 == " " }
             guard let space = trimmed.firstIndex(of: " "), let pid = Int32(trimmed[..<space]) else { return nil }
             let arguments = trimmed[space...]
-            guard arguments.contains("codex"), !arguments.contains("app-server") else { return nil }
+            // Byte searches: these ASCII words are looked for in every process's arguments each scan,
+            // and the Unicode-aware `contains` dominated the process read (#302).
+            guard arguments.utf8.firstRange(of: "codex".utf8) != nil,
+                  arguments.utf8.firstRange(of: "app-server".utf8) == nil else { return nil }
             return pid
         }
     }

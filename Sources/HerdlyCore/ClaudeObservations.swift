@@ -104,14 +104,14 @@ public enum ClaudeObservationReader {
                             cache: ClaudeRecordCache) -> (scan: ClaudeObservationScan, cache: ClaudeRecordCache) {
         let scope = normalizedScope(sourceScope)
         guard isDirectory(events),
-              let entries = HookEventListing.entries(in: events) else {
+              let listing = HookEventListing.listing(in: events) else {
             return (ClaudeObservationScan(sourceScope: scope, available: false), cache)
         }
         let reusable = cache.installationID == installationID && cache.observingSince == observingSince
         var next = ClaudeRecordCache()
         next.installationID = installationID
         next.observingSince = observingSince
-        let records = HookEventListing.newestRecords(entries)
+        let records = listing.records
             .compactMap { url -> Record? in
                 // A link or a path that cannot be stat'ed is never a record, as `record(at:)` decides.
                 guard let stamp = FileStamp(url, followingLinks: false) else { return nil }
