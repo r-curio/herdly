@@ -15,7 +15,7 @@ Herdly configures the selected user root. Claude can also merge project and comm
 ## States
 
 - **Not configured**: no Herdly install record exists for the selected root.
-- **Configured; restart required**: owned files are present, but Herdly has not observed a post-install startup event from this root.
+- **Configured; restart required**: owned files are present, but Herdly has not observed a post-install startup event from this root. The card shows a **Restart required** badge and offers Configure Claude only when it would change something (settings left to write, or a changed usage choice). Sessions already running pick up the hooks and may report activity (observed live on 2026-10-20, [issue #299](https://github.com/r-curio/herdly/issues/299)), but only a new session sends the startup event and sets the terminal title Herdly uses to match its Ghostty tab.
 - **Connected**: a newly received `SessionStart` event whose Claude `source` is `startup`, carrying this root's installation identity, was observed after installation. Resume, clear, compact, or other events from another root, another installation, another hook event, or before installation do not connect the root.
 - **Repair required**: an owned hook or helper is missing.
 - **Conflict**: an owned value changed, duplicate Herdly installs exist, or the install record is inconsistent. Herdly does not overwrite it.

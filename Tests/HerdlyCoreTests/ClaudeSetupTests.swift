@@ -283,9 +283,9 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
                                        helperPath: first.helperURL, eventsPath: first.eventsDirectory)
     #expect(plan.ownedEnvironment.isEmpty)
     #expect(try installer.install(plan, roots: first, helper: helper, capabilities: capabilities)
-            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Herdly's hooks."))
+            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Sessions already running may still report activity; restart them so Herdly can match their terminal tabs."))
     #expect(installer.status(roots: first, capabilities: capabilities)
-            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Herdly's hooks."))
+            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Sessions already running may still report activity; restart them so Herdly can match their terminal tabs."))
 
     let installedSettings = try Data(contentsOf: first.settingsURL)
     let stablePlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: installedSettings,
@@ -311,21 +311,21 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
         .replacingOccurrences(of: "PLACEHOLDER", with: installationID).utf8)
         .write(to: first.eventsDirectory.appendingPathComponent("stale.json"))
     #expect(installer.status(roots: first, capabilities: capabilities)
-            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Herdly's hooks."))
+            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Sessions already running may still report activity; restart them so Herdly can match their terminal tabs."))
     let nonSessionEvent = Data(#"{"hook_event_name":"PreToolUse","source":"herdly-claude-hook-v1","installation_id":"PLACEHOLDER","session_id":"session-new","received_at":"2026-09-20T00:00:00Z","captured_at":PLACEHOLDER_TIME}"#.utf8)
     try Data(String(data: nonSessionEvent, encoding: .utf8)!
         .replacingOccurrences(of: "PLACEHOLDER_TIME", with: String(Date().timeIntervalSince1970))
         .replacingOccurrences(of: "PLACEHOLDER", with: installationID).utf8)
         .write(to: first.eventsDirectory.appendingPathComponent("non-session.json"))
     #expect(installer.status(roots: first, capabilities: capabilities)
-            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Herdly's hooks."))
+            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Sessions already running may still report activity; restart them so Herdly can match their terminal tabs."))
     let resumedEvent = Data(#"{"hook_event_name":"SessionStart","session_start_source":"resume","source":"herdly-claude-hook-v1","installation_id":"PLACEHOLDER","session_id":"session-old","received_at":"2026-09-20T00:00:00Z","captured_at":PLACEHOLDER_TIME}"#.utf8)
     try Data(String(data: resumedEvent, encoding: .utf8)!
         .replacingOccurrences(of: "PLACEHOLDER_TIME", with: String(Date().timeIntervalSince1970))
         .replacingOccurrences(of: "PLACEHOLDER", with: installationID).utf8)
         .write(to: first.eventsDirectory.appendingPathComponent("resumed.json"))
     #expect(installer.status(roots: first, capabilities: capabilities)
-            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Herdly's hooks."))
+            == .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Sessions already running may still report activity; restart them so Herdly can match their terminal tabs."))
 
     let event = Data(#"{"hook_event_name":"SessionStart","session_start_source":"startup","source":"herdly-claude-hook-v1","installation_id":"PLACEHOLDER","session_id":"session-a","received_at":"2026-09-20T00:00:00Z","captured_at":PLACEHOLDER_TIME}"#.utf8)
     let eventData = Data(String(data: event, encoding: .utf8)!
@@ -531,4 +531,20 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(permissionGroups.compactMap { $0["matcher"] as? String }
             == ["Bash", ClaudeDirectApproval.fileMatcher, ClaudeDirectApproval.webMatcher])
     #expect(NSDictionary(dictionary: permissionGroups[0]).isEqual(to: bash[0]))
+}
+
+@Test func configureIsOfferedOnlyWhenItWouldChangeSomething() {
+    let awaiting = ClaudeConnectionStatus.configuredAwaitingRestart("Configured")
+    #expect(awaiting.isAwaitingRestart)
+    #expect(!ClaudeConnectionStatus.connected.isAwaitingRestart)
+    // Installed and waiting for a new session: configuring again would write nothing.
+    #expect(!awaiting.offersConfigure(requiresConfigure: false, usageMatches: true))
+    #expect(!ClaudeConnectionStatus.connected.offersConfigure(requiresConfigure: false, usageMatches: true))
+    // New hooks to add, or a changed usage choice, still offer it.
+    #expect(awaiting.offersConfigure(requiresConfigure: true, usageMatches: true))
+    #expect(awaiting.offersConfigure(requiresConfigure: false, usageMatches: false))
+    #expect(ClaudeConnectionStatus.connected.offersConfigure(requiresConfigure: false, usageMatches: false))
+    // Missing or broken setup always offers it.
+    #expect(ClaudeConnectionStatus.notConfigured.offersConfigure(requiresConfigure: false, usageMatches: true))
+    #expect(ClaudeConnectionStatus.repairRequired("missing").offersConfigure(requiresConfigure: false, usageMatches: true))
 }
