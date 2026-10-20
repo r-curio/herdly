@@ -2,9 +2,9 @@ import AppKit
 import HerdlyCore
 
 // tmux (#241): the two-second binding and visit scan, ADR 0014's two-layer Open with ADR 0015's
-// fallback, replies typed into the bound pane (ADR 0017), and the question-digit relay, built but off
-// until its live proof (`TmuxInput.questionDigitsProvenLive`). Everything runs only while tmux may
-// be contacted (its switch and a terminal on); the switch and card stay hidden until acceptance (#246).
+// fallback, replies typed into the bound pane (ADR 0017), and the question-digit relay, on since its
+// live proof (`TmuxInput.questionDigitsProvenLive`, #246). Everything runs only while tmux may be
+// contacted (its switch and a terminal on); the card is shown since tmux's acceptance (#246).
 // Rules are HerdlyCore's (`Tmux.swift`, `TmuxTargeting.swift`, `TmuxInput.swift`,
 // `MultiplexerHostTab.swift`); this file reads, sends and schedules. Commands go through `TmuxRunner`.
 
@@ -481,9 +481,9 @@ extension Companion {
         }
     }
 
-    // MARK: - Question digits (ADR 0017; off until the live proof)
+    // MARK: - Question digits (ADR 0017)
 
-    /// The bound tmux pane a Codex question's digit may be typed into, from the latest scan; nil while
+    /// The bound tmux pane a Codex question's digit may be typed into, from the latest scan; nil if
     /// tmux's digit is not proven live (`TmuxInput.questionDigitsProvenLive`), so the shared route offers
     /// no key and the card says "Answer this in Codex."
     func tmuxQuestionKeyPane(for session: UUID) -> TypedInputPane? {

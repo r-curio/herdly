@@ -430,18 +430,19 @@ private let inputPane = TypedInputPane(host: .tmux, paneID: "%0", tty: "/dev/tty
             == .pane(TypedInputPane(host: .terminalApp, paneID: "9882", tty: hostTTY)))
 }
 
-// MARK: - Question digits (ADR 0017 "Codex questions"): built, off until a live proof
+// MARK: - Question digits (ADR 0017 "Codex questions"): on since the live proof (#246)
 
-@Test func tmuxQuestionDigitsStayOffUntilTheLiveProofFlipsTheirGate() {
-    #expect(TmuxInput.questionDigitsProvenLive == false)
+@Test func tmuxQuestionDigitsFollowTheirLiveProofGate() {
+    // Proven live in tmux's acceptance run (#246): the digit alone commits Codex's answer.
+    #expect(TmuxInput.questionDigitsProvenLive)
     #expect(TerminalHost.tmux.typesQuestionDigits == TmuxInput.questionDigitsProvenLive)
-    // While off, a session tmux holds is answered in Codex.
+    // With the gate off, a session tmux holds is answered in Codex.
     let question = cliQuestion()
     #expect(QuestionRelayRouting.route(for: question, book: AppServerQuestionBook(), daemonConnected: false,
                                        ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
-                                       terminalHost: .tmux) == .relayUnavailable(.noQuestionKeys(.tmux)))
+                                       terminalHost: .tmux, typesDigits: { _ in false }) == .relayUnavailable(.noQuestionKeys(.tmux)))
     #expect(HerdrQuestionRelayUnavailable.noQuestionKeys(.tmux).message == "Answer this in Codex.")
-    // Once flipped, the shared pane-key route carries it.
+    // With it on, the shared pane-key route carries it.
     #expect(QuestionRelayRouting.route(for: question, book: AppServerQuestionBook(), daemonConnected: false,
                                        ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
                                        terminalHost: .tmux, typesDigits: { $0 == .tmux }) == .terminalRelay)
