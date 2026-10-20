@@ -11,14 +11,48 @@ public enum HookEventListing {
 
     /// Every top-level entry, oldest first by creation date and then name. `nil` when the directory
     /// is unreadable or holds more than `maximumEntries` entries.
+    ///
+    /// Several readers list the same directories every scan, and a busy Claude directory holds
+    /// thousands of records, each needing its own creation-date lookup (#301). Adding, removing or
+    /// renaming an entry changes the directory's own stamp, and a file's creation date never
+    /// changes, so an unchanged stamp reuses the last listing. The stamp is taken before listing,
+    /// so a change during the listing shows up as a new stamp on the next call.
     public static func entries(in directory: URL, limit: Int = maximumEntries) -> [URL]? {
+        let stamp = FileStamp(directory, followingLinks: true)
+        let key = directory.standardizedFileURL.path
+        if let stamp, let cached = listings.cached(key, stamp: stamp) {
+            return cached.count <= limit ? cached : nil
+        }
         guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]),
               urls.count <= limit else { return nil }
         let dated: [(url: URL, created: Date)] = urls.map { ($0, created($0)) }
-        return dated.sorted { left, right in
+        let ordered = dated.sorted { left, right in
             left.created == right.created ? left.url.lastPathComponent < right.url.lastPathComponent
                 : left.created < right.created
         }.map(\.url)
+        if let stamp { listings.store(ordered, for: key, stamp: stamp) }
+        return ordered
+    }
+
+    private static let listings = ListingCache()
+
+    /// The last successful listing per directory and the stamp it was taken under. Unreadable and
+    /// oversized results are never kept, so they are retried on the next call.
+    private final class ListingCache: @unchecked Sendable {
+        // Invariant for `@unchecked Sendable`: `entries` is only touched while holding `lock`.
+        private let lock = NSLock()
+        private var entries: [String: (stamp: FileStamp, urls: [URL])] = [:]
+
+        func cached(_ key: String, stamp: FileStamp) -> [URL]? {
+            lock.lock(); defer { lock.unlock() }
+            guard let entry = entries[key], entry.stamp == stamp else { return nil }
+            return entry.urls
+        }
+
+        func store(_ urls: [URL], for key: String, stamp: FileStamp) {
+            lock.lock(); defer { lock.unlock() }
+            entries[key] = (stamp, urls)
+        }
     }
 
     /// The newest `.json` hook records among `entries`, still oldest first.

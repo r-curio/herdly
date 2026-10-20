@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import HerdlyCore
 
@@ -20,4 +21,46 @@ import Testing
 
 @Test func noEligibleHostTakesNoSharedRead() {
     #expect(SharedTabScan.hostsToRead(eligible: [String: Double](), now: 100).isEmpty)
+}
+
+private func listingDirectory() throws -> URL {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-listing-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    return root
+}
+
+@Test func anUnchangedEventDirectoryReusesItsListingAndAChangedOneIsListedAgain() throws {
+    let root = try listingDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let first = root.appendingPathComponent("a.json"), second = root.appendingPathComponent("b.json")
+    try Data("{}".utf8).write(to: first)
+    try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: 100)], ofItemAtPath: first.path)
+    #expect(HookEventListing.entries(in: root)?.map(\.lastPathComponent) == ["a.json"])
+    #expect(HookEventListing.entries(in: root)?.map(\.lastPathComponent) == ["a.json"])
+
+    try Data("{}".utf8).write(to: second)
+    try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: 50)], ofItemAtPath: second.path)
+    // A new entry changes the directory's stamp: listed again, oldest first.
+    #expect(HookEventListing.entries(in: root)?.map(\.lastPathComponent) == ["b.json", "a.json"])
+
+    try FileManager.default.removeItem(at: second)
+    #expect(HookEventListing.entries(in: root)?.map(\.lastPathComponent) == ["a.json"])
+}
+
+@Test func aCachedListingStillHonorsEachCallersLimit() throws {
+    let root = try listingDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    for name in ["a.json", "b.json", "c.json"] { try Data("{}".utf8).write(to: root.appendingPathComponent(name)) }
+    #expect(HookEventListing.entries(in: root)?.count == 3)
+    #expect(HookEventListing.entries(in: root, limit: 2) == nil)
+    #expect(HookEventListing.entries(in: root, limit: 3)?.count == 3)
+}
+
+@Test func aMissingEventDirectoryIsUnavailableAndNotCached() throws {
+    let root = try listingDirectory()
+    try FileManager.default.removeItem(at: root)
+    #expect(HookEventListing.entries(in: root) == nil)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    #expect(HookEventListing.entries(in: root) == [])
 }
