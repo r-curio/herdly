@@ -94,14 +94,14 @@ extension Companion {
 
     // MARK: - Scan (bindings, routes, visits, card)
 
-    /// Every two seconds while Zellij may be contacted and a session could be bound there.
-    func checkZellij() {
+    /// Zellij's part of the shared scheduled read (`checkScheduledTabHosts`): while Zellij may be
+    /// contacted, is not scanning, and a session could be bound there.
+    func zellijScanPlan() -> ZellijScanPlan? {
         guard zellijContactAllowed else {
             if zellij.read != nil { zellijSwitchChanged(hostSwitches.isOn(.zellij)) }
-            return
+            return nil
         }
-        let uptime = ProcessInfo.processInfo.systemUptime
-        guard !zellij.scanning, !openingTask, uptime >= zellij.nextScan else { return }
+        guard !zellij.scanning, !openingTask else { return nil }
         let codexSessions = Set(cliItems.map(\.session)).union(queue.items.compactMap { item in
             item.question.flatMap { $0.source == .cli ? $0.session : nil }
         })
@@ -110,27 +110,17 @@ extension Companion {
             (identity, (claudeInventories[identity.sourceScope]?.sessions ?? [])
                 .filter { $0.kind == .interactive && $0.sessionID == identity.session })
         })
-        guard !codexSessions.isEmpty || !claudeRows.isEmpty || !liveCLI.isEmpty else { return }
-        zellij.scanning = true
-        zellij.nextScan = uptime + 2
-        let others = otherTabHosts
-        let frontmost = TerminalApps.frontmostHost()
-        let terminalPID = frontmost == .terminalApp ? TerminalAppNavigation.pid() : nil
-        let generation = zellij.generation
-        Task { @MainActor in
-            let takenAt = Date().timeIntervalSince1970
-            let observed = await Task.detached { () -> (TerminalTabReads, [AgentSessionIdentity: ClaudeTabProcess],
-                                                        TerminalVisibilityReading<String>) in
-                let claude = claudeRows.mapValues(ClaudeTabProcess.read)
-                let reads = TerminalTabReads.take(others: others, claudeTTYs: Set(claude.values.compactMap(\.tty)), second: false)
-                let onScreen = terminalPID.flatMap { TerminalAppNavigation.onScreenWindowIDs(pid: $0) }
-                return (reads, claude, Companion.hostFront(reads, frontmost: frontmost, onScreen: onScreen))
-            }.value
-            zellij.scanning = false
-            guard generation == zellij.generation, zellijContactAllowed else { return }
-            applyZellijScan(observed.0, claude: observed.1, codexSessions: codexSessions, hostFront: observed.2, takenAt: takenAt)
-            refresh()
-        }
+        guard !codexSessions.isEmpty || !claudeRows.isEmpty || !liveCLI.isEmpty else { return nil }
+        return ZellijScanPlan(codexSessions: codexSessions, claudeRows: claudeRows, generation: zellij.generation)
+    }
+
+    /// Applies the shared read to Zellij, unless its switch or generation moved meanwhile.
+    func finishZellijScan(_ plan: ZellijScanPlan, reads: TerminalTabReads, claude: [AgentSessionIdentity: ClaudeTabProcess],
+                          hostFront: TerminalVisibilityReading<String>, takenAt: Double) {
+        zellij.scanning = false
+        guard plan.generation == zellij.generation, zellijContactAllowed else { return }
+        applyZellijScan(reads, claude: claude.filter { plan.claudeRows[$0.key] != nil }, codexSessions: plan.codexSessions,
+                        hostFront: hostFront, takenAt: takenAt)
     }
 
     private func applyZellijScan(_ reads: TerminalTabReads, claude: [AgentSessionIdentity: ClaudeTabProcess],

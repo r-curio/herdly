@@ -11,19 +11,111 @@ public enum HookEventListing {
 
     /// Every top-level entry, oldest first by creation date and then name. `nil` when the directory
     /// is unreadable or holds more than `maximumEntries` entries.
+    ///
+    /// Several readers list the same directories every scan, and a busy Claude directory holds
+    /// thousands of records, each needing its own creation-date lookup (#301). An unchanged
+    /// directory stamp reuses the last listing outright. Otherwise only names are read, and a
+    /// creation date is looked up only for an entry not seen before under the same inode: a file's
+    /// creation date never changes, and a name replaced by another file has a new inode. The stamp is
+    /// taken before listing, so a change during the listing shows up as a new stamp next call.
     public static func entries(in directory: URL, limit: Int = maximumEntries) -> [URL]? {
-        guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]),
-              urls.count <= limit else { return nil }
-        let dated: [(url: URL, created: Date)] = urls.map { ($0, created($0)) }
-        return dated.sorted { left, right in
-            left.created == right.created ? left.url.lastPathComponent < right.url.lastPathComponent
-                : left.created < right.created
-        }.map(\.url)
+        let stamp = FileStamp(directory, followingLinks: true)
+        let key = directory.standardizedFileURL.path
+        let previous = listings.entry(key)
+        if let stamp, let previous, previous.stamp == stamp {
+            return previous.urls.count <= limit ? previous.urls : nil
+        }
+        guard let names = names(in: directory), names.count <= limit else { return nil }
+        var dates: [String: Dated] = [:]
+        dates.reserveCapacity(names.count)
+        var added: [Dated] = []
+        for name in names {
+            if let known = previous?.dates[name.name], known.inode == name.inode {
+                dates[name.name] = known
+            } else {
+                let url = directory.appendingPathComponent(name.name, isDirectory: name.isDirectory)
+                let entry = Dated(name: name.name, url: url, inode: name.inode, created: Self.created(url))
+                dates[name.name] = entry
+                added.append(entry)
+            }
+        }
+        // The usual change: records were removed, or added after the newest one. The kept entries
+        // are still in order, so only the new ones are sorted.
+        let kept = previous?.order.filter { name in
+            guard let entry = dates[name] else { return false }
+            return previous?.dates[name]?.inode == entry.inode
+        } ?? []
+        let order: [String]
+        if let newest = kept.last.flatMap({ dates[$0]?.created }), added.allSatisfy({ $0.created > newest }) {
+            order = kept + added.sorted(by: Dated.older).map(\.name)
+        } else {
+            order = dates.values.sorted(by: Dated.older).map(\.name)
+        }
+        let ordered = order.compactMap { dates[$0]?.url }
+        if let stamp { listings.store(ListingCache.Entry(stamp: stamp, urls: ordered, order: order, dates: dates), for: key) }
+        return ordered
+    }
+
+    /// One listed entry with the inode its creation date was read under.
+    private struct Dated {
+        let name: String
+        let url: URL
+        let inode: UInt64
+        let created: Date
+
+        static func older(_ left: Dated, _ right: Dated) -> Bool {
+            left.created == right.created ? left.name < right.name : left.created < right.created
+        }
+    }
+
+    /// Top-level names with their inodes, `.` and `..` excluded; nil when the directory cannot be opened.
+    private static func names(in directory: URL) -> [(name: String, inode: UInt64, isDirectory: Bool)]? {
+        let handle = directory.withUnsafeFileSystemRepresentation { path in path.flatMap { opendir($0) } }
+        guard let handle else { return nil }
+        defer { closedir(handle) }
+        var result: [(name: String, inode: UInt64, isDirectory: Bool)] = []
+        while let entry = readdir(handle) {
+            let name = withUnsafePointer(to: entry.pointee.d_name) { pointer in
+                pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+            }
+            guard name != ".", name != ".." else { continue }
+            result.append((name, UInt64(entry.pointee.d_ino), Int32(entry.pointee.d_type) == DT_DIR))
+        }
+        return result
+    }
+
+    private static let listings = ListingCache()
+
+    /// The last successful listing per directory, the stamp it was taken under, and each entry's
+    /// inode and creation date. Unreadable and oversized results are never kept.
+    private final class ListingCache: @unchecked Sendable {
+        struct Entry {
+            let stamp: FileStamp
+            let urls: [URL]
+            /// `urls`' names, in the same order.
+            let order: [String]
+            let dates: [String: Dated]
+        }
+
+        // Invariant for `@unchecked Sendable`: `entries` is only touched while holding `lock`.
+        private let lock = NSLock()
+        private var entries: [String: Entry] = [:]
+
+        func entry(_ key: String) -> Entry? {
+            lock.lock(); defer { lock.unlock() }
+            return entries[key]
+        }
+
+        func store(_ entry: Entry, for key: String) {
+            lock.lock(); defer { lock.unlock() }
+            entries[key] = entry
+        }
     }
 
     /// The newest `.json` hook records among `entries`, still oldest first.
     public static func newestRecords(_ entries: [URL]) -> ArraySlice<URL> {
-        entries.filter { $0.pathExtension == "json" }.suffix(maximumRecords)
+        // A name suffix check: `pathExtension` parses each URL, and listings hold thousands (#301).
+        entries.filter { $0.lastPathComponent.hasSuffix(".json") && $0.lastPathComponent != ".json" }.suffix(maximumRecords)
     }
 
     static func created(_ url: URL) -> Date {
