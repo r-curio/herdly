@@ -1447,18 +1447,23 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 completionPresentation = Attention(restored: true)
             }
             if ghosttyEnabled && newCompletions.contains(where: { $0.source == .cli }) { nextGhosttyScan = 0 }
-            if !currentAgent.contains(where: { $0.approval != nil }) { reminderPresentation.dismiss() }
-            else if newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest })
+            // A dismiss of a card that is not showing would still publish and re-render the notch (#306).
+            if !currentAgent.contains(where: { $0.approval != nil }) {
+                if reminderPresentation.pending || reminderPresentation.expanded { reminderPresentation.dismiss() }
+            } else if newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest })
                     || !freshAgentRequests.isEmpty {
                 reminderPresentation.enqueue()
             } else if !newAgentRequests.isEmpty, !reminderPresentation.pending {
                 reminderPresentation = Attention(restored: true)
             }
-            if !currentAgent.contains(where: { $0.outcome != nil }) { completionPresentation.dismiss() }
+            if !currentAgent.contains(where: { $0.outcome != nil }), completionPresentation.pending || completionPresentation.expanded {
+                completionPresentation.dismiss()
+            }
             // A question posed before this launch is shown but does not pop or chime: the user may
             // already be looking at it, and Herdly was not observing when it arrived.
-            if !currentAgent.contains(where: { $0.question != nil }) { questionPresentation.dismiss() }
-            else if !freshAgentQuestions.isEmpty { questionPresentation.enqueue() }
+            if !currentAgent.contains(where: { $0.question != nil }) {
+                if questionPresentation.pending || questionPresentation.expanded { questionPresentation.dismiss() }
+            } else if !freshAgentQuestions.isEmpty { questionPresentation.enqueue() }
             else if !newAgentQuestions.isEmpty, !questionPresentation.pending { questionPresentation = Attention(restored: true) }
             saveCompletions()
             scanHerdr()
@@ -2341,25 +2346,28 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         nextGhosttyScan = now + 2
         let configuredRoots = configuredClaudeNavigationRoots()
         // ADR 0016: frontmost comes from macOS, read as the scan starts; Ghostty's own answer must agree.
+        let scanStart = Date().timeIntervalSince1970
         let frontmost = TerminalApps.frontmostHost()
         Task { @MainActor in
             let observedAt = Date().timeIntervalSince1970
             let result = await Task.detached {
-                let snapshot = GhosttyNavigation.snapshot()
+                let shared = GhosttyNavigation.scheduledSnapshot(notBefore: scanStart)
                 let inventories = configuredRoots.map { root in
                     ClaudeSetupDetection.activeSessionInventory(root: root.root, capabilities: root.capabilities,
                                                                 observedAt: observedAt)
                 }
-                return (snapshot, inventories)
+                return (shared.snapshot, inventories, shared.takenAt)
             }.value
             let snapshot = result.0
+            // A snapshot another scheduled scan read is dated by when that read began (ADR 0016).
+            let snapshotAt = result.2
             if ghosttyEnabled, let snapshot {
                 if !ghosttyPermissionVerified { ghosttyPermissionVerified = true }
                 ghosttyFocusState = .known(snapshot)
-                ghosttyInventoryAt = observedAt
+                ghosttyInventoryAt = snapshotAt
                 // ADR 0016: one visit and dwell rule for Codex and Claude tabs alike. Only completions are
                 // acknowledged, and only when the session's own bound tab is the one visible.
-                ghosttyVisits.record(TerminalVisibilityScan(takenAt: observedAt,
+                ghosttyVisits.record(TerminalVisibilityScan(takenAt: snapshotAt,
                                                             reading: TerminalVisibility.ghostty(snapshot, frontmost: frontmost)))
                 let queued = cliItems
                 for session in Set(queued.map(\.session)) {

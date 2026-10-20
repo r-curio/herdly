@@ -16,6 +16,57 @@ enum GhosttyNavigation {
     /// Without it, the surfaces' TTYs are read from Ghostty's child processes for the sole-terminal
     /// rule (ADR 0011), after the inventory so a surface opened in between is still counted.
     static func snapshot() -> GhosttySnapshot? {
+        let taken = Date().timeIntervalSince1970
+        let snapshot = freshSnapshot()
+        shared.store(snapshot, takenAt: taken)
+        return snapshot
+    }
+
+    /// For the scheduled scans only: a snapshot whose read began no earlier than `notBefore` and at
+    /// most `sharedAge` ago, with when its read began. The focus check and the shared tab read each
+    /// read Ghostty every two seconds, each through its own `osascript` (#306); callers that arrive
+    /// together wait for one read. `notBefore` is when the caller read the frontmost app (ADR 0016),
+    /// so a snapshot never predates the frontmost reading it is combined with. Open, typed input and
+    /// question keys call `snapshot()`, which always reads Ghostty.
+    static func scheduledSnapshot(notBefore: Double) -> (snapshot: GhosttySnapshot?, takenAt: Double) {
+        shared.scheduled(notBefore: notBefore, maxAge: sharedAge) {
+            let started = Date().timeIntervalSince1970
+            return (freshSnapshot(), started)
+        }
+    }
+
+    /// Shorter than the two-second scan interval, so every scheduled cycle still sees a new read.
+    static let sharedAge: Double = 1.5
+
+    private static let shared = SharedSnapshot()
+
+    private final class SharedSnapshot: @unchecked Sendable {
+        // Invariant for `@unchecked Sendable`: `latest` is only touched while holding `storeLock`;
+        // `readLock` serializes scheduled reads so callers arriving together share one.
+        private let readLock = NSLock()
+        private let storeLock = NSLock()
+        private var latest: (snapshot: GhosttySnapshot?, takenAt: Double)?
+
+        func store(_ snapshot: GhosttySnapshot?, takenAt: Double) {
+            storeLock.lock(); defer { storeLock.unlock() }
+            if takenAt >= latest?.takenAt ?? -.infinity { latest = (snapshot, takenAt) }
+        }
+
+        func scheduled(notBefore: Double, maxAge: Double,
+                       read: () -> (GhosttySnapshot?, Double)) -> (snapshot: GhosttySnapshot?, takenAt: Double) {
+            readLock.lock(); defer { readLock.unlock() }
+            storeLock.lock()
+            let cached = latest
+            storeLock.unlock()
+            if let cached, SharedReading.reusable(takenAt: cached.takenAt, notBefore: notBefore,
+                                                  now: Date().timeIntervalSince1970, maxAge: maxAge) { return cached }
+            let (snapshot, takenAt) = read()
+            store(snapshot, takenAt: takenAt)
+            return (snapshot, takenAt)
+        }
+    }
+
+    private static func freshSnapshot() -> GhosttySnapshot? {
         var value: [String: Any] = ["action": "snapshot"]
         let supported = GhosttyScriptingSupport.ttySupport() == .supported
         if supported { value["tty"] = true }

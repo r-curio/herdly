@@ -93,13 +93,18 @@ struct TerminalTabReads: Sendable {
     /// tty-listing host (Terminal.app, iTerm2, WezTerm, tmux) whose title is a shortened Codex identifier
     /// or whose tty is in `claudeTTYs`, so a title decoy is told apart from an unread tab (#268), then,
     /// when `second`, Terminal.app, tmux and Zellij again. Off the main actor.
-    static func take(others: OtherTabHosts, claudeTTYs: Set<String>, second: Bool) -> TerminalTabReads {
+    /// `scheduledSince` is set only by the shared scheduled read, as when it read the frontmost app: it
+    /// may then reuse a Ghostty snapshot another scheduled scan read since (`GhosttyNavigation.scheduledSnapshot`).
+    static func take(others: OtherTabHosts, claudeTTYs: Set<String>, second: Bool,
+                     scheduledSince: Double? = nil) -> TerminalTabReads {
         let terminal: TerminalAppNavigation.Read = others.terminalAppOn ? TerminalAppNavigation.snapshot() : .notRunning
         var inventories: [TerminalHost: TerminalHostInventory] = [:]
         if others.terminalAppOn { inventories[.terminalApp] = terminal.inventory }
         var ghostty: GhosttySnapshot?
         if others.ghosttyOn {
-            ghostty = others.ghosttyRunning ? GhosttyNavigation.snapshot() : nil
+            ghostty = others.ghosttyRunning
+                ? (scheduledSince.map { GhosttyNavigation.scheduledSnapshot(notBefore: $0).snapshot } ?? GhosttyNavigation.snapshot())
+                : nil
             inventories[.ghostty] = .ghosttyTitles(ghostty, running: others.ghosttyRunning)
         }
         var iTerm2: ITerm2Snapshot?
