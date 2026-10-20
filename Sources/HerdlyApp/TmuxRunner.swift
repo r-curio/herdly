@@ -100,7 +100,10 @@ enum TmuxRunner {
         }
         guard drained.wait(timeout: max(deadline, .now() + 1)) == .success else { return .timedOut }
         guard process.terminationStatus == 0 else { return .failed }
-        guard let bytes = box.bytes, bytes.count <= TmuxListing.maximumOutput else { return .failed }
+        // `read(upToCount:)` is nil at end of file, so a command that prints nothing (`switch-client`,
+        // `send-keys`) read empty, not failed (#246).
+        let bytes = box.bytes ?? Data()
+        guard bytes.count <= TmuxListing.maximumOutput else { return .failed }
         return .succeeded(String(decoding: bytes, as: UTF8.self))
     }
 
