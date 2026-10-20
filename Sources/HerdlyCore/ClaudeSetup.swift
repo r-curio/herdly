@@ -151,7 +151,7 @@ public struct ClaudeSetupRoots: Equatable, Sendable {
     public var usageDirectory: URL { helperDirectory.appendingPathComponent("usage", isDirectory: true) }
 }
 
-public struct ClaudeSetupPlan: Sendable {
+public struct ClaudeSetupPlan: Equatable, Sendable {
     public let status: ClaudeSetupStatus
     public let settingsChange: Data
     public let ownedHooks: [ClaudeOwnedHook]

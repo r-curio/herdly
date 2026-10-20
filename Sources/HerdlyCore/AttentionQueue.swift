@@ -195,7 +195,7 @@ public struct AttentionItem: Identifiable, Equatable, Sendable {
 }
 
 /// Merges all session activity into one deterministic attention projection.
-public struct AttentionQueue: Sendable {
+public struct AttentionQueue: Equatable, Sendable {
     private var requests: [RequestIdentity: AttentionRequest] = [:]
     private var completions: [CompletionIdentity: AttentionCompletion] = [:]
     private var runningBySession: [SourceSession: AttentionRunning] = [:]

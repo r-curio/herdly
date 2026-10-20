@@ -1099,6 +1099,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Projects the legacy Codex adapter into the source-neutral queue used by the notch. Claude
     /// observations already arrive there, so this keeps both sources under one ordering/count path.
     private func syncAgentQueueWithCodex(now: Double) {
+        var next = agentQueue
         let items = queue.items
         let keeping = Set(items.map { item -> AgentAttentionID in
             switch item.kind {
@@ -1108,14 +1109,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             case .running: return .running(CodexAttentionAdapter.running(from: item.running!).id)
             }
         })
-        agentQueue.reconcile(source: .codex, sourceScope: CodexAttentionAdapter.sourceScope, keeping: keeping)
+        next.reconcile(source: .codex, sourceScope: CodexAttentionAdapter.sourceScope, keeping: keeping)
         let requests = items.compactMap { $0.request }
         let questions = items.compactMap { $0.question }
         let completions = items.compactMap { $0.completion }
         let running = items.compactMap { $0.running }
-        agentQueue.apply(CodexAttentionAdapter.observations(requests: requests, questions: questions,
-                                                            completions: completions, running: running), now: now)
-        agentQueue.expire(at: now)
+        next.apply(CodexAttentionAdapter.observations(requests: requests, questions: questions,
+                                                      completions: completions, running: running), now: now)
+        next.expire(at: now)
+        if next != agentQueue { agentQueue = next }
     }
 
     /// Hook records accumulate without bound, so Herdly deletes expired ones itself: at launch and
@@ -1295,9 +1297,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                         scanGeneration: approvalScanGeneration))
                 }
             }
+            var scannedAgent = agentQueue
             for claudeScan in result.8 {
-                agentQueue.apply(claudeScan, now: scanNow)
+                scannedAgent.apply(claudeScan, now: scanNow)
             }
+            if scannedAgent != agentQueue { agentQueue = scannedAgent }
             // Receipt reads and writes happen off the main actor. The completion rechecks the
             // exact root, request, and deadline before making controls available.
             publishClaudeApprovalReceipts(approvalReceiptWork)
@@ -1341,17 +1345,21 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // A root can contain many pending rendezvous files. Writes happen off the main actor;
             // the completion rechecks the scan generation, root identity, and request deadline.
             publishClaudeQuestionReceipts(receiptWork)
+            var inventoriedAgent = agentQueue
             for inventory in result.7 {
-                agentQueue.apply(inventory, now: Date().timeIntervalSince1970)
+                inventoriedAgent.apply(inventory, now: Date().timeIntervalSince1970)
                 for session in inventory.sessions {
                     let identity = AgentSessionIdentity(source: .claude, sourceScope: inventory.sourceScope,
                                                         session: session.sessionID, surface: .cli)
-                    if !session.name.isEmpty { claudeSessionNames[identity] = session.name }
+                    if !session.name.isEmpty, claudeSessionNames[identity] != session.name {
+                        claudeSessionNames[identity] = session.name
+                    }
                     if let directory = session.directory, claudeSessionDirectories[identity] != directory {
                         claudeSessionDirectories[identity] = directory
                     }
                 }
             }
+            if inventoriedAgent != agentQueue { agentQueue = inventoriedAgent }
             if threadNames != result.3 { threadNames = result.3 }
             if usage != result.4 { usage = result.4 }
             if claudeUsage != result.10 { claudeUsage = result.10 }
@@ -1367,7 +1375,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                            sessionEnds: scan.sessionEnds)
             let discovered = SessionDiscovery.running(candidates, liveness: liveness)
             let discoveredCLI = Set(discovered.filter { $0.source == .cli }.map(\.session))
-            endedSessions = scan.endedSessions
+            if endedSessions != scan.endedSessions { endedSessions = scan.endedSessions }
             cliSessions = scan.cliSessions.union(discoveredCLI)
             daemonCLISessions = scan.cliSessions.intersection(daemonThreads)
             liveCLI = scan.cliState.liveSessions.union(discoveredCLI)
@@ -1378,8 +1386,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let previous = Set(queue.items.map(\.id))
             // A receipt found on disk is not a verified live interaction: such a request enters handed
             // back and, when a real helper receipt exists, a no-decision record releases it to Codex at once.
-            let unverified = queue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970)
-            queue.apply(discovered: discovered)
+            var scannedQueue = queue
+            let unverified = scannedQueue.apply(scan: scan, desktopEvents: desktopEvents, now: Date().timeIntervalSince1970)
+            scannedQueue.apply(discovered: discovered)
+            if scannedQueue != queue { queue = scannedQueue }
             acknowledgeCodexCompletions(Array(CodexReplyAcknowledgment.acknowledged(
                 queue.items.compactMap(\.completion), events: scan.cliEvents)))
             replyTurnStarts = ReplyTurnStarts.latest(cliEvents: scan.cliEvents, hookEvents: desktopEvents)
@@ -1410,17 +1420,22 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let newCompletions = newItems.compactMap(\.completion)
             for completion in newCompletions where !completion.uncertain {
                 let turn = TurnIdentity(session: completion.session, turn: completion.turn)
-                completionPreviews[completion.id] = scan.completionPreviews[turn].map(CompletionPreviewAvailability.available)
+                let preview = scan.completionPreviews[turn].map(CompletionPreviewAvailability.available)
                     ?? .unavailable("Codex did not provide a readable final response for this turn.")
-                spotlightContexts[.completion(completion.id)] = scan.turnContexts[turn] ?? SpotlightRecordContext()
+                if completionPreviews[completion.id] != preview { completionPreviews[completion.id] = preview }
+                let context = scan.turnContexts[turn] ?? SpotlightRecordContext()
+                if spotlightContexts[.completion(completion.id)] != context { spotlightContexts[.completion(completion.id)] = context }
             }
             let liveCompletionIDs = Set(current.compactMap(\.completion).map(\.id))
-            completionPreviews = completionPreviews.filter { liveCompletionIDs.contains($0.key) }
+            let livePreviews = completionPreviews.filter { liveCompletionIDs.contains($0.key) }
+            if livePreviews.count != completionPreviews.count { completionPreviews = livePreviews }
             let liveItemIDs = Set(current.map(\.id))
-            spotlightContexts = spotlightContexts.filter { liveItemIDs.contains($0.key) }
+            let liveContexts = spotlightContexts.filter { liveItemIDs.contains($0.key) }
+            if liveContexts.count != spotlightContexts.count { spotlightContexts = liveContexts }
             for item in current where item.kind != .completion {
                 let turn = item.request?.turn ?? item.question?.turn ?? item.running?.turn
-                if let turn, let context = scan.turnContexts[TurnIdentity(session: item.session, turn: turn)] {
+                if let turn, let context = scan.turnContexts[TurnIdentity(session: item.session, turn: turn)],
+                   spotlightContexts[item.id] != context {
                     spotlightContexts[item.id] = context
                 }
             }
@@ -1534,7 +1549,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func refresh() {
         scanReminders()
         pruneEventRecords()
-        queue.expire(at: Date().timeIntervalSince1970)
+        // Published values are written back only when they change: each write re-renders the notch,
+        // and an unchanged one on every tick and scan was most of Herdly's drawing cost (#306).
+        var expired = queue
+        expired.expire(at: Date().timeIntervalSince1970)
+        if expired != queue { queue = expired }
         pruneAnswerProgress()
         pruneReplyProgress()
         pruneClaudeReplies()
@@ -2335,7 +2354,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             }.value
             let snapshot = result.0
             if ghosttyEnabled, let snapshot {
-                ghosttyPermissionVerified = true
+                if !ghosttyPermissionVerified { ghosttyPermissionVerified = true }
                 ghosttyFocusState = .known(snapshot)
                 ghosttyInventoryAt = observedAt
                 // ADR 0016: one visit and dwell rule for Codex and Claude tabs alike. Only completions are
