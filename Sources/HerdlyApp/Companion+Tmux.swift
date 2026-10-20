@@ -146,7 +146,7 @@ extension Companion {
     private func applyTmuxScan(_ reads: TerminalTabReads, claude: [AgentSessionIdentity: ClaudeTabProcess],
                                codexSessions: Set<UUID>, processes: [TmuxSessionProcess],
                                hostFront: TerminalVisibilityReading<String>, takenAt: Double) {
-        tmux.read = reads.tmux
+        if tmux.read != reads.tmux { tmux.read = reads.tmux }
         recordHostTitles(reads.inventories, takenAt: takenAt)
         let snapshot = reads.tmux.snapshot
         let unreadable = reads.tmux.inventory == .unreadable

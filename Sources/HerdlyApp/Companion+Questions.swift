@@ -516,7 +516,8 @@ extension Companion {
     /// Drops progress for questions no longer waiting and turns an unconfirmed send into its final state.
     func pruneAnswerProgress() {
         let waiting = Set(queue.items.compactMap { $0.question?.id })
-        daemonDraftRequests = daemonDraftRequests.filter { waiting.contains($0.key) }
+        let drafts = daemonDraftRequests.filter { waiting.contains($0.key) }
+        if drafts.count != daemonDraftRequests.count { daemonDraftRequests = drafts }
         var ledger = relayLedger
         ledger.prune(keeping: waiting)
         if ledger != relayLedger { relayLedger = ledger }
