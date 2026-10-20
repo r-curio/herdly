@@ -1,6 +1,6 @@
 # herdr pane IDs from a shared Codex daemon (#116)
 
-Run on 2026-10-07 for [Prove the herdr items not yet shown live](https://github.com/r-curio/steer/issues/116), under the map [herdr support: find the safe route for sessions in herdr](https://github.com/r-curio/steer/issues/100). The run stopped after check 1 because that check found a safety problem with the binding rule in [ADR 0008](../adr/0008-bind-herdr-panes-when-steer-and-herdr-agree.md). Checks 2 to 6 were not run.
+Run on 2026-10-07 for [Prove the herdr items not yet shown live](https://github.com/r-curio/herdly/issues/116), under the map [herdr support: find the safe route for sessions in herdr](https://github.com/r-curio/herdly/issues/100). The run stopped after check 1 because that check found a safety problem with the binding rule in [ADR 0008](../adr/0008-bind-herdr-panes-when-herdly-and-herdr-agree.md). Checks 2 to 6 were not run.
 
 ## Setup
 

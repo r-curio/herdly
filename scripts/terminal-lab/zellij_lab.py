@@ -210,7 +210,7 @@ enter(lab["claude"])
 
 codex_title = wait_for(lambda: (lambda p: p and CODEX_TITLE.match(p["title"]) and p["title"])(pane(lab["codex"])), 90, 2)
 step("codex_title", title=codex_title)
-claude_title = wait_for(lambda: (lambda p: p and p["title"].startswith("Steer Claude ") and p["title"])(pane(lab["claude"])), 150, 2)
+claude_title = wait_for(lambda: (lambda p: p and p["title"].startswith("Herdly Claude ") and p["title"])(pane(lab["claude"])), 150, 2)
 step("claude_title", title=claude_title, observed=pane(lab["claude"])["title"])
 wait_for(lambda: "READY" in screen(lab["codex"]).split("Reply with only the word READY.")[-1], 90, 2)
 wait_for(lambda: "READY" in screen(lab["claude"]).split("Reply with only the word READY.")[-1], 90, 2)

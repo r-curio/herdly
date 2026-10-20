@@ -2,7 +2,7 @@
 
 Status: automated proof recorded; live product delivery deferred.
 
-The automated checks in `Tests/SteerCoreTests/ClaudeUsageTests.swift` run only against temporary
+The automated checks in `Tests/HerdlyCoreTests/ClaudeUsageTests.swift` run only against temporary
 configuration and support directories. They prove independent five-hour and seven-day decoding,
 expiry on a supplied Steer clock, missing-window behavior, spend-limit exclusion, canonical session
 identity, root isolation, malformed newest-record invalidation, bounded status-line probing, one-record

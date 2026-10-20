@@ -1,6 +1,6 @@
 # Zellij live targeting proof
 
-Recorded 2026-10-11 for [Prove Zellij targeting live](https://github.com/r-curio/steer/issues/208), the live check of [Research Zellij's CLI for pane targeting and client tty](https://github.com/r-curio/steer/issues/202) ([findings](https://github.com/r-curio/steer/blob/docs/202-research-zellij/docs/zellij-cli-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
+Recorded 2026-10-11 for [Prove Zellij targeting live](https://github.com/r-curio/herdly/issues/208), the live check of [Research Zellij's CLI for pane targeting and client tty](https://github.com/r-curio/herdly/issues/202) ([findings](https://github.com/r-curio/herdly/blob/docs/202-research-zellij/docs/zellij-cli-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
 
 ## Setup
 

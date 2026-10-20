@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Read-only probe of the Codex desktop app's unread set, for ongoing format checks.
 
-Prints the state file's write time and the local unread thread ids, then applies Steer's rule to
-the desktop completions in Steer's attention snapshot so a human can compare with what the running
-app cleared. Nothing is written. Exit status 1 means the format is not what Steer expects.
+Prints the state file's write time and the local unread thread ids, then applies Herdly's rule to
+the desktop completions in Herdly's attention snapshot so a human can compare with what the running
+app cleared. Nothing is written. Exit status 1 means the format is not what Herdly expects.
 
   python3 scripts/probe_desktop_read_state.py [--codex-home ~/.codex] [--snapshot PATH] [--watch]
 """
@@ -32,10 +32,10 @@ def read_state(path):
             raise ValueError(f"unknown read-state version {state['version']!r}")
         identities = state["unreadByIdentity"]
         if len(identities) != 1:
-            raise ValueError(f"{len(identities)} signed-in identities; Steer needs exactly one")
+            raise ValueError(f"{len(identities)} signed-in identities; Herdly needs exactly one")
         hosts = [key for key in next(iter(identities.values())) if key.startswith("local:")]
         if len(hosts) != 1:
-            raise ValueError(f"{len(hosts)} local hosts; Steer needs exactly one")
+            raise ValueError(f"{len(hosts)} local hosts; Herdly needs exactly one")
         local = next(iter(identities.values()))[hosts[0]]
     else:
         # Desktop 26.901.51231, before the app migrated to the per-identity layout.
@@ -76,7 +76,7 @@ def report(codex_home, snapshot_path):
     print(f"file written {when} ({time.time() - mtime:.1f}s ago); {len(unread)} local unread threads")
     snapshot = load_snapshot(snapshot_path)
     if snapshot is None:
-        print(f"no Steer snapshot at {snapshot_path}")
+        print(f"no Herdly snapshot at {snapshot_path}")
         return 0
     for completion in desktop_completions(snapshot):
         session = str(uuid.UUID(completion["session"]))
@@ -94,7 +94,7 @@ def report(codex_home, snapshot_path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--codex-home", default=os.path.expanduser("~/.codex"))
-    parser.add_argument("--snapshot", default=os.path.expanduser("~/Library/Application Support/Steer/attention-snapshot.json"))
+    parser.add_argument("--snapshot", default=os.path.expanduser("~/Library/Application Support/Herdly/attention-snapshot.json"))
     parser.add_argument("--watch", action="store_true", help="repeat every 2 seconds until interrupted")
     args = parser.parse_args()
     status = report(args.codex_home, args.snapshot)

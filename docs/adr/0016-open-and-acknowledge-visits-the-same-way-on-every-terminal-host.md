@@ -1,6 +1,6 @@
 # Open and acknowledge visits the same way on every terminal host
 
-Accepted with the user on 2026-10-11 ([issue #210](https://github.com/r-curio/steer/issues/210), map [#197](https://github.com/r-curio/steer/issues/197)). This generalizes [ADR 0011](0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md)'s Open sequence, visit rule and dwell rule to iTerm2, Terminal.app and WezTerm tabs, and to tmux, Zellij and herdr panes hosted in any enabled terminal. Binding is unchanged: [ADR 0013](0013-bind-cli-sessions-to-terminal-tabs-by-tty.md) (terminal tabs) and [ADR 0014](0014-bind-multiplexer-panes-and-join-their-client-to-a-host-tab.md) (multiplexer panes and their host-tab join) decide what the exact target is. [ADR 0015](0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md) decides what an Open falls back to.
+Accepted with the user on 2026-10-11 ([issue #210](https://github.com/r-curio/herdly/issues/210), map [#197](https://github.com/r-curio/herdly/issues/197)). This generalizes [ADR 0011](0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md)'s Open sequence, visit rule and dwell rule to iTerm2, Terminal.app and WezTerm tabs, and to tmux, Zellij and herdr panes hosted in any enabled terminal. Binding is unchanged: [ADR 0013](0013-bind-cli-sessions-to-terminal-tabs-by-tty.md) (terminal tabs) and [ADR 0014](0014-bind-multiplexer-panes-and-join-their-client-to-a-host-tab.md) (multiplexer panes and their host-tab join) decide what the exact target is. [ADR 0015](0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md) decides what an Open falls back to.
 
 Before this decision Ghostty had three visit rules. A Codex tab acknowledged its completions at any scan that showed it selected with Ghostty frontmost. A Claude tab acknowledged only on a switch to it after the completion arrived, and never acknowledged a completion that arrived while the tab was already in front. herdr used that interval rule plus a five-second dwell. The live proofs ([iTerm2](../evidence/iterm2-live.md), [Terminal.app](../evidence/terminal-app-live.md), [WezTerm](../evidence/wezterm-live.md), [tmux](../evidence/tmux-live.md), [Zellij](../evidence/zellij-live.md)) showed that each new host can say what is in front, and that WezTerm cannot raise a window that is not already focused.
 
@@ -50,23 +50,23 @@ A visit or dwell acknowledges every queued completion of that session that quali
 
 ## Windows
 
-iTerm2 and Terminal.app Open and visits reach a tab in any window: both crossed windows in every live attempt. WezTerm's Open reaches only the focused window; its visits count in any window that becomes focused, because `focused_pane_id` follows the focused window. Ghostty stays limited to its current window until a Ghostty with `tty` is proven ([#155](https://github.com/r-curio/steer/issues/155)).
+iTerm2 and Terminal.app Open and visits reach a tab in any window: both crossed windows in every live attempt. WezTerm's Open reaches only the focused window; its visits count in any window that becomes focused, because `focused_pane_id` follows the focused window. Ghostty stays limited to its current window until a Ghostty with `tty` is proven ([#155](https://github.com/r-curio/herdly/issues/155)).
 
 ## Presentation and scanning
 
 - A completion whose target is visible when it arrives gets no spotlight and no sound. It stays queued until dwell, a visit or dismissal clears it. This extends the product rule that Ghostty presents completions only while outside the originating pane.
-- Steer checks visibility every two seconds, off the main actor, with at most one check in flight per host, only while that host holds a target bound to a live session and macOS reports that host as the frontmost app. A host that is not frontmost has nothing visible, so it is not asked. Multiplexer reads follow ADR 0014's gates.
+- Herdly checks visibility every two seconds, off the main actor, with at most one check in flight per host, only while that host holds a target bound to a live session and macOS reports that host as the frontmost app. A host that is not frontmost has nothing visible, so it is not asked. Multiplexer reads follow ADR 0014's gates.
 
 ## Considered options
 
 - **Keep Ghostty's three rules and give only new hosts the herdr rule:** two behaviors for the same act, and a Claude completion that arrived in a watched tab would still never clear on its own.
 - **Ghostty's Codex rule everywhere (visible at any scan acknowledges):** a completion would clear within two seconds of a glance, with no switch or dwell to show it was seen.
-- **Send WezTerm's `activate-pane` to a window that is not focused:** it changes that window's tab where Steer cannot verify it.
+- **Send WezTerm's `activate-pane` to a window that is not focused:** it changes that window's tab where Herdly cannot verify it.
 - **Scan every two seconds whenever a bound session is live:** the same answers with Apple Events sent to apps that are not in front.
 - **Trust the host's own focus report:** iTerm2, Terminal.app and WezTerm keep reporting a current target while another app is in front.
 
 ## Not yet shown live
 
-- The visible tests and the dwell run on iTerm2, Terminal.app and WezTerm in any Steer code path.
+- The visible tests and the dwell run on iTerm2, Terminal.app and WezTerm in any Herdly code path.
 - Visibility through a multiplexer hosted in iTerm2, Terminal.app or Ghostty.
 - WezTerm's `focused_pane_id` following a window switch made by the user rather than the CLI.

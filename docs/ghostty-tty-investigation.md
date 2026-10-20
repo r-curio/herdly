@@ -1,12 +1,12 @@
 # Ghostty terminal `tty`: first release and feature check (#117)
 
-Checked 2026-10-07 for [Find the first Ghostty release that exposes terminal tty](https://github.com/r-curio/steer/issues/117). It answers the open point in [ADR 0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md) and the feature-check rule in [Agreed terminal host presentation](product.md#agreed-terminal-host-presentation).
+Checked 2026-10-07 for [Find the first Ghostty release that exposes terminal tty](https://github.com/r-curio/herdly/issues/117). It answers the open point in [ADR 0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md) and the feature-check rule in [Agreed terminal host presentation](product.md#agreed-terminal-host-presentation).
 
 ## Answer
 
 1. **No stable Ghostty release exposes a terminal's `tty` yet.** The latest stable release is 1.3.1 (2026-03-13), and it lacks the property. The property is merged on `main` for the open 1.4.0 milestone, but 1.4.0 has not been released. The first release expected to ship it is 1.4.0. That is an inference from the milestone, not a verified release.
 2. **Dictionary entry (on `main`):** class `terminal` (code `Gtrm`), property `tty`, code `Gtty`, type `text`, read-only. The sibling property `pid` (code `Gpid`, `integer`) arrived in the same PR.
-3. **Feature check:** read the scripting dictionary of the Ghostty bundle Steer will drive. Treat the feature as present only if class `terminal` declares a property with code `Gtty`. This needs no version comparison and sends no Apple Events. At runtime, an empty `tty` string still means "cannot identify" for that terminal.
+3. **Feature check:** read the scripting dictionary of the Ghostty bundle Herdly will drive. Treat the feature as present only if class `terminal` declares a property with code `Gtty`. This needs no version comparison and sends no Apple Events. At runtime, an empty `tty` string still means "cannot identify" for that terminal.
 
 ## Verified facts
 
@@ -50,7 +50,7 @@ So a Ghostty that declares the property still returns `""` when AppleScript is d
 
 ### Reading it
 
-These snippets come from the PR's own smoke test (`get tty of every terminal`, `get {id, pid, tty, working directory} of terminal 1`). They match Steer's JXA style in `Sources/SteerApp/Resources/Ghostty.js`. They were **not** run here, because the installed Ghostty lacks the property and this task sends no Apple Events.
+These snippets come from the PR's own smoke test (`get tty of every terminal`, `get {id, pid, tty, working directory} of terminal 1`). They match Herdly's JXA style in `Sources/HerdlyApp/Resources/Ghostty.js`. They were **not** run here, because the installed Ghostty lacks the property and this task sends no Apple Events.
 
 ```sh
 osascript -e 'tell application id "com.mitchellh.ghostty" to get {id, tty} of every terminal'
@@ -68,14 +68,14 @@ t.terminals().map(p => ({id: p.id(), name: p.name(), tty: p.tty()}))
 - The bundle's `Contents/Resources/Ghostty.sdef`, the output of `sdef /Applications/Ghostty.app`, and `macos/Ghostty.sdef` at tag `v1.3.1` have the same SHA-256 (`0ac1bbd8…2adf`). The shipped dictionary is the source-tree file at that tag.
 - `python3 scripts/probe_ghostty.py` (read-only, no Apple Events) reports `native_tty_mapping_available: false` for this bundle. The probe already implements the dictionary check below, matching by property name.
 
-## Feature check for Steer
+## Feature check for Herdly
 
 Recommended, with no version comparison:
 
-1. Resolve the Ghostty bundle Steer will actually drive. Prefer the running `com.mitchellh.ghostty` app's `NSRunningApplication.bundleURL`, and fall back to `NSWorkspace.urlForApplication(withBundleIdentifier:)`. Do not hard-code `/Applications`.
+1. Resolve the Ghostty bundle Herdly will actually drive. Prefer the running `com.mitchellh.ghostty` app's `NSRunningApplication.bundleURL`, and fall back to `NSWorkspace.urlForApplication(withBundleIdentifier:)`. Do not hard-code `/Applications`.
 2. Read `Contents/Info.plist` → `OSAScriptingDefinition` (currently `Ghostty.sdef`) from `Contents/Resources/`, with bounded size and safe file access. `sdef <bundle>` returns the same XML but spawns a process.
 3. Parse the XML. The feature is present only if a `class` with `code="Gtrm"` contains a `property` with `code="Gtty"` and `type="text"`. Matching the four-character codes is more robust than matching names. A missing, unreadable or malformed dictionary means "cannot identify", never "supported".
-4. Recheck when the bundle changes (path, `CFBundleVersion` or the dictionary file's modification date), since Ghostty can be updated while Steer runs. Fail closed: if the check is stale or uncertain, herdr Open is unavailable.
+4. Recheck when the bundle changes (path, `CFBundleVersion` or the dictionary file's modification date), since Ghostty can be updated while Herdly runs. Fail closed: if the check is stale or uncertain, herdr Open is unavailable.
 5. At runtime, a declared property is necessary but not sufficient. An empty or non-`/dev/ttys*` value for a terminal, or zero or several matches, still yields "Ghostty cannot identify herdr's tab" (ADR 0011).
 
 Rejected as the primary check: attempting `get tty of …` and treating an error as unsupported. It needs a running Ghostty and Automation permission, and it sends Apple Events just to probe. The error an older Ghostty returns for the raw code `«class Gtty»` was not observed here. A raw-code read is also ambiguous with the `""` that a supporting Ghostty returns when scripting is disabled.

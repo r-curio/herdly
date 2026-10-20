@@ -1,4 +1,4 @@
-"""Race checks against the real release SteerHook, without Codex.
+"""Race checks against the real release HerdlyHook, without Codex.
 
 Each case feeds one synthetic PermissionRequest payload to the helper on stdin, plays the companion
 (receipt, then a decision at a chosen moment) and records the helper's stdout decision and the
@@ -13,7 +13,7 @@ rewritten .approval outcome. Cases run concurrently in separate event directorie
 import json, os, subprocess, sys, threading, time, uuid, shutil
 
 S = os.path.dirname(os.path.abspath(__file__))
-HOOK = os.environ.get("STEER_HOOK", os.path.abspath(os.path.join(S, "..", "..", ".build", "arm64-apple-macosx", "release", "SteerHook")))
+HOOK = os.environ.get("HERDLY_HOOK", os.path.abspath(os.path.join(S, "..", "..", ".build", "arm64-apple-macosx", "release", "HerdlyHook")))
 ROOT = os.path.join(S, "events-helper-race")
 shutil.rmtree(ROOT, ignore_errors=True); os.makedirs(ROOT)
 
@@ -24,7 +24,7 @@ def atomic(path, obj):
 
 def payload(session, turn, command):
     return json.dumps({"hook_event_name": "PermissionRequest", "session_id": session, "turn_id": turn,
-                       "tool_name": "Bash", "cwd": "/tmp/steer-race", "tool_input": {"command": command}})
+                       "tool_name": "Bash", "cwd": "/tmp/herdly-race", "tool_input": {"command": command}})
 
 def run_helper(events, session, turn, command):
     started = time.time()

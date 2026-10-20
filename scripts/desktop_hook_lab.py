@@ -54,17 +54,17 @@ def prepare(root):
     hooks = {event: [{"hooks": [{"type": "command", "command": command, "timeout": 2}]}]
              for event in EVENTS}
     (root / ".codex" / "hooks.json").write_text(json.dumps({
-        "description": "Steer disposable event recorder: metadata only, no approval decisions.",
+        "description": "Herdly disposable event recorder: metadata only, no approval decisions.",
         "hooks": hooks}, indent=2) + "\n")
     (root / ".codex" / "config.toml").write_text("[features]\nhooks = true\n")
     (root / ".gitignore").write_text("events/\n")
-    (root / "README.md").write_text("""# Steer desktop hook lab
+    (root / "README.md").write_text("""# Herdly desktop hook lab
 
 Open this directory as a local Codex desktop project. Review the recorder and
 trust its project hooks through Codex's normal review flow if prompted.
 No trust bypass is configured. Existing user/system hooks may still apply.
 
-First prompt: Reply only STEER-LIFECYCLE-OK. Do not run tools or change files.
+First prompt: Reply only HERDLY-LIFECYCLE-OK. Do not run tools or change files.
 After hooks are trusted, send the prompt again in the same task if necessary.
 
 The recorder keeps event names and correlation IDs in events/. It never stores
@@ -86,7 +86,7 @@ def report(root):
 
 
 def self_test():
-    with tempfile.TemporaryDirectory(prefix="steer-hook-check-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="herdly-hook-check-") as temporary:
         root = prepare(Path(temporary) / "project with spaces")
         command = json.loads((root / ".codex/hooks.json").read_text())["hooks"]["PermissionRequest"][0]["hooks"][0]["command"]
         sample = {"hook_event_name": "PermissionRequest", "session_id": "fixture-session",

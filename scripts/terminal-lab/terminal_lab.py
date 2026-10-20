@@ -141,7 +141,7 @@ if args.adopt_window:
     preexisting = [t["tty"] for t in tm("inventory")["tabs"] if t["window"] != w1_window
                    and t["bounds"] != next(x["bounds"] for x in tm("inventory")["tabs"] if x["window"] == w1_window)]
 else:
-    W1 = tm("newWindow", text="clear; echo; echo '  STEER LAB: press Cmd-T twice in THIS window, then leave the keyboard alone.'; echo")
+    W1 = tm("newWindow", text="clear; echo; echo '  HERDLY LAB: press Cmd-T twice in THIS window, then leave the keyboard alone.'; echo")
     w1_window = tab_of(tm("inventory"), W1["tty"])["window"]
 step("waiting_for_tabs", window=w1_window, timeout=args.tab_wait)
 

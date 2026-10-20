@@ -1,6 +1,6 @@
 # Terminal.app live targeting proof
 
-Recorded 2026-10-11 for [Prove Terminal.app targeting live](https://github.com/r-curio/steer/issues/205), the live check of [Research Terminal.app's scripting surface for exact tab targeting](https://github.com/r-curio/steer/issues/199) ([findings](https://github.com/r-curio/steer/blob/docs/199-research-terminal-app/docs/terminal-app-scripting-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
+Recorded 2026-10-11 for [Prove Terminal.app targeting live](https://github.com/r-curio/herdly/issues/205), the live check of [Research Terminal.app's scripting surface for exact tab targeting](https://github.com/r-curio/herdly/issues/199) ([findings](https://github.com/r-curio/herdly/blob/docs/199-research-terminal-app/docs/terminal-app-scripting-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
 
 ## Setup
 

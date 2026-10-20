@@ -1,6 +1,6 @@
 # Pane signals for Codex sessions under a shared daemon (#144)
 
-Gathered on 2026-10-07 for [Decide herdr pane binding when Codex hooks run in a shared daemon](https://github.com/r-curio/steer/issues/144), which follows the [daemon hook environment run](herdr-daemon-hook-env.md) from #116. These findings inform the decision; they do not make it. Everything below came from read-only observation of the user's live default herdr session and Codex daemon, plus the Codex and herdr CLIs' own help and schemas. No hook, herdr state, Codex configuration or session was changed, and no key or focus request was sent. Project directories and full session IDs are omitted.
+Gathered on 2026-10-07 for [Decide herdr pane binding when Codex hooks run in a shared daemon](https://github.com/r-curio/herdly/issues/144), which follows the [daemon hook environment run](herdr-daemon-hook-env.md) from #116. These findings inform the decision; they do not make it. Everything below came from read-only observation of the user's live default herdr session and Codex daemon, plus the Codex and herdr CLIs' own help and schemas. No hook, herdr state, Codex configuration or session was changed, and no key or focus request was sent. Project directories and full session IDs are omitted.
 
 ## Setup
 

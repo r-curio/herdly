@@ -2,7 +2,7 @@
 //   osascript -l JavaScript terminal.js '{"op": "...", ...}'
 // Terminal tabs have no id, so ops address a tab by its tty and resolve it fresh each call.
 // Lab only: `Application(bundleID)` launches Terminal if it quit before an event, so this can relaunch
-// a quit Terminal. Steer's own adapter addresses the process id instead (#270, Resources/AppleEvents.js).
+// a quit Terminal. Herdly's own adapter addresses the process id instead (#270, Resources/AppleEvents.js).
 function run(argv) {
   const app = Application("com.apple.Terminal");
   const req = JSON.parse(argv[0]);

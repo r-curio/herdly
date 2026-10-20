@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Drive the built Steer.app through restart, crash, corrupt-snapshot and saved-dismissal runs.
+"""Drive the built Herdly.app through restart, crash, corrupt-snapshot and saved-dismissal runs.
 
 Everything happens in a disposable lab directory: an isolated events directory, an isolated
 rollouts directory standing in for ~/.codex/sessions, and an isolated attention snapshot.
 No Codex configuration, hook, or real rollout is read or written. Each reported run starts
 the real app, waits for its first scan, and reads the JSON the app writes via --restart-report.
 
-    python3 scripts/restart_lab.py --app output/Steer.app --out docs/evidence/restart-recovery.json
+    python3 scripts/restart_lab.py --app output/Herdly.app --out docs/evidence/restart-recovery.json
 """
 import argparse
 import hashlib
@@ -64,7 +64,7 @@ def tree_digest(root):
 
 class Lab:
     def __init__(self, app, root):
-        self.binary = Path(app) / "Contents/MacOS/Steer"
+        self.binary = Path(app) / "Contents/MacOS/Herdly"
         self.root = root
         self.events = root / "events"
         self.rollouts = root / "rollouts"
@@ -135,11 +135,11 @@ def check(condition, message, failures):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--app", default="output/Steer.app")
+    parser.add_argument("--app", default="output/Herdly.app")
     parser.add_argument("--out")
     parser.add_argument("--keep", action="store_true", help="keep the lab directory for inspection")
     options = parser.parse_args()
-    root = Path(tempfile.mkdtemp(prefix="steer-restart-lab-"))
+    root = Path(tempfile.mkdtemp(prefix="herdly-restart-lab-"))
     lab = Lab(options.app, root)
     failures = []
 
@@ -149,7 +149,7 @@ def main():
     cli_turn = str(uuid.uuid4())
     request_id = str(uuid.uuid4())
 
-    # A desktop completion recorded before Steer starts (metadata-only hook records).
+    # A desktop completion recorded before Herdly starts (metadata-only hook records).
     hook(lab.events, "SessionStart", desktop_session)
     hook(lab.events, "UserPromptSubmit", desktop_session, turn1)
     hook(lab.events, "Stop", desktop_session, turn1)
@@ -159,7 +159,7 @@ def main():
     # A "saved approval record": a pending request plus a companion receipt from a previous run, no decision.
     write_json(lab.events / f"{request_id}.approval", {
         "request_id": request_id, "session_id": cli_session, "turn_id": cli_turn,
-        "details": {"command": "touch STEER11-RESTART", "action": "Bash", "project": str(root)},
+        "details": {"command": "touch HERDLY11-RESTART", "action": "Bash", "project": str(root)},
         "captured_at": 0, "expires_at": 0, "outcome": "pending"})
     received = time.time()
     write_json(lab.events / f"{request_id}.receipt", {"request_id": request_id, "received_at": received,
@@ -200,7 +200,7 @@ def main():
     pre = lab.reported_run("C2-dismissal-before-corruption", "turn1 dismissed; saves a good snapshot and its backup")
     check([i["turn"] for i in pre["items"] if i["kind"] == "completion"] == [turn2], "C2: dismissed turn1 stays cleared", failures)
     lab.snapshot.write_bytes(b'{"version":1,"completions":[{"source":"desktop"')  # interrupted save
-    (root / ".attention-snapshot.json.steer-partial").write_bytes(b"\x00\xff garbage")
+    (root / ".attention-snapshot.json.herdly-partial").write_bytes(b"\x00\xff garbage")
     d = lab.reported_run("D-corrupt-snapshot", "truncated snapshot plus a leftover temporary file")
     d_items = {i.get("turn"): i for i in d["items"] if i["kind"] == "completion"}
     check(set(d_items) == {turn2}, "D: startup proceeds; undismissed completion rebuilt, dismissed one still cleared", failures)

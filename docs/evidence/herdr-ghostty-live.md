@@ -1,6 +1,6 @@
 # herdr in Ghostty: live proof (#102)
 
-Run on 2026-10-07 for [Prove herdr in Ghostty live](https://github.com/r-curio/steer/issues/102), under the map [herdr support: find the safe route for sessions in herdr](https://github.com/r-curio/steer/issues/100). It checks the open questions from the [herdr socket API investigation](https://github.com/r-curio/steer/blob/codex/research-herdr-socket-api/docs/herdr-socket-api-investigation.md). No Steer code drove herdr. Every step used the herdr CLI, Ghostty's scripting dictionary or the read-only probe below.
+Run on 2026-10-07 for [Prove herdr in Ghostty live](https://github.com/r-curio/herdly/issues/102), under the map [herdr support: find the safe route for sessions in herdr](https://github.com/r-curio/herdly/issues/100). It checks the open questions from the [herdr socket API investigation](https://github.com/r-curio/herdly/blob/codex/research-herdr-socket-api/docs/herdr-socket-api-investigation.md). No Steer code drove herdr. Every step used the herdr CLI, Ghostty's scripting dictionary or the read-only probe below.
 
 ## Setup
 

@@ -1,6 +1,6 @@
 # Terminal.app scripting surface for exact tab targeting (#199)
 
-Checked 2026-10-11 for [Research Terminal.app's scripting surface for exact tab targeting](https://github.com/r-curio/steer/issues/199), a research ticket under the map [Support iTerm2, Terminal.app, WezTerm and multiplexers](https://github.com/r-curio/steer/issues/197). This doc records facts only. Decisions belong to the grilling tickets.
+Checked 2026-10-11 for [Research Terminal.app's scripting surface for exact tab targeting](https://github.com/r-curio/herdly/issues/199), a research ticket under the map [Support iTerm2, Terminal.app, WezTerm and multiplexers](https://github.com/r-curio/herdly/issues/197). This doc records facts only. Decisions belong to the grilling tickets.
 
 No Apple Events were sent to Terminal. No tab was scripted or typed into, and no configuration was changed. Every scripting fact below comes from the installed scripting dictionary, Apple documentation, or symbol names in the Terminal binary. Runtime behavior that only a live test can show is marked **unverified**.
 
@@ -10,7 +10,7 @@ No Apple Events were sent to Terminal. No tab was scripted or typed into, and no
 2. **One tab is one TTY:** the dictionary has no pane or split class. Terminal's "Split Pane" (⌘D) shows a second view of the same session, not a second shell (see [Splits](#splits)). So "unsplit tab" and "one tty per tab" coincide.
 3. **Select and verify:** `selected` (tab) and `frontmost` (window) are writable. `selected tab` of a window, application `frontmost`, and window order (`front window`/`index`) can be read back to verify the result.
 4. **Focus:** `tty of selected tab of front window`, combined with Terminal being the frontmost app, reports which tab has focus.
-5. **Titles:** a tab exposes only `custom title`. Whether the title Codex sets with an escape sequence (OSC 0) or Steer's Claude title (OSC 2) appears in `custom title`, in the window's `name`, or nowhere readable for a background tab is **unverified**. Apple does not document it.
+5. **Titles:** a tab exposes only `custom title`. Whether the title Codex sets with an escape sequence (OSC 0) or Herdly's Claude title (OSC 2) appears in `custom title`, in the window's `name`, or nowhere readable for a background tab is **unverified**. Apple does not document it.
 6. **Input:** the only tab-addressed input in the dictionary is **`do script <text> in <tab>`**. It needs no System Events keystrokes. Apple documents it only as "Runs a UNIX shell script or command" and returns the tab. Its delivery semantics are **unverified**, and it gives **no delivery confirmation**. If the target resolves to nothing, the dictionary's null case suggests the text is run in a **new window** instead (see [Input](#input-to-one-tab)).
 7. **Open Island** binds Terminal sessions by tab `tty`, falling back to a substring match on `custom title`. It selects the first matching tab without verifying the result, and it sends no text to Terminal.app: reply input is offered only for tmux and Ghostty.
 
@@ -97,13 +97,13 @@ There is no `write text`/`input text` command (iTerm2's and Ghostty's equivalent
 ### TTY, title and foreground process exposure
 
 - **TTY:** `tty of tab` (see above).
-- **Foreground process:** the dictionary gives only process *names* (`processes`) and `busy`. With the tab's tty, Steer can read the foreground process without another Apple Event: `ps -t ttysNNN -o pid,stat,comm`, where `+` in `stat` means "the process is in the foreground process group of its control terminal" (`man ps`, `-t` and `state` `+`). This mirrors ADR 0011's `lsof` TTY join and ADR 0012's foreground-process check. It has not been run against a Terminal tab here.
+- **Foreground process:** the dictionary gives only process *names* (`processes`) and `busy`. With the tab's tty, Herdly can read the foreground process without another Apple Event: `ps -t ttysNNN -o pid,stat,comm`, where `+` in `stat` means "the process is in the foreground process group of its control terminal" (`man ps`, `-t` and `state` `+`). This mirrors ADR 0011's `lsof` TTY join and ADR 0012's foreground-process check. It has not been run against a Terminal tab here.
 - **Titles:** see the next section.
 - **Screen text:** `contents` and `history` expose the visible screen and full scrollback. These are readable but carry conversation content. Matching on them was not evaluated.
 
 ### Codex and Claude Code titles
 
-- **What the agents write:** Codex's TUI writes its title as **OSC 0** (`ESC ] 0 ; title BEL`). Source: [`codex-rs/tui/src/terminal_title.rs`](https://github.com/openai/codex/blob/cc7ba33601286a751477832b01de7b6f8de0dd9c/codex-rs/tui/src/terminal_title.rs) at `cc7ba33` (2026-10-10), which writes `"\x1b]0;{}\x07"` and tests `writes_osc_title_with_bel_terminator`. With `tui.terminal_title = ["session-id"]`, the title is ADR 0005's 29-character prefix plus `...` (observed on Codex 0.145.0). Steer's Claude hook writes **OSC 2** `Steer Claude <full-session-id>` through Claude's `terminalSequence` (`Sources/SteerHook/main.swift:136-138`, [Claude setup](claude-setup.md)).
+- **What the agents write:** Codex's TUI writes its title as **OSC 0** (`ESC ] 0 ; title BEL`). Source: [`codex-rs/tui/src/terminal_title.rs`](https://github.com/openai/codex/blob/cc7ba33601286a751477832b01de7b6f8de0dd9c/codex-rs/tui/src/terminal_title.rs) at `cc7ba33` (2026-10-10), which writes `"\x1b]0;{}\x07"` and tests `writes_osc_title_with_bel_terminator`. With `tui.terminal_title = ["session-id"]`, the title is ADR 0005's 29-character prefix plus `...` (observed on Codex 0.145.0). Herdly's Claude hook writes **OSC 2** `Herdly Claude <full-session-id>` through Claude's `terminalSequence` (`Sources/HerdlyHook/main.swift:136-138`, [Claude setup](claude-setup.md)).
 - **What Terminal shows:** Apple's guide lists the window-title items (working directory or document, active process name, shell command name, profile name, TTY name, dimensions, command key) and the tab-title items (working directory or document, path, active process name, arguments, TTY name, "Show other items when there is a custom title", activity indicator). Sources: [window title](https://support.apple.com/guide/terminal/trml15228/mac) and [Tab settings 2.15](https://support.apple.com/guide/terminal/change-profiles-tab-settings-trmltab/2.15/mac/26). Neither page mentions escape-sequence titles. The Inspector has separate "Window Title" and "Tab Title" fields.
 - **Unverified, and needs a live check:**
   - whether OSC 0 or OSC 2 updates the tab's scriptable `custom title`;
@@ -111,7 +111,7 @@ There is no `write text`/`input text` command (iTerm2's and Ghostty's equivalent
   - whether it is readable at all for a background tab;
   - whether the profile's title options can hide it.
 
-  Until this is checked, Codex's session-ID title and Steer's Claude title cannot be assumed visible through Terminal scripting. Note that `custom title` is writable, so a user, a script or another tool can set any value there.
+  Until this is checked, Codex's session-ID title and Herdly's Claude title cannot be assumed visible through Terminal scripting. Note that `custom title` is writable, so a user, a script or another tool can set any value there.
 
 ### Selecting a tab and verifying it
 
@@ -165,15 +165,15 @@ The dictionary has no pane class. Apple's [keyboard shortcuts page](https://supp
 
 ### Permissions and configuration
 
-- **Automation (TCC Apple Events)** for `com.apple.Terminal`: the same mechanism Steer already uses for Ghostty. The pieces are `NSAppleEventsUsageDescription` in `scripts/build-app.sh` (its text currently names Ghostty only), the `com.apple.security.automation.apple-events` entitlement in `scripts/Steer.entitlements`, and a consent check through `AEDeterminePermissionToAutomateTarget`, which sends no event (`Sources/SteerApp/GhosttyAutomationPermission.swift`). Terminal needs its own per-target consent, because macOS grants Automation per controlling app and target app pair.
+- **Automation (TCC Apple Events)** for `com.apple.Terminal`: the same mechanism Herdly already uses for Ghostty. The pieces are `NSAppleEventsUsageDescription` in `scripts/build-app.sh` (its text currently names Ghostty only), the `com.apple.security.automation.apple-events` entitlement in `scripts/Herdly.entitlements`, and a consent check through `AEDeterminePermissionToAutomateTarget`, which sends no event (`Sources/HerdlyApp/GhosttyAutomationPermission.swift`). Terminal needs its own per-target consent, because macOS grants Automation per controlling app and target app pair.
 - **Terminal-side settings:** the dictionary and `Info.plist` show no in-app scripting toggle (unlike Ghostty's `NSApp.isAppleScriptEnabled` gate). `NSAppleScriptEnabled` is `true` in the bundle. Reading tabs needs no Terminal preference.
-- **Things Steer would have to change to make titles work:** nothing is known to be needed if escape-sequence titles are readable (unverified). Setting a tab's `custom title` by script would modify Terminal state. The map says Steer never edits user configuration, and whether a scripted custom title counts as configuration is a decision for the grilling tickets.
+- **Things Herdly would have to change to make titles work:** nothing is known to be needed if escape-sequence titles are readable (unverified). Setting a tab's `custom title` by script would modify Terminal state. The map says Herdly never edits user configuration, and whether a scripted custom title counts as configuration is a decision for the grilling tickets.
 
 ### Detecting support and version
 
 - **Presence:** `NSWorkspace.urlForApplication(withBundleIdentifier: "com.apple.Terminal")` or a running `NSRunningApplication`. Terminal ships with macOS at `/System/Applications/Utilities/Terminal.app`, so it is always installed on supported macOS.
 - **Version:** `CFBundleShortVersionString` (2.15 here) from `Info.plist`, read with no Apple Event. The application's `version` property also gives it, but costs an Apple Event.
-- **Feature check without Apple Events**, following the Ghostty precedent in [Ghostty tty investigation](ghostty-tty-investigation.md#feature-check-for-steer): read `Info.plist` → `OSAScriptingDefinition`, parse `Contents/Resources/Terminal.sdef`, and require:
+- **Feature check without Apple Events**, following the Ghostty precedent in [Ghostty tty investigation](ghostty-tty-investigation.md#feature-check-for-herdly): read `Info.plist` → `OSAScriptingDefinition`, parse `Contents/Resources/Terminal.sdef`, and require:
   - class `ttab` with property `ttty` (type `text`);
   - property `tbsl`;
   - window class `cwin` with property `pisf` and contents `tcnt`;
@@ -205,7 +205,7 @@ Source: Open Island at commit `b50f87aa7d58af1478837d48909eb68baa37f9b9` (2026-0
   - `canReply` returns true only for tmux targets and Ghostty, so Terminal.app gets **no** text input.
   - Ghostty uses `input text` plus `send key "enter"`. Open Island does not use `do script`.
 
-Compared with Steer's rules, Open Island's Terminal route:
+Compared with Herdly's rules, Open Island's Terminal route:
 
 - accepts a substring title match;
 - takes the first match rather than requiring a unique one;
@@ -216,7 +216,7 @@ Compared with Steer's rules, Open Island's Terminal route:
 
 All of these need a live Terminal test in a disposable lab. None was run, because this ticket forbids Apple Events to running terminals.
 
-1. Where Codex's OSC 0 title and Steer's Claude OSC 2 title surface: tab `custom title`, window `name`, or neither, including for background tabs and under different profile title settings.
+1. Where Codex's OSC 0 title and Herdly's Claude OSC 2 title surface: tab `custom title`, window `name`, or neither, including for background tabs and under different profile title settings.
 2. `do script … in tab`:
    - whether a newline is appended;
    - paste-versus-keystroke delivery;
@@ -239,4 +239,4 @@ All of these need a live Terminal test in a disposable lab. None was run, becaus
 - Apple [Terminal 2 Release Notes](https://developer.apple.com/library/archive/releasenotes/DeveloperTools/RN-Terminal/index.html) (retired, Leopard).
 - openai/codex [`terminal_title.rs`](https://github.com/openai/codex/blob/cc7ba33601286a751477832b01de7b6f8de0dd9c/codex-rs/tui/src/terminal_title.rs) at `cc7ba33`.
 - Open Island `b50f87a`: `Sources/OpenIslandApp/TerminalJumpService.swift`, `TerminalSessionAttachmentProbe.swift`, `ForegroundTerminalSessionProbe.swift` and `TerminalTextSender.swift`, plus `Sources/OpenIslandCore/CodexHooks.swift` and `ClaudeHooks.swift`.
-- Steer precedent: [ADR 0005](adr/0005-bind-ghostty-tabs-by-codex-title.md), [ADR 0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md), [ADR 0012](adr/0012-bind-codex-herdr-panes-by-title-and-foreground-process.md), [Ghostty tty investigation](ghostty-tty-investigation.md).
+- Herdly precedent: [ADR 0005](adr/0005-bind-ghostty-tabs-by-codex-title.md), [ADR 0011](adr/0011-open-herdr-panes-only-through-an-exact-ghostty-tty-join.md), [ADR 0012](adr/0012-bind-codex-herdr-panes-by-title-and-foreground-process.md), [Ghostty tty investigation](ghostty-tty-investigation.md).

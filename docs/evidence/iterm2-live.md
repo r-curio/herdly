@@ -1,6 +1,6 @@
 # iTerm2 live targeting proof
 
-Recorded 2026-10-11 for [Prove iTerm2 targeting live](https://github.com/r-curio/steer/issues/204), the live check of [Research iTerm2's scripting surface for exact tab targeting](https://github.com/r-curio/steer/issues/198) ([findings](https://github.com/r-curio/steer/blob/docs/198-research-iterm2/docs/iterm2-scripting-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
+Recorded 2026-10-11 for [Prove iTerm2 targeting live](https://github.com/r-curio/herdly/issues/204), the live check of [Research iTerm2's scripting surface for exact tab targeting](https://github.com/r-curio/herdly/issues/198) ([findings](https://github.com/r-curio/herdly/blob/docs/198-research-iterm2/docs/iterm2-scripting-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
 
 ## Setup
 

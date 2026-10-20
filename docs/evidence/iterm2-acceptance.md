@@ -1,6 +1,6 @@
 # iTerm2 acceptance
 
-Recorded 2026-10-13 for [Accept iTerm2 live and turn its switch on](https://github.com/r-curio/steer/issues/243): the [MVP acceptance §3d](../mvp-acceptance.md#3d-terminal-host-acceptance) table run against packaged builds with iTerm2. The agent drove the run; the operator approved macOS prompts and confirmed card, Open and acknowledgment lines by looking. The operator accepted iTerm2 on 2026-10-13 with the results below, the lines marked not run included, and asked for its Settings card to be shown and for §3d's H4 and H6 wording to match the agreed rules. The earlier capability proof, with no Steer code path, is [iTerm2 live targeting proof](iterm2-live.md).
+Recorded 2026-10-13 for [Accept iTerm2 live and turn its switch on](https://github.com/r-curio/herdly/issues/243): the [MVP acceptance §3d](../mvp-acceptance.md#3d-terminal-host-acceptance) table run against packaged builds with iTerm2. The agent drove the run; the operator approved macOS prompts and confirmed card, Open and acknowledgment lines by looking. The operator accepted iTerm2 on 2026-10-13 with the results below, the lines marked not run included, and asked for its Settings card to be shown and for §3d's H4 and H6 wording to match the agreed rules. The earlier capability proof, with no Steer code path, is [iTerm2 live targeting proof](iterm2-live.md).
 
 ## Setup and versions
 
@@ -23,7 +23,7 @@ Recorded 2026-10-13 for [Accept iTerm2 live and turn its switch on](https://gith
 
 ## Source inspection
 
-- The iTerm2 card ([`ControlsView.swift`](../../Sources/SteerApp/ControlsView.swift) `ITerm2Controls`) has the switch, Automation permission badge (Allowed, Not allowed or Not verified, with Open Settings… on a denial), status badge (`ITerm2Presentation.settingsRow`: Off, Not in use, Ready or Needs attention), problem lines, Show diagnostics and the footer, as [product.md's card rules](../product.md#settings) require. This change adds the Version row and shows the card (`TerminalHost.showsCard`).
+- The iTerm2 card ([`ControlsView.swift`](../../Sources/HerdlyApp/ControlsView.swift) `ITerm2Controls`) has the switch, Automation permission badge (Allowed, Not allowed or Not verified, with Open Settings… on a denial), status badge (`ITerm2Presentation.settingsRow`: Off, Not in use, Ready or Needs attention), problem lines, Show diagnostics and the footer, as [product.md's card rules](../product.md#settings) require. This change adds the Version row and shows the card (`TerminalHost.showsCard`).
 - What H6 shows depends on what finds the Automation denial. Steer's permission check (at start, when the switch is turned on, or when iTerm2 launches; `Companion+ITerm2.swift`) turns the switch back off, per product.md's Settings › Permission rule, so the card shows the switched-off line. A denial met by a scan while the switch is on marks iTerm2 unreadable, and one met by an Open maps to `.hostUnreadable(.iTerm2)` (`ITerm2.swift`, `ITerm2Navigation.swift`); both show "Steer can't read iTerm2. Check Settings › Terminals." This run reached only the first path (see H6).
 - H4's results follow [ADR 0016](../adr/0016-open-and-acknowledge-visits-the-same-way-on-every-terminal-host.md)'s manual-visit rule: a switch to the tab acknowledges completions that arrived before it, however short. §3d's earlier H4 text ("the short visit acknowledges nothing") contradicted ADR 0016 and is corrected in the same change.
 
@@ -43,7 +43,7 @@ Run 2026-10-13 on this change's head (`feat/243-accept-iterm2`): `swift test` pa
 | H6 | 456 | PASS with note | First attempt (451) failed: with Steer → iTerm2 Automation turned off, the Codex card showed no line and Open did nothing visible (no view showed the navigation message since a20f994, and there was no scan-time line). Fixed by #267. Rerun on 456 with Automation denied: Steer turned iTerm2's switch off (`iTerm2HostEnabled` = 0), per product.md's "a denial turns the switch back off"; the Codex card replaced Open with "Steer can't tell which terminal this session is in." (the switched-off line, as in H8). The reply field stayed (daemon-held thread). The "Steer can't read iTerm2…" path (a denial met by a scan or an Open while the switch is on, or a scripting error) was not reached in this run. Settings half not run (card hidden). |
 | H7 | 464 | PASS | First attempt (456) failed: quitting iTerm2 with Steer running relaunched it (pid 43611, "Tips of the Day"); with Steer stopped it stayed closed 45 s; starting Steer with iTerm2 closed did not launch it. Fixed by #270. Part 1 on 464: the quit lab kept iTerm2 closed for 120 s and for 30 s with Steer running, and the ROMEO card showed "iTerm2 isn't running." (operator). Part 2 on 464: after the agent reopened iTerm2 with `open -a iTerm` (Steer did not launch it) and the SIERRA Codex tab was closed, the card showed "This session has ended." (operator). |
 | H8 Codex | 456 | PASS | Switch off: "Steer can't tell which terminal this session is in." |
-| H8 Claude | 456 | PASS with note | Switch off: Open raised iTerm2 without changing tab (the Codex tab stayed). The card's offer to turn the host back on is not built (product.md puts it on the Settings card; owned by [#248](https://github.com/r-curio/steer/issues/248)): not run. |
+| H8 Claude | 456 | PASS with note | Switch off: Open raised iTerm2 without changing tab (the Codex tab stayed). The card's offer to turn the host back on is not built (product.md puts it on the Settings card; owned by [#248](https://github.com/r-curio/herdly/issues/248)): not run. |
 | H9 Codex reply | 456 | PASS with note | With iTerm2 off, the card's reply "kilo" reached Codex through the daemon (the KILO turn ran 07:09:07–07:09:10Z), but the card said "Sent “kilo”, but Codex has not started a turn. Check Codex; Steer will not resend.", which was false. Fixed by #271. Not typed into iTerm2 (ADR 0017). |
 | H9 Codex question | — | not run | No Codex question was available; the account's quota was low. |
 | H9 Claude | 464 | open question | The UNIFORM card (Claude in iTerm2) showed Open Session and Dismiss, no reply field and no "Steer can't type into iTerm2. Reply in the session." line. `ClaudeReplyRouting` offers no field when no typed-reply host is on. See open questions. |
@@ -69,16 +69,16 @@ Observed, not a confirmed defect: the INDIA completion (01A13411) was acknowledg
 
 | Issue | Pull request | Found in | Fix |
 | --- | --- | --- | --- |
-| [#265](https://github.com/r-curio/steer/issues/265) | [#266](https://github.com/r-curio/steer/pull/266) (37bef81) | Before H3 | Daemon Codex sessions in a host other than Ghostty were marked ended. |
-| [#267](https://github.com/r-curio/steer/issues/267) | [#269](https://github.com/r-curio/steer/pull/269) (0e2ee0e) | H2, H6 | Open's unavailable reason had no view on terminal cards. |
-| [#268](https://github.com/r-curio/steer/issues/268) | [#272](https://github.com/r-curio/steer/pull/272) (09852ff) | H2 | A title decoy with no `codex` blocked the Codex binding. The user chose option A: ignore such decoys. |
-| [#270](https://github.com/r-curio/steer/issues/270) | [#275](https://github.com/r-curio/steer/pull/275) (87e5eb1) | H7 | Steer relaunched a terminal app that quit during a scan. |
-| [#271](https://github.com/r-curio/steer/issues/271) | [#274](https://github.com/r-curio/steer/pull/274) (feb27a5) | H9 | A Codex reply whose turn finished between scans was reported as never started. |
+| [#265](https://github.com/r-curio/herdly/issues/265) | [#266](https://github.com/r-curio/herdly/pull/266) (37bef81) | Before H3 | Daemon Codex sessions in a host other than Ghostty were marked ended. |
+| [#267](https://github.com/r-curio/herdly/issues/267) | [#269](https://github.com/r-curio/herdly/pull/269) (0e2ee0e) | H2, H6 | Open's unavailable reason had no view on terminal cards. |
+| [#268](https://github.com/r-curio/herdly/issues/268) | [#272](https://github.com/r-curio/herdly/pull/272) (09852ff) | H2 | A title decoy with no `codex` blocked the Codex binding. The user chose option A: ignore such decoys. |
+| [#270](https://github.com/r-curio/herdly/issues/270) | [#275](https://github.com/r-curio/herdly/pull/275) (87e5eb1) | H7 | Steer relaunched a terminal app that quit during a scan. |
+| [#271](https://github.com/r-curio/herdly/issues/271) | [#274](https://github.com/r-curio/herdly/pull/274) (feb27a5) | H9 | A Codex reply whose turn finished between scans was reported as never started. |
 
-Follow-up, open: [#273](https://github.com/r-curio/steer/issues/273) "Acknowledge and confirm replies from prompt records for every session".
+Follow-up, open: [#273](https://github.com/r-curio/herdly/issues/273) "Acknowledge and confirm replies from prompt records for every session".
 
 ## Open questions
 
 - **H9 Claude line.** A Claude card in iTerm2 shows no reply field and no "Steer can't type into iTerm2. Reply in the session." line while no typed-reply host is on. product.md lists the line but not when it shows. Should it show there?
 - **Confirmed-reply copy.** The new confirmation "Sent “X”. Codex started a turn after your reply." (#271) needs product sign-off.
-- **H8 Claude offer.** The card's offer to turn a switched-off host back on belongs to [#248](https://github.com/r-curio/steer/issues/248).
+- **H8 Claude offer.** The card's offer to turn a switched-off host back on belongs to [#248](https://github.com/r-curio/herdly/issues/248).

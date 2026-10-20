@@ -104,7 +104,7 @@ from <folder> during this session". Those change session permissions, so they st
 
 ## Differences from the September catalog
 
-The [permission families catalog](https://github.com/r-curio/steer/blob/fe9457f1e9394dff2a474a93c8d8a2eb15c63ea9/docs/claude-permission-families.md)
+The [permission families catalog](https://github.com/r-curio/herdly/blob/fe9457f1e9394dff2a474a93c8d8a2eb15c63ea9/docs/claude-permission-families.md)
 says a hook allow cannot override a matching ask rule. On 2.1.296, a project `ask` rule for `Edit` still raised
 `PermissionRequest`, and the hook's allow applied the edit without the native dialog being answered. For Steer
 this is acceptable, because Allow once is the user's own explicit answer. A `deny` rule did stop the call

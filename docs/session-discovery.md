@@ -1,12 +1,12 @@
 # Session discovery — issue #44
 
-Steer shows Codex sessions that were already working before it launched, or before their first hook event reached it, instead of waiting for the next hook. Like [thread names](thread-names.md) and the [weekly limit](codex-usage.md), this rides on a private Codex format and fails soft: a session it cannot place is simply not shown as working, and discovery never creates a completion, request, question, or sound.
+Herdly shows Codex sessions that were already working before it launched, or before their first hook event reached it, instead of waiting for the next hook. Like [thread names](thread-names.md) and the [weekly limit](codex-usage.md), this rides on a private Codex format and fails soft: a session it cannot place is simply not shown as working, and discovery never creates a completion, request, question, or sound.
 
 ## What Codex records
 
 Every rollout under `~/.codex/sessions/YYYY/MM/DD/rollout-<time>-<session id>.jsonl` opens with a `session_meta` line whose payload carries the session `id`, its `cwd`, and its `source`: `"cli"` for the terminal, `"vscode"` for the desktop app, `"exec"` for `codex exec`, and an object (`{"subagent":{"thread_spawn":…}}`) for a subagent thread. A turn begins with `{"type":"event_msg","payload":{"type":"task_started","turn_id":"…"}}` and ends with `task_complete` or `turn_aborted` for that `turn_id`. Every line written during the turn names it: event messages such as `item_completed` and `token_usage_record` carry `turn_id` in their payload, and response items carry it in `internal_chat_message_metadata_passthrough.turn_id`. A live turn keeps writing: a desktop thread that had been running for five hours while waiting on subagents was seen appending every minute. Observed with CLI 0.153.4 and desktop 26.901.51231.
 
-## Steer's rule
+## Herdly's rule
 
 `SessionDiscovery.candidates` reads the 24 most recently modified rollouts from the newest day directories, skipping any not written within the last hour (`maximumAge`), any symlink, and any irregular file. For each it reads the first 64 KB for the `session_meta` line and the last 512 KB for turn events; a file smaller than that is read once. Only `cli` and `vscode` sessions are candidates: an `exec` run has no tab or thread to return to, and a subagent thread is Codex's own, not the user's.
 
@@ -26,6 +26,6 @@ Each two-second scan reads the candidates and the process list off the main acto
 
 ## Verification
 
-Automated: `Tests/SteerCoreTests/SessionDiscoveryTests.swift` covers the real shapes for an open, ended, aborted, and reopened turn; the CLI, desktop, exec, and subagent sources; a partial tail and unreadable lines; inference of the open turn from later items when its start is beyond the tail, including a trailing line after the end; file selection by freshness with a refused symlink and a tail read of a large rollout; the liveness gate for each source and for SessionEnd; process-list recognition; Ghostty title membership; and the queue merge with a later hook event, completion evidence, and the no-notification rule.
+Automated: `Tests/HerdlyCoreTests/SessionDiscoveryTests.swift` covers the real shapes for an open, ended, aborted, and reopened turn; the CLI, desktop, exec, and subagent sources; a partial tail and unreadable lines; inference of the open turn from later items when its start is beyond the tail, including a trailing line after the end; file selection by freshness with a refused symlink and a tail read of a large rollout; the liveness gate for each source and for SessionEnd; process-list recognition; Ghostty title membership; and the queue merge with a later hook event, completion evidence, and the no-notification rule.
 
-Live: a check linked against `SteerCore` read `~/.codex/sessions` on the inspected machine in 45 ms and returned the two desktop threads whose turns were open, including the five-hour parent thread whose `task_started` was 30 MB before the tail, and excluded the subagent thread written at the same time. The full app walkthrough (start two sessions, launch Steer, see both sprites, jump back to each) is still to be recorded.
+Live: a check linked against `HerdlyCore` read `~/.codex/sessions` on the inspected machine in 45 ms and returned the two desktop threads whose turns were open, including the five-hour parent thread whose `task_started` was 30 MB before the tail, and excluded the subagent thread written at the same time. The full app walkthrough (start two sessions, launch Herdly, see both sprites, jump back to each) is still to be recorded.

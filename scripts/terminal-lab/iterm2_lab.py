@@ -101,7 +101,7 @@ os.makedirs(os.path.join(CPROJ, ".claude"), exist_ok=True)
 for f in glob.glob(os.path.join(EVENTS, "*.json")):
     os.unlink(f)
 with open(os.path.join(PROJ, "README.md"), "w") as f:
-    f.write("Disposable project for Steer terminal-host live proofs.\n")
+    f.write("Disposable project for Herdly terminal-host live proofs.\n")
 hook = f"/usr/bin/python3 -I {json.dumps(os.path.join(S, 'claude_title_hook.py'))} {json.dumps(EVENTS)}"
 with open(os.path.join(CPROJ, ".claude", "settings.json"), "w") as f:
     json.dump({"env": {"CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"},
@@ -147,7 +147,7 @@ it("write", session=lab["A2"], text=f"cd {json.dumps(CPROJ)} && exec {CLAUDE} --
 # --- C1/C2: Codex title, Claude title, foreground jobs ---------------------------------------
 codex_title = wait_for(lambda: (lambda s: s and s["terminalIconName"] and CODEX_TITLE.match(s["terminalIconName"]) and s["terminalIconName"])(session_of(it("inventory"), lab["A1"])), 90, 2)
 step("codex_title", title=codex_title)
-claude_title = wait_for(lambda: (lambda s: s and (s["terminalWindowName"] or "").startswith("Steer Claude ") and s["terminalWindowName"])(session_of(it("inventory"), lab["A2"])), 90, 2)
+claude_title = wait_for(lambda: (lambda s: s and (s["terminalWindowName"] or "").startswith("Herdly Claude ") and s["terminalWindowName"])(session_of(it("inventory"), lab["A2"])), 90, 2)
 step("claude_title", title=claude_title)
 wait_for(lambda: "READY" in contents(lab["A1"]).split("Reply with only the word READY.")[-1], 90, 2)
 wait_for(lambda: "READY" in contents(lab["A2"]).split("Reply with only the word READY.")[-1], 90, 2)
