@@ -10,7 +10,7 @@ Herdly creates exactly one `NotchPanel` and one `AttentionQueue`. Every display 
 
 ## Active-display rule
 
-`NotchDisplaySelection.choose(displays:pointer:current:interacting:preference:)` decides where the panel goes on every refresh (five times a second and on app activation or screen-parameter changes):
+`NotchDisplaySelection.choose(displays:pointer:current:interacting:preference:)` decides where the panel goes on every refresh (five times a second while a card or the queue is showing, the pointer or keyboard is on the notch, or an approval is actionable; once a second otherwise (`RefreshCadence`, #301); and on app activation or screen-parameter changes):
 
 1. **Interacting → freeze.** While the pointer is over the panel or the panel has keyboard focus, keep the display the panel is already on. Controls never move to another display mid-click or mid-Tab; expanding or collapsing still resizes the panel in place. The app confirms the hover flag against the real pointer location, so a panel re-placed out from under the pointer does not stay frozen.
 2. **Pinned → the pinned display.** With a pin (see [Pinned display](#pinned-display-2026-10-08)), the pinned display wherever the pointer is; while it is not attached, the built-in display. With neither attached, the steps below apply.
@@ -86,7 +86,7 @@ Reported: with the pointer pushed against the top of the screen above the strip,
 
 ## Panel moved after display sleep (2026-10-13)
 
-Reported: after the screen turned off and back on, the collapsed strip sometimes sat in the middle of the screen. While a display sleeps, wakes, or is reconfigured, the window server can move the panel itself; refresh only set the frame when the computed frame changed, and after wake it computed the same frame as before sleep, so the moved panel stayed put until something else changed the frame. Each refresh now also compares the panel's actual frame with the target and puts a drifted panel back at once (`NotchFrameSync`), ignoring differences up to 1 pt (backing-store rounding) and the in-between frames of a running resize animation. The five-times-a-second refresh corrects it within 0.2 s. `panelMovedByTheWindowServerIsPutBackWhenTheTargetIsUnchanged` and `frameSyncIgnoresRoundingAndRunningAnimationsButFollowsANewTarget` cover the rule. Display sleep cannot be triggered from the automated checks; a live check after waking the display has not yet been recorded.
+Reported: after the screen turned off and back on, the collapsed strip sometimes sat in the middle of the screen. While a display sleeps, wakes, or is reconfigured, the window server can move the panel itself; refresh only set the frame when the computed frame changed, and after wake it computed the same frame as before sleep, so the moved panel stayed put until something else changed the frame. Each refresh now also compares the panel's actual frame with the target and puts a drifted panel back at once (`NotchFrameSync`), ignoring differences up to 1 pt (backing-store rounding) and the in-between frames of a running resize animation. The next refresh corrects it within 0.2 s while the notch is active and within 1 s while it is idle (`RefreshCadence`, #301). `panelMovedByTheWindowServerIsPutBackWhenTheTargetIsUnchanged` and `frameSyncIgnoresRoundingAndRunningAnimationsButFollowsANewTarget` cover the rule. Display sleep cannot be triggered from the automated checks; a live check after waking the display has not yet been recorded.
 
 ## Operator walkthrough (to record before release)
 

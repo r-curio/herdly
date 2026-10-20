@@ -602,6 +602,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var controlsAnimatingOut = false
     private var controlsRestingFrame: NSRect?
     private var timer: Timer?
+    private var refreshInterval = RefreshCadence.active
     private var activationObserver: NSObjectProtocol?
     private var screenObserver: NSObjectProtocol?
     /// The display the panel was last placed on; placement freezes here while the user interacts.
@@ -719,9 +720,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         pointerMonitors = [NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { _ in pointerMoved() },
                            NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { event in pointerMoved(); return event }]
             .compactMap { $0 }
-        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
-        }
+        scheduleRefreshTimer(RefreshCadence.active)
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in self?.reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion } }
@@ -1521,6 +1520,17 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         app.terminate(nil)
     }
 
+    /// Runs `refresh` every `interval` (RefreshCadence, #301); an unchanged interval keeps the
+    /// current timer, so a refresh never pushes the next one back.
+    private func scheduleRefreshTimer(_ interval: Double) {
+        guard timer == nil || refreshInterval != interval else { return }
+        timer?.invalidate()
+        refreshInterval = interval
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
+    }
+
     func refresh() {
         scanReminders()
         pruneEventRecords()
@@ -1543,10 +1553,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         checkApprovalFocus()
         checkGhosttyFocus()
         checkITerm2Visits()
-        checkTerminalApp()
         checkWezTerm()
-        checkTmux()
-        checkZellij()
+        checkScheduledTabHosts()
         checkOpenAvailability()
         // App identity only: no window contents, task titles, or accessibility queries.
         // App activation affects notification delivery, never the notch's visibility.
@@ -1709,6 +1717,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             presentationMode = resolvedPresentation
         }
         expanded = presentationMode.expanded
+        let actionableApproval = agentItems.contains { $0.kind == .actionableApproval }
+            || queue.items.contains { $0.request?.state == .actionable }
+        scheduleRefreshTimer(RefreshCadence.interval(presenting: presentationMode != .collapsed,
+                                                     interacting: interacting || pointerOnTopEdge,
+                                                     actionableApproval: actionableApproval))
         // Sound follows the card opening: the frame below is set in the same pass, so the chime
         // lands as the card lands. Muted, restored, and foreground cases never reach here.
         let selectedAgentSound = (selectedCompletion != nil && firstCompletionPresentation)

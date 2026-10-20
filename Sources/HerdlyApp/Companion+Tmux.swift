@@ -97,14 +97,14 @@ extension Companion {
         return result
     }
 
-    /// Every two seconds while tmux may be contacted and a session could be bound there.
-    func checkTmux() {
+    /// tmux's part of the shared scheduled read (`checkScheduledTabHosts`): while tmux may be
+    /// contacted, is not scanning, and a session could be bound there.
+    func tmuxScanPlan() -> TmuxScanPlan? {
         guard tmuxContactAllowed else {
             if tmux.read != nil { tmuxSwitchChanged(hostSwitches.isOn(.tmux)) }
-            return
+            return nil
         }
-        let uptime = ProcessInfo.processInfo.systemUptime
-        guard !tmux.scanning, !openingTask, uptime >= tmux.nextScan else { return }
+        guard !tmux.scanning, !openingTask else { return nil }
         let codexSessions = Set(cliItems.map(\.session)).union(queue.items.compactMap { item in
             item.question.flatMap { $0.source == .cli ? $0.session : nil }
         })
@@ -114,32 +114,18 @@ extension Companion {
             (claudeInventories[scope]?.sessions ?? []).filter { $0.kind == .interactive && sessions.contains($0.sessionID) }
                 .compactMap(\.pid)
         }
-        guard !codexSessions.isEmpty || !claudeRows.isEmpty || !livePIDs.isEmpty || !liveCLI.isEmpty else { return }
-        tmux.scanning = true
-        tmux.nextScan = uptime + 2
-        let others = otherTabHosts
-        let frontmost = TerminalApps.frontmostHost()
-        let terminalPID = frontmost == .terminalApp ? TerminalAppNavigation.pid() : nil
-        let generation = tmux.generation
-        Task { @MainActor in
-            let takenAt = Date().timeIntervalSince1970
-            let observed = await Task.detached { () -> (TerminalTabReads, [AgentSessionIdentity: ClaudeTabProcess],
-                                                        [TmuxSessionProcess], TerminalVisibilityReading<String>) in
-                let claude = claudeRows.mapValues(ClaudeTabProcess.read)
-                let reads = TerminalTabReads.take(others: others, claudeTTYs: Set(claude.values.compactMap(\.tty)), second: false)
-                let processes = livePIDs.map { pid in
-                    let chain = HerdrProcessTree.ancestry(of: pid)
-                    return TmuxSessionProcess(tty: chain.first?.tty, ancestorCommands: chain.map(\.command))
-                }
-                let onScreen = terminalPID.flatMap { TerminalAppNavigation.onScreenWindowIDs(pid: $0) }
-                return (reads, claude, processes, Companion.hostFront(reads, frontmost: frontmost, onScreen: onScreen))
-            }.value
-            tmux.scanning = false
-            guard generation == tmux.generation, tmuxContactAllowed else { return }
-            applyTmuxScan(observed.0, claude: observed.1, codexSessions: codexSessions, processes: observed.2,
-                          hostFront: observed.3, takenAt: takenAt)
-            refresh()
-        }
+        guard !codexSessions.isEmpty || !claudeRows.isEmpty || !livePIDs.isEmpty || !liveCLI.isEmpty else { return nil }
+        return TmuxScanPlan(codexSessions: codexSessions, claudeRows: claudeRows, livePIDs: livePIDs,
+                            generation: tmux.generation)
+    }
+
+    /// Applies the shared read to tmux, unless its switch or generation moved meanwhile.
+    func finishTmuxScan(_ plan: TmuxScanPlan, reads: TerminalTabReads, claude: [AgentSessionIdentity: ClaudeTabProcess],
+                        processes: [TmuxSessionProcess], hostFront: TerminalVisibilityReading<String>, takenAt: Double) {
+        tmux.scanning = false
+        guard plan.generation == tmux.generation, tmuxContactAllowed else { return }
+        applyTmuxScan(reads, claude: claude.filter { plan.claudeRows[$0.key] != nil }, codexSessions: plan.codexSessions,
+                      processes: processes, hostFront: hostFront, takenAt: takenAt)
     }
 
     /// The tty of the frontmost enabled host's visible tab (ADR 0016), from reads already taken. A host
