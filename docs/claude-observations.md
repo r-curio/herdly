@@ -1,6 +1,6 @@
 # Claude observations
 
-Steer observes Claude Code through the per-root helper event directory. Each record is accepted only
+Herdly observes Claude Code through the per-root helper event directory. Each record is accepted only
 when its source marker and installation id match the configured root, and every accepted observation
 is bounded before it reaches the shared `AgentAttentionQueue`.
 
@@ -46,7 +46,7 @@ request (`Edit`, `Write`, `NotebookEdit`, or `Read`) or web request (`WebFetch`,
 only when the helper accepted its exact proven input shape and attached bounded display details
 (`ClaudeDirectApproval`), and only for the one uncompleted call of that tool on the same absolute path,
 URL, or query. The helper
-adds a bounded request token because `PermissionRequest` does not supply `tool_use_id`; Steer
+adds a bounded request token because `PermissionRequest` does not supply `tool_use_id`; Herdly
 publishes a receipt only for that exact candidate while the helper's short-lived heartbeat is fresh,
 and accepts one allow or deny before the request's 30-second deadline. The helper acknowledges a user decision only after emitting Claude's response;
 missing acknowledgment leaves delivery uncertain and never claims that Bash executed. Ambiguous,
@@ -92,7 +92,7 @@ single-select, multi-select, typed answers, exact identity rejection, one-shot w
 receipt/answer rendezvous. `ClaudeApprovalTests` covers the one-winner deadline,
 atomic receipt/decision/delivery records, one-winner concurrency, helper crash handback, and Claude's exact allow/deny output shape. The app/helper build,
 packaged smoke check, and helper self-test pass on this branch.
-- **Live application proof:** pending. Restarting Steer during one real Claude session and observing
+- **Live application proof:** pending. Restarting Herdly during one real Claude session and observing
 its current state without replaying sound or fabricating a question was deferred for the user's
 walkthrough tomorrow; one live answer of each supported shape and native fallback after helper
 timeout are also deferred. This change does not claim those scenarios passed.

@@ -164,7 +164,7 @@ send(A2, f"cd {json.dumps(CPROJ)} && exec {CLAUDE} --setting-sources project 'Re
 
 codex_title = wait_for(lambda: (lambda p: p and CODEX_TITLE.match(p["title"]) and p["title"])(pane(A1)), 90, 2)
 step("codex_title", title=codex_title)
-claude_title = wait_for(lambda: (lambda p: p and p["title"].startswith("Steer Claude ") and p["title"])(pane(A2)), 60, 2)
+claude_title = wait_for(lambda: (lambda p: p and p["title"].startswith("Herdly Claude ") and p["title"])(pane(A2)), 60, 2)
 step("claude_title", title=claude_title, observed=pane(A2)["title"])
 wait_for(lambda: "READY" in text(A1).split("Reply with only the word READY.")[-1], 90, 2)
 wait_for(lambda: "READY" in text(A2).split("Reply with only the word READY.")[-1], 90, 2)

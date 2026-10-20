@@ -41,7 +41,7 @@ for line in sys.stdin:
             f.write(json.dumps({"t": time.time(), "event": "initialize", "pid": os.getpid()}) + "\n")
         send({"jsonrpc": "2.0", "id": rid, "result": {
             "protocolVersion": request.get("params", {}).get("protocolVersion", "2025-06-18"),
-            "capabilities": {"tools": {}}, "serverInfo": {"name": "steer-lab", "version": "1"}}})
+            "capabilities": {"tools": {}}, "serverInfo": {"name": "herdly-lab", "version": "1"}}})
     elif method == "tools/list":
         send({"jsonrpc": "2.0", "id": rid, "result": {"tools": TOOLS}})
     elif method == "tools/call":

@@ -2,7 +2,7 @@
 
 Usage: python3 -I tmux_lab.py --lab-root <dir> [--keep]
 
-Starts an isolated tmux server (`-L steerlab -f /dev/null`, minimal environment) with windows
+Starts an isolated tmux server (`-L herdlylab -f /dev/null`, minimal environment) with windows
 codex, claude, decoy (Codex's title over `sleep`) and split (two shells), and attaches one client
 from a WezTerm pane (host H1) and, for part of the run, a second client from another WezTerm tab
 (H2). It records pane ids, ttys, titles and current commands, the client list with each client's
@@ -24,7 +24,7 @@ BUNDLE = "com.github.wez.wezterm"
 CODEX = os.path.expanduser("~/.local/bin/codex")
 CLAUDE = os.path.expanduser("~/.local/bin/claude")
 CODEX_TITLE = re.compile(r"^[0-9a-f-]{29}\.\.\.$")
-SOCKET = "steerlab"
+SOCKET = "herdlylab"
 CLEAN_ENV = {"HOME": os.environ["HOME"], "USER": os.environ.get("USER", ""), "LANG": "en_US.UTF-8",
              "PATH": "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin", "TERM": "xterm-256color"}
 
@@ -129,7 +129,7 @@ with open(os.path.join(CPROJ, ".claude", "settings.json"), "w") as f:
                          for e in ("SessionStart", "UserPromptSubmit", "Stop")}}, f, indent=2)
 
 if tmux("has-session", check=False).returncode == 0:
-    sys.exit("a tmux server is already running on -L steerlab; kill it first")
+    sys.exit("a tmux server is already running on -L herdlylab; kill it first")
 tmux("-f", "/dev/null", "new-session", "-d", "-s", "lab", "-n", "codex", "-x", "120", "-y", "30")
 tmux("new-window", "-t", "lab", "-n", "claude")
 tmux("new-window", "-t", "lab", "-n", "decoy")
@@ -179,7 +179,7 @@ step("codex_title", title=codex_title)
 def host_title():
     return next(p for p in json.loads(wez("list", "--format", "json").stdout) if p["pane_id"] == H1)["title"]
 
-claude_title = wait_for(lambda: (lambda p: p and p["pane_title"].startswith("Steer Claude ") and p["pane_title"])(pane(lab["claude"])), 60, 2)
+claude_title = wait_for(lambda: (lambda p: p and p["pane_title"].startswith("Herdly Claude ") and p["pane_title"])(pane(lab["claude"])), 60, 2)
 step("claude_title", title=claude_title, observed=pane(lab["claude"])["pane_title"], host_title=host_title())
 wait_for(lambda: "READY" in capture(lab["codex"]).split("Reply with only the word READY.")[-1], 90, 2)
 wait_for(lambda: "READY" in capture(lab["claude"]).split("Reply with only the word READY.")[-1], 90, 2)
@@ -208,7 +208,7 @@ time.sleep(2)
 step("inventory", panes=[dict(p, ps_foreground=ps_foreground(p["pane_tty"])) for p in panes()], clients=clients(),
      host_title=next(p for p in json.loads(wez("list", "--format", "json").stdout) if p["pane_id"] == H1)["title"])
 
-# Claude again in a window with allow-passthrough on: where does Steer's OSC 2 title land?
+# Claude again in a window with allow-passthrough on: where does Herdly's OSC 2 title land?
 tmux("new-window", "-d", "-t", "lab", "-n", "claude-passthrough")
 cp = next(p["pane_id"] for p in panes() if p["window_name"] == "claude-passthrough")
 tmux("set", "-p", "-t", cp, "allow-passthrough", "on")

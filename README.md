@@ -1,6 +1,6 @@
-# Steer
+# Herdly
 
-A native macOS companion for Codex desktop and Codex CLI in Ghostty. Keep using Codex normally; Steer shows activity and requests for attention in a compact notch while you work elsewhere.
+A native macOS companion for Codex desktop and Codex CLI in Ghostty. Keep using Codex normally; Herdly shows activity and requests for attention in a compact notch while you work elsewhere.
 
 ## Status
 
@@ -14,7 +14,7 @@ Desktop MVP visibility: hide the notch while Codex is foreground and show eligib
 - One notch on the active display, fused under the camera housing: a sprite per session that steps while Codex works, a to-check badge, Codex's weekly usage limit (and its five-hour one when Codex reports it), and a prioritized queue on hover.
 - Direct CLI approvals use one receipt-bound allow-once or deny decision with a 30-second handoff; desktop approvals stay native until their transport and handoff policy are proven.
 - Three-second completion notifications, a short sound with mute, and acknowledgments preserved locally.
-- Codex remains usable if Steer is unavailable. Unknown focus keeps notifications and leaves approvals in Codex.
+- Codex remains usable if Herdly is unavailable. Unknown focus keeps notifications and leaves approvals in Codex.
 
 ## Project documents
 
@@ -26,20 +26,20 @@ Desktop MVP visibility: hide the notch while Codex is foreground and show eligib
 - [Install, permissions, and removal](docs/install.md)
 - [MVP acceptance record and operator checklist](docs/mvp-acceptance.md)
 - [Backlog and dependency index](docs/mvp-backlog.md)
-- [MVP implementation issues](https://github.com/r-curio/steer/issues?q=is%3Aissue+label%3Amvp)
+- [MVP implementation issues](https://github.com/r-curio/herdly/issues?q=is%3Aissue+label%3Amvp)
 
 ## Build and install
 
 ```sh
 swift test
-sh scripts/package-app.sh    # output/dist/Steer-<version>+<build>-<label>.zip, .sha256, manifest
+sh scripts/package-app.sh    # output/dist/Herdly-<version>+<build>-<label>.zip, .sha256, manifest
 ```
 
-`sh scripts/build-app.sh && open output/Steer.app` is the shorter development loop. Installation, the permissions macOS asks for, supported versions, and a clean uninstall are in [docs/install.md](docs/install.md).
+`sh scripts/build-app.sh && open output/Herdly.app` is the shorter development loop. Installation, the permissions macOS asks for, supported versions, and a clean uninstall are in [docs/install.md](docs/install.md).
 
 ## Run the prototype controls
 
-Click **Send test** in the Steer controls window, then switch away from Codex. The menu-bar shortcut is **S**; reopening the app restores its controls if the shortcut is hidden by a crowded menu bar. See the [prototype walkthrough and limitations](docs/prototype.md).
+Click **Send test** in the Herdly controls window, then switch away from Codex. The menu-bar shortcut is **S**; reopening the app restores its controls if the shortcut is hidden by a crowded menu bar. See the [prototype walkthrough and limitations](docs/prototype.md).
 
 To replay desktop activity from an isolated event directory, use the [desktop integration runbook](docs/desktop-live-integration.md).
 

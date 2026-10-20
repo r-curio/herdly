@@ -66,7 +66,7 @@ report = {
     "recorded": "2026-10-11",
     "claude_code": version,
     "repo_commit": commit,
-    "helper": "scripts/claude-permission-lab/lab_helper.py (lab stand-in mirroring SteerHook's Claude approval file protocol for any tool); not the shipped SteerHook, which decides Bash only",
+    "helper": "scripts/claude-permission-lab/lab_helper.py (lab stand-in mirroring HerdlyHook's Claude approval file protocol for any tool); not the shipped HerdlyHook, which decides Bash only",
     "companion": "scripts/claude-permission-lab/run_case.py writes receipts and decisions; native answers are keystrokes into Claude's own prompt",
     "decisions": "scripted by the agent at the operator's explicit direction (2026-10-11); not human-clicked",
     "session_mode": "top-level interactive sessions (the driver clears CLAUDECODE/CLAUDE_CODE_* so a launch from inside Claude Code is not marked nested)",

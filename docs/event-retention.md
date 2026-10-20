@@ -2,7 +2,7 @@
 
 Status: implemented and covered by automated checks. No live soak has been recorded yet.
 
-Steer's helper writes one JSON record per hook event into Steer's own events directories: the Codex `events` folder and one `claude-events/<root>` folder per connected Claude root. Nothing else removes them. Codex alone produced about 10,000 records a day. Before this change, every reader refused a directory holding more than 4,096 entries, so after about a day of normal use Steer showed no hook-driven status at all.
+Herdly's helper writes one JSON record per hook event into Herdly's own events directories: the Codex `events` folder and one `claude-events/<root>` folder per connected Claude root. Nothing else removes them. Codex alone produced about 10,000 records a day. Before this change, every reader refused a directory holding more than 4,096 entries, so after about a day of normal use Herdly showed no hook-driven status at all.
 
 ## Retention (app)
 
@@ -11,13 +11,13 @@ The app runs `HookEventRetention.prune` on the Codex events directory and on eve
 | Record | Kept for |
 | --- | --- |
 | Tool records: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch` | 1 hour. About 95% of the volume; readers use them only to label the current tool. |
-| Every other Steer record (session start/end, prompt, stop, permission request, …) | 7 days |
+| Every other Herdly record (session start/end, prompt, stop, permission request, …) | 7 days |
 
 Retention never removes:
 
 - **Open tool calls.** A `PreToolUse` with no completion for its tool id, no later `Stop`/`StopFailure` for its turn, and no later `SessionEnd` is kept for the full 7 days. A Claude question waits in such a record. A completion is kept while the call it completes is kept.
 - **Records a handoff reminder depends on.** Approval request files (`.approval`), receipts and decisions are never deleted. A session with a request the reminder reader would still show keeps its non-tool records past 7 days, so the session end that resolves its reminder survives a restart. That covers `pending` or `no_decision` requests in either the current or the legacy reminder format, but not requests the user already decided.
-- **Anything it cannot identify as Steer's own record.** Malformed or foreign JSON, oversized files, symlinks, directories (including `.steer-claude-questions`), and Claude approval rendezvous files stay. Abandoned `.steer-*` temporary writes older than 7 days are removed.
+- **Anything it cannot identify as Herdly's own record.** Malformed or foreign JSON, oversized files, symlinks, directories (including `.herdly-claude-questions`), and Claude approval rendezvous files stay. Abandoned `.herdly-*` temporary writes older than 7 days are removed.
 
 The helper is unchanged: hooks stay fast and Codex-compatible output stays clean.
 
@@ -34,10 +34,10 @@ The helper is unchanged: hooks stay fast and Codex-compatible output stays clean
 
 ## Automated checks
 
-Local gate on this branch: `swift test`, `sh scripts/build-app.sh`, `sh scripts/package-app.sh`, and `output/Steer.app/Contents/MacOS/Steer --smoke-test` all passed. These are build and smoke checks, not live operator acceptance.
+Local gate on this branch: `swift test`, `sh scripts/build-app.sh`, `sh scripts/package-app.sh`, and `output/Herdly.app/Contents/MacOS/Herdly --smoke-test` all passed. These are build and smoke checks, not live operator acceptance.
 
 
-`Tests/SteerCoreTests/HookEventRetentionTests.swift` covers:
+`Tests/HerdlyCoreTests/HookEventRetentionTests.swift` covers:
 
 - per-kind expiry
 - open tool calls and Claude questions kept, interrupted and batched calls pruned
@@ -52,4 +52,4 @@ Local gate on this branch: `swift test`, `sh scripts/build-app.sh`, `sh scripts/
 
 - Approval request, receipt and decision files are not pruned. They are low volume, roughly three files per CLI approval.
 - One pass over an overgrown directory reads every record once. The 2026-10-07 machine held about 179,000 Codex records. Readers report that directory unavailable until the first pass finishes. Later passes see about a week of non-tool records.
-- Tool-call closure is matched by session and tool id. Steer trusts any record with its own source tag in its own directory, as the readers do.
+- Tool-call closure is matched by session and tool id. Herdly trusts any record with its own source tag in its own directory, as the readers do.

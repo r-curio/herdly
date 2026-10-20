@@ -38,8 +38,8 @@ for path in sorted(glob.glob(os.path.join(S, "runs", "*.json"))):
         "queue_requests_remaining_after_scan": resolution.get("remaining_queue_requests"),
     })
 report = {
-    "recorded": "2026-09-12", "codex_cli": version, "helper": f"SteerHook release build from branch codex/10-approval-reconciliation ({commit})",
-    "native_answers": "keystrokes into the lab TUI's own approval prompt after Steer handed back; never a Steer decision",
+    "recorded": "2026-09-12", "codex_cli": version, "helper": f"HerdlyHook release build from branch codex/10-approval-reconciliation ({commit})",
+    "native_answers": "keystrokes into the lab TUI's own approval prompt after Herdly handed back; never a Herdly decision",
     "isolation": "lab project hooks.json swapped per run and restored; --dangerously-bypass-hook-trust per invocation; no global hooks, policies or settings changed",
     "cli_cases": cases,
     "helper_race": json.load(open(os.path.join(S, "runs", "helper-race.json")))["cases"],

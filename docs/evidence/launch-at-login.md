@@ -1,6 +1,6 @@
 # Launch-at-login evidence
 
-Issue: [Add a native launch-at-login setting](https://github.com/r-curio/steer/issues/56)
+Issue: [Add a native launch-at-login setting](https://github.com/r-curio/herdly/issues/56)
 
 Status: automated checks cover state presentation and reconciliation without changing the user's login item. Installed-app checks require human interaction and remain unverified until the table below records an artifact and observation.
 

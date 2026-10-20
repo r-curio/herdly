@@ -1,4 +1,4 @@
-"""Stand-in for the Steer companion's receipt and decision writes. Same JSON shapes as ApprovalStore.
+"""Stand-in for the Herdly companion's receipt and decision writes. Same JSON shapes as ApprovalStore.
 
 Modes:
   allow | deny        receipt, then that decision after <delay> seconds

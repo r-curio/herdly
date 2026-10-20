@@ -1,8 +1,8 @@
-# Working on Steer
+# Working on Herdly
 
 ## Product
 
-Steer is a native macOS companion for a developer running several local Codex sessions while working in other apps. One shared notch shows work in progress, questions, approval requests, and completions, with actions for returning to the originating session. The user continues launching and using Codex normally; Codex must remain usable when Steer is closed or unavailable.
+Herdly is a native macOS companion for a developer running several local Codex sessions while working in other apps. One shared notch shows work in progress, questions, approval requests, and completions, with actions for returning to the originating session. The user continues launching and using Codex normally; Codex must remain usable when Herdly is closed or unavailable.
 
 The initial surfaces are Codex desktop and Codex CLI running directly in Ghostty, with one session per unsplit tab. Remote sessions, other agents, other terminal hosts, split-pane targeting, and other operating systems are outside the initial scope. Exact desktop conversation focus remains deferred; opening a task is not proof that its result was read.
 
@@ -38,10 +38,10 @@ The project is a Swift 6 package targeting macOS 14 or later. [Package.swift](Pa
 
 | Location | Owns |
 | --- | --- |
-| `Sources/SteerCore/` | Session/attention models, deterministic transitions, matching, bounded record decoding, persistence formats, and safe file access. Keep AppKit, sockets, and process orchestration outside this target. |
-| `Sources/SteerApp/` | SwiftUI content, AppKit panels/windows, main-actor state ownership, native navigation, integration clients, and storage locations. |
-| `Sources/SteerHook/` | Decode hook input, deliver events, arbitrate one request outcome, and emit Codex-compatible output. |
-| `Tests/SteerCoreTests/` | Swift Testing checks for state, identity, records, and integration boundaries. |
+| `Sources/HerdlyCore/` | Session/attention models, deterministic transitions, matching, bounded record decoding, persistence formats, and safe file access. Keep AppKit, sockets, and process orchestration outside this target. |
+| `Sources/HerdlyApp/` | SwiftUI content, AppKit panels/windows, main-actor state ownership, native navigation, integration clients, and storage locations. |
+| `Sources/HerdlyHook/` | Decode hook input, deliver events, arbitrate one request outcome, and emit Codex-compatible output. |
+| `Tests/HerdlyCoreTests/` | Swift Testing checks for state, identity, records, and integration boundaries. |
 | `scripts/` | Build/package scripts, capability probes, and isolated integration labs. Read a lab before executing it. |
 | `docs/` | Product contracts, decisions, runbooks, and durable evidence. |
 | `output/` | Ignored local build and lab artifacts. |
@@ -62,7 +62,7 @@ Use native macOS and standard library facilities first. Add dependencies or abst
 
 ### Native interface
 
-- Use SwiftUI for content and AppKit for panel, window, activation, and platform behavior. Put business rules in SteerCore rather than view bodies.
+- Use SwiftUI for content and AppKit for panel, window, activation, and platform behavior. Put business rules in HerdlyCore rather than view bodies.
 - Follow [DESIGN.md](DESIGN.md) and the existing `NotchStyle` tokens. Preserve the compact native interface and session color semantics.
 - Preserve keyboard navigation, VoiceOver labels, Reduce Motion behavior, full command details, and explicit unavailable/unknown states.
 - Keep model ownership consistent with surrounding views. A feature change is not a reason to migrate the whole observation model or raise the deployment target.
@@ -78,7 +78,7 @@ Use native macOS and standard library facilities first. Add dependencies or abst
 
 1. **Establish scope.** Read `git status --short`, `git branch --show-current`, the requested ticket or agreed task, and relevant product/architecture docs. Preserve existing user changes.
 2. **Isolate work.** Keep changes scoped to one ticket on its own branch, prefixed by the kind of change: `feat/` for new or changed behavior, `fix/` for a bug fix, `docs/` for documentation only. These are the only prefixes: any other change (a refactor, tests, scripts, packaging or CI) uses `fix/` when it corrects something broken and `feat/` otherwise, and a change that mixes kinds takes the prefix of its main purpose. Follow the prefix with the ticket number when there is one and a short slug, such as `fix/153-herdr-route-gaps` or `docs/branch-prefixes`. For a direct request without a ticket, use an equivalently scoped branch; do not invent a ticket number. Existing `codex/` branches keep their names. Avoid unrelated cleanup.
-3. **Check dependencies.** Use GitHub Issues in `r-curio/steer`. Verify blockers and their actual results before starting. Follow [issue tracker](docs/agents/issue-tracker.md) and [triage labels](docs/agents/triage-labels.md). External PRs are not a separate triage intake.
+3. **Check dependencies.** Use GitHub Issues in `r-curio/herdly`. Verify blockers and their actual results before starting. Follow [issue tracker](docs/agents/issue-tracker.md) and [triage labels](docs/agents/triage-labels.md). External PRs are not a separate triage intake.
 4. **Choose tools.** Use the [local AI tooling guide](docs/agents/ai-tooling.md). Read applicable skills before using them; prefer this project's variants for SwiftUI and tracker workflows.
 5. **Implement completely.** Follow the real data/state path through affected surfaces. Continue routine authorized work; ask when an unresolved decision or unavailable dependency prevents a correct result.
 6. **Verify.** Every nontrivial behavior needs a focused runnable check, including affected failure and uncertainty paths. Update the relevant contract or runbook when behavior changes.
@@ -96,7 +96,7 @@ Run from the repository root. The local checks below are the required gate for m
 | Focused test | `swift test --filter <test-name>` |
 | Development app bundle | `sh scripts/build-app.sh` |
 | Development distribution package | `sh scripts/package-app.sh` |
-| Packaged-app smoke check | `output/Steer.app/Contents/MacOS/Steer --smoke-test` |
+| Packaged-app smoke check | `output/Herdly.app/Contents/MacOS/Herdly --smoke-test` |
 | Whitespace check | `git diff --check` |
 
 Use Swift Testing (`import Testing`, `@Test`, `#expect`) and existing fixtures. Test observable behavior: duplicate/reordered events, exact identity isolation, deadline boundaries, late decisions, malformed records, restart recovery, and unavailable targets as relevant. Prefer explicit clocks and temporary directories over sleeps or real user state.

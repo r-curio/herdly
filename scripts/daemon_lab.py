@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Drive Steer's daemon client against a fake app-server daemon on a scratch socket.
+"""Drive Herdly's daemon client against a fake app-server daemon on a scratch socket.
 
 Everything happens in a disposable lab directory: a fake daemon that speaks JSON-RPC over
 WebSocket (the framing Codex's daemon uses on its control socket) with the shapes from the
 installed CLI's generated schema, an isolated events directory, and an
 isolated rollouts directory. The real `~/.codex/app-server-control` socket is never touched and no
-Codex configuration is read or written. Each run starts the real Steer binary with
+Codex configuration is read or written. Each run starts the real Herdly binary with
 `--daemon-socket` pointing at the fake and reads the JSON it writes via `--daemon-report`.
-Steer never answers anything here: the lab proves connect, initialize, subscribe and receive, and
+Herdly never answers anything here: the lab proves connect, initialize, subscribe and receive, and
 that a socket readable by other users is refused. The real daemon's behaviour (whether a second
 client receives the pending request at all) is a separate, human proof; see
 docs/user-input-requests.md.
 
-    python3 scripts/daemon_lab.py --steer .build/debug/Steer --out docs/evidence/app-server-daemon-lab.json
+    python3 scripts/daemon_lab.py --herdly .build/debug/Herdly --out docs/evidence/app-server-daemon-lab.json
 """
 import argparse
 import base64
@@ -214,14 +214,14 @@ def seed_pending_question(events, rollouts):
     (rollouts / f"rollout-2026-09-14T00-00-00-{THREAD}.jsonl").write_text("".join(json.dumps(l) + "\n" for l in lines))
 
 
-def run_steer(steer, socket_path, lab, name, extra=()):
+def run_herdly(herdly, socket_path, lab, name, extra=()):
     report = lab / f"{name}.json"
     events = lab / f"{name}-events"
     events.mkdir(exist_ok=True)
     rollouts = lab / f"{name}-rollouts"
     rollouts.mkdir(exist_ok=True)
     seed_pending_question(events, rollouts)
-    command = [str(steer), "--daemon-socket", socket_path, "--daemon-report", str(report),
+    command = [str(herdly), "--daemon-socket", socket_path, "--daemon-report", str(report),
                "--reminder-events", str(events), "--reminder-rollouts", str(rollouts),
                "--attention-snapshot", str(lab / f"{name}-snapshot.json"), *extra]
     run = subprocess.run(command, capture_output=True, text=True, timeout=60)
@@ -231,30 +231,30 @@ def run_steer(steer, socket_path, lab, name, extra=()):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--steer", type=Path, required=True, help="the built Steer executable")
+    parser.add_argument("--herdly", type=Path, required=True, help="the built Herdly executable")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
-    results = {"recorded": datetime.now(timezone.utc).isoformat(), "steer": str(args.steer), "runs": {}}
-    with tempfile.TemporaryDirectory(prefix="steer-daemon-lab-") as directory:
+    results = {"recorded": datetime.now(timezone.utc).isoformat(), "herdly": str(args.herdly), "runs": {}}
+    with tempfile.TemporaryDirectory(prefix="herdly-daemon-lab-") as directory:
         lab = Path(directory)
         # Run 1: a private socket with a fake daemon behind it.
         path = str(lab / "d.sock")
         daemon = FakeDaemon(path)
         daemon.start()
-        results["runs"]["private-socket"] = run_steer(args.steer, path, lab, "private")
+        results["runs"]["private-socket"] = run_herdly(args.herdly, path, lab, "private")
         daemon.join(timeout=25)
         results["runs"]["private-socket"]["daemon_log"] = daemon.log
-        results["runs"]["private-socket"]["answer_written_by_steer"] = daemon.response
-        # Run 2: the same socket made readable by other users: Steer must refuse to connect.
+        results["runs"]["private-socket"]["answer_written_by_herdly"] = daemon.response
+        # Run 2: the same socket made readable by other users: Herdly must refuse to connect.
         shared = str(lab / "shared.sock")
         shared_daemon = FakeDaemon(shared)
         os.chmod(shared, 0o666)
         shared_daemon.start()
-        results["runs"]["shared-socket"] = run_steer(args.steer, shared, lab, "shared")
+        results["runs"]["shared-socket"] = run_herdly(args.herdly, shared, lab, "shared")
         shared_daemon.join(timeout=20)
         results["runs"]["shared-socket"]["daemon_log"] = shared_daemon.log
         # Run 3: no socket at all.
-        results["runs"]["no-socket"] = run_steer(args.steer, str(lab / "missing.sock"), lab, "missing")
+        results["runs"]["no-socket"] = run_herdly(args.herdly, str(lab / "missing.sock"), lab, "missing")
     private = results["runs"]["private-socket"]["report"] or {}
     checks = {
         "private_connected": private.get("connected") is True,
@@ -267,12 +267,12 @@ def main():
         == [f"{DONE_THREAD}: daemon(thread: {DONE_THREAD.upper()})"],
         # With no daemon there is no reply path at all, and the card says so.
         "no_socket_reply_unavailable": (results["runs"]["no-socket"]["report"] or {}).get("completion_reply_targets")
-        == [f"{DONE_THREAD}: unavailable(SteerCore.SessionReplyPolicy.Rejection.noDaemon)"],
+        == [f"{DONE_THREAD}: unavailable(HerdlyCore.SessionReplyPolicy.Rejection.noDaemon)"],
         "shared_card_falls_back": any("ghosttyRelay" in r for r in (results["runs"]["shared-socket"]["report"] or {}).get("question_routes", [])),
-        "nothing_answered": results["runs"]["private-socket"]["answer_written_by_steer"] is None,
+        "nothing_answered": results["runs"]["private-socket"]["answer_written_by_herdly"] is None,
         "upgraded_to_websocket": (results["runs"]["private-socket"]["daemon_log"] or [{}])[0].get("upgrade", {}).get("upgrade", "").lower() == "websocket",
-        "initialized_as_steer": any(m.get("message", {}).get("method") == "initialize"
-                                    and m["message"]["params"]["clientInfo"]["name"] == "steer"
+        "initialized_as_herdly": any(m.get("message", {}).get("method") == "initialize"
+                                    and m["message"]["params"]["clientInfo"]["name"] == "herdly"
                                     for m in results["runs"]["private-socket"]["daemon_log"]),
         "shared_refused": (results["runs"]["shared-socket"]["report"] or {}).get("connected") is False
         and "readable by other users" in (results["runs"]["shared-socket"]["report"] or {}).get("status", "")

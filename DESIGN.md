@@ -1,5 +1,5 @@
 ---
-name: Steer
+name: Herdly
 description: A black notch instrument for macOS, read in one glance - one sprite, one task name, one count.
 platform: macos
 colors:
@@ -109,13 +109,13 @@ components:
     typography: "{typography.body}"
 ---
 
-# Design System: Steer
+# Design System: Herdly
 
 ## Overview
 
 **Creative North Star: "The Instrument in the Housing"**
 
-Steer has two designed surfaces. The notch panel, described in most of this document, is the instrument. The Settings window, described in its own section near the end, is a native macOS window where the user tunes that instrument. The notch panel is a single pure-black shape that grows out of the bottom of the macOS menu bar as if it were part of the camera housing. It is read the way a gauge is read. Three readings sit on one line: a green 8-bit sprite that steps while Codex is working, the name of the task in a gray monospaced face, and a dark-gray count of items that need the user. Everything else lives one hover away and is drawn from the same three materials: black ground, gray type in a single monospaced family, and dark wells for anything pressable.
+Herdly has two designed surfaces. The notch panel, described in most of this document, is the instrument. The Settings window, described in its own section near the end, is a native macOS window where the user tunes that instrument. The notch panel is a single pure-black shape that grows out of the bottom of the macOS menu bar as if it were part of the camera housing. It is read the way a gauge is read. Three readings sit on one line: a green 8-bit sprite that steps while Codex is working, the name of the task in a gray monospaced face, and a dark-gray count of items that need the user. Everything else lives one hover away and is drawn from the same three materials: black ground, gray type in a single monospaced family, and dark wells for anything pressable.
 
 The world is deliberately austere. Color belongs to each session's mark alone: each session has one of six colors, chosen from its identifier so it stays with the session, and its mark is the sprite unless the user picks another indicator style. There is one typeface, and it is the system monospaced face at 10 to 12 points. Depth is not a shadow; the panel has no window shadow at all, because a shadow rim would outline the shape and break its fusion with the menu bar. The only edge inside the panel is a one-point seam at eight percent white between the strip and the open queue. Motion is a reading, not an ornament: the sprite's two-frame step is the working signal, the frame resize is a short ease-out, and Reduce Motion replaces the step with a slow breathe and removes the resize animation entirely.
 
@@ -183,7 +183,7 @@ An achromatic ladder on pure black with a single green, reserved for the sprite,
 
 **The Wrap, Never Truncate Rule.** Commands and reasons wrap in full inside the open queue; nothing is cut with an ellipsis. The strip's task name is the sole exception, and it is one line by definition.
 
-**Spotlight detail.** An automatically opened notification is a single-item glance-and-act surface, not the queue. Its title and session label establish what happened and where. An approval request reads top to bottom rather than as a field table: Codex's ask (its reason, or a `description`/`justification` it put in its tool input) as a 12pt regular line in ink; then the action as a dim word leading the command in ink, wrapped in full; then a dim line naming the task (when the session label does not already) and "in" the working directory, with the home folder shortened to `~` and the full path on hover, Copy Path, and VoiceOver; then one status line. A live request says "Decide by" its deadline (time only, dim). A handed-back request says "Handed back with no decision · asked 2m ago" in text gray, from the arrival time, because Steer records no hand-back time. The raw request sits behind "Show full request" only when it holds something the card does not already show. Other cards add the exact turn's working directory as the same dim "in" line. The notification's own prompt or question, current status, and valid actions follow in reading order; a completion ends with its bounded final-response preview. Technical identities, transport routes, and duplicated state or source labels stay out of the interface. The full queue retains its compact treatment.
+**Spotlight detail.** An automatically opened notification is a single-item glance-and-act surface, not the queue. Its title and session label establish what happened and where. An approval request reads top to bottom rather than as a field table: Codex's ask (its reason, or a `description`/`justification` it put in its tool input) as a 12pt regular line in ink; then the action as a dim word leading the command in ink, wrapped in full; then a dim line naming the task (when the session label does not already) and "in" the working directory, with the home folder shortened to `~` and the full path on hover, Copy Path, and VoiceOver; then one status line. A live request says "Decide by" its deadline (time only, dim). A handed-back request says "Handed back with no decision · asked 2m ago" in text gray, from the arrival time, because Herdly records no hand-back time. The raw request sits behind "Show full request" only when it holds something the card does not already show. Other cards add the exact turn's working directory as the same dim "in" line. The notification's own prompt or question, current status, and valid actions follow in reading order; a completion ends with its bounded final-response preview. Technical identities, transport routes, and duplicated state or source labels stay out of the interface. The full queue retains its compact treatment.
 
 ## Layout
 
@@ -228,11 +228,11 @@ Text-only wells in the panel's own vocabulary. No icons.
 ### Question card
 The body of a question row, for Codex and Claude alike. One question is read at a time.
 - **Step rail** (several questions only): a 2pt bar per question at 4pt gaps, the question's header beneath in 10pt. The current step is ink, an answered step dim, an upcoming bar a well with a dim label. When the headers do not all fit whole, the rail keeps only its bars and names the current question beneath them with "N of M" in dim, so no header is cut.
-- **Answered lines:** each earlier question with an answer Steer sent or drafted, as a detail-table line (header in the 58pt label column, answer in text gray).
+- **Answered lines:** each earlier question with an answer Herdly sent or drafted, as a detail-table line (header in the 58pt label column, answer in text gray).
 - **Question:** 12pt regular in ink, wrapping in full. A single question's header sits above it in 11pt dim.
 - **Options:** full-width option wells stacked at 4pt, each with its digit in a 14pt slot in the session's highlight and the label in ink. Options that are not pressable here keep the same digit slot, dim, with the label in text gray.
 - **Later questions:** behind "Show the next question" / "Show the next N questions", as reference questions.
-- **Read-only card:** when Steer cannot answer, one 12pt ink sentence says where to answer ("Claude is asking 3 questions. Answer them in Claude."), followed by the questions as reference: header in the label column, question in ink, numbered options in text gray. Several questions sit behind "Show questions". The warning is never repeated per question.
+- **Read-only card:** when Herdly cannot answer, one 12pt ink sentence says where to answer ("Claude is asking 3 questions. Answer them in Claude."), followed by the questions as reference: header in the label column, question in ink, numbered options in text gray. Several questions sit behind "Show questions". The warning is never repeated per question.
 
 ### Badge
 The count of items to check, hidden at zero.
@@ -286,14 +286,14 @@ With grouping on (State, Agent, or Project), the open queue inserts a heading ab
 
 ### Cards / Containers
 Rows are not cards. There is no card surface, border, or shadow; a row is a left-aligned stack on the black ground, separated from its neighbors by 14pt of whitespace.
-- **Row header:** one line: the session's mark, then its name in 12pt semibold ink, then "· project @ branch" in 11pt dim when Steer has seen the session's working directory (it truncates first, so the name and tags stay whole), then, when the row needs the user, a tag at 6pt: 10pt text gray on a well with a 4pt corner, the same material as the source tag ("approve", "answer", "handed back", "waiting", "status unknown", or for a result "check", "failed", "stopped"). A working row has no tag; the mark's step says it is working. The source tag sits right-aligned before the age lane, which sits on the right in 11pt dim tabular digits (at least 36pt wide, right-aligned, refreshed every 30 s), aligned on the first baseline with 10pt spacing. The spotlight uses the same header.
+- **Row header:** one line: the session's mark, then its name in 12pt semibold ink, then "· project @ branch" in 11pt dim when Herdly has seen the session's working directory (it truncates first, so the name and tags stay whole), then, when the row needs the user, a tag at 6pt: 10pt text gray on a well with a 4pt corner, the same material as the source tag ("approve", "answer", "handed back", "waiting", "status unknown", or for a result "check", "failed", "stopped"). A working row has no tag; the mark's step says it is working. The source tag sits right-aligned before the age lane, which sits on the right in 11pt dim tabular digits (at least 36pt wide, right-aligned, refreshed every 30 s), aligned on the first baseline with 10pt spacing. The spotlight uses the same header.
 - **Source tag:** "Claude", "Codex app", or "Codex CLI" in the row header, right-aligned before the age. The source tag is 10pt text gray on a well with 4pt corners and 5pt by 1pt padding; it carries no hue.
 - **Sentence (when present):** 11pt text gray, wrapping in full.
 - **Detail table:** label column 58pt wide in dim, values in text gray, 8pt gutter, 3pt line spacing; missing values read "Not provided by Codex" in dim. Command and reason are selectable.
 - **Disclosure:** "Show full request" in 11pt text gray reveals the long text inline. A working row's "Show full prompt" instead grows the row's own two-line prompt to the full text in place and reads "Show less" while open, so the prompt is never shown twice.
 - **Controls:** a row of wells at 6pt gaps beneath the details.
 - **Foot (full queue only):** the keyboard hint in 10pt dim, 2pt above the 14pt bottom pad.
-- **Empty queue:** with nothing listed, the open queue holds one row in the same grammar (`EmptyQueueReading`). The unlit sprite leads a 12pt semibold ink title. "Nothing running" is followed by a dim line naming the connected sources ("Listening for Codex and Claude."), or by no line while setup is still being checked. "Not connected" appears only once both setups are checked and neither is connected; a text-gray line ("Codex and Claude aren’t reporting to Steer yet.") and an Open Controls well follow it. The strip's spoken label reads the same title.
+- **Empty queue:** with nothing listed, the open queue holds one row in the same grammar (`EmptyQueueReading`). The unlit sprite leads a 12pt semibold ink title. "Nothing running" is followed by a dim line naming the connected sources ("Listening for Codex and Claude."), or by no line while setup is still being checked. "Not connected" appears only once both setups are checked and neither is connected; a text-gray line ("Codex and Claude aren’t reporting to Herdly yet.") and an Open Controls well follow it. The strip's spoken label reads the same title.
 
 ### Panel motion
 - **Resize:** the frame animates to its new size over 0.18 s with an ease-out curve; no spring, no overshoot. Under Reduce Motion, or before first presentation, the frame is set without animation.
@@ -326,10 +326,10 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 
 ## Settings Window
 
-The Settings window follows the native macOS conventions measured on macOS 26 (Tahoe). It does not use the notch's materials. Its reference mockup is the "Steer Settings" Paper file.
+The Settings window follows the native macOS conventions measured on macOS 26 (Tahoe). It does not use the notch's materials. Its reference mockup is the "Herdly Settings" Paper file.
 
 - **Opening:**
-  - From "Settings…" (⌘,) in the app menu, and from "Show Steer controls" in the menu bar item.
+  - From "Settings…" (⌘,) in the app menu, and from "Show Herdly controls" in the menu bar item.
   - The window title is the name of the selected pane, and the window reopens on the last pane viewed.
 - **Structure:**
   - The window opens at 820x780pt, with a minimum of 720x600.

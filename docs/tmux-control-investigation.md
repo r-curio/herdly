@@ -1,6 +1,6 @@
 # tmux control surface for pane targeting and client TTY (#201)
 
-Checked 2026-10-11 for [Research tmux's control surface for pane targeting and client tty](https://github.com/r-curio/steer/issues/201), a child of the map [Support iTerm2, Terminal.app, WezTerm and multiplexers](https://github.com/r-curio/steer/issues/197). This document records facts only. Decisions belong to the grilling tickets.
+Checked 2026-10-11 for [Research tmux's control surface for pane targeting and client tty](https://github.com/r-curio/herdly/issues/201), a child of the map [Support iTerm2, Terminal.app, WezTerm and multiplexers](https://github.com/r-curio/herdly/issues/197). This document records facts only. Decisions belong to the grilling tickets.
 
 ## Method and versions
 
@@ -17,7 +17,7 @@ Checked 2026-10-11 for [Research tmux's control surface for pane targeting and c
 4. **Focus.** The `focused` client flag is only meaningful when the user has turned on `focus-events` (off by default) and the outer terminal reports focus. Otherwise every client always shows `focused`.
 5. **Input.** `send-keys -t %P -l <text>` delivers literal UTF-8 to one pane. A zero exit status confirms only that the target resolved. The keys can be swallowed without error: in copy mode they become mode commands, and with input disabled (`select-pane -d`) they are dropped.
 6. **Titles.** Codex writes its title as plain `OSC 0`. tmux stores both `OSC 0` and `OSC 2` as `pane_title`, because `allow-set-title` defaults to on. The host terminal's own tab title shows nothing from tmux unless the user turns on `set-titles` (off by default).
-7. **Socket.** The default socket is `$TMUX_TMPDIR/tmux-<uid>/default`, or `/tmp/tmux-<uid>/default` (which resolves to `/private/tmp/...` on macOS). tmux refuses to use the directory if it is not owned by the user or has any "other" permission bit. Steer never needs to change user configuration to read state.
+7. **Socket.** The default socket is `$TMUX_TMPDIR/tmux-<uid>/default`, or `/tmp/tmux-<uid>/default` (which resolves to `/private/tmp/...` on macOS). tmux refuses to use the directory if it is not owned by the user or has any "other" permission bit. Herdly never needs to change user configuration to read state.
 8. **Version.** `tmux -V` reports the version of the binary. `#{version}` reports the version of the running server. The client and server must share protocol version 8, or the client prints `protocol version mismatch`.
 
 ## Identifiers and formats
@@ -69,7 +69,7 @@ From the manual:
 
 - `select-window -t <target-window>` selects the window in **its session**. It changes the current window for every client attached to that session.
 - `select-pane -t <target-pane>` makes the pane the active pane **in its window**. It has no client argument. `-Z` keeps a zoomed window zoomed. `-d` and `-e` disable and enable input to the pane. `-T` sets the pane title.
-- `switch-client -c <target-client> -t <target>`: "As a special case, -t may refer to a pane (a target that contains ':', '.' or '%'), to change session, window and pane." This command needs a target client. Steer runs outside tmux with no `$TMUX`, so it has no current client and must pass `-c <client_tty>`. The manual says a target client is "typically the pty(4) file to which the client is connected".
+- `switch-client -c <target-client> -t <target>`: "As a special case, -t may refer to a pane (a target that contains ':', '.' or '%'), to change session, window and pane." This command needs a target client. Herdly runs outside tmux with no `$TMUX`, so it has no current client and must pass `-c <client_tty>`. The manual says a target client is "typically the pty(4) file to which the client is connected".
 - **Verification:** a fresh `list-clients -F '#{client_tty} #{pane_id} #{window_id}'` showing the target client on the target pane establishes what tmux is displaying to that client. tmux cannot tell whether the host terminal tab is selected or frontmost. That has to come from the host terminal.
 - **Side effects:** selecting changes tmux's per-session "last window" and per-window "last pane" history, and can fire hooks the user has configured. Open Island's source records a further side effect: a redundant `switch-client` makes iTerm2's `-CC` integration re-attach and rebuild its windows (`TerminalJumpService.swift`, comment at "Step 1").
 
@@ -101,7 +101,7 @@ From the manual:
   - tmux creates `tmux-<uid>` with `mkdir(..., S_IRWXU)`. It refuses to use the directory if it is not a directory, not owned by the current uid, or has any `o+rwx` bit (`TMUX_SOCK_PERM` = 7). Group bits are not checked.
   - The server binds a default or `-L` socket with mode `0660` and a `-S` socket with `0600` (`server.c` umasks). It then sets the socket's execute bits while any session is attached and clears them when none is (`server_update_socket`).
   - Since 3.3, the server also has an access list (`server-access`). Only the owner and root have access by default.
-- **Finding non-default servers:** tmux has no registry. Servers started with `-L` sit as other names in the same directory. Servers started with `-S` can be anywhere and are found only through the server process's arguments, or through `$TMUX` in an environment Steer can read. The server process title is `tmux: server` on macOS (**unverified**).
+- **Finding non-default servers:** tmux has no registry. Servers started with `-L` sit as other names in the same directory. Servers started with `-S` can be anywhere and are found only through the server process's arguments, or through `$TMUX` in an environment Herdly can read. The server process title is `tmux: server` on macOS (**unverified**).
 - **Environment in panes** (`environ.c`, `spawn.c`):
   - `TMUX=<socket_path>,<server pid>,<session id number>`.
   - `TMUX_PANE=%<pane id>`.
@@ -115,7 +115,7 @@ From the manual:
   - `select-pane -T` and `split-window -T` / `new-pane -T` also set the title.
   - An empty `OSC` payload sets an empty title.
 - **Codex** (0.161.0 and `main`) writes `\x1b]0;<title>\x07` directly to stdout. It does not wrap the title in tmux DCS passthrough, which it does use for `OSC 9` notifications. tmux should therefore capture Codex's title, including ADR 0005's shortened session ID, as `pane_title` under default options. This follows from both sources but is **unverified live**.
-- **Claude Code:** Steer's Claude setup emits `ESC ] 2 ; Steer Claude <id> BEL` through Claude's hook `terminalSequence` response (`docs/claude-setup.md`). Whether Claude writes that sequence as is to its pane TTY, or wraps it for tmux, is **unverified**. If it is wrapped in passthrough, tmux would forward it to the host terminal only with `allow-passthrough` on (default off), and `pane_title` would not change.
+- **Claude Code:** Herdly's Claude setup emits `ESC ] 2 ; Herdly Claude <id> BEL` through Claude's hook `terminalSequence` response (`docs/claude-setup.md`). Whether Claude writes that sequence as is to its pane TTY, or wraps it for tmux, is **unverified**. If it is wrapped in passthrough, tmux would forward it to the host terminal only with `allow-passthrough` on (default off), and `pane_title` would not change.
 - **tmux to host terminal:** tmux sets the outer terminal's title only when `set-titles` is on (session option, default off), using `set-titles-string` (default `#S:#I:#W - "#T" #{session_alerts}`). With defaults, the host tab's title does not show the pane title. With `set-titles on` and the default string, the host title contains the Codex title only as a quoted substring.
 - **Window names are separate:** `automatic-rename` is on by default and names the window after the active pane's current command. `allow-rename` (`\ek...\e\\`) is off by default.
 

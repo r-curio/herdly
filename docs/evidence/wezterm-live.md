@@ -1,6 +1,6 @@
 # WezTerm live targeting proof
 
-Recorded 2026-10-11 for [Prove WezTerm targeting live](https://github.com/r-curio/steer/issues/206), the live check of [Research WezTerm's CLI for exact pane targeting](https://github.com/r-curio/steer/issues/200) ([findings](https://github.com/r-curio/steer/blob/docs/200-research-wezterm/docs/wezterm-cli-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab scripts stood in for it.
+Recorded 2026-10-11 for [Prove WezTerm targeting live](https://github.com/r-curio/herdly/issues/206), the live check of [Research WezTerm's CLI for exact pane targeting](https://github.com/r-curio/herdly/issues/200) ([findings](https://github.com/r-curio/herdly/blob/docs/200-research-wezterm/docs/wezterm-cli-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab scripts stood in for it.
 
 ## Setup
 

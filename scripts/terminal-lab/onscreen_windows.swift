@@ -2,7 +2,7 @@
 //   swift onscreen_windows.swift com.apple.Terminal
 // Window numbers are CGWindowIDs. "name" is present only when the calling process has Screen
 // Recording permission; the labs use it only to check which window is in front, never as a
-// Steer identity source.
+// Herdly identity source.
 import AppKit
 import CoreGraphics
 

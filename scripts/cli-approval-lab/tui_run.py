@@ -1,18 +1,18 @@
 """Drive the interactive Codex CLI in a pty for one approval case (allow, deny, timeout).
 
 Usage: python3 tui_run.py <allow|deny|timeout> <marker path> <seconds to wait>
-Swaps the trusted lab project's .codex/hooks.json for a single SteerHook PermissionRequest hook
+Swaps the trusted lab project's .codex/hooks.json for a single HerdlyHook PermissionRequest hook
 and restores it on exit. Hook trust is bypassed per invocation; nothing persisted changes.
-Env: STEER_LAB_PROJECT (trusted lab dir), STEER_HOOK (release SteerHook path).
+Env: HERDLY_LAB_PROJECT (trusted lab dir), HERDLY_HOOK (release HerdlyHook path).
 """
 import os, pty, sys, time, select, fcntl, termios, struct, signal, subprocess, json, re, shutil, shlex, uuid
 mode, marker, wait_s = sys.argv[1], sys.argv[2], float(sys.argv[3])
 S = os.path.dirname(os.path.abspath(__file__))
-PROJECT = os.environ.get("STEER_LAB_PROJECT", "/Users/rmaisog/Documents/ChatGPT/Steer/output/desktop-hook-lab")
-HOOK = os.environ.get("STEER_HOOK", os.path.abspath(os.path.join(S, "..", "..", "output", "Steer.app", "Contents", "Helpers", "SteerHook")))
+PROJECT = os.environ.get("HERDLY_LAB_PROJECT", "/Users/rmaisog/Documents/ChatGPT/Herdly/output/desktop-hook-lab")
+HOOK = os.environ.get("HERDLY_HOOK", os.path.abspath(os.path.join(S, "..", "..", "output", "Herdly.app", "Contents", "Helpers", "HerdlyHook")))
 events = os.path.join(S, "events-" + mode); os.makedirs(events, exist_ok=True)
 hooks_path = os.path.join(PROJECT, ".codex", "hooks.json")
-backup = hooks_path + ".steer9-backup"
+backup = hooks_path + ".herdly9-backup"
 shutil.copy2(hooks_path, backup)
 cmd = f"{shlex.quote(HOOK)} --events-dir {shlex.quote(events)} --installation-id {shlex.quote(str(uuid.uuid4()).upper())}"
 with open(hooks_path, "w") as f:

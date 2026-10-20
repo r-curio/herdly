@@ -1,6 +1,6 @@
 # Desktop lifecycle and approval gate (#2)
 
-Checked 2026-09-11. Status: blocked; no real desktop approval was answered or intercepted. [Issue #2](https://github.com/r-curio/steer/issues/2).
+Checked 2026-09-11. Status: blocked; no real desktop approval was answered or intercepted. [Issue #2](https://github.com/r-curio/herdly/issues/2).
 
 ## Reproducible installed-runtime evidence
 
@@ -28,7 +28,7 @@ These are definitions, not events observed from the user's existing desktop runt
 
 The official [PermissionRequest reference](https://learn.chatgpt.com/docs/hooks#permissionrequest) describes synchronous decisions before the native prompt. Emit `hookSpecificOutput.hookEventName = PermissionRequest` with `decision.behavior = allow` or `deny` only for an explicit live user decision. Emit no decision for handoff. This is separate from `PreToolUse`'s output shape.
 
-No decision lets Codex continue its own approval rules; it does not override another matching hook's allow or deny. Steer must preserve those existing rules. Unsupported requests stay native. A timeout is never an allow decision.
+No decision lets Codex continue its own approval rules; it does not override another matching hook's allow or deny. Herdly must preserve those existing rules. Unsupported requests stay native. A timeout is never an allow decision.
 
 Documented input includes session, turn, tool name and tool input, but no guaranteed `tool_use_id` for PermissionRequest. Give each helper invocation its own identity; do not join a later native resolution to a handed-back hook solely by session or command. The hook-to-native-request correlation is still an unresolved integration contract.
 
@@ -58,14 +58,14 @@ state, because the desktop transport and handoff policy remain unverified;
 they then retain only Open in Codex. Focused or unknown Ghostty observations
 hand back with no decision; a check in flight waits for its snapshot. This
 policy lives in `ApprovalHandoff` and the payload mapping in
-`ApprovalRequestParser`, both in SteerCore with unit tests covering request
+`ApprovalRequestParser`, both in HerdlyCore with unit tests covering request
 identity, unsupported approval types, and receipt-deadline preservation across
 rescans. Only `tool_name: Bash`, the shape proven in the isolated lab, is
 intercepted; every other approval type stays in Codex's native flow. A decided
 request is remembered by the queue so a scan during the helper's file rewrite
 cannot resurrect it.
 
-`swift test` and `SteerHook --self-test` exercise the coordinator, atomic
+`swift test` and `HerdlyHook --self-test` exercise the coordinator, atomic
 identity checks, deadline preservation, and request detail replay. These are
 isolated helper/core checks, not live desktop approval evidence. No desktop
 allow/deny/timeout was run, and no existing hooks or permissions were changed.
@@ -83,7 +83,7 @@ desktop approval remains unverified.
 The subsequent isolated retest used the installed Codex CLI with session
 `01a09248-ce66-7823-8e80-5043df76f11e`, turn
 `01a09249-2e6e-7613-a414-cd556a328af2`, and the real Bash command
-`touch /tmp/steer-approval-lab/TIMEOUT_MARKER-2`. The hook published request
+`touch /tmp/herdly-approval-lab/TIMEOUT_MARKER-2`. The hook published request
 `FBF4D0AD-AF2B-4652-9819-798AD02E1717` with the real project, action, command,
 and long request details. The running exact-branch app wrote the companion
 receipt at `received_at=1789160668.896307` with a 30-second expiry, then wrote
@@ -96,15 +96,15 @@ This proves real Bash ingestion, companion receipt, conservative unknown-focus
 handback, and no accidental allow. It does not prove Ghostty allow/deny,
 30-second timeout, or desktop decision transport.
 
-Setup migration recognizes the prior Steer command shape with its two-second or
+Setup migration recognizes the prior Herdly command shape with its two-second or
 35-second hook timeout, upgrades it in place to the 38-second bounded hook
 timeout, and
-collapses duplicate copies. Ambiguous multiple Steer installations return an
+collapses duplicate copies. Ambiguous multiple Herdly installations return an
 explicit conflict instead of adding another handler.
 
 ## Isolated lifecycle experiment prepared
 
-The official [hook discovery and review documentation](https://learn.chatgpt.com/docs/hooks) supports project-local `.codex/hooks.json`, requires project trust and review of non-managed hook definitions, and merges hooks from other active sources. No trust bypass is used. Existing user/system hooks may still apply; this is isolation of Steer's test configuration, not an empty global configuration.
+The official [hook discovery and review documentation](https://learn.chatgpt.com/docs/hooks) supports project-local `.codex/hooks.json`, requires project trust and review of non-managed hook definitions, and merges hooks from other active sources. No trust bypass is used. Existing user/system hooks may still apply; this is isolation of Herdly's test configuration, not an empty global configuration.
 
 ```sh
 python3 scripts/desktop_hook_lab.py --self-test
@@ -112,13 +112,13 @@ python3 scripts/desktop_hook_lab.py --prepare output/desktop-hook-lab
 python3 scripts/desktop_hook_lab.py --report output/desktop-hook-lab
 ```
 
-Preparation requires a new directory and refuses to overwrite one. It creates a separate Git project with only its own hook configuration. The generated command uses absolute, shell-quoted interpreter and recorder paths. Normal Steer tasks and user-level Codex configuration are unchanged.
+Preparation requires a new directory and refuses to overwrite one. It creates a separate Git project with only its own hook configuration. The generated command uses absolute, shell-quoted interpreter and recorder paths. Normal Herdly tasks and user-level Codex configuration are unchanged.
 
 The recorder accepts events only for the disposable project or its subdirectories. It records event name, receipt time, correlation IDs, permission mode and field names. It does not store prompt, transcript or tool-input contents. Records use separate unique files to avoid concurrent append collisions. All capture paths produce no stdout decision; errors also return no decision. PermissionRequest is observed only when Codex's existing policy requests permission. The two-second hook timeout bounds this initial recorder, not the eventual thirty-second approval design.
 
 Self-check passed using a temporary fixture project: the generated command runs with spaces in paths, writes no stdout/stderr, retains correlation IDs, excludes private content, rejects outside-project events and handles malformed/oversized input without changing approval behavior. Those fixtures are not desktop integration evidence.
 
-For the live check, open `output/desktop-hook-lab` as a **local project in the existing Codex desktop app**. Review/trust the recorder through Codex's normal hook-review flow if prompted, then submit: `Reply only STEER-LIFECYCLE-OK. Do not run tools or change files.` If trust is granted after startup, submit that prompt again in the same task. Correlate the captured session ID with that desktop task before declaring lifecycle access proved. No permission test or allow/deny decision is required for this first prompt.
+For the live check, open `output/desktop-hook-lab` as a **local project in the existing Codex desktop app**. Review/trust the recorder through Codex's normal hook-review flow if prompted, then submit: `Reply only HERDLY-LIFECYCLE-OK. Do not run tools or change files.` If trust is granted after startup, submit that prompt again in the same task. Correlate the captured session ID with that desktop task before declaring lifecycle access proved. No permission test or allow/deny decision is required for this first prompt.
 
 At preparation time the report contained zero events. Allow once, deny, thirty-second no-decision, disconnect and native-resolution correlation are still unverified. They must not be inferred from recorder self-checks or the mere existence of a hooks.json file. Live desktop interaction requires the user because computer-use access to Codex is restricted.
 
@@ -143,7 +143,7 @@ Three real interactive Codex CLI 0.145.0 sessions ran in the trusted
 `output/desktop-hook-lab` project through a pseudo-terminal driver
 (`scripts/cli-approval-lab/tui_run.py`) with `-s read-only -a on-request`.
 For each run the lab's `.codex/hooks.json` was swapped to a single
-PermissionRequest hook pointing at this branch's release `SteerHook`, with a
+PermissionRequest hook pointing at this branch's release `HerdlyHook`, with a
 scratch events directory, and restored afterwards; hook trust was bypassed per
 invocation with `--dangerously-bypass-hook-trust`, so no persisted trust hash,
 global hook, permission policy, or sandbox setting changed. `codex exec` cannot
@@ -162,11 +162,11 @@ as expandable text. All three sessions correlate to `source: cli` rollouts in
   `01A093DA-7E9D-7CB2-8E3D-5763296C22AD`, turn
   `01A093DA-BACD-7110-8F1B-0A0868564CD8`. Decision written 1.5 s after
   receipt; helper outcome `allow`; Codex ran the exact `touch` and
-  `STEER9-ALLOW-1` exists; rollout shows `task_complete`.
+  `HERDLY9-ALLOW-1` exists; rollout shows `task_complete`.
 - Deny: request `23FA9F74-09B2-4E06-8774-73B9B3DE038B`, session
   `01A093DB-1A89-7CB2-A6DA-4CBCAD14938A`, turn
   `01A093DB-56A8-7483-9091-9C978F56404F`. Helper outcome `deny`; the CLI
-  displayed "PermissionRequest hook denied approval"; `STEER9-DENY-1` is
+  displayed "PermissionRequest hook denied approval"; `HERDLY9-DENY-1` is
   absent; rollout shows `task_complete`.
 - Timeout: request `E5474BA4-77EE-4A35-9935-C8EF74CBA2FC`, session
   `01A093DC-C19E-7B43-8A59-1974F6B68A34`, turn
@@ -174,7 +174,7 @@ as expandable text. All three sessions correlate to `source: cli` rollouts in
   rewrote the request as `no_decision` 30.03 s after receipt and emitted no hook
   output; Codex then presented its native approval prompt. The driver's Ctrl-C
   cancelled that prompt ("You canceled the request"), the model retried inside
-  the read-only sandbox, and `STEER9-TIMEOUT-1` is absent; rollout shows
+  the read-only sandbox, and `HERDLY9-TIMEOUT-1` is absent; rollout shows
   `turn_aborted`. Nothing was approved by the timeout.
 
 Desktop runtime evidence remains unavailable: issue #2 found no supported

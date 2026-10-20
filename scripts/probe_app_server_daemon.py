@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probe Codex's local app-server daemon socket the way Steer's daemon client would.
+"""Probe Codex's local app-server daemon socket the way Herdly's daemon client would.
 
 Read-only unless `--answer` is given. Speaks JSON-RPC 2.0 over WebSocket on
 `~/.codex/app-server-control/app-server-control.sock` (the socket `codex app-server daemon start`
@@ -43,7 +43,7 @@ INTERESTING = {"item/tool/requestUserInput", "serverRequest/resolved", "turn/com
 
 
 def socket_status(path=SOCKET):
-    """What Steer's client checks before connecting: a socket owned by this user, private to them."""
+    """What Herdly's client checks before connecting: a socket owned by this user, private to them."""
     try:
         info = os.lstat(path)
     except FileNotFoundError:
@@ -221,7 +221,7 @@ def stamp():
 
 
 def initialize(client):
-    result = client.request("initialize", {"clientInfo": {"name": "steer-probe", "title": "Steer probe", "version": "0"},
+    result = client.request("initialize", {"clientInfo": {"name": "herdly-probe", "title": "Herdly probe", "version": "0"},
                                            "capabilities": {"experimentalApi": True}})
     client.send({"jsonrpc": "2.0", "method": "initialized"})
     return result
