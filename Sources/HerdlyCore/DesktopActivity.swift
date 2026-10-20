@@ -173,8 +173,8 @@ public enum DesktopEventReader {
     /// `ReminderScan.hookCache`) while their files are unchanged.
     public static func read(from directory: URL, cache: HookFileCache) -> (events: [DesktopEvent], cache: HookFileCache) {
         var next = HookFileCache()
-        guard let entries = HookEventListing.entries(in: directory) else { return ([], next) }
-        let events: [DesktopEvent] = HookEventListing.newestRecords(entries)
+        guard let listing = HookEventListing.listing(in: directory) else { return ([], next) }
+        let events: [DesktopEvent] = listing.records
             .compactMap { url -> (Record, String)? in
                 guard let data = cache.bytes(url, limit: maximumRecordSize, next: &next),
                       let record = try? JSONDecoder().decode(Record.self, from: data) else { return nil }

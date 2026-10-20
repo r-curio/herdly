@@ -48,7 +48,14 @@ public enum DesktopReadStateReader {
 
     /// Nil whenever the file is missing, not a regular file, over the size bound, not JSON, or holds
     /// neither layout exactly down to one local host's array. An empty array is a valid snapshot.
+    /// `read` is called on every scan; the file is parsed again only when it changes (#302).
     public static func read(_ url: URL) -> DesktopReadStateSnapshot? {
+        memo.value(of: url, read: readUncached)
+    }
+
+    private static let memo = StampedFileMemo<DesktopReadStateSnapshot?>()
+
+    private static func readUncached(_ url: URL) -> DesktopReadStateSnapshot? {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               let modified = attributes[.modificationDate] as? Date,
               let bytes = SafeFile.read(url, limit: limit) else { return nil }

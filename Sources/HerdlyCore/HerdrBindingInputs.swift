@@ -349,8 +349,8 @@ public enum HerdrHookRecordReader {
         var records: [HerdrHookPaneRecord] = []
         var kept: [String: HerdrHookPaneRecord?] = [:]
         for directory in directories {
-            guard let entries = HookEventListing.entries(in: directory) else { continue }
-            for url in HookEventListing.newestRecords(entries) {
+            guard let listing = HookEventListing.listing(in: directory) else { continue }
+            for url in listing.records {
                 let path = url.path
                 let record: HerdrHookPaneRecord?
                 if let cached = cache[path] { record = cached } else { record = decode(url) }

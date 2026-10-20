@@ -499,7 +499,8 @@ public enum ReminderReader {
             return true
         }
         var result = ReminderScan()
-        guard let ordered = HookEventListing.entries(in: events) else { return result }
+        guard let listing = HookEventListing.listing(in: events) else { return result }
+        let ordered = listing.entries
         var probes: [UUID: [ApprovalResolutionProbe]] = [:]
         for url in ordered where url.pathExtension == "approval" {
             if let bytes = bounded(url, limit: 65536), let item = try? JSONDecoder().decode(ApprovalRequest.self, from: bytes),
@@ -561,7 +562,7 @@ public enum ReminderReader {
             guard let bytes = hookCache.bytes(url, limit: 65536, next: &result.hookCache) else { return nil }
             return try? JSONDecoder().decode(Hook.self, from: bytes)
         }
-        let window = HookEventListing.newestRecords(ordered)
+        let window = listing.records
         var hooks = window.compactMap(hook)
         // Request files are always read, but their session's end can be older than the window. A
         // handed-back reminder resolves from it, so look further back, newest first and bounded,
