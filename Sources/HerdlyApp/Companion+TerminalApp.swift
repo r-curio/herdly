@@ -289,40 +289,37 @@ extension Companion {
         return result
     }
 
-    /// Every two seconds while Terminal.app is on, allowed, running and something could be bound to it.
-    func checkTerminalApp() {
-        guard terminalAppActive else { return }
-        let uptime = ProcessInfo.processInfo.systemUptime
+    /// Terminal.app's part of the shared scheduled read (`checkScheduledTabHosts`): while it is on,
+    /// allowed, not scanning, and something could be bound to it. Whether it runs is checked once the
+    /// read is due.
+    func terminalAppScanPlan() -> TerminalAppScanPlan? {
+        guard terminalAppActive else { return nil }
         let codexSessions = terminalAppCodexSessions
         let claudeRows = terminalAppClaudeRows
-        guard !terminalApp.scanning, !openingTask, uptime >= terminalApp.nextScan,
-              !codexSessions.isEmpty || !claudeRows.isEmpty || !codexSessionsAwaitingInventory.isEmpty else { return }
+        guard !terminalApp.scanning, !openingTask,
+              !codexSessions.isEmpty || !claudeRows.isEmpty || !codexSessionsAwaitingInventory.isEmpty else { return nil }
+        return TerminalAppScanPlan(codexSessions: codexSessions, claudeRows: claudeRows, generation: terminalApp.generation)
+    }
+
+    /// Terminal.app stopped since its last scan: forget the result instead of reading it.
+    func terminalAppStillRunning() -> Bool {
         guard TerminalApps.isRunning(.terminalApp) else {
             if terminalApp.readable != nil { resetTerminalAppScan() }
-            return
+            return false
         }
-        terminalApp.scanning = true
-        terminalApp.nextScan = uptime + 2
-        let others = otherTabHosts
+        return true
+    }
+
+    /// Applies the shared read to Terminal.app, unless its switch, access or generation moved meanwhile.
+    func finishTerminalAppScan(_ plan: TerminalAppScanPlan, reads: TerminalTabReads,
+                               claude: [AgentSessionIdentity: ClaudeTabProcess], frontmost: TerminalHost?,
+                               onScreen: Set<Int>?, takenAt: Double) {
+        terminalApp.scanning = false
+        guard plan.generation == terminalApp.generation, terminalAppActive else { return }
         // ADR 0016: frontmost comes from macOS as the scan starts; Terminal's own answer must agree.
-        let frontmost = TerminalApps.frontmostHost()
-        let pid = TerminalAppNavigation.pid()
-        let generation = terminalApp.generation
-        Task { @MainActor in
-            let takenAt = Date().timeIntervalSince1970
-            let observed = await Task.detached { () -> (TerminalTabReads, [AgentSessionIdentity: ClaudeTabProcess], Set<Int>?) in
-                let claude = claudeRows.mapValues(ClaudeTabProcess.read)
-                let reads = TerminalTabReads.take(others: others,
-                                                  claudeTTYs: Set(claude.values.compactMap(\.tty)), second: false)
-                let onScreen = frontmost == .terminalApp ? TerminalAppNavigation.onScreenWindowIDs(pid: pid) : []
-                return (reads, claude, onScreen)
-            }.value
-            terminalApp.scanning = false
-            guard generation == terminalApp.generation, terminalAppActive else { return }
-            applyTerminalAppScan(observed.0, claude: observed.1, codexSessions: codexSessions,
-                                 frontmost: frontmost, onScreen: observed.2, takenAt: takenAt)
-            refresh()
-        }
+        applyTerminalAppScan(reads, claude: claude.filter { plan.claudeRows[$0.key] != nil },
+                             codexSessions: plan.codexSessions, frontmost: frontmost,
+                             onScreen: frontmost == .terminalApp ? onScreen : [], takenAt: takenAt)
     }
 
     private func applyTerminalAppScan(_ reads: TerminalTabReads, claude: [AgentSessionIdentity: ClaudeTabProcess],
