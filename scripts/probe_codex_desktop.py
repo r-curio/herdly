@@ -39,7 +39,7 @@ def probe(app):
     version = subprocess.run(
         [str(binary), "--version"], check=True, capture_output=True, text=True, timeout=10
     ).stdout.strip()
-    with tempfile.TemporaryDirectory(prefix="steer-desktop-schema-") as directory:
+    with tempfile.TemporaryDirectory(prefix="herdly-desktop-schema-") as directory:
         subprocess.run(
             [str(binary), "app-server", "generate-json-schema", "--experimental", "--out", directory],
             check=True, capture_output=True, text=True, timeout=45,

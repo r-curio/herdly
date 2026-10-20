@@ -1,6 +1,6 @@
 # Thread names
 
-Steer labels a notch item with the name Codex desktop shows for that thread in its sidebar, such as "Sync main and resolve conflicts", instead of the shortened session identifier. The identifier remains the fallback whenever no name is known. Like the [desktop read state](desktop-read-state.md), this rides on a private Codex format and fails soft.
+Herdly labels a notch item with the name Codex desktop shows for that thread in its sidebar, such as "Sync main and resolve conflicts", instead of the shortened session identifier. The identifier remains the fallback whenever no name is known. Like the [desktop read state](desktop-read-state.md), this rides on a private Codex format and fails soft.
 
 ## What Codex records
 
@@ -14,11 +14,11 @@ A rename appends another line for the same id, so the last line for an id is the
 
 Only desktop threads are named. CLI sessions have no entry, so they keep the `session xxxxxxxx` label. Observed with CLI 0.153.4 and desktop 26.901.51231.
 
-## Steer's rule
+## Herdly's rule
 
 `ThreadNameReader` reads the index with the same bounds as other Codex files (regular file, no symlink, at most 20 MB) and returns a map from session id to the latest non-empty name. A line that is not a JSON object with a UUID `id` and a string `thread_name`, including a partial last line while Codex is appending, is skipped without affecting other lines. A missing or unreadable file yields no names.
 
-`StripSummary.sessionLabel` returns the thread name when known, otherwise the shortened identifier. The strip subject prefers the thread name, then a request's task name from Codex, then the identifier. Steer never invents a name.
+`StripSummary.sessionLabel` returns the thread name when known, otherwise the shortened identifier. The strip subject prefers the thread name, then a request's task name from Codex, then the identifier. Herdly never invents a name.
 
 ## App integration
 
@@ -26,7 +26,7 @@ Each two-second scan reads the index off the main actor alongside the hook event
 
 ## Verification
 
-Automated: `Tests/SteerCoreTests/ThreadNamesTests.swift` covers the real shape, last-line-wins on rename, skipped unreadable lines, file bounds, and label preference.
+Automated: `Tests/HerdlyCoreTests/ThreadNamesTests.swift` covers the real shape, last-line-wins on rename, skipped unreadable lines, file bounds, and label preference.
 
 Live walkthrough after each desktop update:
 

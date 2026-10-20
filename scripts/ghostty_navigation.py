@@ -9,7 +9,7 @@ from probe_ghostty import session_title, tab_for_session
 
 # JXA uses Ghostty's installed scripting dictionary. Never run during offline checks.
 # `Application(bundleID)` launches Ghostty if it quit after the `running()` check, so this can relaunch a
-# quit Ghostty. Steer's own adapter addresses the process id instead (#270, Resources/AppleEvents.js).
+# quit Ghostty. Herdly's own adapter addresses the process id instead (#270, Resources/AppleEvents.js).
 SCRIPT = r'''
 function run(argv) {
     const request = JSON.parse(argv[0]);

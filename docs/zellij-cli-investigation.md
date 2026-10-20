@@ -1,6 +1,6 @@
 # Zellij CLI: pane targeting, focus, input and client tty (#202)
 
-Checked 2026-10-11 for [Research Zellij's CLI for pane targeting and client tty](https://github.com/r-curio/steer/issues/202), a research child of [Support iTerm2, Terminal.app, WezTerm and multiplexers](https://github.com/r-curio/steer/issues/197). This document records facts only. Decisions belong to the grilling tickets.
+Checked 2026-10-11 for [Research Zellij's CLI for pane targeting and client tty](https://github.com/r-curio/herdly/issues/202), a research child of [Support iTerm2, Terminal.app, WezTerm and multiplexers](https://github.com/r-curio/herdly/issues/197). This document records facts only. Decisions belong to the grilling tickets.
 
 ## Sources and versions
 
@@ -81,7 +81,7 @@ Because the socket directory depended on the exact version before 0.44.0, a pre-
 
 ## Which client a CLI action acts for
 
-- Every `zellij action` invocation connects to the session socket as a temporary client and sends `ClientToServerMsg::Action { …, is_cli_client: true }` (`zellij-client/src/cli_client.rs`). The CLI client also passes `terminal_id` from its own `ZELLIJ_PANE_ID` if that variable is set. A process outside Zellij, such as Steer, has none.
+- Every `zellij action` invocation connects to the session socket as a temporary client and sends `ClientToServerMsg::Action { …, is_cli_client: true }` (`zellij-client/src/cli_client.rs`). The CLI client also passes `terminal_id` from its own `ZELLIJ_PANE_ID` if that variable is set. A process outside Zellij, such as Herdly, has none.
 - The server resolves the acting client in `route.rs`:
 
   ```rust
@@ -91,7 +91,7 @@ Because the socket directory depended on the exact version before 0.44.0, a pre-
   ```
 
   `last_active_client` is set on each `ClientToServerMsg::Key` and cleared when that client leaves (`zellij-server/src/lib.rs`).
-- So `focus-pane-id`, `go-to-tab*`, `current-tab-info`, and `write-chars` without `--pane-id` (which writes to that client's focused pane) act for whichever client typed last. If several clients are attached, that may not be the client in the host tab Steer means to raise. Read-only watchers (`zellij watch`, 0.44.0) and web clients are clients too.
+- So `focus-pane-id`, `go-to-tab*`, `current-tab-info`, and `write-chars` without `--pane-id` (which writes to that client's focused pane) act for whichever client typed last. If several clients are attached, that may not be the client in the host tab Herdly means to raise. Read-only watchers (`zellij watch`, 0.44.0) and web clients are clients too.
 - **No keystroke yet:** if no client has typed since the session started, the acting client falls back to the CLI client itself. `go-to-tab` then uses the first client in `active_tab_ids` (`screen.rs`, `ScreenInstruction::GoToTab`). What `focus-pane-id` does in that state was not traced to a conclusion (unverified).
 
 ## Focus and verification
@@ -124,7 +124,7 @@ Because the socket directory depended on the exact version before 0.44.0, a pre-
 
 - **Processes:** a Zellij client is the `zellij` process the user ran in the host terminal tab (`zellij`, `zellij attach <name>`, `zellij -s <name>`, …). Its controlling terminal is that tab's TTY. The server is a separate daemonized `zellij --server <socket path>` process with no controlling terminal (`zellij-client/src/lib.rs`; `zellij-server/src/lib.rs`, `daemonize`). The socket path's last component is the session name at the time the server started.
 - **What Zellij exposes:** client IDs (small integers assigned by `SessionState::new_client`) with their focused pane, through `list-clients` and `list-tabs`. It exposes no client PID, TTY, host terminal or environment. The plugin API's `ListClients` returns `ClientInfo { client_id, pane_id, running_command, is_current_client }`, with no PID or TTY either (`data.rs`).
-- **Possible external join (unverified):** the herdr precedent ([live proof](evidence/herdr-ghostty-live.md)) counted attached clients from `lsof -U` peers on the session socket and joined each to a host TTY. The same technique on Zellij's session socket would find client processes. It would also see transient connections from any `zellij action`, `zellij list-sessions` probe (including Steer's own), `zellij watch`, and the web server. It would not yield Zellij's client IDs. Whether `lsof` on macOS shows usable peer pairs for Zellij's socket was not tested. A client's argv names the session only when the user typed it.
+- **Possible external join (unverified):** the herdr precedent ([live proof](evidence/herdr-ghostty-live.md)) counted attached clients from `lsof -U` peers on the session socket and joined each to a host TTY. The same technique on Zellij's session socket would find client processes. It would also see transient connections from any `zellij action`, `zellij list-sessions` probe (including Herdly's own), `zellij watch`, and the web server. It would not yield Zellij's client IDs. Whether `lsof` on macOS shows usable peer pairs for Zellij's socket was not tested. A client's argv names the session only when the user typed it.
 - **Single-client check:** `list-clients` counts clients that focus a pane, including watchers and web clients. The number of `zellij` client processes on the socket is a separate count, and the two can be compared (unverified).
 
 ## Socket location and permissions

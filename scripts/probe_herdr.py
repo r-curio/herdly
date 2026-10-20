@@ -155,10 +155,10 @@ def self_test():
     assert clients == {'server_pids': [10], 'client_pids': [20, 30]}, clients
     assert attached_clients(parse_lsof(text), '/other.sock') == {'server_pids': [], 'client_pids': []}
     inventory = [{'window': 'w', 'tab': 't1', 'selected': True,
-                  'terminals': [{'id': 'a', 'name': 'host: steer-probe'}]},
+                  'terminals': [{'id': 'a', 'name': 'host: herdly-probe'}]},
                  {'window': 'w', 'tab': 't2', 'selected': False,
                   'terminals': [{'id': 'b', 'name': 'private title'}, {'id': 'c', 'name': None}]}]
-    found = ghostty_matches(inventory, 'steer-probe')
+    found = ghostty_matches(inventory, 'herdly-probe')
     assert found['terminal_count'] == 3 and [m['terminal'] for m in found['matches']] == ['a'], found
     assert 'private title' not in json.dumps(found)
     assert ghostty_matches(inventory, '')['matches'] == []
@@ -170,7 +170,7 @@ def self_test():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument('--session', default='steer-probe', help='herdr session name (default: steer-probe)')
+    parser.add_argument('--session', default='herdly-probe', help='herdr session name (default: herdly-probe)')
     parser.add_argument('--ghostty', action='store_true', help="also read Ghostty's window/tab/terminal names")
     parser.add_argument('--marker', default='', help='substring identifying the herdr client in a Ghostty title')
     parser.add_argument('--self-test', action='store_true')

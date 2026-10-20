@@ -5,7 +5,7 @@
 The user deferred multiple panes within a tab. Issue #3 now targets one Codex session per unsplit tab, across tabs/windows, on the stable runtime. Earlier split-pane test requirements below are historical. Session-to-tab binding remains unresolved; two tabs in one project cannot be distinguished by cwd alone. A prerelease upgrade is not an accepted requirement. See ADR 0004.
 
 
-Checked 2026-09-11. Status: blocked; exact live session-to-pane binding is not proven. [Issue #3](https://github.com/r-curio/steer/issues/3).
+Checked 2026-09-11. Status: blocked; exact live session-to-pane binding is not proven. [Issue #3](https://github.com/r-curio/herdly/issues/3).
 
 ## Installed evidence
 
@@ -52,7 +52,7 @@ A supported upstream fix exists: commit [9a900220](https://github.com/ghostty-or
 
 ### Independent CLI lifecycle proof
 
-Ran the installed shell CLI with `exec --ephemeral --sandbox read-only` in the existing isolated desktop-hook-lab, reusing its previously trusted recorder without changing hook or permission settings. Default gpt-6-astra failed with a server error requiring a newer Codex version. A per-invocation gpt-5.5 override succeeded and returned the exact marker STEER-CLI-LIFECYCLE-3.
+Ran the installed shell CLI with `exec --ephemeral --sandbox read-only` in the existing isolated desktop-hook-lab, reusing its previously trusted recorder without changing hook or permission settings. Default gpt-6-astra failed with a server error requiring a newer Codex version. A per-invocation gpt-5.5 override succeeded and returned the exact marker HERDLY-CLI-LIFECYCLE-3.
 
 CLI session 01a08ffb-8606-77b1-af6c-6f63169781a8, turn 01a08ffb-86de-7ea1-85e5-95b6ca2c8a56 produced independently captured SessionStart, UserPromptSubmit, Stop and SessionEnd hooks. Output and stderr are in ignored output/cli-lifecycle.*. This verifies CLI exec lifecycle delivery, not interactive Ghostty behavior or CLI approvals. No hook-trust bypass was used.
 
@@ -82,8 +82,8 @@ The user selected the session-ID title approach. `session_title` and `tab_for_se
 For the human-assisted test, open two unsplit Ghostty tabs in the same existing isolated lab. In each, run:
 
 ```sh
-cd /Users/dev/Steer/output/desktop-hook-lab
-codex -m gpt-5.5 -c 'tui.terminal_title=["session-id"]' 'Reply only STEER-TAB-CHECK. Do not use tools.'
+cd /Users/dev/code/Herdly/output/desktop-hook-lab
+codex -m gpt-5.5 -c 'tui.terminal_title=["session-id"]' 'Reply only HERDLY-TAB-CHECK. Do not use tools.'
 ```
 
 The model override only avoids the independently observed newer-model/older-CLI incompatibility. It changes neither the saved default model nor the title setting. Expected titles are different shortened UUIDs. Capturing and revalidating the actual native tab/window inventory and navigation still require a permitted interaction route; the current Ghostty computer-use restriction remains. Do not run the prerelease merely for this test. Interactive approval checks remain separate.
@@ -111,14 +111,14 @@ Added read-only `observe` to the adapter. It returns foreground only for the uni
 
 Completed: two normal CLI sessions in same-project unsplit tabs, separately captured lifecycle hooks, human-confirmed distinct session-ID titles.
 
-Outstanding live proof: native inventory IDs, foreground/background focus and navigation across tabs/windows, native Automation permission behavior, and CLI allow/deny/no-decision. The existing trusted isolated lab has a marker-only PermissionRequest helper; its desktop proof must not be substituted for CLI proof. The helper accepts only `touch STEER-APPROVAL-DIRECT-...` commands. No hooks or permission settings were changed during this audit.
+Outstanding live proof: native inventory IDs, foreground/background focus and navigation across tabs/windows, native Automation permission behavior, and CLI allow/deny/no-decision. The existing trusted isolated lab has a marker-only PermissionRequest helper; its desktop proof must not be substituted for CLI proof. The helper accepts only `touch HERDLY-APPROVAL-DIRECT-...` commands. No hooks or permission settings were changed during this audit.
 
-Next permitted human-assisted CLI check: in one existing lab session, request exactly `touch STEER-APPROVAL-DIRECT-CLI-ALLOW-1` using an explicit approval request, with no retry without approval. Confirm the helper appears before testing Allow once. Then use fresh DENY and HANDOFF markers in separate turns. Record each outcome and file existence independently. If the CLI refuses to request approval under its current policy, record that as a policy limitation; do not loosen the user's policy automatically.
+Next permitted human-assisted CLI check: in one existing lab session, request exactly `touch HERDLY-APPROVAL-DIRECT-CLI-ALLOW-1` using an explicit approval request, with no retry without approval. Confirm the helper appears before testing Allow once. Then use fresh DENY and HANDOFF markers in separate turns. Record each outcome and file existence independently. If the CLI refuses to request approval under its current policy, record that as a policy limitation; do not loosen the user's policy automatically.
 
 
 ## CLI approval attempt and Stop warning — 2026-09-12
 
-Turn `01a09131-5937-7473-ae0d-d0ffe8d83b39` in session `01a09046-5590-7882-adad-6b7f4ec91925` ran the exact CLI-ALLOW-1 marker command, returned exit 0 and created the file. The runtime trace shows on-request approval policy with danger-full-access sandbox, and an explicit require_escalated tool request. Captured events include UserPromptSubmit, PreToolUse, PostToolUse and Stop, but no matching PermissionRequest or approval outcome. This does not pass the Steer allow test. Next attempt needs a per-launch read-only sandbox in the disposable lab; saved permission configuration remains unchanged.
+Turn `01a09131-5937-7473-ae0d-d0ffe8d83b39` in session `01a09046-5590-7882-adad-6b7f4ec91925` ran the exact CLI-ALLOW-1 marker command, returned exit 0 and created the file. The runtime trace shows on-request approval policy with danger-full-access sandbox, and an explicit require_escalated tool request. Captured events include UserPromptSubmit, PreToolUse, PostToolUse and Stop, but no matching PermissionRequest or approval outcome. This does not pass the Herdly allow test. Next attempt needs a per-launch read-only sandbox in the disposable lab; saved permission configuration remains unchanged.
 
 The user reported “Stop hook (failed): hook exited without a status code.” Despite this, the matching Stop record was persisted at 15:59:40 UTC. Twenty isolated replays of the exact recorder/interpreter with synthetic Stop input all exited 0, produced no stdout/stderr and saved all twenty records; maximum duration was 0.183 seconds against the configured two-second timeout. The runtime warning is unreproduced and its cause remains unknown. No hook code, trusted-hook configuration or timeout was changed.
 

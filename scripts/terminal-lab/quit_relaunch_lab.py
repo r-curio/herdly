@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""H7 lab for #270: does a running Steer relaunch a terminal app that quits?
+"""H7 lab for #270: does a running Herdly relaunch a terminal app that quits?
 
 WARNING: this QUITS THE REAL APP (SIGTERM to its process). Every window, tab and shell
 in it ends, including any running Codex or Claude session. Run it only with the
@@ -9,11 +9,11 @@ after saving any work in that app. It never launches, types into or scripts any 
     python3 scripts/terminal-lab/quit_relaunch_lab.py iterm2|terminal|ghostty|wezterm \
         --i-understand-this-quits-the-app [--seconds 120]
 
-It checks that Steer is running and the named app is running (its own process, with
+It checks that Herdly is running and the named app is running (its own process, with
 no controlling terminal), sends SIGTERM to that process, then polls the process table
 every second for `--seconds` (default 120) and reports whether a new process of the
 app appeared. Exit status: 0 stayed closed, 1 relaunched, 2 precondition or usage
-failure. Record the result with the Steer build under test (docs/cli-notch-integration.md,
+failure. Record the result with the Herdly build under test (docs/cli-notch-integration.md,
 "Never launching the app (#270)").
 """
 import argparse
@@ -29,7 +29,7 @@ APPS = {
     "ghostty": "/Ghostty.app/Contents/MacOS/ghostty",
     "wezterm": "/WezTerm.app/Contents/MacOS/wezterm-gui",
 }
-STEER = "/Steer.app/Contents/MacOS/Steer"
+HERDLY = "/Herdly.app/Contents/MacOS/Herdly"
 
 
 def app_processes(suffix):
@@ -57,16 +57,16 @@ def main():
     if not 1 <= args.seconds <= 600:
         print("--seconds must be between 1 and 600", file=sys.stderr)
         return 2
-    steer = app_processes(STEER)
-    if not steer:
-        print("Steer is not running; the check needs it running with the app's switch on.", file=sys.stderr)
+    herdly = app_processes(HERDLY)
+    if not herdly:
+        print("Herdly is not running; the check needs it running with the app's switch on.", file=sys.stderr)
         return 2
     suffix = APPS[args.app]
     before = app_processes(suffix)
     if len(before) != 1:
         print(f"Expected one running {args.app} process, found {before}.", file=sys.stderr)
         return 2
-    print(f"Steer pid(s) {steer}; quitting {args.app} pid {before[0]} with SIGTERM.")
+    print(f"Herdly pid(s) {herdly}; quitting {args.app} pid {before[0]} with SIGTERM.")
     os.kill(before[0], signal.SIGTERM)
     start = time.monotonic()
     while time.monotonic() - start < args.seconds:

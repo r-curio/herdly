@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Read-only probe of Codex's recorded user-input questions, for ongoing format checks.
 
-Scans session rollouts for `request_user_input` calls and applies Steer's rule: a call is pending
+Scans session rollouts for `request_user_input` calls and applies Herdly's rule: a call is pending
 while the same file has no `function_call_output` for its call id and no `task_complete` or
 `turn_aborted` for its turn. Prints pending and recently answered calls so a human can compare with
-the running notch. Nothing is written. Exit status 1 means a call had a shape Steer would not read.
+the running notch. Nothing is written. Exit status 1 means a call had a shape Herdly would not read.
 
   python3 scripts/probe_user_input.py [--sessions ~/.codex/sessions] [--file ROLLOUT] [--days 2] [--watch]
   python3 scripts/probe_user_input.py --self-test
@@ -29,14 +29,14 @@ MAX_DIGIT = 9
 def offer(question, index, total):
     """Mirror of QuestionAnswerProgress.offer: what the notch would let the user send for one question."""
     if index >= MAX_QUESTIONS:
-        return None, "beyond what Steer shows"
+        return None, "beyond what Herdly shows"
     if not isinstance(question, dict):
         return None, "unreadable"
     raw = question.get("options")
     if raw is None or raw == []:
         return None, "typed answer"
     if not isinstance(raw, list) or len(raw) > MAX_OPTIONS:
-        return None, "more options than Steer shows"
+        return None, "more options than Herdly shows"
     labels = []
     for option in raw:
         label = option.get("label") if isinstance(option, dict) else None
@@ -104,7 +104,7 @@ def evidence(lines, session=None):
                 except (ValueError, AttributeError):
                     questions = None
             if not isinstance(questions, list):
-                problems.append("arguments unreadable (Steer shows the question without text)")
+                problems.append("arguments unreadable (Herdly shows the question without text)")
                 questions = []
             identity_problems = [p for p in problems if not p.startswith("arguments")]
             if problems:
@@ -233,8 +233,8 @@ def self_test():
     checks.append(labels == ["Nested levels (Recommended)", "One level only"] and reason is None)
     checks.append(offer({"header": "h", "question": "q", "options": []}, 0, 1) == (None, "typed answer"))
     checks.append(offer({"options": [{"label": "a"}, {"description": "no label"}, {"label": "c"}]}, 0, 1)[1] == "an option label is unreadable")
-    checks.append(offer({"options": [{"label": str(n)} for n in range(9)]}, 0, 1)[1] == "more options than Steer shows")
-    checks.append(offer({"options": [{"label": "a"}]}, 8, 9)[1] == "beyond what Steer shows")
+    checks.append(offer({"options": [{"label": str(n)} for n in range(9)]}, 0, 1)[1] == "more options than Herdly shows")
+    checks.append(offer({"options": [{"label": "a"}]}, 8, 9)[1] == "beyond what Herdly shows")
     recorded_output = json.dumps({"timestamp": "2026-09-14T02:21:41.908Z", "type": "response_item",
                                   "payload": {"type": "function_call_output", "call_id": "c1",
                                               "output": json.dumps({"answers": {"q": {"answers": ["One level only"]}}})}})

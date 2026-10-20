@@ -1,14 +1,14 @@
-"""Drive the interactive Codex CLI in a pty through a Steer handoff, then answer Codex's own prompt.
+"""Drive the interactive Codex CLI in a pty through a Herdly handoff, then answer Codex's own prompt.
 
 Usage: python3 resolution_run.py <case> <marker basename> [--answers y,n] [--standin receipt|handoff]
        [--standin-delay S] [--kill-standin-after S] [--wait S] [--prompt-file PATH] [--explore]
 
 Cases are names for the evidence record. The lab project's .codex/hooks.json is swapped for a single
-SteerHook PermissionRequest hook and restored on exit; hook trust is bypassed per invocation only.
+HerdlyHook PermissionRequest hook and restored on exit; hook trust is bypassed per invocation only.
 After the helper hands the request back (its .approval outcome becomes no_decision), the driver
 answers each native prompt with the next key in --answers. With --explore it only records the
-prompt text and cancels. Nothing here approves through Steer; answers go to Codex's native prompt.
-Env: STEER_LAB_PROJECT (trusted lab dir), STEER_HOOK (release SteerHook path).
+prompt text and cancels. Nothing here approves through Herdly; answers go to Codex's native prompt.
+Env: HERDLY_LAB_PROJECT (trusted lab dir), HERDLY_HOOK (release HerdlyHook path).
 """
 import argparse, os, pty, sys, time, select, fcntl, termios, struct, signal, subprocess, json, re, shutil, shlex, uuid
 
@@ -23,13 +23,13 @@ parser.add_argument("--prompt-file")
 parser.add_argument("--explore", action="store_true")
 args = parser.parse_args()
 S = os.path.dirname(os.path.abspath(__file__))
-PROJECT = os.environ.get("STEER_LAB_PROJECT", "/Users/dev/Steer/output/desktop-hook-lab")
-HOOK = os.environ.get("STEER_HOOK", os.path.abspath(os.path.join(S, "..", "..", ".build", "arm64-apple-macosx", "release", "SteerHook")))
+PROJECT = os.environ.get("HERDLY_LAB_PROJECT", "/Users/dev/code/Herdly/output/desktop-hook-lab")
+HOOK = os.environ.get("HERDLY_HOOK", os.path.abspath(os.path.join(S, "..", "..", ".build", "arm64-apple-macosx", "release", "HerdlyHook")))
 events = os.path.join(S, "events-" + args.case); os.makedirs(events, exist_ok=True)
 os.makedirs(os.path.join(S, "runs"), exist_ok=True)
 marker = os.path.join(PROJECT, args.marker)
 hooks_path = os.path.join(PROJECT, ".codex", "hooks.json")
-backup = hooks_path + ".steer10-backup"
+backup = hooks_path + ".herdly10-backup"
 shutil.copy2(hooks_path, backup)
 cmd = f"{shlex.quote(HOOK)} --events-dir {shlex.quote(events)} --installation-id {shlex.quote(str(uuid.uuid4()).upper())}"
 with open(hooks_path, "w") as f:

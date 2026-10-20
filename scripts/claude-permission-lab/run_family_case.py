@@ -5,7 +5,7 @@ Usage: python3 -I run_family_case.py <case> [--wait S]
 
 Each case names a tool action, a companion decision for every PermissionRequest it raises, and optional
 project permission rules or mode. The companion is this script, writing receipt/decision records for
-lab_helper.py (the #71 stand-in for SteerHook's Claude approval protocol). Decisions:
+lab_helper.py (the #71 stand-in for HerdlyHook's Claude approval protocol). Decisions:
   allow / deny     receipt, then that decision 2 s later
   handoff          receipt, then no_decision 2 s later; the native prompt is then answered No (Esc)
   observe          no receipt; any native prompt is answered No (Esc) 3 s after it appears
@@ -123,7 +123,7 @@ WATCHED = list(FIXTURES) + [os.path.join(OUTSIDE, "created.txt"), os.path.join(P
 DECIDE_TOOL = extra.get("decide_tool")
 MCP_CONFIG = os.path.join(EVENTS, "mcp.json")
 with open(MCP_CONFIG, "w") as f:
-    servers = {"steer-lab": {"command": "/usr/bin/python3", "args": ["-I", os.path.join(S, "lab_mcp_server.py"), EVENTS]}}
+    servers = {"herdly-lab": {"command": "/usr/bin/python3", "args": ["-I", os.path.join(S, "lab_mcp_server.py"), EVENTS]}}
     json.dump({"mcpServers": servers if extra.get("mcp") else {}}, f)
 
 def digest(path):

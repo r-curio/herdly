@@ -52,7 +52,7 @@ Before shipping desktop support, obtain a permitted live verification path and d
 
 ## Original ticket #1 execution: 2026-09-11 (superseded scope)
 
-Status: blocked, not completed. [Issue #1](https://github.com/r-curio/steer/issues/1).
+Status: blocked, not completed. [Issue #1](https://github.com/r-curio/herdly/issues/1).
 
 `python3 scripts/probe_desktop_process.py` now identifies main processes using their executable path and bundle metadata. It reports a unique running installation only when exactly one matches; zero or multiple matches are unknown. It never infers conversation focus. The live read-only result was `/Applications/ChatGPT.app`, version `26.901.51231`. Process IDs are transient and are not saved as surface identities.
 
@@ -68,7 +68,7 @@ Both probe self-checks and the installed desktop schema probe passed. The proces
 
 To resume this gate, use a permitted test environment and two disposable local conversations A and B. Record their IDs, installed app version, selected window/conversation before and after each switch, and the observer result. Complete A, visit B, then visit A; only the last visit may acknowledge A's completion. Repeat with the app backgrounded and with the target closed or unavailable. Open A's deep link against the identified running bundle and independently verify A is selected. A successful URL-open call alone is not a pass.
 
-Human navigation alone will not solve the integration: a standalone companion still needs a supported or explicitly evaluated focus observation mechanism. The Codex app's built-in task tools are not evidence of an API available to Steer. No private IPC adapter or acknowledgment heuristic has been adopted.
+Human navigation alone will not solve the integration: a standalone companion still needs a supported or explicitly evaluated focus observation mechanism. The Codex app's built-in task tools are not evidence of an API available to Herdly. No private IPC adapter or acknowledgment heuristic has been adopted.
 
 The next bounded exercise is the [manual jump-back test](desktop-manual-test.md). It collects user observations of navigation only; no focus watcher is running. Do not ask the user to switch tasks while claiming an unimplemented observer is measuring those switches.
 
@@ -119,10 +119,10 @@ Read state therefore claims only "the selected thread was visible in a focused w
 - Cross-window sync: the changing window broadcasts `thread-read-state-changed { hostId, conversationId, hasUnreadTurn }` over the app's private IPC (`~/.codex/ipc/ipc.sock`); other windows apply it without re-broadcasting. This is an internal Electron IPC protocol, not an app-server method, and is versioned per message (`thread-read-state-changed` is at version 2 in this build).
 - Not in the app server: `~/.codex/state_5.sqlite` `threads` has no read column, and the generated app-server schema has no read-state notification. The desktop's own app-server session is the only client that could know, and it keeps the state in the renderer.
 
-### Consequences for Steer
+### Consequences for Herdly
 
 - A supported subscription still does not exist. The only externally observable artifact is the persisted JSON key, which is private, build-specific, debounced, and rewritten as one large file.
-- If Steer ever reads it, the honest interpretation is: "thread X was viewed in a focused Codex window after its most recent completion or request at or before file time T". That is a thread-level fact, not per-completion acknowledgment. Steer could use it conservatively only as evidence to acknowledge a completion whose turn completed before the thread left the unread set and while no newer turn or request has since arrived, with the flag's absence never treated as "unread". Removal by archive or delete also clears the flag, so absence must not be read as viewed either; a thread never in the set at all is indistinguishable from one read long ago.
+- If Herdly ever reads it, the honest interpretation is: "thread X was viewed in a focused Codex window after its most recent completion or request at or before file time T". That is a thread-level fact, not per-completion acknowledgment. Herdly could use it conservatively only as evidence to acknowledge a completion whose turn completed before the thread left the unread set and while no newer turn or request has since arrived, with the flag's absence never treated as "unread". Removal by archive or delete also clears the flag, so absence must not be read as viewed either; a thread never in the set at all is indistinguishable from one read long ago.
 - The mechanism matches the glossary: it can only ever downgrade an uncertain completion to acknowledged, never the reverse, and it must fail closed when the file is missing, unreadable, over the size bound, or lacks the key.
 - Adopting it means depending on a private format that can change with any desktop release. If pursued, gate it on the tested desktop version, verify live with two disposable threads (complete A, view B, view A; only the last step may drop A from the set), and keep the dismissal path independent.
 
@@ -136,4 +136,4 @@ Open Vibe Island (github.com/Octane0411/open-vibe-island, commit 334c580, 2026-0
 - Its only attention check happens at presentation time: before showing a completion, it asks whether the session's terminal is already frontmost (Ghostty focused terminal id, Terminal tty, iTerm session via AppleScript). If so it suppresses the popup. For the Codex desktop app it returns false, so desktop completions always present.
 - Desktop-app sessions are discovered by connecting a second app-server client and listing threads; visibility is "desktop app is running and thread not ended". That is the approach this project already rejected as not proving which task the user is viewing.
 
-Steer's uncertain-completion and explicit-dismissal model is therefore already stricter than Open Vibe Island's. The desktop unread set described above remains the only source that could add a verified visit signal for desktop threads. It was adopted the same day; see [desktop read state](desktop-read-state.md).
+Herdly's uncertain-completion and explicit-dismissal model is therefore already stricter than Open Vibe Island's. The desktop unread set described above remains the only source that could add a verified visit signal for desktop threads. It was adopted the same day; see [desktop read state](desktop-read-state.md).

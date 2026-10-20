@@ -1,4 +1,4 @@
-# Local AI tooling for Steer
+# Local AI tooling for Herdly
 
 This is a personal development workspace. Its local skills and tools are part of the working setup; agents should use them when they fit the task. AI-native development here means explicit product contracts, scoped tasks, reproducible checks, and durable evidence another session can pick up.
 
@@ -6,13 +6,13 @@ This is a personal development workspace. Its local skills and tools are part of
 
 | Location/tool | Purpose |
 | --- | --- |
-| `/Users/dev/Steer` | Primary checkout; verify the current branch and dirty state. |
+| `/Users/dev/code/Herdly` | Primary checkout; verify the current branch and dirty state. |
 | `.agents/skills/` inside the checkout | Project-specific skills; prefer these variants for native SwiftUI and GitHub workflows. |
 | `/Users/dev/.agents/skills/` | Additional personal engineering skills. |
 | `/Users/dev/.codex/skills/` | Personal Codex skills and system skills. |
 | `/Users/dev/.codex/plugins/cache/` | Installed plugin bundles; use the active skill catalog to resolve versioned paths. |
 | `/Users/dev/.codex/memories/` | Prior context when exposed by the session. Verify drift-prone facts and follow the session's memory read/write rules. |
-| `/opt/homebrew/bin/gh` | GitHub CLI for `r-curio/steer`; check authentication when needed. |
+| `/opt/homebrew/bin/gh` | GitHub CLI for `r-curio/herdly`; check authentication when needed. |
 | `/usr/bin/swift`, `/usr/bin/python3` | Swift package development and standard-library probe/lab scripts. |
 
 These locations describe the owner's Mac. Resolve actual executables and paths when the environment changes. `.agents/`, `.codex/`, `.claude/`, and `skills-lock.json` are ignored locally; that does not make the tools off-limits for this project. Keep personal paths in development guidance, not application runtime logic.
@@ -58,7 +58,7 @@ The active session catalog is the authority for names and resolved paths. Useful
 - **`imagegen`:** raster artwork or visual assets when needed; never use generated imagery as proof of a working UI.
 - **`skill-creator`, `write-a-skill`, and `plugin-creator`:** build reusable development tooling when requested.
 
-Choose Steer's local `impeccable` for native app design; personal web-design skills do not change the product's platform. Skill instructions may require further references or tools; inspect those requirements before execution.
+Choose Herdly's local `impeccable` for native app design; personal web-design skills do not change the product's platform. Skill instructions may require further references or tools; inspect those requirements before execution.
 
 ## Session tools
 
@@ -70,7 +70,7 @@ Availability depends on the current agent host, enabled integrations, and permis
 | Swift and repository scripts | Compile, test, package, inspect integration contracts | Build/fixture success is not live interoperability. |
 | `gh` | Issues, dependencies, PRs, CI, authorized publishing | Installed CLI is not proof of authentication; read back writes. Follow [tracker rules](issue-tracker.md). |
 | Official docs/web search | Platform APIs and runtime contracts | Use primary sources and confirm installed-version parity separately. |
-| Native computer-use tools | Inspect Steer, interact with supported app surfaces, capture visual evidence | Follow the tool's access rules. A screenshot cannot prove correct request routing. |
+| Native computer-use tools | Inspect Herdly, interact with supported app surfaces, capture visual evidence | Follow the tool's access rules. A screenshot cannot prove correct request routing. |
 | Codex task tools | Inspect or coordinate existing tasks; create/fork/manage tasks when requested | A separate user-visible task differs from an internal subagent. |
 | Subagents | Independently scoped investigation or review | Delegate only when the user or applicable instructions request it; give concrete boundaries and reconcile findings. |
 | Automations | Requested reminders, monitors, or follow-ups | Use the provided scheduling tool; preserve notification intent. |

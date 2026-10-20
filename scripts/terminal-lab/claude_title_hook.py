@@ -1,11 +1,11 @@
-"""Lab stand-in for SteerHook's Claude --terminal-title behaviour (terminal-host live proofs).
+"""Lab stand-in for HerdlyHook's Claude --terminal-title behaviour (terminal-host live proofs).
 
 Usage (registered in the lab project's .claude/settings.json only):
   python3 -I claude_title_hook.py <events-dir>
 
 Records the hook event's session id, the terminal-host variables in its environment and the
-controlling tty of its ancestors, then, for SessionStart, prints the same OSC 2 title SteerHook
-emits (`Steer Claude <session id>`). Prints nothing else on stdout.
+controlling tty of its ancestors, then, for SessionStart, prints the same OSC 2 title HerdlyHook
+emits (`Herdly Claude <session id>`). Prints nothing else on stdout.
 """
 import json, os, subprocess, sys, time
 
@@ -43,7 +43,7 @@ def main():
     with open(os.path.join(events, f"{time.time_ns()}-{event}.json"), "w") as f:
         json.dump(record, f)
     if event == "SessionStart" and isinstance(session, str):
-        sys.stdout.write(json.dumps({"terminalSequence": f"\x1b]2;Steer Claude {session}\x07"}))
+        sys.stdout.write(json.dumps({"terminalSequence": f"\x1b]2;Herdly Claude {session}\x07"}))
 
 
 main()

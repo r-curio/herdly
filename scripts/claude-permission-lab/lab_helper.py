@@ -1,4 +1,4 @@
-"""Lab-only Claude Code hook for issue #71. Mirrors SteerHook's Claude approval file protocol for any tool.
+"""Lab-only Claude Code hook for issue #71. Mirrors HerdlyHook's Claude approval file protocol for any tool.
 
 Invoked by the lab project's .claude/settings.json only. Every hook event is logged as identifiers and
 keys (no prompt or file content). A PermissionRequest publishes <rid>.request plus a <rid>.live heartbeat,
