@@ -13,45 +13,80 @@ public enum HookEventListing {
     /// is unreadable or holds more than `maximumEntries` entries.
     ///
     /// Several readers list the same directories every scan, and a busy Claude directory holds
-    /// thousands of records, each needing its own creation-date lookup (#301). Adding, removing or
-    /// renaming an entry changes the directory's own stamp, and a file's creation date never
-    /// changes, so an unchanged stamp reuses the last listing. The stamp is taken before listing,
-    /// so a change during the listing shows up as a new stamp on the next call.
+    /// thousands of records, each needing its own creation-date lookup (#301). An unchanged
+    /// directory stamp reuses the last listing outright. Otherwise only names are read, and a
+    /// creation date is looked up only for an entry not seen before under the same inode: a file's
+    /// creation date never changes, and a name replaced by another file has a new inode. The stamp is
+    /// taken before listing, so a change during the listing shows up as a new stamp next call.
     public static func entries(in directory: URL, limit: Int = maximumEntries) -> [URL]? {
         let stamp = FileStamp(directory, followingLinks: true)
         let key = directory.standardizedFileURL.path
-        if let stamp, let cached = listings.cached(key, stamp: stamp) {
-            return cached.count <= limit ? cached : nil
+        let previous = listings.entry(key)
+        if let stamp, let previous, previous.stamp == stamp {
+            return previous.urls.count <= limit ? previous.urls : nil
         }
-        guard let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]),
-              urls.count <= limit else { return nil }
-        let dated: [(url: URL, created: Date)] = urls.map { ($0, created($0)) }
+        guard let names = names(in: directory), names.count <= limit else { return nil }
+        var dates: [String: (inode: UInt64, created: Date)] = [:]
+        var dated: [(url: URL, created: Date)] = []
+        dated.reserveCapacity(names.count)
+        for name in names {
+            let url = directory.appendingPathComponent(name.name, isDirectory: name.isDirectory)
+            let created: Date
+            if let known = previous?.dates[name.name], known.inode == name.inode {
+                created = known.created
+            } else {
+                created = Self.created(url)
+            }
+            dates[name.name] = (name.inode, created)
+            dated.append((url, created))
+        }
         let ordered = dated.sorted { left, right in
             left.created == right.created ? left.url.lastPathComponent < right.url.lastPathComponent
                 : left.created < right.created
         }.map(\.url)
-        if let stamp { listings.store(ordered, for: key, stamp: stamp) }
+        if let stamp { listings.store(ListingCache.Entry(stamp: stamp, urls: ordered, dates: dates), for: key) }
         return ordered
+    }
+
+    /// Top-level names with their inodes, `.` and `..` excluded; nil when the directory cannot be opened.
+    private static func names(in directory: URL) -> [(name: String, inode: UInt64, isDirectory: Bool)]? {
+        let handle = directory.withUnsafeFileSystemRepresentation { path in path.flatMap { opendir($0) } }
+        guard let handle else { return nil }
+        defer { closedir(handle) }
+        var result: [(name: String, inode: UInt64, isDirectory: Bool)] = []
+        while let entry = readdir(handle) {
+            let name = withUnsafePointer(to: entry.pointee.d_name) { pointer in
+                pointer.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+            }
+            guard name != ".", name != ".." else { continue }
+            result.append((name, UInt64(entry.pointee.d_ino), Int32(entry.pointee.d_type) == DT_DIR))
+        }
+        return result
     }
 
     private static let listings = ListingCache()
 
-    /// The last successful listing per directory and the stamp it was taken under. Unreadable and
-    /// oversized results are never kept, so they are retried on the next call.
+    /// The last successful listing per directory, the stamp it was taken under, and each entry's
+    /// inode and creation date. Unreadable and oversized results are never kept.
     private final class ListingCache: @unchecked Sendable {
-        // Invariant for `@unchecked Sendable`: `entries` is only touched while holding `lock`.
-        private let lock = NSLock()
-        private var entries: [String: (stamp: FileStamp, urls: [URL])] = [:]
-
-        func cached(_ key: String, stamp: FileStamp) -> [URL]? {
-            lock.lock(); defer { lock.unlock() }
-            guard let entry = entries[key], entry.stamp == stamp else { return nil }
-            return entry.urls
+        struct Entry {
+            let stamp: FileStamp
+            let urls: [URL]
+            let dates: [String: (inode: UInt64, created: Date)]
         }
 
-        func store(_ urls: [URL], for key: String, stamp: FileStamp) {
+        // Invariant for `@unchecked Sendable`: `entries` is only touched while holding `lock`.
+        private let lock = NSLock()
+        private var entries: [String: Entry] = [:]
+
+        func entry(_ key: String) -> Entry? {
             lock.lock(); defer { lock.unlock() }
-            entries[key] = (stamp, urls)
+            return entries[key]
+        }
+
+        func store(_ entry: Entry, for key: String) {
+            lock.lock(); defer { lock.unlock() }
+            entries[key] = entry
         }
     }
 

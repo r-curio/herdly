@@ -64,3 +64,31 @@ private func listingDirectory() throws -> URL {
     defer { try? FileManager.default.removeItem(at: root) }
     #expect(HookEventListing.entries(in: root) == [])
 }
+
+@Test func aRecordReplacedUnderTheSameNameIsDatedAfresh() throws {
+    let root = try listingDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let early = root.appendingPathComponent("early.json"), late = root.appendingPathComponent("late.json")
+    try Data("{}".utf8).write(to: early)
+    try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: 100)], ofItemAtPath: early.path)
+    try Data("{}".utf8).write(to: late)
+    try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: 200)], ofItemAtPath: late.path)
+    #expect(HookEventListing.entries(in: root)?.map(\.lastPathComponent) == ["early.json", "late.json"])
+
+    // An atomic rewrite puts a new file (new inode, new creation date) under the old name.
+    let replacement = root.appendingPathComponent("replacement.tmp")
+    try Data("{}".utf8).write(to: replacement)
+    try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: 300)], ofItemAtPath: replacement.path)
+    #expect(rename(replacement.path, early.path) == 0)
+    #expect(HookEventListing.entries(in: root)?.map(\.lastPathComponent) == ["late.json", "early.json"])
+}
+
+@Test func aListingKeepsHiddenEntriesAndMarksDirectories() throws {
+    let root = try listingDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("{}".utf8).write(to: root.appendingPathComponent(".hidden.json"))
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("folder"), withIntermediateDirectories: false)
+    let listed = try #require(HookEventListing.entries(in: root))
+    #expect(Set(listed.map(\.lastPathComponent)) == [".hidden.json", "folder"])
+    #expect(listed.first { $0.lastPathComponent == "folder" }?.hasDirectoryPath == true)
+}
