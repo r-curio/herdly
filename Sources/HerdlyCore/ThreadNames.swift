@@ -22,7 +22,14 @@ public enum ThreadNameReader {
     }
 
     /// Nil whenever the file is missing, not a regular file, a symlink, or over the size bound.
+    /// `read` is called on every scan; the file is parsed again only when it changes (#302).
     public static func read(_ url: URL) -> [UUID: String]? {
+        memo.value(of: url, read: readUncached)
+    }
+
+    private static let memo = StampedFileMemo<[UUID: String]?>()
+
+    private static func readUncached(_ url: URL) -> [UUID: String]? {
         guard let bytes = SafeFile.read(url, limit: limit) else { return nil }
         return parse(bytes)
     }

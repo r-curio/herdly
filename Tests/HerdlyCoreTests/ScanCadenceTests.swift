@@ -109,3 +109,53 @@ private func listingDirectory() throws -> URL {
     try add("c.json", at: 300)
     #expect(HookEventListing.entries(in: root)?.map(\.lastPathComponent) == ["b.json", "c.json", "d.json"])
 }
+
+@Test func anUnchangedFileIsParsedOnceAndAChangedOrReplacedOneAgain() throws {
+    let root = try listingDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("state.json")
+    try Data("one".utf8).write(to: file)
+    let memo = StampedFileMemo<String?>()
+    var reads = 0
+    func read(_ url: URL) -> String? { reads += 1; return (try? Data(contentsOf: url)).map { String(decoding: $0, as: UTF8.self) } }
+    #expect(memo.value(of: file, read: read) == "one")
+    #expect(memo.value(of: file, read: read) == "one")
+    #expect(reads == 1)
+    try Data("three".utf8).write(to: file)   // a rewrite changes size and time
+    #expect(memo.value(of: file, read: read) == "three")
+    let replacement = root.appendingPathComponent("next.tmp")
+    try Data("seven".utf8).write(to: replacement)
+    #expect(rename(replacement.path, file.path) == 0)   // an atomic replace changes the inode
+    #expect(memo.value(of: file, read: read) == "seven")
+    #expect(reads == 3)
+}
+
+@Test func aLinkOrMissingFileIsNeverKept() throws {
+    let root = try listingDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let target = root.appendingPathComponent("target"), link = root.appendingPathComponent("link")
+    try Data("x".utf8).write(to: target)
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+    let memo = StampedFileMemo<Int>()
+    var reads = 0
+    _ = memo.value(of: link) { _ in reads += 1; return 0 }
+    _ = memo.value(of: link) { _ in reads += 1; return 0 }
+    _ = memo.value(of: root.appendingPathComponent("missing")) { _ in reads += 1; return 0 }
+    #expect(reads == 3)
+}
+
+@Test func aListingsRecordsAreItsNewestJSONEntriesOldestFirst() throws {
+    let root = try listingDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    for (index, name) in ["a.json", "b.approval", ".json", "c.json"].enumerated() {
+        let url = root.appendingPathComponent(name)
+        try Data("{}".utf8).write(to: url)
+        try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: Double(100 + index))], ofItemAtPath: url.path)
+    }
+    let listing = try #require(HookEventListing.listing(in: root))
+    #expect(listing.entries.map(\.lastPathComponent) == ["a.json", "b.approval", ".json", "c.json"])
+    #expect(listing.records.map(\.lastPathComponent) == ["a.json", "c.json"])
+    #expect(Array(HookEventListing.newestRecords(listing.entries)) == Array(listing.records))
+    // A reused listing returns the same records.
+    #expect(HookEventListing.listing(in: root).map { Array($0.records) } == Array(listing.records))
+}

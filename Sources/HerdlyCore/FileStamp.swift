@@ -31,3 +31,26 @@ public struct FileStamp: Hashable, Sendable {
         isRegularFile = info.st_mode & S_IFMT == S_IFREG
     }
 }
+
+/// One parsed value per file, reused while the file's stamp is unchanged (#302). The stamp is taken
+/// without following links and before reading, so a replaced, linked or rewritten file is read
+/// again; anything but a regular file is never kept.
+public final class StampedFileMemo<Value: Sendable>: @unchecked Sendable {
+    // Invariant for `@unchecked Sendable`: `entries` is only touched while holding `lock`.
+    private let lock = NSLock()
+    private var entries: [String: (stamp: FileStamp, value: Value)] = [:]
+
+    public init() {}
+
+    public func value(of url: URL, read: (URL) -> Value) -> Value {
+        guard let stamp = FileStamp(url, followingLinks: false), stamp.isRegularFile else { return read(url) }
+        let key = url.standardizedFileURL.path
+        lock.lock()
+        let cached = entries[key]
+        lock.unlock()
+        if let cached, cached.stamp == stamp { return cached.value }
+        let value = read(url)
+        lock.lock(); entries[key] = (stamp, value); lock.unlock()
+        return value
+    }
+}
