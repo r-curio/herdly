@@ -111,6 +111,21 @@ public enum ClaudeConnectionStatus: Equatable, Sendable {
     case conflict(String)
 }
 
+extension ClaudeConnectionStatus {
+    public var isAwaitingRestart: Bool {
+        if case .configuredAwaitingRestart = self { return true }
+        return false
+    }
+
+    /// Whether Configure Claude would change anything. A root awaiting restart is already installed and
+    /// needs only a new session, so it offers Configure only when the plan has settings to write or the
+    /// usage choice differs from what is installed.
+    public func offersConfigure(requiresConfigure: Bool, usageMatches: Bool) -> Bool {
+        if requiresConfigure || !usageMatches { return true }
+        return self != .connected && !isAwaitingRestart
+    }
+}
+
 public enum ClaudeGhosttyStatus: Equatable, Sendable {
     case off
     case permissionRequired
@@ -893,7 +908,7 @@ public struct ClaudeSetupInstaller {
         case .intact: break
         }
         guard fileManager.fileExists(atPath: roots.eventsDirectory.path) else {
-            return .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Herdly's hooks.")
+            return .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Sessions already running may still report activity; restart them so Herdly can match their terminal tabs.")
         }
         let files: [URL]
         // The same listing bound as every other hook reader (`HookEventListing`): busy sessions keep
@@ -911,7 +926,7 @@ public struct ClaudeSetupInstaller {
             .sorted { $0.created < $1.created }.map(\.url)
             .contains(where: { validEvent($0, installationID: state.installationID, installedAt: state.installedAt, now: now) })
             ? .connected
-            : .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Existing sessions keep running without Herdly's hooks.")
+            : .configuredAwaitingRestart("Configured; start a new Claude session in this root to verify delivery. Sessions already running may still report activity; restart them so Herdly can match their terminal tabs.")
     }
 
     public func isInstallRecordValid(for roots: ClaudeSetupRoots) -> Bool {

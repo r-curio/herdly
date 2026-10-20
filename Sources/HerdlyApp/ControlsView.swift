@@ -647,7 +647,8 @@ private struct ClaudeAgentControls: View {
                         Text(rootSummary(root, isDefault: index == 0)).font(.subheadline).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 16)
-                    StatusBadge(title: root.status == .connected ? "Connected" : "Not ready",
+                    StatusBadge(title: root.status == .connected ? "Connected"
+                                    : root.status.isAwaitingRestart ? "Restart required" : "Not ready",
                                 color: root.status == .connected ? .green : .orange)
                 }
                 .padding(.horizontal, SettingsStyle.rowInset)
@@ -683,7 +684,7 @@ private struct ClaudeAgentControls: View {
                     }
                     Divider().padding(.horizontal, SettingsStyle.rowInset)
                     PreviewDisclosure(title: "Show setup changes") { previewText(root, plan: plan) }
-                    if plan.addsHooks, root.status == .connected || { if case .configuredAwaitingRestart = root.status { return true }; return false }() {
+                    if plan.addsHooks, root.status == .connected || root.status.isAwaitingRestart {
                         // A connected root missing newer Herdly hooks (such as file approvals) keeps working;
                         // those requests stay in Claude until the user reconfigures.
                         Divider().padding(.horizontal, SettingsStyle.rowInset)
@@ -704,7 +705,8 @@ private struct ClaudeAgentControls: View {
                         }
                         Button("Review Again", action: setup.refresh)
                             .accessibilityLabel("Review Claude setup for \(root.displayPath)")
-                        if root.status != .connected || plan.requiresConfigure || root.usageInstalled != setup.usageEnabled(for: root) {
+                        if root.status.offersConfigure(requiresConfigure: plan.requiresConfigure,
+                                                       usageMatches: root.usageInstalled == setup.usageEnabled(for: root)) {
                             Button("Configure Claude") { setup.configure(root) }
                                 .buttonStyle(.borderedProminent)
                                 .accessibilityLabel("Configure Claude for \(root.displayPath)")
