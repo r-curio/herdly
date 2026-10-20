@@ -366,3 +366,28 @@ func aDirectSessionWhoseLastHostNoLongerShowsItEnds(host: TerminalHost) throws {
                                      knownCLISessions: [fixture.session], otherHosts: [:])
     #expect(unread.endedSessions.isEmpty)
 }
+
+/// The candidate rules as first written over substrings, kept as the reference for the byte scan.
+private func referenceCandidatePIDs(_ processList: String) -> [Int32] {
+    processList.split(separator: "\n").compactMap { line in
+        let trimmed = line.drop { $0 == " " }
+        guard let space = trimmed.firstIndex(of: " "), let pid = Int32(trimmed[..<space]) else { return nil }
+        let arguments = trimmed[space...]
+        guard arguments.contains("codex"), !arguments.contains("app-server") else { return nil }
+        return pid
+    }
+}
+
+@Test func codexCandidateByteScanMatchesTheSubstringRulesOnEdgeLines() {
+    let lines = ["", " ", "12", "  12", "12 ", "  42 codex", "43 xcodexy", "44 codex app-server", "45 app-server codex",
+                 "codex 46", "+47 codex", "-48 codex", "99999999999 codex", "49 cod ex", "50 /Users/ünïcødé/codex",
+                 "51 CODEX", "52 codexapp-server", "   53    codex   ", "54\tcodex", "55 code", "56 /a/codex-tui --flag"]
+    var generator = SystemRandomNumberGenerator()
+    for _ in 0..<500 {
+        let count = Int.random(in: 0...8, using: &generator)
+        var list = (0..<count).map { _ in lines.randomElement(using: &generator)! }.joined(separator: "\n")
+        if Bool.random(using: &generator) { list += "\n" }
+        #expect(CodexCLIProcesses.candidatePIDs(processList: list) == referenceCandidatePIDs(list), "\(list.debugDescription)")
+    }
+    #expect(CodexCLIProcesses.candidatePIDs(processList: "") == [])
+}

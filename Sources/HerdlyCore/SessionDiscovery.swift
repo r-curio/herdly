@@ -74,16 +74,36 @@ extension CodexCLIProcesses {
     /// app-server: the ones whose ancestry may be walked. Loose on purpose, since an executable path
     /// may contain spaces; `hostReached` confirms each by its kernel-reported executable name.
     public static func candidatePIDs(processList: String) -> [Int32] {
-        processList.split(separator: "\n").compactMap { line in
-            let trimmed = line.drop { $0 == " " }
-            guard let space = trimmed.firstIndex(of: " "), let pid = Int32(trimmed[..<space]) else { return nil }
-            let arguments = trimmed[space...]
-            // Byte searches: these ASCII words are looked for in every process's arguments each scan,
-            // and the Unicode-aware `contains` dominated the process read (#302).
-            guard arguments.utf8.firstRange(of: "codex".utf8) != nil,
-                  arguments.utf8.firstRange(of: "app-server".utf8) == nil else { return nil }
-            return pid
+        // One pass over the bytes with `memchr`/`memmem`: the list holds every process's full
+        // arguments and is read every scan, and splitting it into substrings and searching each one
+        // cost more than everything else in the scan (#306). The rules are unchanged: leading spaces
+        // skipped, the pid is the text before the first space, and the rest must contain `codex` and
+        // not `app-server`.
+        var text = processList
+        return text.withUTF8 { bytes -> [Int32] in
+            guard let base = bytes.baseAddress else { return [] }
+            let raw = UnsafeRawPointer(base)
+            var pids: [Int32] = []
+            var start = 0
+            while start < bytes.count {
+                let end = memchr(raw + start, 0x0A, bytes.count - start).map { UnsafeRawPointer($0) - raw } ?? bytes.count
+                defer { start = end + 1 }
+                var first = start
+                while first < end, bytes[first] == 0x20 { first += 1 }
+                guard let space = memchr(raw + first, 0x20, end - first).map({ UnsafeRawPointer($0) - raw }),
+                      contains("codex", in: raw, from: space, to: end),
+                      !contains("app-server", in: raw, from: space, to: end),
+                      let pid = Int32(String(decoding: UnsafeBufferPointer(rebasing: bytes[first..<space]), as: UTF8.self))
+                else { continue }
+                pids.append(pid)
+            }
+            return pids
         }
+    }
+
+    private static func contains(_ needle: StaticString, in raw: UnsafeRawPointer, from: Int, to: Int) -> Bool {
+        to - from >= needle.utf8CodeUnitCount
+            && memmem(raw + from, to - from, needle.utf8Start, needle.utf8CodeUnitCount) != nil
     }
 
     /// `ps -axo pid=,args=` output without its pid column, for `isRunning`.
