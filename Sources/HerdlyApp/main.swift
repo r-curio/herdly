@@ -1559,7 +1559,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // App identity only: no window contents, task titles, or accessibility queries.
         // App activation affects notification delivery, never the notch's visibility.
         let codexForeground = previewMode == nil ? desktopAdapter.codexForeground() : false
-        desktopForeground = codexForeground == true
+        // Each published value below is written only when it changes: an unchanged write still makes
+        // SwiftUI re-render and lay out the notch, which cost more than the scans on every tick (#301).
+        if desktopForeground != (codexForeground == true) { desktopForeground = codexForeground == true }
         // Desktop decision transport is unproven: release every desktop request at once.
         if previewMode == nil {
             queue.items.compactMap(\.request)
@@ -1586,7 +1588,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         freshAgentQuestionIDs.formIntersection(liveAgentIDs)
         let freshRequests = agentItems.filter { freshAgentRequestIDs.contains($0.id)
             && ($0.kind == .actionableApproval || $0.kind == .handedBackApproval) }
-        var firstReminderPresentation = reminderPresentation.update(codexForeground: !agentItems.contains {
+        var reminder = reminderPresentation
+        var firstReminderPresentation = reminder.update(codexForeground: !agentItems.contains {
             $0.kind == .actionableApproval || $0.kind == .handedBackApproval
         }, hovering: interacting,
                                                                     now: ProcessInfo.processInfo.systemUptime)
@@ -1651,7 +1654,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             hovering: interacting,
             now: ProcessInfo.processInfo.systemUptime
         )
-        completionPresentation = nextCompletionPresentation
+        if completionPresentation != nextCompletionPresentation { completionPresentation = nextCompletionPresentation }
 
         // A question pops under the same away-from-Codex rule as a completion; Ghostty focus is
         // not consulted because the question stays pending until Codex records the answer.
@@ -1666,13 +1669,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         } else {
             canPresentQuestion ? codexForeground : true
         }
-        var firstQuestionPresentation = questionPresentation.update(
+        var question = questionPresentation
+        var firstQuestionPresentation = question.update(
             codexForeground: questionForegroundGate,
             hovering: interacting, now: ProcessInfo.processInfo.systemUptime)
         let selectedReminder = selectedFreshAgent.flatMap { id in freshRequests.first { $0.id == id } }
-        if selectedReminder != nil, reminderPresentation.presented, !firstReminderPresentation {
-            reminderPresentation.enqueue()
-            firstReminderPresentation = reminderPresentation.update(
+        if selectedReminder != nil, reminder.presented, !firstReminderPresentation {
+            reminder.enqueue()
+            firstReminderPresentation = reminder.update(
                 codexForeground: false, hovering: interacting, now: ProcessInfo.processInfo.systemUptime)
         }
         if firstReminderPresentation, let id = selectedReminder?.id {
@@ -1684,20 +1688,22 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             firstCompletionPresentation = nextCompletionPresentation.update(
                 codexForeground: completionForegroundGate, hovering: interacting,
                 now: ProcessInfo.processInfo.systemUptime)
-            completionPresentation = nextCompletionPresentation
+            if completionPresentation != nextCompletionPresentation { completionPresentation = nextCompletionPresentation }
         }
         if firstCompletionPresentation, let id = selectedCompletion?.id {
             freshAgentCompletionIDs.remove(id)
         }
-        if selectedQuestion != nil, questionPresentation.presented, !firstQuestionPresentation {
-            questionPresentation.enqueue()
-            firstQuestionPresentation = questionPresentation.update(
+        if selectedQuestion != nil, question.presented, !firstQuestionPresentation {
+            question.enqueue()
+            firstQuestionPresentation = question.update(
                 codexForeground: questionForegroundGate, hovering: interacting,
                 now: ProcessInfo.processInfo.systemUptime)
         }
         if firstQuestionPresentation, let id = selectedQuestion?.id {
             freshAgentQuestionIDs.remove(id)
         }
+        if reminderPresentation != reminder { reminderPresentation = reminder }
+        if questionPresentation != question { questionPresentation = question }
         let selectedPresentationWasFresh = (selectedReminder != nil && firstReminderPresentation)
             || (selectedCompletion != nil && firstCompletionPresentation)
             || (selectedQuestion != nil && firstQuestionPresentation)
@@ -1712,11 +1718,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         case "expanded", "empty-expanded", "empty-not-connected": presentationMode = .queue
         case "collapsed", "empty-collapsed": presentationMode = .collapsed
         case _ where Self.spotlightPreviewModes.contains(previewMode ?? ""):
-            presentationMode = spotlightItem.map(NotchPresentationMode.agentSpotlight) ?? .collapsed
+            let mode = spotlightItem.map(NotchPresentationMode.agentSpotlight) ?? .collapsed
+            if presentationMode != mode { presentationMode = mode }
         default:
-            presentationMode = resolvedPresentation
+            if presentationMode != resolvedPresentation { presentationMode = resolvedPresentation }
         }
-        expanded = presentationMode.expanded
+        if expanded != presentationMode.expanded { expanded = presentationMode.expanded }
         let actionableApproval = agentItems.contains { $0.kind == .actionableApproval }
             || queue.items.contains { $0.request?.state == .actionable }
         scheduleRefreshTimer(RefreshCadence.interval(presenting: presentationMode != .collapsed,

@@ -92,3 +92,20 @@ private func listingDirectory() throws -> URL {
     #expect(Set(listed.map(\.lastPathComponent)) == [".hidden.json", "folder"])
     #expect(listed.first { $0.lastPathComponent == "folder" }?.hasDirectoryPath == true)
 }
+
+@Test func recordsAddedAfterTheNewestAreAppendedInOrderAndRemovalsDropOut() throws {
+    let root = try listingDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    func add(_ name: String, at seconds: Double) throws {
+        let url = root.appendingPathComponent(name)
+        try Data("{}".utf8).write(to: url)
+        try FileManager.default.setAttributes([.creationDate: Date(timeIntervalSince1970: seconds)], ofItemAtPath: url.path)
+    }
+    try add("a.json", at: 100)
+    try add("b.json", at: 200)
+    #expect(HookEventListing.entries(in: root)?.map(\.lastPathComponent) == ["a.json", "b.json"])
+    try FileManager.default.removeItem(at: root.appendingPathComponent("a.json"))
+    try add("d.json", at: 400)
+    try add("c.json", at: 300)
+    #expect(HookEventListing.entries(in: root)?.map(\.lastPathComponent) == ["b.json", "c.json", "d.json"])
+}

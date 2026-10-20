@@ -1,5 +1,5 @@
 /// One test completion. App visibility never clears queue state.
-public struct Attention {
+public struct Attention: Equatable {
     public private(set) var pending: Bool
     public private(set) var presented: Bool
     public private(set) var expanded = false

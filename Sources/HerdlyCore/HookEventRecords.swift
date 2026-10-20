@@ -26,26 +26,46 @@ public enum HookEventListing {
             return previous.urls.count <= limit ? previous.urls : nil
         }
         guard let names = names(in: directory), names.count <= limit else { return nil }
-        var dates: [String: (inode: UInt64, created: Date)] = [:]
-        var dated: [(url: URL, created: Date)] = []
-        dated.reserveCapacity(names.count)
+        var dates: [String: Dated] = [:]
+        dates.reserveCapacity(names.count)
+        var added: [Dated] = []
         for name in names {
-            let url = directory.appendingPathComponent(name.name, isDirectory: name.isDirectory)
-            let created: Date
             if let known = previous?.dates[name.name], known.inode == name.inode {
-                created = known.created
+                dates[name.name] = known
             } else {
-                created = Self.created(url)
+                let url = directory.appendingPathComponent(name.name, isDirectory: name.isDirectory)
+                let entry = Dated(name: name.name, url: url, inode: name.inode, created: Self.created(url))
+                dates[name.name] = entry
+                added.append(entry)
             }
-            dates[name.name] = (name.inode, created)
-            dated.append((url, created))
         }
-        let ordered = dated.sorted { left, right in
-            left.created == right.created ? left.url.lastPathComponent < right.url.lastPathComponent
-                : left.created < right.created
-        }.map(\.url)
-        if let stamp { listings.store(ListingCache.Entry(stamp: stamp, urls: ordered, dates: dates), for: key) }
+        // The usual change: records were removed, or added after the newest one. The kept entries
+        // are still in order, so only the new ones are sorted.
+        let kept = previous?.order.filter { name in
+            guard let entry = dates[name] else { return false }
+            return previous?.dates[name]?.inode == entry.inode
+        } ?? []
+        let order: [String]
+        if let newest = kept.last.flatMap({ dates[$0]?.created }), added.allSatisfy({ $0.created > newest }) {
+            order = kept + added.sorted(by: Dated.older).map(\.name)
+        } else {
+            order = dates.values.sorted(by: Dated.older).map(\.name)
+        }
+        let ordered = order.compactMap { dates[$0]?.url }
+        if let stamp { listings.store(ListingCache.Entry(stamp: stamp, urls: ordered, order: order, dates: dates), for: key) }
         return ordered
+    }
+
+    /// One listed entry with the inode its creation date was read under.
+    private struct Dated {
+        let name: String
+        let url: URL
+        let inode: UInt64
+        let created: Date
+
+        static func older(_ left: Dated, _ right: Dated) -> Bool {
+            left.created == right.created ? left.name < right.name : left.created < right.created
+        }
     }
 
     /// Top-level names with their inodes, `.` and `..` excluded; nil when the directory cannot be opened.
@@ -72,7 +92,9 @@ public enum HookEventListing {
         struct Entry {
             let stamp: FileStamp
             let urls: [URL]
-            let dates: [String: (inode: UInt64, created: Date)]
+            /// `urls`' names, in the same order.
+            let order: [String]
+            let dates: [String: Dated]
         }
 
         // Invariant for `@unchecked Sendable`: `entries` is only touched while holding `lock`.
@@ -92,7 +114,8 @@ public enum HookEventListing {
 
     /// The newest `.json` hook records among `entries`, still oldest first.
     public static func newestRecords(_ entries: [URL]) -> ArraySlice<URL> {
-        entries.filter { $0.pathExtension == "json" }.suffix(maximumRecords)
+        // A name suffix check: `pathExtension` parses each URL, and listings hold thousands (#301).
+        entries.filter { $0.lastPathComponent.hasSuffix(".json") && $0.lastPathComponent != ".json" }.suffix(maximumRecords)
     }
 
     static func created(_ url: URL) -> Date {
