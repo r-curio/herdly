@@ -129,3 +129,31 @@ private func approvalRow(_ session: AgentSessionIdentity, readAt: Double) -> Age
     queue.apply(.outcome(AgentOutcome(session: codexCLI, turn: "t2", status: .finished, arrivedAt: 100)))
     #expect(queue.items(at: 100).first.flatMap { ApprovalCardKindWord($0, decidable: true) } == nil)
 }
+
+@Test func pastTheDeadlineADecidableCardKeepsApproveAndDenyDisabledAndItsPillUntilTheHandBack() throws {
+    // Read live at 129.5; the card's clock reaches the deadline before the hand-back is recorded.
+    let row = try #require(approvalRow(codexCLI, readAt: 129.5))
+    let live = try #require(ApprovalCardReading(row, decidable: true, now: 129.5))
+    #expect(live.showsDecision && live.decisionEnabled && live.countdown?.seconds == 1)
+    #expect(live.kindWord == .approve)
+
+    for now in [130.0, 131, 200] {
+        let expired = try #require(ApprovalCardReading(row, decidable: true, now: now))
+        // Still drawn, never pressable, no countdown, and the pill stays until the hand-back.
+        #expect(expired.showsDecision && !expired.decisionEnabled)
+        #expect(expired.countdown == nil)
+        #expect(expired.kindWord == .approve)
+        #expect(expired.openTitle == "Open")
+    }
+
+    // Once the hand-back is recorded: only Open, named for the agent.
+    let handedBack = try #require(approvalRow(codexCLI, readAt: 130))
+    let after = try #require(ApprovalCardReading(handedBack, decidable: true, now: 130))
+    #expect(!after.showsDecision && !after.decisionEnabled)
+    #expect(after.kindWord == .exception(.handedBack) && after.openTitle == "Open in Codex")
+
+    // A source that cannot decide here never draws Approve or Deny, live or not, and has no pill.
+    let native = try #require(ApprovalCardReading(row, decidable: false, now: 120))
+    #expect(!native.showsDecision && !native.decisionEnabled && native.kindWord == nil)
+    #expect(native.countdown?.seconds == 10)
+}

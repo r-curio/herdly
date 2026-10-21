@@ -2170,15 +2170,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         decide(request, as: decision)
     }
 
-    /// Whether this approval row takes Approve and Deny from Herdly right now (#320): a live Codex
-    /// CLI request still in the queue that `ApprovalDecisionPolicy` accepts, or a Claude request with
-    /// a verified live helper (`canDecideAgent`). The same checks guard `decideAgent`, which re-reads
-    /// them at the click, so a card never offers a decision its button would refuse.
+    /// Whether this approval's source takes Approve and Deny from Herdly at all (#320): a Codex CLI
+    /// request the queue still holds as actionable, or a Claude request with a verified live helper
+    /// route. It has no deadline and reads no clock, so a card drawn between the deadline and the
+    /// recorded hand-back keeps its controls in place; `ApprovalCardReading` disables them from the
+    /// card's own clock. Display only: `decideAgent` still refuses anything past its deadline
+    /// (`ApprovalDecisionPolicy.accepts`, `canDecideAgent`).
     func canDecide(_ item: AgentAttentionItem) -> Bool {
         guard item.kind == .actionableApproval, let approval = item.approval else { return false }
-        if approval.identity.session.source == .claude { return canDecideAgent(approval) }
-        guard let request = codexCLIRequest(for: approval) else { return false }
-        return ApprovalDecisionPolicy.accepts(request, decision: .allowOnce, now: Date().timeIntervalSince1970)
+        if approval.identity.session.source == .claude { return hasClaudeDecisionRoute(approval) }
+        return codexCLIRequest(for: approval)?.state == .actionable
     }
 
     /// The queue's own copy of a Codex CLI approval, by its request id; nil for any other source.
@@ -2189,24 +2190,36 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return queue.items.compactMap(\.request).first { $0.id == requestID }
     }
 
+    /// A Claude approval Herdly may decide now: a verified live route (`hasClaudeDecisionRoute`)
+    /// and neither the request's nor its receipt's deadline passed.
     func canDecideAgent(_ approval: AgentApproval) -> Bool {
+        let now = Date().timeIntervalSince1970
+        guard approval.expiresAt > now, hasClaudeDecisionRoute(approval),
+              let requestID = approval.hookRequestID,
+              let receipt = verifiedClaudeApprovalReceipts[requestID],
+              receipt.expiresAt > now else { return false }
+        return true
+    }
+
+    /// The deadline-free part of `canDecideAgent`: an actionable Claude CLI request whose helper is
+    /// live, whose root is connected, with no decision pending, and with a receipt verified for this
+    /// exact root and installation.
+    private func hasClaudeDecisionRoute(_ approval: AgentApproval) -> Bool {
         guard approval.identity.session.source == .claude,
               approval.identity.session.surface == .cli,
               approval.state == .actionable,
-              approval.expiresAt > Date().timeIntervalSince1970,
               let requestID = approval.hookRequestID,
               liveClaudeApprovalIDs.contains(requestID),
               let root = claude.roots.first(where: { $0.url.standardizedFileURL.path == approval.identity.session.sourceScope }),
               case .connected = root.status,
               !root.eventsPath.isEmpty,
               !pendingClaudeApprovalDecisions.contains(requestID),
-              let receipt = verifiedClaudeApprovalReceipts[requestID],
+              verifiedClaudeApprovalReceipts[requestID] != nil,
               let installationID = root.plan?.installationID,
               verifiedClaudeApprovalRoots[requestID] == claudeApprovalRootKey(
                   sourceScope: approval.identity.session.sourceScope,
                   events: URL(fileURLWithPath: root.eventsPath, isDirectory: true),
-                  installationID: installationID),
-              receipt.expiresAt > Date().timeIntervalSince1970 else {
+                  installationID: installationID) else {
             return false
         }
         return true

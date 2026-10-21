@@ -73,3 +73,30 @@ public enum ApprovalCardKindWord: Equatable, Sendable {
         }
     }
 }
+
+/// Everything one approval card draws at the card's own `now` (#320), from where the request stands
+/// (`ApprovalCardStage`, which alone reads the deadline) and `decidable`: whether this source takes a
+/// decision from Herdly at all, a rule with no deadline in it. Past the deadline a decidable card
+/// keeps Approve and Deny in place but disabled, and its "Approve" pill, until the hand-back is
+/// recorded. Display only: the decide paths keep their own deadline checks.
+public struct ApprovalCardReading: Equatable, Sendable {
+    public let stage: ApprovalCardStage
+    public let kindWord: ApprovalCardKindWord?
+    /// Approve and Deny are drawn.
+    public let showsDecision: Bool
+    /// Approve and Deny can be pressed.
+    public let decisionEnabled: Bool
+    public let openTitle: String
+
+    public var countdown: ApprovalCountdown? { stage.countdown }
+
+    /// Nil for every row that is not an approval.
+    public init?(_ item: AgentAttentionItem, decidable: Bool, now: Double) {
+        guard let stage = ApprovalCardStage(item, now: now) else { return nil }
+        self.stage = stage
+        kindWord = ApprovalCardKindWord(item, decidable: decidable)
+        showsDecision = decidable && stage.showsDecisionControls
+        decisionEnabled = showsDecision && stage.offersDecision
+        openTitle = stage.openTitle(for: item.session.source)
+    }
+}

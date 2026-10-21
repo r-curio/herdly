@@ -642,6 +642,12 @@ struct ApprovalCommandBox: View {
     }
 }
 
+/// What a single approval card's header adds after the place (#320): its kind word, if any, and then
+/// always its source.
+struct ApprovalCardHeader {
+    let kind: ApprovalCardKindWord?
+}
+
 /// A single approval card's kind word (#320): "Approve" in a well pill while it can be decided here,
 /// then the queue's own "Handed back". The row heading already speaks the state.
 struct ApprovalKindWordView: View {
@@ -1147,7 +1153,8 @@ struct Notch: View {
                 }
             }
             if item.session.source == .claude {
-                if item.kind == .actionableApproval, let approval = item.approval, !model.canDecideAgent(approval) {
+                // `decidable` has no deadline, so this line does not flicker on at the deadline itself.
+                if item.kind == .actionableApproval, !decidable {
                     Text("Claude's native permission prompt remains available.")
                         .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
                 }
@@ -1163,27 +1170,28 @@ struct Notch: View {
                     approvalOpenControl(item, stage: .handedBack, subject: subject, codexOpen: codexOpen)
                 }
             } else {
-                // `decidable` (`Companion.canDecide`) is read when the card renders; the per-second
-                // clock below only ever narrows it (at the deadline Approve and Deny disable), and the
-                // decide path re-checks the request before writing anything.
+                // `decidable` (`Companion.canDecide`) has no deadline; the card's own clock alone
+                // disables Approve and Deny at the deadline (`ApprovalCardReading`), and the decide
+                // path re-checks the request, deadline included, before writing anything.
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    let stage = ApprovalCardStage(item, now: context.date.timeIntervalSince1970) ?? .expired
-                    VStack(alignment: .leading, spacing: 10) {
-                        if let countdown = stage.countdown { ApprovalCountdownRow(countdown: countdown) }
-                        HStack(spacing: 6) {
-                            if decidable && stage.showsDecisionControls, let approval = item.approval {
-                                let request = "\(item.session.source.displayName) \(Self.requestKind(approval)) request"
-                                NotchButton(title: "Approve", emphasized: true) { model.decideAgent(approval, as: .allowOnce) }
-                                    .disabled(!stage.offersDecision)
-                                    .accessibilityLabel("Approve this request once: \(subject)")
-                                    .accessibilityHint("Approves this \(request) once.")
-                                NotchButton(title: "Deny") { model.decideAgent(approval, as: .deny) }
-                                    .disabled(!stage.offersDecision)
-                                    .accessibilityLabel("Deny: \(subject)")
-                                    .accessibilityHint("Denies this \(request).")
+                    if let reading = ApprovalCardReading(item, decidable: decidable, now: context.date.timeIntervalSince1970) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if let countdown = reading.countdown { ApprovalCountdownRow(countdown: countdown) }
+                            HStack(spacing: 6) {
+                                if reading.showsDecision, let approval = item.approval {
+                                    let request = "\(item.session.source.displayName) \(Self.requestKind(approval)) request"
+                                    NotchButton(title: "Approve", emphasized: true) { model.decideAgent(approval, as: .allowOnce) }
+                                        .disabled(!reading.decisionEnabled)
+                                        .accessibilityLabel("Approve this request once: \(subject)")
+                                        .accessibilityHint("Approves this \(request) once.")
+                                    NotchButton(title: "Deny") { model.decideAgent(approval, as: .deny) }
+                                        .disabled(!reading.decisionEnabled)
+                                        .accessibilityLabel("Deny: \(subject)")
+                                        .accessibilityHint("Denies this \(request).")
+                                }
+                                Spacer(minLength: 6)
+                                approvalOpenControl(item, stage: reading.stage, subject: subject, codexOpen: codexOpen)
                             }
-                            Spacer(minLength: 6)
-                            approvalOpenControl(item, stage: stage, subject: subject, codexOpen: codexOpen)
                         }
                     }
                 }
@@ -1557,8 +1565,8 @@ struct Notch: View {
                     } else {
                         cardOpener(item) {
                             headerLine(item, folded: folded, working: working, earlierOpen: earlierOpen, countdown: nil,
-                                       cardHeader: spotlit && approvalRow,
-                                       cardKind: spotlit ? ApprovalCardKindWord(item, decidable: decidable) : nil)
+                                       card: spotlit && approvalRow
+                                           ? ApprovalCardHeader(kind: ApprovalCardKindWord(item, decidable: decidable)) : nil)
                         }
                     }
                 }
@@ -1764,13 +1772,13 @@ struct Notch: View {
 
     /// A non-question row's heading line (D17): sprite, name, dim "· place" (it truncates first),
     /// then at most one word or a live approval's "Ns left", then the age lane. A single approval
-    /// card's header (`cardHeader`, #320) says its kind instead: `cardKind` ("Approve" while it can be
-    /// decided here, or "Handed back"), then the dim source ("CLI", "Claude"); queue rows keep D17 and
-    /// name neither. `showsAge` false
-    /// leaves the age lane to the caller, which puts a row note's Open before it.
+    /// card's header (`card`, #320) says its kind instead ("Approve" while it can be decided here,
+    /// "Handed back", or none), then the dim source ("CLI", "Claude"); queue rows keep D17 and name
+    /// neither. With `showsAge` false the caller draws the age lane, putting a row note's Open
+    /// before it.
     private func headerLine(_ item: AgentAttentionItem, folded: Bool, working: Bool, earlierOpen: Binding<Bool>,
-                            countdown: ApprovalCountdown?, cardHeader: Bool = false,
-                            cardKind: ApprovalCardKindWord? = nil, showsAge: Bool = true) -> some View {
+                            countdown: ApprovalCountdown?, card: ApprovalCardHeader? = nil,
+                            showsAge: Bool = true) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if folded {
                 earlierToggle(item, open: earlierOpen)
@@ -1782,8 +1790,8 @@ struct Notch: View {
                 }
                 if let countdown {
                     SecondsLeftPill(countdown: countdown)
-                } else if cardHeader {
-                    if let cardKind { ApprovalKindWordView(word: cardKind) }
+                } else if let card {
+                    if let kind = card.kind { ApprovalKindWordView(word: kind) }
                     Text(QueueRowPresentation.cardSource(item.session))
                         .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
                         .lineLimit(1).fixedSize()
@@ -1912,15 +1920,11 @@ struct Notch: View {
             .textSelection(.enabled)
     }
 
-    /// The kind of request for VoiceOver hints: "permission" for Codex; for Claude the action the row
-    /// shows ("Edit file"), lowercased, or "Bash".
+    /// The kind of request for VoiceOver hints: "permission" for Codex; for Claude the action the
+    /// card shows ("Edit file"), lowercased, "Bash", or "permission" when it named none.
     static func requestKind(_ approval: AgentApproval) -> String {
-        approval.identity.session.source == .claude ? claudeRequestKind(approval) : "permission"
-    }
-
-    /// The kind of Claude request for VoiceOver: the action the row shows ("Edit file"), lowercased, or "Bash".
-    static func claudeRequestKind(_ approval: AgentApproval) -> String {
-        guard let action = approval.details?.action, !action.isEmpty else { return "permission" }
+        guard approval.identity.session.source == .claude,
+              let action = approval.details?.action, !action.isEmpty else { return "permission" }
         return action == "Bash" ? action : action.lowercased()
     }
 
