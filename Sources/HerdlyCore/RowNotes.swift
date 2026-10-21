@@ -18,6 +18,9 @@ public enum RowNote: Equatable, Sendable {
     /// session; the session should now show the next one (#321). Recorded only for a key Herdly
     /// reports sent, and only for a question.
     case keySent(question: Int, of: Int)
+    /// A reply sent from a result card never left Herdly (#323); the user replies in the agent, so
+    /// the row offers Open. Recorded only from the card's own reply progress (`RowNote.reply`).
+    case replyNotDelivered(AgentSource)
 
     public var text: String {
         switch self {
@@ -27,11 +30,17 @@ public enum RowNote: Equatable, Sendable {
         case .notDelivered: return "Not delivered · answer in Claude"
         case .awaitingCodex: return "Sent, waiting for Codex"
         case let .keySent(question, count): return "Sent \(question + 1) of \(count), on question \(question + 2)"
+        case let .replyNotDelivered(agent): return "Not delivered · reply in \(agent.displayName)"
         }
     }
 
     /// Whether the row offers Open beside the note.
-    public var offersOpen: Bool { self == .notDelivered }
+    public var offersOpen: Bool {
+        switch self {
+        case .notDelivered, .replyNotDelivered: true
+        default: false
+        }
+    }
 }
 
 /// One change to a request's row note.
@@ -122,6 +131,7 @@ public struct RowNotes: Equatable, Sendable {
         guard id.isRequest, pending.contains(id), !cleared.contains(id) else { return false }
         if note == .approvalReceived, case .question = id { return false }
         if case .keySent = note, case .approval = id { return false }
+        if case .replyNotDelivered = note { return false }
         notes[id] = note
         return true
     }

@@ -281,8 +281,14 @@ private struct AgentSpotlight: Equatable, Sendable {
 public struct CompletionPreview: Equatable, Sendable {
     public static let maximumCharacters = 600
     public static let maximumLines = 5
+    /// The most of the message "Show all" keeps (#323); longer text is cut and the card says so.
+    public static let maximumFullCharacters = 20_000
     public let text: String
     public let truncated: Bool
+    /// The whole message for "Show all", only when `text` was shortened; at most
+    /// `maximumFullCharacters`, and `fullShortened` when even that cut it. Transient like `text`.
+    public let full: String?
+    public let fullShortened: Bool
 
     public init?(_ source: String) {
         let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \Character.isNewline)
@@ -298,6 +304,8 @@ public struct CompletionPreview: Equatable, Sendable {
         }
         text = wasTruncated ? value.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) + "…" : value
         truncated = wasTruncated
+        full = wasTruncated ? String(normalized.prefix(Self.maximumFullCharacters)) : nil
+        fullShortened = wasTruncated && normalized.count > Self.maximumFullCharacters
     }
 }
 
