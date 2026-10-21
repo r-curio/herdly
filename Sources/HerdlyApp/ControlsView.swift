@@ -410,7 +410,7 @@ private struct SettingsCard<Content: View>: View {
     }
 }
 
-/// A section header (13pt bold) aligned with the row text, with room above it for the previous footer.
+/// A section header (13pt bold) aligned with the row text, with room above it for the previous section.
 private struct SettingsHeader: View {
     let title: String
     init(_ title: String) { self.title = title }
@@ -420,18 +420,6 @@ private struct SettingsHeader: View {
             .padding(.horizontal, SettingsStyle.rowInset)
             .padding(.top, 18)
             .accessibilityAddTraits(.isHeader)
-    }
-}
-
-/// A section footer: 11pt secondary text explaining the section above.
-private struct SettingsFooter: View {
-    let text: String
-    init(_ text: String) { self.text = text }
-
-    var body: some View {
-        Text(text).font(.subheadline).foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, SettingsStyle.rowInset)
     }
 }
 
@@ -1540,20 +1528,21 @@ private struct NotchControls: View {
                                     options: [(StripLeftWing.spritesAndCount, "Sprites and count"), (StripLeftWing.countOnly, "Count only"), (StripLeftWing.none, "None")])
                 }
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
+                // Only the control is disabled on the MacBook notch, so the title stays readable and
+                // the row's hover text still explains why.
                 SettingsRow(title: "Center label", detail: nil) {
                     SlidingSegments(title: "Center label", selection: binding(\.centerLabel),
                                     options: [(StripCenterLabel.taskName, "Task name"), (StripCenterLabel.sessionName, "Session name"), (StripCenterLabel.off, "Off")])
+                        .disabled(profile == .macBookNotch)
                 }
-                .disabled(profile == .macBookNotch)
+                .contentShape(Rectangle())
+                .help("Text in the middle of the strip naming the top item. External displays only; on a MacBook the camera covers that space.")
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
                 SettingsRow(title: "Usage bars", detail: nil) {
                     SlidingSegments(title: "Usage bars", selection: binding(\.usage),
                                     options: [(UsageDisplay.compact, "Compact"), (UsageDisplay.weeklyOnly, "Weekly only"), (UsageDisplay.hidden, "Hidden")])
                 }
             }
-            SettingsFooter(profile == .macBookNotch
-                ? "These settings apply to the MacBook notch. The camera housing covers the center, so Center label is set under External display."
-                : "These settings apply to external displays. The center label widens the strip to make room for it.")
 
             SettingsHeader("Sprite")
             SettingsCard {
@@ -1581,6 +1570,15 @@ private struct NotchControls: View {
                                     options: [(QueueSort.needsAttention, "By need"), (QueueSort.lastUpdate, "Newest first")])
                 }
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
+                SettingsRow(title: "After each name", detail: nil) {
+                    FormMenu(title: "After each name", selection: binding(\.labelFormat),
+                             options: [(.repoAtBranch, "Repo @ branch"), (.repoOnly, "Repo"), (.branchOnly, "Branch")])
+                }
+                PlaceSampleRow(sprite: appearance.sprite, format: appearance.labelFormat, reduceMotion: model.reduceMotion)
+                    .animation(SettingsMotion.curve(reduceMotion: model.reduceMotion), value: appearance.labelFormat)
+                    .padding(.horizontal, SettingsStyle.rowInset)
+                    .padding(.bottom, 10)
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
                 SettingsRow(title: "Group by", detail: nil) {
                     FormMenu(title: "Group by", selection: binding(\.grouping),
                              options: [(.none, "None"), (.state, "State"), (.agent, "Agent"), (.project, "Project")])
@@ -1592,7 +1590,6 @@ private struct NotchControls: View {
                                        (.twentyMinutes, "20 minutes"), (.never, "Never")])
                 }
             }
-            SettingsFooter("Panel width sets how far the open list widens past the strip; it never runs past the display's edges. Live approvals always stay first, soonest deadline first, then waiting questions. Newest first orders everything else by its latest update. Older completions stay listed until you dismiss or open them.")
         }
     }
 }
@@ -1656,6 +1653,49 @@ private struct NotchPreview: View {
         .padding(.horizontal, 14)
         .frame(width: 340, height: 28)
         .background(.black, in: UnevenRoundedRectangle(bottomLeadingRadius: 12, bottomTrailingRadius: 12, style: .continuous))
+    }
+}
+
+/// A sample queue row under "After each name": the chosen sprite idle in the first session colour,
+/// a fixed title, then the place in the chosen format. It follows the Paper artboard, not the
+/// notch's row header: system 12pt text (#F5F5F7 title, #8F8F8F place) on a black well. Display only.
+private struct PlaceSampleRow: View {
+    let sprite: SpriteKind
+    let format: QueueLabelFormat
+    let reduceMotion: Bool
+
+    private static let sampleTitle = "Fix flaky tests"
+    /// The sample's title colour, #F5F5F7; the notch has no token this bright.
+    private static let titleColor = Color(red: 0.961, green: 0.961, blue: 0.969)
+
+    /// The place in the chosen format, or nil when the format shows nothing.
+    private var place: String? {
+        QueueRowPresentation.place(directory: "/Users/you/code/herdly", branch: "main", format: format)
+    }
+
+    /// What follows the title on screen ("· herdly @ main") and the matching VoiceOver label, from
+    /// the same place so the two never disagree.
+    private var placeSuffix: String { place.map { " · \($0)" } ?? "" }
+    private var spokenLabel: String {
+        "Sample row: \(Self.sampleTitle)" + (place.map { ", \($0)" } ?? "")
+    }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Sprite(kind: sprite, working: false, reduceMotion: reduceMotion, color: 0)
+            Text("\(Text(Self.sampleTitle).foregroundStyle(Self.titleColor))\(Text(placeSuffix).foregroundStyle(NotchStyle.text))")
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .contentTransition(.opacity)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30)
+        .background(NotchStyle.ground, in: .rect(cornerRadius: 9, style: .continuous))
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenLabel)
     }
 }
 

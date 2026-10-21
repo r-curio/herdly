@@ -366,7 +366,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - The sidebar footer shows the "N working · N to check" status in 11pt secondary text.
 - **Forms:**
   - `.formStyle(.grouped)` with system fills. Sections have 12pt continuous corners; rows are 36pt, or 40pt with a segmented control. Separators are inset 10pt.
-  - Section headers are 13pt bold. Where a pane has footers, explanations go there in 11pt secondary text; Notifications and Terminals have none.
+  - Section headers are 13pt bold. No pane has section footers; a row that can be grayed out explains itself with hover text instead.
 - **Controls:**
   - Mini switches for booleans, menu pickers for lists, and segmented pickers for two or three short choices.
   - Push buttons for actions. Destructive actions sit alone in the last section, end in an ellipsis, use the destructive role, and confirm first.
@@ -390,7 +390,9 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - A segmented "MacBook notch | External display" picker in the toolbar chooses which profile is being edited.
   - A live preview of the strip on a desktop backdrop sits above the sections and redraws as options change.
   - A "Display" section directly below the preview holds the "Show notch on" menu picker. It is one choice for both profiles, so the profile picker does not change it.
-  - Options that do not apply to the selected profile, such as Center label on the MacBook notch, are shown disabled with a footer saying why.
+  - An option that does not apply to the selected profile has its control disabled while its title stays enabled, and the row carries hover text saying what it does and why. Only a row that can be grayed out gets hover text; today that is Center label on the MacBook notch ("Text in the middle of the strip naming the top item. External displays only; on a MacBook the camera covers that space.").
+  - The "Session list" section holds an "After each name" menu picker between Sort by and Group by: "Repo @ branch" (the default), "Repo", or "Branch", kept per profile. Directly under it, with no divider, a black sample row inset 10pt with 10pt below: a 30pt black rounded rect with 9pt continuous corners, 12pt horizontal padding and 7pt spacing, holding the chosen sprite idle in the first session colour, "Fix flaky tests" in 12pt #F5F5F7, then "· herdly @ main" (or "· herdly", "· main") in 12pt #8F8F8F on one line with tail truncation. It eases with the other settings motion, reads to VoiceOver as one element ("Sample row: Fix flaky tests, herdly @ main"), and is not interactive.
+  - The Notch pane has no section footers.
 - **Sprite picker:** a "Sprite" section with no footer holding five equal-width tiles in a row at 10pt gaps: Sheep, Critter, Sheepdog, Cow, and Blob. Each tile is a 76pt black well with 9pt continuous corners and the kind's idle frame centred at 6pt per cell in the first session colour, with its 12pt name 6pt below. The selected tile has a 2pt accent ring with a 2pt gap and a medium-weight name. Each tile is a button named for its kind.
 - **Agents pane:**
   - One card per agent with no section header above it, 28pt apart: Codex, then Claude Code. The Claude Code card describes the default folder; each added folder is a row in that card with its monospaced path, status, a Configure button while it needs setup, and its own ⋯ menu (Review Again, Show Setup Changes…, the two switches as menu items, Undo Setup…, Remove Folder). Its problems sit indented beneath it.
