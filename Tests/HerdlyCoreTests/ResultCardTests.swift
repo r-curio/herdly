@@ -213,36 +213,71 @@ private func timestamp(_ seconds: Double) -> String { RolloutTimestamp.format(se
     #expect(ResultPop.isFresh(restored, launchedAt: launchedAt) == false)
 }
 
-// MARK: No pop while the session's Ghostty tab is in front
+// MARK: No pop while the session's Ghostty tab is in front (ADR 0016)
 
+private let claudeID = "0f3c2a1b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+private let claudeTab = AgentSessionIdentity(source: .claude, sourceScope: "/Users/me/.claude", session: claudeID, surface: .cli)
+
+/// One window: t-1 holds the Codex session's title, t-2 a shell, t-3 the Claude session's title.
 private func ghostty(selected: String?) throws -> GhosttySnapshot {
+    let terminals = ["t-1": GhosttyMatch.title(session), "t-2": "shell", "t-3": GhosttyMatch.claudeTitle(claudeID)!]
     let data: [String: Any] = [
         "status": "ok", "front_window_id": "w",
-        "windows": [["id": "w", "tabs": [["id": "t-1", "terminals": [["id": "p-1", "name": GhosttyMatch.title(session)]]],
-                                         ["id": "t-2", "terminals": [["id": "p-2", "name": "shell"]]]]]],
-        "selected": selected.map { ["window_id": "w", "tab_id": $0, "terminal_id": $0 == "t-1" ? "p-1" : "p-2"] as Any } ?? NSNull()
+        "windows": [["id": "w", "tabs": terminals.keys.sorted().map { tab in
+            ["id": tab, "terminals": [["id": "p" + tab, "name": terminals[tab]!]]] as [String: Any]
+        }]],
+        "selected": selected.map { ["window_id": "w", "tab_id": $0, "terminal_id": "p" + $0] as Any } ?? NSNull()
     ]
     return try JSONDecoder().decode(GhosttySnapshot.self, from: JSONSerialization.data(withJSONObject: data))
 }
 
-@Test func aCLIResultWhoseGhosttyTabIsInFrontDoesNotPop() throws {
-    let inFront = try ghostty(selected: "t-1")
-    #expect(ResultPop.ghosttyAllows(source: .cli, session: session, ghosttyEnabled: true, live: [session], snapshot: inFront) == false)
-    // Another tab in front: it pops.
-    let away = try ghostty(selected: "t-2")
-    #expect(ResultPop.ghosttyAllows(source: .cli, session: session, ghosttyEnabled: true, live: [session], snapshot: away))
+private func codexAllows(_ snapshot: GhosttySnapshot?, session id: UUID = session) -> Bool {
+    ResultPop.ghosttyAllows(source: .cli, session: id, ghosttyEnabled: true, live: [id], snapshot: snapshot)
 }
 
-@Test func aCLIResultWhoseGhosttyTabIsUnknownDoesNotPop() throws {
-    // No inventory yet, or no exact tab for the session: Herdly cannot say it is away, so it waits.
-    #expect(ResultPop.ghosttyAllows(source: .cli, session: session, ghosttyEnabled: true, live: [session], snapshot: nil) == false)
-    let away = try ghostty(selected: "t-2")
+private func claudeAllows(_ snapshot: GhosttySnapshot?, enabled: Bool = true) -> Bool {
+    ResultPop.claudeGhosttyAllows(claudeTab, ghosttyEnabled: enabled, liveSessionsByScope: [claudeTab.sourceScope: [claudeID]],
+                                  inventoryAvailable: [claudeTab.sourceScope: true],
+                                  configuredScopes: [claudeTab.sourceScope], snapshot: snapshot)
+}
+
+@Test func aCLIResultWhoseGhosttyTabIsInFrontDoesNotPop() throws {
+    #expect(codexAllows(try ghostty(selected: "t-1")) == false)
+    // Another tab in front: it pops.
+    #expect(codexAllows(try ghostty(selected: "t-2")))
+}
+
+@Test func aCLIResultWithNoGhosttyTabOrGhosttyNotInFrontPops() throws {
+    // A session in another terminal (iTerm2, tmux, herdr) has no Ghostty tab: nothing of it is visible here.
     let other = UUID(uuidString: "01A09DC4-1F22-7AA4-8C31-5B71A0C24D10")!
-    #expect(ResultPop.ghosttyAllows(source: .cli, session: other, ghosttyEnabled: true, live: [other], snapshot: away) == false)
+    #expect(codexAllows(try ghostty(selected: "t-2"), session: other))
+    // Ghostty reports no selected tab while another app is in front: nothing in Ghostty is visible.
+    #expect(codexAllows(try ghostty(selected: nil)))
+}
+
+@Test func aCLIResultWaitsForTheFirstGhosttyReading() {
+    // No inventory yet: not now. The fresh result stays a candidate and can pop once one arrives.
+    #expect(codexAllows(nil) == false)
 }
 
 @Test func ghosttyIsNotConsultedWhenOffOrForTheCodexApp() throws {
     let inFront = try ghostty(selected: "t-1")
     #expect(ResultPop.ghosttyAllows(source: .cli, session: session, ghosttyEnabled: false, live: [session], snapshot: inFront))
     #expect(ResultPop.ghosttyAllows(source: .desktop, session: session, ghosttyEnabled: true, live: [session], snapshot: nil))
+}
+
+@Test func aClaudeResultWhoseGhosttyTabIsInFrontDoesNotPop() throws {
+    #expect(claudeAllows(try ghostty(selected: "t-3")) == false)
+    #expect(claudeAllows(try ghostty(selected: "t-1")))
+    #expect(claudeAllows(try ghostty(selected: nil)))
+}
+
+@Test func aClaudeResultPopsWithoutAGhosttyReadingOrBinding() throws {
+    // Claude results never waited for Ghostty: with no reading, or with Ghostty off, they pop as before.
+    #expect(claudeAllows(nil))
+    #expect(claudeAllows(try ghostty(selected: "t-3"), enabled: false))
+    // Incomplete inventories give no exact tab, so nothing is known visible: it pops.
+    let unbound = ResultPop.claudeGhosttyAllows(claudeTab, ghosttyEnabled: true, liveSessionsByScope: [:], inventoryAvailable: [:],
+                                                configuredScopes: [claudeTab.sourceScope], snapshot: try ghostty(selected: "t-3"))
+    #expect(unbound)
 }

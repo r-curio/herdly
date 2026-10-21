@@ -1739,9 +1739,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         switch ghosttyFocusState {
         case .disabled: ghosttyFocus = .disabled
         case .checking: ghosttyFocus = .checking
-        case .known(let snapshot): ghosttyFocus = snapshot.selected == nil ? .unknown : .away
+        // A Ghostty reading in hand: whether the session's own tab is the one in front is
+        // `ResultPop`'s call below; a reading with no tab selected means Ghostty is not in front (#323).
+        case .known: ghosttyFocus = .away
         case .unknown: ghosttyFocus = .unknown
         }
+        let ghosttySnapshot: GhosttySnapshot? = if case .known(let snapshot) = ghosttyFocusState { snapshot } else { nil }
         func completionIsEligible(_ item: AgentAttentionItem) -> Bool {
             guard let outcome = item.outcome, !outcome.uncertain else { return false }
             guard outcome.session.source == .claude else {
@@ -1749,11 +1752,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 let source: AttentionSource = outcome.session.surface == .cli ? .cli : .desktop
                 guard CompletionVisibility.allows(source: source, codexForeground: codexForeground,
                                                  ghosttyFocus: ghosttyFocus) else { return false }
-                let snapshot: GhosttySnapshot? = if case .known(let snapshot) = ghosttyFocusState { snapshot } else { nil }
                 return ResultPop.ghosttyAllows(source: source, session: session, ghosttyEnabled: ghosttyEnabled,
-                                               live: liveCLI, snapshot: snapshot)
+                                               live: liveCLI, snapshot: ghosttySnapshot)
             }
-            return true
+            // ADR 0016's one rule for Claude too: no pop while its own Ghostty tab is in front.
+            return ResultPop.claudeGhosttyAllows(outcome.session, ghosttyEnabled: ghosttyEnabled,
+                                                 liveSessionsByScope: liveClaudeSessions,
+                                                 inventoryAvailable: claudeInventoryAvailable,
+                                                 configuredScopes: Set(configuredClaudeNavigationRoots().map { $0.root.path }),
+                                                 snapshot: ghosttySnapshot)
         }
         let freshCompletions = agentItems.filter { freshAgentCompletionIDs.contains($0.id) }
         let eligibleFreshCompletions = freshCompletions.filter(completionIsEligible)

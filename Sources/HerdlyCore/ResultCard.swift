@@ -63,15 +63,35 @@ public enum ResultPop {
         !outcome.uncertain && outcome.arrivedAt >= launchedAt
     }
 
-    /// A Codex CLI result while Ghostty controls are on pops only when the latest inventory shows the
-    /// session's exact tab and another tab selected (ADR 0016, "Presentation and scanning"). Its own
-    /// tab in front, no inventory yet, or no exact tab for the session: no pop, and the result waits in
-    /// the queue. A Codex app result, or Ghostty off, is not judged here. Other terminal hosts are not
-    /// consulted yet.
+    /// ADR 0016, "Presentation and scanning", for a Codex CLI result while Ghostty controls are on:
+    /// no pop only when the latest Ghostty inventory shows the session's exact tab selected. Another
+    /// tab selected, Ghostty not in front (it then reports no selected tab), or no exact Ghostty tab
+    /// for the session (it runs in another terminal) pops; nothing visible is known. Before the first
+    /// inventory (`nil`) it is not yet: the fresh result stays a candidate until one arrives. A Codex
+    /// app result, or Ghostty off, is not judged here. Other terminal hosts are not consulted yet.
     public static func ghosttyAllows(source: AttentionSource, session: UUID, ghosttyEnabled: Bool,
                                      live: Set<UUID>, snapshot: GhosttySnapshot?) -> Bool {
         guard source == .cli, ghosttyEnabled else { return true }
-        guard let snapshot, let target = GhosttyMatch.target(session: session, live: live, snapshot: snapshot) else { return false }
-        return snapshot.selected != target
+        guard let snapshot else { return false }
+        return allows(selected: snapshot.selected, target: GhosttyMatch.target(session: session, live: live, snapshot: snapshot))
+    }
+
+    /// The same rule for a Claude CLI result, through the Claude tab binding the visit rule uses
+    /// (`GhosttyVisitTargets.claude`). Claude results never waited for Ghostty, so with no inventory
+    /// yet, or Ghostty off, they pop.
+    public static func claudeGhosttyAllows(_ identity: AgentSessionIdentity, ghosttyEnabled: Bool,
+                                           liveSessionsByScope: [String: [String]], inventoryAvailable: [String: Bool],
+                                           configuredScopes: Set<String>, snapshot: GhosttySnapshot?) -> Bool {
+        guard ghosttyEnabled, let snapshot else { return true }
+        return allows(selected: snapshot.selected,
+                      target: GhosttyVisitTargets.claude(identity, liveSessionsByScope: liveSessionsByScope,
+                                                         inventoryAvailable: inventoryAvailable,
+                                                         configuredScopes: configuredScopes, snapshot: snapshot))
+    }
+
+    /// Only the session's own exact tab, selected, holds the card back.
+    private static func allows(selected: GhosttyTarget?, target: GhosttyTarget?) -> Bool {
+        guard let target else { return true }
+        return selected != target
     }
 }
