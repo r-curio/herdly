@@ -2,7 +2,7 @@ import Foundation
 
 /// One row in an agent's Settings card that names something to fix, such as
 /// "Codex desktop · Update to 26.901.51231 or later". Rows come only from existing setup state,
-/// and a card shows at most one row of each kind.
+/// and an agent or Claude folder shows at most one row of each kind.
 public struct AgentProblem: Equatable, Sendable, Identifiable {
     public enum Kind: Equatable, Hashable, Sendable {
         case codexCLI
