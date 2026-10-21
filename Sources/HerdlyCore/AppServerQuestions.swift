@@ -268,24 +268,6 @@ public enum AppServerAnswerPolicy {
         }
         return ["answers": answers]
     }
-
-    public static func message(for rejection: Rejection) -> String {
-        switch rejection {
-        case .notInQueue: return "This question is no longer waiting."
-        case .noDaemonRequest: return "Codex's daemon no longer holds this question; answer it in Codex."
-        case .alreadyAnswered: return "Herdly already answered this question through Codex's daemon."
-        case .wrongQuestion: return "Codex is on a different question now."
-        case .notOfferable: return "This question takes a typed answer."
-        case .optionOutOfRange: return "That option is not one Codex listed."
-        case .textNotOffered: return "This question takes one of the listed options."
-        case .emptyText: return "Type an answer first."
-        case .textTooLong: return "That answer is longer than Herdly sends; answer in Codex."
-        case .secret: return "Codex asked for a secret; answer it in Codex."
-        case .notReady: return "An answer for this question was already given."
-        case .notPendingInRollout: return "Codex already has an answer or the turn ended; nothing was sent."
-        case .answersIncomplete: return "A question in this call has no answer yet; answer them in order."
-        }
-    }
 }
 
 /// One click or one typed answer on the daemon path, decided in one place. Returns what to do and

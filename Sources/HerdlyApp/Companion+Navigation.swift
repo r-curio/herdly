@@ -13,7 +13,6 @@ extension Companion {
         } else if let session = codexSession(identity) {
             if isCodexTerminalSession(identity) { openCLI(session) } else { openDesktop(session) }
         } else {
-            navigationMessage = "Open Session is unavailable until Herdly can verify the exact session."
             refresh()
         }
     }
@@ -94,7 +93,6 @@ extension Companion {
     private func openClaude(_ identity: AgentSessionIdentity, approval: AgentApproval? = nil) {
         guard !openingTask else { return }
         guard identity.surface == .cli else {
-            navigationMessage = "The exact Claude tab is unavailable for this session surface."
             refresh()
             return
         }
@@ -164,7 +162,6 @@ extension Companion {
     /// Ghostty's title route for a Claude tab, or the fallback from its registry process (ADR 0015).
     private func openClaudeByTitle(_ identity: AgentSessionIdentity, approval: AgentApproval?) {
         openingTask = true
-        navigationMessage = "Finding the matching Claude tab…"
         let configuredRoots = configuredClaudeNavigationRoots()
         // ADR 0016: a verified Open acknowledges the session's completions that arrived before the pre-Open read.
         let preOpenAt = Date().timeIntervalSince1970
@@ -211,8 +208,6 @@ extension Companion {
                     }
                 }
             }
-            navigationMessage = result.map { message(for: $0, opened: "Opened the matching Claude tab.") }
-                ?? claudeReturnUnavailableMessage
             if let result { recordOpen(result, claude: identity) }
             switch result {
             case .opened?, .fellBack?:
@@ -264,17 +259,6 @@ extension Companion {
                                             stillRunning: activated || TerminalApps.isRunning(host))
     }
 
-    /// The navigation message after an Open: the host's line for a verified Open, none for a silent
-    /// fallback (ADR 0015; `navigationMessage` is empty when there is nothing to say), or the agreed
-    /// unavailable line.
-    func message(for result: TerminalOpenResult, opened: String) -> String {
-        switch result {
-        case .opened: opened
-        case .fellBack: ""
-        case .unavailable(let reason): reason.cardLine
-        }
-    }
-
     func openAgentApproval(_ approval: AgentApproval) {
         if approval.identity.session.source == .claude {
             openClaude(approval.identity.session, approval: approval)
@@ -284,7 +268,6 @@ extension Companion {
               let session = codexSession(approval.identity.session),
               let requestID = UUID(uuidString: approval.identity.call),
               let request = queue.items.compactMap(\.request).first(where: { $0.id == requestID }) else {
-            navigationMessage = "Open Session is unavailable until Herdly can verify the exact Claude tab."
             refresh()
             return
         }
@@ -355,7 +338,6 @@ extension Companion {
     /// Ghostty's title route for a Codex tab (ADR 0005, ADR 0016), with ADR 0015's fallback.
     private func openCLIInGhostty(_ session: UUID) {
         openingTask = true
-        navigationMessage = "Finding the matching Ghostty tab…"
         let live = liveCLI
         // ADR 0016: a verified Open acknowledges the session's completions that arrived before the pre-Open read.
         let preOpenAt = Date().timeIntervalSince1970
@@ -367,7 +349,6 @@ extension Companion {
             let result = await openResult(outcome) { count in
                 OpenFallback.codexApp(candidates: GhosttyTitleOpen.codexCandidates(count: count), switches: switches)
             }
-            navigationMessage = message(for: result, opened: "Opened the matching Ghostty tab.")
             recordOpen(result, codex: session)
             let queued = cliItems.filter { $0.session == session }
                 .map(TerminalCompletionCandidate.init)
@@ -408,10 +389,8 @@ extension Companion {
     func openDesktop(_ session: UUID) {
         guard !openingTask else { return }
         openingTask = true
-        navigationMessage = "Opening link…"
         Task { @MainActor in
-            let result = await desktopAdapter.open(taskID: session.uuidString)
-            navigationMessage = result.rawValue
+            _ = await desktopAdapter.open(taskID: session.uuidString)
             openingTask = false
             refresh()
         }
@@ -454,7 +433,6 @@ extension Companion {
             return
         }
         openingTask = true
-        navigationMessage = "Finding the matching herdr pane…"
         Task { @MainActor in
             let walk = await Task.detached { TerminalApps.walk(from: clientPID) }.value
             if case .reached(let host) = walk, others.contains(host) {
@@ -471,7 +449,6 @@ extension Companion {
     /// the pane verified is a partial reach (ADR 0015).
     private func openHerdrInHostTab(_ key: HerdrSessionKey, subject: HerdrOpenSubject) {
         openingTask = true
-        navigationMessage = "Finding the matching herdr pane…"
         let client = herdr.client
         let others = otherTabHosts
         let switches = hostSwitches
@@ -514,7 +491,6 @@ extension Companion {
             switch run {
             case .opened(_, let preOpenAt):
                 herdr.open.failures[key] = nil
-                navigationMessage = "Opened the matching herdr pane."
                 acknowledgeHerdrCompletions(TerminalVisitAcknowledgment.afterOpen(herdrCompletions(subject), result: .opened,
                                                                                   preOpenAt: preOpenAt), subject: subject)
             case .failed(.herdr(let failure), _):
@@ -522,16 +498,13 @@ extension Companion {
                 let walks = await Task.detached { pids.map(TerminalApps.walk(from:)) }.value
                 if let fallback = HerdrOpenFallback.resolve(failure, agent: agent, clientWalks: walks, switches: switches,
                                                             isRunning: TerminalApps.isRunning) {
-                    navigationMessage = message(for: raise(fallback), opened: "")
-                } else {
-                    navigationMessage = HerdrPresentation.cardLine(for: .open(failure), agent: key.agent)
+                    _ = raise(fallback)
                 }
             case .failed(.host(let miss), _):
-                let result = await openResult(.miss(miss)) { _ in
+                _ = await openResult(.miss(miss)) { _ in
                     let walks = await Task.detached { pids.map(TerminalApps.walk(from:)) }.value
                     return OpenFallback.processApp(walks: walks, agent: agent, switches: switches)
                 }
-                navigationMessage = message(for: result, opened: "")
             }
             endVisitIntervalsAfterOpen()
             openingTask = false
@@ -543,7 +516,6 @@ extension Companion {
     /// every failure; only completions that arrived before the pre-Open scan are acknowledged on success.
     private func openHerdrInGhostty(_ key: HerdrSessionKey, subject: HerdrOpenSubject) {
         openingTask = true
-        navigationMessage = "Finding the matching herdr pane…"
         let client = herdr.client
         // The latest scan the sequence read, whose attached clients a fallback walks (ADR 0015).
         final class LatestScan { var outcome: HerdrScanOutcome? }
@@ -565,7 +537,6 @@ extension Companion {
             switch result {
             case .opened:
                 herdr.open.failures[key] = nil
-                navigationMessage = "Opened the matching herdr pane."
                 acknowledgeHerdrCompletions(HerdrOpenAcknowledgment.afterOpen(herdrCompletions(subject), result: result),
                                             subject: subject)
             case .unavailable(let failure):
@@ -577,10 +548,8 @@ extension Companion {
                                                             clientWalks: walks, switches: hostSwitches,
                                                             isRunning: TerminalApps.isRunning) {
                     // Silent; the herdr focus already verified is kept, and nothing is acknowledged.
-                    navigationMessage = message(for: raise(fallback), opened: "")
-                } else {
-                    // The grouped reason only; the exact failure stays in diagnostics.
-                    navigationMessage = HerdrPresentation.cardLine(for: .open(failure), agent: key.agent)
+                    // Otherwise the card shows the grouped reason; the exact failure stays in diagnostics.
+                    _ = raise(fallback)
                 }
             }
             endVisitIntervalsAfterOpen()

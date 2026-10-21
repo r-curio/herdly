@@ -201,19 +201,6 @@ public enum QuestionAnswerPolicy {
         precondition(option >= 0 && option < maximumDigit, "an option beyond the digit range is never sent")
         return String(option + 1)
     }
-
-    /// The card's explanation for a refused click.
-    public static func message(for rejection: Rejection) -> String {
-        switch rejection {
-        case .notInQueue: return "This question is no longer waiting."
-        case .notCLI: return "Desktop questions are answered in Codex."
-        case .ghosttyDisabled: return "Enable Ghostty controls to answer from here."
-        case .wrongQuestion: return "Codex is on a different question now; answer it there."
-        case .notOfferable: return "This question needs Codex's own panel."
-        case .optionOutOfRange: return "That option cannot be sent as a key."
-        case .notReady: return "An answer for this question was already sent."
-        }
-    }
 }
 
 /// The pre-send check against the rollout as it is right now. Unreadable evidence is never "still pending".

@@ -196,6 +196,16 @@ public enum AgentAttentionID: Hashable, Codable, Sendable {
     case unavailable(AgentSessionIdentity)
 }
 
+extension AgentAttentionID {
+    /// An approval or question: the rows that open as a clicked card and may carry a row note.
+    public var isRequest: Bool {
+        switch self {
+        case .approval, .question: return true
+        case .outcome, .running, .unavailable: return false
+        }
+    }
+}
+
 public enum AgentAttentionKind: Int, Equatable, Sendable {
     case actionableApproval
     case question

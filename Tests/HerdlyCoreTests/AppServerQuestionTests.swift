@@ -166,10 +166,6 @@ private func fullBook() -> (AppServerQuestionBook, AppServerQuestionRequest) {
     var secret = AppServerQuestionBook()
     _ = secret.apply(message: requestMessage(questions: [["id": "q", "question": "token?", "isSecret": true]]), now: 1)
     #expect(P.rejection(for: otherQuestion, book: secret, progress: QuestionAnswerProgress(call: otherQuestion.id), question: 0, answer: .text("s")) == .secret)
-    for rejection in [P.Rejection.notInQueue, .noDaemonRequest, .alreadyAnswered, .wrongQuestion, .notOfferable, .optionOutOfRange,
-                      .textNotOffered, .emptyText, .textTooLong, .secret, .notReady] {
-        #expect(!P.message(for: rejection).isEmpty)
-    }
 }
 
 @Test func responseCarriesEveryQuestionsAnswerByIdAndOnlyWhenComplete() throws {
