@@ -77,7 +77,7 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
     #expect(appearance.leftWing == .spritesAndCount)
     #expect(appearance.centerLabel == .taskName)
     #expect(appearance.usage == .compact)
-    #expect(appearance.indicator == .sprite)
+    #expect(appearance.sprite == .sheep)
     #expect(appearance.sort == .needsAttention)
     #expect(appearance.grouping == .none)
     #expect(appearance.earlier == .fiveMinutes)
@@ -87,13 +87,13 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
 @Test func appearanceStoreRoundTripsEachProfileSeparatelyAndIgnoresUnknownValues() {
     var stored: [String: String] = [:]
     var external = NotchAppearance.standard
-    external.indicator = .tint
+    external.sprite = .cow
     external.sort = .lastUpdate
     external.earlier = .never
     external.usage = .weeklyOnly
     external.panelWidth = .extraWide
     external.save(profile: .externalDisplay) { stored[$0] = $1 }
-    stored["appearance.macBookNotch.indicator"] = "glow"
+    stored["appearance.macBookNotch.sprite"] = "alpaca"
     stored["appearance.macBookNotch.panelWidth"] = "huge"
 
     let loadedExternal = NotchAppearance.load(profile: .externalDisplay) { stored[$0] }
@@ -101,6 +101,83 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
 
     #expect(loadedExternal == external)
     #expect(loadedMacBook == .standard)
+}
+
+@Test(arguments: SpriteKind.allCases)
+func eachSpriteKindRoundTripsForEachProfile(kind: SpriteKind) {
+    var stored: [String: String] = [:]
+    var appearance = NotchAppearance.standard
+    appearance.sprite = kind
+    appearance.save(profile: .macBookNotch) { stored[$0] = $1 }
+
+    #expect(stored["appearance.macBookNotch.sprite"] == kind.rawValue)
+    #expect(NotchAppearance.load(profile: .macBookNotch) { stored[$0] }.sprite == kind)
+    // The other profile keeps its own choice.
+    #expect(NotchAppearance.load(profile: .externalDisplay) { stored[$0] }.sprite == .sheep)
+}
+
+@Test func unknownSavedSpriteLoadsSheep() {
+    let stored = ["appearance.externalDisplay.sprite": "alpaca", "appearance.externalDisplay.sort": "lastUpdate"]
+
+    let loaded = NotchAppearance.load(profile: .externalDisplay) { stored[$0] }
+
+    #expect(loaded.sprite == .sheep)
+    #expect(loaded.sort == .lastUpdate)
+}
+
+@Test(arguments: ["dot", "bar", "tint", "sprite"])
+func savedIndicatorStyleNoLongerChangesTheAppearance(style: String) {
+    // A profile saved before the sprite set: the old indicator key is ignored and nothing is written for sprite.
+    let stored = ["appearance.macBookNotch.indicator": style, "appearance.macBookNotch.grouping": "agent"]
+    var expected = NotchAppearance.standard
+    expected.grouping = .agent
+
+    let loaded = NotchAppearance.load(profile: .macBookNotch) { stored[$0] }
+
+    #expect(loaded == expected)
+    #expect(loaded.sprite == .sheep)
+}
+
+@Test func savingNoLongerWritesTheIndicatorKey() {
+    var stored: [String: String] = [:]
+    NotchAppearance.standard.save(profile: .externalDisplay) { stored[$0] = $1 }
+
+    #expect(stored["appearance.externalDisplay.indicator"] == nil)
+    #expect(stored["appearance.externalDisplay.sprite"] == "sheep")
+}
+
+@Test func spritePickerOffersSheepFirstThenTheOtherKinds() {
+    #expect(SpriteKind.allCases == [.sheep, .critter, .sheepdog, .cow, .blob])
+    #expect(SpriteKind.allCases.map(\.name) == ["Sheep", "Critter", "Sheepdog", "Cow", "Blob"])
+}
+
+@Test(arguments: SpriteKind.allCases)
+func eachSpriteKindIsTwoSameSizedFramesWithinTheTenByEighteenPointBox(kind: SpriteKind) {
+    #expect(kind.frames.count == 2)
+    #expect(kind.frames[0] != kind.frames[1], "the working step must change something")
+    for frame in kind.frames {
+        #expect(frame.count == kind.rows)
+        #expect(frame.allSatisfy { $0.count == kind.columns })
+        #expect(frame.allSatisfy { $0.allSatisfy { "#+.".contains($0) } })
+    }
+    // Two points per cell: at most 18 by 10 points.
+    #expect(kind.columns <= 9 && kind.rows <= 5)
+}
+
+@Test func spriteSizesMatchTheirArtboards() {
+    #expect(SpriteKind.allCases.map { [$0.columns, $0.rows] } == [[9, 5], [6, 4], [9, 5], [9, 5], [7, 5]])
+    #expect(SpriteKind.critter.frames == [[".++.++", "######", "#+##+#", ".#..#."],
+                                          [".++.++", "######", "#+##+#", "#....#"]])
+}
+
+@Test func threeOfTheWidestSpritesFitTheLeftWing() {
+    let widest = SpriteKind.allCases.map(\.columns).max() ?? 0
+    // Two points per cell, 6pt between sprites. The strip draws the wing 8pt narrower than its
+    // body and sets the first sprite 4pt in, leaving 100pt of the 112pt wing for its content.
+    let needed = CGFloat(3 * widest * 2 + 2 * 6)
+
+    #expect(needed == 66)
+    #expect(needed <= NotchPlacement.leadingWing - 8 - 4)
 }
 
 @Test func centerLabelOnlyAppliesWhereThereIsNoCameraHousing() {

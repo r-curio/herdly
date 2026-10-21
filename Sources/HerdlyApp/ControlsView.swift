@@ -114,7 +114,8 @@ struct Controls: View {
         // A fixed sidebar panel that runs the full window height, so the window buttons sit inside
         // it as in System Settings and Raycast. It never collapses.
         HStack(spacing: 0) {
-            ControlsSidebar(selection: $selection, status: "\(model.workingCount) working · \(model.currentToCheckCount) to check")
+            ControlsSidebar(selection: $selection, status: "\(model.workingCount) working · \(model.currentToCheckCount) to check",
+                            sprite: model.appearance.sprite)
                 .frame(width: 210)
                 .padding(8)
             ZStack {
@@ -138,21 +139,22 @@ struct Controls: View {
 private struct ControlsSidebar: View {
     @Binding var selection: ControlSection
     let status: String
+    let sprite: SpriteKind
 
     var body: some View {
         List(selection: $selection) {
             Section("Notch") {
                 ForEach([ControlSection.general, .notch, .notifications]) { section in
-                    SidebarLabel(section: section).tag(section)
+                    SidebarLabel(section: section, sprite: sprite).tag(section)
                 }
             }
             Section("Connections") {
                 ForEach([ControlSection.agents, .terminals]) { section in
-                    SidebarLabel(section: section).tag(section)
+                    SidebarLabel(section: section, sprite: sprite).tag(section)
                 }
             }
             Section {
-                SidebarLabel(section: .about).tag(ControlSection.about)
+                SidebarLabel(section: .about, sprite: sprite).tag(ControlSection.about)
             }
         }
         .listStyle(.sidebar)
@@ -179,6 +181,8 @@ private struct ControlsSidebar: View {
 
 private struct SidebarLabel: View {
     let section: ControlSection
+    /// The notch's chosen animal, so the Notch tile shows what the strip shows.
+    let sprite: SpriteKind
 
     var body: some View {
         Label {
@@ -186,7 +190,7 @@ private struct SidebarLabel: View {
         } icon: {
             Group {
                 if section == .notch {
-                    Sprite(working: false, reduceMotion: true)
+                    Sprite(kind: sprite, working: false, reduceMotion: true)
                 } else {
                     Image(systemName: section.symbol).font(.system(size: 11, weight: .semibold))
                 }
@@ -210,7 +214,7 @@ private struct ControlsDetail: View {
         case .agents: AgentControls(model: model)
         case .terminals: TerminalControls(model: model)
         case .notifications: NotificationControls(model: model)
-        case .about: AboutControls(quit: model.quit)
+        case .about: AboutControls(sprite: model.appearance.sprite, quit: model.quit)
         }
     }
 }
@@ -1440,13 +1444,14 @@ private struct SoundRow: View {
 }
 
 private struct AboutControls: View {
+    let sprite: SpriteKind
     let quit: () -> Void
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development" }
 
     var body: some View {
         ControlsPage(section: .about) {
             VStack(spacing: 6) {
-                Sprite(working: false, reduceMotion: true)
+                Sprite(kind: sprite, working: false, reduceMotion: true)
                     .scaleEffect(4)
                     .frame(width: 84, height: 84)
                     .background(.black, in: .rect(cornerRadius: 20, style: .continuous))
@@ -1534,24 +1539,19 @@ private struct NotchControls: View {
                 ? "These settings apply to the MacBook notch. The camera housing covers the center, so Center label is set under External display."
                 : "These settings apply to external displays. The center label widens the strip to make room for it.")
 
-            SettingsHeader("Session state")
+            SettingsHeader("Sprite")
             SettingsCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("How rows show working, waiting, and done")
-                    HStack(spacing: 10) {
-                        ForEach(SessionIndicatorStyle.allCases, id: \.self) { style in
-                            IndicatorTile(style: style, selected: appearance.indicator == style,
-                                          reduceMotion: model.reduceMotion) {
-                                if appearance.indicator != style { SettingsClick.play() }
-                                binding(\.indicator).wrappedValue = style
-                            }
+                HStack(spacing: 10) {
+                    ForEach(SpriteKind.allCases) { kind in
+                        SpriteTile(kind: kind, selected: appearance.sprite == kind, reduceMotion: model.reduceMotion) {
+                            if appearance.sprite != kind { SettingsClick.play() }
+                            binding(\.sprite).wrappedValue = kind
                         }
                     }
                 }
                 .padding(.horizontal, SettingsStyle.rowInset)
                 .padding(.vertical, 12)
             }
-            SettingsFooter("Sprite is Herdly's default. Every style steps while a session works and holds still when it is idle.")
 
             SettingsHeader("Session list")
             SettingsCard {
@@ -1611,11 +1611,11 @@ private struct NotchPreview: View {
         HStack(spacing: 6) {
             switch appearance.leftWing {
             case .spritesAndCount:
-                Sprite(working: true, reduceMotion: reduceMotion, color: 0)
-                Sprite(working: false, reduceMotion: reduceMotion, color: 1)
+                Sprite(kind: appearance.sprite, working: true, reduceMotion: reduceMotion, color: 0)
+                Sprite(kind: appearance.sprite, working: false, reduceMotion: reduceMotion, color: 1)
                 Badge(count: 1)
             case .countOnly:
-                Sprite(working: true, reduceMotion: reduceMotion, color: 0)
+                Sprite(kind: appearance.sprite, working: true, reduceMotion: reduceMotion, color: 0)
                 Badge(count: 1)
             case .none:
                 EmptyView()
@@ -1643,9 +1643,10 @@ private struct NotchPreview: View {
     }
 }
 
-/// One choice in the indicator picker: two rows on black, one working and one idle.
-private struct IndicatorTile: View {
-    let style: SessionIndicatorStyle
+/// One choice in the sprite picker: the kind's idle frame at three times the notch's cell size,
+/// centred on a black well in the first session color, with its name below.
+private struct SpriteTile: View {
+    let kind: SpriteKind
     let selected: Bool
     let reduceMotion: Bool
     let choose: () -> Void
@@ -1653,36 +1654,23 @@ private struct IndicatorTile: View {
     var body: some View {
         Button(action: choose) {
             VStack(spacing: 6) {
-                VStack(alignment: .leading, spacing: 6) {
-                    sampleRow(working: true, width: 56)
-                    sampleRow(working: false, width: 40)
-                }
-                .padding(.horizontal, 10)
-                .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-                .background(.black, in: .rect(cornerRadius: 9, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 11, style: .continuous)
-                        .strokeBorder(Color.accentColor, lineWidth: 2)
-                        .padding(-4)
-                        .opacity(selected ? 1 : 0)
-                }
-                Text(style.rawValue.capitalized).font(.callout.weight(selected ? .medium : .regular))
+                Sprite(kind: kind, working: false, reduceMotion: reduceMotion, color: 0, cellSize: 6)
+                    .frame(maxWidth: .infinity, minHeight: 76, maxHeight: 76)
+                    .background(.black, in: .rect(cornerRadius: 9, style: .continuous))
+                    .overlay {
+                        // A 2pt accent ring 2pt outside the well.
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .strokeBorder(Color.accentColor, lineWidth: 2)
+                            .padding(-4)
+                            .opacity(selected ? 1 : 0)
+                    }
+                Text(kind.name).font(.system(size: 12, weight: selected ? .medium : .regular))
             }
             .padding(4)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressFeedback())
-        .accessibilityLabel(style.rawValue.capitalized)
+        .accessibilityLabel(kind.name)
         .accessibilityAddTraits(selected ? .isSelected : [])
-    }
-
-    private func sampleRow(working: Bool, width: CGFloat) -> some View {
-        HStack(spacing: 7) {
-            if style != .tint {
-                SessionMark(style: style, working: working, reduceMotion: reduceMotion, color: working ? 0 : 1)
-            }
-            RoundedRectangle(cornerRadius: 2).fill(working ? NotchStyle.text : NotchStyle.well).frame(width: width, height: 4)
-        }
-        .modifier(SessionTint(active: style == .tint && working, working: working, reduceMotion: reduceMotion, color: 0))
     }
 }
