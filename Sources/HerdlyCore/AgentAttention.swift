@@ -722,7 +722,8 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         lhs.arrivedAt == rhs.arrivedAt ? sortKey(.outcome(lhs.id)) < sortKey(.outcome(rhs.id)) : lhs.arrivedAt < rhs.arrivedAt
     }
 
-    private static func sortKey(_ id: AgentAttentionID) -> String {
+    /// A stable identity order for ties; also the spotlight's tie-break.
+    static func sortKey(_ id: AgentAttentionID) -> String {
         switch id {
         case let .approval(value): return "approval:\(value.session.source.rawValue):\(value.session.sourceScope):\(value.session.session):\(value.turn):\(value.call)"
         case let .question(value): return "question:\(value.session.source.rawValue):\(value.session.sourceScope):\(value.session.session):\(value.turn):\(value.call)"

@@ -37,17 +37,16 @@ public enum NotchPresentationMode: Equatable, Sendable {
 /// Chooses among fresh source-aware cards after each card class has applied its own
 /// presentation policy. Queue order is the product priority order.
 public enum AgentPresentationSelection {
-    /// The fresh item to spotlight: the highest-priority kind, oldest arrival first. Live approvals
-    /// sit in the queue by soonest deadline (D12), but which one opens on arrival is unchanged, so
-    /// ties within a kind go by arrival; equal arrivals keep the queue's order.
+    /// The fresh item to spotlight, by the pre-#314 priority rule: highest-priority kind, then oldest
+    /// arrival, then identity. It ignores list order, so the queue's soonest-deadline order for live
+    /// approvals (D12) never changes which request opens on arrival.
     public static func highestPriority(in items: [AgentAttentionItem],
                                        candidates: Set<AgentAttentionID>) -> AgentAttentionID? {
-        var best: AgentAttentionItem?
-        for item in items where candidates.contains(item.id) {
-            guard let current = best else { best = item; continue }
-            if (item.kind.rawValue, item.arrivedAt) < (current.kind.rawValue, current.arrivedAt) { best = item }
-        }
-        return best?.id
+        items.filter { candidates.contains($0.id) }.min {
+            if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
+            if $0.arrivedAt != $1.arrivedAt { return $0.arrivedAt < $1.arrivedAt }
+            return AgentAttentionQueue.sortKey($0.id) < AgentAttentionQueue.sortKey($1.id)
+        }?.id
     }
 }
 

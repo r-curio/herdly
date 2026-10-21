@@ -234,3 +234,16 @@ private func foldedCheck(fresh: Int, earlier: Int) -> QueueSections {
     let byState = QueueSections.make(queue.items(at: 1_000), grouping: .state, project: { _ in nil })
     #expect(byState.attention.map(\.earlierIDs.count) == [1])
 }
+
+@Test func equalArrivalsSpotlightByIdentityNotDeadline() {
+    var queue = AgentAttentionQueue()
+    // Same arrival; "b" has the sooner deadline so it leads the queue, but before #314 the
+    // identity tie-break ("a" before "b") chose which opened on arrival, and it still does.
+    queue.apply(.approval(AgentApproval(session: session("a"), turn: "t", call: "c", arrivedAt: 10, expiresAt: 50)))
+    queue.apply(.approval(AgentApproval(session: session("b"), turn: "t", call: "c", arrivedAt: 10, expiresAt: 30)))
+    let rows = queue.items(at: 20)
+    #expect(rows.map(\.session.session) == ["b", "a"])
+    #expect(AgentPresentationSelection.highestPriority(in: rows, candidates: Set(rows.map(\.id))) == rows[1].id)
+    // List order does not matter.
+    #expect(AgentPresentationSelection.highestPriority(in: rows.reversed(), candidates: Set(rows.map(\.id))) == rows[1].id)
+}
