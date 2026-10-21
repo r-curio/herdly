@@ -240,22 +240,22 @@ public enum QueueFold {
 
     /// Rows shown per section, for sections of `sections` rows following `approvals` live approvals.
     public static func shownRows(approvals: Int, sections: [Int], budget: Int = lineBudget) -> [Int] {
-        var left = budget - approvals
-        guard sections.reduce(0, +) > left else { return sections }
+        var linesLeft = budget - approvals
+        guard sections.reduce(0, +) > linesLeft else { return sections }
         // The fewest lines a section can take: all of one or two rows, or one row and its pill.
         func fewest(_ rows: Int) -> Int { min(rows, 2) }
         return sections.indices.map { index in
             let rows = sections[index]
             let isLast = index == sections.count - 1
-            let reserved = sections[(index + 1)...].map(fewest).reduce(0, +)
-            let allowed = max(fewest(rows), left - reserved)
+            let reservedForLater = sections[(index + 1)...].map(fewest).reduce(0, +)
+            let allowed = max(fewest(rows), linesLeft - reservedForLater)
             let cap = isLast ? rows : rowsBeforeFold
             var shown = rows
             if rows > min(cap, allowed) {
                 shown = max(1, min(cap, allowed - 1))
                 if rows - shown == 1 { shown = rows }
             }
-            left -= shown + (shown < rows ? 1 : 0)
+            linesLeft -= shown + (shown < rows ? 1 : 0)
             return shown
         }
     }
@@ -341,17 +341,25 @@ public struct QueueSections: Equatable, Sendable {
                              workingCount: running.count)
     }
 
+    /// One kind section's rows before folding.
+    private struct KindRows {
+        let section: QueueKindSection
+        let rows: [AgentAttentionItem]
+    }
+
     private static func sectionsByKind(_ items: [AgentAttentionItem], open: Set<QueueKindSection>) -> [QueueGroup] {
-        let members = QueueKindSection.allCases.map { section in
-            (section, items.filter { QueueKindSection($0.kind) == section })
-        }.filter { !$0.1.isEmpty }
-        let approvals = members.first { $0.0 == .approve }?.1.count ?? 0
-        let later = members.filter { $0.0 != .approve }
-        let shown = QueueFold.shownRows(approvals: approvals, sections: later.map(\.1.count))
-        return members.map { section, rows in
-            let limit = section == .approve || open.contains(section)
-                ? rows.count : (later.firstIndex { $0.0 == section }.map { shown[$0] } ?? rows.count)
-            return QueueGroup(heading: section.heading, items: Array(rows.prefix(limit)), section: section, all: rows)
+        let sections = QueueKindSection.allCases
+            .map { section in KindRows(section: section, rows: items.filter { QueueKindSection($0.kind) == section }) }
+            .filter { !$0.rows.isEmpty }
+        let approvalCount = sections.first { $0.section == .approve }?.rows.count ?? 0
+        let foldable = sections.filter { $0.section != .approve }
+        let shownPerFoldable = QueueFold.shownRows(approvals: approvalCount, sections: foldable.map(\.rows.count))
+        return sections.map { kind in
+            let foldableIndex = foldable.firstIndex { $0.section == kind.section }
+            let shown = kind.section == .approve || open.contains(kind.section)
+                ? kind.rows.count : foldableIndex.map { shownPerFoldable[$0] } ?? kind.rows.count
+            return QueueGroup(heading: kind.section.heading, items: Array(kind.rows.prefix(shown)),
+                              section: kind.section, all: kind.rows)
         }
     }
 }
