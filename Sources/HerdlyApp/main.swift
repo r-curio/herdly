@@ -700,7 +700,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var targetFrame: CGRect = .zero
     /// The frame animation in flight, so a refresh mid-animation does not mistake it for drift.
     private var frameAnimation: UUID?
-    /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|expanded>`
+    /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|spotlight-result|row-note-reply|expanded>`
     /// seeds in-memory sample items for screenshots; `clicked-approval` shows the approval sample as a
     /// clicked card (`clicked-approval-long` with a command past the six-line cap, `clicked-claude-approval`
     /// a Claude request with no command), and `row-note` the queue with that row selected and carrying a note;
