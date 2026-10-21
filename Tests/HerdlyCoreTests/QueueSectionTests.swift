@@ -190,3 +190,47 @@ private func kindSections(_ items: [AgentAttentionItem], open: Set<QueueKindSect
     selection.reconcile(rows: rows)
     #expect(selection.selected == nil)
 }
+
+// MARK: Earlier inside a folded section
+
+/// `fresh` current results then `earlier` results that moved under Earlier, after 4 approvals and
+/// 8 questions, so Check folds to two rows.
+private func foldedCheck(fresh: Int, earlier: Int) -> QueueSections {
+    var queue = AgentAttentionQueue()
+    for index in 0..<4 {
+        queue.apply(.approval(AgentApproval(session: session("approve-\(index)"), turn: "t", call: "a", arrivedAt: 1_000)))
+    }
+    for index in 0..<8 {
+        queue.apply(.question(AgentQuestion(session: session("answer-\(index)"), turn: "t", call: "q", arrivedAt: 1_000)))
+    }
+    for index in 0..<earlier {
+        queue.apply(.outcome(AgentOutcome(session: session("old-\(index)"), turn: "t", status: .finished, arrivedAt: Double(index))))
+    }
+    for index in 0..<fresh {
+        queue.apply(.outcome(AgentOutcome(session: session("new-\(index)"), turn: "t", status: .finished, arrivedAt: 990 + Double(index))))
+    }
+    return kindSections(queue.items(at: 1_001))
+}
+
+@Test func earlierCountsEveryEarlierResultInAFoldedSection() {
+    // Check shows two Earlier rows and folds twelve: the heading counts all fourteen.
+    let check = foldedCheck(fresh: 0, earlier: 14).attention[2]
+    #expect(check.section == .check && check.items.count == 2 && check.folded == 12)
+    #expect(check.earlierIDs.count == 14)
+    // Dismiss all clears exactly the results it counts: every Earlier row, shown or folded, and nothing else.
+    #expect(Set(check.earlierIDs).isSuperset(of: check.items.map(\.id)))
+
+    // One current result shown, one Earlier shown, the rest folded.
+    let mixed = foldedCheck(fresh: 1, earlier: 9).attention[2]
+    #expect(mixed.items.map(\.kind) == [.outcome, .earlierOutcome])
+    #expect(mixed.earlierIDs.count == 9)
+    #expect(!mixed.earlierIDs.contains(mixed.items[0].id))
+}
+
+@Test func anUnfoldedGroupCountsItsOwnEarlierRows() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.outcome(AgentOutcome(session: session("old"), turn: "t", status: .finished, arrivedAt: 0)))
+    queue.apply(.outcome(AgentOutcome(session: session("new"), turn: "t", status: .finished, arrivedAt: 990)))
+    let byState = QueueSections.make(queue.items(at: 1_000), grouping: .state, project: { _ in nil })
+    #expect(byState.attention.map(\.earlierIDs.count) == [1])
+}

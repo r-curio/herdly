@@ -1743,8 +1743,9 @@ struct Notch: View {
                     }
                     ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
                         if item.kind == .earlierOutcome && (index == 0 || group.items[index - 1].kind != .earlierOutcome) {
-                            // Dismiss all clears exactly the results listed under this heading.
-                            let earlierIDs = group.items[index...].prefix { $0.kind == .earlierOutcome }.map(\.id)
+                            // The heading counts every Earlier result in the group, folded ones
+                            // included, and Dismiss all clears exactly those.
+                            let earlierIDs = group.earlierIDs
                             let count = earlierIDs.count
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 HStack(alignment: .firstTextBaseline, spacing: 6) {

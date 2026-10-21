@@ -207,11 +207,12 @@ observations, discovery, and restart recovery do not replay either presentation.
 arrived before Herdly restarted is uncertain and silent. After the Earlier delay (five minutes by default), an unacknowledged
 outcome moves into Earlier while retaining its Dismiss action; Codex retains Open
 in Codex, while Claude keeps the unavailable return explanation. In the open queue an Earlier row folds to
-one line (its session name and tag, with its age); opening the fold shows its full header, details, and controls. This is
+one line (its session name and exception word, if any, with its age); opening the fold shows its full header, details, and controls. This is
 presentation decay, not deletion or acknowledgment. Agreed on 2026-10-11: an Earlier result leaves the strip; the
 strip's to-check badge and the to-check count in Herdly's settings no longer count it, and it gives its session no sprite, though a session with other rows keeps
-its sprite through them. The Earlier heading carries a Dismiss all
-action that explicitly dismisses exactly the results listed under it, as if each row's Dismiss were clicked; results
+its sprite through them. The Earlier heading counts every Earlier result
+in its group, including any folded behind "+N more" (#314), and carries a Dismiss all action that explicitly
+dismisses exactly the results it counts, as if each row's Dismiss were clicked; results
 that move into Earlier afterwards, and every other row, stay queued. Claude has no trustworthy read receipt; only
 explicit dismissal, a later verified exact-tab visit, or a reply can acknowledge its outcome. Agreed
 on 2026-10-08: a prompt submitted in a Claude session (its `UserPromptSubmit`) acknowledges that

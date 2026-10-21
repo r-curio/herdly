@@ -183,14 +183,21 @@ public struct QueueGroup: Equatable, Sendable {
     public let section: QueueKindSection?
     /// Every row in the group, folded ones included; a kind section's heading shows it.
     public let count: Int
+    /// Every Earlier result in the group, folded ones included, in queue order. The "Earlier"
+    /// heading counts these and its "Dismiss all" dismisses exactly these.
+    public let earlierIDs: [AgentAttentionID]
     /// Rows behind the group's "+N more" pill; zero when nothing is folded.
     public var folded: Int { count - items.count }
 
-    public init(heading: String?, items: [AgentAttentionItem], section: QueueKindSection? = nil, count: Int? = nil) {
+    /// `items` are the rows shown; `all`, when the group folds, is every row it holds.
+    public init(heading: String?, items: [AgentAttentionItem], section: QueueKindSection? = nil,
+                all: [AgentAttentionItem]? = nil) {
+        let all = all ?? items
         self.heading = heading
         self.items = items
         self.section = section
-        self.count = max(items.count, count ?? items.count)
+        self.count = max(items.count, all.count)
+        self.earlierIDs = all.filter { $0.kind == .earlierOutcome }.map(\.id)
     }
 }
 
@@ -344,7 +351,7 @@ public struct QueueSections: Equatable, Sendable {
         return members.map { section, rows in
             let limit = section == .approve || open.contains(section)
                 ? rows.count : (later.firstIndex { $0.0 == section }.map { shown[$0] } ?? rows.count)
-            return QueueGroup(heading: section.heading, items: Array(rows.prefix(limit)), section: section, count: rows.count)
+            return QueueGroup(heading: section.heading, items: Array(rows.prefix(limit)), section: section, all: rows)
         }
     }
 }
