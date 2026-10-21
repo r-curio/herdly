@@ -616,6 +616,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var openQueueFolds: Set<QueueKindSection> = [] {
         didSet { if openQueueFolds != oldValue { reconcileSelection() } }
     }
+    /// The one running row opened in place (#319). Changed only through Companion+RunningRow.swift.
+    @Published var openRunningRow = OpenRunningRow()
     /// The rows the open panel shows, under their group headings: the explicit queue (working rows
     /// folded below anything that needs the user), or only the one card. A card is never grouped.
     /// The view draws these and the keyboard selection steps through them.
@@ -1833,6 +1835,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             if !expanded {
                 workingFoldOpen = false
                 openQueueFolds = []
+                closeOpenRunningRow()
             }
         }
         reconcileSelection()
@@ -1954,9 +1957,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
     }
 
-    /// One Escape, from the panel or a text field (D6): a clicked card returns to the queue; otherwise
-    /// the panel collapses. Neither dismisses anything.
+    /// One Escape, from the panel or a text field (D6): an opened running row closes (#319); a clicked
+    /// card returns to the queue; otherwise the panel collapses. None of them dismisses anything.
     func escape() {
+        // A clicked card replaces the queue, so an open running row and a clicked card never coexist.
+        if escapeOpenRunningRow() { return }
         switch notchPresentation.escape() {
         case .backToQueue: refresh()
         case .collapse: collapse()
@@ -1988,6 +1993,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         var selection = queueSelection
         selection.reconcile(rows: selectableRows)
         if selection != queueSelection { queueSelection = selection }
+        reconcileOpenRunningRow()
     }
 
     /// Returns false when the queue is not shown or has no rows, so the arrow key goes on to AppKit.
@@ -2000,8 +2006,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return true
     }
 
-    /// Return on the selected row. Approvals and questions open as their clicked card; opening a
-    /// session from any other row is the hook #322 fills in (until then the key is not handled).
+    /// Return on the selected row. Approvals and questions open as their clicked card; a working row
+    /// opens or closes in place (#319); opening a session from any other row is the hook #322 fills in
+    /// (until then the key is not handled).
     func activateSelectedRow() -> Bool {
         reconcileSelection()
         guard let selected = queueSelection.selected else { return false }
@@ -2009,8 +2016,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         case let .openCard(id):
             openCard(id)
             return true
-        case .openSession:
-            return false
+        case let .openSession(id):
+            return toggleRunningRow(id)
         }
     }
 
