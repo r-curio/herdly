@@ -124,24 +124,24 @@ public enum HerdrSettingsProblem: Equatable, Hashable, Sendable {
 public struct HerdrSettingsRow: Equatable, Sendable {
     /// Nil only while the first scan after the gate opened is still running.
     public let badge: HerdrReadinessBadge?
-    public let detail: String
     /// Every applicable problem, one per line: Claude's integration, Ghostty, herdr. Codex needs no
     /// herdr integration (ADR 0012).
     public let problems: [HerdrSettingsProblem]
 
-    public init(badge: HerdrReadinessBadge?, detail: String, problems: [HerdrSettingsProblem]) {
+    public init(badge: HerdrReadinessBadge?, problems: [HerdrSettingsProblem]) {
         self.badge = badge
-        self.detail = detail
         self.problems = problems
     }
 }
 
 public enum HerdrPresentation {
-    /// The row's targeting rule and what Open does otherwise (ADRs 0011, 0014, 0015): Herdly focuses the
-    /// bound pane, then selects the tab of the enabled terminal running herdr's single client, joined by
-    /// tty. A split, several clients, or a tab it cannot join raises that terminal instead.
+    /// The row's targeting rule and what Open does otherwise (ADRs 0008, 0011, 0014, 0015): Herdly focuses
+    /// the bound pane in herdr's default session, then selects the unsplit tab of the enabled terminal
+    /// running herdr's single client, joined by tty. A split, several clients, or a tab it cannot join
+    /// raises that terminal instead; herdr's own failures (not found, socket, protocol, binding,
+    /// integration) and named sessions stay unavailable.
     public static let howOpenWorks =
-        "Herdly returns to a herdr pane alone in its tab, with one herdr client, and the terminal tab running that client; otherwise Open raises that terminal. Codex question options are sent to the exact pane."
+        "Herdly returns to a pane alone in its tab in herdr's default session, with one herdr client, and the unsplit terminal tab running that client; otherwise Open raises that terminal. When Herdly can't read herdr, Open is unavailable. Codex question options are sent to the exact pane."
 
     // MARK: - Grouping
 
@@ -325,19 +325,19 @@ public enum HerdrPresentation {
     public static func settingsRow(switches: TerminalHostSwitches, inUse: Bool, outcome: HerdrScanOutcome?,
                                    agentsSeen: Set<HerdrAgentKind>, ttySupport: GhosttyTTYSupport?) -> HerdrSettingsRow {
         guard switches.isOn(.herdr) else {
-            return HerdrSettingsRow(badge: .off, detail: "Herdly never scans or contacts herdr.", problems: [])
+            return HerdrSettingsRow(badge: .off, problems: [])
         }
         guard switches.anyTerminalOn else {
-            return HerdrSettingsRow(badge: .needsAttention, detail: "Fix each item below.", problems: [.noTerminalOn])
+            return HerdrSettingsRow(badge: .needsAttention, problems: [.noTerminalOn])
         }
         // A Codex session opens the gate whenever herdr's socket is trusted (ADR 0012); with no
         // server and no Claude session reporting a pane, nothing runs in herdr.
         let nothingInHerdr = outcome == .unavailable(.notRunning) && !agentsSeen.contains(.claude)
         guard inUse, !nothingInHerdr else {
-            return HerdrSettingsRow(badge: .notInUse, detail: "No herdr sessions seen.", problems: [])
+            return HerdrSettingsRow(badge: .notInUse, problems: [])
         }
         guard let outcome else {
-            return HerdrSettingsRow(badge: nil, detail: "Checking herdr…", problems: [])
+            return HerdrSettingsRow(badge: nil, problems: [])
         }
         var problems: [HerdrSettingsProblem] = []
         var herdrUnavailable = false
@@ -353,8 +353,6 @@ public enum HerdrPresentation {
         }
         if ttySupport == .unsupported { problems.append(.ghosttyCannotIdentifyTab) }
         if herdrUnavailable { problems.append(.herdrUnavailable) }
-        return HerdrSettingsRow(badge: problems.isEmpty ? .ready : .needsAttention,
-                                detail: problems.isEmpty ? "herdr is reachable and its integrations are current." : "Fix each item below.",
-                                problems: problems)
+        return HerdrSettingsRow(badge: problems.isEmpty ? .ready : .needsAttention, problems: problems)
     }
 }

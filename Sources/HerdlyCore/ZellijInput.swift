@@ -74,7 +74,6 @@ extension ZellijInput {
 
 public struct ZellijSettingsRow: Equatable, Sendable {
     public let badge: TerminalAppSettingsRow.Badge
-    public let detail: String
     /// One line per problem, each a separate fix.
     public let problems: [String]
 }
@@ -91,7 +90,7 @@ public enum ZellijPresentation {
     public static let notFoundLine = "Herdly can't find Zellij in /opt/homebrew/bin or /usr/local/bin."
     /// An untrusted socket directory and any other failed read: the shared agreed line.
     public static let unreadableLine = OpenUnavailableReason.hostUnreadable(.zellij).cardLine
-    public static let footer =
+    public static let howOpenWorks =
         "Herdly returns to a pane alone in its tab, with one Zellij client, in Zellij's default socket directory; otherwise Open raises the terminal running Zellij. Replies are typed into the exact pane."
 
     /// - Parameters:
@@ -99,7 +98,7 @@ public enum ZellijPresentation {
     ///   - sessionsSeen: a scan has bound a session to a Zellij pane.
     public static func settingsRow(on: Bool, anyTerminalOn: Bool, read: ZellijRead?, sessionsSeen: Bool) -> ZellijSettingsRow {
         guard on else {
-            return ZellijSettingsRow(badge: .off, detail: "Herdly never scans or contacts Zellij.", problems: [])
+            return ZellijSettingsRow(badge: .off, problems: [])
         }
         var problems: [String] = []
         if !anyTerminalOn { problems.append(noTerminalLine) }
@@ -112,10 +111,8 @@ public enum ZellijPresentation {
         case .notRunning?, nil: break
         }
         guard problems.isEmpty else {
-            return ZellijSettingsRow(badge: .needsAttention, detail: "Fix each item below.", problems: problems)
+            return ZellijSettingsRow(badge: .needsAttention, problems: problems)
         }
-        return ZellijSettingsRow(badge: sessionsSeen ? .ready : .notInUse,
-                                 detail: sessionsSeen ? "Zellij's default socket directory is readable." : "No Zellij sessions seen.",
-                                 problems: [])
+        return ZellijSettingsRow(badge: sessionsSeen ? .ready : .notInUse, problems: [])
     }
 }

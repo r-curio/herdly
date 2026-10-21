@@ -57,11 +57,11 @@ public enum TerminalHost: String, CaseIterable, Hashable, Sendable {
     public var howOpenWorks: String {
         switch self {
         case .ghostty: GhosttyPresentation.howOpenWorks
-        case .iTerm2: ITerm2Presentation.footer
-        case .terminalApp: TerminalAppPresentation.footer
-        case .wezTerm: WezTermPresentation.footer
-        case .tmux: TmuxPresentation.footer
-        case .zellij: ZellijPresentation.footer
+        case .iTerm2: ITerm2Presentation.howOpenWorks
+        case .terminalApp: TerminalAppPresentation.howOpenWorks
+        case .wezTerm: WezTermPresentation.howOpenWorks
+        case .tmux: TmuxPresentation.howOpenWorks
+        case .zellij: ZellijPresentation.howOpenWorks
         case .herdr: HerdrPresentation.howOpenWorks
         }
     }

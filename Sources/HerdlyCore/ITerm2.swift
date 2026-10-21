@@ -298,21 +298,18 @@ public enum ITerm2SettingsProblem: CaseIterable, Equatable, Hashable, Sendable {
 /// The iTerm2 card's state: the status badge, the Automation badge and every problem that applies.
 public struct ITerm2SettingsRow: Equatable, Sendable {
     public let badge: HerdrReadinessBadge
-    /// Allowed, Not allowed or Not verified.
-    public let permission: String
     public let problems: [ITerm2SettingsProblem]
 
-    public init(badge: HerdrReadinessBadge, permission: String, problems: [ITerm2SettingsProblem]) {
+    public init(badge: HerdrReadinessBadge, problems: [ITerm2SettingsProblem]) {
         self.badge = badge
-        self.permission = permission
         self.problems = problems
     }
 }
 
 public enum ITerm2Presentation {
-    /// The card's targeting rule and what Open does otherwise; a fallback is silent on notch cards
-    /// (ADR 0015), so this is where it is explained.
-    public static let footer = "Herdly returns to unsplit tabs; otherwise Open raises iTerm2."
+    /// The row's targeting rule and what Open does otherwise, shown by How Open Works…; a fallback is
+    /// silent on notch cards (ADR 0015), so this is where it is explained.
+    public static let howOpenWorks = "Herdly returns to unsplit tabs; otherwise Open raises iTerm2."
     /// The typed-input line for a session in iTerm2 (ADR 0017: Broadcast Input cannot be ruled out, so
     /// Herdly types nothing there). It never points to Settings.
     public static let typedInputLine = "Herdly can't type into iTerm2. Reply in the session."
@@ -326,9 +323,8 @@ public enum ITerm2Presentation {
         if !installed { problems.append(.notFound) }
         if access == .denied { problems.append(.automationDenied) }
         if on, scan == .unreadable { problems.append(.unreadable) }
-        let permission = access == .granted ? "Allowed" : access == .denied ? "Not allowed" : "Not verified"
         let badge: HerdrReadinessBadge = !on ? .off : !problems.isEmpty ? .needsAttention : inUse ? .ready : .notInUse
-        return ITerm2SettingsRow(badge: badge, permission: permission, problems: problems)
+        return ITerm2SettingsRow(badge: badge, problems: problems)
     }
 }
 

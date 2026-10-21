@@ -102,7 +102,6 @@ public struct TmuxSessionProcess: Equatable, Sendable {
 
 public struct TmuxSettingsRow: Equatable, Sendable {
     public let badge: TerminalAppSettingsRow.Badge
-    public let detail: String
     /// One line per problem, each a separate fix.
     public let problems: [String]
 }
@@ -119,7 +118,7 @@ public enum TmuxPresentation {
     public static let unreadableLine = OpenUnavailableReason.hostUnreadable(.tmux).cardLine
     /// product.md, "Problem lines": "sessions seen on a socket other than the default can't be reached."
     public static let otherSocketLine = "Sessions seen on a socket other than the default can't be reached."
-    public static let footer =
+    public static let howOpenWorks =
         "Herdly returns to a pane alone in its window, with one client, on tmux's default socket; otherwise Open raises the terminal running tmux. Replies are typed into the exact pane."
 
     /// - Parameters:
@@ -129,7 +128,7 @@ public enum TmuxPresentation {
     public static func settingsRow(on: Bool, anyTerminalOn: Bool, read: TmuxRead?, sessionsSeen: Bool,
                                    otherSocketSeen: Bool) -> TmuxSettingsRow {
         guard on else {
-            return TmuxSettingsRow(badge: .off, detail: "Herdly never scans or contacts tmux.", problems: [])
+            return TmuxSettingsRow(badge: .off, problems: [])
         }
         var problems: [String] = []
         if !anyTerminalOn { problems.append(noTerminalLine) }
@@ -141,11 +140,9 @@ public enum TmuxPresentation {
         }
         if otherSocketSeen { problems.append(otherSocketLine) }
         guard problems.isEmpty else {
-            return TmuxSettingsRow(badge: .needsAttention, detail: "Fix each item below.", problems: problems)
+            return TmuxSettingsRow(badge: .needsAttention, problems: problems)
         }
-        return TmuxSettingsRow(badge: sessionsSeen ? .ready : .notInUse,
-                               detail: sessionsSeen ? "tmux's default server is readable." : "No tmux sessions seen.",
-                               problems: [])
+        return TmuxSettingsRow(badge: sessionsSeen ? .ready : .notInUse, problems: [])
     }
 
     /// Whether a live session runs under a tmux server other than the default one: its process descends

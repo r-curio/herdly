@@ -271,20 +271,22 @@ private let t2 = TerminalTabTarget(host: .terminalApp, tabID: "9921", tty: "/dev
 @Test func terminalAppSettingsCardFollowsTheSwitchPermissionAndScan() {
     let off = TerminalAppPresentation.settingsRow(on: false, access: nil, readable: nil, sessionsSeen: false)
     #expect(off.badge == .off && off.problems.isEmpty)
-    #expect(off.detail == "Herdly never scans or contacts Terminal.app.")
-    #expect(off.permission == "Not verified")
     let unused = TerminalAppPresentation.settingsRow(on: true, access: .granted, readable: true, sessionsSeen: false)
-    #expect(unused.badge == .notInUse && unused.permission == "Allowed")
+    #expect(unused.badge == .notInUse && unused.problems.isEmpty)
     let ready = TerminalAppPresentation.settingsRow(on: true, access: .granted, readable: true, sessionsSeen: true)
     #expect(ready.badge == .ready && ready.problems.isEmpty)
     // Denied, or running but unreadable: needs attention, with the fix on its own line.
     let denied = TerminalAppPresentation.settingsRow(on: true, access: .denied, readable: nil, sessionsSeen: true)
-    #expect(denied.badge == .needsAttention && denied.permission == "Not allowed")
-    #expect(denied.problems == [TerminalAppPresentation.unreadableLine])
+    #expect(denied.badge == .needsAttention && denied.problems == [.automationDenied])
+    // Only a denial offers Open Settings…; both keep the one agreed line.
+    #expect(TerminalAppSettingsProblem.automationDenied.opensAutomationSettings)
+    #expect(TerminalAppSettingsProblem.automationDenied.message == TerminalAppPresentation.unreadableLine)
     let unreadable = TerminalAppPresentation.settingsRow(on: true, access: .granted, readable: false, sessionsSeen: false)
-    #expect(unreadable.badge == .needsAttention && unreadable.problems == [TerminalAppPresentation.unreadableLine])
-    // The footer explains the silent fallback and the typed-input rule.
-    #expect(TerminalAppPresentation.footer
+    #expect(unreadable.badge == .needsAttention && unreadable.problems == [.unreadable])
+    #expect(!TerminalAppSettingsProblem.unreadable.opensAutomationSettings)
+    #expect(TerminalAppSettingsProblem.unreadable.message == TerminalAppPresentation.unreadableLine)
+    // How Open Works… explains the silent fallback and the typed-input rule.
+    #expect(TerminalAppPresentation.howOpenWorks
         == "Herdly returns to unsplit tabs; otherwise Open raises Terminal.app. Replies are typed into the exact tab; Codex questions are answered in Codex.")
 }
 
@@ -295,13 +297,13 @@ private let t2 = TerminalTabTarget(host: .terminalApp, tabID: "9921", tty: "/dev
     let shown = TerminalAppScanPermission.shown(checked: .granted, scan: denied)
     #expect(shown == .denied)
     let row = TerminalAppPresentation.settingsRow(on: true, access: shown, readable: false, sessionsSeen: true)
-    #expect(row.permission == "Not allowed" && row.badge == .needsAttention)
+    #expect(row.problems == [.automationDenied] && row.badge == .needsAttention)
     // A later readable scan returns the row to Allowed.
     let recovered = TerminalAppScanPermission.after(denied, .readable)
     #expect(recovered == .allowed)
     let shownAgain = TerminalAppScanPermission.shown(checked: .granted, scan: recovered)
-    #expect(TerminalAppPresentation.settingsRow(on: true, access: shownAgain, readable: true,
-                                                sessionsSeen: true).permission == "Allowed")
+    let readable = TerminalAppPresentation.settingsRow(on: true, access: shownAgain, readable: true, sessionsSeen: true)
+    #expect(readable.problems.isEmpty && readable.badge == .ready)
 }
 
 @Test func aScanFailingForAnyOtherReasonLeavesThePermissionBadgeAsItWas() {

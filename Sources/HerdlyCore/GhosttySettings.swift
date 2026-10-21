@@ -41,15 +41,15 @@ public enum GhosttyPresentation {
 
     /// The row from the switch, the installed Ghostty, the latest Automation check and whether a scan
     /// has verified access. A denial turns the switch back off, so its line is listed whatever the switch
-    /// says; every other problem is listed the same way, as iTerm2's are. Access that is neither verified
+    /// says; a missing or outdated Ghostty is listed only while the switch is on. Access that is neither verified
     /// nor denied (not checked yet, Ghostty not running, consent not yet given) reads Not in use: nothing
     /// has been seen there and macOS asks when Ghostty next opens.
     public static func settingsRow(on: Bool, installed: Bool, supported: Bool, minimum: String,
                                    access: GhosttyAutomationAccess?, permissionVerified: Bool) -> GhosttySettingsRow {
         var problems: [GhosttySettingsProblem] = []
-        if !installed {
+        if on, !installed {
             problems.append(.notFound)
-        } else if !supported {
+        } else if on, !supported {
             problems.append(.updateNeeded(minimum: minimum))
         }
         if access == .denied, !permissionVerified { problems.append(.automationDenied) }

@@ -271,7 +271,7 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
 @Test func herdrSettingsRowIsNotInUseUntilASessionReportsHerdr() {
     let row = HerdrPresentation.settingsRow(switches: herdrOn, inUse: false, outcome: nil,
                                             agentsSeen: [], ttySupport: .unsupported)
-    #expect(row == HerdrSettingsRow(badge: .notInUse, detail: "No herdr sessions seen.", problems: []))
+    #expect(row == HerdrSettingsRow(badge: .notInUse, problems: []))
     #expect(row.badge?.title == "Not in use")
 }
 
@@ -279,7 +279,7 @@ private func scan(integration: [HerdrAgentKind: HerdrIntegrationState] = [.codex
     for switches in [TerminalHostSwitches(enabled: [.ghostty]), TerminalHostSwitches()] {
         let row = HerdrPresentation.settingsRow(switches: switches, inUse: false, outcome: nil,
                                                 agentsSeen: [.claude], ttySupport: .unsupported)
-        #expect(row == HerdrSettingsRow(badge: .off, detail: "Herdly never scans or contacts herdr.", problems: []))
+        #expect(row == HerdrSettingsRow(badge: .off, problems: []))
         #expect(row.badge?.title == "Off")
     }
 }
