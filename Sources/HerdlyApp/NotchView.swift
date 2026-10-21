@@ -170,15 +170,26 @@ struct Sprite: View {
     }
 }
 
-/// The count of items that need the user; hidden at zero by the caller.
+/// The count of items that need the user: the bare number on the collapsed strip, "N to check"
+/// while the queue is open (`StripWing`); hidden at zero by the caller.
 struct Badge: View {
-    var count: Int
+    var badge: StripWing.Badge
+
+    init(count: Int) { badge = .count(count) }
+    init(_ badge: StripWing.Badge) { self.badge = badge }
+
+    private var named: Bool {
+        if case .named = badge { true } else { false }
+    }
+
     var body: some View {
-        Text("\(count)")
+        Text(badge.text)
             .font(NotchStyle.mono(11, .medium)).monospacedDigit()
             .foregroundStyle(NotchStyle.ink)
+            .lineLimit(1).fixedSize()
             .frame(minWidth: 16, minHeight: 16)
-            .padding(.horizontal, 2)
+            // A named badge keeps the well's shape with a little more room either side (`badge-named`).
+            .padding(.horizontal, named ? 4 : 2)
             .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
     }
 }
@@ -1710,15 +1721,8 @@ struct Notch: View {
     }
 
     private var stripLabel: String {
-        let summary = strip
-        let empty = summary.sessions.isEmpty && summary.toCheck == 0
-        var parts: [String] = [empty ? model.emptyQueueReading.title : summary.subject]
-        let sessions = summary.sessions.count + summary.overflow
-        if sessions > 1 { parts.append("\(sessions) sessions") }
-        if summary.working { parts.append("working") }
-        if summary.toCheck > 0 { parts.append("\(summary.toCheck) to check") }
-        parts += model.usageStripReadouts.map(\.spokenLabel)
-        return parts.joined(separator: ", ")
+        strip.spokenLabel(emptyQueueTitle: model.emptyQueueReading.title,
+                          readouts: model.usageStripReadouts.map(\.spokenLabel))
     }
 
     /// Rows under their optional group headings, with each run of Earlier rows under its count. Each
@@ -1805,8 +1809,9 @@ struct Notch: View {
         let summary = strip
         VStack(alignment: .leading, spacing: 0) {
             Button(action: model.expand) {
-                // One sprite per session (at most three), the overflow mark, and the to-check count
-                // sit together in the wing left of the housing; Codex's weekly limit reading sits in the
+                // The sprites and the to-check count sit together in the wing left of the housing
+                // (`StripWing`: up to three sprites and the bare count collapsed, one sprite and
+                // "N to check" open); Codex's weekly limit reading sits in the
                 // wing right of it, with its five-hour reading ahead of it while Codex reports one, and
                 // Claude's current five-hour and seven-day readings (orange) ahead of Codex's (blue).
                 // The gap between them is the housing itself. On a display without a housing the
@@ -1814,33 +1819,19 @@ struct Notch: View {
                 // open queue and the accessibility label. The 8pt content inset on each side comes
                 // out of the wings. What each wing shows follows the active display profile.
                 let layout = model.stripLayout
-                let leftWing = model.appearance.leftWing
+                let wing = StripWing.make(summary: summary, leftWing: model.appearance.leftWing, expanded: model.expanded)
                 HStack(spacing: 0) {
                     HStack(spacing: 6) {
-                        switch leftWing {
-                        case .spritesAndCount:
-                            if summary.sessions.isEmpty {
+                        ForEach(wing.sprites, id: \.identity) { sprite in
+                            switch sprite {
+                            case .unlit:
                                 Sprite(kind: model.appearance.sprite, working: false, reduceMotion: model.reduceMotion, unlit: true)
-                            }
-                            ForEach(summary.sessions, id: \.session) { session in
+                            case .session(let session):
                                 Sprite(kind: model.appearance.sprite, working: session.working, reduceMotion: model.reduceMotion,
                                        color: session.color)
                             }
-                        case .countOnly:
-                            // One stepping sprite keeps the working signal when sessions are hidden.
-                            if let busy = summary.sessions.first(where: \.working) {
-                                Sprite(kind: model.appearance.sprite, working: true, reduceMotion: model.reduceMotion, color: busy.color)
-                            }
-                        case .none:
-                            EmptyView()
                         }
-                        if leftWing == .spritesAndCount && summary.overflow > 0 {
-                            Text("+\(summary.overflow)")
-                                .font(NotchStyle.mono(11, .medium)).monospacedDigit()
-                                .foregroundStyle(NotchStyle.text).lineLimit(1).fixedSize()
-                                .accessibilityLabel("\(summary.overflow) more sessions")
-                        }
-                        if leftWing != .none && summary.toCheck > 0 { Badge(count: summary.toCheck) }
+                        if let badge = wing.badge { Badge(badge) }
                         Spacer(minLength: 0)
                     }
                     .padding(.leading, 4)
