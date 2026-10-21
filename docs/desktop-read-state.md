@@ -30,7 +30,7 @@ Known honest limits: a thread cleared by archive or delete also acknowledges its
 
 ## App integration
 
-Each two-second scan reads the file off the main actor alongside the hook events and rollouts, then applies the rule before presentation decisions, so a completion that finished while its thread was open in front never pops or plays a sound. Acknowledgments persist in Herdly's attention snapshot like dismissals. The controls window has a toggle, "Clear desktop completions Codex marks read" (on by default, stored in UserDefaults as `desktopReadStateEnabled`), and a status line with the file's write time, the unread count, how many completions the last scan cleared, and a note when the installed desktop version differs from the tested one. `--desktop-read-state <path>` points a lab run at a copy of the file.
+Each two-second scan reads the file off the main actor alongside the hook events and rollouts, then applies the rule before presentation decisions, so a completion that finished while its thread was open in front never pops or plays a sound. Acknowledgments persist in Herdly's attention snapshot like dismissals. Settings › Notifications has a switch, "Clear when read in Codex" (on by default, stored in UserDefaults as `desktopReadStateEnabled`), whose tooltip is a status line with the file's write time, the unread count, how many completions the last scan cleared, and a note when the installed desktop version differs from the tested one. `--desktop-read-state <path>` points a lab run at a copy of the file.
 
 ## Verification
 
@@ -42,11 +42,11 @@ Live walkthrough to repeat after each desktop update, with two disposable deskto
 
 1. Send a no-tools prompt in A, switch to another app before it finishes. Expect: A's completion appears in the notch; the probe shows A unread.
 2. Bring Codex forward with B selected. Expect: A stays queued; the probe still shows A unread.
-3. Select A. Expect: within about three seconds A's completion clears without a dismissal; the probe shows A absent and the status line reports one cleared.
+3. Select A. Expect: within about three seconds A's completion clears without a dismissal; the probe shows A absent and the status line (the tooltip of "Clear when read in Codex" in Settings › Notifications, since #317) reports one cleared.
 4. Send a prompt in A and stay on it until it finishes. Expect: no popup and no sound; the completion is acknowledged on its first scan.
 5. Quit Herdly, complete a turn in B, view B, relaunch Herdly. Expect: B's restored uncertain completion clears on the first scan.
 
-Record the desktop version and results in this file. If the status line reports the file unavailable after an update, turn the toggle off and re-run the source inspection described in the investigation document.
+Record the desktop version and results in this file. If Settings › Notifications shows the read state unavailable under the switch after an update, turn the toggle off and re-run the source inspection described in the investigation document.
 
 ### 2026-10-21, two signed-in identities
 

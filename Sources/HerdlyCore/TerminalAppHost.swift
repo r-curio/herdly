@@ -190,11 +190,22 @@ public struct TerminalAppSettingsRow: Equatable, Sendable {
     }
 
     public let badge: Badge
-    /// The Permission row's badge: Allowed, Not allowed or Not verified.
-    public let permission: String
-    public let detail: String
     /// One line per problem, each a separate fix.
-    public let problems: [String]
+    public let problems: [TerminalAppSettingsProblem]
+}
+
+/// One fix under Terminal.app's row. Both share the agreed unreadable line; only a denial offers
+/// Open Settings….
+public enum TerminalAppSettingsProblem: Equatable, Hashable, Sendable {
+    /// macOS Automation access for Terminal.app was denied, by the check or by a scan (#279).
+    case automationDenied
+    /// Terminal.app is running but its latest inventory could not be read.
+    case unreadable
+
+    public var message: String { TerminalAppPresentation.unreadableLine }
+
+    /// Whether the line offers Open Settings…, which opens Privacy & Security › Automation.
+    public var opensAutomationSettings: Bool { self == .automationDenied }
 }
 
 /// What the latest scan that could tell showed about Terminal.app's Automation permission (#279). A scan
@@ -232,7 +243,7 @@ public enum TerminalAppScanPermission: Equatable, Sendable {
 public enum TerminalAppPresentation {
     public static let unreadableLine =
         "Herdly can't read Terminal.app. Allow Herdly under System Settings › Privacy & Security › Automation › Terminal."
-    public static let footer =
+    public static let howOpenWorks =
         "Herdly returns to unsplit tabs; otherwise Open raises Terminal.app. Replies are typed into the exact tab; Codex questions are answered in Codex."
 
     /// - Parameters:
@@ -241,17 +252,13 @@ public enum TerminalAppPresentation {
     ///   - sessionsSeen: whether a scan has seen a session's tab in Terminal.app.
     public static func settingsRow(on: Bool, access: GhosttyAutomationAccess?, readable: Bool?,
                                    sessionsSeen: Bool) -> TerminalAppSettingsRow {
-        let permission = access == .granted ? "Allowed" : access == .denied ? "Not allowed" : "Not verified"
-        guard on else {
-            return TerminalAppSettingsRow(badge: .off, permission: permission,
-                                          detail: "Herdly never scans or contacts Terminal.app.", problems: [])
+        guard on else { return TerminalAppSettingsRow(badge: .off, problems: []) }
+        if access == .denied {
+            return TerminalAppSettingsRow(badge: .needsAttention, problems: [.automationDenied])
         }
-        if access == .denied || readable == false {
-            return TerminalAppSettingsRow(badge: .needsAttention, permission: permission, detail: "Fix each item below.",
-                                          problems: [unreadableLine])
+        if readable == false {
+            return TerminalAppSettingsRow(badge: .needsAttention, problems: [.unreadable])
         }
-        return TerminalAppSettingsRow(badge: sessionsSeen ? .ready : .notInUse, permission: permission,
-                                      detail: sessionsSeen ? "Terminal.app is readable." : "No Terminal.app sessions seen.",
-                                      problems: [])
+        return TerminalAppSettingsRow(badge: sessionsSeen ? .ready : .notInUse, problems: [])
     }
 }

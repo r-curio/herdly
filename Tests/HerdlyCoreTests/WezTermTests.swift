@@ -480,8 +480,8 @@ private var pendingEvidence: ReminderReader.RolloutEvidence {
     #expect(WezTermPresentation.settingsRow(on: true, installed: true, scan: .read, inUse: true)
         == WezTermSettingsRow(badge: .ready, problems: []))
     #expect(WezTermPresentation.settingsRow(on: true, installed: true, scan: .notRunning, inUse: true).badge == .ready)
-    // The footer states targeting and replies only, so it cannot go stale when the digit gate opens (#245).
-    #expect(WezTermPresentation.footer
+    // How Open Works… states targeting and replies only, so it cannot go stale when the digit gate opens (#245).
+    #expect(WezTermPresentation.howOpenWorks
         == "Herdly returns to unsplit tabs in WezTerm's front window; otherwise Open raises WezTerm. Replies are typed into the exact pane.")
 }
 

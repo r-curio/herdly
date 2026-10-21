@@ -535,7 +535,7 @@ private func cliQuestion() -> AttentionQuestion {
     // product.md's lines, and the shared unavailable line where product.md names none.
     #expect(TmuxPresentation.otherSocketLine == "Sessions seen on a socket other than the default can't be reached.")
     #expect(TmuxPresentation.unreadableLine == OpenUnavailableReason.hostUnreadable(.tmux).cardLine)
-    #expect(!TmuxPresentation.footer.contains("Codex questions"))
+    #expect(!TmuxPresentation.howOpenWorks.contains("Codex questions"))
     #expect(TmuxPresentation.settingsRow(on: false, anyTerminalOn: false, read: nil, sessionsSeen: false,
                                          otherSocketSeen: true).badge == .off)
 }
