@@ -64,3 +64,13 @@ private let unnamed = QuestionPrompt(header: "  ", question: "Anything else?", o
     #expect(!QuestionOptionLabel("Recommended by someone").recommended)
     #expect(!QuestionOptionLabel(" (Recommended)").recommended)
 }
+
+@Test func aKeySentStepNamesTheDigitItTyped() {
+    let player = QuestionPrompt(header: "Format", question: "Which?", options: ["JSON lines (Recommended)", "Plist"])
+    let purpose = QuestionPrompt(header: "Location", question: "Where?", options: ["App Support", "Rollouts"])
+    let steps = QuestionSteps.make([player, purpose], current: 1, currentStatus: nil, sentKeys: true) { $0 == 0 ? .option(0) : nil }
+    #expect(steps.steps.map(\.summary) == ["sent: 1 · JSON lines", nil])
+    // A daemon draft is not a sent key: its step shows the label alone.
+    let drafted = QuestionSteps.make([player, purpose], current: 1, currentStatus: nil) { $0 == 0 ? .option(0) : nil }
+    #expect(drafted.steps.map(\.summary) == ["JSON lines", nil])
+}

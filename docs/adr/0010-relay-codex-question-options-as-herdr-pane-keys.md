@@ -2,6 +2,8 @@
 
 Accepted with the user on 2026-10-07 (issue #106). This is the herdr counterpart of ADR 0006. When a Codex CLI session in a herdr pane asks a `request_user_input` question and the Codex daemon does not hold that call, a click on an option sends exactly one `agent.send_keys` request to the bound pane over herdr's socket (ADR 0009). The request carries only the option's one-based digit. The live proof (`docs/evidence/herdr-ghostty-live.md`) showed that the digit alone selects and submits an option in Codex 0.154.0. Approvals are never keys.
 
+Amended 2026-10-21 ([issue #321](https://github.com/r-curio/herdly/issues/321)): as for ADR 0006, "a click on an option" now means Send on a selected option; selecting alone sends nothing.
+
 ## Rules
 
 - **Target:** the key is addressed to the pane ID from the session's pane binding (ADR 0012 for Codex), never to an herdr agent name, which is a user-chosen label. A paste, `herdr agent prompt`, or text input is never used. Acceptance must show that `agent.send_keys` accepts a pane ID target. If it does not, the herdr relay is unavailable, with no fallback to names.

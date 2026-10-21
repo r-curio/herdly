@@ -2,8 +2,8 @@ import Foundation
 
 /// The short line a queue row carries after the user approves, denies, or answers it from the
 /// notch (D10). It says only what Herdly knows about delivery; it never says Codex or Claude acted.
-/// The copy is exactly the five agreed strings.
-public enum RowNote: Equatable, Sendable, CaseIterable {
+/// The copy is exactly the agreed strings.
+public enum RowNote: Equatable, Sendable {
     /// Herdly is sending the decision or answer.
     case sending
     /// Claude's helper confirmed it received this one-time approval.
@@ -14,6 +14,10 @@ public enum RowNote: Equatable, Sendable, CaseIterable {
     case notDelivered
     /// A Codex question answer left Herdly; Codex has not recorded it yet.
     case awaitingCodex
+    /// The key for an earlier question of a call (zero-based `question` of `of`) was written to the
+    /// session; the session should now show the next one (#321). Recorded only for a key Herdly
+    /// reports sent, and only for a question.
+    case keySent(question: Int, of: Int)
 
     public var text: String {
         switch self {
@@ -22,6 +26,7 @@ public enum RowNote: Equatable, Sendable, CaseIterable {
         case .sentUnconfirmed: return "Sent, not confirmed"
         case .notDelivered: return "Not delivered · answer in Claude"
         case .awaitingCodex: return "Sent, waiting for Codex"
+        case let .keySent(question, count): return "Sent \(question + 1) of \(count), on question \(question + 2)"
         }
     }
 
@@ -63,26 +68,29 @@ extension RowNoteUpdate {
     }
 
     /// A Codex question's digit is about to be typed. Only the final question of the call notes and
-    /// leaves the clicked card; earlier questions stay unanswered (their wording is #321).
+    /// leaves the clicked card; an earlier question's key keeps the card open and notes once it settles.
     public static func codexKeySending(final: Bool) -> Self {
         final ? .record(.sending) : .unchanged
     }
 
-    /// A typed digit settled (herdr, tmux, Zellij, WezTerm). Written → waiting for Codex; may have
-    /// been written → not confirmed; nothing written, or vetoed → the note is withdrawn.
-    public static func codexKeyAnswer(_ outcome: HerdrQuestionRelay.Outcome, final: Bool) -> Self {
-        guard final else { return .unchanged }
+    /// A typed digit for zero-based question `index` of a `count`-question call settled (herdr, tmux,
+    /// Zellij, WezTerm). Written → waiting for Codex, or for an earlier question "Sent k of n, on
+    /// question k+1"; may have been written → not confirmed; nothing written, or vetoed → withdrawn.
+    public static func codexKeyAnswer(_ outcome: HerdrQuestionRelay.Outcome, question index: Int, of count: Int) -> Self {
         switch outcome {
-        case .delivered(.queued): return .record(.awaitingCodex)
+        case .delivered(.queued): return written(question: index, of: count)
         case .delivered(.possiblySent): return .record(.sentUnconfirmed)
         case .delivered(.notSent), .vetoed: return .withdraw
         }
     }
 
     /// A Ghostty digit settled: Ghostty reports only whether it sent the key.
-    public static func ghosttyKeyAnswer(sent: Bool, final: Bool) -> Self {
-        guard final else { return .unchanged }
-        return sent ? .record(.awaitingCodex) : .withdraw
+    public static func ghosttyKeyAnswer(sent: Bool, question index: Int, of count: Int) -> Self {
+        sent ? written(question: index, of: count) : .withdraw
+    }
+
+    private static func written(question index: Int, of count: Int) -> Self {
+        index == max(1, count) - 1 ? .record(.awaitingCodex) : .record(.keySent(question: index, of: count))
     }
 
     /// A Claude approval decision whose root, receipt or scan changed before its result came back:
@@ -113,6 +121,7 @@ public struct RowNotes: Equatable, Sendable {
     public mutating func record(_ note: RowNote, for id: AgentAttentionID, pending: Set<AgentAttentionID>) -> Bool {
         guard id.isRequest, pending.contains(id), !cleared.contains(id) else { return false }
         if note == .approvalReceived, case .question = id { return false }
+        if case .keySent = note, case .approval = id { return false }
         notes[id] = note
         return true
     }

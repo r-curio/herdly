@@ -117,9 +117,9 @@ private func fullBook() -> (AppServerQuestionBook, AppServerQuestionRequest) {
     #expect(QuestionAnswerRouting.route(for: desktop, book: book, daemonConnected: true) == .daemon(request))
     // Not connected, or the daemon never sent this request: the pre-daemon paths, unchanged.
     #expect(QuestionAnswerRouting.route(for: cli, book: book, daemonConnected: false) == .ghosttyRelay)
-    #expect(QuestionAnswerRouting.route(for: desktop, book: book, daemonConnected: false) == .desktopPick)
+    #expect(QuestionAnswerRouting.route(for: desktop, book: book, daemonConnected: false) == .desktopReadOnly)
     #expect(QuestionAnswerRouting.route(for: rolloutQuestion(callID: "call_2"), book: book, daemonConnected: true) == .ghosttyRelay)
-    #expect(QuestionAnswerRouting.route(for: rolloutQuestion(source: .desktop, callID: "call_2"), book: book, daemonConnected: true) == .desktopPick)
+    #expect(QuestionAnswerRouting.route(for: rolloutQuestion(source: .desktop, callID: "call_2"), book: book, daemonConnected: true) == .desktopReadOnly)
     // Once Herdly answered, the card stays on the daemon path (its status says so) rather than offering a key.
     var answered = book
     answered.markAnswered(request)
@@ -242,6 +242,48 @@ private final class FakeClient {
     _ = request
 }
 
+@Test func selectionsAcrossStepsLeaveAsOneWriteOnlyOnSend() throws {
+    // D16: select, Next, go back and change, then Send: the whole call is written once.
+    let (book, _) = fullBook()
+    let question = rolloutQuestion()
+    let selected = QuestionAnswerProgress(call: question.id).selecting(question: 0, answer: .option(0))
+    let next = AppServerAnswering.prepare(current: question, book: book, progress: selected, question: 0,
+                                          answer: try #require(selected.selection(for: 0)),
+                                          stillPending: { Issue.record("Next reads no rollout and sends nothing"); return true },
+                                          now: 1)
+    guard case let .drafted(drafted) = next.outcome else { Issue.record("draft expected"); return }
+    #expect(next.message == nil && next.book == book && drafted.questionIndex == 1)
+    // Back on the first step, a new selection replaces the draft; still nothing is written.
+    #expect(AppServerAnswerPolicy.rejection(for: question, book: book, progress: drafted, question: 0, answer: .option(1)) == nil)
+    let changed = drafted.selecting(question: 0, answer: .option(1), revisesDrafts: true)
+    #expect(changed.answer(for: 0) == .option(1) && changed.questionIndex == 1)
+    let last = changed.selecting(question: 1, answer: .text("Herdly"))
+    let send = AppServerAnswering.prepare(current: question, book: book, progress: last, question: 1,
+                                          answer: try #require(last.selection(for: 1)), stillPending: { true }, now: 2)
+    guard case .sending = send.outcome else { Issue.record("send expected"); return }
+    let result = try #require(send.message?["result"] as? [String: Any])
+    #expect(result["answers"] as? [String: [String: [String]]]
+            == ["list_shape": ["answers": ["Same levels"]], "name": ["answers": ["Herdly"]]])
+    #expect(send.book.hasAnswered(question))
+    // A second Send for the call is refused: one write, ever.
+    let again = AppServerAnswering.prepare(current: question, book: send.book, progress: last, question: 1,
+                                           answer: .text("Herdly"), stillPending: { true }, now: 3)
+    #expect(again.outcome == .refused(.alreadyAnswered) && again.message == nil)
+}
+
+@Test func aQuestionAnsweredInCodexWhileTheCardIsOpenSendsNothing() {
+    // The fresh pending check runs at Send; an answer Codex recorded meanwhile refuses the write and
+    // leaves the request unspent. The item then leaves the queue on that evidence.
+    let (book, _) = fullBook()
+    let question = rolloutQuestion()
+    let ready = QuestionAnswerProgress(call: question.id).recordingDraft(question: 0, answer: .option(0))
+        .selecting(question: 1, answer: .text("Herdly"))
+    let send = AppServerAnswering.prepare(current: question, book: book, progress: ready, question: 1,
+                                          answer: .text("Herdly"), stillPending: { false }, now: 1)
+    #expect(send.outcome == .refused(.notPendingInRollout))
+    #expect(send.message == nil && send.book == book && !send.book.hasAnswered(question))
+}
+
 @Test func singleQuestionCallSendsOnTheFirstAnswer() throws {
     var book = AppServerQuestionBook()
     _ = book.apply(message: requestMessage(questions: [["id": "only", "question": "?", "options": [["label": "yes"], ["label": "no"]]]]), now: 1)
@@ -271,7 +313,7 @@ private final class FakeClient {
     #expect(prompts?.map(\.id) == ["list_shape", nil])
 }
 
-@Test func aClosedThreadForgetsItsAnsweredCallsAndAPickBeforeTheDaemonStartsOver() {
+@Test func aClosedThreadForgetsItsAnsweredCalls() {
     let (book, request) = fullBook()
     let question = rolloutQuestion()
     var answered = book
@@ -283,12 +325,7 @@ private final class FakeClient {
     other.markAnswered(request)
     _ = other.apply(message: ["jsonrpc": "2.0", "method": "thread/closed", "params": ["threadId": UUID().uuidString]], now: 3)
     #expect(other.hasAnswered(question))
-    // A desktop pick made before the daemon held the request only opened Codex; the daemon card restarts.
-    let picked = QuestionAnswerProgress(call: question.id).pickingInCodex(question: 0, option: 1)
-    let reopened = picked.reopeningForDaemon()
-    #expect(reopened.phase == .ready && reopened.picks.isEmpty && reopened.questionIndex == 0)
     let drafted = QuestionAnswerProgress(call: question.id).recordingDraft(question: 0, answer: .text("x"))
-    #expect(drafted.reopeningForDaemon() == drafted)
     // A typed last answer moves to sending without a placeholder option.
     #expect(drafted.startingSend(question: 1).phase == .sending)
     #expect(drafted.startingSend(question: 0).phase == .ready)
