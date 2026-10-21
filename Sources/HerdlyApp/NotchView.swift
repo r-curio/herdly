@@ -54,6 +54,8 @@ enum NotchStyle {
     static let text = Color(red: 0.56, green: 0.56, blue: 0.56)         // #8f8f8f names and captions
     static let dim = Color(red: 0.47, green: 0.47, blue: 0.47)          // #787878 tertiary, 4.7:1 on black
     static let well = Color(red: 0.165, green: 0.165, blue: 0.165)      // #2a2a2a badge and controls
+    /// The opened running row's container (#319, F3): the one card-like surface in the queue.
+    static let openRow = Color(red: 0.102, green: 0.102, blue: 0.102)   // #1a1a1a
     // Source values chosen so the captured tones match the reference's greens (109,201,125 and 135,222,154).
     static let sprite = Color(red: 0.133, green: 0.773, blue: 0.369)    // #22c55e body
     static let spriteLight = Color(red: 0.298, green: 0.863, blue: 0.502) // #4cdc80 highlight
@@ -853,6 +855,107 @@ struct Notch: View {
         }
     }
 
+    /// Makes a working row's header line the click target that opens or closes it in place (#319).
+    /// Like `cardOpener` it is left out of Tab order; the arrow selection and Return reach it.
+    private func runningOpener<Header: View>(_ item: AgentAttentionItem, open: Bool,
+                                             @ViewBuilder header: () -> Header) -> some View {
+        Button { model.toggleRunningRow(item.id) } label: { header().contentShape(Rectangle()) }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .accessibilityLabel("Open details: \(rowHeading(item))")
+            .accessibilityValue(open ? "expanded" : "collapsed")
+            .accessibilityHint(open ? "Hides this session's details. Escape also closes them."
+                                    : "Shows what the session is doing, your last prompt, where it runs, and Open.")
+    }
+
+    /// The opened running row's details (#319, F3): "now", "you" and "where" (`RunningRowDetails`),
+    /// any line saying why Open is not offered, then the prompt's disclosure and Open. Inset to the
+    /// title; Open still revalidates its target through the session's usual route.
+    @ViewBuilder
+    private func runningDetails(_ item: AgentAttentionItem, subject: String, herdr: HerdrOpenAvailability,
+                                codexOpen: Bool) -> some View {
+        if let running = item.running {
+            let details = RunningRowDetails.make(running, host: model.lastSeenHost(for: item.session))
+            let promptKey = "prompt:\(item.session.session)"
+            let agent = item.session.source.displayName
+            VStack(alignment: .leading, spacing: 6) {
+                if let now = details.now {
+                    runningLine("now", now.text, tone: now.isUnknown ? NotchStyle.dim : NotchStyle.ink)
+                    if let full = now.full, let title = now.disclosureTitle {
+                        // D11: a shortened command stays marked and its full text is one click away.
+                        NotchDisclosure(title: title, subject: subject, expanded: disclosure("action:\(item.session.session)")) {
+                            fullText(full)
+                        }
+                        .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                    }
+                }
+                if let you = details.you { runningLine("you", you.text, tone: NotchStyle.text) }
+                runningLine("where", details.place, tone: NotchStyle.text)
+                if item.session.source == .codex, case let .unavailable(cause) = herdr {
+                    herdrReasonLine(item, cause: cause)
+                } else if item.session.source == .codex, let reason = model.terminalOpenLine(item.session) {
+                    terminalOpenLine(item, reason: reason)
+                }
+                if item.session.source == .claude { claudeReturnMessage(item) }
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let you = details.you, let title = you.disclosureTitle {
+                        // The toggle only; what it reveals goes below the whole line, not beside Open.
+                        NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject,
+                                        expanded: disclosure(promptKey)) { EmptyView() }
+                    }
+                    Spacer(minLength: 6)
+                    if item.session.source == .codex, codexOpen {
+                        NotchButton(title: "Open", emphasized: true) { model.openAgent(item.session) }
+                            .disabled(model.openingTask)
+                            .accessibilityLabel("Open Session: \(subject)")
+                            .accessibilityHint("Open this session in Codex.")
+                    }
+                    claudeReturnControl(item, subject: subject, emphasized: true, openTitle: "Open")
+                    claudeRemoveControl(item, subject: subject)
+                }
+                .padding(.top, 4)
+                if let you = details.you, you.disclosureTitle != nil, openDisclosures.contains(promptKey) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let full = you.full { fullText(full) }
+                        if you.keptOnlyStart {
+                            // Herdly kept only the start; the disclosure must not call it full.
+                            Text("Shortened; the full prompt is in \(agent).")
+                                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                }
+            }
+            .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
+            // With the row's 3pt spacing below the header line, 4pt above the first detail line.
+            .padding(.top, 1)
+            .padding(.bottom, 8)
+        }
+    }
+
+    private static let runningLabelWidth: CGFloat = 40
+    private static let runningLabelGap: CGFloat = 10
+
+    /// One labelled detail line: an 11pt dim label in a 40pt column, then the 11pt mono value at a
+    /// 16pt line height. Read by VoiceOver as one element, label first.
+    private func runningLine(_ label: String, _ value: String, tone: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Self.runningLabelGap) {
+            Text(label).foregroundStyle(NotchStyle.dim).frame(width: Self.runningLabelWidth, alignment: .leading)
+            Text(value).foregroundStyle(tone).lineSpacing(3).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(NotchStyle.mono(11))
+        .accessibilityElement(children: .combine)
+    }
+
+    private func fullText(_ text: String) -> some View {
+        Text(text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     /// D10/D21: the row's note after the user acted, in place of its dim "project @ branch" until
     /// its request clears.
     private func rowNote(_ item: AgentAttentionItem) -> RowNote? {
@@ -1231,6 +1334,9 @@ struct Notch: View {
         // In the open queue a row's heading line is 26pt tall, so one-line rows stack like the
         // artboards; the space it adds above and below the text replaces part of the row spacing.
         let inQueue = model.presentationMode.showsAll
+        // #319: a working row in the open queue is its header line alone until it is opened in place.
+        let runningRow = inQueue && item.kind == .running
+        let runningOpen = runningRow && model.openRunningRow.isOpen(item.id)
         let bodySpacing: CGFloat = item.kind == .question ? 14 : 8
         VStack(alignment: .leading, spacing: inQueue ? bodySpacing - 5 : bodySpacing) {
             // Every row is headed by its session's mark and name; the mark steps only while the
@@ -1250,6 +1356,10 @@ struct Notch: View {
                                 headerLine(item, folded: folded, working: working, earlierOpen: earlierOpen, countdown: countdown)
                             }
                         }
+                    } else if runningRow {
+                        runningOpener(item, open: runningOpen) {
+                            headerLine(item, folded: false, working: working, earlierOpen: earlierOpen, countdown: nil)
+                        }
                     } else {
                         cardOpener(item) {
                             headerLine(item, folded: folded, working: working, earlierOpen: earlierOpen, countdown: nil)
@@ -1258,7 +1368,12 @@ struct Notch: View {
                 }
                 .frame(minHeight: inQueue ? 26 : nil)
             }
-            if !collapsed || rowNote(item)?.offersOpen == true {
+            if runningRow {
+                if runningOpen {
+                    runningDetails(item, subject: subject, herdr: herdr, codexOpen: codexOpen)
+                        .transition(QueueMotion.rowTransition(reduceMotion: model.reduceMotion))
+                }
+            } else if !collapsed || rowNote(item)?.offersOpen == true {
                 VStack(alignment: .leading, spacing: bodySpacing) {
                     if let note = rowNote(item), note.offersOpen {
                         // "Not delivered · answer in Claude": Open takes the user to the session to answer there.
@@ -1354,7 +1469,7 @@ struct Notch: View {
                                     let title = running.promptShortened ? "Show more of prompt" : "Show full prompt"
                                     NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject, expanded: disclosure(promptKey)) {
                                         if running.promptShortened {
-                                            Text("Shortened; the full prompt is in \(item.session.source == .claude ? "Claude" : "Codex").")
+                                            Text("Shortened; the full prompt is in \(item.session.source.displayName).")
                                                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                                         }
                                     }
@@ -1483,6 +1598,15 @@ struct Notch: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(rowHeading(item)), \(subject)")
         .accessibilityAddTraits(selected ? .isSelected : [])
+        // The opened running row is one container on its own ground (NotchStyle.openRow), 6pt outside
+        // the row's left and right edges so the header line does not move when it opens (F3).
+        .background {
+            if runningOpen {
+                RoundedRectangle(cornerRadius: 6, style: .continuous).fill(NotchStyle.openRow)
+                    .padding(.horizontal, -6)
+                    .transition(.opacity)
+            }
+        }
         // The keyboard selection reuses the focus ring's vocabulary around the whole row.
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .stroke(NotchStyle.ink.opacity(selected ? 0.9 : 0), lineWidth: 1.5).padding(.horizontal, -6).padding(.vertical, -4))
@@ -1561,7 +1685,7 @@ struct Notch: View {
             .accessibilityLabel(rowHeading(item))
             .accessibilityAddTraits(.isHeader)
             let directory = model.rowDirectory(for: item)
-            let source = item.session.source == .claude ? "Claude Code" : (item.session.surface == .cli ? "Codex CLI" : "Codex Desktop")
+            let source = item.session.sourceLabel
             Text(source + (directory.map { " · " + ($0 as NSString).abbreviatingWithTildeInPath } ?? ""))
                 .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
                 .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
@@ -1661,13 +1785,14 @@ struct Notch: View {
     }
 
     @ViewBuilder
-    private func claudeReturnControl(_ item: AgentAttentionItem, subject: String, emphasized: Bool = false) -> some View {
+    private func claudeReturnControl(_ item: AgentAttentionItem, subject: String, emphasized: Bool = false,
+                                     openTitle: String = "Open Session") -> some View {
         if item.session.source == .claude {
             let herdr = herdrOpen(item.session)
             if herdr == .available || (herdr == .notInHerdr && model.canOpenClaude(item.session)) {
                 // The terminal scan's line replaces Open with no disabled button (#267).
                 if herdr == .available || model.offersTerminalOpen(item.session) {
-                    claudeOpenButton(item, subject: subject, emphasized: emphasized)
+                    claudeOpenButton(item, subject: subject, emphasized: emphasized, title: openTitle)
                 }
             } else if herdr == .notInHerdr, !model.ghosttyEnabled, model.claudeLastSeenLine(item.session) == nil {
                 NotchButton(title: "Set up Ghostty", emphasized: emphasized, action: model.showControls)
@@ -1689,8 +1814,9 @@ struct Notch: View {
         }
     }
 
-    private func claudeOpenButton(_ item: AgentAttentionItem, subject: String, emphasized: Bool) -> some View {
-        NotchButton(title: "Open Session", emphasized: emphasized) {
+    private func claudeOpenButton(_ item: AgentAttentionItem, subject: String, emphasized: Bool,
+                                  title: String = "Open Session") -> some View {
+        NotchButton(title: title, emphasized: emphasized) {
             if let approval = item.approval {
                 model.openAgentApproval(approval)
             } else {
@@ -1904,6 +2030,7 @@ struct Notch: View {
                     }
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: QueueMotion.layoutKey(sections.attention + sections.working))
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: showsTestRow)
+                    .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: model.openRunningRow)
                     .padding(.bottom, 14)
                     // Room inside the scroll view's clip for the selection ring and focus rings at
                     // the row edges; the outer negative padding keeps the column where it was.

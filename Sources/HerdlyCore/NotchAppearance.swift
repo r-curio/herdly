@@ -203,20 +203,25 @@ public struct QueueGroup: Equatable, Sendable {
 
 /// The open queue's kind sections when it is not grouped (D13): live approvals, waiting questions,
 /// and everything else that needs the user. Each heading says the kind, so rows carry no kind word.
+/// `working` heads the running rows only when nothing needs the user (#319, F1); otherwise they sit
+/// behind the "N working" fold, which names them. It never folds behind "+N more".
 public enum QueueKindSection: String, CaseIterable, Hashable, Sendable {
     case approve
     case answer
     case check
+    case working
 
     public var heading: String {
         switch self {
         case .approve: "Approve"
         case .answer: "Answer"
         case .check: "Check"
+        case .working: "Working"
         }
     }
 
-    /// The section a row belongs in, or nil for a running row, which sits in the working fold.
+    /// The section a row that needs the user belongs in, or nil for a running row, which sits in the
+    /// working fold or, with nothing above it, the Working section.
     public init?(_ kind: AgentAttentionKind) {
         switch kind {
         case .actionableApproval: self = .approve
@@ -316,16 +321,22 @@ public struct QueueSections: Equatable, Sendable {
     /// The rows the keyboard selection steps through, in reading order. Rows in a closed working
     /// fold are not on screen and are skipped.
     public func selectableRows(workingOpen: Bool) -> [AgentAttentionID] {
+        selectableItems(workingOpen: workingOpen).map(\.id)
+    }
+
+    /// The on-screen rows themselves, in the same order as `selectableRows`.
+    public func selectableItems(workingOpen: Bool) -> [AgentAttentionItem] {
         let working = foldsWorking && !workingOpen ? [] : self.working
-        return (attention + working).flatMap(\.items).map(\.id)
+        return (attention + working).flatMap(\.items)
     }
 
     /// Splits already-ordered rows. With `kindSections` and no grouping (the open queue), rows that
     /// need the user sit under Approve, Answer, and Check headings with their counts, an empty section
     /// leaves no heading, and later sections fold behind "+N more" (`QueueFold`) unless named in
-    /// `openSections`. A card passes no `kindSections` and stays one unheaded row. Folded working rows
-    /// drop the State grouping's "Working" heading, since the fold already names them; Agent and
-    /// Project headings stay inside the fold.
+    /// `openSections`. With nothing needing the user, the running rows sit unfolded under a "Working"
+    /// heading with their count (#319, F1). A card passes no `kindSections` and stays one unheaded row.
+    /// Folded working rows drop the State grouping's "Working" heading, since the fold already names
+    /// them; Agent and Project headings stay inside the fold.
     public static func make(_ items: [AgentAttentionItem], grouping: QueueGrouping,
                             project: (AgentAttentionItem) -> String?, kindSections: Bool = false,
                             openSections: Set<QueueKindSection> = []) -> QueueSections {
@@ -336,9 +347,10 @@ public struct QueueSections: Equatable, Sendable {
             ? sectionsByKind(needsUser, open: openSections)
             : QueueGroups.make(needsUser, grouping: grouping, project: project)
         let workingGrouping: QueueGrouping = folds && grouping == .state ? .none : grouping
-        return QueueSections(attention: attention,
-                             working: QueueGroups.make(running, grouping: workingGrouping, project: project),
-                             workingCount: running.count)
+        let working = kindSections && grouping == .none && !folds && !running.isEmpty
+            ? [QueueGroup(heading: QueueKindSection.working.heading, items: running, section: .working)]
+            : QueueGroups.make(running, grouping: workingGrouping, project: project)
+        return QueueSections(attention: attention, working: working, workingCount: running.count)
     }
 
     /// One kind section's rows before folding.
