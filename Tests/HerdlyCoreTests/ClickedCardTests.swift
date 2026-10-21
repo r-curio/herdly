@@ -209,3 +209,37 @@ private let otherApprovalID = AgentAttentionID.approval(AgentCallIdentity(sessio
         #expect(!mode.showsSingleCard)
     }
 }
+
+@Test func aDecisionOnTheClickedCardReturnsToTheQueueForClaudeAndCodexCLI() {
+    let codexApprovalID = AgentAttentionID.approval(AgentCallIdentity(session: codex, turn: "t3", call: "call_3"))
+
+    // Claude: Approve or Deny records the row's "Sending…" note on the still-queued request, and
+    // the card it was clicked from returns to the queue, where the note shows.
+    for decision in [ApprovalDecision.allowOnce, .deny] {
+        var controller = NotchPresentationController()
+        controller.openQueue()
+        controller.openCard(approvalID)
+        var notes = RowNotes()
+        // Both decisions write "Sending…" at the click (`decideClaudeApproval`); delivery settles later.
+        #expect(decision.isUserDecision)
+        let recorded = notes.apply(.record(.sending), for: approvalID, pending: [approvalID])
+        #expect(recorded)
+        do { let left = controller.leaveCard(after: approvalID); #expect(left) }
+        let mode = controller.update(interacting: true, now: 1, queued: [approvalID])
+        #expect(mode == .queue)
+        #expect(notes.note(for: approvalID) == .sending)
+    }
+
+    // Codex CLI: the request leaves the queue once its decision is written, with no note; the card
+    // returns to the queue explicitly, never to another item.
+    var controller = NotchPresentationController()
+    controller.openQueue()
+    controller.openCard(codexApprovalID)
+    do { let left = controller.leaveCard(after: codexApprovalID); #expect(left) }
+    do { let mode = controller.update(interacting: true, now: 1, queued: [approvalID]); #expect(mode == .queue) }
+
+    // A decision on another request never moves the user off the card they have open.
+    controller.openCard(approvalID)
+    do { let left = controller.leaveCard(after: otherApprovalID); #expect(!left) }
+    do { let mode = controller.update(interacting: true, now: 2, queued: [approvalID, otherApprovalID]); #expect(mode == .clickedCard(approvalID)) }
+}

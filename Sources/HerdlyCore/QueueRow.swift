@@ -162,6 +162,9 @@ public struct ApprovalCountdown: Equatable, Sendable {
 
     public var label: String { "\(seconds)s left" }
     public var spoken: String { "\(seconds) \(seconds == 1 ? "second" : "seconds") left" }
+    /// The last five whole seconds (#320): the card's "Ns left" turns bright ink so the closing
+    /// window reads at a glance. Presentation only; it never moves the deadline.
+    public var isUrgent: Bool { seconds <= 5 }
 }
 
 /// Reads the checked-out branch of the git work tree containing a directory, from `.git/HEAD`

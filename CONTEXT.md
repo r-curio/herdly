@@ -70,7 +70,7 @@ The short delivery line a queue row carries after the user approved, denied, or 
 _Avoid_: Status message, toast, navigation message
 
 **Open in Codex**:
-The action that returns the user to the Codex session associated with a notch notification. Its button reads "Open Session", the same for Claude's equivalent (Open in Claude); the docs keep the source-specific names for the action.
+The action that returns the user to the originating Codex session of a notch notification; Claude's equivalent is Open in Claude. These are the action's names; its button labels are product presentation and live in the product and design docs.
 
 **Attention queue**:
 The ordered collection of Codex activity presented in the shared notch, with approval requests ahead of other activity. Its order determines presentation, not when Codex sessions execute. The user may sort the remaining rows "Newest first" instead of "By need"; live approvals (soonest deadline first) and waiting questions stay first either way. Ungrouped, its rows that need the user sit under kind sections (see **Queue section**).
