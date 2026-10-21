@@ -291,12 +291,20 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The macOS system sound played when a completion or question card opens.
     @Published private(set) var completionSound = UserDefaults.standard.string(forKey: "completionSound") ?? Companion.defaultSound
     nonisolated static let defaultSound = "Glass"
-    /// How long a new card stays open on its own. Read once from the old "keepCardsOpen" switch
-    /// until a duration is saved; the old key is left in place and no longer written.
-    @Published var cardOpenDuration = CardOpenDuration.resolve(
-        saved: UserDefaults.standard.string(forKey: "cardOpenDuration"),
-        legacyKeepCardsOpen: UserDefaults.standard.object(forKey: "keepCardsOpen") as? Bool) {
+    /// How long a new card stays open on its own.
+    @Published var cardOpenDuration = Companion.loadCardOpenDuration() {
         didSet { UserDefaults.standard.set(cardOpenDuration.rawValue, forKey: "cardOpenDuration") }
+    }
+    /// Migrates the old "keepCardsOpen" switch once: when no readable duration is saved, the
+    /// resolved one is written, so later launches never read the old key again. The old key is
+    /// left in place and no longer written.
+    private static func loadCardOpenDuration() -> CardOpenDuration {
+        let defaults = UserDefaults.standard
+        let saved = defaults.string(forKey: "cardOpenDuration")
+        let duration = CardOpenDuration.resolve(saved: saved,
+                                                legacyKeepCardsOpen: defaults.object(forKey: "keepCardsOpen") as? Bool)
+        if saved != duration.rawValue { defaults.set(duration.rawValue, forKey: "cardOpenDuration") }
+        return duration
     }
     /// Codex's own thread names by session, refreshed every scan; unknown sessions keep their identifier.
     @Published var threadNames: [UUID: String] = [:]

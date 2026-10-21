@@ -120,7 +120,7 @@ public struct NotchPresentationController: Equatable, Sendable {
     /// A timed card closes `duration.seconds` after it opens unless the user is interacting then.
     /// Until I act keeps it open until the user interacts with it, then closes it once that
     /// interaction ends. Approval deadlines are separate and never move.
-    public mutating func present(_ item: AgentAttentionID, now: Double, duration: CardOpenDuration = .threeSeconds) {
+    public mutating func present(_ item: AgentAttentionID, now: Double, duration: CardOpenDuration = .standard) {
         guard clicked == nil else { return }
         agentSpotlight.present(item, now: now, duration: duration)
     }

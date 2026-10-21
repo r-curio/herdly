@@ -55,6 +55,8 @@ enum SettingsStyle {
     /// Status pill text: a darker green and orange in light mode so they read on their 12% tint.
     static let readyText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 0.19, green: 0.82, blue: 0.35, alpha: 1),
                                                   light: NSColor(srgbRed: 0.14, green: 0.54, blue: 0.24, alpha: 1)))
+    /// The General pane's not-connected bar: #FF9500, its fill at 10% (DESIGN.md, General pane).
+    static let noticeOrange = Color(.sRGB, red: 1, green: 0x95 / 255, blue: 0)
     static let attentionText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 1, green: 0.62, blue: 0.04, alpha: 1),
                                                       light: NSColor(srgbRed: 0.79, green: 0.2, blue: 0, alpha: 1)))
 }
@@ -535,14 +537,12 @@ private struct GeneralControls: View {
 /// The orange bar at the top of General while an agent is known not to be connected, with a
 /// button that switches the window to the Agents pane (DESIGN.md, Settings Window, General pane).
 private struct ConnectionNoticeBar: View {
-    static let orange = Color(.sRGB, red: 1, green: 0x95 / 255, blue: 0)
-
     let message: String
     let openAgents: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            Circle().fill(Self.orange).frame(width: 7, height: 7).accessibilityHidden(true)
+            Circle().fill(SettingsStyle.noticeOrange).frame(width: 7, height: 7).accessibilityHidden(true)
             Text(message).font(.system(size: 13)).foregroundStyle(.primary)
             Spacer(minLength: 10)
             Button("Open Agents", action: openAgents)
@@ -550,7 +550,7 @@ private struct ConnectionNoticeBar: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
         .frame(minHeight: 44)
-        .background(Self.orange.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
+        .background(SettingsStyle.noticeOrange.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
         .accessibilityElement(children: .contain)
     }
 }
