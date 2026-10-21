@@ -412,6 +412,10 @@ public struct OpenUnavailableLines<Key: Hashable & Sendable>: Equatable, Sendabl
     /// The reason whose line the card shows, nil for none: the scan's, else a click's.
     public func line(for key: Key) -> OpenUnavailableReason? { scanned[key] ?? clicked[key]?.reason }
 
+    /// When the click line `line(for:)` may show was recorded, nil for none. A result row's fold
+    /// reads it to tell this click's line from an older one (#322).
+    public func clickedAt(_ key: Key) -> Double? { clicked[key]?.at }
+
     /// A scan that started at `startedAt` classified exactly the sessions in `results`. A session it did
     /// not classify keeps no scan line (the click rechecks); a click line from before it gives way. A
     /// session whose Open opened or fell back after the scan started keeps no line from it.

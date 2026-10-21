@@ -499,47 +499,6 @@ struct NotchDisclosure<Content: View>: View {
     }
 }
 
-/// An Earlier row folded to one line: its title and session name. Opening it shows the identity
-/// line, details, and controls. While closed the fold is the row's only pressable surface, so Open
-/// Session and Dismiss stay one keypress away for keyboard and VoiceOver users.
-struct EarlierFold: View {
-    let name: String
-    let exception: RowException?
-    /// The full spoken heading, since the word is a shortened reading.
-    let spoken: String
-    let subject: String
-    let reduceMotion: Bool
-    @Binding var open: Bool
-    @FocusState private var focused: Bool
-    var body: some View {
-        Button {
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) { open.toggle() }
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .rotationEffect(.degrees(open ? 90 : 0))
-                    .frame(width: 10)
-                    .foregroundStyle(NotchStyle.dim)
-                Text(name)
-                    .font(NotchStyle.mono(open ? 12 : 11, open ? .semibold : .regular))
-                    .foregroundStyle(open ? NotchStyle.ink : NotchStyle.text)
-                    .lineLimit(1).truncationMode(.tail)
-                if let exception { ExceptionWord(exception: exception) }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .focused($focused)
-        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .stroke(NotchStyle.ink.opacity(focused ? 0.9 : 0), lineWidth: 1.5).padding(.horizontal, -4).padding(.vertical, -2))
-        .accessibilityLabel("\(spoken), \(subject)")
-        .accessibilityValue(open ? "expanded" : "collapsed")
-        .accessibilityHint(open ? "Hides this earlier result's details." : "Shows Open Session and Dismiss for this earlier result.")
-        .accessibilityAddTraits(.isHeader)
-    }
-}
-
 /// The panel's small pill: 10pt mono on a fill, 6pt by 1pt padding, 4pt continuous corners, sized to
 /// its text. Shared by "Failed", "Ns left", and "+N more". `bar` draws a 2pt ink bar along the bottom
 /// edge, that share of the pill wide and clipped to it; nil draws none.
@@ -575,8 +534,8 @@ extension View {
 }
 
 /// A row's one off-path word (D17). "Failed" sits in the dark red well, the panel's only red (D14);
-/// "Handed back", "Waiting", and "Status unknown" are plain dim text with no well. Spoken through the
-/// row heading, so it is hidden from VoiceOver here.
+/// "Handed back", "Waiting", "Status unknown", and "Unreachable" (#322) are plain dim text with no
+/// well. Spoken through the row heading, so it is hidden from VoiceOver here.
 struct ExceptionWord: View {
     let exception: RowException
     var body: some View {
@@ -695,9 +654,10 @@ struct ApprovalKindWordView: View {
     }
 }
 
-/// The hover ground behind a queue row that opens as a card (#320): #1c1c1c with 5pt continuous
-/// corners, 6pt outside the row horizontally like the selection ring. Hover only highlights; it never
-/// opens, selects, or acts. Under Reduce Motion the ground appears without animation.
+/// The hover ground behind a queue row that opens as a card (#320) or a reachable result row that
+/// opens its session (#322): #1c1c1c with 5pt continuous corners, 6pt outside the row horizontally
+/// like the selection ring. Hover only highlights; it never opens, selects, or acts. Under Reduce
+/// Motion the ground appears without animation.
 struct CardRowHover: ViewModifier {
     let id: AgentAttentionID
     let active: Bool
@@ -1327,6 +1287,59 @@ struct Notch: View {
                                     : "Shows what the session is doing, your last prompt, where it runs, and Open.")
     }
 
+    /// Makes a result row's header line the click target that opens its session (#322, D20), through
+    /// the same Open the cards use, which revalidates the exact target. Like `cardOpener` it is left
+    /// out of Tab order; the arrow selection and Return reach it. A click while another Open runs is
+    /// ignored (`Companion.activateRow`) rather than drawn disabled, so the row never dims. An
+    /// unreachable row is not a button: it reads its heading, "Unreachable", and then its reason line.
+    @ViewBuilder
+    private func sessionOpener<Header: View>(_ item: AgentAttentionItem, target: ResultRowTarget,
+                                             @ViewBuilder header: () -> Header) -> some View {
+        if target == .reachable {
+            Button { model.activateRow(item.id) } label: { header().contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .accessibilityLabel("Open Session: \(rowHeading(item))")
+                .accessibilityHint("Opens this session in \(item.session.source.displayName). Opening it does not mark anything as checked.")
+        } else {
+            header()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(rowHeading(item)), \(RowException.unreachable.word)")
+        }
+    }
+
+    /// A result row's one control, inline before the age lane (#322): Dismiss on a result, which
+    /// clears only that turn; Remove on a waiting or status-unknown Claude row once it looks stuck.
+    /// It is its own button in Tab order, a sibling of the row's button, never inside it.
+    @ViewBuilder
+    private func resultRowControl(_ item: AgentAttentionItem, subject: String) -> some View {
+        if item.outcome != nil {
+            NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+                .accessibilityLabel("Dismiss completion: \(subject)")
+        } else {
+            claudeRemoveControl(item, subject: subject)
+        }
+    }
+
+    /// The line under a result row's name (`ResultRowReading.line`): why Open is not offered, or
+    /// why the last click did not open, in the cards' own copy (product.md, "Open unavailable").
+    /// Every unreachable row has one.
+    @ViewBuilder
+    private func resultRowLine(_ item: AgentAttentionItem, reading: ResultRowReading) -> some View {
+        switch reading.line {
+        case let .herdr(cause)?:
+            herdrReasonLine(item, cause: cause)
+        case let .terminal(reason)?:
+            terminalOpenLine(item, reason: reason, replacesOpen: reading.target == .unreachable)
+        case let .claudeLastSeen(reason)?:
+            terminalOpenLine(item, reason: reason, replacesOpen: true)
+        case .claudeNotVerified?:
+            claudeNotVerifiedLine
+        case nil:
+            EmptyView()
+        }
+    }
+
     /// The opened running row's details (#319, F3): "now", "you" and "where" (`RunningRowDetails`),
     /// any line saying why Open is not offered, then the prompt's disclosure and Open. Inset to the
     /// title; Open still revalidates its target through the session's usual route.
@@ -1781,8 +1794,6 @@ struct Notch: View {
         // A Codex card offers Open unless herdr or the latest terminal scan rules it out (#267).
         let codexOpen = herdr.offersOpen && model.offersTerminalOpen(item.session)
         let spotlit = isSpotlight(item)
-        let earlierOpen = disclosure(earlierKey(item))
-        let collapsed = item.kind == .earlierOutcome && !earlierOpen.wrappedValue && !spotlit
         let selected = model.presentationMode.showsAll && model.queueSelection.selected == item.id
         // In the open queue a row's heading line is 26pt tall, so one-line rows stack like the
         // artboards; the space it adds above and below the text replaces part of the row spacing.
@@ -1797,12 +1808,17 @@ struct Notch: View {
         let questionRow = item.kind == .question
         // "Not delivered · answer in Claude" keeps its Open inline on the row line, before the age.
         let opensFromNote = inQueue && approvalRow && rowNote(item)?.offersOpen == true
+        // #322: a result row in the open queue (Earlier included) is one line: the header opens the
+        // session, Dismiss (or Remove) sits before the age, and an unreachable row's reason line sits
+        // under the name. Its body, reply field and preview stay on the spotlight card.
+        let resultRow = inQueue && !spotlit && item.kind.opensSession
+        let rowReading = resultRow ? model.resultRowReading(item.session) : ResultRowReading(target: .reachable, line: nil)
+        let rowTarget = rowReading.target
         // Whether Approve and Deny are this card's to offer; one rule with the decide path.
         let decidable = spotlit && approvalRow && model.canDecide(item)
         VStack(alignment: .leading, spacing: inQueue ? bodySpacing - 5 : bodySpacing) {
             // Every row is headed by its session's mark and name; the mark steps only while the
             // session is working, and a word appears only when the row is off its normal path.
-            let folded = item.kind == .earlierOutcome && !spotlit
             let working = item.running?.status == .working
             if questionRow && spotlit {
                 questionCardHeader(item)
@@ -1814,19 +1830,27 @@ struct Notch: View {
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             let countdown = QueueRowPresentation.countdown(item, now: context.date.timeIntervalSince1970)
                             cardOpener(item, countdown: countdown) {
-                                headerLine(item, folded: folded, working: working, earlierOpen: earlierOpen, countdown: countdown)
+                                headerLine(item, working: working, countdown: countdown)
                             }
                         }
                     } else if runningRow {
                         runningOpener(item, open: runningOpen) {
-                            headerLine(item, folded: false, working: working, earlierOpen: earlierOpen, countdown: nil)
+                            headerLine(item, working: working, countdown: nil)
+                        }
+                    } else if resultRow {
+                        // The control sits outside the row's own button, so the two never nest.
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            sessionOpener(item, target: rowTarget) {
+                                headerLine(item, working: working, countdown: nil, target: rowTarget, showsAge: false)
+                            }
+                            resultRowControl(item, subject: subject)
+                            rowAge(item)
                         }
                     } else if opensFromNote {
                         // Open sits outside the row's own button, so the two never nest.
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             cardOpener(item) {
-                                headerLine(item, folded: false, working: working, earlierOpen: earlierOpen, countdown: nil,
-                                           showsAge: false)
+                                headerLine(item, working: working, countdown: nil, showsAge: false)
                             }
                             claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle)
                             rowAge(item)
@@ -1834,18 +1858,19 @@ struct Notch: View {
                     } else if spotlit && approvalRow {
                         // The card header reads the same `ApprovalCardReading` as the card body below.
                         TimelineView(.periodic(from: .now, by: 1)) { context in
-                            headerLine(item, folded: false, working: working, earlierOpen: earlierOpen, countdown: nil,
+                            headerLine(item, working: working, countdown: nil,
                                        card: ApprovalCardReading(item, decidable: decidable,
                                                                  now: context.date.timeIntervalSince1970))
                         }
                     } else {
                         cardOpener(item) {
-                            headerLine(item, folded: folded, working: working, earlierOpen: earlierOpen, countdown: nil)
+                            headerLine(item, working: working, countdown: nil)
                         }
                     }
                 }
                 .frame(minHeight: inQueue ? 26 : nil)
-                .modifier(CardRowHover(id: item.id, active: opensAsCard(item), hovered: $hoveredCardRow,
+                .modifier(CardRowHover(id: item.id, active: opensAsCard(item) || (resultRow && rowTarget == .reachable),
+                                       hovered: $hoveredCardRow,
                                        reduceMotion: model.reduceMotion))
             }
             if runningRow {
@@ -1864,133 +1889,137 @@ struct Notch: View {
                 if spotlit {
                     questionCardBody(item, subject: subject, herdr: herdr, codexOpen: codexOpen)
                 }
-            } else if !collapsed || rowNote(item)?.offersOpen == true {
+            } else if resultRow {
+                // Why Open is not offered (an unreachable row), or why the last click did not open,
+                // under the name: the cards' own line, never a greyed button.
+                resultRowLine(item, reading: rowReading)
+                    .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
+                    .padding(.bottom, 4)
+            } else {
                 VStack(alignment: .leading, spacing: bodySpacing) {
                     if let note = rowNote(item), note.offersOpen {
                         // "Not delivered · answer in Claude": Open takes the user to the session to answer there.
                         HStack(spacing: 6) { claudeReturnControl(item, subject: subject) }
                     }
-                    if !collapsed {
-                        if item.kind != .question, let directory = spotlightDetails?.directory {
-                            directoryLine(directory)
-                        }
-                        switch item.kind {
-                        case .actionableApproval, .handedBackApproval:
-                            // Approval rows render the approval card body instead (#320).
-                            EmptyView()
-                        case .outcome, .earlierOutcome:
-                            if item.outcome?.uncertain == true {
-                                Text("Queued before Herdly last started. You may already have seen this result; Herdly cannot verify it.")
-                                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
-                            }
-                            if let prompt = spotlightDetails?.originalPrompt {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("Original prompt").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
-                                    Text(prompt).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                            if item.session.source == .claude {
-                                claudeReturnMessage(item)
-                            }
-                        case .question:
-                            // Question rows render the question card body instead (#321).
-                            EmptyView()
-                        case .waiting, .running:
-                            if let running = item.running, let row = running.rowText {
-                                // A prompt opens in place: the row's own text grows to the full prompt rather
-                                // than repeating it below. An action keeps its labelled row and shows the full
-                                // command beneath, since the row may not be the command itself.
-                                let promptKey = "prompt:\(item.session.session)"
-                                let expandsPrompt = running.fullAction == nil && running.fullPrompt.map { $0 != row } == true
-                                let promptOpen = expandsPrompt && openDisclosures.contains(promptKey)
-                                if promptOpen, let full = running.fullPrompt {
-                                    Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                } else {
-                                    Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).lineLimit(2).truncationMode(.tail)
-                                }
-                                if let full = running.fullAction {
-                                    // D11: a shortened shell command is named as a command; other tools keep "action".
-                                    NotchDisclosure(title: running.action?.disclosureTitle ?? "Show full action", subject: subject, expanded: disclosure("action:\(item.session.session)")) {
-                                        Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                } else if expandsPrompt {
-                                    // A shortened prompt is only its start; the disclosure must not call it full.
-                                    let title = running.promptShortened ? "Show more of prompt" : "Show full prompt"
-                                    NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject, expanded: disclosure(promptKey)) {
-                                        if running.promptShortened {
-                                            Text("Shortened; the full prompt is in \(item.session.source.displayName).")
-                                                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                                        }
-                                    }
-                                }
-                            }
-                            if item.session.source == .claude {
-                                claudeReturnMessage(item)
-                            }
-                        case .statusUnavailable:
-                            Text(item.unavailableReason ?? "Status unavailable. Continue in Claude to inspect the session.")
+                    if item.kind != .question, let directory = spotlightDetails?.directory {
+                        directoryLine(directory)
+                    }
+                    switch item.kind {
+                    case .actionableApproval, .handedBackApproval:
+                        // Approval rows render the approval card body instead (#320).
+                        EmptyView()
+                    case .outcome, .earlierOutcome:
+                        if item.outcome?.uncertain == true {
+                            Text("Queued before Herdly last started. You may already have seen this result; Herdly cannot verify it.")
                                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
                         }
-                        if item.session.source == .codex, case let .unavailable(cause) = herdr {
-                            herdrReasonLine(item, cause: cause)
-                        } else if item.session.source == .codex, let reason = model.terminalOpenLine(item.session) {
-                            terminalOpenLine(item, reason: reason)
-                        }
-                        HStack(spacing: 6) {
-                            switch item.kind {
-                            case .actionableApproval, .handedBackApproval:
-                                // Approval rows render their controls in the approval card body (#320).
-                                EmptyView()
-                            case .statusUnavailable:
-                                if item.session.source == .codex, codexOpen {
-                                    NotchButton(title: "Open Session") { model.openAgent(item.session) }
-                                        .disabled(model.openingTask)
-                                        .accessibilityLabel("Open Session: \(subject)")
-                                        .accessibilityHint("Open this session in Codex.")
-                                }
-                                claudeRemoveControl(item, subject: subject)
-                            case .question:
-                                // Question rows render their controls in the question card body (#321).
-                                EmptyView()
-                            case .outcome, .earlierOutcome:
-                                if item.session.source == .codex, codexOpen {
-                                    NotchButton(title: "Open Session") { model.openAgent(item.session) }
-                                        .disabled(model.openingTask)
-                                        .accessibilityLabel("Open Session: \(subject)")
-                                        .accessibilityHint("Open this session in Codex.")
-                                }
-                                claudeReturnControl(item, subject: subject)
-                                NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
-                                    .accessibilityLabel("Dismiss completion: \(subject)")
-                            case .waiting, .running:
-                                if item.session.source == .codex, codexOpen {
-                                    NotchButton(title: "Open Session") { model.openAgent(item.session) }
-                                        .disabled(model.openingTask)
-                                        .accessibilityLabel("Open Session: \(subject)")
-                                        .accessibilityHint("Open this session in Codex.")
-                                }
-                                claudeReturnControl(item, subject: subject)
-                                claudeRemoveControl(item, subject: subject)
+                        if let prompt = spotlightDetails?.originalPrompt {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Original prompt").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
+                                Text(prompt).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        if let outcome = item.outcome, outcome.session.source == .codex, let completion = model.codexCompletion(for: outcome),
-                           completion.source == .cli {
-                            replyBody(completion, subject: subject)
+                        if item.session.source == .claude {
+                            claudeReturnMessage(item)
                         }
-                        if let outcome = item.outcome, let target = model.claudeReplyTarget(for: outcome) {
-                            claudeReplyBody(outcome, target: target, subject: subject)
-                        }
-                        if item.outcome != nil, let spotlightDetails {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Final response").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
-                                switch spotlightDetails.response {
-                                case let .available(preview): Text(preview.text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                                case let .unavailable(reason): Text(reason).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-                                case nil: EmptyView()
+                    case .question:
+                        // Question rows render the question card body instead (#321).
+                        EmptyView()
+                    case .waiting, .running:
+                        if let running = item.running, let row = running.rowText {
+                            // A prompt opens in place: the row's own text grows to the full prompt rather
+                            // than repeating it below. An action keeps its labelled row and shows the full
+                            // command beneath, since the row may not be the command itself.
+                            let promptKey = "prompt:\(item.session.session)"
+                            let expandsPrompt = running.fullAction == nil && running.fullPrompt.map { $0 != row } == true
+                            let promptOpen = expandsPrompt && openDisclosures.contains(promptKey)
+                            if promptOpen, let full = running.fullPrompt {
+                                Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            } else {
+                                Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).lineLimit(2).truncationMode(.tail)
+                            }
+                            if let full = running.fullAction {
+                                // D11: a shortened shell command is named as a command; other tools keep "action".
+                                NotchDisclosure(title: running.action?.disclosureTitle ?? "Show full action", subject: subject, expanded: disclosure("action:\(item.session.session)")) {
+                                    Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
+                            } else if expandsPrompt {
+                                // A shortened prompt is only its start; the disclosure must not call it full.
+                                let title = running.promptShortened ? "Show more of prompt" : "Show full prompt"
+                                NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject, expanded: disclosure(promptKey)) {
+                                    if running.promptShortened {
+                                        Text("Shortened; the full prompt is in \(item.session.source.displayName).")
+                                            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                                    }
+                                }
+                            }
+                        }
+                        if item.session.source == .claude {
+                            claudeReturnMessage(item)
+                        }
+                    case .statusUnavailable:
+                        Text(item.unavailableReason ?? "Status unavailable. Continue in Claude to inspect the session.")
+                            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if item.session.source == .codex, case let .unavailable(cause) = herdr {
+                        herdrReasonLine(item, cause: cause)
+                    } else if item.session.source == .codex, let reason = model.terminalOpenLine(item.session) {
+                        terminalOpenLine(item, reason: reason)
+                    }
+                    HStack(spacing: 6) {
+                        switch item.kind {
+                        case .actionableApproval, .handedBackApproval:
+                            // Approval rows render their controls in the approval card body (#320).
+                            EmptyView()
+                        case .statusUnavailable:
+                            if item.session.source == .codex, codexOpen {
+                                NotchButton(title: "Open Session") { model.openAgent(item.session) }
+                                    .disabled(model.openingTask)
+                                    .accessibilityLabel("Open Session: \(subject)")
+                                    .accessibilityHint("Open this session in Codex.")
+                            }
+                            claudeRemoveControl(item, subject: subject)
+                        case .question:
+                            // Question rows render their controls in the question card body (#321).
+                            EmptyView()
+                        case .outcome, .earlierOutcome:
+                            if item.session.source == .codex, codexOpen {
+                                NotchButton(title: "Open Session") { model.openAgent(item.session) }
+                                    .disabled(model.openingTask)
+                                    .accessibilityLabel("Open Session: \(subject)")
+                                    .accessibilityHint("Open this session in Codex.")
+                            }
+                            claudeReturnControl(item, subject: subject)
+                            NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+                                .accessibilityLabel("Dismiss completion: \(subject)")
+                        case .waiting, .running:
+                            if item.session.source == .codex, codexOpen {
+                                NotchButton(title: "Open Session") { model.openAgent(item.session) }
+                                    .disabled(model.openingTask)
+                                    .accessibilityLabel("Open Session: \(subject)")
+                                    .accessibilityHint("Open this session in Codex.")
+                            }
+                            claudeReturnControl(item, subject: subject)
+                            claudeRemoveControl(item, subject: subject)
+                        }
+                    }
+                    if let outcome = item.outcome, outcome.session.source == .codex, let completion = model.codexCompletion(for: outcome),
+                       completion.source == .cli {
+                        replyBody(completion, subject: subject)
+                    }
+                    if let outcome = item.outcome, let target = model.claudeReplyTarget(for: outcome) {
+                        claudeReplyBody(outcome, target: target, subject: subject)
+                    }
+                    if item.outcome != nil, let spotlightDetails {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Final response").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
+                            switch spotlightDetails.response {
+                            case let .available(preview): Text(preview.text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            case let .unavailable(reason): Text(reason).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                            case nil: EmptyView()
                             }
                         }
                     }
@@ -2028,37 +2057,31 @@ struct Notch: View {
     /// then at most one word or a live approval's "Ns left", then the age lane. A single approval
     /// card's header (`card`, #320) says its kind instead ("Approve" while it can be decided here,
     /// "Handed back", or none), then the dim source ("CLI", "Claude"); queue rows keep D17 and name
-    /// neither. With `showsAge` false the caller draws the age lane, putting a row note's Open
-    /// before it.
-    private func headerLine(_ item: AgentAttentionItem, folded: Bool, working: Bool, earlierOpen: Binding<Bool>,
-                            countdown: ApprovalCountdown?, card: ApprovalCardReading? = nil,
+    /// neither. With `showsAge` false the caller draws the age lane, putting a row note's Open or a
+    /// result row's Dismiss before it. A result row whose session is unreachable (`target`, #322)
+    /// reads "Unreachable" in the word slot.
+    private func headerLine(_ item: AgentAttentionItem, working: Bool, countdown: ApprovalCountdown?,
+                            card: ApprovalCardReading? = nil, target: ResultRowTarget = .reachable,
                             showsAge: Bool = true) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            if folded {
-                earlierToggle(item, open: earlierOpen)
-                Spacer(minLength: 0)
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
-                    spriteSlot(working: working, color: spriteColor(for: item.session))
-                    rowHeader(item, countdown: countdown)
-                }
-                if let countdown {
-                    SecondsLeftPill(countdown: countdown)
-                } else if let card {
-                    if let kind = card.kindWord { ApprovalKindWordView(word: kind) }
-                    Text(card.source)
-                        .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
-                        .lineLimit(1).fixedSize()
-                        .accessibilityLabel(item.session.sourceLabel)
-                } else if let exception = QueueRowPresentation.exception(item) {
-                    ExceptionWord(exception: exception)
-                }
+            HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
+                spriteSlot(working: working, color: spriteColor(for: item.session))
+                rowHeader(item, countdown: countdown)
+            }
+            if let countdown {
+                SecondsLeftPill(countdown: countdown)
+            } else if let card {
+                if let kind = card.kindWord { ApprovalKindWordView(word: kind) }
+                Text(card.source)
+                    .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
+                    .lineLimit(1).fixedSize()
+                    .accessibilityLabel(item.session.sourceLabel)
+            } else if let exception = QueueRowPresentation.exception(item, target: target) {
+                ExceptionWord(exception: exception)
             }
             if showsAge { rowAge(item) }
         }
     }
-
-    private func earlierKey(_ item: AgentAttentionItem) -> String { "earlier:\(item.id)" }
 
     /// A row's leading mark: the chosen sprite in a fixed slot as wide as the widest kind and as tall
     /// as the tallest, leading-aligned and centred in it, so titles line up whichever kind is chosen.
@@ -2068,12 +2091,6 @@ struct Notch: View {
         Sprite(kind: model.appearance.sprite, working: working, reduceMotion: model.reduceMotion,
                color: color, unlit: unlit)
             .frame(width: Sprite.slotWidth, height: Sprite.slotHeight, alignment: .leading)
-    }
-
-    private func earlierToggle(_ item: AgentAttentionItem, open: Binding<Bool>) -> some View {
-        EarlierFold(name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
-                    exception: QueueRowPresentation.exception(item), spoken: rowHeading(item),
-                    subject: rowSubject(item), reduceMotion: model.reduceMotion, open: open)
     }
 
     /// The row's name, then "· project @ branch" (in the profile's label format) when Herdly has seen
@@ -2118,12 +2135,11 @@ struct Notch: View {
         .fixedSize()
     }
 
-    /// A herdr session's Open availability for this card. With Ghostty controls off the card keeps
-    /// its Set up Ghostty path, so that reason is presented as the Ghostty rules present it.
+    /// A herdr session's Open availability for this card, as the notch presents it
+    /// (`HerdrOpenAvailability.presented`, one reading with the result rows). `ghosttyTTY` is the
+    /// shared support reading the model reads too; the view observes it, so a change redraws.
     private func herdrOpen(_ session: AgentSessionIdentity) -> HerdrOpenAvailability {
-        let availability = model.herdrOpenAvailability(session, ttySupport: ghosttyTTY.support)
-        if case .unavailable(.session(.ghosttyControlsOff)) = availability { return .notInHerdr }
-        return availability
+        model.presentedHerdrOpen(session)
     }
 
     /// The one line that replaces Open for a herdr session (product.md, "Agreed herdr
@@ -2160,12 +2176,18 @@ struct Notch: View {
             if let reason = model.claudeLastSeenLine(session) {
                 terminalOpenLine(item, reason: reason, replacesOpen: true)
             } else {
-                Text(model.claudeReturnUnavailableMessage)
-                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                claudeNotVerifiedLine
             }
         } else if herdr == .notInHerdr, let reason = model.terminalOpenLine(session) {
             terminalOpenLine(item, reason: reason)
         }
+    }
+
+    /// "Open is unavailable until Herdly can verify this Claude session is live." (or Ghostty's
+    /// awaiting-permission line), shared by the card and the result row.
+    private var claudeNotVerifiedLine: some View {
+        Text(model.claudeReturnUnavailableMessage)
+            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder

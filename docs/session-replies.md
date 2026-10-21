@@ -1,6 +1,6 @@
 # Replying to a session from its completion card
 
-A CLI completion card carries a single-line field: the user reads that a session finished, types "now add tests", and sends it to that session without switching applications. The reply starts a new turn on that exact thread through the local app-server daemon, the same verified transport that answers questions by call id ([user-input requests](user-input-requests.md), [ADR 0007](adr/0007-connect-to-the-codex-daemon-socket-as-the-same-user.md)). Desktop completion cards omit the reply field, Send button, and reply status because Herdly has no supported desktop reply transport. Open in Codex and dismissal remain available.
+A CLI completion card carries a single-line field: the user reads that a session finished, types "now add tests", and sends it to that session without switching applications. The reply starts a new turn on that exact thread through the local app-server daemon, the same verified transport that answers questions by call id ([user-input requests](user-input-requests.md), [ADR 0007](adr/0007-connect-to-the-codex-daemon-socket-as-the-same-user.md)). Desktop completion cards omit the reply field, Send button, and reply status because Herdly has no supported desktop reply transport. Open in Codex and dismissal remain available. The field lives on the completion's card (the spotlight); since #322 a result row in the open queue is one line with Dismiss and no reply field, and clicking it opens the session.
 
 ## The only transport
 
