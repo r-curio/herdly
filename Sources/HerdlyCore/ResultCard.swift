@@ -66,13 +66,14 @@ public enum ResultPop {
     /// ADR 0016, "Presentation and scanning", for a Codex CLI result while Ghostty controls are on:
     /// no pop only when the latest Ghostty inventory shows the session's exact tab selected. Another
     /// tab selected, Ghostty not in front (it then reports no selected tab), or no exact Ghostty tab
-    /// for the session (it runs in another terminal) pops; nothing visible is known. Before the first
-    /// inventory (`nil`) it is not yet: the fresh result stays a candidate until one arrives. A Codex
-    /// app result, or Ghostty off, is not judged here. Other terminal hosts are not consulted yet.
+    /// for the session (it runs in another terminal) pops; nothing visible is known. With no inventory
+    /// (`nil`) it is not yet only while a read is in flight (`reading`): the fresh result stays a
+    /// candidate until it lands. Ghostty unreadable or not running shows nothing visible, so it pops.
+    /// A Codex app result, or Ghostty off, is not judged here. Other terminal hosts are not consulted yet.
     public static func ghosttyAllows(source: AttentionSource, session: UUID, ghosttyEnabled: Bool,
-                                     live: Set<UUID>, snapshot: GhosttySnapshot?) -> Bool {
+                                     live: Set<UUID>, snapshot: GhosttySnapshot?, reading: Bool = false) -> Bool {
         guard source == .cli, ghosttyEnabled else { return true }
-        guard let snapshot else { return false }
+        guard let snapshot else { return !reading }
         return allows(selected: snapshot.selected, target: GhosttyMatch.target(session: session, live: live, snapshot: snapshot))
     }
 

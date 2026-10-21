@@ -1753,7 +1753,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 guard CompletionVisibility.allows(source: source, codexForeground: codexForeground,
                                                  ghosttyFocus: ghosttyFocus) else { return false }
                 return ResultPop.ghosttyAllows(source: source, session: session, ghosttyEnabled: ghosttyEnabled,
-                                               live: liveCLI, snapshot: ghosttySnapshot)
+                                               live: liveCLI, snapshot: ghosttySnapshot,
+                                               reading: ghosttyFocus == .checking)
             }
             // ADR 0016's one rule for Claude too: no pop while its own Ghostty tab is in front.
             return ResultPop.claudeGhosttyAllows(outcome.session, ghosttyEnabled: ghosttyEnabled,

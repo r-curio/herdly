@@ -54,9 +54,10 @@ import Testing
     #expect(!item.expanded && item.pending)
 }
 
-@Test func cliPresentationWaitsForVerifiedGhosttyFocus() {
+@Test func cliPresentationWaitsOnlyWhileGhosttyIsBeingRead() {
     #expect(!CompletionVisibility.allows(source: .cli, codexForeground: false, ghosttyFocus: .checking))
-    #expect(!CompletionVisibility.allows(source: .cli, codexForeground: false, ghosttyFocus: .unknown))
+    // Ghostty unreadable or not running: nothing visible is known, so the card pops (#323).
+    #expect(CompletionVisibility.allows(source: .cli, codexForeground: false, ghosttyFocus: .unknown))
     #expect(!CompletionVisibility.allows(source: .cli, codexForeground: false, ghosttyFocus: .focused))
     #expect(CompletionVisibility.allows(source: .cli, codexForeground: false, ghosttyFocus: .away))
     #expect(CompletionVisibility.allows(source: .desktop, codexForeground: nil, ghosttyFocus: .unknown))

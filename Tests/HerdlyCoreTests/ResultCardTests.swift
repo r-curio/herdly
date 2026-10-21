@@ -255,9 +255,14 @@ private func claudeAllows(_ snapshot: GhosttySnapshot?, enabled: Bool = true) ->
     #expect(codexAllows(try ghostty(selected: nil)))
 }
 
-@Test func aCLIResultWaitsForTheFirstGhosttyReading() {
-    // No inventory yet: not now. The fresh result stays a candidate and can pop once one arrives.
-    #expect(codexAllows(nil) == false)
+@Test func aCLIResultWaitsOnlyWhileGhosttyIsBeingRead() {
+    let id = session
+    // A read in flight: not now. The fresh result stays a candidate and can pop once it lands.
+    #expect(ResultPop.ghosttyAllows(source: .cli, session: id, ghosttyEnabled: true, live: [id], snapshot: nil,
+                                    reading: true) == false)
+    // Ghostty unreadable or not running: nothing visible is known, so it pops.
+    #expect(ResultPop.ghosttyAllows(source: .cli, session: id, ghosttyEnabled: true, live: [id], snapshot: nil,
+                                    reading: false))
 }
 
 @Test func ghosttyIsNotConsultedWhenOffOrForTheCodexApp() throws {
