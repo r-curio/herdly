@@ -92,7 +92,7 @@ Codex keeps working if Herdly is quit or crashes. Every hook either records meta
 
 ### Connect Claude Code
 
-Claude is configured separately in **Agents → Claude Code**. Herdly previews the default `~/.claude` root first; use **⋯ → Add Another Claude Folder…** for a manually selected `CLAUDE_CONFIG_DIR` root, which then gets its own card. Each root has its own helper, events, install record, installation identity, and undo path. See [Claude setup](claude-setup.md) for ownership and state details.
+Claude is configured separately in **Agents → Claude Code**. Herdly previews the default `~/.claude` root first; use **⋯ → Add Another Claude Folder…** for a manually selected `CLAUDE_CONFIG_DIR` root, which then appears as a row in that card. Each root has its own helper, events, install record, installation identity, and undo path. See [Claude setup](claude-setup.md) for ownership and state details.
 
 Configure Claude adds only Herdly's exact hook entries and `env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to that root's `settings.json`, then installs the packaged helper under Herdly's Application Support directory. The `SessionStart` entry emits the full-session-ID Ghostty title through Claude's JSON `terminalSequence`, and `SessionEnd` requests a reset. Existing Claude sessions are not restarted; Herdly reports **Configured; restart required** until a newly started session sends a root-matching event. Ghostty Automation readiness remains separate from this connection state.
 

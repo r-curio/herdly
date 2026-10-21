@@ -542,8 +542,9 @@ private struct AgentControls: View {
     @ObservedObject var model: Companion
     @State private var preview: SetupPreview?
 
+    /// `setupStatus` is only a default until the first detection lands, so it reads as unknown until then.
     private var summary: AgentSummary {
-        AgentSummary.codex(model.setupCapabilities, connected: model.setupStatus == .connected,
+        AgentSummary.codex(model.setupCapabilities, status: model.setupChecked ? model.setupStatus : nil,
                            statusText: model.setupStatusText)
     }
 
@@ -551,17 +552,17 @@ private struct AgentControls: View {
         ControlsPage(section: .agents) {
             VStack(alignment: .leading, spacing: 28) {
                 codexCard
-                ClaudeAgentControls(setup: model.claude)
+                ClaudeAgentControls(setup: model.claude, preview: $preview)
             }
         }
         .sheet(item: $preview) { SetupPreviewSheet(preview: $0) }
     }
 
     private var codexCard: some View {
-        SettingsCard {
+        let summary = summary
+        return SettingsCard {
             AgentCardHeader(name: "Codex", subtitle: summary.subtitle, symbol: "terminal", tile: Color(white: 0.11),
-                            status: model.canUndoSetup ? "Connected" : "Not configured",
-                            connected: model.canUndoSetup, menuLabel: "Codex actions") {
+                            status: summary.status, menuLabel: "Codex actions") {
                 if model.canConfigureSetup {
                     Button("Configure Codex", action: model.configureCodex)
                         .buttonStyle(.borderedProminent).controlSize(.small)
@@ -626,6 +627,35 @@ private struct SetupPreviewSheet: View {
     }
 }
 
+/// An agent's status: a green dot when connected, orange when it needs attention, gray while unknown.
+private struct AgentStatusBadge: View {
+    let status: AgentHeaderStatus
+
+    var body: some View {
+        switch status {
+        case .connected: StatusBadge(title: status.title, color: .green)
+        case .attention: StatusBadge(title: status.title, color: .orange)
+        case .checking: StatusBadge(title: status.title, color: .secondary)
+        }
+    }
+}
+
+/// The 22pt borderless ⋯ button that opens an agent's or folder's setup actions.
+private struct AgentActionsMenu<Actions: View>: View {
+    let label: String
+    @ViewBuilder let actions: Actions
+
+    var body: some View {
+        Menu { actions } label: {
+            Image(systemName: "ellipsis").frame(width: 22, height: 22)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel(label)
+    }
+}
+
 /// An agent card's first row: tile, name and versions, status, a Configure button while setup is
 /// needed, and the ⋯ menu of setup actions.
 private struct AgentCardHeader<Configure: View, Actions: View>: View {
@@ -633,8 +663,7 @@ private struct AgentCardHeader<Configure: View, Actions: View>: View {
     let subtitle: String
     let symbol: String
     let tile: Color
-    let status: String
-    let connected: Bool
+    let status: AgentHeaderStatus
     let menuLabel: String
     @ViewBuilder let configure: Configure
     @ViewBuilder let actions: Actions
@@ -653,15 +682,9 @@ private struct AgentCardHeader<Configure: View, Actions: View>: View {
             }
             .accessibilityElement(children: .combine)
             Spacer(minLength: 8)
-            StatusBadge(title: status, color: connected ? .green : .orange)
+            AgentStatusBadge(status: status)
             configure
-            Menu { actions } label: {
-                Image(systemName: "ellipsis").frame(width: 22, height: 22)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityLabel(menuLabel)
+            AgentActionsMenu(label: menuLabel) { actions }
         }
         .padding(.horizontal, SettingsStyle.rowInset)
         .padding(.vertical, 8)
@@ -669,22 +692,32 @@ private struct AgentCardHeader<Configure: View, Actions: View>: View {
     }
 }
 
-/// A row per problem: what needs fixing on the left, an orange dot and the fix on the right.
-private struct AgentProblemRows: View {
-    let problems: [AgentProblem]
+/// A value with an orange dot before it: the fix for a problem row.
+private struct ProblemValue: View {
+    let text: String
 
     var body: some View {
-        ForEach(problems, id: \.label) { problem in
+        HStack(spacing: 6) {
+            Circle().fill(.orange).frame(width: 7, height: 7).accessibilityHidden(true)
+            Text(text).foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// A row per problem: what needs fixing on the left, an orange dot and the fix on the right.
+/// `indent` sets a folder's own problems beneath its row.
+private struct AgentProblemRows: View {
+    let problems: [AgentProblem]
+    var indent: CGFloat = 0
+
+    var body: some View {
+        ForEach(problems) { problem in
             Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: problem.label, detail: nil) {
-                HStack(spacing: 6) {
-                    Circle().fill(.orange).frame(width: 7, height: 7).accessibilityHidden(true)
-                    Text(problem.value).foregroundStyle(.secondary)
-                        .multilineTextAlignment(.trailing)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .accessibilityElement(children: .combine)
+            SettingsRow(title: problem.label, detail: nil) { ProblemValue(text: problem.value) }
+                .padding(.leading, indent)
+                .accessibilityElement(children: .combine)
         }
     }
 }
@@ -725,19 +758,18 @@ private struct PreviewDisclosure: View {
     }
 }
 
-/// One Claude Code card per configuration folder. The first is the default folder; each added
-/// folder has its own card, with Remove Folder in its ⋯ menu.
+/// The Claude Code card. Its header and rows describe the default folder; each added folder is a
+/// row beneath them with its own status, Configure button and ⋯ menu, and its problems indented under it.
 private struct ClaudeAgentControls: View {
     @ObservedObject var setup: ClaudeSetupModel
-    @State private var preview: SetupPreview?
+    @Binding var preview: SetupPreview?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            ForEach(Array(setup.roots.enumerated()), id: \.element.id) { index, root in
-                card(root, isDefault: index == 0)
-            }
+        SettingsCard {
+            if let root = setup.roots.first { defaultFolder(root) }
+            ForEach(Array(setup.roots.dropFirst())) { root in addedFolder(root) }
+            AgentMessageRow(message: setup.message)
         }
-        .sheet(item: $preview) { SetupPreviewSheet(preview: $0) }
     }
 
     private func readyPlan(_ root: ClaudeSetupModel.Root) -> ClaudeSetupPlan? {
@@ -745,77 +777,137 @@ private struct ClaudeAgentControls: View {
         return plan
     }
 
-    private func card(_ root: ClaudeSetupModel.Root, isDefault: Bool) -> some View {
+    private func summary(_ root: ClaudeSetupModel.Root) -> AgentSummary {
+        AgentSummary.claude(root.capabilities, displayPath: root.displayPath, status: root.status,
+                            statusText: ClaudeSetupModel.statusText(root.status),
+                            addsHooks: readyPlan(root)?.addsHooks ?? false)
+    }
+
+    private func usage(_ root: ClaudeSetupModel.Root) -> AgentUsage? {
+        guard setup.usageEnabled(for: root) else { return nil }
+        return AgentSummary.claudeUsage(root.usage, status: root.usageStatus, now: Date().timeIntervalSince1970)
+    }
+
+    @ViewBuilder
+    private func defaultFolder(_ root: ClaudeSetupModel.Root) -> some View {
+        let summary = summary(root)
         let plan = readyPlan(root)
-        let summary = AgentSummary.claude(root.capabilities, displayPath: root.displayPath, status: root.status,
-                                          statusText: ClaudeSetupModel.statusText(root.status),
-                                          addsHooks: plan?.addsHooks ?? false)
-        return SettingsCard {
-            AgentCardHeader(name: "Claude Code", subtitle: summary.subtitle, symbol: "sparkle",
-                            tile: Color(red: 0.851, green: 0.467, blue: 0.341),
-                            status: root.status == .connected ? "Connected"
-                                : root.status.isAwaitingRestart ? "Restart required" : "Not ready",
-                            connected: root.status == .connected,
-                            menuLabel: "Claude Code actions for \(root.displayPath)") {
-                if let plan, root.status.offersConfigure(requiresConfigure: plan.requiresConfigure,
-                                                         usageMatches: root.usageInstalled == setup.usageEnabled(for: root)) {
-                    Button("Configure Claude") { setup.configure(root) }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
-                        .accessibilityLabel("Configure Claude for \(root.displayPath)")
-                }
-            } actions: {
-                if let plan {
-                    Button("Review Again", action: setup.refresh)
-                        .accessibilityLabel("Review Claude setup for \(root.displayPath)")
-                    Button("Show Setup Changes…") {
-                        preview = SetupPreview(title: "Claude Code setup changes for \(root.displayPath)",
-                                               text: previewText(root, plan: plan))
-                    }
-                    .accessibilityLabel("Show Claude setup changes for \(root.displayPath)")
-                }
-                Button("Add Another Claude Folder…", action: setup.addAlternateRoot)
-                if (plan != nil && root.status != .notConfigured) || !isDefault { Divider() }
-                if plan != nil, root.status != .notConfigured {
-                    Button("Undo Setup…") { setup.undo(root) }
-                        .accessibilityLabel("Undo Claude setup for \(root.displayPath)")
-                }
-                if !isDefault {
-                    Button("Remove Folder", role: .destructive) { setup.removeAlternateRoot(root) }
-                        .accessibilityLabel("Remove Claude folder \(root.displayPath)")
-                }
+        AgentCardHeader(name: "Claude Code", subtitle: summary.subtitle, symbol: "sparkle",
+                        tile: Color(red: 0.851, green: 0.467, blue: 0.341), status: summary.status,
+                        menuLabel: "Claude Code actions for \(root.displayPath)") {
+            configureButton(root)
+        } actions: {
+            reviewActions(root)
+            Button("Add Another Claude Folder…", action: setup.addAlternateRoot)
+            if plan != nil, root.status != .notConfigured {
+                Divider()
+                undoButton(root)
             }
-            AgentProblemRows(problems: summary.problems)
-            if plan != nil {
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Usage limits on the strip", detail: nil) {
-                    HStack(spacing: 10) {
-                        if setup.usageEnabled(for: root) {
-                            Text(AgentSummary.claudeUsage(root.usage, status: root.usageStatus,
-                                                          now: Date().timeIntervalSince1970))
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.trailing)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Toggle("Usage limits on the strip", isOn: Binding(
-                            get: { setup.usageEnabled(for: root) },
-                            set: { setup.setUsageEnabled($0, for: root) }
-                        ))
-                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                        .accessibilityLabel("Claude usage limits on the strip for \(root.displayPath)")
-                    }
-                }
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Name sessions with Haiku", detail: nil) {
-                    Toggle("Name sessions with Haiku", isOn: Binding(
-                        get: { setup.sessionTitlesEnabled(for: root) },
-                        set: { setup.setSessionTitlesEnabled($0, for: root) }
-                    ))
-                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                    .accessibilityLabel("Name Claude sessions with Haiku for \(root.displayPath)")
-                }
-            }
-            if isDefault { AgentMessageRow(message: setup.message) }
         }
+        AgentProblemRows(problems: summary.problems)
+        if plan != nil {
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Usage limits on the strip", detail: nil) {
+                HStack(spacing: 10) {
+                    if let usage = usage(root) {
+                        if usage.isProblem {
+                            ProblemValue(text: usage.text)
+                        } else {
+                            Text(usage.text).foregroundStyle(.secondary)
+                        }
+                    }
+                    usageToggle(root).labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                }
+            }
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Name sessions with Haiku", detail: nil) {
+                titlesToggle(root).labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func addedFolder(_ root: ClaudeSetupModel.Root) -> some View {
+        let summary = summary(root)
+        let plan = readyPlan(root)
+        Divider().padding(.horizontal, SettingsStyle.rowInset)
+        HStack(spacing: 10) {
+            Text(root.displayPath)
+                .font(.system(.body, design: .monospaced))
+                .lineLimit(1).truncationMode(.middle)
+                .accessibilityLabel("Claude folder \(root.displayPath)")
+            Spacer(minLength: 8)
+            AgentStatusBadge(status: summary.status)
+            configureButton(root)
+            AgentActionsMenu(label: "Claude Code actions for \(root.displayPath)") {
+                reviewActions(root)
+                if plan != nil {
+                    usageToggle(root)
+                    titlesToggle(root)
+                }
+                Divider()
+                if plan != nil, root.status != .notConfigured { undoButton(root) }
+                Button("Remove Folder", role: .destructive) { setup.removeAlternateRoot(root) }
+                    .accessibilityLabel("Remove Claude folder \(root.displayPath)")
+            }
+        }
+        .padding(.horizontal, SettingsStyle.rowInset)
+        .padding(.vertical, 8)
+        .frame(minHeight: 36)
+        AgentProblemRows(problems: summary.problems, indent: 16)
+        if let usage = usage(root), usage.isProblem {
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            SettingsRow(title: "Usage limits", detail: nil) { ProblemValue(text: usage.text) }
+                .padding(.leading, 16)
+                .accessibilityElement(children: .combine)
+        }
+    }
+
+    @ViewBuilder
+    private func configureButton(_ root: ClaudeSetupModel.Root) -> some View {
+        if let plan = readyPlan(root),
+           root.status.offersConfigure(requiresConfigure: plan.requiresConfigure,
+                                       usageMatches: root.usageInstalled == setup.usageEnabled(for: root)) {
+            Button("Configure Claude") { setup.configure(root) }
+                .buttonStyle(.borderedProminent).controlSize(.small)
+                .accessibilityLabel("Configure Claude for \(root.displayPath)")
+        }
+    }
+
+    /// Review Again and Show Setup Changes…, offered only while the folder's plan is ready, as before.
+    @ViewBuilder
+    private func reviewActions(_ root: ClaudeSetupModel.Root) -> some View {
+        if let plan = readyPlan(root) {
+            Button("Review Again", action: setup.refresh)
+                .accessibilityLabel("Review Claude setup for \(root.displayPath)")
+            Button("Show Setup Changes…") {
+                preview = SetupPreview(title: "Claude Code setup changes for \(root.displayPath)",
+                                       text: previewText(root, plan: plan))
+            }
+            .accessibilityLabel("Show Claude setup changes for \(root.displayPath)")
+        }
+    }
+
+    private func undoButton(_ root: ClaudeSetupModel.Root) -> some View {
+        Button("Undo Setup…") { setup.undo(root) }
+            .accessibilityLabel("Undo Claude setup for \(root.displayPath)")
+    }
+
+    /// Plain toggles so they read as checkmark items in a folder's menu; rows style them as mini switches.
+    private func usageToggle(_ root: ClaudeSetupModel.Root) -> some View {
+        Toggle("Usage limits on the strip", isOn: Binding(
+            get: { setup.usageEnabled(for: root) },
+            set: { setup.setUsageEnabled($0, for: root) }
+        ))
+        .accessibilityLabel("Claude usage limits on the strip for \(root.displayPath)")
+    }
+
+    private func titlesToggle(_ root: ClaudeSetupModel.Root) -> some View {
+        Toggle("Name sessions with Haiku", isOn: Binding(
+            get: { setup.sessionTitlesEnabled(for: root) },
+            set: { setup.setSessionTitlesEnabled($0, for: root) }
+        ))
+        .accessibilityLabel("Name Claude sessions with Haiku for \(root.displayPath)")
     }
 
     private func previewText(_ root: ClaudeSetupModel.Root, plan: ClaudeSetupPlan) -> String {
