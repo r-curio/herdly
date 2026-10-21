@@ -153,6 +153,15 @@ public struct NotchPresentationController: Equatable, Sendable {
         clicked = nil
         manualOpen = true
     }
+    /// Approve, Deny, or Send taken on the clicked card `item` (D10): back to the queue, where the
+    /// row note shows. A decision on any other request leaves the open card alone. Returns whether
+    /// it left.
+    @discardableResult
+    public mutating func leaveCard(after item: AgentAttentionID) -> Bool {
+        guard clicked == item else { return false }
+        backToQueue()
+        return true
+    }
     /// The one Escape rule (D6): a clicked card returns to the queue; otherwise the panel collapses.
     public mutating func escape() -> NotchEscape {
         if clicked != nil {
@@ -351,6 +360,20 @@ public struct SpotlightRequest: Equatable, Sendable {
         }
         self.arrivedAt = arrivedAt
         self.expiresAt = expiresAt
+    }
+
+    /// The same card read from a source-neutral approval (#320): its own details, arrival, and
+    /// deadline, so a Claude request reads top to bottom like a Codex one. `contextDirectory` places
+    /// the card when the request names no project, such as a Claude session's own directory.
+    public init(approval: AgentApproval, contextDirectory: String?, home: String?) {
+        self.init(details: approval.details, contextDirectory: contextDirectory,
+                  arrivedAt: approval.arrivedAt, expiresAt: approval.expiresAt, home: home)
+    }
+
+    /// What the card says where the command would be when the agent sent none (D9). Herdly never
+    /// guesses the command.
+    public static func missingCommand(from source: AgentSource) -> String {
+        "\(source.displayName) didn't say which command."
     }
 
     /// True when the raw request holds anything beyond the command and ask the card already shows.

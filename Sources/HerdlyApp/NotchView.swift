@@ -56,6 +56,8 @@ enum NotchStyle {
     static let well = Color(red: 0.165, green: 0.165, blue: 0.165)      // #2a2a2a badge and controls
     /// The opened running row's container (#319, F3): the one card-like surface in the queue.
     static let openRow = Color(red: 0.102, green: 0.102, blue: 0.102)   // #1a1a1a
+    /// The hover ground behind a queue row that opens as a card (#320): a highlight only; hover never acts.
+    static let hoverRow = Color(red: 0.110, green: 0.110, blue: 0.110)  // #1c1c1c
     // Source values chosen so the captured tones match the reference's greens (109,201,125 and 135,222,154).
     static let sprite = Color(red: 0.133, green: 0.773, blue: 0.369)    // #22c55e body
     static let spriteLight = Color(red: 0.298, green: 0.863, blue: 0.502) // #4cdc80 highlight
@@ -568,6 +570,118 @@ struct SecondsLeftPill: View {
     }
 }
 
+/// The approval card's "Ns left" row (D7, #320): a full-width 2pt bar, ink over a well track as long
+/// as the remaining share of the request's own window, then "18s left" in 10pt dim, bright 600-weight
+/// ink for the last five seconds (`ApprovalCountdown.isUrgent`). It steps once a second without
+/// animation, so Reduce Motion needs nothing extra, and it never moves the deadline.
+struct ApprovalCountdownRow: View {
+    let countdown: ApprovalCountdown
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Rectangle().fill(NotchStyle.well)
+                    Rectangle().fill(NotchStyle.ink).frame(width: proxy.size.width * countdown.fraction)
+                }
+            }
+            .frame(height: 2)
+            Text(countdown.label)
+                .font(NotchStyle.mono(10, countdown.isUrgent ? .semibold : .regular))
+                .foregroundStyle(countdown.isUrgent ? NotchStyle.ink : NotchStyle.dim)
+                .monospacedDigit()
+                .frame(height: 12)
+                .fixedSize()
+        }
+        .transaction { $0.animation = nil }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(countdown.spoken)
+    }
+}
+
+/// The approval card's command (#320): the full command in 11pt ink at a 14pt line height, never
+/// shortened. Past six lines (84pt) it sits in a box that scrolls, and "Show full command" lifts the
+/// cap; a command that fits shows no disclosure.
+struct ApprovalCommandBox: View {
+    let command: String
+    let subject: String
+    @Binding var expanded: Bool
+    /// The command's own height at the card's width, measured where it is drawn.
+    @State private var naturalHeight: CGFloat = 0
+    private static let cap: CGFloat = 84
+    private var overflows: Bool { naturalHeight > Self.cap + 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if overflows && !expanded {
+                ScrollView(.vertical) { commandText }
+                    .frame(height: Self.cap)
+            } else {
+                commandText
+            }
+            if overflows {
+                NotchDisclosure(title: "Show full command", subject: subject, expanded: $expanded) { EmptyView() }
+            }
+        }
+    }
+
+    private var commandText: some View {
+        Text(command)
+            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
+            // SF Mono 11pt sets about 13pt of line; one more makes the 14pt line height.
+            .lineSpacing(1)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { naturalHeight = proxy.size.height }
+                        .onChange(of: proxy.size.height) { _, height in naturalHeight = height }
+                }
+            }
+    }
+}
+
+/// A single approval card's kind word (#320): "Approve" in a well pill while it can be decided here,
+/// then the queue's own "Handed back". The row heading already speaks the state.
+struct ApprovalKindWordView: View {
+    let word: ApprovalCardKindWord
+    var body: some View {
+        switch word {
+        case .approve:
+            Text(word.word)
+                .smallPill(fill: NotchStyle.well, textColor: NotchStyle.ink, weight: .semibold)
+                .accessibilityHidden(true)
+        case let .exception(exception):
+            ExceptionWord(exception: exception)
+        }
+    }
+}
+
+/// The hover ground behind a queue row that opens as a card (#320): #1c1c1c with 5pt continuous
+/// corners, 6pt outside the row horizontally like the selection ring. Hover only highlights; it never
+/// opens, selects, or acts. Under Reduce Motion the ground appears without animation.
+struct CardRowHover: ViewModifier {
+    let id: AgentAttentionID
+    let active: Bool
+    @Binding var hovered: AgentAttentionID?
+    let reduceMotion: Bool
+
+    func body(content: Content) -> some View {
+        let highlighted = active && hovered == id
+        content
+            .background {
+                RoundedRectangle(cornerRadius: 5, style: .continuous).fill(NotchStyle.hoverRow)
+                    .padding(.horizontal, -6)
+                    .opacity(highlighted ? 1 : 0)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: highlighted)
+            }
+            .onHover { inside in
+                if inside, active { hovered = id } else if hovered == id { hovered = nil }
+            }
+    }
+}
+
 /// A kind section's "+N more" (D13): a pressable well that opens the rest of that section in place.
 /// It is a plain button, so Tab and VoiceOver reach it; the arrow-key row selection does not.
 struct MoreRowsPill: View {
@@ -608,6 +722,8 @@ struct Notch: View {
     @State private var viewedQuestions: [ClaudeQuestionViewStateKey: Int] = [:]
     /// Multi-select labels are kept in the view until the user presses Send.
     @State private var claudeSelections: [ClaudeQuestionViewStateKey: Set<Int>] = [:]
+    /// The queue row under the pointer that would open as a card; a highlight only (#320).
+    @State private var hoveredCardRow: AgentAttentionID?
     /// Ghostty's `tty` support for herdr Open availability; refreshed off the main actor.
     @ObservedObject private var ghosttyTTY = GhosttyTTYSupportMonitor.shared
 
@@ -905,12 +1021,12 @@ struct Notch: View {
                     }
                     Spacer(minLength: 6)
                     if item.session.source == .codex, codexOpen {
-                        NotchButton(title: "Open", emphasized: true) { model.openAgent(item.session) }
+                        NotchButton(title: Self.rowOpenTitle, emphasized: true) { model.openAgent(item.session) }
                             .disabled(model.openingTask)
                             .accessibilityLabel("Open Session: \(subject)")
                             .accessibilityHint("Open this session in Codex.")
                     }
-                    claudeReturnControl(item, subject: subject, emphasized: true, openTitle: "Open")
+                    claudeReturnControl(item, subject: subject, emphasized: true, openTitle: Self.rowOpenTitle)
                     claudeRemoveControl(item, subject: subject)
                 }
                 .padding(.top, 4)
@@ -936,6 +1052,9 @@ struct Notch: View {
     }
 
     private static let runningLabelWidth: CGFloat = 40
+    /// The plain "Open" a queue row offers on its own line: an opened running row (#319) and an
+    /// approval row's "Not delivered" note (#320). Cards name theirs from `ApprovalCardReading`.
+    private static let rowOpenTitle = "Open"
     private static let runningLabelGap: CGFloat = 10
 
     /// One labelled detail line: an 11pt dim label in a 40pt column, then the 11pt mono value at a
@@ -977,68 +1096,123 @@ struct Notch: View {
         }
     }
 
+    /// One approval card body (#320) for the spotlight and the clicked card, Codex and Claude alike,
+    /// read top to bottom and inset to the title: the agent's ask, the action and its full command,
+    /// where it runs, the raw request when it adds detail, then where the request stands and its
+    /// controls. Only the user's own Approve or Deny decides; the countdown only reads the deadline.
     @ViewBuilder
-    private func detail(_ label: String, _ value: String?, selectable: Bool = false,
-                        missing: String = "Not provided by Codex") -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text(label).foregroundStyle(NotchStyle.dim).frame(width: 58, alignment: .leading)
-            if selectable {
-                Text(value ?? missing).foregroundStyle(value == nil ? NotchStyle.dim : NotchStyle.text).textSelection(.enabled)
-            } else {
-                Text(value ?? missing).foregroundStyle(value == nil ? NotchStyle.dim : NotchStyle.text)
+    private func approvalCardBody(_ request: SpotlightRequest, item: AgentAttentionItem, subject: String,
+                                  herdr: HerdrOpenAvailability, codexOpen: Bool, decidable: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let ask = request.ask {
+                Text(ask).font(NotchStyle.mono(12)).foregroundStyle(NotchStyle.ink)
+                    // 12pt mono sets about 14pt of line; three more make the 17pt line height.
+                    .lineSpacing(3).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-        }
-        .font(NotchStyle.mono(11)).fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// A spotlit approval request read top to bottom: Codex's ask, then what it wants to run and
-    /// where, then where the request stands. The raw request appears only behind a disclosure, and
-    /// only when it holds something this card does not already show.
-    @ViewBuilder
-    private func spotlightRequest(_ request: SpotlightRequest, item: AgentAttentionItem, subject: String) -> some View {
-        if let ask = request.ask {
-            Text(ask).font(NotchStyle.mono(12)).foregroundStyle(NotchStyle.ink).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if let action = request.action { Text(action).foregroundStyle(NotchStyle.dim) }
+            HStack(alignment: .top, spacing: 8) {
+                if let action = request.action {
+                    Text(action).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize()
+                }
                 if let command = request.command {
-                    Text(command).foregroundStyle(NotchStyle.ink).textSelection(.enabled)
+                    ApprovalCommandBox(command: command, subject: subject,
+                                       expanded: disclosure("command:\(item.id)"))
                 } else {
-                    Text("Command not provided by Codex").foregroundStyle(NotchStyle.dim)
+                    // D9: never guess; say who left it out. Approve, Deny and Open stay offered.
+                    Text(SpotlightRequest.missingCommand(from: item.session.source))
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .contain)
             let task = request.task(besidesSessionName: sessionNames[item.session])
             if task != nil || request.directory != nil {
                 let place = request.directory.map { "in \($0.display)" }
                 Text([task, place].compactMap { $0 }.joined(separator: " · "))
-                    .foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
                     .help(request.directory?.full ?? "")
                     .accessibilityLabel([task, request.directory.map { "in \($0.full)" }].compactMap { $0 }.joined(separator: ", "))
                     .contextMenu { if let full = request.directory?.full { copyPathButton(full) } }
             }
-        }
-        .font(NotchStyle.mono(11))
-        if item.kind == .handedBackApproval {
-            // Herdly records when the request arrived, not when it was handed back, so the elapsed
-            // time names the arrival.
-            TimelineView(.periodic(from: .now, by: 30)) { context in
-                Text("Handed back with no decision · asked \(SpotlightRequest.elapsed(since: request.arrivedAt, now: context.date.timeIntervalSince1970))")
-                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+            if let full = request.fullRequest {
+                // Per request, like the command's disclosure, so one request's open state never opens another's.
+                NotchDisclosure(title: "Show full request", subject: subject, expanded: disclosure("request:\(item.id)")) {
+                    Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-        } else {
-            Text("Decide by \(Date(timeIntervalSince1970: request.expiresAt).formatted(date: .omitted, time: .standard))")
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-        }
-        if let full = request.fullRequest {
-            NotchDisclosure(title: "Show full request", subject: subject, expanded: disclosure("request:\(item.session.session)")) {
-                Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+            if item.kind == .handedBackApproval {
+                // Herdly records when the request arrived, not when or why it was handed back, so the
+                // elapsed time names the arrival and no cause is given.
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text("Handed back with no decision · asked \(SpotlightRequest.elapsed(since: request.arrivedAt, now: context.date.timeIntervalSince1970))")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if item.session.source == .claude {
+                // `decidable` has no deadline, so this line does not flicker on at the deadline itself.
+                if item.kind == .actionableApproval, !decidable {
+                    Text("Claude's native permission prompt remains available.")
+                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                }
+                claudeReturnMessage(item)
+            } else if case let .unavailable(cause) = herdr {
+                herdrReasonLine(item, cause: cause)
+            } else if let reason = model.terminalOpenLine(item.session) {
+                terminalOpenLine(item, reason: reason)
+            }
+            // Everything below reads one `ApprovalCardReading` from the card's own clock. `decidable`
+            // (`Companion.canDecide`) has no deadline; the reading alone disables Approve and Deny at
+            // the deadline, and the decide path re-checks the request, deadline included, before
+            // writing anything.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                if let reading = ApprovalCardReading(item, decidable: decidable, now: context.date.timeIntervalSince1970) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let countdown = reading.countdown { ApprovalCountdownRow(countdown: countdown) }
+                        HStack(spacing: 6) {
+                            if reading.showsDecision, let approval = item.approval {
+                                let request = "\(item.session.source.displayName) \(Self.requestKind(approval)) request"
+                                NotchButton(title: "Approve", emphasized: true) { model.decideAgent(approval, as: .allowOnce) }
+                                    .disabled(!reading.decisionEnabled)
+                                    .accessibilityLabel("Approve this request once: \(subject)")
+                                    .accessibilityHint("Approves this \(request) once.")
+                                NotchButton(title: "Deny") { model.decideAgent(approval, as: .deny) }
+                                    .disabled(!reading.decisionEnabled)
+                                    .accessibilityLabel("Deny: \(subject)")
+                                    .accessibilityHint("Denies this \(request).")
+                            }
+                            Spacer(minLength: 6)
+                            approvalOpenControl(item, reading: reading, subject: subject, codexOpen: codexOpen)
+                        }
+                    }
+                }
             }
         }
+        .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
+        .padding(.trailing, 6)
+        .padding(.top, 2)
+    }
+
+    /// The card's Open: "Open" beside Approve and Deny, "Open in Codex" or "Open in Claude" once handed
+    /// back (emphasized, as the card's one action). VoiceOver reads "Open Session: <subject>" either way;
+    /// Open still revalidates its exact target.
+    @ViewBuilder
+    private func approvalOpenControl(_ item: AgentAttentionItem, reading: ApprovalCardReading, subject: String,
+                                     codexOpen: Bool) -> some View {
+        let handedBack = reading.stage == .handedBack
+        if item.session.source == .codex, codexOpen {
+            NotchButton(title: reading.openTitle, emphasized: handedBack) {
+                if !handedBack, let approval = item.approval {
+                    model.openAgentApproval(approval)
+                } else {
+                    model.openAgent(item.session)
+                }
+            }
+            .disabled(model.openingTask)
+            .accessibilityLabel("Open Session: \(subject)")
+            .accessibilityHint(handedBack ? "Open this session in Codex." : "Hands this request back to Codex's own prompt.")
+        }
+        claudeReturnControl(item, subject: subject, emphasized: handedBack, openTitle: reading.openTitle)
     }
 
     /// The exact turn's working directory, home shortened to `~`; hover and Copy Path give the full path.
@@ -1338,6 +1512,12 @@ struct Notch: View {
         let runningRow = inQueue && item.kind == .running
         let runningOpen = runningRow && model.openRunningRow.isOpen(item.id)
         let bodySpacing: CGFloat = item.kind == .question ? 14 : 8
+        // #320: an approval row in the open queue is its header line alone; its body is the card.
+        let approvalRow = item.kind == .actionableApproval || item.kind == .handedBackApproval
+        // "Not delivered · answer in Claude" keeps its Open inline on the row line, before the age.
+        let opensFromNote = inQueue && approvalRow && rowNote(item)?.offersOpen == true
+        // Whether Approve and Deny are this card's to offer; one rule with the decide path.
+        let decidable = spotlit && approvalRow && model.canDecide(item)
         VStack(alignment: .leading, spacing: inQueue ? bodySpacing - 5 : bodySpacing) {
             // Every row is headed by its session's mark and name; the mark steps only while the
             // session is working, and a word appears only when the row is off its normal path.
@@ -1345,11 +1525,13 @@ struct Notch: View {
             let working = item.running?.status == .working
             if item.kind == .question {
                 cardOpener(item) { questionHeader(item, inQueue: inQueue) }
+                    .modifier(CardRowHover(id: item.id, active: opensAsCard(item), hovered: $hoveredCardRow,
+                                           reduceMotion: model.reduceMotion))
             } else {
                 Group {
                     if item.kind == .actionableApproval && inQueue {
                         // A live approval's "Ns left" steps once a second, seen and spoken. The
-                        // spotlight and clicked card say "Decide by" instead, so they do not repeat it.
+                        // spotlight and clicked card show it as their countdown row instead.
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             let countdown = QueueRowPresentation.countdown(item, now: context.date.timeIntervalSince1970)
                             cardOpener(item, countdown: countdown) {
@@ -1360,6 +1542,23 @@ struct Notch: View {
                         runningOpener(item, open: runningOpen) {
                             headerLine(item, folded: false, working: working, earlierOpen: earlierOpen, countdown: nil)
                         }
+                    } else if opensFromNote {
+                        // Open sits outside the row's own button, so the two never nest.
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            cardOpener(item) {
+                                headerLine(item, folded: false, working: working, earlierOpen: earlierOpen, countdown: nil,
+                                           showsAge: false)
+                            }
+                            claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle)
+                            rowAge(item)
+                        }
+                    } else if spotlit && approvalRow {
+                        // The card header reads the same `ApprovalCardReading` as the card body below.
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            headerLine(item, folded: false, working: working, earlierOpen: earlierOpen, countdown: nil,
+                                       card: ApprovalCardReading(item, decidable: decidable,
+                                                                 now: context.date.timeIntervalSince1970))
+                        }
                     } else {
                         cardOpener(item) {
                             headerLine(item, folded: folded, working: working, earlierOpen: earlierOpen, countdown: nil)
@@ -1367,11 +1566,19 @@ struct Notch: View {
                     }
                 }
                 .frame(minHeight: inQueue ? 26 : nil)
+                .modifier(CardRowHover(id: item.id, active: opensAsCard(item), hovered: $hoveredCardRow,
+                                       reduceMotion: model.reduceMotion))
             }
             if runningRow {
                 if runningOpen {
                     runningDetails(item, subject: subject, herdr: herdr, codexOpen: codexOpen)
                         .transition(QueueMotion.rowTransition(reduceMotion: model.reduceMotion))
+                }
+            } else if approvalRow {
+                // One card body for the spotlight and the clicked card (#320); nothing under a queue row.
+                if spotlit, let card = model.approvalCard(for: item) {
+                    approvalCardBody(card, item: item, subject: subject, herdr: herdr, codexOpen: codexOpen,
+                                     decidable: decidable)
                 }
             } else if !collapsed || rowNote(item)?.offersOpen == true {
                 VStack(alignment: .leading, spacing: bodySpacing) {
@@ -1380,44 +1587,13 @@ struct Notch: View {
                         HStack(spacing: 6) { claudeReturnControl(item, subject: subject) }
                     }
                     if !collapsed {
-                        if let request = spotlightDetails?.request {
-                            spotlightRequest(request, item: item, subject: subject)
-                        } else if item.kind != .question, let directory = spotlightDetails?.directory {
+                        if item.kind != .question, let directory = spotlightDetails?.directory {
                             directoryLine(directory)
                         }
-                        if let details = item.approval?.details, spotlightDetails == nil {
-                            let missing = item.session.source == .claude ? "Not provided by Claude" : "Not provided by Codex"
-                            VStack(alignment: .leading, spacing: 3) {
-                                detail("task", details.taskName, missing: missing)
-                                detail("project", details.project, missing: missing)
-                                detail("action", details.action, missing: missing)
-                                detail(details.commandLabel ?? "command", details.command, selectable: true, missing: missing)
-                                detail("reason", details.reason, selectable: true, missing: missing)
-                            }
-                            if let longText = details.longText {
-                                NotchDisclosure(title: "Show full request", subject: subject, expanded: disclosure("request:\(item.session.session)")) {
-                                    Text(longText).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                        }
                         switch item.kind {
-                        case .handedBackApproval where spotlightDetails?.request != nil:
+                        case .actionableApproval, .handedBackApproval:
+                            // Approval rows render the approval card body instead (#320).
                             EmptyView()
-                        case .handedBackApproval:
-                            Text("Handed back with no decision. Continue in \(item.session.source == .claude ? "Claude" : "Codex") to decide.")
-                                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
-                            if item.session.source == .claude {
-                                claudeReturnMessage(item)
-                            }
-                        case .actionableApproval:
-                            if item.session.source == .claude {
-                                if let approval = item.approval, !model.canDecideAgent(approval) {
-                                    Text("Claude's native permission prompt remains available.")
-                                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-                                }
-                                claudeReturnMessage(item)
-                            }
                         case .outcome, .earlierOutcome:
                             if item.outcome?.uncertain == true {
                                 Text("Queued before Herdly last started. You may already have seen this result; Herdly cannot verify it.")
@@ -1493,40 +1669,9 @@ struct Notch: View {
                                 Spacer(minLength: 6)
                             }
                             switch item.kind {
-                            case .actionableApproval:
-                                if item.session.source == .codex && item.session.surface == .cli {
-                                    NotchButton(title: "Approve once", emphasized: true) { if let approval = item.approval { model.decideAgent(approval, as: .allowOnce) } }
-                                        .accessibilityLabel("Approve once: \(subject)")
-                                        .accessibilityHint("Approves this Codex permission request once.")
-                                    NotchButton(title: "Deny") { if let approval = item.approval { model.decideAgent(approval, as: .deny) } }
-                                        .accessibilityLabel("Deny: \(subject)")
-                                        .accessibilityHint("Denies this Codex permission request.")
-                                }
-                                if item.session.source == .claude, let approval = item.approval, model.canDecideAgent(approval) {
-                                    NotchButton(title: "Approve once", emphasized: true) { model.decideAgent(approval, as: .allowOnce) }
-                                        .accessibilityLabel("Approve once: \(subject)")
-                                        .accessibilityHint("Approves this Claude \(Self.claudeRequestKind(approval)) request once.")
-                                    NotchButton(title: "Deny") { model.decideAgent(approval, as: .deny) }
-                                        .accessibilityLabel("Deny: \(subject)")
-                                        .accessibilityHint("Denies this Claude \(Self.claudeRequestKind(approval)) request.")
-                                }
-                                if item.session.source == .codex, codexOpen {
-                                    NotchButton(title: "Open Session") {
-                                        if let approval = item.approval { model.openAgentApproval(approval) }
-                                    }
-                                    .disabled(model.openingTask)
-                                    .accessibilityLabel("Open Session: \(subject)")
-                                    .accessibilityHint("Hands this request back to Codex's own prompt.")
-                                }
-                                claudeReturnControl(item, subject: subject)
-                            case .handedBackApproval:
-                                if item.session.source == .codex, codexOpen {
-                                    NotchButton(title: "Open Session") { model.openAgent(item.session) }
-                                        .disabled(model.openingTask)
-                                        .accessibilityLabel("Open Session: \(subject)")
-                                        .accessibilityHint("Open this session in Codex.")
-                                }
-                                claudeReturnControl(item, subject: subject)
+                            case .actionableApproval, .handedBackApproval:
+                                // Approval rows render their controls in the approval card body (#320).
+                                EmptyView()
                             case .statusUnavailable:
                                 if item.session.source == .codex, codexOpen {
                                     NotchButton(title: "Open Session") { model.openAgent(item.session) }
@@ -1621,9 +1766,14 @@ struct Notch: View {
     }
 
     /// A non-question row's heading line (D17): sprite, name, dim "· place" (it truncates first),
-    /// then at most one word or a live approval's "Ns left", then the age lane.
+    /// then at most one word or a live approval's "Ns left", then the age lane. A single approval
+    /// card's header (`card`, #320) says its kind instead ("Approve" while it can be decided here,
+    /// "Handed back", or none), then the dim source ("CLI", "Claude"); queue rows keep D17 and name
+    /// neither. With `showsAge` false the caller draws the age lane, putting a row note's Open
+    /// before it.
     private func headerLine(_ item: AgentAttentionItem, folded: Bool, working: Bool, earlierOpen: Binding<Bool>,
-                            countdown: ApprovalCountdown?) -> some View {
+                            countdown: ApprovalCountdown?, card: ApprovalCardReading? = nil,
+                            showsAge: Bool = true) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if folded {
                 earlierToggle(item, open: earlierOpen)
@@ -1635,11 +1785,17 @@ struct Notch: View {
                 }
                 if let countdown {
                     SecondsLeftPill(countdown: countdown)
+                } else if let card {
+                    if let kind = card.kindWord { ApprovalKindWordView(word: kind) }
+                    Text(card.source)
+                        .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
+                        .lineLimit(1).fixedSize()
+                        .accessibilityLabel(item.session.sourceLabel)
                 } else if let exception = QueueRowPresentation.exception(item) {
                     ExceptionWord(exception: exception)
                 }
             }
-            rowAge(item)
+            if showsAge { rowAge(item) }
         }
     }
 
@@ -1759,9 +1915,11 @@ struct Notch: View {
             .textSelection(.enabled)
     }
 
-    /// The kind of Claude request for VoiceOver: the action the row shows ("Edit file"), lowercased, or "Bash".
-    static func claudeRequestKind(_ approval: AgentApproval) -> String {
-        guard let action = approval.details?.action, !action.isEmpty else { return "permission" }
+    /// The kind of request for VoiceOver hints: "permission" for Codex; for Claude the action the
+    /// card shows ("Edit file"), lowercased, "Bash", or "permission" when it named none.
+    static func requestKind(_ approval: AgentApproval) -> String {
+        guard approval.identity.session.source == .claude,
+              let action = approval.details?.action, !action.isEmpty else { return "permission" }
         return action == "Bash" ? action : action.lowercased()
     }
 
@@ -2081,6 +2239,8 @@ struct Notch: View {
         }
         .onAppear { ghosttyTTY.refreshIfStale() }
         .onChange(of: model.herdrScanOutcome) { _, _ in ghosttyTTY.refreshIfStale() }
+        // A hover highlight belongs to the queue it was drawn on; leaving the queue clears it.
+        .onChange(of: model.presentationMode) { _, _ in hoveredCardRow = nil }
     }
 }
 
