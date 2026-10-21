@@ -34,6 +34,16 @@ public enum QueueRowPresentation {
     /// The one word a row carries when it is off its normal path (D17), or nil. Approve, answer, and
     /// check are said by the row's section heading, and a stopped result is a normal end, so none of
     /// them gets a word; a working row's sprite step says it is working.
+    ///
+    /// A result row whose session is unreachable (`target`, #322) reads "Unreachable" in the one word
+    /// slot, ahead of "Failed", "Waiting" or "Status unknown" (8J1): it is what decides whether the
+    /// row can be clicked. The state it replaces is still read in full by VoiceOver (`spokenState`).
+    public static func exception(_ item: AgentAttentionItem, target: ResultRowTarget) -> RowException? {
+        if target == .unreachable, item.kind.opensSession { return .unreachable }
+        return exception(item)
+    }
+
+    /// The word for a row whose session is reachable, or that never opens one.
     public static func exception(_ item: AgentAttentionItem) -> RowException? {
         switch item.kind {
         case .handedBackApproval: return .handedBack
@@ -115,6 +125,8 @@ public enum RowException: Equatable, Sendable {
     case handedBack
     case waiting
     case statusUnknown
+    /// A result row whose session Herdly cannot open (#322); its reason shows on a second line.
+    case unreachable
 
     public var word: String {
         switch self {
@@ -122,6 +134,7 @@ public enum RowException: Equatable, Sendable {
         case .handedBack: "Handed back"
         case .waiting: "Waiting"
         case .statusUnknown: "Status unknown"
+        case .unreachable: "Unreachable"
         }
     }
 

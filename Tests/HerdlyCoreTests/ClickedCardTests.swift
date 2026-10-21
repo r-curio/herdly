@@ -190,12 +190,18 @@ private let otherApprovalID = AgentAttentionID.approval(AgentCallIdentity(sessio
     #expect(empty.selected == nil)
 }
 
-@Test func returnOpensASelectedApprovalOrQuestionAsItsCardAndLeavesOtherRowsToLaterWork() {
-    let session = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "s3", surface: .desktop)
-    #expect(QueueRowSelection.returnAction(for: approvalID) == .openCard(approvalID))
-    #expect(QueueRowSelection.returnAction(for: questionID) == .openCard(questionID))
-    let outcome = AgentAttentionID.outcome(AgentTurnIdentity(session: session, turn: "t"))
-    #expect(QueueRowSelection.returnAction(for: outcome) == .openSession(outcome))
+@Test func returnOpensASelectedApprovalOrQuestionAsItsCard() throws {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(AgentApproval(session: claude, turn: "t1", call: "toolu_1", arrivedAt: 10)))
+    queue.apply(.question(AgentQuestion(session: codex, turn: "t2", call: "call_2", arrivedAt: 10)))
+    let items = queue.items(at: 11)
+    let approval = try #require(items.first { $0.id == approvalID })
+    let question = try #require(items.first { $0.id == questionID })
+    // A request opens as its card whatever its session's reach.
+    for target in [ResultRowTarget.reachable, .unreachable] {
+        #expect(QueueRowSelection.action(for: approval, target: target) == .openCard(approvalID))
+        #expect(QueueRowSelection.action(for: question, target: target) == .openCard(questionID))
+    }
 }
 
 @Test func singleCardModesNameTheirOneItem() {
