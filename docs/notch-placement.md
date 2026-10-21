@@ -100,7 +100,7 @@ Not performed by the agent: it needs a second display, Mission Control, and the 
 5. **Keyboard.** With another app active, wait for a completion: the other app keeps keyboard focus. Click the panel, press Tab repeatedly: the focus ring moves through the controls and is visible on each. Press Escape: the panel collapses and typing goes to the previous app.
 6. **VoiceOver.** Turn VoiceOver on and navigate the expanded panel: each row announces its kind and subject, each button its action and subject, and a long command reads in full.
 7. **Spaces and full screen.** Open a full-screen app and switch Spaces: the panel shows over the full-screen app and on each Space, once.
-8. **Pinned display.** Choose the external monitor under Show notch on. Move the pointer to the built-in display: the panel stays on the external one. Unplug it: the panel appears once on the built-in display and Notch display reads "*name* (not connected)". Reconnect it: the panel returns to the external monitor. Choose Follow pointer: the panel follows the pointer again.
+8. **Pinned display.** Choose the external monitor under Show notch on. Move the pointer to the built-in display: the panel stays on the external one. Unplug it: the panel appears once on the built-in display and Show notch on reads "*name* (not connected)". Reconnect it: the panel returns to the external monitor. Choose Follow pointer: the panel follows the pointer again.
 
 ## Boundaries
 

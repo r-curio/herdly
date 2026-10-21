@@ -96,7 +96,8 @@ public enum CardOpenDuration: String, CaseIterable, Sendable {
     /// The timed close, or nil for Until I act.
     public var seconds: Double? {
         switch self {
-        case .threeSeconds: 3
+        // The default shares the legacy spotlight's constant so 3 seconds is defined once.
+        case .threeSeconds: Spotlight.duration
         case .fiveSeconds: 5
         case .tenSeconds: 10
         case .untilIAct: nil
