@@ -127,8 +127,8 @@ struct Sprite: View {
     static let cell: CGFloat = 2
     /// The fixed leading slot of a queue row, 18x10pt: the widest and tallest kinds, so titles
     /// align whichever kind is chosen. The title follows 6pt after it.
-    static let slotWidth: CGFloat = 18
-    static let slotHeight: CGFloat = 10
+    static let slotWidth = cell * CGFloat(SpriteKind.maximumColumns)
+    static let slotHeight = cell * CGFloat(SpriteKind.maximumRows)
     static let slotGap: CGFloat = 6
 
     var body: some View {
@@ -159,7 +159,7 @@ struct Sprite: View {
             for (y, row) in rows.enumerated() {
                 for (x, ch) in row.enumerated() where ch != "." {
                     let rect = CGRect(x: CGFloat(x) * cellSize, y: CGFloat(y) * cellSize, width: cellSize, height: cellSize)
-                    // One tone when unlit: the highlight cells fill like the body, so the eyes close.
+                    // One tone when unlit: the highlight cells fill like the body and close into it.
                     let tone = unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color)
                     context.fill(Path(rect), with: .color(ch == "+" ? tone.light : tone.body))
                 }

@@ -1543,7 +1543,7 @@ private struct NotchControls: View {
             SettingsCard {
                 HStack(spacing: 10) {
                     ForEach(SpriteKind.allCases) { kind in
-                        SpriteTile(kind: kind, selected: appearance.sprite == kind, reduceMotion: model.reduceMotion) {
+                        SpriteTile(kind: kind, selected: appearance.sprite == kind) {
                             if appearance.sprite != kind { SettingsClick.play() }
                             binding(\.sprite).wrappedValue = kind
                         }
@@ -1648,18 +1648,18 @@ private struct NotchPreview: View {
 private struct SpriteTile: View {
     let kind: SpriteKind
     let selected: Bool
-    let reduceMotion: Bool
     let choose: () -> Void
 
     var body: some View {
         Button(action: choose) {
             VStack(spacing: 6) {
-                Sprite(kind: kind, working: false, reduceMotion: reduceMotion, color: 0, cellSize: 6)
+                // Idle, so the tile never steps or breathes; Reduce Motion has nothing to change.
+                Sprite(kind: kind, working: false, reduceMotion: true, color: 0, cellSize: 6)
                     .frame(maxWidth: .infinity, minHeight: 76, maxHeight: 76)
                     .background(.black, in: .rect(cornerRadius: 9, style: .continuous))
                     .overlay {
-                        // A 2pt accent ring 2pt outside the well.
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        // A 2pt accent ring 2pt outside the well, concentric with its 9pt corners.
+                        RoundedRectangle(cornerRadius: 13, style: .continuous)
                             .strokeBorder(Color.accentColor, lineWidth: 2)
                             .padding(-4)
                             .opacity(selected ? 1 : 0)

@@ -28,21 +28,11 @@ public enum SpriteKind: String, CaseIterable, Identifiable, Sendable {
     /// Two frames: the first is the idle, unlit, and Reduce Motion pose; working alternates them.
     public var frames: [[String]] {
         switch self {
-        case .critter:
-            [[".++.++", "######", "#+##+#", ".#..#."],
-             [".++.++", "######", "#+##+#", "#....#"]]
-        case .sheep:
-            [[".####....", "######+++", "######+.+", "######++.", ".#..#...."],
-             [".####....", "######+++", "######+.+", "######++.", "#..#....."]]
-        case .sheepdog:
-            [[".......++", "+.....+++", ".######+.", ".######..", ".#....#.."],
-             [".......++", "......+++", "+######+.", ".######..", "#....#..."]]
-        case .cow:
-            [["......+.+", "#######++", "##+##+#+.", "#######..", ".#.#..#.#"],
-             ["......+.+", "#######++", "##+##+#+.", "#######..", "#.#..#.#."]]
-        case .blob:
-            [["..###..", ".#####.", ".#+#+#.", ".#####.", "..#.#.."],
-             [".......", "..###..", "##+#+##", "#######", ".#...#."]]
+        case .critter: Self.critterFrames
+        case .sheep: Self.sheepFrames
+        case .sheepdog: Self.sheepdogFrames
+        case .cow: Self.cowFrames
+        case .blob: Self.blobFrames
         }
     }
 
@@ -50,4 +40,21 @@ public enum SpriteKind: String, CaseIterable, Identifiable, Sendable {
     public var columns: Int { frames[0].first?.count ?? 0 }
     /// Cells down, the same in both frames.
     public var rows: Int { frames[0].count }
+
+    /// The widest kind's columns: the queue row's sprite slot is this many cells wide.
+    public static let maximumColumns = allCases.map(\.columns).max() ?? 0
+    /// The tallest kind's rows: the queue row's sprite slot is this many cells tall.
+    public static let maximumRows = allCases.map(\.rows).max() ?? 0
+
+    // Built once; the strip and every queue row read these on each frame step.
+    private static let critterFrames = [[".++.++", "######", "#+##+#", ".#..#."],
+                                        [".++.++", "######", "#+##+#", "#....#"]]
+    private static let sheepFrames = [[".####....", "######+++", "######+.+", "######++.", ".#..#...."],
+                                      [".####....", "######+++", "######+.+", "######++.", "#..#....."]]
+    private static let sheepdogFrames = [[".......++", "+.....+++", ".######+.", ".######..", ".#....#.."],
+                                         [".......++", "......+++", "+######+.", ".######..", "#....#..."]]
+    private static let cowFrames = [["......+.+", "#######++", "##+##+#+.", "#######..", ".#.#..#.#"],
+                                    ["......+.+", "#######++", "##+##+#+.", "#######..", "#.#..#.#."]]
+    private static let blobFrames = [["..###..", ".#####.", ".#+#+#.", ".#####.", "..#.#.."],
+                                     [".......", "..###..", "##+#+##", "#######", ".#...#."]]
 }

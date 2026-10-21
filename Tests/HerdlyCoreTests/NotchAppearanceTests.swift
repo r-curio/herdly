@@ -152,7 +152,7 @@ func savedIndicatorStyleNoLongerChangesTheAppearance(style: String) {
 }
 
 @Test(arguments: SpriteKind.allCases)
-func eachSpriteKindIsTwoSameSizedFramesWithinTheTenByEighteenPointBox(kind: SpriteKind) {
+func eachSpriteKindIsTwoSameSizedFramesWithinTheEighteenByTenPointBox(kind: SpriteKind) {
     #expect(kind.frames.count == 2)
     #expect(kind.frames[0] != kind.frames[1], "the working step must change something")
     for frame in kind.frames {
@@ -170,8 +170,14 @@ func eachSpriteKindIsTwoSameSizedFramesWithinTheTenByEighteenPointBox(kind: Spri
                                           [".++.++", "######", "#+##+#", "#....#"]])
 }
 
+@Test func theRowSlotIsSizedForTheWidestAndTallestKinds() {
+    // Sheep, Sheepdog and Cow are 9 cells wide; every kind but Critter is 5 tall.
+    #expect(SpriteKind.maximumColumns == 9)
+    #expect(SpriteKind.maximumRows == 5)
+}
+
 @Test func threeOfTheWidestSpritesFitTheLeftWing() {
-    let widest = SpriteKind.allCases.map(\.columns).max() ?? 0
+    let widest = SpriteKind.maximumColumns
     // Two points per cell, 6pt between sprites. The strip draws the wing 8pt narrower than its
     // body and sets the first sprite 4pt in, leaving 100pt of the 112pt wing for its content.
     let needed = CGFloat(3 * widest * 2 + 2 * 6)
