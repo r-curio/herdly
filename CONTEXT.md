@@ -61,6 +61,14 @@ A follow-up prompt the user types on a completion card and sends to that finishe
 A question option's digit or a session reply that the companion types into the one terminal pane a session is bound to, after the user chose or wrote it in the notch. It reaches only that pane, is sent at most once, and is never an approval.
 _Avoid_: Keystrokes, injection
 
+**Clicked card**:
+An approval request or question request the user opened from the attention queue by clicking its row, shown alone in place of the queue with a way back to it. It has no timed close, never moves an approval's deadline, and ends on Escape, the way back, an action, the end of interaction, or its request leaving the queue; it never shows a different item.
+_Avoid_: Spotlight (that is the automatic three-second card), detail view
+
+**Row note**:
+The short delivery line a queue row carries after the user approved, denied, or answered it in the notch: sending, confirmed received, sent but unconfirmed, not delivered, or waiting for Codex. It belongs to one exact request, says only what Herdly observed about delivery, and clears with that request's resolution evidence, never returning afterwards.
+_Avoid_: Status message, toast, navigation message
+
 **Open in Codex**:
 The action that returns the user to the Codex session associated with a notch notification. Its button reads "Open Session", the same for Claude's equivalent (Open in Claude); the docs keep the source-specific names for the action.
 

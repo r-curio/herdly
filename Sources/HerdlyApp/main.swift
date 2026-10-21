@@ -115,6 +115,19 @@ final class NotchPanel: NSPanel {
     /// presentation uses orderFrontRegardless, which never makes the panel key.
     override var canBecomeKey: Bool { true }
     var onEscape: (() -> Void)?
+    /// Up and Down arrows move the queue's row selection; Return acts on the selected row. Only
+    /// keys no control in the panel handled reach here. Each returns false when it did nothing, so
+    /// the key continues to AppKit.
+    var onMoveSelection: ((QueueRowSelection.Direction) -> Bool)?
+    var onReturn: (() -> Bool)?
+
+    /// Virtual key codes from the HIToolbox `kVK_*` table.
+    private enum KeyCode {
+        static let returnKey: UInt16 = 36
+        static let keypadEnter: UInt16 = 76
+        static let downArrow: UInt16 = 125
+        static let upArrow: UInt16 = 126
+    }
     /// True once the user has clicked in the panel; launch or app activation can also make the
     /// panel key, and that must not count as the user interacting with it.
     private(set) var clickedForKey = false
@@ -132,8 +145,21 @@ final class NotchPanel: NSPanel {
     /// Keyboard focus the user asked for by clicking, as opposed to key status handed over at launch.
     var hasDeliberateKeyboardFocus: Bool { isKeyWindow && clickedForKey }
 
-    /// Escape collapses the panel and returns keyboard input to the app the user was using.
+    /// Escape follows `NotchPresentationController.escape()`: a clicked card steps back to the
+    /// queue; otherwise the panel collapses and returns keyboard input to the app the user was using.
     override func cancelOperation(_ sender: Any?) { onEscape?() }
+
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        let handled: Bool
+        switch (modifiers.isEmpty, event.keyCode) {
+        case (true, KeyCode.downArrow): handled = onMoveSelection?(.down) ?? false
+        case (true, KeyCode.upArrow): handled = onMoveSelection?(.up) ?? false
+        case (true, KeyCode.returnKey), (true, KeyCode.keypadEnter): handled = onReturn?() ?? false
+        default: handled = false
+        }
+        if !handled { super.keyDown(with: event) }
+    }
 
     /// AppKit pulls a frame back on screen; the tucked strip rests entirely above the screen edge.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
@@ -150,7 +176,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var attention = Attention(restored: UserDefaults.standard.bool(forKey: "testCompletion"))
     @Published var muted = UserDefaults.standard.bool(forKey: "muted")
     @Published var taskID = ""
-    @Published var navigationMessage = ""
+    /// Each approval's or question's delivery note after the user acted on it (D10); memory only.
+    @Published var rowNotes = RowNotes()
     @Published var openingTask = false
     /// Each terminal card's Open line: the latest scan's unavailable cause, or a click's (#267).
     @Published var openLines = OpenUnavailableLines<String>()
@@ -495,21 +522,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
               result.work.receipt == verifiedClaudeApprovalReceipts[result.work.requestID],
               result.work.root == verifiedClaudeApprovalRoots[result.work.requestID],
               result.work.receipt.expiresAt > result.work.decidedAt,
-              result.work.scanGeneration == claudeApprovalScanGeneration || current != nil else { return }
-        verifiedClaudeApprovalReceipts.removeValue(forKey: result.work.requestID)
-        verifiedClaudeApprovalRoots.removeValue(forKey: result.work.requestID)
-        guard result.published else {
-            navigationMessage = "Claude could not receive this decision; continue in Claude."
+              result.work.scanGeneration == claudeApprovalScanGeneration || current != nil else {
+            // Receipt can no longer be verified against this root and scan; the note says what was written.
+            updateRowNote(.claudeDecisionUnverified(published: result.published), for: .approval(result.work.approvalID))
             refresh()
             return
         }
-        if result.delivered {
-            navigationMessage = result.work.decision == .allowOnce
-                ? "Claude received the one-time approval."
-                : "Claude received the denial."
-        } else {
-            navigationMessage = "Claude decision delivery is unconfirmed; continue in Claude."
-        }
+        verifiedClaudeApprovalReceipts.removeValue(forKey: result.work.requestID)
+        verifiedClaudeApprovalRoots.removeValue(forKey: result.work.requestID)
+        updateRowNote(RowNoteUpdate.claudeDecision(result.work.decision, published: result.published, delivered: result.delivered),
+                      for: .approval(result.work.approvalID))
         refresh()
     }
 
@@ -554,6 +576,32 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// One presentation mode prevents passive hover from replacing a new item's focused card.
     @Published var expanded = false
     @Published var presentationMode: NotchPresentationMode = .collapsed
+    /// The open queue's keyboard selection (Up and Down arrows); cleared whenever the queue closes.
+    @Published private(set) var queueSelection = QueueRowSelection()
+    /// Whether the user opened the "N working" fold; closed again whenever the panel collapses.
+    @Published var workingFoldOpen = false {
+        didSet { if workingFoldOpen != oldValue { reconcileSelection() } }
+    }
+    /// The rows the open panel shows, under their group headings: the explicit queue (working rows
+    /// folded below anything that needs the user), or only the one card. A card is never grouped.
+    /// The view draws these and the keyboard selection steps through them.
+    var visibleSections: QueueSections {
+        let items: [AgentAttentionItem]
+        if presentationMode.showsAll {
+            items = queueAgentAttentionItems
+        } else if let id = presentationMode.singleCard {
+            items = orderedAgentAttentionItems.filter { $0.id == id }
+        } else {
+            items = []
+        }
+        let grouping = presentationMode.showsAll ? appearance.grouping : .none
+        return QueueSections.make(items, grouping: grouping, project: projectFolder(for:))
+    }
+    /// The open queue's rows in reading order as they are on screen: the arrows step through these,
+    /// skipping a closed working fold.
+    var selectableRows: [AgentAttentionID] {
+        presentationMode.showsAll ? visibleSections.selectableRows(workingOpen: workingFoldOpen) : []
+    }
     /// Fresh response previews are intentionally process-memory only.
     @Published private(set) var completionPreviews: [CompletionIdentity: CompletionPreviewAvailability] = [:]
     @Published private(set) var spotlightContexts: [AttentionItemID: SpotlightRecordContext] = [:]
@@ -586,7 +634,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The frame animation in flight, so a refresh mid-animation does not mistake it for drift.
     private var frameAnimation: UUID?
     /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|expanded>`
-    /// seeds in-memory sample items for screenshots;
+    /// seeds in-memory sample items for screenshots; `clicked-approval` shows the approval sample as a
+    /// clicked card, and `row-note` the queue with that row selected and carrying a note;
     /// `empty-collapsed`, `empty-expanded`, and `empty-not-connected` seed only the usage readouts, to show the empty notch.
     /// It never scans Codex events, never saves, and never releases approvals.
     let previewMode = Companion.argumentValue(for: "--preview-queue")
@@ -689,7 +738,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = NSHostingView(rootView: Notch(model: self, claudeSetup: claude))
-        panel.onEscape = { [weak self] in self?.collapse() }
+        panel.onEscape = { [weak self] in self?.escape() }
+        panel.onMoveSelection = { [weak self] in self?.moveSelection($0) ?? false }
+        panel.onReturn = { [weak self] in self?.activateSelectedRow() ?? false }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in self?.refresh() } }
@@ -874,11 +925,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         case .disable:
             ghosttyEnabled = false
             ghosttyChanged(false)
-            navigationMessage = "Herdly is not allowed to control Ghostty. \(GhosttyAutomationPermission.deniedGuidance) Then enable Ghostty controls again."
         case .awaitGhostty:
             ghosttyPermissionVerified = false
             ghosttyFocusState = .unknown
-            navigationMessage = "macOS will ask for access to Ghostty when Ghostty is open."
         case .unverified:
             break
         }
@@ -1554,6 +1603,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if expired != queue { queue = expired }
         pruneAnswerProgress()
         pruneReplyProgress()
+        pruneRowNotes()
         pruneClaudeReplies()
         if previewMode == nil {
             // A waiting question on a thread Herdly has not subscribed to yet: ask for the list now.
@@ -1729,10 +1779,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         if let mode = previewMode, Self.spotlightPreviewModes.contains(mode), let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
         let resolvedPresentation = notchPresentation.update(interacting: interacting, draftInProgress: notchDraftInProgress,
-                                                            now: now, legacyPopup: attention.expanded)
+                                                            now: now, legacyPopup: attention.expanded, queued: liveAgentIDs)
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
-        case "expanded", "empty-expanded", "empty-not-connected": presentationMode = .queue
+        case "expanded", "empty-expanded", "empty-not-connected", "row-note": presentationMode = .queue
+        case "clicked-approval":
+            let mode = previewSpotlightAgent.map(NotchPresentationMode.clickedCard) ?? .collapsed
+            if presentationMode != mode { presentationMode = mode }
         case "collapsed", "empty-collapsed": presentationMode = .collapsed
         case _ where Self.spotlightPreviewModes.contains(previewMode ?? ""):
             let mode = spotlightItem.map(NotchPresentationMode.agentSpotlight) ?? .collapsed
@@ -1740,7 +1793,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         default:
             if presentationMode != resolvedPresentation { presentationMode = resolvedPresentation }
         }
-        if expanded != presentationMode.expanded { expanded = presentationMode.expanded }
+        if expanded != presentationMode.expanded {
+            expanded = presentationMode.expanded
+            if !expanded { workingFoldOpen = false }
+        }
+        reconcileSelection()
         let actionableApproval = agentItems.contains { $0.kind == .actionableApproval }
             || queue.items.contains { $0.request?.state == .actionable }
         scheduleRefreshTimer(RefreshCadence.interval(presenting: presentationMode != .collapsed,
@@ -1776,12 +1833,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let width = appearance.panelWidth
         let layout = NotchPlacement.strip(on: display, expanded: expanded, wing: wing, centerLabel: center, width: width)
         if stripLayout != layout { stripLayout = layout }
-        let rows = presentationMode.showsAll ? orderedAgentAttentionItems.count : (spotlightItem == nil ? 0 : 1)
+        let singleCard = presentationMode.showsSingleCard
+        let rows = presentationMode.showsAll ? orderedAgentAttentionItems.count : (singleCard ? 1 : 0)
         var frame = contentHeight > 0
             ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, wing: wing, centerLabel: center,
                                    width: width)
             : NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
-                                   extraRows: attention.pending && (presentationMode.showsAll || spotlightItem == nil),
+                                   extraRows: attention.pending && (presentationMode.showsAll || !singleCard),
                                    wing: wing, centerLabel: center, width: width)
         // With no menu bar and no housing the strip rests above the screen edge and slides in for
         // the pointer at the top edge or an open panel, so it does not cover a full-screen app.
@@ -1858,6 +1916,66 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
     }
 
+    /// One Escape, from the panel or a text field (D6): a clicked card returns to the queue; otherwise
+    /// the panel collapses. Neither dismisses anything.
+    func escape() {
+        switch notchPresentation.escape() {
+        case .backToQueue: refresh()
+        case .collapse: collapse()
+        }
+    }
+
+    /// Opens one approval or question from the queue as its own card (D5, D18). Its deadline is untouched.
+    func openCard(_ id: AgentAttentionID) {
+        guard notchPresentation.openCard(id) else { return }
+        refresh()
+    }
+
+    /// ‹ Queue: leaves the clicked card for the queue without dismissing anything.
+    func backToQueue() {
+        notchPresentation.backToQueue()
+        refresh()
+    }
+
+    /// Approve, Deny or Send on a clicked card returns to the queue at once (D10); the row note
+    /// carries the outcome from there. The caller refreshes.
+    func leaveClickedCard(after id: AgentAttentionID) {
+        guard presentationMode == .clickedCard(id) else { return }
+        notchPresentation.backToQueue()
+    }
+
+    /// Keeps the selection on a row that is still on screen; it clears when the queue closes, its
+    /// row leaves, or its fold closes, so Return never acts on a hidden row.
+    private func reconcileSelection() {
+        var selection = queueSelection
+        selection.reconcile(rows: selectableRows)
+        if selection != queueSelection { queueSelection = selection }
+    }
+
+    /// Returns false when the queue is not shown or has no rows, so the arrow key goes on to AppKit.
+    func moveSelection(_ direction: QueueRowSelection.Direction) -> Bool {
+        let rows = selectableRows
+        guard !rows.isEmpty else { return false }
+        var selection = queueSelection
+        selection.move(direction, in: rows)
+        if selection != queueSelection { queueSelection = selection }
+        return true
+    }
+
+    /// Return on the selected row. Approvals and questions open as their clicked card; opening a
+    /// session from any other row is the hook #322 fills in (until then the key is not handled).
+    func activateSelectedRow() -> Bool {
+        reconcileSelection()
+        guard let selected = queueSelection.selected else { return false }
+        switch QueueRowSelection.returnAction(for: selected) {
+        case let .openCard(id):
+            openCard(id)
+            return true
+        case .openSession:
+            return false
+        }
+    }
+
     /// Collapses the panel and hands keyboard input back to the app the user was using.
     func collapse() {
         attention.collapse()
@@ -1921,11 +2039,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func openTestTask() {
         guard !openingTask else { return }
         openingTask = true
-        navigationMessage = "Opening link…"
         let id = taskID
         Task { @MainActor in
-            let result = await desktopAdapter.open(taskID: id)
-            navigationMessage = result.rawValue
+            _ = await desktopAdapter.open(taskID: id)
             openingTask = false
             // Navigation never calls dismissTest or writes the saved completion flag.
         }
@@ -1995,9 +2111,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
               approval.identity.session.surface == .cli,
               let requestID = UUID(uuidString: approval.identity.call),
               let request = queue.items.compactMap(\.request).first(where: { $0.id == requestID }) else {
-            navigationMessage = approval.identity.session.source == .claude
-                ? "Claude decisions are unavailable here; decide in Claude."
-                : "Desktop Codex decisions are handled by Codex's native prompt."
             refresh()
             return
         }
@@ -2036,7 +2149,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
               !root.eventsPath.isEmpty,
               let receipt = verifiedClaudeApprovalReceipts[requestID],
               pendingClaudeApprovalDecisions.insert(requestID).inserted else {
-            navigationMessage = "This Claude permission is no longer actionable; continue in Claude."
             refresh()
             return
         }
@@ -2046,7 +2158,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // the helper's output acknowledgment separately; a crash leaves Claude's native prompt
         // available without leaving a second direct control.
         agentQueue.apply(.approval(approval.with(state: .handedBack)), now: now)
-        navigationMessage = "Sending the Claude decision; delivery confirmation is pending."
+        updateRowNote(.record(.sending), for: .approval(approval.id), userAction: true)
         publishClaudeApprovalDecision(ClaudeApprovalDecisionWork(
             requestID: requestID, approvalID: approval.id, decision: decision, decidedAt: now,
             receipt: receipt,
@@ -2207,12 +2319,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                progress: reply(for: completion), text: text,
                                                at: Date().timeIntervalSince1970)
         switch plan.outcome {
-        case let .refused(rejection):
-            navigationMessage = SessionReplyPolicy.message(for: rejection)
+        case .refused:
             refresh()
         case let .sending(next):
             guard previewMode == nil else {
-                navigationMessage = "Preview only; nothing was sent."
                 refresh()
                 return
             }
@@ -2228,7 +2338,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             guard let params = plan.params else { return }
             replying = true
             replyProgress[completion.id] = next
-            navigationMessage = "Sending your reply to Codex's daemon…"
             refresh()
             daemonClient.call(SessionReplyRequest.method, params: params) { [weak self] accepted, error in
                 Task { @MainActor in
@@ -2238,7 +2347,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                     self.replyProgress[completion.id] = accepted
                         ? progress.recordingSent(at: Date().timeIntervalSince1970)
                         : progress.recordingFailure(SessionReplyPolicy.daemonRefused(error))
-                    self.navigationMessage = accepted ? "Reply sent to Codex's daemon." : "Could not send the reply to Codex's daemon."
                     self.refresh()
                 }
             }
@@ -2260,22 +2368,23 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     func decide(_ request: AttentionRequest, as decision: ApprovalDecision) {
         // Re-read the queue's current copy: a request handed back since the row rendered must not be answered.
-        guard !eventsPath.isEmpty else { navigationMessage = "Codex events are not connected."; refresh(); return }
+        guard !eventsPath.isEmpty else { refresh(); return }
         guard let current = queue.items.compactMap(\.request).first(where: { $0.identity == request.identity }) else {
-            navigationMessage = "This request is no longer in the queue."; refresh(); return
+            refresh(); return
         }
         guard ApprovalDecisionPolicy.accepts(current, decision: decision, now: Date().timeIntervalSince1970) else {
-            navigationMessage = "This request was handed back to Codex; answer it there."; refresh(); return
+            refresh(); return
         }
         let record = ApprovalDecisionRecord(requestID: request.id, decision: decision,
                                             decidedAt: Date().timeIntervalSince1970)
         guard ApprovalStore.publish(record, in: URL(fileURLWithPath: eventsPath)) else {
-            navigationMessage = "This approval was already answered or is no longer available."
             refresh()
             return
         }
+        // A Codex CLI request leaves the queue as soon as its decision is written, so its row carries
+        // no note (an accepted decision, #312); a clicked card on it returns to the queue explicitly.
+        leaveClickedCard(after: .approval(CodexAttentionAdapter.approval(from: current).id))
         queue.dismiss(.request(request.identity))
-        navigationMessage = decision == .allowOnce ? "Approved once." : "Denied."
         refresh()
     }
 
@@ -2284,11 +2393,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let now = Date().timeIntervalSince1970
         if !eventsPath.isEmpty {
             let events = URL(fileURLWithPath: eventsPath)
-            let released = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision, decidedAt: now), in: events)
-            if !released && ApprovalDecisions.existing(for: request.id, in: events) == nil {
-                // The helper still waits for its own deadline; the row loses its controls regardless.
-                navigationMessage = "Herdly could not write the handoff record; Codex will show its own prompt within 30 seconds."
-            }
+            // A failed write leaves the helper waiting for its own deadline; the row loses its controls regardless.
+            ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision, decidedAt: now), in: events)
         }
         let handedBack = AttentionRequest(id: request.id, source: request.source, session: request.session,
                                           turn: request.turn, arrivedAt: request.arrivedAt, expiresAt: request.expiresAt,
@@ -2522,7 +2628,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if mode == "spotlight-claude-question" {
             previewSpotlightAgent = .question(AgentCallIdentity(session: claudeSession, turn: "preview-turn", call: "toolu_preview"))
         }
-        if mode == "spotlight-approval" || mode == "spotlight-handed-back" {
+        if mode == "spotlight-approval" || mode == "spotlight-handed-back" || mode == "clicked-approval" || mode == "row-note" {
             // One request in the spotlight's own reading order: Codex's ask lifted from its tool input,
             // a command the card already shows, and a home-relative working directory.
             let handedBack = mode == "spotlight-handed-back"
@@ -2538,6 +2644,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             queue.recordReceipts([fetch], now: now)
             syncAgentQueueWithCodex(now: now)
             previewSpotlightAgent = .approval(CodexAttentionAdapter.approval(from: fetch).id)
+            if mode == "row-note", let id = previewSpotlightAgent {
+                rowNotes.record(.sentUnconfirmed, for: id, pending: rowNotePendingIDs)
+                queueSelection = QueueRowSelection(selected: id)
+            }
         }
         if mode.hasPrefix("spotlight-question") || mode.hasPrefix("spotlight-claude-") {
             let selected = agentQueue.items(at: now).first { $0.id == previewSpotlightAgent }?.question

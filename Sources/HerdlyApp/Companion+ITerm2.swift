@@ -196,10 +196,7 @@ extension Companion {
         case .disable:
             setHostSwitch(.iTerm2, on: false)
             iTerm2.access = access
-            navigationMessage = ITerm2SettingsProblem.automationDenied.message
-        case .awaitGhostty:
-            navigationMessage = "macOS will ask for access to iTerm2 when iTerm2 is open."
-        case .verified, .unverified:
+        case .awaitGhostty, .verified, .unverified:
             break
         }
     }
@@ -211,7 +208,6 @@ extension Companion {
     func openCLIAcrossHosts(_ session: UUID) {
         guard !openingTask, let title = HerdrCodexBindingRules.title(forSession: session.uuidString.lowercased()) else { return }
         openingTask = true
-        navigationMessage = "Finding the matching terminal tab…"
         let live = liveCLI
         let liveIDs = Set(live.map(\.uuidString))
         let switches = hostSwitches
@@ -246,14 +242,12 @@ extension Companion {
                 select: { plan in await Task.detached { ITerm2Navigation.select(plan) }.value },
                 verifyRead: { await self.iTerm2VerifyRead() })
             let result: TerminalOpenResult
-            var opened = "Opened the matching iTerm2 tab."
             switch run {
             case .opened(_, let preOpenAt):
                 result = .opened
                 acknowledgeCodexOpen(session, preOpenAt: preOpenAt)
             case .failed(_, .revalidate) where record.binding.map(TerminalTabOpen.route) == .ghosttyTitle:
                 // ADR 0013: a Ghostty without `tty` holds the only tab with the title; its title route decides.
-                opened = "Opened the matching Ghostty tab."
                 let preOpenAt = Date().timeIntervalSince1970
                 let outcome = await Task.detached {
                     await GhosttyNavigation.open(session: session, live: live, running: ghosttyRunning)
@@ -277,7 +271,6 @@ extension Companion {
                 }
             }
             iTerm2.lastOpen[session.uuidString] = Self.iTerm2Diagnostic(run, result: result)
-            navigationMessage = message(for: result, opened: opened)
             recordOpen(result, codex: session)
             endVisitIntervalsAfterOpen()
             openingTask = false

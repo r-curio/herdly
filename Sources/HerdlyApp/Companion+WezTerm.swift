@@ -295,7 +295,6 @@ extension Companion {
     func openCodexWithWezTerm(_ session: UUID, otherwise: @escaping @MainActor () -> Void) {
         guard !openingTask, let title = HerdrCodexBindingRules.title(forSession: session.uuidString.lowercased()) else { return }
         openingTask = true
-        navigationMessage = "Finding the matching tab…"
         let others = wezTermOtherHosts
         let running = TerminalApps.isRunning(.wezTerm)
         let otherRouteOn = ghosttyEnabled || terminalAppSwitchedOn || hostSwitches.mayContact(.iTerm2)
@@ -348,7 +347,6 @@ extension Companion {
                 }
             }
             wezTerm.lastOpen[session.uuidString.lowercased()] = Self.wezTermDiagnostic(run, result: result)
-            navigationMessage = message(for: result, opened: "Opened the matching WezTerm tab.")
             recordOpen(result, codex: session)
             endVisitIntervalsAfterOpen()
             openingTask = false
@@ -362,7 +360,6 @@ extension Companion {
                                otherwise: @escaping @MainActor () -> Void) {
         guard !openingTask else { return }
         openingTask = true
-        navigationMessage = "Finding the matching tab…"
         let others = wezTermOtherHosts
         let running = TerminalApps.isRunning(.wezTerm)
         let roots = configuredClaudeNavigationRoots()
@@ -374,7 +371,6 @@ extension Companion {
             }.value
             guard let rows else {
                 openingTask = false
-                navigationMessage = claudeReturnUnavailableMessage
                 refresh()
                 return
             }
@@ -412,7 +408,6 @@ extension Companion {
                 }
             }
             wezTerm.lastOpen[identity.session] = Self.wezTermDiagnostic(run, result: result)
-            navigationMessage = message(for: result, opened: "Opened the matching WezTerm tab.")
             recordOpen(result, claude: identity)
             if case .unavailable = result {} else {
                 // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included.
@@ -477,7 +472,6 @@ extension Companion {
         guard !terminalApp.replying else { return }
         terminalApp.replying = true
         replyProgress[completion.id] = progress
-        navigationMessage = "Typing your reply into the session…"
         refresh()
         let others = wezTermOtherHosts
         let rolloutRoot = Companion.rolloutRoot
@@ -503,11 +497,6 @@ extension Companion {
                 pause: { seconds in try? await Task.sleep(for: .seconds(seconds)) })
             terminalApp.replying = false
             replyProgress[completion.id] = reply(for: completion).settling(run, at: Date().timeIntervalSince1970)
-            switch run {
-            case .sent: navigationMessage = "Reply typed into the session."
-            case .sentTextOnly: navigationMessage = "Typed the reply, but Herdly couldn't press Return. The text may be waiting in Codex's composer."
-            case .notSent: navigationMessage = ""
-            }
             refresh()
         }
     }
@@ -520,7 +509,6 @@ extension Companion {
         terminalApp.replying = true
         terminalApp.claudeReplies[outcome.id] = progress.startingSend(text: send.writes.first.map(Self.replyText) ?? "",
                                                                       route: .terminal(send.pane))
-        navigationMessage = "Typing your reply into the session…"
         refresh()
         let others = wezTermOtherHosts
         let roots = configuredClaudeNavigationRoots().filter { $0.root.path == outcome.session.sourceScope }
@@ -550,7 +538,6 @@ extension Companion {
                 pause: { seconds in try? await Task.sleep(for: .seconds(seconds)) })
             terminalApp.replying = false
             terminalApp.claudeReplies[outcome.id] = claudeReply(for: outcome).settling(run, at: Date().timeIntervalSince1970)
-            navigationMessage = run == .sent ? "Reply typed into the session." : ""
             refresh()
         }
     }
@@ -591,12 +578,8 @@ extension Companion {
         let start: TerminalQuestionKeys.Start
         switch TerminalQuestionKeys.start(current: current, progress: progress(for: question), ledger: relayLedger,
                                           pane: pane, question: index, option: option) {
-        case let .failure(.policy(rejection)):
-            navigationMessage = QuestionAnswerPolicy.message(for: rejection); refresh(); return
-        case .failure(.noPane):
-            navigationMessage = HerdrQuestionRelayUnavailable.otherHostUnreadable(.wezTerm).message; refresh(); return
-        case .failure(.alreadySent):
-            navigationMessage = QuestionAnswerPolicy.message(for: .notReady); refresh(); return
+        case .failure:
+            refresh(); return
         case let .success(value):
             start = value
         }
@@ -617,7 +600,7 @@ extension Companion {
         answering = true
         relayLedger = start.ledger
         answerProgress[question.id] = start.progress
-        navigationMessage = "Sending \(start.key)…"
+        noteCodexKeySending(current, index: index)
         refresh()
         let rolloutRoot = Companion.rolloutRoot
         let others = wezTermOtherHosts
@@ -646,11 +629,7 @@ extension Companion {
                 return .delivered(TerminalQuestionKeys.delivery(delivery))
             }.value
             answering = false
-            switch outcome {
-            case let .delivered(delivery) where delivery.countsAsSent: navigationMessage = "Sent \(start.key) as a key."
-            case let .vetoed(reason): navigationMessage = reason.message
-            case .delivered: navigationMessage = "Could not send the key; nothing was sent. Answer in Codex."
-            }
+            noteCodexKeyAnswer(current, index: index, outcome: outcome)
             guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
                 answerProgress[question.id] = nil
                 refresh()
