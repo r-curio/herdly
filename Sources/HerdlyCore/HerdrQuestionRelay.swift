@@ -189,7 +189,7 @@ public enum QuestionRelayRouting {
         case nil: break
         }
         if daemonConnected, let request = book.request(for: question) { return .daemon(request) }
-        guard question.source == .cli else { return .desktopPick }
+        guard question.source == .cli else { return .desktopReadOnly }
         if let progress, !progress.picks.isEmpty || !progress.texts.isEmpty {
             return .relayUnavailable(.daemonAnswerInProgress)
         }

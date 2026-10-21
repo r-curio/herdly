@@ -58,6 +58,8 @@ enum NotchStyle {
     static let openRow = Color(red: 0.102, green: 0.102, blue: 0.102)   // #1a1a1a
     /// The hover ground behind a queue row that opens as a card (#320): a highlight only; hover never acts.
     static let hoverRow = Color(red: 0.110, green: 0.110, blue: 0.110)  // #1c1c1c
+    /// The question card's typed-answer field (D23), under its faint `well` outline.
+    static let typedField = Color(red: 0.078, green: 0.078, blue: 0.078) // #141414
     // Source values chosen so the captured tones match the reference's greens (109,201,125 and 135,222,154).
     static let sprite = Color(red: 0.133, green: 0.773, blue: 0.369)    // #22c55e body
     static let spriteLight = Color(red: 0.298, green: 0.863, blue: 0.502) // #4cdc80 highlight
@@ -317,44 +319,86 @@ struct DraftInProgressKey: PreferenceKey {
 }
 
 /// One answer option: its digit in the session's colour, the label in ink. The option the user
-/// chose fills with that colour and reads in black, the way a pressed control inverts; the colour
-/// says which session's question this is, the fill says what was chosen. Focus ring as elsewhere.
-/// Each option spans the column, so the list reads as one stack of answers and every label wraps.
+/// selected fills with that colour and reads in black, the way a pressed control inverts; the colour
+/// says which session's question this is, the fill says what was chosen. Selecting sends nothing
+/// (D16). A read-only option (the Codex app without the daemon, #321) sits on the darker open-row
+/// ground with its digit dim and its label in text gray. A multi-select option shows a box (☑/☐) in
+/// the digit slot. Each option spans the column, so the list reads as one stack and every label wraps.
 struct OptionButton: View {
     let number: Int
     let label: String
     let tone: (body: Color, light: Color)
     var selected = false
+    var readOnly = false
+    /// Multi-select: ticked or not, drawn in place of the digit. Nil draws the digit.
+    var checked: Bool? = nil
     let action: () -> Void
     @FocusState private var focused: Bool
     @Environment(\.isEnabled) private var enabled
     var body: some View {
         let display = QuestionOptionLabel(label)
+        let live = enabled && !readOnly
         Button(action: action) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("\(number)").monospacedDigit().foregroundStyle(selected ? Color.black : (enabled ? tone.light : NotchStyle.dim))
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(checked.map { $0 ? "☑" : "☐" } ?? "\(number)").monospacedDigit()
+                    .font(QuestionCardStyle.font(11, .semibold))
+                    .foregroundStyle(selected ? Color.black : (live ? tone.light : NotchStyle.dim))
                     .frame(width: 14, alignment: .leading)
-                Text(display.text).foregroundStyle(selected ? Color.black : (enabled ? NotchStyle.ink : NotchStyle.dim))
+                Text(display.text).foregroundStyle(selected ? Color.black : (live ? NotchStyle.ink : NotchStyle.text))
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 if display.recommended {
                     Text("Recommended").font(QuestionCardStyle.font(10))
-                        .foregroundStyle(selected ? Color.black.opacity(0.8) : NotchStyle.dim)
+                        .foregroundStyle(selected ? Color.black : NotchStyle.dim)
                         .fixedSize()
                 }
             }
-            .font(QuestionCardStyle.font(11, selected ? .semibold : .regular))
+            .font(QuestionCardStyle.font(11))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 8).padding(.vertical, 7)
-            .background(selected ? tone.body : NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .background(selected ? tone.body : (readOnly ? NotchStyle.openRow : NotchStyle.well),
+                        in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
 
         }
-        .accessibilityValue(selected ? "Selected" : "")
+        .disabled(readOnly)
+        .accessibilityValue(checked.map { $0 ? "Ticked" : "Not ticked" } ?? (selected ? "Selected" : ""))
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .buttonStyle(QuestionOptionButtonStyle())
         .focused($focused)
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .stroke(NotchStyle.ink.opacity(focused ? 0.9 : 0), lineWidth: 1.5).padding(-2))
+    }
+}
+
+/// The daemon path's "Or type an answer" field (D23): the one surface that keeps a faint outline, so
+/// it reads as a place to type. A dim "›" leads the text. Return does the card's Next or Send with
+/// the typed text in place of a selected option; the bottom row's button does the same. Escape follows
+/// the panel's one Escape rule. Unsent text holds the card open (`DraftInProgressKey`).
+struct QuestionTypedField: View {
+    @Binding var text: String
+    let fieldLabel: String
+    var committedText: String?
+    let onEscape: () -> Void
+    let submit: () -> Void
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("›").foregroundStyle(NotchStyle.dim).accessibilityHidden(true)
+            TextField("Or type an answer", text: $text)
+                .textFieldStyle(.plain)
+                .foregroundStyle(NotchStyle.ink)
+                .onSubmit { if enabled { submit() } }
+                .onExitCommand(perform: onEscape)
+                .accessibilityLabel(fieldLabel)
+                .accessibilityHint("Takes the place of a selected option. Nothing is sent until Send.")
+        }
+        .font(QuestionCardStyle.font(11))
+        .padding(.horizontal, 8).padding(.vertical, 7)
+        .background(NotchStyle.typedField, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(NotchStyle.well, lineWidth: 1))
+        .preference(key: DraftInProgressKey.self, value: text != committedText && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 }
 
@@ -365,7 +409,9 @@ private struct QuestionOptionButtonStyle: ButtonStyle {
     }
 }
 
-/// Viewed position and answer progress are independent; changing a step only navigates.
+/// Viewed position and answer progress are independent; changing a step only navigates. Each step
+/// is a 2pt bar with its header beneath (10pt; the viewed one semibold ink), and an answered step's
+/// answer beneath that in text gray ("sent: 1 · JSON lines" for a typed key).
 struct QuestionStepRail: View {
     let steps: [QuestionSteps.Step]
     let show: (Int) -> Void
@@ -373,7 +419,7 @@ struct QuestionStepRail: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 4) {
+            HStack(alignment: .top, spacing: 8) {
                 ForEach(steps) { step in cell(step, inline: true).frame(maxWidth: .infinity, alignment: .leading) }
             }
             VStack(alignment: .leading, spacing: 8) {
@@ -383,39 +429,28 @@ struct QuestionStepRail: View {
     }
 
     private func cell(_ step: QuestionSteps.Step, inline: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Button { show(step.id) } label: {
-                VStack(alignment: .leading, spacing: 5) {
-                    RoundedRectangle(cornerRadius: 1).fill(step.state == .current ? NotchStyle.ink :
-                        (step.state == .answered ? NotchStyle.dim : NotchStyle.well)).frame(height: 2)
-                    Text("\(step.id + 1) \(step.label)")
-                        .font(QuestionCardStyle.font(10, step.state == .current ? .semibold : .regular))
-                        .foregroundStyle(step.state == .current ? NotchStyle.ink : NotchStyle.dim)
-                        .fixedSize(horizontal: inline, vertical: !inline)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .focused($focusedStep, equals: step.id)
-            .overlay(RoundedRectangle(cornerRadius: 3)
-                .stroke(NotchStyle.ink.opacity(focusedStep == step.id ? 0.9 : 0), lineWidth: 1).padding(-2))
-            .accessibilityLabel("View question \(step.id + 1): \(step.label)")
-            .accessibilityValue(step.state == .current ? "Viewing" : "")
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Button { show(step.id) } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                RoundedRectangle(cornerRadius: 1).fill(step.state == .current ? NotchStyle.ink :
+                    (step.state == .answered ? NotchStyle.dim : NotchStyle.well)).frame(height: 2)
+                Text(step.label)
+                    .font(QuestionCardStyle.font(10, step.state == .current ? .semibold : .regular))
+                    .foregroundStyle(step.state == .current ? NotchStyle.ink : NotchStyle.dim)
+                    .fixedSize(horizontal: inline, vertical: !inline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if let summary = step.summary {
-                    Text(summary).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if step.canEdit {
-                    Button("change") { show(step.id) }
-                        .buttonStyle(.plain).underline().fixedSize()
-                        .font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.dim)
-                        .accessibilityLabel("Change answer to \(step.label)")
+                    Text(summary).font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.text)
+                        .lineLimit(1).truncationMode(.tail)
                 }
             }
+            .contentShape(Rectangle())
         }
-        .padding(.bottom, 6)
+        .buttonStyle(.plain)
+        .focused($focusedStep, equals: step.id)
+        .overlay(RoundedRectangle(cornerRadius: 3)
+            .stroke(NotchStyle.ink.opacity(focusedStep == step.id ? 0.9 : 0), lineWidth: 1).padding(-2))
+        .accessibilityLabel("View question \(step.id + 1): \(step.label)")
+        .accessibilityValue([step.state == .current ? "Viewing" : nil, step.summary].compactMap { $0 }.joined(separator: ", "))
     }
 }
 
@@ -720,8 +755,8 @@ struct Notch: View {
     @State private var drafts: [String: String] = [:]
     @State private var questionDrafts: [ClaudeQuestionViewStateKey: String] = [:]
     @State private var viewedQuestions: [ClaudeQuestionViewStateKey: Int] = [:]
-    /// Multi-select labels are kept in the view until the user presses Send.
-    @State private var claudeSelections: [ClaudeQuestionViewStateKey: Set<Int>] = [:]
+    /// A Claude question's selection is kept in the view until the user presses Send (D16).
+    @State private var claudeSelections: [ClaudeQuestionViewStateKey: ClaudeQuestionSelection] = [:]
     /// The queue row under the pointer that would open as a card; a highlight only (#320).
     @State private var hoveredCardRow: AgentAttentionID?
     /// Ghostty's `tty` support for herdr Open availability; refreshed off the main actor.
@@ -774,32 +809,22 @@ struct Notch: View {
         viewedQuestions[claudeSelectionKey(question, 0)] = index
     }
 
-    @ViewBuilder
-    private func questionNavigation(_ question: AgentQuestion) -> some View {
-        let prompts = questionPrompts(question)
-        let current = model.codexQuestion(for: question).map { model.progress(for: $0).questionIndex } ?? 0
-        let viewed = viewedQuestion(question, current: current, count: prompts.count)
-        if prompts.count > 1 {
-            if viewed > 0 {
-                NotchButton(title: "← \(QuestionSteps.label(prompts[viewed - 1], index: viewed - 1))") {
-                    showQuestion(viewed - 1, of: question)
-                }
-                .accessibilityLabel("Previous question: \(QuestionSteps.label(prompts[viewed - 1], index: viewed - 1))")
-            }
-            if viewed + 1 < prompts.count {
-                NotchButton(title: "\(QuestionSteps.label(prompts[viewed + 1], index: viewed + 1)) →") {
-                    showQuestion(viewed + 1, of: question)
-                }
-                .accessibilityLabel("Next question: \(QuestionSteps.label(prompts[viewed + 1], index: viewed + 1))")
-            }
-        }
+    private func toggleClaudeSelection(_ question: AgentQuestion, prompt: QuestionPrompt, option: Int) {
+        let key = claudeSelectionKey(question, 0)
+        claudeSelections[key] = claudeSelection(question, prompt: prompt).toggling(option, of: prompt.options.count)
     }
 
-    private func toggleClaudeSelection(_ question: AgentQuestion, index: Int, option: Int) {
-        let key = claudeSelectionKey(question, index)
-        var selected = claudeSelections[key] ?? []
-        if !selected.insert(option).inserted { selected.remove(option) }
-        claudeSelections[key] = selected
+    /// What the user has ticked on a Claude question; nothing until they select.
+    private func claudeSelection(_ question: AgentQuestion, prompt: QuestionPrompt) -> ClaudeQuestionSelection {
+        claudeSelections[claudeSelectionKey(question, 0)] ?? ClaudeQuestionSelection(multiSelect: prompt.multiSelect)
+    }
+
+    /// Send on a Claude card: the selected option, or the ticked options, through the live helper's
+    /// own checks (`answerClaudeQuestion`). Nothing is sent while nothing is selected.
+    private func sendClaudeSelection(_ question: AgentQuestion, prompt: QuestionPrompt) {
+        guard let answer = claudeSelection(question, prompt: prompt).answer(labels: prompt.options) else { return }
+        model.answerClaudeQuestion(question, kind: prompt.multiSelect ? .multiSelect : .option, answer: answer)
+        claudeSelections[claudeSelectionKey(question, 0)] = nil
     }
 
     private var sessionNames: [AgentSessionIdentity: String] {
@@ -841,20 +866,342 @@ struct Notch: View {
         return sessionLabel(item.session)
     }
 
-    @ViewBuilder
-    private func agentQuestionBody(_ question: AgentQuestion, subject: String) -> some View {
-        if question.identity.session.source == .claude {
-            claudeQuestionBody(question, subject: subject)
-        } else if let legacy = model.codexQuestion(for: question) {
-            questionBody(legacy, subject: subject)
-        } else if question.prompts.isEmpty {
-            Text("Codex asked a question Herdly could not read; answer it in Codex.")
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
-        } else {
-            // Not in the queue Herdly answers from, so nothing here is pressable.
-            readOnlyQuestions(question.prompts, agent: "Codex", question: question, subject: subject,
-                              tone: spriteColor(for: question.identity.session))
+    // MARK: Question card (#321)
+
+    /// One Codex question card as it stands now, from the queue's current copy of the question.
+    private struct CodexCard {
+        let question: AttentionQuestion
+        let agent: AgentQuestion
+        let progress: QuestionAnswerProgress
+        let route: QuestionAnswerRoute
+        let prompts: [QuestionPrompt]
+        let viewed: Int
+        /// The route offers option controls at all (`Companion.showsOptionControls`).
+        let controls: Bool
+        var current: Int { progress.questionIndex }
+        /// The daemon's request, when the card answers through it.
+        var request: AppServerQuestionRequest? {
+            if case let .daemon(request) = route, !request.questions.isEmpty { return request }
+            return nil
         }
+        /// One typed digit per Send (ADR 0006, ADR 0017).
+        var keyRoute: Bool {
+            switch route {
+            case .ghosttyRelay, .herdrRelay, .terminalRelay: true
+            case .daemon, .daemonAnswered, .relayUnavailable, .desktopReadOnly: false
+            }
+        }
+    }
+
+    private func codexCard(_ legacy: AttentionQuestion) -> CodexCard {
+        let agent = CodexAttentionAdapter.question(from: legacy)
+        let progress = model.progress(for: legacy)
+        let prompts = questionPrompts(agent)
+        return CodexCard(question: legacy, agent: agent, progress: progress, route: model.route(for: legacy),
+                         prompts: prompts, viewed: viewedQuestion(agent, current: progress.questionIndex, count: prompts.count),
+                         controls: model.showsOptionControls(for: legacy))
+    }
+
+    /// Whether the viewed question's options can be selected now: the question being answered, or on
+    /// the daemon path an earlier unsent draft. A key already typed and a later question are not.
+    private func selectable(_ card: CodexCard) -> Bool {
+        guard card.progress.phase == .ready, card.controls else { return false }
+        if let request = card.request {
+            guard request.questions.indices.contains(card.viewed), !request.questions[card.viewed].isSecret else { return false }
+            return card.viewed == card.current || (card.viewed < card.current && card.progress.answer(for: card.viewed) != nil)
+        }
+        guard card.keyRoute, card.viewed == card.current,
+              case .options = QuestionAnswerProgress.offer(card.question, at: card.viewed) else { return false }
+        return true
+    }
+
+    private func optionCount(_ card: CodexCard) -> Int {
+        if let request = card.request, request.questions.indices.contains(card.viewed) {
+            return request.questions[card.viewed].displayPrompt.options.count
+        }
+        return card.prompts.indices.contains(card.viewed) ? card.prompts[card.viewed].options.count : 0
+    }
+
+    /// The daemon field's text for the viewed question; empty when there is no field.
+    private func typedText(_ card: CodexCard) -> String {
+        guard card.request != nil else { return "" }
+        return questionDraft(card.agent, index: card.viewed, answer: card.progress.answer(for: card.viewed)).wrappedValue
+    }
+
+    /// A click on an option or its digit: selects it (D16). The typed field gives way to it.
+    private func select(_ card: CodexCard, option: Int) {
+        if card.request != nil { questionDrafts[claudeSelectionKey(card.agent, card.viewed)] = "" }
+        model.selectQuestionAnswer(card.question, question: card.viewed, answer: .option(option))
+    }
+
+    /// The card's Next or Send, or a step on while reviewing; nil where the route answers nothing here.
+    private func primary(_ card: CodexCard) -> QuestionCardPrimary? {
+        guard card.request != nil || (card.keyRoute && card.controls), !card.prompts.isEmpty else { return nil }
+        let typed = !typedText(card).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return QuestionCardPrimary.make(daemon: card.request != nil, viewed: card.viewed, current: card.current,
+                                        count: card.prompts.count,
+                                        selected: typed || card.progress.selected[card.viewed] != nil,
+                                        ready: card.progress.phase == .ready)
+    }
+
+    private func perform(_ primary: QuestionCardPrimary, _ card: CodexCard) {
+        switch primary {
+        case let .step(to): showQuestion(to, of: card.agent)
+        case .next, .send:
+            guard primary.enabled, !model.answering else { return }
+            model.sendQuestionAnswer(card.question, question: card.viewed, typed: card.request != nil ? typedText(card) : nil)
+        }
+    }
+
+    /// A digit or Return the panel handed to the question card on screen (#321). A digit selects;
+    /// Return does what the card's left button would, only while it is enabled.
+    private func handleQuestionCardKey(_ press: QuestionCardKeyPress?) {
+        guard let press, press.card == model.presentationMode.singleCard,
+              let question = model.orderedAgentAttentionItems.first(where: { $0.id == press.card })?.question else { return }
+        if question.identity.session.source == .claude {
+            guard model.canAnswerAgentQuestion(question), let prompt = question.prompts.first else { return }
+            switch press.key {
+            case let .digit(number): toggleClaudeSelection(question, prompt: prompt, option: number - 1)
+            case .primary: sendClaudeSelection(question, prompt: prompt)
+            }
+            return
+        }
+        guard let legacy = model.codexQuestion(for: question) else { return }
+        let card = codexCard(legacy)
+        switch press.key {
+        case let .digit(number):
+            guard selectable(card), number <= optionCount(card) else { return }
+            select(card, option: number - 1)
+        case .primary:
+            guard let primary = primary(card), primary.enabled else { return }
+            perform(primary, card)
+        }
+    }
+
+    /// The question card's header line (6AD): sprite, name, dim "· repo @ branch", the "Answer" pill,
+    /// the dim source ("CLI", "App", "Claude"), then the age. Queue rows keep D17 and name neither.
+    private func questionCardHeader(_ item: AgentAttentionItem) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
+                spriteSlot(working: false, color: spriteColor(for: item.session))
+                Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
+                    .font(QuestionCardStyle.font(12, .semibold)).foregroundStyle(NotchStyle.ink)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            .layoutPriority(2)
+            if let place = model.rowPlace(for: item) {
+                Text("· \(place)").font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(model.rowDirectory(for: item) ?? place)
+            } else {
+                Spacer(minLength: 0)
+            }
+            Text("Answer").font(QuestionCardStyle.font(10, .semibold)).foregroundStyle(NotchStyle.ink)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .fixedSize()
+            Text(Self.questionSource(item.session)).font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.dim)
+                .lineLimit(1).fixedSize()
+            rowAge(item)
+        }
+        .frame(minHeight: 26)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(rowHeading(item)), \(item.session.sourceLabel)")
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    /// The question card header's source word (6AD): "CLI", "App" for the Codex app, or "Claude".
+    static func questionSource(_ session: AgentSessionIdentity) -> String {
+        session.source == .claude ? "Claude" : (session.surface == .cli ? "CLI" : "App")
+    }
+
+    /// One question card body for the spotlight and the clicked card, inset to the title: the steps,
+    /// the viewed question, its options, the typed field on the daemon path, one status line, then
+    /// Next or Send on the left and Open and Dismiss on the right. No countdown: questions never expire.
+    @ViewBuilder
+    private func questionCardBody(_ item: AgentAttentionItem, subject: String, herdr: HerdrOpenAvailability,
+                                  codexOpen: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let question = item.question {
+                if question.identity.session.source == .claude {
+                    claudeQuestionCard(question, subject: subject)
+                    claudeReturnMessage(item)
+                    if herdr == .notInHerdr, !model.isBackgroundClaudeSession(item.session),
+                       !model.canAnswerAgentQuestion(question) {
+                        Text("The exact Claude tab cannot be opened until Herdly can verify it; continue in Claude.")
+                            .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    }
+                    claudeQuestionFooter(question, item: item, subject: subject)
+                } else {
+                    let card = model.codexQuestion(for: question).map(codexCard)
+                    if let card {
+                        codexQuestionCard(card, subject: subject)
+                    } else if question.prompts.isEmpty {
+                        Text("Codex asked a question Herdly could not read; answer it in Codex.")
+                            .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        // Not in the queue Herdly answers from, so nothing here is pressable.
+                        readOnlyQuestions(question.prompts, agent: "Codex", question: question, subject: subject,
+                                          tone: spriteColor(for: question.identity.session))
+                    }
+                    if case let .unavailable(cause) = herdr {
+                        herdrReasonLine(item, cause: cause)
+                    } else if let reason = model.terminalOpenLine(item.session) {
+                        terminalOpenLine(item, reason: reason)
+                    }
+                    codexQuestionFooter(card, item: item, subject: subject, codexOpen: codexOpen)
+                }
+            }
+        }
+        .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
+        .padding(.trailing, 6)
+        .padding(.top, 2)
+    }
+
+    private func statusLine(_ text: String, tone: Color = NotchStyle.dim) -> some View {
+        Text(text).font(QuestionCardStyle.font(11)).foregroundStyle(tone).fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The viewed question's option wells. `select` nil draws them for reading only.
+    private func optionList(_ options: [String], subject: String, tone: Int, selected: Int?, enabled: Bool,
+                            readOnly: Bool = false, select: ((Int) -> Void)?) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(options.enumerated()), id: \.offset) { offset, label in
+                OptionButton(number: offset + 1, label: label, tone: NotchStyle.spriteColor(tone),
+                             selected: selected == offset, readOnly: readOnly) { select?(offset) }
+                    .disabled(!enabled || select == nil)
+                    .accessibilityLabel("Option \(offset + 1): \(label), for \(subject)")
+                    .accessibilityHint(readOnly || select == nil || !enabled ? "Reference only."
+                                       : "Selects this answer. Nothing is sent until Send.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func codexQuestionCard(_ card: CodexCard, subject: String) -> some View {
+        let tone = spriteColor(for: card.agent.identity.session)
+        let canSelect = selectable(card)
+        if let request = card.request {
+            questionHead(card.prompts, question: card.agent, current: card.current, viewed: card.viewed,
+                         answer: card.progress.answer(for:))
+            let prompt = request.questions[min(card.viewed, request.questions.count - 1)]
+            let shown = prompt.displayPrompt
+            if let text = shown.question { questionText(text) }
+            if prompt.isSecret {
+                statusLine(QuestionCardLines.secret)
+            } else {
+                let typed = questionDraft(card.agent, index: card.viewed, answer: card.progress.answer(for: card.viewed))
+                let typing = !typed.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let chosen: Int? = { if !typing, case let .option(option) = card.progress.selection(for: card.viewed) { return option }; return nil }()
+                optionList(shown.options, subject: subject, tone: tone, selected: chosen, enabled: canSelect) { select(card, option: $0) }
+                if prompt.takesText {
+                    let committed: String? = { if case let .text(text) = card.progress.answer(for: card.viewed) { return text }; return nil }()
+                    QuestionTypedField(text: typed, fieldLabel: "Typed answer for \(subject)", committedText: committed,
+                                       onEscape: model.escape) {
+                        if card.viewed < card.current {
+                            model.selectQuestionAnswer(card.question, question: card.viewed, answer: .text(typed.wrappedValue))
+                        } else if let primary = primary(card) {
+                            perform(primary, card)
+                        }
+                    }
+                    .disabled(!canSelect)
+                }
+                if shown.truncated { statusLine("Shortened; the full question is in Codex.") }
+            }
+            if let status = daemonStatus(card.progress) { statusLine(status) }
+        } else if card.prompts.isEmpty {
+            statusLine("Codex asked a question Herdly could not read; answer it in Codex.", tone: NotchStyle.text)
+        } else {
+            questionHead(card.prompts, question: card.agent, current: card.current, viewed: card.viewed,
+                         sentKeys: card.keyRoute, answer: card.progress.answer(for:))
+            let prompt = card.prompts[card.viewed]
+            if let text = prompt.question { questionText(text) }
+            else { statusLine("Herdly could not read this question; continue in Codex.") }
+            if card.route == .desktopReadOnly {
+                if !prompt.isSecret {
+                    optionList(prompt.options, subject: subject, tone: tone, selected: nil, enabled: false, readOnly: true, select: nil)
+                }
+            } else if !prompt.isSecret {
+                let chosen: Int? = { if case let .option(option) = card.progress.selection(for: card.viewed) { return option }; return nil }()
+                optionList(prompt.options, subject: subject, tone: tone, selected: chosen, enabled: canSelect,
+                           select: canSelect ? { select(card, option: $0) } : nil)
+                if card.keyRoute, card.controls, card.viewed == card.current, card.progress.phase == .ready,
+                   case .options = QuestionAnswerProgress.offer(card.question, at: card.viewed) {
+                    statusLine(QuestionCardLines.otherAnswersInCodex)
+                }
+            }
+            if prompt.truncated { statusLine("Shortened; the full question is in Codex.") }
+            if card.route == .desktopReadOnly {
+                statusLine(prompt.isSecret ? QuestionCardLines.secret : QuestionCardLines.desktopReadOnly, tone: NotchStyle.text)
+            } else if card.route == .daemonAnswered {
+                if let status = daemonStatus(card.progress) { statusLine(status) }
+            } else if let status = questionStatus(card) {
+                statusLine(status)
+            }
+        }
+    }
+
+    /// The Codex card's bottom row: Next or Send (or a step on) left, Open and Dismiss right. The Codex
+    /// app without the daemon offers only "Open in Codex" (left, emphasized) and Dismiss.
+    private func codexQuestionFooter(_ card: CodexCard?, item: AgentAttentionItem, subject: String, codexOpen: Bool) -> some View {
+        HStack(spacing: 6) {
+            if card?.route == .desktopReadOnly {
+                if codexOpen {
+                    NotchButton(title: "Open in Codex", emphasized: true) { model.openAgent(item.session) }
+                        .disabled(model.openingTask)
+                        .accessibilityLabel("Open Session: \(subject)")
+                        .accessibilityHint("Answer the question in the Codex app.")
+                }
+                Spacer(minLength: 6)
+            } else if item.session.surface == .cli && !model.cliTerminalHostOn {
+                NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
+                    .accessibilityLabel("Set up Ghostty: \(subject)")
+                    .accessibilityHint("Opens Herdly controls to enable Ghostty controls.")
+                Spacer(minLength: 6)
+            } else {
+                if let card, let primary = primary(card) {
+                    primaryButton(primary, card: card, subject: subject)
+                }
+                Spacer(minLength: 6)
+                if codexOpen {
+                    NotchButton(title: "Open") { model.openAgent(item.session) }
+                        .disabled(model.openingTask)
+                        .accessibilityLabel("Open Session: \(subject)")
+                        .accessibilityHint("Answer the question in Codex's own panel.")
+                }
+            }
+            // Dismiss only clears the card; nothing is sent, so the agent's own question stays authoritative.
+            NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+                .accessibilityLabel("Dismiss question: \(subject)")
+        }
+        .padding(.top, 2)
+    }
+
+    private func primaryButton(_ primary: QuestionCardPrimary, card: CodexCard, subject: String) -> some View {
+        let title: String
+        let label: String
+        let hint: String
+        switch primary {
+        case .next:
+            title = "Next ›"
+            label = "Next: keep this answer for \(subject)"
+            hint = "Keeps the answer here and shows the next question. Nothing is sent until Send."
+        case .send:
+            title = "Send"
+            label = "Send answer to \(subject)"
+            hint = card.keyRoute ? "Types this option's digit into the session for this question only."
+                                 : "Sends every answer on this card to Codex once."
+        case let .step(to):
+            let next = QuestionSteps.label(card.prompts[to], index: to)
+            title = "\(next) ›"
+            label = "Next question: \(next)"
+            hint = "Shows the next question. Changes nothing."
+        }
+        return NotchButton(title: title, emphasized: true) { perform(primary, card) }
+            .disabled(!primary.enabled || model.answering)
+            .accessibilityLabel(label)
+            .accessibilityHint(hint)
     }
 
     /// Unsupported routes can browse the questions, but never acquire answer controls.
@@ -864,71 +1211,64 @@ struct Notch: View {
         Text(QuestionSteps.answerElsewhere(count: prompts.count, agent: agent))
             .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
         let viewed = viewedQuestion(question, current: 0, count: prompts.count)
-        questionHead(prompts, question: question, current: 0, viewed: viewed, currentStatus: nil) { _ in nil }
+        questionHead(prompts, question: question, current: 0, viewed: viewed) { _ in nil }
         if prompts.indices.contains(viewed) {
             prompt(prompts[viewed], subject: subject, tone: tone, agent: agent)
         }
     }
 
+    /// A Claude card: one question answered through the live helper (select, then Send; ticks for
+    /// multi-select), otherwise read-only references.
     @ViewBuilder
-    private func claudeQuestionBody(_ question: AgentQuestion, subject: String) -> some View {
-        let controls = model.canAnswerAgentQuestion(question)
+    private func claudeQuestionCard(_ question: AgentQuestion, subject: String) -> some View {
         let tone = spriteColor(for: question.identity.session)
         if question.prompts.isEmpty {
-            Text("Claude asked a question Herdly could not read; answer it in Claude.")
-                .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
-        } else if !controls {
+            statusLine("Claude asked a question Herdly could not read; answer it in Claude.", tone: NotchStyle.text)
+        } else if !model.canAnswerAgentQuestion(question) {
             readOnlyQuestions(question.prompts, agent: "Claude", question: question, subject: subject, tone: tone)
-        } else {
+        } else if let prompt = question.prompts.first {
             // Claude's answer control takes exactly one question (`canAnswerAgentQuestion`).
-            ForEach(Array(question.prompts.enumerated()), id: \.offset) { index, prompt in
-                questionHead(question.prompts, question: question, current: index, viewed: index) { _ in nil }
-                if let text = prompt.question { questionText(text) }
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(prompt.options.enumerated()), id: \.offset) { option, label in
-                        if prompt.multiSelect {
-                            let selected = claudeSelections[claudeSelectionKey(question, index)]?.contains(option) == true
-                            OptionButton(number: option + 1, label: label, tone: NotchStyle.spriteColor(tone), selected: selected) {
-                                toggleClaudeSelection(question, index: index, option: option)
-                            }
-                            .accessibilityLabel("Select \(option + 1): \(label), for \(subject)")
-                        } else {
-                            OptionButton(number: option + 1, label: label, tone: NotchStyle.spriteColor(tone)) {
-                                model.answerClaudeQuestion(question, kind: .option, answer: label)
-                            }
-                            .accessibilityLabel("Answer \(option + 1): \(label), for \(subject)")
-                        }
+            questionHead([prompt], question: question, current: 0, viewed: 0) { _ in nil }
+            if let text = prompt.question { questionText(text) }
+            let selection = claudeSelection(question, prompt: prompt)
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(prompt.options.enumerated()), id: \.offset) { option, label in
+                    let ticked = selection.options.contains(option)
+                    OptionButton(number: option + 1, label: label, tone: NotchStyle.spriteColor(tone), selected: ticked,
+                                 checked: prompt.multiSelect ? ticked : nil) {
+                        toggleClaudeSelection(question, prompt: prompt, option: option)
                     }
-                }
-                if prompt.multiSelect {
-                    let selected = claudeSelections[claudeSelectionKey(question, index)] ?? []
-                    NotchButton(title: "Send") {
-                        let labels = selected.sorted().compactMap { prompt.options.indices.contains($0) ? prompt.options[$0] : nil }
-                        model.answerClaudeQuestion(question, kind: .multiSelect, answer: labels.joined(separator: ", "))
-                        claudeSelections[claudeSelectionKey(question, index)] = nil
-                    }
-                    .disabled(selected.isEmpty)
-                    .accessibilityLabel("Send selected answers for \(subject)")
-                }
-                DraftField(placeholder: prompt.options.isEmpty ? "Type your answer" : "Or type another answer",
-                           text: questionDraft(question, index: index), sendTitle: "Send",
-                           fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
-                           onEscape: model.escape) {
-                    model.answerClaudeQuestion(question, kind: .text,
-                                               answer: questionDrafts[claudeSelectionKey(question, index)] ?? "")
-                    questionDrafts[claudeSelectionKey(question, index)] = nil
+                    .accessibilityLabel("\(prompt.multiSelect ? "Tick" : "Select") \(option + 1): \(label), for \(subject)")
+                    .accessibilityHint("Nothing is sent until Send.")
                 }
             }
+            if prompt.truncated { statusLine("Shortened; the full question is in Claude.") }
         }
+    }
+
+    private func claudeQuestionFooter(_ question: AgentQuestion, item: AgentAttentionItem, subject: String) -> some View {
+        HStack(spacing: 6) {
+            if model.canAnswerAgentQuestion(question), let prompt = question.prompts.first {
+                NotchButton(title: "Send", emphasized: true) { sendClaudeSelection(question, prompt: prompt) }
+                    .disabled(!claudeSelection(question, prompt: prompt).canSend)
+                    .accessibilityLabel("Send answer to \(subject)")
+                    .accessibilityHint(prompt.multiSelect ? "Sends the ticked options to Claude once."
+                                                          : "Sends the selected option to Claude once.")
+            }
+            Spacer(minLength: 6)
+            claudeReturnControl(item, subject: subject, openTitle: "Open")
+            NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+                .accessibilityLabel("Dismiss question: \(subject)")
+        }
+        .padding(.top, 2)
     }
 
     @ViewBuilder
     private func questionHead(_ prompts: [QuestionPrompt], question: AgentQuestion, current: Int, viewed: Int,
-                              editable: Bool = false, currentStatus: String? = "Answering now",
-                              answer: (Int) -> ChosenAnswer?) -> some View {
+                              sentKeys: Bool = false, answer: (Int) -> ChosenAnswer?) -> some View {
         if prompts.count > 1 {
-            let steps = QuestionSteps.make(prompts, current: current, viewed: viewed, editable: editable,
-                                           currentStatus: currentStatus, answer: answer)
+            let steps = QuestionSteps.make(prompts, current: current, viewed: viewed, currentStatus: nil,
+                                           sentKeys: sentKeys, answer: answer)
             QuestionStepRail(steps: steps.steps) { showQuestion($0, of: question) }
         } else if let only = prompts.first, only.header?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
             Text(QuestionSteps.label(only, index: 0)).font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.dim)
@@ -1086,13 +1426,37 @@ struct Notch: View {
             .lineLimit(1).truncationMode(.tail)
     }
 
-    /// The "‹ Queue" bar above a clicked card: back to the queue, nothing dismissed. No stepper (D19).
+    /// The "‹ Queue" bar above a clicked card: back to the queue, nothing dismissed. No stepper to
+    /// other items (D19); a question card with several questions steps through this request's own.
     private var clickedCardBar: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 6) {
             NotchButton(title: "‹ Queue", action: model.backToQueue)
                 .accessibilityLabel("Back to queue")
                 .accessibilityHint("Returns to the full queue. Nothing is dismissed.")
             Spacer(minLength: 0)
+            if let id = model.presentationMode.clickedCard,
+               let question = model.orderedAgentAttentionItems.first(where: { $0.id == id })?.question {
+                questionStepper(question)
+            }
+        }
+    }
+
+    /// "‹ question N of M ›" (D19): steps the view through this request's questions only; the arrows
+    /// are dim and cannot be pressed at either end. Viewing changes no answer.
+    @ViewBuilder
+    private func questionStepper(_ question: AgentQuestion) -> some View {
+        let prompts = questionPrompts(question)
+        if prompts.count > 1 {
+            let current = model.codexQuestion(for: question).map { model.progress(for: $0).questionIndex } ?? 0
+            let viewed = viewedQuestion(question, current: current, count: prompts.count)
+            NotchButton(title: "‹") { showQuestion(viewed - 1, of: question) }
+                .disabled(viewed == 0)
+                .accessibilityLabel("Previous question")
+            Text(QuestionCardLines.stepper(viewed: viewed, count: prompts.count))
+                .font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.dim).monospacedDigit().fixedSize()
+            NotchButton(title: "›") { showQuestion(viewed + 1, of: question) }
+                .disabled(viewed + 1 >= prompts.count)
+                .accessibilityLabel("Next question")
         }
     }
 
@@ -1231,70 +1595,22 @@ struct Notch: View {
         }
     }
 
+    /// A question for reading only: its text and its options as read-only wells.
     @ViewBuilder
-    private func prompt(_ prompt: QuestionPrompt, subject: String = "", tone: Int = 0, agent: String = "Codex",
-                        pick: Int? = nil, typed: String? = nil, choose: ((Int) -> Void)? = nil) -> some View {
+    private func prompt(_ prompt: QuestionPrompt, subject: String = "", tone: Int = 0, agent: String = "Codex") -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if let question = prompt.question { questionText(question) }
             else { Text("Herdly could not read this question; continue in \(agent).")
                 .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim) }
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(prompt.options.enumerated()), id: \.offset) { offset, label in
-                    OptionButton(number: offset + 1, label: label, tone: NotchStyle.spriteColor(tone), selected: pick == offset) {
-                        choose?(offset)
-                    }
-                    .disabled(choose == nil)
-                    .accessibilityLabel("Option \(offset + 1): \(label), for \(subject)")
-                    .accessibilityHint(choose == nil ? "Reference only." : "Choose this answer.")
-                }
-            }
-            if let typed {
-                Text("Typed: \(typed)").font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            optionList(prompt.options, subject: subject, tone: tone, selected: nil, enabled: false, readOnly: true, select: nil)
             if prompt.truncated {
                 Text("Shortened; the full question is in \(agent).").font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
             }
         }
     }
 
-    @ViewBuilder
-    private func daemonPrompt(_ prompt: AppServerQuestion, index: Int, question: AgentQuestion, subject: String,
-                              tone: Int, answer: ChosenAnswer?, enabled: Bool,
-                              choose: @escaping (ChosenAnswer) -> Void) -> some View {
-        let pick: Int? = { if case let .option(option) = answer { return option }; return nil }()
-        let shown = prompt.displayPrompt
-        VStack(alignment: .leading, spacing: 10) {
-            if let text = shown.question { questionText(text) }
-            if prompt.isSecret {
-                Text("Codex asked for a secret; answer it in Codex.").font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(shown.options.enumerated()), id: \.offset) { offset, label in
-                        OptionButton(number: offset + 1, label: label, tone: NotchStyle.spriteColor(tone), selected: pick == offset) {
-                            choose(.option(offset))
-                        }
-                        .disabled(!enabled)
-                        .accessibilityLabel("Answer \(offset + 1): \(label), for \(subject)")
-                    }
-                }
-                if prompt.takesText {
-                    let binding = questionDraft(question, index: index, answer: answer)
-                    let committed: String? = { if case let .text(text) = answer { return text }; return nil }()
-                    DraftField(placeholder: prompt.isOther ? "Or type another answer" : "Type your answer",
-                               text: binding, sendTitle: "Send",
-                               fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
-                               committedText: committed, onEscape: model.escape) {
-                        choose(.text(binding.wrappedValue))
-                    }
-                    .disabled(!enabled)
-                }
-            }
-        }
-    }
-
     /// The daemon card's status sentence: which path, and where the answer stands.
-    private func daemonStatus(_ question: AttentionQuestion, request: AppServerQuestionRequest?, progress: QuestionAnswerProgress) -> String? {
+    private func daemonStatus(_ progress: QuestionAnswerProgress) -> String? {
         switch progress.phase {
         case .ready:
             // Nothing sent yet: the controls speak for themselves. The path is named once something is.
@@ -1303,7 +1619,6 @@ struct Notch: View {
         case .sent: return "Answered through Codex's daemon. Waiting for Codex to record it."
         case .unconfirmed: return "Answered through Codex's daemon, but Codex has not recorded an answer. Check Codex; Herdly will not resend."
         case let .failed(reason): return reason
-        case .pickedInCodex: return "Your pick opened Codex; Codex's daemon now holds the question, choose again here or in Codex."
         }
     }
 
@@ -1312,31 +1627,41 @@ struct Notch: View {
         model.daemonConnected ? "Codex's daemon does not hold this question" : "No Codex daemon"
     }
 
-    /// The card's one sentence about where the answer stands. Every phase names what Herdly knows
-    /// and nothing more; a relayed key is never described as an answer Codex has.
-    private func questionStatus(_ question: AttentionQuestion, progress: QuestionAnswerProgress, total: Int) -> String? {
+    /// The key-route card's one sentence about where the answer stands (D24). Every phase names what
+    /// Herdly knows and nothing more; a typed key is never described as an answer Codex has.
+    private func questionStatus(_ card: CodexCard) -> String? {
+        let question = card.question
         // The card's one reason line already says to answer it in Codex (`herdrReasonLine`, `terminalOpenLine`).
         if unrelayedQuestion(question) { return nil }
-        let index = progress.questionIndex
-        let destination = HerdrPresentation.keyDestination(for: model.route(for: question))
-        switch progress.phase {
+        let index = card.current
+        let destination = HerdrPresentation.keyDestination(for: card.route)
+        let digit = { (question: Int) in card.progress.picks[question].map { $0 + 1 } }
+        switch card.progress.phase {
         case .ready:
-            if index >= question.prompts.count { return "Codex is on question \(index + 1) of \(total). Continue in Codex." }
-            if case let .continueInCodex(reason) = QuestionAnswerProgress.offer(question, at: index) { return reason }
-            if case let .relayUnavailable(reason) = model.route(for: question) { return HerdrPresentation.relayUnavailableLine(for: reason) }
-            if question.source == .cli, !model.showsOptionControls(for: question) { return "\(noDaemon); enable Ghostty controls to answer from here, or answer in Codex." }
+            if card.keyRoute, card.viewed < index, let sent = digit(card.viewed) {
+                return QuestionCardLines.typedReview(digit: sent, noun: destination.noun)
+            }
+            if index >= question.prompts.count {
+                return "Codex is on question \(index + 1) of \(max(question.questionCount, card.prompts.count)). Continue in Codex."
+            }
+            if card.viewed >= index, case let .continueInCodex(reason) = QuestionAnswerProgress.offer(question, at: card.viewed) {
+                return reason
+            }
+            if case let .relayUnavailable(reason) = card.route { return HerdrPresentation.relayUnavailableLine(for: reason) }
+            if question.source == .cli, !card.controls { return "\(noDaemon); enable Ghostty controls to answer from here, or answer in Codex." }
+            if card.keyRoute, index > 0, card.viewed == index, let sent = digit(index - 1) {
+                return QuestionCardLines.typed(digit: sent, noun: destination.noun, next: index)
+            }
             // Nothing sent yet: no sentence. The path is named once something is.
             return nil
         case .sending:
             return "Sending the key to \(destination.place)…"
         case .sent:
-            return "Sent \(progress.picks[index].map { $0 + 1 } ?? 0) as a key to \(destination.place). Waiting for Codex to record it."
+            return QuestionCardLines.typed(digit: digit(index) ?? 0, noun: destination.noun, next: nil)
         case .unconfirmed:
-            return "Sent \(progress.picks[index].map { $0 + 1 } ?? 0) as a key to \(destination.place), but Codex has not recorded an answer. Check the \(destination.noun); Herdly will not resend."
+            return QuestionCardLines.typedUnconfirmed(digit: digit(index) ?? 0, noun: destination.noun)
         case let .failed(reason):
             return reason
-        case .pickedInCodex:
-            return "Choose it in Codex to answer."
         }
     }
 
@@ -1350,55 +1675,6 @@ struct Notch: View {
         let identity = CodexAttentionAdapter.session(question.session, surface: .cli)
         if case .unavailable = herdrOpen(identity) { return true }
         return !model.offersTerminalOpen(identity)
-    }
-
-    @ViewBuilder
-    private func questionBody(_ question: AttentionQuestion, subject: String) -> some View {
-        let agent = CodexAttentionAdapter.question(from: question)
-        let progress = model.progress(for: question)
-        let index = progress.questionIndex
-        let route = model.route(for: question)
-        let tone = spriteColor(for: agent.identity.session)
-        let prompts = questionPrompts(agent)
-        let viewed = viewedQuestion(agent, current: index, count: prompts.count)
-        if case let .daemon(request) = route, !request.questions.isEmpty {
-            let editable = progress.phase == .ready
-            questionHead(prompts, question: agent, current: index, viewed: viewed, editable: editable,
-                         currentStatus: viewed == index ? "Answering now" : "Not answered yet", answer: progress.answer(for:))
-            daemonPrompt(request.questions[viewed], index: viewed, question: agent, subject: subject, tone: tone,
-                         answer: progress.answer(for: viewed), enabled: editable && viewed <= index) { answer in
-                model.answerThroughDaemon(question, question: viewed, answer: answer, expectedRequest: request)
-            }
-            if let status = daemonStatus(question, request: request, progress: progress) {
-                Text(status).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-            }
-        } else if prompts.isEmpty {
-            Text("Codex asked a question Herdly could not read; answer it in Codex.")
-                .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
-        } else {
-            let offer = QuestionAnswerProgress.offer(question, at: index)
-            let interactive: Bool = {
-                guard viewed == index, model.showsOptionControls(for: question), case .options = offer else { return false }
-                switch progress.phase {
-                case .ready, .pickedInCodex: return true
-                case .sending, .sent, .unconfirmed, .failed: return false
-                }
-            }()
-            questionHead(prompts, question: agent, current: index, viewed: viewed,
-                         currentStatus: progress.phase == .ready ? (viewed == index ? "Answering now" : "Codex is here now") : nil,
-                         answer: progress.answer(for:))
-            prompt(prompts[viewed], subject: subject, tone: tone, pick: progress.picks[viewed], typed: progress.texts[viewed],
-                   choose: interactive ? { option in
-                       model.chooseOption(question, question: viewed, option: option)
-                          } : nil)
-            if route == .daemonAnswered, let status = daemonStatus(question, request: nil, progress: progress) {
-                Text(status).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        if case .daemon = route {} else if route != .daemonAnswered,
-            let status = questionStatus(question, progress: progress, total: max(question.questionCount, prompts.count)) {
-            Text(status).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-        }
     }
 
     /// The completion card's own sentence about the reply the user sent from it. Every phase says
@@ -1511,9 +1787,11 @@ struct Notch: View {
         // #319: a working row in the open queue is its header line alone until it is opened in place.
         let runningRow = inQueue && item.kind == .running
         let runningOpen = runningRow && model.openRunningRow.isOpen(item.id)
-        let bodySpacing: CGFloat = item.kind == .question ? 14 : 8
+        let bodySpacing: CGFloat = 8
         // #320: an approval row in the open queue is its header line alone; its body is the card.
         let approvalRow = item.kind == .actionableApproval || item.kind == .handedBackApproval
+        // #321: so is a question row; one question card at a time takes digits and Return.
+        let questionRow = item.kind == .question
         // "Not delivered · answer in Claude" keeps its Open inline on the row line, before the age.
         let opensFromNote = inQueue && approvalRow && rowNote(item)?.offersOpen == true
         // Whether Approve and Deny are this card's to offer; one rule with the decide path.
@@ -1523,10 +1801,8 @@ struct Notch: View {
             // session is working, and a word appears only when the row is off its normal path.
             let folded = item.kind == .earlierOutcome && !spotlit
             let working = item.running?.status == .working
-            if item.kind == .question {
-                cardOpener(item) { questionHeader(item, inQueue: inQueue) }
-                    .modifier(CardRowHover(id: item.id, active: opensAsCard(item), hovered: $hoveredCardRow,
-                                           reduceMotion: model.reduceMotion))
+            if questionRow && spotlit {
+                questionCardHeader(item)
             } else {
                 Group {
                     if item.kind == .actionableApproval && inQueue {
@@ -1580,6 +1856,11 @@ struct Notch: View {
                     approvalCardBody(card, item: item, subject: subject, herdr: herdr, codexOpen: codexOpen,
                                      decidable: decidable)
                 }
+            } else if questionRow {
+                // One question card body for the spotlight and the clicked card (#321); nothing under a queue row.
+                if spotlit {
+                    questionCardBody(item, subject: subject, herdr: herdr, codexOpen: codexOpen)
+                }
             } else if !collapsed || rowNote(item)?.offersOpen == true {
                 VStack(alignment: .leading, spacing: bodySpacing) {
                     if let note = rowNote(item), note.offersOpen {
@@ -1610,16 +1891,8 @@ struct Notch: View {
                                 claudeReturnMessage(item)
                             }
                         case .question:
-                            if let question = item.question { agentQuestionBody(question, subject: subject) }
-                            if item.session.source == .claude {
-                                claudeReturnMessage(item)
-                            }
-                            if item.session.source == .claude, herdr == .notInHerdr, let question = item.question,
-                               !model.isBackgroundClaudeSession(item.session),
-                               !model.canAnswerAgentQuestion(question) {
-                                Text("The exact Claude tab cannot be opened until Herdly can verify it; continue in Claude.")
-                                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-                            }
+                            // Question rows render the question card body instead (#321).
+                            EmptyView()
                         case .waiting, .running:
                             if let running = item.running, let row = running.rowText {
                                 // A prompt opens in place: the row's own text grows to the full prompt rather
@@ -1664,10 +1937,6 @@ struct Notch: View {
                             terminalOpenLine(item, reason: reason)
                         }
                         HStack(spacing: 6) {
-                            if let question = item.question {
-                                questionNavigation(question)
-                                Spacer(minLength: 6)
-                            }
                             switch item.kind {
                             case .actionableApproval, .handedBackApproval:
                                 // Approval rows render their controls in the approval card body (#320).
@@ -1681,21 +1950,8 @@ struct Notch: View {
                                 }
                                 claudeRemoveControl(item, subject: subject)
                             case .question:
-                                if item.session.source == .claude {
-                                    claudeReturnControl(item, subject: subject, emphasized: true)
-                                } else if item.session.surface == .cli && !model.cliTerminalHostOn {
-                                    NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
-                                        .accessibilityLabel("Set up Ghostty: \(subject)")
-                                        .accessibilityHint("Opens Herdly controls to enable Ghostty controls.")
-                                } else if codexOpen {
-                                    NotchButton(title: "Open Session", emphasized: true) { model.openAgent(item.session) }
-                                        .disabled(model.openingTask)
-                                        .accessibilityLabel("Open Session: \(subject)")
-                                        .accessibilityHint("Answer the question in Codex's own panel.")
-                                }
-                                // Dismiss only clears the card; nothing is sent, so the agent's own question stays authoritative.
-                                NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
-                                    .accessibilityLabel("Dismiss question: \(subject)")
+                                // Question rows render their controls in the question card body (#321).
+                                EmptyView()
                             case .outcome, .earlierOutcome:
                                 if item.session.source == .codex, codexOpen {
                                     NotchButton(title: "Open Session") { model.openAgent(item.session) }
@@ -1815,39 +2071,6 @@ struct Notch: View {
         EarlierFold(name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
                     exception: QueueRowPresentation.exception(item), spoken: rowHeading(item),
                     subject: rowSubject(item), reduceMotion: model.reduceMotion, open: open)
-    }
-
-    private func questionHeader(_ item: AgentAttentionItem, inQueue: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
-                    spriteSlot(working: false, color: spriteColor(for: item.session))
-                    Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
-                        .font(QuestionCardStyle.font(12, .semibold)).foregroundStyle(NotchStyle.ink)
-                        .lineLimit(1).truncationMode(.tail)
-                }
-                .layoutPriority(1)
-                if let note = rowNote(item) {
-                    rowNoteText(note, questionCard: true)
-                } else if let place = model.rowPlace(for: item) {
-                    Text(place).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
-                        .lineLimit(1).help(place)
-                }
-                Spacer(minLength: 0)
-                rowAge(item)
-            }
-            .frame(minHeight: inQueue ? 26 : nil)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(rowHeading(item))
-            .accessibilityAddTraits(.isHeader)
-            let directory = model.rowDirectory(for: item)
-            let source = item.session.sourceLabel
-            Text(source + (directory.map { " · " + ($0 as NSString).abbreviatingWithTildeInPath } ?? ""))
-                .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
-                .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
-                .fixedSize(horizontal: false, vertical: true)
-                .help(directory ?? source)
-        }
     }
 
     /// The row's name, then "· project @ branch" (in the profile's label format) when Herdly has seen
@@ -2232,6 +2455,7 @@ struct Notch: View {
                 }
             }
         }
+        .onChange(of: model.questionCardKeyPress) { _, press in handleQuestionCardKey(press) }
         .onChange(of: questionStateKeys) { _, keys in
             viewedQuestions = viewedQuestions.filter { keys.contains($0.key) }
             questionDrafts = questionDrafts.filter { keys.contains($0.key) }

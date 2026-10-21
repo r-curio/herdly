@@ -282,7 +282,7 @@ private func started(_ question: AttentionQuestion, progress: QuestionAnswerProg
     #expect(route(call, herdr: .unavailable(.ghosttyControlsOff)) == .relayUnavailable(.binding(.ghosttyControlsOff)))
     let desktop = AttentionQuestion(source: .desktop, session: session, turn: turn, callID: "call_1", arrivedAt: 1,
                                     prompts: [twoOptions])
-    #expect(route(desktop) == .desktopPick)
+    #expect(route(desktop) == .desktopReadOnly)
     // A Ghostty-keyed call stays on Ghostty keys.
     var ledger = QuestionRelayLedger()
     let spentGhostty = ledger.spend(call.id, question: 0, route: .ghostty)

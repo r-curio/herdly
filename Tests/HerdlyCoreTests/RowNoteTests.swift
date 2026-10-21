@@ -11,12 +11,15 @@ private let sibling = AgentAttentionID.approval(AgentCallIdentity(session: claud
 private let otherSource = AgentAttentionID.approval(AgentCallIdentity(session: codex, turn: "t1", call: "toolu_1"))
 private let question = AgentAttentionID.question(AgentCallIdentity(session: codex, turn: "t2", call: "call_1"))
 
-@Test func rowNotesReadExactlyTheFiveAgreedStrings() {
-    #expect(Set(RowNote.allCases.map(\.text)) == ["Sending…", "Claude got your approval", "Sent, not confirmed",
-                                                  "Not delivered · answer in Claude", "Sent, waiting for Codex"])
-    #expect(RowNote.allCases.count == 5)
+@Test func rowNotesReadExactlyTheAgreedStrings() {
+    let fixed: [RowNote] = [.sending, .approvalReceived, .sentUnconfirmed, .notDelivered, .awaitingCodex]
+    #expect(fixed.map(\.text) == ["Sending…", "Claude got your approval", "Sent, not confirmed",
+                                  "Not delivered · answer in Claude", "Sent, waiting for Codex"])
+    // An earlier question's key (#321): "Sent k of n, on question k+1".
+    #expect(RowNote.keySent(question: 0, of: 3).text == "Sent 1 of 3, on question 2")
+    #expect(RowNote.keySent(question: 1, of: 3).text == "Sent 2 of 3, on question 3")
     #expect(RowNote.notDelivered.offersOpen)
-    #expect(RowNote.allCases.filter(\.offersOpen) == [.notDelivered])
+    #expect((fixed + [.keySent(question: 0, of: 2)]).filter(\.offersOpen) == [.notDelivered])
 }
 
 @Test func notesAreIsolatedPerExactRequestIdentity() {
@@ -127,19 +130,36 @@ private let question = AgentAttentionID.question(AgentCallIdentity(session: code
     let one = AttentionQuestion(source: .cli, session: UUID(), turn: UUID(), callID: "c", arrivedAt: 0)
     #expect(one.isFinalQuestion(0))
 
-    // A non-final key writes no note and leaves no card.
+    // A non-final key notes nothing while it is in flight, so the card stays open.
     #expect(RowNoteUpdate.codexKeySending(final: false) == .unchanged)
     #expect(RowNoteUpdate.codexKeySending(final: true) == .record(.sending))
-    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.queued), final: false) == .unchanged)
-    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.possiblySent(.timeout)), final: false) == .unchanged)
+    // A non-final key Herdly reports written: "Sent k of n, on question k+1"; one that may have been
+    // written is not confirmed; one not sent withdraws any note. A note never claims undelivered keys.
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.queued), question: 0, of: 3) == .record(.keySent(question: 0, of: 3)))
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.queued), question: 1, of: 3) == .record(.keySent(question: 1, of: 3)))
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.possiblySent(.timeout)), question: 0, of: 3) == .record(.sentUnconfirmed))
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.notSent(.notRunning)), question: 0, of: 3) == .withdraw)
+    #expect(RowNoteUpdate.codexKeyAnswer(.vetoed(.leftHerdr), question: 0, of: 3) == .withdraw)
     // Final key: written → waiting for Codex; may have been written → not confirmed; nothing sent → withdrawn.
-    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.queued), final: true) == .record(.awaitingCodex))
-    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.possiblySent(.timeout)), final: true) == .record(.sentUnconfirmed))
-    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.notSent(.notRunning)), final: true) == .withdraw)
-    #expect(RowNoteUpdate.codexKeyAnswer(.vetoed(.leftHerdr), final: true) == .withdraw)
-    #expect(RowNoteUpdate.ghosttyKeyAnswer(sent: true, final: true) == .record(.awaitingCodex))
-    #expect(RowNoteUpdate.ghosttyKeyAnswer(sent: true, final: false) == .unchanged)
-    #expect(RowNoteUpdate.ghosttyKeyAnswer(sent: false, final: true) == .withdraw)
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.queued), question: 2, of: 3) == .record(.awaitingCodex))
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.possiblySent(.timeout)), question: 2, of: 3) == .record(.sentUnconfirmed))
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.notSent(.notRunning)), question: 2, of: 3) == .withdraw)
+    #expect(RowNoteUpdate.codexKeyAnswer(.vetoed(.leftHerdr), question: 2, of: 3) == .withdraw)
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.queued), question: 0, of: 1) == .record(.awaitingCodex))
+    #expect(RowNoteUpdate.ghosttyKeyAnswer(sent: true, question: 2, of: 3) == .record(.awaitingCodex))
+    #expect(RowNoteUpdate.ghosttyKeyAnswer(sent: true, question: 0, of: 3) == .record(.keySent(question: 0, of: 3)))
+    #expect(RowNoteUpdate.ghosttyKeyAnswer(sent: false, question: 0, of: 3) == .withdraw)
+    #expect(RowNoteUpdate.ghosttyKeyAnswer(sent: false, question: 2, of: 3) == .withdraw)
+}
+
+@Test func anEarlierKeysNoteIsForAQuestionOnlyAndALaterKeyReplacesIt() {
+    var notes = RowNotes()
+    let pending: Set<AgentAttentionID> = [approval, question]
+    do { let result = notes.record(.keySent(question: 0, of: 2), for: approval, pending: pending); #expect(!result) }
+    do { let result = notes.record(.keySent(question: 0, of: 2), for: question, pending: pending); #expect(result) }
+    #expect(notes.note(for: question)?.text == "Sent 1 of 2, on question 2")
+    notes.apply(.record(.awaitingCodex), for: question, pending: pending)
+    #expect(notes.note(for: question) == .awaitingCodex)
 }
 
 @Test func aClaudeDecisionWhoseCheckGoesStaleSettlesByWhatWasWritten() {

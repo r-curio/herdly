@@ -203,15 +203,16 @@ public enum QuestionAnswerRoute: Equatable, Sendable {
     case terminalRelay
     /// CLI session with no usable relay for this call: nothing is offered but Open in Codex.
     case relayUnavailable(HerdrQuestionRelayUnavailable)
-    /// Desktop session without the daemon: a highlighted pick that opens the thread.
-    case desktopPick
+    /// Codex app session without the daemon: the options are for reading only; nothing is sent and
+    /// the card offers Open in Codex and Dismiss (#321).
+    case desktopReadOnly
 }
 
 public enum QuestionAnswerRouting {
     public static func route(for question: AttentionQuestion, book: AppServerQuestionBook, daemonConnected: Bool) -> QuestionAnswerRoute {
         if book.hasAnswered(question) { return .daemonAnswered }
         if daemonConnected, let request = book.request(for: question) { return .daemon(request) }
-        return question.source == .cli ? .ghosttyRelay : .desktopPick
+        return question.source == .cli ? .ghosttyRelay : .desktopReadOnly
     }
 }
 

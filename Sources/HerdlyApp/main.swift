@@ -148,6 +148,8 @@ final class NotchPanel: NSPanel {
     /// the key continues to AppKit.
     var onMoveSelection: ((QueueRowSelection.Direction) -> Bool)?
     var onReturn: (() -> Bool)?
+    /// A digit 1 through 9 selects that option on a question card (#321); it never sends.
+    var onDigit: ((Int) -> Bool)?
 
     /// Virtual key codes from the HIToolbox `kVK_*` table.
     private enum KeyCode {
@@ -184,7 +186,13 @@ final class NotchPanel: NSPanel {
         case (true, KeyCode.downArrow): handled = onMoveSelection?(.down) ?? false
         case (true, KeyCode.upArrow): handled = onMoveSelection?(.up) ?? false
         case (true, KeyCode.returnKey), (true, KeyCode.keypadEnter): handled = onReturn?() ?? false
-        default: handled = false
+        default:
+            if modifiers.isEmpty, let characters = event.charactersIgnoringModifiers, characters.count == 1,
+               let digit = Int(characters), (1...9).contains(digit) {
+                handled = onDigit?(digit) ?? false
+            } else {
+                handled = false
+            }
         }
         if !handled { super.keyDown(with: event) }
     }
@@ -235,6 +243,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// returns every question as plain pending and nothing is ever re-sent.
     @Published var answerProgress: [QuestionIdentity: QuestionAnswerProgress] = [:]
     var daemonDraftRequests: [QuestionIdentity: AppServerQuestionRequest] = [:]
+    /// The last digit or Return pressed while one question card is shown (#321). The card acts on it:
+    /// a digit selects, Return does the card's Next or Send when it is enabled. Never sent by itself.
+    @Published var questionCardKeyPress: QuestionCardKeyPress?
     var answering = false
     /// The keys Herdly may have sent per call and question index, and the last relay failure per call.
     @Published var relayLedger = QuestionRelayLedger()
@@ -789,7 +800,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         panel.contentView = NSHostingView(rootView: Notch(model: self, claudeSetup: claude))
         panel.onEscape = { [weak self] in self?.escape() }
         panel.onMoveSelection = { [weak self] in self?.moveSelection($0) ?? false }
-        panel.onReturn = { [weak self] in self?.activateSelectedRow() ?? false }
+        panel.onReturn = { [weak self] in
+            guard let self else { return false }
+            return self.pressQuestionCardKey(.primary) || self.activateSelectedRow()
+        }
+        panel.onDigit = { [weak self] in self?.pressQuestionCardKey(.digit($0)) ?? false }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in self?.refresh() } }
@@ -2020,6 +2035,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Return on the selected row. Approvals and questions open as their clicked card; a working row
     /// opens or closes in place (#319); opening a session from any other row is the hook #322 fills in
     /// (until then the key is not handled).
+    /// Hands a digit or Return to the one question card on screen (the spotlight or a clicked card).
+    /// False when no question card is shown, so the key goes on to the queue or AppKit.
+    func pressQuestionCardKey(_ key: QuestionCardKeyPress.Key) -> Bool {
+        guard expanded, let id = presentationMode.singleCard, case .question = id else { return false }
+        questionCardKeyPress = QuestionCardKeyPress(key: key, card: id, serial: (questionCardKeyPress?.serial ?? 0) + 1)
+        return true
+    }
+
     func activateSelectedRow() -> Bool {
         reconcileSelection()
         guard let selected = queueSelection.selected else { return false }

@@ -30,9 +30,12 @@ public struct QuestionSteps: Equatable, Sendable {
     /// - Parameters:
     ///   - prompts: the call's questions in order.
     ///   - current: the question the card is on; clamped to the list.
+    ///   - sentKeys: earlier answers went as typed keys (a key route): an answered step's summary
+    ///     names the digit sent, "sent: 1 · JSON lines" (#321).
     ///   - answer: the answer Herdly holds for a question index, if any.
     public static func make(_ prompts: [QuestionPrompt], current: Int, viewed: Int? = nil,
-                            editable: Bool = false, currentStatus: String? = "Answering now", answer: (Int) -> ChosenAnswer?) -> QuestionSteps {
+                            editable: Bool = false, currentStatus: String? = "Answering now", sentKeys: Bool = false,
+                            answer: (Int) -> ChosenAnswer?) -> QuestionSteps {
         guard !prompts.isEmpty else { return QuestionSteps(steps: [], answered: []) }
         let current = min(max(current, 0), prompts.count - 1)
         let viewed = min(max(viewed ?? current, 0), prompts.count - 1)
@@ -44,7 +47,8 @@ public struct QuestionSteps: Equatable, Sendable {
             let summary: String?
             switch answer(index) {
             case let .option(option):
-                summary = prompt.options.indices.contains(option) ? QuestionOptionLabel(prompt.options[option]).text : "Option \(option + 1)"
+                let text = prompt.options.indices.contains(option) ? QuestionOptionLabel(prompt.options[option]).text : "Option \(option + 1)"
+                summary = sentKeys && index < current ? "sent: \(option + 1) · \(text)" : text
             case let .text(text): summary = text
             case nil: summary = index == current ? currentStatus : (currentStatus == nil ? nil : "Not answered yet")
             }

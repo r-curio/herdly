@@ -137,12 +137,49 @@ private let threeOptions = QuestionPrompt(header: "Release", question: "Scope?",
     #expect(!QuestionAnswerGuard.stillPending(call, in: otherTurn))
 }
 
-@Test func desktopPickIsRecordedWithoutSendingAnything() {
-    let call = question(source: .desktop, prompts: [twoOptions])
-    let picked = QuestionAnswerProgress(call: call.id).pickingInCodex(question: 0, option: 1)
-    #expect(picked.phase == .pickedInCodex(option: 1))
-    #expect(picked.picks == [0: 1])
-    #expect(!picked.offersButtons)
-    #expect(QuestionAnswerPolicy.rejection(for: call, ghosttyEnabled: true, progress: picked, question: 0, option: 1) == .notCLI)
-    #expect(QuestionAnswerProgress(call: call.id).pickingInCodex(question: 1, option: 0).phase == .ready)
+@Test func selectingAnOptionHoldsADraftAndSendsNothing() {
+    // D16: a click or a digit only selects. The selection is not a pick, a draft or a send.
+    let call = question(prompts: [twoOptions, threeOptions])
+    let fresh = QuestionAnswerProgress(call: call.id)
+    let selected = fresh.selecting(question: 0, answer: .option(1))
+    #expect(selected.selection(for: 0) == .option(1))
+    #expect(selected.phase == .ready && selected.questionIndex == 0)
+    #expect(selected.picks.isEmpty && selected.texts.isEmpty && selected.answer(for: 0) == nil)
+    // Selecting again replaces the selection.
+    #expect(selected.selecting(question: 0, answer: .option(0)).selection(for: 0) == .option(0))
+    // A later question can be read but not answered out of order.
+    #expect(fresh.selecting(question: 1, answer: .option(0)) == fresh)
+    #expect(fresh.selecting(question: -1, answer: .option(0)) == fresh)
+    // Nothing is selectable while a send is in flight or after one settled.
+    let sending = selected.startingSend(question: 0)
+    #expect(sending.selecting(question: 0, answer: .option(0)) == sending)
+    // Progress is in memory only: a new progress for the same call (a restart) holds no selection.
+    #expect(QuestionAnswerProgress(call: call.id).selection(for: 0) == nil)
+}
+
+@Test func aKeySendTurnsTheSelectionIntoAReviewOnlySentAnswer() {
+    let call = question(prompts: [twoOptions, threeOptions])
+    let selected = QuestionAnswerProgress(call: call.id).selecting(question: 0, answer: .option(1))
+    let sent = selected.startingSend(question: 0).recordingSent(question: 0, option: 1, of: call, at: 1)
+    #expect(sent.questionIndex == 1 && sent.phase == .ready)
+    #expect(sent.picks == [0: 1])
+    #expect(sent.selection(for: 0) == .option(1))
+    #expect(sent.selection(for: 1) == nil)
+    // A sent key is review-only: it cannot be reselected, even by the daemon's draft rule.
+    #expect(sent.selecting(question: 0, answer: .option(0)) == sent)
+    // The key policy refuses the sent question and accepts only the new current one.
+    #expect(QuestionAnswerPolicy.rejection(for: call, ghosttyEnabled: true, progress: sent, question: 0, option: 0) == .wrongQuestion)
+    #expect(QuestionAnswerPolicy.rejection(for: call, ghosttyEnabled: true, progress: sent, question: 1, option: 2) == nil)
+}
+
+@Test func onlyTheDaemonDraftRuleChangesAnEarlierUnsentAnswer() {
+    let call = question(prompts: [twoOptions, threeOptions])
+    let drafted = QuestionAnswerProgress(call: call.id).selecting(question: 0, answer: .option(0))
+        .recordingDraft(question: 0, answer: .option(0))
+    #expect(drafted.questionIndex == 1)
+    #expect(drafted.selection(for: 0) == .option(0))
+    let changed = drafted.selecting(question: 0, answer: .option(1), revisesDrafts: true)
+    #expect(changed.answer(for: 0) == .option(1))
+    #expect(changed.questionIndex == 1 && changed.phase == .ready)
+    #expect(drafted.selecting(question: 0, answer: .option(1)) == drafted)
 }

@@ -42,9 +42,10 @@ extension Companion {
                       userAction: true)
     }
 
-    /// A typed digit settled (herdr, tmux, Zellij, WezTerm).
+    /// A typed digit settled (herdr, tmux, Zellij, WezTerm). An earlier question's key notes "Sent k
+    /// of n, on question k+1" without leaving the card, since the user is still answering on it.
     func noteCodexKeyAnswer(_ question: AttentionQuestion, index: Int, outcome: HerdrQuestionRelay.Outcome) {
-        updateRowNote(.codexKeyAnswer(outcome, final: question.isFinalQuestion(index)),
+        updateRowNote(.codexKeyAnswer(outcome, question: index, of: question.questionCount),
                       for: Self.codexQuestionNoteID(question))
     }
 }
