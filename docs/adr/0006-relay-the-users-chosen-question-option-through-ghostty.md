@@ -2,6 +2,8 @@
 
 Accepted with the user on 2026-09-14.
 
+Amended 2026-10-21 ([issue #321](https://github.com/r-curio/herdly/issues/321), Paper D16 and D18): a click or digit on an option only selects it, and the one key for the current question leaves Herdly on Send, after the same fresh checks. A selection made while the card used another route is dropped, not sent. A desktop card without the daemon no longer offers a pick that opens the thread: its options are for reading only, beside Open in Codex.
+
 When Codex asks a question through `request_user_input` in a CLI session running in Ghostty, the notch shows the listed options as controls. A click relays that one option to the exact matched Ghostty terminal as a single key event, the option's one-based digit, through Ghostty 1.3's own `send key` scripting command. Codex's terminal question pane binds a digit to "select this option and move on", so the key is the same input the user would type.
 
 Scope: `request_user_input` questions only; CLI sessions in Ghostty only; exactly one key press per option the user clicked, plus Enter only if a live check on the installed CLI proves the digit alone does not commit. The key goes to the terminal object, not to the frontmost window, and only after the same unique-unsplit-tab recheck that tab selection uses. Immediately before sending, the session rollout is re-read; an answer already recorded or an ended turn sends nothing. Herdly never sends on a timeout, an error, or after a restart, and never resends. Only the listed options are offered: no free text, no "Other", no Skip, no Escape.
