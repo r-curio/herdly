@@ -62,4 +62,16 @@ public enum ResultPop {
     public static func isFresh(_ outcome: AgentOutcome, launchedAt: Double) -> Bool {
         !outcome.uncertain && outcome.arrivedAt >= launchedAt
     }
+
+    /// A Codex CLI result while Ghostty controls are on pops only when the latest inventory shows the
+    /// session's exact tab and another tab selected (ADR 0016, "Presentation and scanning"). Its own
+    /// tab in front, no inventory yet, or no exact tab for the session: no pop, and the result waits in
+    /// the queue. A Codex app result, or Ghostty off, is not judged here. Other terminal hosts are not
+    /// consulted yet.
+    public static func ghosttyAllows(source: AttentionSource, session: UUID, ghosttyEnabled: Bool,
+                                     live: Set<UUID>, snapshot: GhosttySnapshot?) -> Bool {
+        guard source == .cli, ghosttyEnabled else { return true }
+        guard let snapshot, let target = GhosttyMatch.target(session: session, live: live, snapshot: snapshot) else { return false }
+        return snapshot.selected != target
+    }
 }

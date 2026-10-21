@@ -283,12 +283,20 @@ public struct CompletionPreview: Equatable, Sendable {
     public static let maximumLines = 5
     /// The most of the message "Show all" keeps (#323); longer text is cut and the card says so.
     public static let maximumFullCharacters = 20_000
+    /// How much of the message `text` shows, and what "Show all" has beyond it (#323). Transient like `text`.
+    public enum Extent: Equatable, Sendable {
+        /// `text` is the whole message: nothing more to show.
+        case whole
+        /// `text` was shortened; `full` is the whole message.
+        case cut(full: String)
+        /// `text` was shortened and the message was longer than `maximumFullCharacters`; `full` is its
+        /// start, so the card says the rest is only in the agent.
+        case cutAndCapped(full: String)
+    }
+
     public let text: String
-    public let truncated: Bool
-    /// The whole message for "Show all", only when `text` was shortened; at most
-    /// `maximumFullCharacters`, and `fullShortened` when even that cut it. Transient like `text`.
-    public let full: String?
-    public let fullShortened: Bool
+    public let extent: Extent
+    public var truncated: Bool { extent != .whole }
 
     public init?(_ source: String) {
         let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \Character.isNewline)
@@ -303,9 +311,13 @@ public struct CompletionPreview: Equatable, Sendable {
             wasTruncated = true
         }
         text = wasTruncated ? value.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) + "…" : value
-        truncated = wasTruncated
-        full = wasTruncated ? String(normalized.prefix(Self.maximumFullCharacters)) : nil
-        fullShortened = wasTruncated && normalized.count > Self.maximumFullCharacters
+        if !wasTruncated {
+            extent = .whole
+        } else if normalized.count > Self.maximumFullCharacters {
+            extent = .cutAndCapped(full: String(normalized.prefix(Self.maximumFullCharacters)))
+        } else {
+            extent = .cut(full: normalized)
+        }
     }
 }
 

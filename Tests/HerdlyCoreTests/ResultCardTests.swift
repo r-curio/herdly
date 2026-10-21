@@ -37,6 +37,10 @@ private func completion(_ source: AttentionSource = .cli) -> AttentionCompletion
     #expect(ResultCardReply.offersField(for: completion(.desktop), target: .daemon(thread: session), phase: .ready) == false)
 }
 
+@Test func aCodexAppCardHasNoReplyFieldEvenWithATypedRoute() {
+    #expect(ResultCardReply.offersField(for: completion(.desktop), target: .terminal(pane), phase: .ready) == false)
+}
+
 @Test func aClaudeCardOffersTheFieldOnlyWithATypingHost() {
     // No host that types replies is on: no route, no field.
     let none = ClaudeReplyRouting.target(ended: false, inTurn: false, route: nil)
@@ -121,6 +125,33 @@ private func completion(_ source: AttentionSource = .cli) -> AttentionCompletion
 
 // MARK: Sending acknowledges nothing
 
+private func timestamp(_ seconds: Double) -> String { RolloutTimestamp.format(seconds) }
+
+@Test func onlyTheTurnTheReplyStartsAcknowledgesTheResult() {
+    // The app's path: each scan acknowledges what `CodexReplyAcknowledgment` returns and dismisses it.
+    func scan(_ queue: inout AttentionQueue, events: [CLIEvent]) {
+        for id in CodexReplyAcknowledgment.acknowledged(queue.items.compactMap(\.completion), events: events) {
+            queue.dismiss(.completion(id))
+        }
+    }
+    var queue = AttentionQueue()
+    queue.apply(completions: [completion()])
+    let sent = SessionReplyProgress(completion: completion().id).startingSend(text: "now add tests", at: 200)
+        .recordingSent(at: 200)
+    #expect(ResultCardReply.foldsCard(before: .ready, after: sent.phase))
+    // Sent and folded, but no turn start yet: the result stays queued.
+    scan(&queue, events: [])
+    #expect(queue.items.contains { $0.id == .completion(completion().id) })
+    // A turn start before the result arrived is not the reply's and acknowledges nothing.
+    scan(&queue, events: [.turnStarted(session: session, turn: turn, receivedAt: timestamp(90))])
+    #expect(queue.items.contains { $0.id == .completion(completion().id) })
+    // The turn the reply started, at or after the send, acknowledges it.
+    let replyTurn = UUID(uuidString: "01A09DC4-1F22-7AA4-8C31-5B71A0C24D10")!
+    scan(&queue, events: [.turnStarted(session: session, turn: replyTurn, receivedAt: timestamp(200))])
+    #expect(queue.items.contains { $0.id == .completion(completion().id) } == false)
+    #expect(queue.acknowledgedCompletions.contains(completion().id))
+}
+
 @Test func sendingFromTheResultCardLeavesTheResultQueued() {
     var queue = AgentAttentionQueue()
     let outcome = AgentOutcome(session: claude, turn: "t-1", status: .finished, arrivedAt: 100)
@@ -146,8 +177,7 @@ private func completion(_ source: AttentionSource = .cli) -> AttentionCompletion
 @Test func aMessageWithinFiveLinesHasNothingMoreToShow() {
     let preview = CompletionPreview("Snapshots now write to a temp file and rename into place.\nAll 214 tests pass.")
     #expect(preview?.truncated == false)
-    #expect(preview?.full == nil)
-    #expect(preview?.fullShortened == false)
+    #expect(preview?.extent == .whole)
 }
 
 @Test func aTruncatedMessageKeepsItsFullTextForShowAll() {
@@ -155,8 +185,7 @@ private func completion(_ source: AttentionSource = .cli) -> AttentionCompletion
     let preview = CompletionPreview(message)
     #expect(preview?.truncated == true)
     #expect(preview?.text.hasSuffix("…") == true)
-    #expect(preview?.full == message)
-    #expect(preview?.fullShortened == false)
+    #expect(preview?.extent == .cut(full: message))
 }
 
 @Test func theFullMessageIsCappedAndSaysSo() {
@@ -164,12 +193,10 @@ private func completion(_ source: AttentionSource = .cli) -> AttentionCompletion
     let long = String(repeating: "a", count: 25_000)
     let preview = CompletionPreview(long)
     #expect(preview?.truncated == true)
-    #expect(preview?.full?.count == 20_000)
-    #expect(preview?.fullShortened == true)
+    #expect(preview?.extent == .cutAndCapped(full: String(repeating: "a", count: 20_000)))
     // Exactly at the cap is the whole message.
-    let atCap = CompletionPreview(String(repeating: "b", count: 20_000))
-    #expect(atCap?.full?.count == 20_000)
-    #expect(atCap?.fullShortened == false)
+    let atCap = String(repeating: "b", count: 20_000)
+    #expect(CompletionPreview(atCap)?.extent == .cut(full: atCap))
 }
 
 // MARK: No pop
@@ -184,4 +211,38 @@ private func completion(_ source: AttentionSource = .cli) -> AttentionCompletion
     // Restored after a restart: Herdly cannot tell whether it was seen, so it never pops.
     let restored = AgentOutcome(session: claude, turn: "t-3", status: .finished, arrivedAt: 1_200, uncertain: true)
     #expect(ResultPop.isFresh(restored, launchedAt: launchedAt) == false)
+}
+
+// MARK: No pop while the session's Ghostty tab is in front
+
+private func ghostty(selected: String?) throws -> GhosttySnapshot {
+    let data: [String: Any] = [
+        "status": "ok", "front_window_id": "w",
+        "windows": [["id": "w", "tabs": [["id": "t-1", "terminals": [["id": "p-1", "name": GhosttyMatch.title(session)]]],
+                                         ["id": "t-2", "terminals": [["id": "p-2", "name": "shell"]]]]]],
+        "selected": selected.map { ["window_id": "w", "tab_id": $0, "terminal_id": $0 == "t-1" ? "p-1" : "p-2"] as Any } ?? NSNull()
+    ]
+    return try JSONDecoder().decode(GhosttySnapshot.self, from: JSONSerialization.data(withJSONObject: data))
+}
+
+@Test func aCLIResultWhoseGhosttyTabIsInFrontDoesNotPop() throws {
+    let inFront = try ghostty(selected: "t-1")
+    #expect(ResultPop.ghosttyAllows(source: .cli, session: session, ghosttyEnabled: true, live: [session], snapshot: inFront) == false)
+    // Another tab in front: it pops.
+    let away = try ghostty(selected: "t-2")
+    #expect(ResultPop.ghosttyAllows(source: .cli, session: session, ghosttyEnabled: true, live: [session], snapshot: away))
+}
+
+@Test func aCLIResultWhoseGhosttyTabIsUnknownDoesNotPop() throws {
+    // No inventory yet, or no exact tab for the session: Herdly cannot say it is away, so it waits.
+    #expect(ResultPop.ghosttyAllows(source: .cli, session: session, ghosttyEnabled: true, live: [session], snapshot: nil) == false)
+    let away = try ghostty(selected: "t-2")
+    let other = UUID(uuidString: "01A09DC4-1F22-7AA4-8C31-5B71A0C24D10")!
+    #expect(ResultPop.ghosttyAllows(source: .cli, session: other, ghosttyEnabled: true, live: [other], snapshot: away) == false)
+}
+
+@Test func ghosttyIsNotConsultedWhenOffOrForTheCodexApp() throws {
+    let inFront = try ghostty(selected: "t-1")
+    #expect(ResultPop.ghosttyAllows(source: .cli, session: session, ghosttyEnabled: false, live: [session], snapshot: inFront))
+    #expect(ResultPop.ghosttyAllows(source: .desktop, session: session, ghosttyEnabled: true, live: [session], snapshot: nil))
 }
