@@ -124,13 +124,12 @@ extension ClaudeConnectionStatus {
         if requiresConfigure || !usageMatches { return true }
         return self != .connected && !isAwaitingRestart
     }
-}
 
-public enum ClaudeGhosttyStatus: Equatable, Sendable {
-    case off
-    case permissionRequired
-    case ready
-    case unavailable(String)
+    /// Whether Undo Setup is offered: only once the root's setup preview is ready and Herdly's setup
+    /// is present in some form.
+    public func offersUndo(planReady: Bool) -> Bool {
+        planReady && self != .notConfigured
+    }
 }
 
 public struct ClaudeSetupRoots: Equatable, Sendable {
