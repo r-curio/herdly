@@ -110,10 +110,30 @@ private func kindSections(_ items: [AgentAttentionItem], open: Set<QueueKindSect
     let sections = kindSections(queue(approvals: 1, results: 2))
     #expect(sections.attention.map(\.heading) == ["Approve", "Check"])
 
-    // With nothing needing the user, the working rows are the queue: no section heading.
-    let working = kindSections(queue(running: 2))
+}
+
+@Test func onlyRunningWorkSitsUnderAWorkingHeadingWithItsCount() {
+    // F1 (#319): with nothing needing the user, the working rows are the queue, under "Working 4".
+    let working = kindSections(queue(running: 4))
     #expect(working.attention.isEmpty && !working.foldsWorking)
-    #expect(working.working.map(\.heading) == [nil])
+    #expect(working.working.map(\.heading) == ["Working"])
+    #expect(working.working.map(\.section) == [.working])
+    #expect(working.working.map(\.count) == [4])
+    // It never folds: every working row is on screen and selectable.
+    #expect(working.working[0].folded == 0)
+    #expect(working.selectableRows(workingOpen: false).count == 4)
+    #expect(working.working[0].items.map(\.session.session) == ["run-0", "run-1", "run-2", "run-3"])
+}
+
+@Test func theWorkingFoldAndOtherGroupingsKeepNoWorkingSection() {
+    // F2: behind the "N working" fold the rows carry no heading; the fold names them.
+    let folded = kindSections(queue(results: 1, running: 2))
+    #expect(folded.foldsWorking && folded.working.map(\.heading) == [nil])
+    // A card, or a grouped queue, keeps its own headings.
+    let card = QueueSections.make(queue(running: 1), grouping: .none, project: { _ in nil })
+    #expect(card.working.map(\.heading) == [nil] && card.working.map(\.section) == [nil])
+    let byAgent = QueueSections.make(queue(running: 2), grouping: .agent, project: { _ in nil }, kindSections: true)
+    #expect(byAgent.working.map(\.heading) == ["Codex"] && byAgent.working.map(\.section) == [nil])
 }
 
 @Test func otherGroupingsAndCardsKeepTheirOwnHeadings() {
