@@ -55,6 +55,8 @@ enum SettingsStyle {
     /// Status pill text: a darker green and orange in light mode so they read on their 12% tint.
     static let readyText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 0.19, green: 0.82, blue: 0.35, alpha: 1),
                                                   light: NSColor(srgbRed: 0.14, green: 0.54, blue: 0.24, alpha: 1)))
+    /// The General pane's not-connected bar: #FF9500, its fill at 10% (DESIGN.md, General pane).
+    static let noticeOrange = Color(.sRGB, red: 1, green: 0x95 / 255, blue: 0)
     static let attentionText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 1, green: 0.62, blue: 0.04, alpha: 1),
                                                       light: NSColor(srgbRed: 0.79, green: 0.2, blue: 0, alpha: 1)))
 }
@@ -127,7 +129,7 @@ struct Controls: View {
                 .frame(width: 210)
                 .padding(8)
             ZStack {
-                ControlsDetail(section: selection, model: model)
+                ControlsDetail(section: selection, model: model, openAgents: { selection = .agents })
                     .id(selection)
                     .transition(SettingsMotion.pageTransition(reduceMotion: reduceMotion))
             }
@@ -214,10 +216,12 @@ private struct SidebarLabel: View {
 private struct ControlsDetail: View {
     let section: ControlSection
     @ObservedObject var model: Companion
+    /// Switches this window to the Agents pane, with the usual page transition and click.
+    let openAgents: () -> Void
 
     var body: some View {
         switch section {
-        case .general: GeneralControls(model: model)
+        case .general: GeneralControls(model: model, openAgents: openAgents)
         case .notch: NotchControls(model: model)
         case .agents: AgentControls(model: model)
         case .terminals: TerminalControls(model: model)
@@ -357,17 +361,22 @@ private struct SlidingSegments<Value: Hashable>: View {
 }
 
 /// A menu picker drawn the way a grouped form draws one: the value, then a round chevron button.
+/// `dividerBefore` draws a menu separator above that option.
 private struct FormMenu<Value: Hashable>: View {
     let title: String
     @Binding var selection: Value
     let options: [(value: Value, label: String)]
+    var dividerBefore: Value? = nil
 
     private var current: String { options.first { $0.value == selection }?.label ?? "" }
 
     var body: some View {
         Menu {
             Picker(title, selection: $selection) {
-                ForEach(options, id: \.value) { option in Text(option.label).tag(option.value) }
+                ForEach(options, id: \.value) { option in
+                    if option.value == dividerBefore { Divider() }
+                    Text(option.label).tag(option.value)
+                }
             }
             .pickerStyle(.inline)
             .labelsHidden()
@@ -462,8 +471,9 @@ private struct StatusBadge: View {
 
 private struct GeneralControls: View {
     @ObservedObject var model: Companion
+    let openAgents: () -> Void
 
-    /// nil while a setup is still being checked, so the row reads "Checking" rather than guessing.
+    /// nil while a setup is still being checked, so the bar never names an agent on a guess.
     private var codexConnected: Bool? { model.setupChecked ? model.setupStatus == .connected : nil }
     private var claudeConnected: Bool? {
         model.claude.checked ? model.claude.roots.contains { $0.status == .connected } : nil
@@ -471,31 +481,14 @@ private struct GeneralControls: View {
 
     var body: some View {
         ControlsPage(section: .general) {
-            SettingsHeader("Status")
-            SettingsCard {
-                SettingsRow(title: "Codex", detail: nil) { connection(codexConnected) }
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Claude Code", detail: nil) { connection(claudeConnected) }
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Sessions", detail: nil) {
-                    Text("\(model.workingCount) working · \(model.currentToCheckCount) to check").foregroundStyle(.secondary)
-                }
-            }
-
-            SettingsHeader("Display")
-            SettingsCard {
-                SettingsRow(title: "Show notch on", detail: model.notchDisplayChoices.detail) {
-                    FormMenu(title: "Show notch on", selection: Binding(
-                        get: { model.notchDisplayChoices.selected.preference },
-                        set: { preference in model.setNotchDisplayPreference(preference) }
-                    ), options: model.notchDisplayChoices.options.map { ($0.preference, $0.label) })
-                    .accessibilityHint(model.notchDisplayChoices.detail)
-                }
+            if let notice = AgentConnectionNotice.message(codexConnected: codexConnected, claudeConnected: claudeConnected) {
+                ConnectionNoticeBar(message: notice, openAgents: openAgents)
+                    .padding(.bottom, 10)
             }
 
             SettingsHeader("Startup")
             SettingsCard {
-                SettingsRow(title: "Launch at login", detail: model.launchAtLogin.detail) {
+                SettingsRow(title: "Launch at login", detail: nil) {
                     Toggle("Launch at login", isOn: Binding(
                         get: { model.launchAtLogin.isOn },
                         set: { enabled in model.launchAtLoginChanged(enabled) }
@@ -528,23 +521,37 @@ private struct GeneralControls: View {
                         .accessibilityLabel("Launch at login error: \(error)")
                 }
             }
+
             SettingsHeader("Behavior")
             SettingsCard {
-                SettingsRow(title: "Keep new cards open until I act", detail: "Instead of closing after 3 seconds") {
-                    Toggle("Keep new cards open until I act", isOn: $model.keepCardsOpen)
-                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                SettingsRow(title: "Keep new cards open", detail: nil) {
+                    FormMenu(title: "Keep new cards open", selection: $model.cardOpenDuration,
+                             options: CardOpenDuration.allCases.map { ($0, $0.title) },
+                             dividerBefore: .untilIAct)
                 }
             }
-            SettingsFooter("Keeping a card open never extends an approval. Each request still hands back to its agent 30 seconds after it arrives. Closing this window keeps Herdly running in the menu bar.")
         }
     }
+}
 
-    private func connection(_ connected: Bool?) -> some View {
-        switch connected {
-        case true?: StatusBadge(title: "Connected", color: .green)
-        case false?: StatusBadge(title: "Not connected", color: .orange)
-        case nil: StatusBadge(title: "Checking", color: .secondary)
+/// The orange bar at the top of General while an agent is known not to be connected, with a
+/// button that switches the window to the Agents pane (DESIGN.md, Settings Window, General pane).
+private struct ConnectionNoticeBar: View {
+    let message: String
+    let openAgents: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle().fill(SettingsStyle.noticeOrange).frame(width: 7, height: 7).accessibilityHidden(true)
+            Text(message).font(.system(size: 13)).foregroundStyle(.primary)
+            Spacer(minLength: 10)
+            Button("Open Agents", action: openAgents)
         }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .frame(minHeight: 44)
+        .background(SettingsStyle.noticeOrange.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .contain)
     }
 }
 
@@ -1512,6 +1519,19 @@ private struct NotchControls: View {
             NotchPreview(appearance: appearance, profile: profile, reduceMotion: model.reduceMotion)
                 .animation(SettingsMotion.curve(reduceMotion: model.reduceMotion), value: appearance)
                 .animation(SettingsMotion.curve(reduceMotion: model.reduceMotion), value: profile)
+
+            // Which display shows the notch is one choice for both profiles, so it is not bound to
+            // the profile being edited.
+            SettingsHeader("Display")
+            SettingsCard {
+                SettingsRow(title: "Show notch on", detail: nil) {
+                    FormMenu(title: "Show notch on", selection: Binding(
+                        get: { model.notchDisplayChoices.selected.preference },
+                        set: { preference in model.setNotchDisplayPreference(preference) }
+                    ), options: model.notchDisplayChoices.options.map { ($0.preference, $0.label) })
+                    .accessibilityHint(model.notchDisplayChoices.detail)
+                }
+            }
 
             SettingsHeader("Strip")
             SettingsCard {
