@@ -383,9 +383,15 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - Reduce Motion keeps only a 0.15 s crossfade with no movement or scaling.
   - Unlike the notch, the Settings window may use the system's smooth easing.
 - **Sound:** switching panes, segments, or sprite tiles plays a soft click (the system "Tink" at 30% volume). It follows the macOS "Play user interface sound effects" setting. The notch never clicks.
+- **General pane:**
+  - Only while an agent isn't connected, an orange bar leads the pane: #FF9500 at 10% with 12pt corners, at least 44pt tall, a 7pt orange dot, 13pt primary text naming the agents ("Claude Code isn't connected", "Codex isn't connected", or both), and an "Open Agents" push button that switches the window to the Agents pane. An agent still being checked is never named.
+  - "Startup": Launch at login with a mini switch, plus the Login Items approval row and any error while macOS requires them.
+  - "Behavior": "Keep new cards open", a menu picker of 3 seconds, 5 seconds, 10 seconds, a separator, then Until I act.
+  - No Status card, row descriptions, or footer.
 - **Notch pane:**
   - A segmented "MacBook notch | External display" picker in the toolbar chooses which profile is being edited.
   - A live preview of the strip on a desktop backdrop sits above the sections and redraws as options change.
+  - A "Display" section directly below the preview holds the "Show notch on" menu picker. It is one choice for both profiles, so the profile picker does not change it.
   - Options that do not apply to the selected profile, such as Center label on the MacBook notch, are shown disabled with a footer saying why.
 - **Sprite picker:** a "Sprite" section with no footer holding five equal-width tiles in a row at 10pt gaps: Sheep, Critter, Sheepdog, Cow, and Blob. Each tile is a 76pt black well with 9pt continuous corners and the kind's idle frame centred at 6pt per cell in the first session colour, with its 12pt name 6pt below. The selected tile has a 2pt accent ring with a 2pt gap and a medium-weight name. Each tile is a button named for its kind.
 - **Agents pane:**
