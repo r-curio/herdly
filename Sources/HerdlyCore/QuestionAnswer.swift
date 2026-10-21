@@ -27,12 +27,11 @@ public enum QuestionAnswerPhase: Equatable, Sendable {
     case unconfirmed(sentAt: Double)
     /// The pre-send guard or Ghostty refused; nothing was sent for this question.
     case failed(String)
-    /// Desktop: the option the user picked in the notch, kept highlighted until Codex records the answer.
-    case pickedInCodex(option: Int)
 }
 
 /// Herdly's memory of one call: which question the Codex pane should now be on, which options were
-/// sent, and the phase. In memory only; a restart returns the question as plain pending.
+/// sent or drafted, what the user has selected but not sent, and the phase. In memory only; a restart
+/// returns the question as plain pending with nothing selected, so nothing is ever sent for it.
 public struct QuestionAnswerProgress: Equatable, Sendable {
     /// Seconds after the last key within which the rollout is expected to record the answer.
     public static let confirmationWindow: Double = 10
@@ -44,6 +43,9 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
     public private(set) var picks: [Int: Int]
     /// Typed answers drafted for the daemon path, by question index. Never used for a key relay.
     public private(set) var texts: [Int: String]
+    /// What the user selected for a question and has not yet sent or drafted with Next (D16), by
+    /// question index. Selecting never sends: only Send (or Next on the daemon path) uses it.
+    public private(set) var selected: [Int: ChosenAnswer]
     public private(set) var phase: QuestionAnswerPhase
 
     public init(call: QuestionIdentity) {
@@ -51,7 +53,35 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
         self.questionIndex = 0
         self.picks = [:]
         self.texts = [:]
+        self.selected = [:]
         self.phase = .ready
+    }
+
+    /// The answer the card shows as chosen for a question: the unsent selection, else the answer
+    /// Herdly drafted or sent for it.
+    public func selection(for index: Int) -> ChosenAnswer? {
+        selected[index] ?? answer(for: index)
+    }
+
+    /// A click on an option, or its digit (D16): selects it and sends nothing. Only the question the
+    /// card is answering may be selected; a later one can be read but not answered out of order. With
+    /// `revisesDrafts` (the daemon path only, whose earlier answers are unsent drafts) an earlier
+    /// drafted question's answer is replaced in place; a sent key is never revised. The caller has
+    /// already applied its route's policy to `answer`.
+    public func selecting(question index: Int, answer: ChosenAnswer, revisesDrafts: Bool = false) -> QuestionAnswerProgress {
+        guard canSelect(question: index, revisesDrafts: revisesDrafts) else { return self }
+        guard index == questionIndex else { return replacingDraft(question: index, answer: answer) }
+        var next = self
+        next.selected[index] = answer
+        return next
+    }
+
+    /// Whether question `index` takes a selection now: the question being answered, or with
+    /// `revisesDrafts` (the daemon path) an earlier question whose answer is an unsent draft.
+    public func canSelect(question index: Int, revisesDrafts: Bool = false) -> Bool {
+        guard phase == .ready else { return false }
+        if index == questionIndex { return answer(for: index) == nil }
+        return revisesDrafts && index >= 0 && index < questionIndex && answer(for: index) != nil
     }
 
     /// The answer held for a question, drafted or sent.
@@ -69,7 +99,7 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
             return .continueInCodex("This question is beyond what Herdly can show.")
         }
         let prompt = question.prompts[index]
-        guard !prompt.isSecret else { return .continueInCodex("Codex asked for a secret; answer it in Codex.") }
+        guard !prompt.isSecret else { return .continueInCodex(QuestionCardLines.secret) }
         guard !prompt.options.isEmpty else { return .continueInCodex("This question takes a typed answer.") }
         guard prompt.optionsComplete, prompt.options.count <= QuestionAnswerPolicy.maximumDigit else {
             return .continueInCodex("Codex lists more options than Herdly can show.")
@@ -92,12 +122,11 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
         return next
     }
 
-    /// Desktop pick made before the daemon delivered the request: the pick only opened Codex, so
-    /// the daemon card starts over. Any other phase is kept.
-    public func reopeningForDaemon() -> QuestionAnswerProgress {
-        guard case .pickedInCodex = phase else { return self }
-        var next = QuestionAnswerProgress(call: call)
-        next.questionIndex = 0
+    /// Forgets every unsent selection, keeping drafts and sent answers. Used when the card's route
+    /// changed after the user selected, so a selection is never sent by a route it was not made on.
+    public func clearingSelections() -> QuestionAnswerProgress {
+        var next = self
+        next.selected = [:]
         return next
     }
 
@@ -145,6 +174,7 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
         case let .option(option): picks[index] = option; texts[index] = nil
         case let .text(text): texts[index] = text; picks[index] = nil
         }
+        selected[index] = nil
     }
 
     /// Nothing was sent; the reason is shown and the call is never retried by Herdly.
@@ -162,18 +192,9 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
         next.phase = .unconfirmed(sentAt: at)
         return next
     }
-
-    /// Desktop: remember the pick shown on the card; nothing is sent anywhere.
-    public func pickingInCodex(question index: Int, option: Int) -> QuestionAnswerProgress {
-        var next = self
-        guard index == questionIndex else { return self }
-        next.picks[index] = option
-        next.phase = .pickedInCodex(option: option)
-        return next
-    }
 }
 
-/// Whether one click may become one key press. Mirrors `ApprovalDecisionPolicy`: it judges the
+/// Whether one Send may become one key press. Mirrors `ApprovalDecisionPolicy`: it judges the
 /// queue's current copy of the question, never the row that was rendered.
 public enum QuestionAnswerPolicy {
     /// One key press carries one digit; Codex's pane binds 1 through 9.

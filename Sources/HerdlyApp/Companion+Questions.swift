@@ -94,25 +94,6 @@ extension Companion {
         }
     }
 
-    func chooseAgentOption(_ question: AgentQuestion, index: Int, option: Int) {
-        if question.identity.session.source == .claude {
-            guard index == 0, let prompt = question.prompts.first, option >= 0, option < prompt.options.count else {
-                refresh()
-                return
-            }
-            answerClaudeQuestion(question, kind: .option, answer: prompt.options[option])
-            return
-        }
-        guard question.identity.session.source == .codex,
-              let session = codexSession(question.identity.session),
-              let turn = UUID(uuidString: question.turn),
-              let current = queue.items.compactMap(\.question).first(where: { $0.session == session && $0.turn == turn && $0.callID == question.identity.call }) else {
-            refresh()
-            return
-        }
-        chooseOption(current, question: index, option: option)
-    }
-
     func codexQuestion(for question: AgentQuestion) -> AttentionQuestion? {
         guard question.identity.session.source == .codex,
               let session = codexSession(question.identity.session),
@@ -210,20 +191,18 @@ extension Companion {
     /// Progress for a question the queue holds; a fresh, ready record when Herdly has relayed nothing.
     func progress(for question: AttentionQuestion) -> QuestionAnswerProgress {
         let progress = answerProgress[question.id] ?? QuestionAnswerProgress(call: question.id)
-        // A desktop pick made before the daemon delivered the request opened Codex and nothing more;
-        // the daemon card starts from its first question.
-        if case let .daemon(request) = route(for: question) {
-            if let draftedFor = daemonDraftRequests[question.id], draftedFor != request {
-                return QuestionAnswerProgress(call: question.id)
-            }
-            return progress.reopeningForDaemon()
+        // Drafts made for an earlier daemon request do not carry over to a new one: the card starts over.
+        if case let .daemon(request) = route(for: question),
+           let draftedFor = daemonDraftRequests[question.id], draftedFor != request {
+            return QuestionAnswerProgress(call: question.id)
         }
         return progress
     }
 
     /// Which path this question's card uses right now, in ADR 0010's precedence: a call keeps the
     /// route its first answer left by; otherwise the daemon when it holds the request, then herdr
-    /// keys for a session in herdr, Ghostty keys for a CLI session not in herdr, or the desktop pick.
+    /// keys for a session in herdr, Ghostty keys for a CLI session not in herdr, or, for the Codex
+    /// app, read-only options.
     func route(for question: AttentionQuestion) -> QuestionAnswerRoute {
         QuestionRelayRouting.route(for: question, book: daemonBook, daemonConnected: daemonConnected,
                                    ledger: relayLedger, progress: answerProgress[question.id],
@@ -245,14 +224,14 @@ extension Companion {
         return relayLedger.failure(for: question.id)
     }
 
-    /// Whether the card may show the options as controls: the daemon path, a CLI question with
-    /// Ghostty controls on, or a desktop question (whose pick only opens Codex). Preview renders the
-    /// controls as well.
+    /// Whether the card may show the options as controls: the daemon path, or a CLI question with
+    /// Ghostty controls on. A Codex app question without the daemon is read-only (#321). Preview
+    /// renders the controls as well.
     func showsOptionControls(for question: AttentionQuestion) -> Bool {
         switch route(for: question) {
         case .daemon: return true
         case .daemonAnswered: return false
-        case .desktopPick: return true
+        case .desktopReadOnly: return false
         // A session another enabled host may hold, or one that host cannot rule out, already routes to
         // `relayUnavailable` (ADR 0013, ADR 0017).
         case .ghosttyRelay, .herdrRelay: return ghosttyEnabled || previewMode != nil
@@ -262,33 +241,77 @@ extension Companion {
         }
     }
 
-    /// One click on an option. Daemon: the exact answer by call id. Desktop: remember the pick and
-    /// open the thread. CLI: relay the digit through Ghostty after re-checking the queue, the policy,
-    /// and the rollout as it is right now.
-    func chooseOption(_ question: AttentionQuestion, question index: Int, option: Int) {
-        switch route(for: question) {
+    /// A click on an option, or its digit (D16): selects it on the card and sends nothing. The
+    /// queue's current copy of the question and the route's own policy judge it first. On the daemon
+    /// path an earlier question's unsent draft may be changed; a key already typed never is. A Codex
+    /// app question without the daemon takes no selection.
+    func selectQuestionAnswer(_ question: AttentionQuestion, question index: Int, answer: ChosenAnswer) {
+        let current = queue.items.compactMap(\.question).first { $0.id == question.id }
+        let progress = progress(for: question)
+        let route = route(for: question)
+        switch route {
         case .daemon:
-            answerThroughDaemon(question, question: index, answer: .option(option))
-            return
-        case .daemonAnswered:
+            guard AppServerAnswerPolicy.rejection(for: current, book: daemonBook, progress: progress,
+                                                  question: index, answer: answer) == nil else { refresh(); return }
+            answerProgress[question.id] = progress.selecting(question: index, answer: answer, revisesDrafts: true)
+            selectionRoutes[question.id] = route
+        case .ghosttyRelay, .herdrRelay, .terminalRelay:
+            guard showsOptionControls(for: question), case let .option(option) = answer,
+                  QuestionAnswerPolicy.rejection(for: current, ghosttyEnabled: ghosttyEnabled || route == .terminalRelay
+                                                     || previewMode != nil,
+                                                 progress: progress, question: index, option: option) == nil else {
+                refresh(); return
+            }
+            answerProgress[question.id] = progress.selecting(question: index, answer: answer)
+            selectionRoutes[question.id] = route
+        case .daemonAnswered, .relayUnavailable, .desktopReadOnly:
+            refresh(); return
+        }
+        refresh()
+    }
+
+    /// Send, or Next on the daemon path, for the question the card is answering: the only way an
+    /// answer leaves Herdly (D16). `typed` is the daemon field's text, which takes the place of a
+    /// selected option. Daemon: Next keeps the answer as a draft; Send on the last question writes
+    /// the whole call once. Key routes: one digit for this question only. Each route keeps its own
+    /// fresh pending-request check immediately before anything is written.
+    func sendQuestionAnswer(_ question: AttentionQuestion, question index: Int, typed: String? = nil) {
+        let progress = progress(for: question)
+        let typedAnswer = typed.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : ChosenAnswer.text($0) }
+        let route = route(for: question)
+        // A selection made on another route (the daemon let go, or a new request arrived) is dropped,
+        // not sent: the user selects again on the card as it is now.
+        if progress.selected[index] != nil, selectionRoutes[question.id] != route {
+            if answerProgress[question.id] != nil { answerProgress[question.id] = progress.clearingSelections() }
+            selectionRoutes[question.id] = nil
             refresh()
             return
+        }
+        switch route {
+        case let .daemon(request):
+            guard let answer = typedAnswer ?? progress.selected[index] else { refresh(); return }
+            answerThroughDaemon(question, question: index, answer: answer, expectedRequest: request)
+        case .ghosttyRelay, .herdrRelay, .terminalRelay:
+            guard typedAnswer == nil, case let .option(option)? = progress.selected[index] else { refresh(); return }
+            sendQuestionKey(question, question: index, option: option)
+        case .daemonAnswered, .relayUnavailable, .desktopReadOnly:
+            refresh()
+        }
+    }
+
+    /// One key for one Send on a key route: herdr, a terminal host's pane, or Ghostty.
+    private func sendQuestionKey(_ question: AttentionQuestion, question index: Int, option: Int) {
+        switch route(for: question) {
         case .herdrRelay:
             answerThroughHerdr(question, question: index, option: option)
             return
         case .terminalRelay:
             answerThroughTerminalKeys(question, question: index, option: option)
             return
-        case .relayUnavailable:
-            refresh()
-            return
-        case .desktopPick, .ghosttyRelay:
+        case .ghosttyRelay:
             break
-        }
-        if question.source == .desktop {
-            guard case .options = QuestionAnswerProgress.offer(question, at: index) else { return }
-            answerProgress[question.id] = progress(for: question).pickingInCodex(question: index, option: option)
-            openAttentionSession(source: .desktop, session: question.session)
+        case .daemon, .daemonAnswered, .relayUnavailable, .desktopReadOnly:
+            refresh()
             return
         }
         guard !answering else { return }
@@ -340,7 +363,7 @@ extension Companion {
                 return GhosttyNavigation.answer(session: current.session, live: live, keys: [key])
             }.value
             answering = false
-            updateRowNote(RowNoteUpdate.ghosttyKeyAnswer(sent: result.sent, final: current.isFinalQuestion(index)),
+            updateRowNote(RowNoteUpdate.ghosttyKeyAnswer(sent: result.sent, question: index, of: current.questionCount),
                           for: Self.codexQuestionNoteID(current))
             if !result.sent { relayLedger.release(current.id, question: index) }
             guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
@@ -358,7 +381,7 @@ extension Companion {
         }
     }
 
-    /// One click on a herdr-bound session (ADR 0010): one `agent.send_keys` carrying only the
+    /// One Send on a herdr-bound session (ADR 0010): one `agent.send_keys` carrying only the
     /// option's digit, to the bound pane, never Enter. The key is spent before anything is sent.
     /// Immediately before it, a fresh scan re-runs ADR 0012's whole binding rule and herdr must report
     /// the pane's agent `blocked`, then the rollout is re-read. A key that may have been written
@@ -417,16 +440,7 @@ extension Companion {
         }
     }
 
-    /// A typed answer; only the daemon path takes one.
-    func answerText(_ question: AttentionQuestion, question index: Int, text: String) {
-        guard case .daemon = route(for: question) else {
-            refresh()
-            return
-        }
-        answerThroughDaemon(question, question: index, answer: .text(text))
-    }
-
-    /// One answer through the daemon. A non-last question's answer is only drafted; the last one
+    /// One Next or Send through the daemon. A non-last question's answer is only drafted; the last one
     /// sends the whole call as one JSON-RPC response, after re-reading the rollout, and marks the
     /// request answered before the write so nothing is ever sent twice. Never on a timer or error.
     func answerThroughDaemon(_ question: AttentionQuestion, question index: Int, answer: ChosenAnswer,
@@ -501,6 +515,8 @@ extension Companion {
         let waiting = Set(queue.items.compactMap { $0.question?.id })
         let drafts = daemonDraftRequests.filter { waiting.contains($0.key) }
         if drafts.count != daemonDraftRequests.count { daemonDraftRequests = drafts }
+        let routes = selectionRoutes.filter { waiting.contains($0.key) }
+        if routes.count != selectionRoutes.count { selectionRoutes = routes }
         var ledger = relayLedger
         ledger.prune(keeping: waiting)
         if ledger != relayLedger { relayLedger = ledger }
@@ -509,4 +525,18 @@ extension Companion {
         let next = answerProgress.filter { waiting.contains($0.key) }.mapValues { $0.expiring(at: now) }
         if next != answerProgress { answerProgress = next }
     }
+}
+
+/// One key the panel handed to the question card on screen (#321). `serial` makes a repeated key a
+/// new value, so the card sees every press; `card` is the card it was pressed on.
+struct QuestionCardKeyPress: Equatable {
+    enum Key: Equatable {
+        /// Selects option `n` (one-based); never sends.
+        case digit(Int)
+        /// Return: the card's Next or Send, only while it is enabled.
+        case primary
+    }
+    let key: Key
+    let card: AgentAttentionID
+    let serial: Int
 }
