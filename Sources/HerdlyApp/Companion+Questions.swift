@@ -184,7 +184,7 @@ extension Companion {
         spentClaudeQuestionTokens.insert(live.request.requestID)
         let noteID = AgentAttentionID.question(question.id)
         guard ClaudeQuestionStore.publish(record, in: live.events) else {
-            settleRowNote(RowNote.claudeAnswer(published: false, delivered: false), for: noteID)
+            settleRowNote(RowNote.claudeAnswer(published: false, delivered: false), for: noteID, userAction: true)
             refresh()
             return
         }
@@ -492,7 +492,7 @@ extension Companion {
                         ? next.recordingSent(question: index, answer: answer, of: latest, at: now)
                         : next.recordingFailure("Could not write to Codex's daemon; Herdly will not retry. Answer in Codex.")
                 }
-                noteCodexAnswer(current, sent: written)
+                noteCodexAnswer(current, sent: written, userAction: true)
             }
             answering = false
             refresh()

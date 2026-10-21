@@ -325,8 +325,8 @@ struct NotchButton: View {
 
 /// One line of text the user types into a card and sends: a typed answer to a Codex question, or a
 /// reply to a finished session. Return in the field and the button do the same thing, and an empty
-/// or all-space draft sends nothing. Escape collapses the panel from the field without dismissing
-/// anything. The caller owns the text and decides what sending means.
+/// or all-space draft sends nothing. Escape follows the panel's one Escape rule from the field (a
+/// clicked card steps back to the queue, otherwise the panel collapses) without dismissing anything. The caller owns the text and decides what sending means.
 struct DraftField: View {
     let placeholder: String
     @Binding var text: String
@@ -803,7 +803,7 @@ struct Notch: View {
                 DraftField(placeholder: prompt.options.isEmpty ? "Type your answer" : "Or type another answer",
                            text: questionDraft(question, index: index), sendTitle: "Send",
                            fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
-                           onEscape: model.collapse) {
+                           onEscape: model.escape) {
                     model.answerClaudeQuestion(question, kind: .text,
                                                answer: questionDrafts[claudeSelectionKey(question, index)] ?? "")
                     questionDrafts[claudeSelectionKey(question, index)] = nil
@@ -845,8 +845,67 @@ struct Notch: View {
         model.attention.pending && !model.desktopForeground && model.presentationMode.showsAll
     }
 
+    /// A spotlit or clicked card renders the single-item spotlight body.
     private func isSpotlight(_ item: AgentAttentionItem) -> Bool {
-        model.presentationMode == .agentSpotlight(item.id)
+        model.presentationMode == .agentSpotlight(item.id) || model.presentationMode == .clickedCard(item.id)
+    }
+
+    private var showsClickedCard: Bool {
+        if case .clickedCard = model.presentationMode { return true }
+        return false
+    }
+
+    /// An approval or question row in the full queue opens as its own card when clicked (D5, D18).
+    private func opensAsCard(_ item: AgentAttentionItem) -> Bool {
+        guard model.presentationMode.showsAll else { return false }
+        switch item.id {
+        case .approval, .question: return true
+        case .outcome, .running, .unavailable: return false
+        }
+    }
+
+    /// The open queue's rows in reading order, as the arrows step through them: folded working rows
+    /// count only while their fold is open.
+    private func selectableRows(_ sections: QueueSections) -> [AgentAttentionID] {
+        guard model.presentationMode.showsAll else { return [] }
+        let working = sections.foldsWorking && !workingOpen ? [] : sections.working
+        return (sections.attention + working).flatMap(\.items).map(\.id)
+    }
+
+    /// Makes a row header the click target that opens its card, keeping its look. VoiceOver reads it
+    /// as a button naming the action.
+    @ViewBuilder
+    private func cardOpener<Header: View>(_ item: AgentAttentionItem, @ViewBuilder header: () -> Header) -> some View {
+        if opensAsCard(item) {
+            Button { model.openCard(item.id) } label: { header().contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .accessibilityLabel("Open card: \(rowHeading(item))")
+                .accessibilityHint("Shows this request alone. Escape or Queue returns to the queue.")
+        } else {
+            header()
+        }
+    }
+
+    /// D10/D21: the row's note after the user acted, in place of its dim "project @ branch" until
+    /// its request clears.
+    private func rowNote(_ item: AgentAttentionItem) -> RowNote? {
+        model.presentationMode.showsAll ? model.rowNote(for: item.id) : nil
+    }
+
+    private func rowNoteText(_ note: RowNote, questionCard: Bool) -> some View {
+        Text(note.text).font(questionCard ? QuestionCardStyle.font(11) : NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+            .lineLimit(1).truncationMode(.tail)
+    }
+
+    /// The "‹ Queue" bar above a clicked card: back to the queue, nothing dismissed. No stepper (D19).
+    private var clickedCardBar: some View {
+        HStack(spacing: 0) {
+            NotchButton(title: "‹ Queue", action: model.backToQueue)
+                .accessibilityLabel("Back to queue")
+                .accessibilityHint("Returns to the full queue. Nothing is dismissed.")
+            Spacer(minLength: 0)
+        }
     }
 
     @ViewBuilder
@@ -982,7 +1041,7 @@ struct Notch: View {
                     DraftField(placeholder: prompt.isOther ? "Or type another answer" : "Type your answer",
                                text: binding, sendTitle: "Send",
                                fieldLabel: "Typed answer for \(subject)", sendLabel: "Send typed answer for \(subject)",
-                               committedText: committed, onEscape: model.collapse) {
+                               committedText: committed, onEscape: model.escape) {
                         choose(.text(binding.wrappedValue))
                     }
                     .disabled(!enabled)
@@ -1138,7 +1197,7 @@ struct Notch: View {
         let key = "reply:\(outcome.session.sourceScope):\(outcome.session.session):\(outcome.turn)"
         DraftField(placeholder: "Reply to this session", text: draft(key), sendTitle: "Send",
                    fieldLabel: "Reply to \(subject)", sendLabel: "Send reply to \(subject)",
-                   hint: "Types a follow-up prompt into this session's tab.", onEscape: model.collapse) {
+                   hint: "Types a follow-up prompt into this session's tab.", onEscape: model.escape) {
             model.sendClaudeReply(outcome, text: drafts[key] ?? "")
             if model.claudeReply(for: outcome).phase != .ready { drafts[key] = nil }
         }
@@ -1158,7 +1217,7 @@ struct Notch: View {
         let key = "reply:\(completion.session.uuidString):\(completion.turn.uuidString)"
         DraftField(placeholder: "Reply to this session", text: draft(key), sendTitle: "Send",
                    fieldLabel: "Reply to \(subject)", sendLabel: "Send reply to \(subject)",
-                   hint: "Sends a follow-up prompt to this session.", onEscape: model.collapse) {
+                   hint: "Sends a follow-up prompt to this session.", onEscape: model.escape) {
             // The typed text is cleared only once the send is under way; a refusal keeps it to edit.
             model.sendReply(to: completion, text: drafts[key] ?? "")
             if model.reply(for: completion).phase != .ready { drafts[key] = nil }
@@ -1202,6 +1261,7 @@ struct Notch: View {
         let spotlit = isSpotlight(item)
         let earlierOpen = disclosure(earlierKey(item))
         let collapsed = item.kind == .earlierOutcome && !earlierOpen.wrappedValue && !spotlit
+        let selected = model.presentationMode.showsAll && model.queueSelection.selected == item.id
         VStack(alignment: .leading, spacing: item.kind == .question ? 14 : 8) {
             // Every row is headed by its session's mark and name; the mark steps only while the
             // session is working, and the tag says what, if anything, the row needs from the user.
@@ -1210,8 +1270,9 @@ struct Notch: View {
             let indicator = model.appearance.indicator
             let working = item.running?.status == .working
             if item.kind == .question {
-                questionHeader(item)
+                cardOpener(item) { questionHeader(item) }
             } else {
+                cardOpener(item) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     if marked && indicator != .tint {
                         SessionMark(style: indicator, working: working, reduceMotion: model.reduceMotion,
@@ -1228,6 +1289,11 @@ struct Notch: View {
                 }
                 .modifier(SessionTint(active: marked && indicator == .tint, working: working,
                                       reduceMotion: model.reduceMotion, color: spriteColor(for: item.session)))
+                }
+            }
+            if let note = rowNote(item), note.offersOpen {
+                // "Not delivered · answer in Claude": Open takes the user to the session to answer there.
+                HStack(spacing: 6) { claudeReturnControl(item, subject: subject) }
             }
             if !collapsed {
                 if let request = spotlightDetails?.request {
@@ -1442,6 +1508,10 @@ struct Notch: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(rowHeading(item)), \(subject)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        // The keyboard selection reuses the focus ring's vocabulary around the whole row.
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .stroke(NotchStyle.ink.opacity(selected ? 0.9 : 0), lineWidth: 1.5).padding(.horizontal, -6).padding(.vertical, -4))
         .environment(\.questionCard, item.kind == .question)
     }
 
@@ -1449,7 +1519,7 @@ struct Notch: View {
     /// visual tag shortens.
     private func rowHeading(_ item: AgentAttentionItem) -> String {
         let name = QueueRowPresentation.sessionName(item.session, names: sessionNames)
-        let place = model.rowPlace(for: item).map { ", \($0)" } ?? ""
+        let place = (rowNote(item)?.text ?? model.rowPlace(for: item)).map { ", \($0)" } ?? ""
         return "\(name)\(place), \(rowTitle(item))"
     }
 
@@ -1471,7 +1541,9 @@ struct Notch: View {
                 Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
                     .font(QuestionCardStyle.font(12, .semibold)).foregroundStyle(NotchStyle.ink)
                     .lineLimit(1).truncationMode(.tail).layoutPriority(1)
-                if let place = model.rowPlace(for: item) {
+                if let note = rowNote(item) {
+                    rowNoteText(note, questionCard: true)
+                } else if let place = model.rowPlace(for: item) {
                     Text(place).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
                         .lineLimit(1).help(place)
                 }
@@ -1501,7 +1573,10 @@ struct Notch: View {
             Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
                 .font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
                 .lineLimit(1).truncationMode(.tail).layoutPriority(2)
-            if let place = model.rowPlace(for: item) {
+            if let note = rowNote(item) {
+                Text("·").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                rowNoteText(note, questionCard: false)
+            } else if let place = model.rowPlace(for: item) {
                 Text("· \(place)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                     .lineLimit(1).truncationMode(.tail)
                     .help(model.rowDirectory(for: item) ?? place)
@@ -1775,6 +1850,7 @@ struct Notch: View {
                 let rowTransition = QueueMotion.rowTransition(reduceMotion: model.reduceMotion)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        if showsClickedCard { clickedCardBar }
                         groupRows(sections.attention)
                         if sections.foldsWorking {
                             NotchDisclosure(title: "\(sections.workingCount) working", expanded: $workingOpen) {
@@ -1802,6 +1878,9 @@ struct Notch: View {
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: QueueMotion.layoutKey(sections.attention + sections.working))
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: showsTestRow)
                     .padding(.bottom, 14)
+                    // Room inside the scroll view's clip for the selection ring and focus rings at
+                    // the row edges; the outer negative padding keeps the column where it was.
+                    .padding(.horizontal, 8)
                     .background(GeometryReader { proxy in
                         Color.clear.preference(key: ContentHeightKey.self,
                                                value: proxy.size.height + model.stripLayout.height + 13)
@@ -1810,6 +1889,7 @@ struct Notch: View {
                 // The queue scrolls without a visible scroller: a scroll bar would be the only
                 // light edge inside the panel and would break its fused shape.
                 .scrollIndicators(.hidden)
+                .padding(.horizontal, -8)
                 .focusSection()
             }
         }
@@ -1826,6 +1906,7 @@ struct Notch: View {
         .preferredColorScheme(.dark)
         .onHover(perform: model.setHovering)
         .onChange(of: model.expanded) { _, expanded in if !expanded { workingOpen = false } }
+        .onChange(of: selectableRows(visibleSections), initial: true) { _, rows in model.selectableRows = rows }
         .onChange(of: model.answerProgress) { previous, next in
             for question in model.orderedAgentAttentionItems.compactMap(\.question) {
                 guard let legacy = model.codexQuestion(for: question), let progress = next[legacy.id],

@@ -115,6 +115,10 @@ final class NotchPanel: NSPanel {
     /// presentation uses orderFrontRegardless, which never makes the panel key.
     override var canBecomeKey: Bool { true }
     var onEscape: (() -> Void)?
+    /// Up and Down arrows move the queue's row selection; Return acts on the selected row. Only
+    /// keys no control in the panel handled reach here.
+    var onMoveSelection: ((QueueRowSelection.Direction) -> Void)?
+    var onReturn: (() -> Void)?
     /// True once the user has clicked in the panel; launch or app activation can also make the
     /// panel key, and that must not count as the user interacting with it.
     private(set) var clickedForKey = false
@@ -132,8 +136,20 @@ final class NotchPanel: NSPanel {
     /// Keyboard focus the user asked for by clicking, as opposed to key status handed over at launch.
     var hasDeliberateKeyboardFocus: Bool { isKeyWindow && clickedForKey }
 
-    /// Escape collapses the panel and returns keyboard input to the app the user was using.
+    /// Escape follows `NotchPresentationController.escape()`: a clicked card steps back to the
+    /// queue; otherwise the panel collapses and returns keyboard input to the app the user was using.
     override func cancelOperation(_ sender: Any?) { onEscape?() }
+
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard modifiers.isEmpty else { return super.keyDown(with: event) }
+        switch event.keyCode {
+        case 125: onMoveSelection?(.down)
+        case 126: onMoveSelection?(.up)
+        case 36, 76: onReturn?()
+        default: super.keyDown(with: event)
+        }
+    }
 
     /// AppKit pulls a frame back on screen; the tucked strip rests entirely above the screen edge.
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
@@ -501,7 +517,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         verifiedClaudeApprovalRoots.removeValue(forKey: result.work.requestID)
         if let note = RowNote.claudeDecision(result.work.decision, published: result.published,
                                              delivered: result.delivered) {
-            recordRowNote(note, for: .approval(result.work.approvalID))
+            recordRowNote(note, for: .approval(result.work.approvalID), userAction: false)
         }
         refresh()
     }
@@ -547,6 +563,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// One presentation mode prevents passive hover from replacing a new item's focused card.
     @Published var expanded = false
     @Published var presentationMode: NotchPresentationMode = .collapsed
+    /// The open queue's keyboard selection (Up and Down arrows); cleared whenever the queue closes.
+    @Published private(set) var queueSelection = QueueRowSelection()
+    /// The open queue's rows in reading order, which the view reports so arrows follow what is on screen.
+    var selectableRows: [AgentAttentionID] = []
     /// Fresh response previews are intentionally process-memory only.
     @Published private(set) var completionPreviews: [CompletionIdentity: CompletionPreviewAvailability] = [:]
     @Published private(set) var spotlightContexts: [AttentionItemID: SpotlightRecordContext] = [:]
@@ -579,7 +599,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The frame animation in flight, so a refresh mid-animation does not mistake it for drift.
     private var frameAnimation: UUID?
     /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|expanded>`
-    /// seeds in-memory sample items for screenshots;
+    /// seeds in-memory sample items for screenshots; `clicked-approval` shows the approval sample as a
+    /// clicked card, and `row-note` the queue with that row selected and carrying a note;
     /// `empty-collapsed`, `empty-expanded`, and `empty-not-connected` seed only the usage readouts, to show the empty notch.
     /// It never scans Codex events, never saves, and never releases approvals.
     let previewMode = Companion.argumentValue(for: "--preview-queue")
@@ -682,7 +703,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = NSHostingView(rootView: Notch(model: self, claudeSetup: claude))
-        panel.onEscape = { [weak self] in self?.collapse() }
+        panel.onEscape = { [weak self] in self?.escape() }
+        panel.onMoveSelection = { [weak self] in self?.moveSelection($0) }
+        panel.onReturn = { [weak self] in self?.activateSelectedRow() }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in self?.refresh() } }
@@ -1721,10 +1744,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         if let mode = previewMode, Self.spotlightPreviewModes.contains(mode), let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
         let resolvedPresentation = notchPresentation.update(interacting: interacting, draftInProgress: notchDraftInProgress,
-                                                            now: now, legacyPopup: attention.expanded)
+                                                            now: now, legacyPopup: attention.expanded, queued: liveAgentIDs)
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
-        case "expanded", "empty-expanded", "empty-not-connected": presentationMode = .queue
+        case "expanded", "empty-expanded", "empty-not-connected", "row-note": presentationMode = .queue
+        case "clicked-approval":
+            let mode = previewSpotlightAgent.map(NotchPresentationMode.clickedCard) ?? .collapsed
+            if presentationMode != mode { presentationMode = mode }
         case "collapsed", "empty-collapsed": presentationMode = .collapsed
         case _ where Self.spotlightPreviewModes.contains(previewMode ?? ""):
             let mode = spotlightItem.map(NotchPresentationMode.agentSpotlight) ?? .collapsed
@@ -1733,6 +1759,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             if presentationMode != resolvedPresentation { presentationMode = resolvedPresentation }
         }
         if expanded != presentationMode.expanded { expanded = presentationMode.expanded }
+        var selection = queueSelection
+        if presentationMode.showsAll { selection.reconcile(rows: Array(liveAgentIDs)) } else { selection.clear() }
+        if selection != queueSelection { queueSelection = selection }
         let actionableApproval = agentItems.contains { $0.kind == .actionableApproval }
             || queue.items.contains { $0.request?.state == .actionable }
         scheduleRefreshTimer(RefreshCadence.interval(presenting: presentationMode != .collapsed,
@@ -1768,12 +1797,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let width = appearance.panelWidth
         let layout = NotchPlacement.strip(on: display, expanded: expanded, wing: wing, centerLabel: center, width: width)
         if stripLayout != layout { stripLayout = layout }
-        let rows = presentationMode.showsAll ? orderedAgentAttentionItems.count : (spotlightItem == nil ? 0 : 1)
+        let singleCard: Bool = switch presentationMode {
+        case .agentSpotlight, .clickedCard: true
+        default: false
+        }
+        let rows = presentationMode.showsAll ? orderedAgentAttentionItems.count : (singleCard ? 1 : 0)
         var frame = contentHeight > 0
             ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, wing: wing, centerLabel: center,
                                    width: width)
             : NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
-                                   extraRows: attention.pending && (presentationMode.showsAll || spotlightItem == nil),
+                                   extraRows: attention.pending && (presentationMode.showsAll || !singleCard),
                                    wing: wing, centerLabel: center, width: width)
         // With no menu bar and no housing the strip rests above the screen edge and slides in for
         // the pointer at the top edge or an open panel, so it does not cover a full-screen app.
@@ -1847,6 +1880,51 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             try? await Task.sleep(for: .seconds(HoverHold.grace))
             guard !Task.isCancelled else { return }
             self?.refresh()
+        }
+    }
+
+    /// One Escape, from the panel or a text field (D6): a clicked card returns to the queue; otherwise
+    /// the panel collapses. Neither dismisses anything.
+    func escape() {
+        switch notchPresentation.escape() {
+        case .backToQueue: refresh()
+        case .collapse: collapse()
+        }
+    }
+
+    /// Opens one approval or question from the queue as its own card (D5, D18). Its deadline is untouched.
+    func openCard(_ id: AgentAttentionID) {
+        guard notchPresentation.openCard(id) else { return }
+        refresh()
+    }
+
+    /// ‹ Queue: leaves the clicked card for the queue without dismissing anything.
+    func backToQueue() {
+        notchPresentation.backToQueue()
+        refresh()
+    }
+
+    /// Approve, Deny or Send on a clicked card returns to the queue at once (D10); the row note
+    /// carries the outcome from there. The caller refreshes.
+    func leaveClickedCard(after id: AgentAttentionID) {
+        guard presentationMode == .clickedCard(id) else { return }
+        notchPresentation.backToQueue()
+    }
+
+    func moveSelection(_ direction: QueueRowSelection.Direction) {
+        guard presentationMode.showsAll else { return }
+        var selection = queueSelection
+        selection.move(direction, in: selectableRows)
+        if selection != queueSelection { queueSelection = selection }
+    }
+
+    /// Return on the selected row. Approvals and questions open as their clicked card; opening a
+    /// session from any other row is the hook #322 fills in.
+    func activateSelectedRow() {
+        guard presentationMode.showsAll, let selected = queueSelection.selected else { return }
+        switch QueueRowSelection.returnAction(for: selected) {
+        case let .openCard(id): openCard(id)
+        case .openSession: break
         }
     }
 
@@ -2503,7 +2581,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if mode == "spotlight-claude-question" {
             previewSpotlightAgent = .question(AgentCallIdentity(session: claudeSession, turn: "preview-turn", call: "toolu_preview"))
         }
-        if mode == "spotlight-approval" || mode == "spotlight-handed-back" {
+        if mode == "spotlight-approval" || mode == "spotlight-handed-back" || mode == "clicked-approval" || mode == "row-note" {
             // One request in the spotlight's own reading order: Codex's ask lifted from its tool input,
             // a command the card already shows, and a home-relative working directory.
             let handedBack = mode == "spotlight-handed-back"
@@ -2519,6 +2597,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             queue.recordReceipts([fetch], now: now)
             syncAgentQueueWithCodex(now: now)
             previewSpotlightAgent = .approval(CodexAttentionAdapter.approval(from: fetch).id)
+            if mode == "row-note", let id = previewSpotlightAgent {
+                rowNotes.record(.sentUnconfirmed, for: id, pending: rowNotePendingIDs)
+                queueSelection = QueueRowSelection(selected: id)
+            }
         }
         if mode.hasPrefix("spotlight-question") || mode.hasPrefix("spotlight-claude-") {
             let selected = agentQueue.items(at: now).first { $0.id == previewSpotlightAgent }?.question
