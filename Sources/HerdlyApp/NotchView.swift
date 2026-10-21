@@ -534,8 +534,8 @@ extension View {
 }
 
 /// A row's one off-path word (D17). "Failed" sits in the dark red well, the panel's only red (D14);
-/// "Handed back", "Waiting", and "Status unknown" are plain dim text with no well. Spoken through the
-/// row heading, so it is hidden from VoiceOver here.
+/// "Handed back", "Waiting", "Status unknown", and "Unreachable" (#322) are plain dim text with no
+/// well. Spoken through the row heading, so it is hidden from VoiceOver here.
 struct ExceptionWord: View {
     let exception: RowException
     var body: some View {
@@ -654,7 +654,8 @@ struct ApprovalKindWordView: View {
     }
 }
 
-/// The hover ground behind a queue row that opens as a card (#320): #1c1c1c with 5pt continuous
+/// The hover ground behind a queue row that opens as a card (#320) or a reachable result row that
+/// opens its session (#322): #1c1c1c with 5pt continuous
 /// corners, 6pt outside the row horizontally like the selection ring. Hover only highlights; it never
 /// opens, selects, or acts. Under Reduce Motion the ground appears without animation.
 struct CardRowHover: ViewModifier {
