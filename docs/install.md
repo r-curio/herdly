@@ -157,7 +157,7 @@ Herdly starts with default settings, an empty attention snapshot, and no Automat
 ## Known limitations
 
 - Exact desktop task focus is deferred: the notch hides whenever Codex desktop is foreground, even while a different thread is visible, and a desktop completion clears only on Dismiss or on Codex's own unread flag clearing.
-- Desktop approvals stay in Codex's native prompt; only direct CLI approvals offer Approve once and Deny, with a 30-second handoff.
+- Desktop approvals stay in Codex's native prompt; only direct CLI approvals offer Approve (allow once) and Deny, with a 30-second handoff.
 - Ghostty targeting covers one Codex session per unsplit tab with session-ID titles; split tabs report unavailable.
 - There is no global hotkey; keyboard users click the panel once, then Tab and Escape work.
 - Hook records and rollouts are scanned fully every two seconds with fixed size caps; very large histories are a known, deferred cost.

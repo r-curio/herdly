@@ -69,8 +69,8 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 | G2 | Two unsplit tabs in the same project, one `codex` session each. Complete a turn in tab A while tab B is focused. | A's completion presents; B stays unaffected. | |
 | G3 | **Open in Codex** on A's item. | Exactly tab A in its window is selected; the item is acknowledged by the verified Open (ADR 0016). | |
 | G4 | Split a tab and run a session in one pane. | Open in Codex raises Ghostty without selecting a tab or pane (ADR 0015); nothing is acknowledged. | |
-| G5 | Trigger a permission request in the CLI session and leave the tab. | Card with command, project and reason (when given), Approve once, Deny, Open in Codex, and a 30-second countdown that hovering does not extend. | |
-| G6 | Approve once. | Codex runs that one command; the next request asks again. | |
+| G5 | Trigger a permission request in the CLI session and leave the tab. | Card with command, project and reason (when given), Approve, Deny, Open, and a 30-second countdown that hovering does not extend. | |
+| G6 | Approve. | Codex runs that one command; the next request asks again. | |
 | G7 | Deny. | Codex reports the denial; nothing runs. | |
 | G8 | Let one expire. | At 30 s the row becomes Continue in Codex with only Open in Codex; Codex's native prompt is showing; nothing was approved. | |
 | G9 | Answer an expired one in Codex. | The row clears on Codex's recorded answer, not before. | |
