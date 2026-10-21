@@ -292,6 +292,14 @@ public struct CompletionPreview: Equatable, Sendable {
         /// `text` was shortened and the message was longer than `maximumFullCharacters`; `full` is its
         /// start, so the card says the rest is only in the agent.
         case cutAndCapped(full: String)
+
+        /// What "Show all" shows: nil for a message `text` already shows whole.
+        public var full: String? {
+            switch self {
+            case .whole: nil
+            case let .cut(full), let .cutAndCapped(full): full
+            }
+        }
     }
 
     public let text: String

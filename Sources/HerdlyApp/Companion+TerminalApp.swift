@@ -712,15 +712,16 @@ extension Companion {
         return ClaudeReplyRouting.target(ended: ended, inTurn: inTurn, route: route)
     }
 
-    func claudeReply(for outcome: AgentOutcome) -> ReplyProgress<AgentTurnIdentity> {
-        terminalApp.claudeReplies[outcome.id] ?? ReplyProgress(completion: outcome.id)
+    /// A Claude result card's reply, by its outcome; a fresh, ready record when it has sent nothing.
+    func claudeReply(for id: AgentTurnIdentity) -> ReplyProgress<AgentTurnIdentity> {
+        terminalApp.claudeReplies[id] ?? ReplyProgress(completion: id)
     }
 
     /// One Send on a Claude completion card: text and its submit in one write (`do script`, tmux's
     /// `send-keys` or Zellij's `write-chars`), after a fresh check.
     func sendClaudeReply(_ outcome: AgentOutcome, text: String) {
         guard !terminalApp.replying else { return }
-        let progress = claudeReply(for: outcome)
+        let progress = claudeReply(for: outcome.id)
         let current = agentQueue.snapshot.outcomes.first { $0.id == outcome.id }
         guard let current, let target = claudeReplyTarget(for: current) else {
             refresh(); return
@@ -768,7 +769,7 @@ extension Companion {
                 },
                 pause: { seconds in try? await Task.sleep(for: .seconds(seconds)) })
             terminalApp.replying = false
-            terminalApp.claudeReplies[outcome.id] = claudeReply(for: outcome).settling(run, at: Date().timeIntervalSince1970)
+            terminalApp.claudeReplies[outcome.id] = claudeReply(for: outcome.id).settling(run, at: Date().timeIntervalSince1970)
             refresh()
         }
     }

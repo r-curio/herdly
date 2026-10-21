@@ -273,10 +273,11 @@ struct NotchButton: View {
     }
 }
 
-/// The result card's reply field (#323, 9NU): one line the user types and sends to a finished session.
-/// Return in the field and Send do the same thing, and an empty or all-space draft sends nothing. Escape follows the panel's one Escape rule from the field (a
-/// clicked card steps back to the queue, otherwise the panel collapses) without dismissing
-/// anything. The caller owns the text and decides what sending means.
+/// The result card's reply field (#323, 9NU): one line the user types and sends to a finished
+/// session. Return in the field and Send do the same thing, and an empty or all-space draft sends
+/// nothing. Escape follows the panel's one Escape rule from the field (a clicked card steps back to
+/// the queue, otherwise the panel collapses) without dismissing anything. The caller owns the text
+/// and decides what sending means.
 struct DraftField: View {
     let placeholder: String
     @Binding var text: String
@@ -508,11 +509,11 @@ struct NotchDisclosure<Content: View>: View {
     /// Names the item for VoiceOver, so the spoken label follows the visible one.
     var subject: String? = nil
     var chevron: Chevron = .leading
-    /// Opens and closes without animation (Reduce Motion).
-    var reduceMotion = false
     @Binding var expanded: Bool
     @ViewBuilder let content: () -> Content
     @FocusState private var focused: Bool
+    /// The system setting, as the controls window reads it; the model's `reduceMotion` mirrors the same one.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var currentTitle: String {
         guard expanded else { return title }
         if let expandedTitle { return expandedTitle }
@@ -1800,7 +1801,7 @@ struct Notch: View {
                     .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
             }
             if let prompt = details?.originalPrompt {
-                NotchDisclosure(title: "Your prompt", subject: subject, chevron: .trailing, reduceMotion: model.reduceMotion,
+                NotchDisclosure(title: "Your prompt", subject: subject, chevron: .trailing,
                                 expanded: disclosure("result-prompt:\(item.id)")) {
                     ResultText(text: prompt)
                 }
@@ -1831,20 +1832,19 @@ struct Notch: View {
     @ViewBuilder
     private func resultMessage(_ preview: CompletionPreview, item: AgentAttentionItem, subject: String) -> some View {
         let key = "result-message:\(item.id)"
-        switch (preview.extent, openDisclosures.contains(key)) {
-        case let (.cut(full), true):
+        if openDisclosures.contains(key), let full = preview.extent.full {
             ResultMessageScroll(text: full)
-        case let (.cutAndCapped(full), true):
-            ResultMessageScroll(text: full)
-            Text("Shortened; the full message is in \(item.session.source.displayName).")
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                .fixedSize(horizontal: false, vertical: true)
-        default:
+            if case .cutAndCapped = preview.extent {
+                Text("Shortened; the full message is in \(item.session.source.displayName).")
+                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
             ResultText(text: preview.text)
         }
         if preview.truncated {
             NotchDisclosure(title: "Show all", expandedTitle: "Show less", subject: subject, chevron: .trailing,
-                            reduceMotion: model.reduceMotion, expanded: disclosure(key)) { EmptyView() }
+                            expanded: disclosure(key)) { EmptyView() }
         }
     }
 
@@ -1854,13 +1854,11 @@ struct Notch: View {
     /// reason line. A send that leaves `.ready` folds the card; a refusal keeps the text.
     @ViewBuilder
     private func resultReplyField(_ outcome: AgentOutcome, subject: String) -> some View {
-        if model.resultCardOffersReply(outcome) {
+        if model.resultCardOffersReply(outcome), let reply = model.resultReply(outcome.id) {
             let key = "reply:\(outcome.session.sourceScope):\(outcome.session.session):\(outcome.turn)"
-            let route = outcome.session.source == .claude ? "Types a follow-up prompt into this session's tab."
-                : "Sends a follow-up prompt to this session."
             DraftField(placeholder: Self.replyPlaceholder, text: draft(key), sendTitle: "Send",
                        fieldLabel: "Reply to \(subject)", sendLabel: "Send reply to \(subject)",
-                       hint: "\(route) Sending does not mark the result as checked.", onEscape: model.escape) {
+                       hint: reply.hint, onEscape: model.escape) {
                 if model.sendResultReply(outcome, text: drafts[key] ?? "") != .ready { drafts[key] = nil }
             }
         }
@@ -1916,14 +1914,13 @@ struct Notch: View {
         // session, Dismiss (or Remove) sits before the age, and an unreachable row's reason line sits
         // under the name. Its body, reply field and preview stay on the spotlight card.
         let resultRow = inQueue && !spotlit && item.kind.opensSession
-        let rowReading = resultRow ? model.resultRowReading(item.session) : ResultRowReading(target: .reachable, line: nil)
-        let rowTarget = rowReading.target
         // Whether Approve and Deny are this card's to offer; one rule with the decide path.
         let decidable = spotlit && approvalRow && model.canDecide(item)
         // #323: a result on its own card (the pop). Its header line opens the session like a result row.
         let resultCard = spotlit && item.outcome != nil
-        // One reading for the card's header click and the line its body shows, so the two never disagree.
-        let cardReading = resultCard ? model.resultRowReading(item.session) : nil
+        // One reading of the session for a result row or card: its click, word, reason line and Open
+        // all read it, so they never disagree. Nil for every other row.
+        let sessionReading = resultRow || resultCard ? model.resultRowReading(item.session) : nil
         VStack(alignment: .leading, spacing: inQueue ? bodySpacing - 5 : bodySpacing) {
             // Every row is headed by its session's mark and name; the mark steps only while the
             // session is working, and a word appears only when the row is off its normal path.
@@ -1945,15 +1942,15 @@ struct Notch: View {
                         runningOpener(item, open: runningOpen) {
                             headerLine(item, working: working, countdown: nil)
                         }
-                    } else if resultRow {
+                    } else if resultRow, let reading = sessionReading {
                         // The control sits outside the row's own button, so the two never nest.
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            sessionOpener(item, target: rowTarget) {
-                                headerLine(item, working: working, countdown: nil, target: rowTarget, showsAge: false)
+                            sessionOpener(item, target: reading.target) {
+                                headerLine(item, working: working, countdown: nil, target: reading.target, showsAge: false)
                             }
                             if rowNote(item)?.offersOpen == true {
                                 // "Not delivered · reply in Codex": Open beside the note, as on an approval row.
-                                resultOpen(item, subject: subject, codexOpen: codexOpen, target: rowTarget)
+                                resultOpen(item, subject: subject, codexOpen: codexOpen, target: reading.target)
                             }
                             resultRowControl(item, subject: subject)
                             rowAge(item)
@@ -1967,9 +1964,9 @@ struct Notch: View {
                             claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle)
                             rowAge(item)
                         }
-                    } else if resultCard {
+                    } else if resultCard, let reading = sessionReading {
                         // 8DW "New ones": clicking the pop opens the session, by the result row's rule.
-                        resultCardHeaderOpener(item, target: cardReading?.target ?? .reachable) {
+                        resultCardHeaderOpener(item, target: reading.target) {
                             headerLine(item, working: working, countdown: nil)
                         }
                     } else if spotlit && approvalRow {
@@ -1986,7 +1983,7 @@ struct Notch: View {
                     }
                 }
                 .frame(minHeight: inQueue || resultCard ? 26 : nil)
-                .modifier(CardRowHover(id: item.id, active: opensAsCard(item) || (resultRow && rowTarget == .reachable),
+                .modifier(CardRowHover(id: item.id, active: opensAsCard(item) || (resultRow && sessionReading?.target == .reachable),
                                        hovered: $hoveredCardRow,
                                        reduceMotion: model.reduceMotion))
             }
@@ -2006,12 +2003,12 @@ struct Notch: View {
                 if spotlit {
                     questionCardBody(item, subject: subject, herdr: herdr, codexOpen: codexOpen)
                 }
-            } else if resultCard {
-                resultCardBody(item, subject: subject, reading: cardReading ?? rowReading, codexOpen: codexOpen)
-            } else if resultRow {
+            } else if resultCard, let reading = sessionReading {
+                resultCardBody(item, subject: subject, reading: reading, codexOpen: codexOpen)
+            } else if resultRow, let reading = sessionReading {
                 // Why Open is not offered (an unreachable row), or why the last click did not open,
                 // under the name: the cards' own line, never a greyed button.
-                resultRowLine(item, reading: rowReading)
+                resultRowLine(item, reading: reading)
                     .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
                     .padding(.bottom, 4)
             } else {

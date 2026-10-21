@@ -72,6 +72,14 @@ extension Companion {
             }
         }
 
+        /// The field's VoiceOver hint: where the text goes, and that sending clears nothing.
+        var hint: String {
+            switch self {
+            case .codex: "Sends a follow-up prompt to this session. Sending does not mark the result as checked."
+            case .claude: "Types a follow-up prompt into this session's tab. Sending does not mark the result as checked."
+            }
+        }
+
         var note: RowNote? {
             switch self {
             case let .codex(_, progress): RowNote.reply(progress, agent: .codex)
@@ -83,7 +91,7 @@ extension Companion {
     func resultReply(_ turn: AgentTurnIdentity) -> ResultReply? {
         switch turn.session.source {
         case .codex: codexTurn(turn).map { .codex($0, reply(for: $0)) }
-        case .claude: .claude(terminalApp.claudeReplies[turn] ?? ReplyProgress(completion: turn))
+        case .claude: .claude(claudeReply(for: turn))
         }
     }
 
