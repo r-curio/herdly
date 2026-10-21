@@ -63,7 +63,7 @@ _Avoid_: Keystrokes, injection
 
 **Clicked card**:
 An approval request or question request the user opened from the attention queue by clicking its row, shown alone in place of the queue with a way back to it. It has no timed close, never moves an approval's deadline, and ends on Escape, the way back, an action, the end of interaction, or its request leaving the queue; it never shows a different item.
-_Avoid_: Spotlight (that is the automatic three-second card), detail view
+_Avoid_: Spotlight (that is the automatic card that closes after the card-open time, 3 seconds by default), detail view
 
 **Row note**:
 The short delivery line a queue row carries after the user approved, denied, or answered it in the notch: sending, confirmed received, sent but unconfirmed, not delivered, or waiting for Codex. It belongs to one exact request, says only what Herdly observed about delivery, and clears with that request's resolution evidence, never returning afterwards.
