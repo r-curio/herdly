@@ -159,3 +159,14 @@ private func listingDirectory() throws -> URL {
     // A reused listing returns the same records.
     #expect(HookEventListing.listing(in: root).map { Array($0.records) } == Array(listing.records))
 }
+
+@Test func aSharedReadingIsReusedOnlyWhenItBeganAfterTheScanAndIsFresh() {
+    // Began after this scan read the frontmost app, and recent: reused.
+    #expect(SharedReading.reusable(takenAt: 100.2, notBefore: 100, now: 101, maxAge: 1.5))
+    #expect(SharedReading.reusable(takenAt: 100, notBefore: 100, now: 101, maxAge: 1.5))
+    // Began before the frontmost reading it would be combined with: read again.
+    #expect(!SharedReading.reusable(takenAt: 99.9, notBefore: 100, now: 100.1, maxAge: 1.5))
+    // Too old, at the boundary too.
+    #expect(!SharedReading.reusable(takenAt: 100, notBefore: 100, now: 101.5, maxAge: 1.5))
+    #expect(!SharedReading.reusable(takenAt: .nan, notBefore: 100, now: 100, maxAge: 1.5))
+}

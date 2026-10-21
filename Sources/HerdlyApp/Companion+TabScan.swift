@@ -57,6 +57,7 @@ extension Companion {
         let livePIDs = tmuxRead?.livePIDs ?? []
         let others = otherTabHosts
         // ADR 0016: frontmost comes from macOS as the scan starts.
+        let scanStart = Date().timeIntervalSince1970
         let frontmost = TerminalApps.frontmostHost()
         let terminalPID = frontmost == .terminalApp ? TerminalAppNavigation.pid() : nil
         Task { @MainActor in
@@ -65,7 +66,8 @@ extension Companion {
                                                         [TmuxSessionProcess], Set<Int>?,
                                                         TerminalVisibilityReading<String>) in
                 let claude = claudeRows.mapValues(ClaudeTabProcess.read)
-                let reads = TerminalTabReads.take(others: others, claudeTTYs: Set(claude.values.compactMap(\.tty)), second: false)
+                let reads = TerminalTabReads.take(others: others, claudeTTYs: Set(claude.values.compactMap(\.tty)), second: false,
+                                                  scheduledSince: scanStart)
                 let processes = livePIDs.map { pid in
                     let chain = HerdrProcessTree.ancestry(of: pid)
                     return TmuxSessionProcess(tty: chain.first?.tty, ancestorCommands: chain.map(\.command))
