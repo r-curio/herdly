@@ -695,7 +695,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// `--preview-queue` modes that open the sample item in the spotlight.
     static let spotlightPreviewModes: Set<String> = ["spotlight", "spotlight-approval", "spotlight-handed-back",
                                                        "spotlight-question", "spotlight-question-edit", "spotlight-question-review",
-                                                       "spotlight-question-long", "spotlight-question-unavailable", "spotlight-claude-question", "spotlight-claude-multiselect"]
+                                                       "spotlight-question-long", "spotlight-question-unavailable", "spotlight-claude-question", "spotlight-claude-multiselect",
+                                                       "spotlight-result"]
     private var targetFrame: CGRect = .zero
     /// The frame animation in flight, so a refresh mid-animation does not mistake it for drift.
     private var frameAnimation: UUID?
@@ -1523,7 +1524,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let newAgentItems = currentAgent.filter { !previousAgent.contains($0.id) }
             let newAgentOutcomes = newAgentItems.compactMap(\.outcome)
             let newAgentQuestions = newAgentItems.compactMap(\.question)
-            let freshAgentOutcomes = newAgentOutcomes.filter { !$0.uncertain && $0.arrivedAt >= Companion.launchedAt }
+            // #323: a restored or pre-launch result goes to the queue without a card or a sound.
+            let freshAgentOutcomes = newAgentOutcomes.filter { ResultPop.isFresh($0, launchedAt: Companion.launchedAt) }
             let freshAgentQuestions = newAgentQuestions.filter { $0.arrivedAt >= Companion.launchedAt }
             let newAgentRequests = newAgentItems.filter {
                 ($0.kind == .actionableApproval || $0.kind == .handedBackApproval)
@@ -1855,7 +1857,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                             now: now, legacyPopup: attention.expanded, queued: liveAgentIDs)
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
-        case "expanded", "empty-expanded", "empty-not-connected", "row-note": presentationMode = .queue
+        case "expanded", "empty-expanded", "empty-not-connected", "row-note", "row-note-reply": presentationMode = .queue
         case "clicked-approval", "clicked-approval-long", "clicked-claude-approval":
             let mode = previewSpotlightAgent.map(NotchPresentationMode.clickedCard) ?? .collapsed
             if presentationMode != mode { presentationMode = mode }
@@ -2431,6 +2433,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func codexCompletion(for outcome: AgentOutcome) -> AttentionCompletion? { codexTurn(outcome.identity) }
+    func codexCompletion(for turn: AgentTurnIdentity) -> AttentionCompletion? { codexTurn(turn) }
 
     /// One Send on a completion card. The reply starts a new turn on that exact thread through the
     /// daemon, after re-reading the queue and the target as they are right now. Sending does not
@@ -2740,6 +2743,29 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                          now: now)
         previewSpotlightAgent = .outcome(CodexAttentionAdapter.outcome(from: completion).id)
         if mode.hasPrefix("spotlight-question") { previewSpotlightAgent = .question(CodexAttentionAdapter.question(from: question).id) }
+        if mode == "spotlight-result" || mode == "row-note-reply" {
+            // #323: a CLI result's card (9NU): a message past five lines, the turn's prompt, and a
+            // reachable reply field; `row-note-reply` shows its row after a send, with the reply's note.
+            let notes = UUID(uuidString: "2B7C9E10-3D4F-4A5B-8C6D-0000000000F6")!
+            let result = AttentionCompletion(source: .cli, session: notes, turn: UUID(), arrivedAt: now - 1)
+            queue.apply(completions: [completion, result], running: [running], now: now)
+            let project = NSHomeDirectory() + "/Developer/herdly"
+            threadNames[notes] = "Release notes"
+            gitBranches[project] = "docs/release-notes"
+            spotlightContexts[.completion(result.id)] = SpotlightRecordContext(
+                workingDirectory: project, prompt: "Draft the 1.4 release notes from the merged PRs since 1.3.")
+            let message = ["Drafted the 1.4 notes in docs/release-notes.md: three fixes, the new sprite picker, and the tmux",
+                           "support marked as preview. I left the version date blank for you to fill in.",
+                           "", "Fixes:", "- Snapshots write atomically.", "- Approval deadlines no longer drift.",
+                           "- Question cards keep their drafts.", "", "Run `make release-notes` to regenerate."].joined(separator: "\n")
+            if let preview = CompletionPreview(message) { completionPreviews[result.id] = .available(preview) }
+            syncAgentQueueWithCodex(now: now)
+            if mode == "row-note-reply" {
+                replyProgress[result.id] = SessionReplyProgress(completion: result.id)
+                    .startingSend(text: "Use today's date and commit it", at: now).recordingSent(at: now)
+            }
+            previewSpotlightAgent = .outcome(CodexAttentionAdapter.outcome(from: result).id)
+        }
         if mode == "spotlight-claude-multiselect" {
             let sample = AgentQuestion(session: claudeSession, turn: "preview-multi", call: "toolu_multi", arrivedAt: now,
                                        prompts: [QuestionPrompt(header: "Checks", question: "Which checks should run before handing this back?",

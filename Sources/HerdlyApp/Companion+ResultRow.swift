@@ -31,7 +31,7 @@ extension Companion {
     /// nothing (an unreachable result row, or a row no longer on screen), so the key goes on.
     @discardableResult
     func activateRow(_ id: AgentAttentionID) -> Bool {
-        guard let item = selectableItems.first(where: { $0.id == id }) else { return false }
+        guard let item = selectableItems.first(where: { $0.id == id }) else { return activateSpotlitResult(id) }
         let target = item.kind.opensSession ? resultRowReading(item.session).target : .reachable
         switch QueueRowSelection.action(for: item, target: target) {
         case let .openCard(id)?:
@@ -45,6 +45,26 @@ extension Companion {
         case nil:
             return false
         }
+    }
+
+    /// A click on the popped result card's header line (#323, 8DW "New ones"): the same Open as the
+    /// queue's result row, through the same reading, so an unreachable session does nothing. Only the
+    /// result card on screen as the spotlight is reached here; queue rows keep `selectableItems`.
+    private func activateSpotlitResult(_ id: AgentAttentionID) -> Bool {
+        guard case .agentSpotlight(id) = presentationMode,
+              let item = orderedAgentAttentionItems.first(where: { $0.id == id }), item.outcome != nil,
+              case let .openSession(session)? = QueueRowSelection.action(for: item, target: resultRowReading(item.session).target)
+        else { return false }
+        openSessionFromRow(session)
+        return true
+    }
+
+    /// A send from the result card that took its reply out of `.ready` folds the card (#323): the
+    /// spotlight collapses as Escape's does, nothing is dismissed, and the result row carries the
+    /// reply's note from then on. A refused send stays `.ready` and keeps the card and its text.
+    func foldResultCard(_ id: AgentAttentionID, before: SessionReplyPhase, after: SessionReplyPhase) {
+        guard ResultCardReply.foldsCard(before: before, after: after), presentationMode.singleCard == id else { return }
+        collapse()
     }
 
     /// Opens a result row's session, then folds the panel back once the Open has finished (8DW),
