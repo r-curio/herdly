@@ -293,6 +293,9 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 - **Disclosure:** "Show full request" in 11pt text gray reveals the long text inline. A working row's "Show full prompt" instead grows the row's own two-line prompt to the full text in place and reads "Show less" while open, so the prompt is never shown twice.
 - **Controls:** a row of wells at 6pt gaps beneath the details.
 - **Foot (full queue only):** the keyboard hint in 10pt dim, 2pt above the 14pt bottom pad.
+- **Row note:** after the user approves, denies, or answers from the notch, the row's dim "· project @ branch" (a question row's dim place) is replaced by the note in the same 11pt dim ("Sending…", "Claude got your approval", "Sent, not confirmed", "Not delivered · answer in Claude", "Sent, waiting for Codex") until that request clears. "Not delivered" adds the row's Open well beneath the header. VoiceOver reads the note where it reads the place.
+- **Selected row (keyboard):** Up and Down arrows move one selection over the open queue's rows in reading order (a closed working fold is skipped). The selected row carries the focus ring's vocabulary around the whole row: 1.5pt ink at 90%, 6pt continuous corners, 6pt outside horizontally and 4pt vertically; VoiceOver adds the selected trait. Return on a selected approval or question opens its clicked card. Tab still moves through controls.
+- **Clicked card:** clicking an approval or question row's header opens that row alone with the spotlight body (see Spotlight detail) under a "‹ Queue" well at the top of the panel; no stepper, no arrows to other items. Approve, Deny, or Send returns to the queue at once. Escape returns to the queue first, then collapses.
 - **Empty queue:** with nothing listed, the open queue holds one row in the same grammar (`EmptyQueueReading`). The unlit sprite leads a 12pt semibold ink title. "Nothing running" is followed by a dim line naming the connected sources ("Listening for Codex and Claude."), or by no line while setup is still being checked. "Not connected" appears only once both setups are checked and neither is connected; a text-gray line ("Codex and Claude aren’t reporting to Herdly yet.") and an Open Controls well follow it. The strip's spoken label reads the same title.
 
 ### Panel motion
@@ -300,6 +303,7 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 - **Rows:** open-queue rows keep their identity, so a reorder slides each row to its new place over 0.28 s on a smooth curve with no bounce. A new row fades in from 6pt above at 98% scale; a leaving row fades and shrinks toward its top edge while the rows below close the gap. Group headings move with their rows. Under Reduce Motion rows and headings only crossfade over 0.15 s, with no offset or scaling.
 - **Hover hold:** the panel treats the pointer as inside for 0.3 s after it leaves, so a slip off the edge does not snap it shut.
 - **Spotlight:** a new completion or actionable approval opens only its own row for 3 s; interaction holds it open and the original deadline applies afterward.
+- **Clicked card:** opening a card from the queue, and ‹ Queue or Escape back, use the same row motion: the other rows leave and return with the row transition, and the frame resizes on the panel's curve. Under Reduce Motion both are the 0.15 s crossfade and an unanimated resize.
 
 ## Do's and Don'ts
 
