@@ -642,12 +642,6 @@ struct ApprovalCommandBox: View {
     }
 }
 
-/// What a single approval card's header adds after the place (#320): its kind word, if any, and then
-/// always its source.
-struct ApprovalCardHeader {
-    let kind: ApprovalCardKindWord?
-}
-
 /// A single approval card's kind word (#320): "Approve" in a well pill while it can be decided here,
 /// then the queue's own "Handed back". The row heading already speaks the state.
 struct ApprovalKindWordView: View {
@@ -1027,12 +1021,12 @@ struct Notch: View {
                     }
                     Spacer(minLength: 6)
                     if item.session.source == .codex, codexOpen {
-                        NotchButton(title: "Open", emphasized: true) { model.openAgent(item.session) }
+                        NotchButton(title: Self.rowOpenTitle, emphasized: true) { model.openAgent(item.session) }
                             .disabled(model.openingTask)
                             .accessibilityLabel("Open Session: \(subject)")
                             .accessibilityHint("Open this session in Codex.")
                     }
-                    claudeReturnControl(item, subject: subject, emphasized: true, openTitle: "Open")
+                    claudeReturnControl(item, subject: subject, emphasized: true, openTitle: Self.rowOpenTitle)
                     claudeRemoveControl(item, subject: subject)
                 }
                 .padding(.top, 4)
@@ -1058,6 +1052,9 @@ struct Notch: View {
     }
 
     private static let runningLabelWidth: CGFloat = 40
+    /// The plain "Open" a queue row offers on its own line: an opened running row (#319) and an
+    /// approval row's "Not delivered" note (#320). Cards name theirs from `ApprovalCardReading`.
+    private static let rowOpenTitle = "Open"
     private static let runningLabelGap: CGFloat = 10
 
     /// One labelled detail line: an 11pt dim label in a 40pt column, then the 11pt mono value at a
@@ -1164,34 +1161,28 @@ struct Notch: View {
             } else if let reason = model.terminalOpenLine(item.session) {
                 terminalOpenLine(item, reason: reason)
             }
-            if item.kind == .handedBackApproval {
-                HStack(spacing: 6) {
-                    Spacer(minLength: 6)
-                    approvalOpenControl(item, stage: .handedBack, subject: subject, codexOpen: codexOpen)
-                }
-            } else {
-                // `decidable` (`Companion.canDecide`) has no deadline; the card's own clock alone
-                // disables Approve and Deny at the deadline (`ApprovalCardReading`), and the decide
-                // path re-checks the request, deadline included, before writing anything.
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    if let reading = ApprovalCardReading(item, decidable: decidable, now: context.date.timeIntervalSince1970) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            if let countdown = reading.countdown { ApprovalCountdownRow(countdown: countdown) }
-                            HStack(spacing: 6) {
-                                if reading.showsDecision, let approval = item.approval {
-                                    let request = "\(item.session.source.displayName) \(Self.requestKind(approval)) request"
-                                    NotchButton(title: "Approve", emphasized: true) { model.decideAgent(approval, as: .allowOnce) }
-                                        .disabled(!reading.decisionEnabled)
-                                        .accessibilityLabel("Approve this request once: \(subject)")
-                                        .accessibilityHint("Approves this \(request) once.")
-                                    NotchButton(title: "Deny") { model.decideAgent(approval, as: .deny) }
-                                        .disabled(!reading.decisionEnabled)
-                                        .accessibilityLabel("Deny: \(subject)")
-                                        .accessibilityHint("Denies this \(request).")
-                                }
-                                Spacer(minLength: 6)
-                                approvalOpenControl(item, stage: reading.stage, subject: subject, codexOpen: codexOpen)
+            // Everything below reads one `ApprovalCardReading` from the card's own clock. `decidable`
+            // (`Companion.canDecide`) has no deadline; the reading alone disables Approve and Deny at
+            // the deadline, and the decide path re-checks the request, deadline included, before
+            // writing anything.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                if let reading = ApprovalCardReading(item, decidable: decidable, now: context.date.timeIntervalSince1970) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if let countdown = reading.countdown { ApprovalCountdownRow(countdown: countdown) }
+                        HStack(spacing: 6) {
+                            if reading.showsDecision, let approval = item.approval {
+                                let request = "\(item.session.source.displayName) \(Self.requestKind(approval)) request"
+                                NotchButton(title: "Approve", emphasized: true) { model.decideAgent(approval, as: .allowOnce) }
+                                    .disabled(!reading.decisionEnabled)
+                                    .accessibilityLabel("Approve this request once: \(subject)")
+                                    .accessibilityHint("Approves this \(request) once.")
+                                NotchButton(title: "Deny") { model.decideAgent(approval, as: .deny) }
+                                    .disabled(!reading.decisionEnabled)
+                                    .accessibilityLabel("Deny: \(subject)")
+                                    .accessibilityHint("Denies this \(request).")
                             }
+                            Spacer(minLength: 6)
+                            approvalOpenControl(item, reading: reading, subject: subject, codexOpen: codexOpen)
                         }
                     }
                 }
@@ -1206,13 +1197,12 @@ struct Notch: View {
     /// back (emphasized, as the card's one action). VoiceOver reads "Open Session: <subject>" either way;
     /// Open still revalidates its exact target.
     @ViewBuilder
-    private func approvalOpenControl(_ item: AgentAttentionItem, stage: ApprovalCardStage, subject: String,
+    private func approvalOpenControl(_ item: AgentAttentionItem, reading: ApprovalCardReading, subject: String,
                                      codexOpen: Bool) -> some View {
-        let title = stage.openTitle(for: item.session.source)
-        let emphasized = stage == .handedBack
+        let handedBack = reading.stage == .handedBack
         if item.session.source == .codex, codexOpen {
-            NotchButton(title: title, emphasized: emphasized) {
-                if stage != .handedBack, let approval = item.approval {
+            NotchButton(title: reading.openTitle, emphasized: handedBack) {
+                if !handedBack, let approval = item.approval {
                     model.openAgentApproval(approval)
                 } else {
                     model.openAgent(item.session)
@@ -1220,9 +1210,9 @@ struct Notch: View {
             }
             .disabled(model.openingTask)
             .accessibilityLabel("Open Session: \(subject)")
-            .accessibilityHint(stage == .handedBack ? "Open this session in Codex." : "Hands this request back to Codex's own prompt.")
+            .accessibilityHint(handedBack ? "Open this session in Codex." : "Hands this request back to Codex's own prompt.")
         }
-        claudeReturnControl(item, subject: subject, emphasized: emphasized, openTitle: title)
+        claudeReturnControl(item, subject: subject, emphasized: handedBack, openTitle: reading.openTitle)
     }
 
     /// The exact turn's working directory, home shortened to `~`; hover and Copy Path give the full path.
@@ -1559,14 +1549,19 @@ struct Notch: View {
                                 headerLine(item, folded: false, working: working, earlierOpen: earlierOpen, countdown: nil,
                                            showsAge: false)
                             }
-                            claudeReturnControl(item, subject: subject, openTitle: "Open")
+                            claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle)
                             rowAge(item)
+                        }
+                    } else if spotlit && approvalRow {
+                        // The card header reads the same `ApprovalCardReading` as the card body below.
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            headerLine(item, folded: false, working: working, earlierOpen: earlierOpen, countdown: nil,
+                                       card: ApprovalCardReading(item, decidable: decidable,
+                                                                 now: context.date.timeIntervalSince1970))
                         }
                     } else {
                         cardOpener(item) {
-                            headerLine(item, folded: folded, working: working, earlierOpen: earlierOpen, countdown: nil,
-                                       card: spotlit && approvalRow
-                                           ? ApprovalCardHeader(kind: ApprovalCardKindWord(item, decidable: decidable)) : nil)
+                            headerLine(item, folded: folded, working: working, earlierOpen: earlierOpen, countdown: nil)
                         }
                     }
                 }
@@ -1777,7 +1772,7 @@ struct Notch: View {
     /// neither. With `showsAge` false the caller draws the age lane, putting a row note's Open
     /// before it.
     private func headerLine(_ item: AgentAttentionItem, folded: Bool, working: Bool, earlierOpen: Binding<Bool>,
-                            countdown: ApprovalCountdown?, card: ApprovalCardHeader? = nil,
+                            countdown: ApprovalCountdown?, card: ApprovalCardReading? = nil,
                             showsAge: Bool = true) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if folded {
@@ -1791,8 +1786,8 @@ struct Notch: View {
                 if let countdown {
                     SecondsLeftPill(countdown: countdown)
                 } else if let card {
-                    if let kind = card.kind { ApprovalKindWordView(word: kind) }
-                    Text(QueueRowPresentation.cardSource(item.session))
+                    if let kind = card.kindWord { ApprovalKindWordView(word: kind) }
+                    Text(card.source)
                         .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
                         .lineLimit(1).fixedSize()
                         .accessibilityLabel(item.session.sourceLabel)

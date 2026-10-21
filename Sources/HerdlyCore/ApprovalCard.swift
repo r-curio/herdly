@@ -14,7 +14,7 @@ public enum ApprovalCardStage: Equatable, Sendable {
     case handedBack
 
     /// The card stage of an approval row; nil for every other row.
-    public init?(_ item: AgentAttentionItem, now: Double) {
+    init?(_ item: AgentAttentionItem, now: Double) {
         guard let approval = item.approval else { return nil }
         switch item.kind {
         case .handedBackApproval:
@@ -27,20 +27,20 @@ public enum ApprovalCardStage: Equatable, Sendable {
         }
     }
 
-    public var countdown: ApprovalCountdown? {
+    var countdown: ApprovalCountdown? {
         if case let .live(countdown) = self { return countdown }
         return nil
     }
 
     /// Approve and Deny can be pressed.
-    public var offersDecision: Bool { countdown != nil }
+    var offersDecision: Bool { countdown != nil }
 
     /// Approve and Deny are drawn, pressable or not. A handed-back card offers only Open.
-    public var showsDecisionControls: Bool { self != .handedBack }
+    var showsDecisionControls: Bool { self != .handedBack }
 
     /// Open's visible label. Beside Approve and Deny it is plain "Open"; once handed back it names
     /// the agent the user now decides in. VoiceOver keeps "Open Session: <subject>" either way.
-    public func openTitle(for source: AgentSource) -> String {
+    func openTitle(for source: AgentSource) -> String {
         self == .handedBack ? "Open in \(source.displayName)" : "Open"
     }
 }
@@ -58,7 +58,7 @@ public enum ApprovalCardKindWord: Equatable, Sendable {
     /// with a verified live helper); otherwise none, since the request is decided in the agent. Nil
     /// for every other row. It reads the row's kind, not a clock, so a request past its deadline
     /// keeps "Approve" until its hand-back is recorded.
-    public init?(_ item: AgentAttentionItem, decidable: Bool) {
+    init?(_ item: AgentAttentionItem, decidable: Bool) {
         switch item.kind {
         case .handedBackApproval: self = .exception(.handedBack)
         case .actionableApproval where decidable: self = .approve
@@ -87,6 +87,9 @@ public struct ApprovalCardReading: Equatable, Sendable {
     /// Approve and Deny can be pressed.
     public let decisionEnabled: Bool
     public let openTitle: String
+    /// The header's dim source word after the kind ("CLI", "Desktop", "Claude"); queue rows name no
+    /// source (D17).
+    public let source: String
 
     public var countdown: ApprovalCountdown? { stage.countdown }
 
@@ -98,5 +101,12 @@ public struct ApprovalCardReading: Equatable, Sendable {
         showsDecision = decidable && stage.showsDecisionControls
         decisionEnabled = showsDecision && stage.offersDecision
         openTitle = stage.openTitle(for: item.session.source)
+        source = Self.source(of: item.session)
+    }
+
+    /// "CLI" or "Desktop" for Codex, "Claude" for Claude. A desktop request reaches the queue (its
+    /// decision stays native), so its card names it too.
+    static func source(of session: AgentSessionIdentity) -> String {
+        session.source == .claude ? "Claude" : (session.surface == .cli ? "CLI" : "Desktop")
     }
 }

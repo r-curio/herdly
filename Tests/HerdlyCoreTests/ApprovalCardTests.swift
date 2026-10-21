@@ -108,10 +108,12 @@ private func approvalRow(_ session: AgentSessionIdentity, readAt: Double) -> Age
 }
 
 @Test func aCardNamesItsSourceInOneShortWord() {
-    #expect(QueueRowPresentation.cardSource(codexCLI) == "CLI")
+    #expect(ApprovalCardReading.source(of: codexCLI) == "CLI")
     // A desktop request reaches the queue (its decision stays native), so its card names it too.
-    #expect(QueueRowPresentation.cardSource(codexDesktop) == "Desktop")
-    #expect(QueueRowPresentation.cardSource(claude) == "Claude")
+    #expect(ApprovalCardReading.source(of: codexDesktop) == "Desktop")
+    #expect(ApprovalCardReading.source(of: claude) == "Claude")
+    // The drawn card reads its source from its reading.
+    #expect(approvalRow(claude, readAt: 110).flatMap { ApprovalCardReading($0, decidable: true, now: 110) }?.source == "Claude")
 }
 
 @Test func theApprovePillShowsOnlyWhileTheRequestCanBeDecidedHere() throws {
