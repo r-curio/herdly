@@ -117,6 +117,14 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
         return next
     }
 
+    /// Forgets every unsent selection, keeping drafts and sent answers. Used when the card's route
+    /// changed after the user selected, so a selection is never sent by a route it was not made on.
+    public func clearingSelections() -> QuestionAnswerProgress {
+        var next = self
+        next.selected = [:]
+        return next
+    }
+
     /// Daemon path: keeps a non-last question's answer without sending anything and moves on to the
     /// next question. The whole call is sent as one response after the last answer.
     public func recordingDraft(question index: Int, answer: ChosenAnswer) -> QuestionAnswerProgress {

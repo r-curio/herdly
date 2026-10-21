@@ -254,6 +254,7 @@ extension Companion {
             guard AppServerAnswerPolicy.rejection(for: current, book: daemonBook, progress: progress,
                                                   question: index, answer: answer) == nil else { refresh(); return }
             answerProgress[question.id] = progress.selecting(question: index, answer: answer, revisesDrafts: true)
+            selectionRoutes[question.id] = route
         case .ghosttyRelay, .herdrRelay, .terminalRelay:
             guard showsOptionControls(for: question), case let .option(option) = answer,
                   QuestionAnswerPolicy.rejection(for: current, ghosttyEnabled: ghosttyEnabled || route == .terminalRelay
@@ -262,6 +263,7 @@ extension Companion {
                 refresh(); return
             }
             answerProgress[question.id] = progress.selecting(question: index, answer: answer)
+            selectionRoutes[question.id] = route
         case .daemonAnswered, .relayUnavailable, .desktopReadOnly:
             refresh(); return
         }
@@ -276,7 +278,16 @@ extension Companion {
     func sendQuestionAnswer(_ question: AttentionQuestion, question index: Int, typed: String? = nil) {
         let progress = progress(for: question)
         let typedAnswer = typed.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : ChosenAnswer.text($0) }
-        switch route(for: question) {
+        let route = route(for: question)
+        // A selection made on another route (the daemon let go, or a new request arrived) is dropped,
+        // not sent: the user selects again on the card as it is now.
+        if progress.selected[index] != nil, selectionRoutes[question.id] != route {
+            if answerProgress[question.id] != nil { answerProgress[question.id] = progress.clearingSelections() }
+            selectionRoutes[question.id] = nil
+            refresh()
+            return
+        }
+        switch route {
         case let .daemon(request):
             guard let answer = typedAnswer ?? progress.selected[index] else { refresh(); return }
             answerThroughDaemon(question, question: index, answer: answer, expectedRequest: request)
@@ -504,6 +515,8 @@ extension Companion {
         let waiting = Set(queue.items.compactMap { $0.question?.id })
         let drafts = daemonDraftRequests.filter { waiting.contains($0.key) }
         if drafts.count != daemonDraftRequests.count { daemonDraftRequests = drafts }
+        let routes = selectionRoutes.filter { waiting.contains($0.key) }
+        if routes.count != selectionRoutes.count { selectionRoutes = routes }
         var ledger = relayLedger
         ledger.prune(keeping: waiting)
         if ledger != relayLedger { relayLedger = ledger }

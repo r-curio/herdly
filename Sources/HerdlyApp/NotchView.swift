@@ -2445,7 +2445,10 @@ struct Notch: View {
                 guard let legacy = model.codexQuestion(for: question), let progress = next[legacy.id],
                       progress.questionIndex != previous[legacy.id]?.questionIndex || progress.picks != previous[legacy.id]?.picks
                         || progress.texts != previous[legacy.id]?.texts else { continue }
-                viewedQuestions[claudeSelectionKey(question, 0)] = nil
+                // Next or a key moves the view to the new question; changing an earlier draft stays on it.
+                if progress.questionIndex != previous[legacy.id]?.questionIndex {
+                    viewedQuestions[claudeSelectionKey(question, 0)] = nil
+                }
                 for index in questionPrompts(question).indices {
                     let key = claudeSelectionKey(question, index)
                     if case let .text(text) = progress.answer(for: index),

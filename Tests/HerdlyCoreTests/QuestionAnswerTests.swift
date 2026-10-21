@@ -153,6 +153,8 @@ private let threeOptions = QuestionPrompt(header: "Release", question: "Scope?",
     // Nothing is selectable while a send is in flight or after one settled.
     let sending = selected.startingSend(question: 0)
     #expect(sending.selecting(question: 0, answer: .option(0)) == sending)
+    // A route change forgets the selection; nothing else.
+    #expect(selected.clearingSelections() == fresh)
     // Progress is in memory only: a new progress for the same call (a restart) holds no selection.
     #expect(QuestionAnswerProgress(call: call.id).selection(for: 0) == nil)
 }

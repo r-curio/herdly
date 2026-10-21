@@ -243,6 +243,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// returns every question as plain pending and nothing is ever re-sent.
     @Published var answerProgress: [QuestionIdentity: QuestionAnswerProgress] = [:]
     var daemonDraftRequests: [QuestionIdentity: AppServerQuestionRequest] = [:]
+    /// The route each question's unsent selection was made on (#321); Send refuses a selection made
+    /// on another route, so a daemon pick never becomes a typed key or the reverse.
+    var selectionRoutes: [QuestionIdentity: QuestionAnswerRoute] = [:]
     /// The last digit or Return pressed while one question card is shown (#321). The card acts on it:
     /// a digit selects, Return does the card's Next or Send when it is enabled. Never sent by itself.
     @Published var questionCardKeyPress: QuestionCardKeyPress?
