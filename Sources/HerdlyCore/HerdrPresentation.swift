@@ -139,9 +139,9 @@ public enum HerdrPresentation {
     /// the bound pane in herdr's default session, then selects the unsplit tab of the enabled terminal
     /// running herdr's single client, joined by tty. A split, several clients, or a tab it cannot join
     /// raises that terminal instead; herdr's own failures (not found, socket, protocol, binding,
-    /// integration) and named sessions stay unavailable.
+    /// integration) and a pane in a named session stay unavailable with nothing raised.
     public static let howOpenWorks =
-        "Herdly returns to a pane alone in its tab in herdr's default session, with one herdr client, and the unsplit terminal tab running that client; otherwise Open raises that terminal. When Herdly can't read herdr, Open is unavailable. Codex question options are sent to the exact pane."
+        "Herdly returns to a pane alone in its tab in herdr's default session, with one herdr client, and the unsplit terminal tab running that client; otherwise Open raises that terminal. When Herdly can't read herdr, or the pane is in a named session, Open is unavailable. Codex question options are sent to the exact pane."
 
     // MARK: - Grouping
 

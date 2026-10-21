@@ -39,10 +39,13 @@ private enum ControlSection: String, CaseIterable, Identifiable {
 /// In dark mode the window takes a near-black tint, closer to the notch, with sections one step
 /// lighter; light mode keeps the system's measured values.
 enum SettingsStyle {
-    static func dynamic(dark: CGFloat, light: CGFloat) -> NSColor {
+    static func dynamic(dark: NSColor, light: NSColor) -> NSColor {
         NSColor(name: nil) { appearance in
-            NSColor(white: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light, alpha: 1)
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
         }
+    }
+    static func dynamic(dark: CGFloat, light: CGFloat) -> NSColor {
+        dynamic(dark: NSColor(white: dark, alpha: 1), light: NSColor(white: light, alpha: 1))
     }
     static let windowBackground = dynamic(dark: 0.075, light: 1)
     static let pageBackground = Color(nsColor: windowBackground)
@@ -50,16 +53,10 @@ enum SettingsStyle {
     static let sidebarFill = Color(nsColor: dynamic(dark: 0.11, light: 0.93))
     static let rowInset: CGFloat = 10
     /// Status pill text: a darker green and orange in light mode so they read on their 12% tint.
-    static let readyText = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 0.19, green: 0.82, blue: 0.35, alpha: 1)
-            : NSColor(srgbRed: 0.14, green: 0.54, blue: 0.24, alpha: 1)
-    })
-    static let attentionText = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 1, green: 0.62, blue: 0.04, alpha: 1)
-            : NSColor(srgbRed: 0.79, green: 0.2, blue: 0, alpha: 1)
-    })
+    static let readyText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 0.19, green: 0.82, blue: 0.35, alpha: 1),
+                                                  light: NSColor(srgbRed: 0.14, green: 0.54, blue: 0.24, alpha: 1)))
+    static let attentionText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 1, green: 0.62, blue: 0.04, alpha: 1),
+                                                      light: NSColor(srgbRed: 0.79, green: 0.2, blue: 0, alpha: 1)))
 }
 
 /// Settings-window feedback: every click answers within about half a second with a smooth ease, and
@@ -1397,7 +1394,7 @@ private struct NotificationControls: View {
                         .accessibilityLabel("Clear completions marked read in Codex")
                         .onChange(of: model.desktopReadStateEnabled) { _, enabled in model.desktopReadStateChanged(enabled) }
                 }
-                .help(model.desktopReadStateMessage)
+                .help(model.desktopReadState.message)
                 if model.desktopReadStateEnabled, let problem = model.desktopReadState.problemLine {
                     CardProblemLine(problem)
                         .padding(.horizontal, SettingsStyle.rowInset)

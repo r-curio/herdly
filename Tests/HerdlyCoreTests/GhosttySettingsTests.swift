@@ -27,7 +27,8 @@ import Testing
     // (ADRs 0008, 0011); its tab must be unsplit (ADR 0014).
     #expect(TerminalHost.herdr.howOpenWorks.contains("default session"))
     #expect(TerminalHost.herdr.howOpenWorks.contains("unsplit terminal tab"))
-    #expect(TerminalHost.herdr.howOpenWorks.contains("When Herdly can't read herdr, Open is unavailable."))
+    #expect(TerminalHost.herdr.howOpenWorks.contains(
+        "When Herdly can't read herdr, or the pane is in a named session, Open is unavailable."))
 }
 
 private func ghosttyRow(on: Bool = true, installed: Bool = true, supported: Bool = true,
