@@ -109,6 +109,16 @@ func claudeQuestionAwaitDeliveryAndCleanUp(_ request: ClaudeQuestionRequest,
     return confirmed
 }
 
+/// What the latest read of the Codex desktop app's read state found (docs/desktop-read-state.md).
+enum DesktopReadStateStatus: Equatable, Sendable {
+    case notChecked
+    /// The switch is off; desktop completions clear only by dismissal.
+    case off
+    /// The file is missing or in an unexpected format; desktop completions clear only by dismissal.
+    case unavailable
+    case readable
+}
+
 @MainActor
 final class NotchPanel: NSPanel {
     /// Key status is only ever taken by a deliberate click or Tab into the panel; automatic
@@ -244,6 +254,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// cleared. Private format; on by default, off with one switch when a desktop update breaks it.
     @Published var desktopReadStateEnabled = UserDefaults.standard.object(forKey: "desktopReadStateEnabled") as? Bool ?? true
     @Published var desktopReadStateMessage = "Desktop read state: not checked yet."
+    /// The latest read-state outcome; Settings shows a problem line only while it is `.unavailable`.
+    @Published private(set) var desktopReadState = DesktopReadStateStatus.notChecked
     /// Follow the pointer, or keep the notch on one display; saved by `setNotchDisplayPreference`.
     @Published private(set) var notchDisplayPreference = NotchDisplayPreference.restored(
         id: UserDefaults.standard.string(forKey: "notchDisplayPinID"),
@@ -2058,11 +2070,17 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Acknowledges desktop completions the Codex desktop app itself no longer flags as unread.
     /// Only ever removes items; a missing or unparsable file changes nothing and says so.
     private func applyDesktopReadState(_ snapshot: DesktopReadStateSnapshot?, enabled: Bool, desktopThreads: Set<UUID>) {
-        guard enabled else { desktopReadStateMessage = "Desktop read state: off. Desktop completions clear only by dismissal."; return }
+        guard enabled else {
+            desktopReadState = .off
+            desktopReadStateMessage = "Desktop read state: off. Desktop completions clear only by dismissal."
+            return
+        }
         guard let snapshot else {
+            desktopReadState = .unavailable
             desktopReadStateMessage = "Desktop read state: unavailable (\(Companion.desktopReadStateURL.lastPathComponent) missing or in an unexpected format). Desktop completions clear only by dismissal."
             return
         }
+        desktopReadState = .readable
         let queued = queue.items.compactMap(\.completion)
         let acknowledged = DesktopReadAcknowledgment.acknowledged(queued, snapshot: snapshot, desktopThreads: desktopThreads)
         acknowledgeCodexCompletions(Array(acknowledged))
@@ -2680,7 +2698,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
 
     func desktopReadStateChanged(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: "desktopReadStateEnabled")
-        if !enabled { desktopReadStateMessage = "Desktop read state: off. Desktop completions clear only by dismissal." }
+        if !enabled {
+            desktopReadState = .off
+            desktopReadStateMessage = "Desktop read state: off. Desktop completions clear only by dismissal."
+        }
         nextScan = 0
     }
     /// The Settings switch of a host without Automation access (every host but Ghostty, which goes
