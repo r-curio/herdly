@@ -73,7 +73,15 @@ _Avoid_: Status message, toast, navigation message
 The action that returns the user to the Codex session associated with a notch notification. Its button reads "Open Session", the same for Claude's equivalent (Open in Claude); the docs keep the source-specific names for the action.
 
 **Attention queue**:
-The ordered collection of Codex activity presented in the shared notch, with approval requests ahead of other activity. Its order determines presentation, not when Codex sessions execute. The user may sort the remaining rows by last update; live approvals and waiting questions stay first either way.
+The ordered collection of Codex activity presented in the shared notch, with approval requests ahead of other activity. Its order determines presentation, not when Codex sessions execute. The user may sort the remaining rows "Newest first" instead of "By need"; live approvals (soonest deadline first) and waiting questions stay first either way. Ungrouped, its rows that need the user sit under kind sections (see **Queue section**).
+
+**Queue section**:
+One of the open queue's kind headings when it is not grouped: Approve (live approvals), Answer (waiting questions), or Check (everything else that needs the user), each with its count; working rows stay in the "N working" fold. A later section may fold its extra rows behind "+N more", which opens in place; live approvals never fold. Presentation only: a section or fold never changes counts, the strip, acknowledgment, or a deadline (D13, agreed 2026-10-21, #314).
+_Avoid_: Group (that is the user's Group by choice), "Needs you" (the retired heading)
+
+**Exception word**:
+The single word a queue row carries when it is off its normal path: Failed, Handed back, Waiting, or Status unknown. Approve, answer, check, and stopped have none, because the section says the kind; a live approval shows its seconds left instead (D17, agreed 2026-10-21, #314).
+_Avoid_: Tag, kind pill
 
 **Open fallback**:
 An Open that raises the session's terminal app, without selecting a tab or pane, because the exact tab or pane cannot be reached. It is navigation only: it never counts as a visit, acknowledges nothing, and is never an input target.

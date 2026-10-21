@@ -22,13 +22,19 @@ public enum DesktopEvent: Equatable, Sendable {
 public struct ToolAction: Equatable, Sendable {
     public let rowText: String
     public let fullText: String
+    /// True for a shell command, whose row text is a shortened copy of the command (D11).
+    public let isCommand: Bool
 
     public init?(name: String, input: [String: String]) {
         let lower = name.lowercased()
         if ["bash", "shell", "exec_command"].contains(lower), let command = Self.text(input["command"] ?? input["cmd"]) {
             fullText = command
             rowText = "running `\(Self.short(command, limit: 64))…`"
-        } else if ["edit", "write", "multiedit"].contains(lower), let path = Self.text(input["file_path"] ?? input["path"]) {
+            isCommand = true
+            return
+        }
+        isCommand = false
+        if ["edit", "write", "multiedit"].contains(lower), let path = Self.text(input["file_path"] ?? input["path"]) {
             fullText = path
             rowText = "editing \(URL(fileURLWithPath: path).lastPathComponent)"
         } else if ["read", "readfile"].contains(lower), let path = Self.text(input["file_path"] ?? input["path"]) {
@@ -42,6 +48,9 @@ public struct ToolAction: Equatable, Sendable {
             return nil
         }
     }
+
+    /// The running row's disclosure: a shell command is named as one; other tools keep "action".
+    public var disclosureTitle: String { isCommand ? "Show full command" : "Show full action" }
 
     private static func text(_ value: String?) -> String? {
         guard let value else { return nil }

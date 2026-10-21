@@ -556,8 +556,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// on the next refresh instead of waiting out another directory's interval.
     private var eventPruneDue: [String: Double] = [:]
     var orderedAttentionItems: [AttentionItem] { queue.items }
-    /// Queue priority order. The strip, spotlight, and center label always read this order, so the
-    /// "Last update" sort can never hide or demote what needs the user outside the open queue.
+    /// Queue priority order (live approvals by soonest deadline, D12). The strip, spotlight, and
+    /// center label always read this order, so the "Newest first" sort can never move what needs the
+    /// user outside the open queue.
     var orderedAgentAttentionItems: [AgentAttentionItem] {
         agentQueue.items(at: Date().timeIntervalSince1970, earlier: appearance.earlier)
     }
@@ -582,6 +583,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var workingFoldOpen = false {
         didSet { if workingFoldOpen != oldValue { reconcileSelection() } }
     }
+    /// Kind sections whose "+N more" the user opened; closed again whenever the panel collapses.
+    @Published var openQueueFolds: Set<QueueKindSection> = [] {
+        didSet { if openQueueFolds != oldValue { reconcileSelection() } }
+    }
     /// The rows the open panel shows, under their group headings: the explicit queue (working rows
     /// folded below anything that needs the user), or only the one card. A card is never grouped.
     /// The view draws these and the keyboard selection steps through them.
@@ -595,7 +600,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             items = []
         }
         let grouping = presentationMode.showsAll ? appearance.grouping : .none
-        return QueueSections.make(items, grouping: grouping, project: projectFolder(for:))
+        return QueueSections.make(items, grouping: grouping, project: projectFolder(for:),
+                                  kindSections: presentationMode.showsAll, openSections: openQueueFolds)
     }
     /// The open queue's rows in reading order as they are on screen: the arrows step through these,
     /// skipping a closed working fold.
@@ -1795,7 +1801,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         if expanded != presentationMode.expanded {
             expanded = presentationMode.expanded
-            if !expanded { workingFoldOpen = false }
+            if !expanded {
+                workingFoldOpen = false
+                openQueueFolds = []
+            }
         }
         reconcileSelection()
         let actionableApproval = agentItems.contains { $0.kind == .actionableApproval }
@@ -2282,13 +2291,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return candidates.compactMap { $0 }.first { $0.hasPrefix("/") }
     }
 
-    /// "project @ branch" for a row, when its working directory is known. A request that names its
-    /// project but no path still shows that name, without a branch.
+    /// "project @ branch" for a row in the profile's label format, when its working directory is
+    /// known. A request that names its project but no path still shows that name, without a branch.
     func rowPlace(for item: AgentAttentionItem) -> String? {
+        let format = appearance.labelFormat
         guard let directory = rowDirectory(for: item) else {
-            return QueueRowPresentation.place(directory: item.approval?.details?.project, branch: nil)
+            return QueueRowPresentation.place(directory: item.approval?.details?.project, branch: nil, format: format)
         }
-        return QueueRowPresentation.place(directory: directory, branch: gitBranches[directory])
+        return QueueRowPresentation.place(directory: directory, branch: gitBranches[directory], format: format)
     }
 
     func spotlightDetails(for item: AgentAttentionItem) -> SpotlightDetails? {
