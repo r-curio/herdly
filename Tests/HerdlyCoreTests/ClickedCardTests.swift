@@ -199,8 +199,8 @@ private let otherApprovalID = AgentAttentionID.approval(AgentCallIdentity(sessio
     let question = try #require(items.first { $0.id == questionID })
     // A request opens as its card whatever its session's reach.
     for target in [ResultRowTarget.reachable, .unreachable] {
-        #expect(QueueRowSelection.returnAction(for: approval, target: target) == .openCard(approvalID))
-        #expect(QueueRowSelection.returnAction(for: question, target: target) == .openCard(questionID))
+        #expect(QueueRowSelection.action(for: approval, target: target) == .openCard(approvalID))
+        #expect(QueueRowSelection.action(for: question, target: target) == .openCard(questionID))
     }
 }
 

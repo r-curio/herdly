@@ -6,10 +6,17 @@ private let codexCLI = AgentSessionIdentity(source: .codex, sourceScope: "codex"
 private let codexApp = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "3f9a2c1e-0000-4000-8000-000000000002", surface: .desktop)
 private let claudeCLI = AgentSessionIdentity(source: .claude, sourceScope: "/Users/u/.claude", session: "abcdef12-3456", surface: .cli)
 
+private func read(_ source: AgentSource, herdr: HerdrOpenAvailability = .notInHerdr, scan: Bool = true,
+                  line: OpenUnavailableReason? = nil, known: Bool = true, claudeOpenable: Bool = true,
+                  background: Bool = false, lastSeen: OpenUnavailableReason? = nil) -> ResultRowReading {
+    ResultRowReading.resolve(ResultRowObservation(source: source, herdr: herdr, scanOffersOpen: scan, terminalLine: line,
+                                                  codexSessionKnown: known, claudeOpenable: claudeOpenable,
+                                                  claudeBackground: background, claudeLastSeen: lastSeen))
+}
+
 private func reach(_ source: AgentSource, herdr: HerdrOpenAvailability = .notInHerdr, scan: Bool = true,
-                   known: Bool = true, claudeOpenable: Bool = true) -> ResultRowTarget {
-    ResultRowTarget.resolve(source: source, herdr: herdr, scanOffersOpen: scan, codexSessionKnown: known,
-                            claudeOpenable: claudeOpenable)
+                   line: OpenUnavailableReason? = nil, known: Bool = true, claudeOpenable: Bool = true) -> ResultRowTarget {
+    read(source, herdr: herdr, scan: scan, line: line, known: known, claudeOpenable: claudeOpenable).target
 }
 
 /// One row of each kind: a finished, a failed, a stopped and an Earlier result, a Claude session
@@ -39,39 +46,66 @@ private func rows() -> [AgentAttentionItem] {
 }
 
 @Test func aCodexRowIsReachableUnlessHerdrTheScanOrAnUnknownSessionRulesOpenOut() {
-    #expect(reach(.codex) == .reachable)
-    // A Codex app thread is not covered by the terminal scan, so it keeps Open.
-    #expect(reach(.codex, scan: true) == .reachable)
+    // A Codex app thread is not covered by the terminal scan: it offers Open and has no line.
+    #expect(read(.codex) == ResultRowReading(target: .reachable, line: nil))
     #expect(reach(.codex, herdr: .available) == .reachable)
-    #expect(reach(.codex, scan: false) == .unreachable)
-    #expect(reach(.codex, herdr: .available, scan: false) == .unreachable)
-    #expect(reach(.codex, herdr: .unavailable(.ghosttyTTYUnsupported)) == .unreachable)
-    #expect(reach(.codex, known: false) == .unreachable)
+    // The scan ruled Open out: its line shows under the name.
+    #expect(read(.codex, scan: false, line: .appNotRunning(.ghostty))
+            == ResultRowReading(target: .unreachable, line: .terminal(.appNotRunning(.ghostty))))
+    #expect(reach(.codex, herdr: .available, scan: false, line: .sessionEnded) == .unreachable)
+    #expect(read(.codex, herdr: .unavailable(.ghosttyTTYUnsupported))
+            == ResultRowReading(target: .unreachable, line: .herdr(.ghosttyTTYUnsupported)))
+    // A malformed id: unreachable, and the line says Herdly cannot tell where the session is.
+    #expect(read(.codex, known: false) == ResultRowReading(target: .unreachable, line: .terminal(.appNotIdentified)))
+    // A click whose recheck failed keeps the row reachable until the next scan, with the click's line.
+    #expect(read(.codex, line: .sessionEnded) == ResultRowReading(target: .reachable, line: .terminal(.sessionEnded)))
     // The Claude inputs never decide a Codex row.
     #expect(reach(.codex, claudeOpenable: false) == .reachable)
 }
 
 @Test func aClaudeRowIsReachableInHerdrOrWhenInventoriesAndTheScanAllowOpen() {
-    #expect(reach(.claude) == .reachable)
+    #expect(read(.claude) == ResultRowReading(target: .reachable, line: nil))
     // herdr's own binding opens the pane; the Ghostty rules are not read.
-    #expect(reach(.claude, herdr: .available, scan: false, claudeOpenable: false) == .reachable)
+    #expect(read(.claude, herdr: .available, scan: false, line: .sessionEnded, claudeOpenable: false)
+            == ResultRowReading(target: .reachable, line: nil))
     #expect(reach(.claude, herdr: .unavailable(.ghosttyTTYUnsupported)) == .unreachable)
-    // Not live exactly once, Ghostty awaiting permission, or switched off ("Set up Ghostty"): no Open.
-    #expect(reach(.claude, claudeOpenable: false) == .unreachable)
-    #expect(reach(.claude, scan: false) == .unreachable)
+    #expect(read(.claude, scan: false, line: .hostUnreadable(.iTerm2))
+            == ResultRowReading(target: .unreachable, line: .terminal(.hostUnreadable(.iTerm2))))
+}
+
+@Test func everyUnreachableClaudeRowCarriesTheLineItsCardWouldShow() {
+    // Not verified live (including Ghostty off with no last-seen app, the cards' Set up Ghostty case).
+    #expect(read(.claude, claudeOpenable: false) == ResultRowReading(target: .unreachable, line: .claudeNotVerified))
+    // No longer live: the app its process last walked to names the line (#280).
+    #expect(read(.claude, claudeOpenable: false, lastSeen: .appNotRunning(.ghostty))
+            == ResultRowReading(target: .unreachable, line: .claudeLastSeen(.appNotRunning(.ghostty))))
+    // A background session shows its terminal line when it has one, else the not-verified line; never none.
+    #expect(read(.claude, line: .sessionEnded, claudeOpenable: false, background: true)
+            == ResultRowReading(target: .unreachable, line: .terminal(.sessionEnded)))
+    #expect(read(.claude, claudeOpenable: false, background: true)
+            == ResultRowReading(target: .unreachable, line: .claudeNotVerified))
+}
+
+@Test func herdrWithGhosttyControlsOffIsPresentedByTheGhosttyRules() {
+    let off = HerdrOpenAvailability.unavailable(.session(.ghosttyControlsOff))
+    #expect(off.presented == .notInHerdr)
+    #expect(read(.claude, herdr: off.presented) == ResultRowReading(target: .reachable, line: nil))
+    // Any other herdr cause stays unavailable.
+    #expect(HerdrOpenAvailability.unavailable(.ghosttyTTYUnsupported).presented == .unavailable(.ghosttyTTYUnsupported))
+    #expect(HerdrOpenAvailability.available.presented == .available)
 }
 
 @Test func reachableResultRowsOpenTheirSessionAndUnreachableOnesDoNothing() throws {
     let items = rows()
     for item in items where item.kind.opensSession {
-        #expect(QueueRowSelection.returnAction(for: item, target: .reachable) == .openSession(item.session))
-        #expect(QueueRowSelection.returnAction(for: item, target: .unreachable) == nil)
+        #expect(QueueRowSelection.action(for: item, target: .reachable) == .openSession(item.session))
+        #expect(QueueRowSelection.action(for: item, target: .unreachable) == nil)
     }
     #expect(Set(items.filter(\.kind.opensSession).map(\.kind)) == [.outcome, .earlierOutcome, .waiting, .statusUnavailable])
     // A working row still opens in place (#319), whatever its session's reach.
     let working = try #require(items.first { $0.kind == .running })
-    #expect(QueueRowSelection.returnAction(for: working, target: .reachable) == .openInPlace(working.id))
-    #expect(QueueRowSelection.returnAction(for: working, target: .unreachable) == .openInPlace(working.id))
+    #expect(QueueRowSelection.action(for: working, target: .reachable) == .openInPlace(working.id))
+    #expect(QueueRowSelection.action(for: working, target: .unreachable) == .openInPlace(working.id))
 }
 
 @Test func unreachableTakesTheWordSlotOnResultRowsOnly() throws {
@@ -99,27 +133,73 @@ private func rows() -> [AgentAttentionItem] {
     #expect(!RowException.unreachable.isFailure)
 }
 
-@Test func theFoldWaitsForTheOpenAndKeepsThePanelWhenTheRowShowsAReasonLine() {
+@Test func theFoldWaitsForTheOpenAndKeepsThePanelOnlyForThisClicksLine() {
     var fold = RowOpenFold()
+    let reachable = ResultRowReading(target: .reachable, line: nil)
     // Nothing pending: nothing to settle.
-    #expect(fold.settle(opening: false, showsLine: false) == .none)
+    #expect(fold.settle(opening: false, reading: reachable, clickLineAt: nil) == .none)
 
-    fold.begin(codexCLI)
-    #expect(fold.settle(opening: true, showsLine: false) == .none)
+    fold.begin(codexCLI, at: 100)
+    #expect(fold.settle(opening: true, reading: reachable, clickLineAt: nil) == .none)
     #expect(fold.pending == codexCLI)
-    #expect(fold.settle(opening: false, showsLine: false) == .collapse)
+    #expect(fold.settle(opening: false, reading: reachable, clickLineAt: nil) == .collapse)
     #expect(fold.pending == nil)
     // Settled once: a later refresh does not fold the panel again.
-    #expect(fold.settle(opening: false, showsLine: false) == .none)
+    #expect(fold.settle(opening: false, reading: reachable, clickLineAt: nil) == .none)
 
-    // A click-time recheck that found the session unavailable leaves its line on the row; the panel stays.
-    fold.begin(claudeCLI)
-    #expect(fold.settle(opening: false, showsLine: true) == .stay)
-    #expect(fold.pending == nil)
+    // A line from this click keeps the panel; a line from an earlier click does not.
+    let failed = ResultRowReading(target: .reachable, line: .terminal(.sessionEnded))
+    fold.begin(claudeCLI, at: 200)
+    #expect(fold.settle(opening: false, reading: failed, clickLineAt: 201) == .stay)
+    fold.begin(claudeCLI, at: 300)
+    #expect(fold.settle(opening: false, reading: failed, clickLineAt: 201) == .collapse)
+    // A row that became unreachable meanwhile shows its line; the panel stays.
+    fold.begin(codexCLI, at: 400)
+    #expect(fold.settle(opening: false, reading: ResultRowReading(target: .unreachable, line: .herdr(.ghosttyTTYUnsupported)),
+                        clickLineAt: nil) == .stay)
 
-    fold.begin(codexApp)
+    fold.begin(codexApp, at: 500)
     fold.cancel()
-    #expect(fold.settle(opening: false, showsLine: false) == .none)
+    #expect(fold.settle(opening: false, reading: reachable, clickLineAt: nil) == .none)
+}
+
+/// A reachable row's click whose recheck cannot reach the exact tab only raises the app (ADR 0015):
+/// the real Open-line, acknowledgment and queue rules leave the result queued, and the panel folds.
+@Test func anOpenFallbackFoldsThePanelAndLeavesTheResultQueued() {
+    let key = "codex:\(codexCLI.session)"
+    var lines = OpenUnavailableLines<String>()
+    var queue = AgentAttentionQueue()
+    let outcome = AgentOutcome(session: codexCLI, turn: "t1", status: .finished, arrivedAt: 50)
+    queue.apply(.outcome(outcome))
+    // An earlier click failed, so a stale click line is on the row.
+    lines.recordOpen(.unavailable(.sessionEnded), for: key, at: 60)
+    var fold = RowOpenFold()
+    fold.begin(codexCLI, at: 100)
+
+    let result = TerminalOpenResult.fellBack(.ghostty, .noUniqueTarget)
+    lines.recordOpen(result, for: key, at: 101)
+    for id in TerminalVisitAcknowledgment.afterOpen([TerminalCompletionCandidate(outcome)], result: result, preOpenAt: 100) {
+        queue.dismiss(.outcome(id))
+    }
+    let reading = ResultRowReading.resolve(ResultRowObservation(source: .codex, scanOffersOpen: lines.offersOpen(key),
+                                                                terminalLine: lines.line(for: key)))
+    #expect(reading == ResultRowReading(target: .reachable, line: nil))
+    #expect(fold.settle(opening: false, reading: reading, clickLineAt: lines.clickedAt(key)) == .collapse)
+    // Raising the app acknowledged nothing: the result is still queued.
+    #expect(queue.items(at: 102).compactMap(\.outcome).map(\.id) == [outcome.id])
+
+    // The same click finding the session ended instead keeps the panel with its line, result retained.
+    fold.begin(codexCLI, at: 200)
+    lines.recordOpen(.unavailable(.sessionEnded), for: key, at: 201)
+    let failed = ResultRowReading.resolve(ResultRowObservation(source: .codex, scanOffersOpen: lines.offersOpen(key),
+                                                               terminalLine: lines.line(for: key)))
+    #expect(failed == ResultRowReading(target: .reachable, line: .terminal(.sessionEnded)))
+    #expect(fold.settle(opening: false, reading: failed, clickLineAt: lines.clickedAt(key)) == .stay)
+    #expect(queue.items(at: 202).compactMap(\.outcome).map(\.id) == [outcome.id])
+
+    // A verified Open, by contrast, acknowledges the result through ADR 0016's rule.
+    #expect(TerminalVisitAcknowledgment.afterOpen([TerminalCompletionCandidate(outcome)], result: .opened, preOpenAt: 300)
+            == [outcome.id])
 }
 
 @Test func dismissClearsOnlyThatResultAndKeepsTheSessionsOtherTurns() {

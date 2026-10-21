@@ -1,23 +1,29 @@
+import Foundation
 import HerdlyCore
 
 /// The open queue's result rows (#322, D20): a click, or Return on the selected row, opens the row's
 /// session through `openAgent`, the same Open every card uses, which revalidates the exact target
 /// and may only raise the session's app when it cannot reach it (ADR 0015). The rules are Core's
-/// (`ResultRowTarget`, `QueueRowSelection.returnAction`, `RowOpenFold`); these only feed them what
-/// the latest scans observed. Opening acknowledges nothing: a verified visit (ADR 0016), the Codex
-/// app's read state, a new prompt, or Dismiss still decides when a result clears.
+/// (`ResultRowReading`, `QueueRowSelection.action`, `RowOpenFold`); these only feed them what the
+/// latest scans observed. Opening acknowledges nothing: a verified visit (ADR 0016), the Codex app's
+/// read state, a new prompt, or Dismiss still decides when a result clears. `rowOpenFold` is changed
+/// only here.
 extension Companion {
-    /// Whether a click on a row for `session` can take the user there, from the same observations
-    /// the cards read to offer Open: herdr's binding, the terminal scan's line, and for Claude the
-    /// live inventories. With Ghostty controls off a herdr session keeps the Ghostty rules, as the
-    /// cards present it.
-    func resultRowTarget(_ session: AgentSessionIdentity) -> ResultRowTarget {
-        var herdr = herdrOpenAvailability(session, ttySupport: GhosttyTTYSupportMonitor.shared.support)
-        if case .unavailable(.session(.ghosttyControlsOff)) = herdr { herdr = .notInHerdr }
-        return ResultRowTarget.resolve(source: session.source, herdr: herdr,
-                                       scanOffersOpen: offersTerminalOpen(session),
-                                       codexSessionKnown: codexSession(session) != nil,
-                                       claudeOpenable: canOpenClaude(session))
+    /// herdr's Open availability for `session` as the notch presents it, from the shared Ghostty
+    /// `tty` support reading the view also observes.
+    func presentedHerdrOpen(_ session: AgentSessionIdentity) -> HerdrOpenAvailability {
+        herdrOpenAvailability(session, ttySupport: GhosttyTTYSupportMonitor.shared.support).presented
+    }
+
+    /// The one reading of a result row's session: whether a click can reach it and the line under
+    /// its name. The row's word, line, click, Return and fold all read it.
+    func resultRowReading(_ session: AgentSessionIdentity) -> ResultRowReading {
+        ResultRowReading.resolve(ResultRowObservation(
+            source: session.source, herdr: presentedHerdrOpen(session),
+            scanOffersOpen: offersTerminalOpen(session), terminalLine: terminalOpenLine(session),
+            codexSessionKnown: session.source != .codex || codexSession(session) != nil,
+            claudeOpenable: canOpenClaude(session), claudeBackground: isBackgroundClaudeSession(session),
+            claudeLastSeen: session.source == .claude ? claudeLastSeenLine(session) : nil))
     }
 
     /// A click on a queue row, or Return on the selected one. Returns false when the row does
@@ -25,7 +31,8 @@ extension Companion {
     @discardableResult
     func activateRow(_ id: AgentAttentionID) -> Bool {
         guard let item = selectableItems.first(where: { $0.id == id }) else { return false }
-        switch QueueRowSelection.returnAction(for: item, target: resultRowTarget(item.session)) {
+        let target = item.kind.opensSession ? resultRowReading(item.session).target : .reachable
+        switch QueueRowSelection.action(for: item, target: target) {
         case let .openCard(id)?:
             openCard(id)
             return true
@@ -40,12 +47,12 @@ extension Companion {
     }
 
     /// Opens a result row's session, then folds the panel back once the Open has finished (8DW),
-    /// unless the click's recheck left a reason line on the row, which stays in view. A click while
-    /// another Open is running is ignored, as the cards' disabled Open is.
+    /// unless this click left a reason line on the row, which stays in view. A click while another
+    /// Open is running is ignored, as the cards' disabled Open is.
     private func openSessionFromRow(_ session: AgentSessionIdentity) {
         guard !openingTask else { return }
+        rowOpenFold.begin(session, at: Date().timeIntervalSince1970)
         openAgent(session)
-        rowOpenFold.begin(session)
         settleRowOpenFold()
     }
 
@@ -54,8 +61,8 @@ extension Companion {
     @discardableResult
     func settleRowOpenFold() -> Bool {
         guard let session = rowOpenFold.pending else { return false }
-        let showsLine = resultRowTarget(session) == .unreachable || terminalOpenLine(session) != nil
-        switch rowOpenFold.settle(opening: openingTask, showsLine: showsLine) {
+        let clickLineAt = openLineKey(session).flatMap(openLines.clickedAt)
+        switch rowOpenFold.settle(opening: openingTask, reading: resultRowReading(session), clickLineAt: clickLineAt) {
         case .collapse:
             collapse()
             return true

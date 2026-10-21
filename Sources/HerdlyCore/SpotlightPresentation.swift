@@ -205,10 +205,10 @@ public struct NotchPresentationController: Equatable, Sendable {
 public struct QueueRowSelection: Equatable, Sendable {
     public enum Direction: Sendable { case up, down }
 
-    /// What a click on a row, or Return on the selected row, asks for: a request opens as its
+    /// What a click on a row, or Return on the selected row (the same action), asks for: a request opens as its
     /// clicked card (D5, D18), a working row opens or closes in place (#319), and a result row opens
     /// its session (D20, #322) through the session's usual Open, which revalidates the exact target.
-    public enum ReturnAction: Equatable, Sendable {
+    public enum RowAction: Equatable, Sendable {
         case openCard(AgentAttentionID)
         case openInPlace(AgentAttentionID)
         case openSession(AgentSessionIdentity)
@@ -238,7 +238,7 @@ public struct QueueRowSelection: Equatable, Sendable {
 
     /// Nil for a result row whose session is unreachable: its click and Return do nothing, and the
     /// key goes on unhandled. `target` is read only for result rows.
-    public static func returnAction(for row: AgentAttentionItem, target: ResultRowTarget) -> ReturnAction? {
+    public static func action(for row: AgentAttentionItem, target: ResultRowTarget) -> RowAction? {
         if row.id.isRequest { return .openCard(row.id) }
         if row.kind == .running { return .openInPlace(row.id) }
         guard row.kind.opensSession, target == .reachable else { return nil }

@@ -80,8 +80,12 @@ One of the open queue's kind headings when it is not grouped: Approve (live appr
 _Avoid_: Group (that is the user's Group by choice), "Needs you" (the retired heading)
 
 **Exception word**:
-The single word a queue row carries when it is off its normal path: Failed, Handed back, Waiting, or Status unknown. Approve, answer, check, and stopped have none, because the section says the kind; a live approval shows its seconds left instead (D17, agreed 2026-10-21, #314).
+The single word a queue row carries when it is off its normal path: Failed, Handed back, Waiting, Status unknown, or Unreachable. Approve, answer, check, and stopped have none, because the section says the kind; a live approval shows its seconds left instead (D17, agreed 2026-10-21, #314). Unreachable marks a result row whose session Herdly cannot open and takes the slot ahead of any other word (#322).
 _Avoid_: Tag, kind pill
+
+**Result row**:
+An open-queue row for a recent or Earlier result, a Claude session waiting, or one whose status is unknown. It is one line; clicking it, or Return on it, opens its session through the usual Open, and its Dismiss (or Remove) sits on the line. An unreachable result row shows why under its name and cannot be clicked. Opening it acknowledges nothing (D20, agreed 2026-10-21, #322).
+_Avoid_: Completion card (the spotlight card), Earlier fold
 
 **Open fallback**:
 An Open that raises the session's terminal app, without selecting a tab or pane, because the exact tab or pane cannot be reached. It is navigation only: it never counts as a visit, acknowledges nothing, and is never an input target.

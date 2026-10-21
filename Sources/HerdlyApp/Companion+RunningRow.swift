@@ -40,7 +40,8 @@ extension Companion {
         }
     }
 
-    /// The open queue's on-screen rows in reading order; empty while it is not shown.
+    /// The open queue's on-screen rows in reading order; empty while it is not shown. Read-only;
+    /// shared with Companion+ResultRow.swift, whose click and Return act only on rows on screen.
     var selectableItems: [AgentAttentionItem] {
         presentationMode.showsAll ? visibleSections.selectableItems(workingOpen: workingFoldOpen) : []
     }

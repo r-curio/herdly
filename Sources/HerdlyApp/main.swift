@@ -644,7 +644,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The one running row opened in place (#319). Changed only through Companion+RunningRow.swift.
     @Published var openRunningRow = OpenRunningRow()
     /// A result row's Open waiting to fold the panel back once it finishes (#322). Not published:
-    /// it changes nothing on screen by itself.
+    /// it changes nothing on screen by itself. Changed only through Companion+ResultRow.swift (and
+    /// cancelled by `collapse`).
     var rowOpenFold = RowOpenFold()
     /// The rows the open panel shows, under their group headings: the explicit queue (working rows
     /// folded below anything that needs the user), or only the one card. A card is never grouped.

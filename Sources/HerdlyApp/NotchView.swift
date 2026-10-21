@@ -655,8 +655,8 @@ struct ApprovalKindWordView: View {
 }
 
 /// The hover ground behind a queue row that opens as a card (#320) or a reachable result row that
-/// opens its session (#322): #1c1c1c with 5pt continuous
-/// corners, 6pt outside the row horizontally like the selection ring. Hover only highlights; it never
+/// opens its session (#322): #1c1c1c with 5pt continuous corners, 6pt outside the row horizontally
+/// like the selection ring. Hover only highlights; it never
 /// opens, selects, or acts. Under Reduce Motion the ground appears without animation.
 struct CardRowHover: ViewModifier {
     let id: AgentAttentionID
@@ -1321,16 +1321,23 @@ struct Notch: View {
         }
     }
 
-    /// The line under a result row's name: why Open is not offered, or why the last click did not
-    /// open (the cards' own copy, product.md "Open unavailable"); nothing when there is neither.
+    /// The line under a result row's name (`ResultRowReading.line`): why Open is not offered, or
+    /// why the last click did not open, in the cards' own copy (product.md, "Open unavailable").
+    /// Every unreachable row has one.
     @ViewBuilder
-    private func resultRowLine(_ item: AgentAttentionItem, herdr: HerdrOpenAvailability) -> some View {
-        if item.session.source == .claude {
-            claudeReturnMessage(item)
-        } else if case let .unavailable(cause) = herdr {
+    private func resultRowLine(_ item: AgentAttentionItem, reading: ResultRowReading) -> some View {
+        switch reading.line {
+        case let .herdr(cause)?:
             herdrReasonLine(item, cause: cause)
-        } else if let reason = model.terminalOpenLine(item.session) {
-            terminalOpenLine(item, reason: reason)
+        case let .terminal(reason)?:
+            terminalOpenLine(item, reason: reason, replacesOpen: reading.target == .unreachable)
+        case let .claudeLastSeen(reason)?:
+            terminalOpenLine(item, reason: reason, replacesOpen: true)
+        case .claudeNotVerified?:
+            Text(model.claudeReturnUnavailableMessage)
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+        case nil:
+            EmptyView()
         }
     }
 
@@ -1806,7 +1813,8 @@ struct Notch: View {
         // session, Dismiss (or Remove) sits before the age, and an unreachable row's reason line sits
         // under the name. Its body, reply field and preview stay on the spotlight card.
         let resultRow = inQueue && !spotlit && item.kind.opensSession
-        let rowTarget = resultRow ? model.resultRowTarget(item.session) : .reachable
+        let rowReading = resultRow ? model.resultRowReading(item.session) : ResultRowReading(target: .reachable, line: nil)
+        let rowTarget = rowReading.target
         // Whether Approve and Deny are this card's to offer; one rule with the decide path.
         let decidable = spotlit && approvalRow && model.canDecide(item)
         VStack(alignment: .leading, spacing: inQueue ? bodySpacing - 5 : bodySpacing) {
@@ -1885,7 +1893,7 @@ struct Notch: View {
             } else if resultRow {
                 // Why Open is not offered (an unreachable row), or why the last click did not open,
                 // under the name: the cards' own line, never a greyed button.
-                resultRowLine(item, herdr: herdr)
+                resultRowLine(item, reading: rowReading)
                     .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
                     .padding(.bottom, 4)
             } else {
@@ -2128,12 +2136,11 @@ struct Notch: View {
         .fixedSize()
     }
 
-    /// A herdr session's Open availability for this card. With Ghostty controls off the card keeps
-    /// its Set up Ghostty path, so that reason is presented as the Ghostty rules present it.
+    /// A herdr session's Open availability for this card, as the notch presents it
+    /// (`HerdrOpenAvailability.presented`, one reading with the result rows). `ghosttyTTY` is the
+    /// shared support reading the model reads too; the view observes it, so a change redraws.
     private func herdrOpen(_ session: AgentSessionIdentity) -> HerdrOpenAvailability {
-        let availability = model.herdrOpenAvailability(session, ttySupport: ghosttyTTY.support)
-        if case .unavailable(.session(.ghosttyControlsOff)) = availability { return .notInHerdr }
-        return availability
+        model.presentedHerdrOpen(session)
     }
 
     /// The one line that replaces Open for a herdr session (product.md, "Agreed herdr
