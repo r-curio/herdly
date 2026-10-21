@@ -117,6 +117,11 @@ enum DesktopReadStateStatus: Equatable, Sendable {
     /// The file is missing or in an unexpected format; desktop completions clear only by dismissal.
     case unavailable
     case readable
+
+    /// The line Settings shows under the switch, nil when nothing needs saying.
+    var problemLine: String? {
+        self == .unavailable ? "Herdly can't read Codex's read state, so desktop completions clear only when dismissed." : nil
+    }
 }
 
 @MainActor

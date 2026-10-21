@@ -994,18 +994,18 @@ private struct TerminalControls: View {
     }
 }
 
-/// A host's row: name and dim version, status badge, switch and ⋯ menu, with its problem lines beneath
-/// and no divider between them. `diagnostics` is nil when there is nothing to show, which disables
-/// Show Diagnostics….
-private struct TerminalHostRow<Switch: View, Problems: View>: View {
+/// A host's row: name and dim version, status badge, switch and ⋯ menu, with a `line` per problem
+/// beneath it and no divider between them. `diagnostics` is nil when there is nothing to show, which
+/// disables Show Diagnostics….
+private struct TerminalHostRow<Switch: View, Problem: Hashable, Line: View>: View {
     let host: TerminalHost
     let version: String?
     let badge: HerdrReadinessBadge?
     let diagnostics: String?
-    let hasProblems: Bool
+    let problems: [Problem]
     @Binding var sheet: SetupPreview?
     @ViewBuilder let toggle: Switch
-    @ViewBuilder let problems: Problems
+    @ViewBuilder let line: (Problem) -> Line
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1033,13 +1033,25 @@ private struct TerminalHostRow<Switch: View, Problems: View>: View {
             }
             .padding(.horizontal, SettingsStyle.rowInset)
             .frame(minHeight: 38)
-            if hasProblems {
-                VStack(alignment: .leading, spacing: 6) { problems }
+            if !problems.isEmpty {
+                VStack(alignment: .leading, spacing: 6) { ForEach(problems, id: \.self, content: line) }
                     .padding(.horizontal, SettingsStyle.rowInset)
                     .padding(.bottom, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+    }
+}
+
+/// The exact diagnostics text for Show Diagnostics…, nil when hidden or empty.
+private func diagnosticsText(_ lines: [String], shown: Bool = true) -> String? {
+    shown && !lines.isEmpty ? lines.joined(separator: "\n") : nil
+}
+
+private extension Companion {
+    /// A Settings binding to the switch of a host without Automation access (`setHostSwitch`).
+    func hostSwitchBinding(_ host: TerminalHost) -> Binding<Bool> {
+        Binding(get: { self.hostSwitches.isOn(host) }, set: { self.setHostSwitch(host, on: $0) })
     }
 }
 
@@ -1140,42 +1152,32 @@ private struct GhosttyHostRow: View {
                                                        supported: capabilities.ghostty,
                                                        version: capabilities.ghosttyVersion,
                                                        minimum: CodexSetupRequirements.minimumGhosttyVersion),
-                        badge: row.badge, diagnostics: nil, hasProblems: !row.problems.isEmpty, sheet: $sheet) {
-            HostSwitch(label: "Enable Ghostty controls", isOn: $model.ghosttyEnabled)
+                        badge: row.badge, diagnostics: nil, problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable Ghostty", isOn: $model.ghosttyEnabled)
                 .onChange(of: model.ghosttyEnabled) { _, enabled in model.ghosttyChanged(enabled) }
-        } problems: {
-            ForEach(row.problems, id: \.self) { problem in
-                CardProblemLine(problem.message) {
-                    if problem.opensAutomationSettings { OpenAutomationSettingsButton() }
-                }
+        } line: { problem in
+            CardProblemLine(problem.message) {
+                if problem.opensAutomationSettings { OpenAutomationSettingsButton() }
             }
         }
     }
 }
 
-/// Terminal.app (#239), shown since its acceptance (#244). Its one unreadable line also covers a denied
-/// Automation permission, so Open Settings… joins that line while access is denied.
+/// Terminal.app (#239), shown since its acceptance (#244). A denied Automation permission offers
+/// Open Settings… on its line.
 private struct TerminalAppHostRow: View {
     @ObservedObject var model: Companion
     @Binding var sheet: SetupPreview?
 
     var body: some View {
         let row = model.terminalAppSettingsRow
-        let diagnostics = model.terminalApp.diagnostics
         TerminalHostRow(host: .terminalApp, version: model.terminalApp.version ?? "Not installed",
-                        badge: row.badge.readiness,
-                        diagnostics: diagnostics.isEmpty ? nil : diagnostics.joined(separator: "\n"),
-                        hasProblems: !row.problems.isEmpty, sheet: $sheet) {
-            HostSwitch(label: "Enable Terminal.app",
-                       isOn: Binding(get: { model.hostSwitches.isOn(.terminalApp) },
-                                     set: { model.setHostSwitch(.terminalApp, on: $0) }))
-        } problems: {
-            ForEach(row.problems, id: \.self) { problem in
-                CardProblemLine(problem) {
-                    if model.terminalApp.shownAccess == .denied, problem == TerminalAppPresentation.unreadableLine {
-                        OpenAutomationSettingsButton()
-                    }
-                }
+                        badge: row.badge.readiness, diagnostics: diagnosticsText(model.terminalApp.diagnostics),
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable Terminal.app", isOn: model.hostSwitchBinding(.terminalApp))
+        } line: { problem in
+            CardProblemLine(problem.message) {
+                if problem.opensAutomationSettings { OpenAutomationSettingsButton() }
             }
         }
     }
@@ -1192,12 +1194,10 @@ private struct WezTermHostRow: View {
         let on = model.hostSwitches.isOn(.wezTerm)
         TerminalHostRow(host: .wezTerm, version: state.installed ? state.version ?? "Unknown" : "Not installed",
                         badge: row.badge,
-                        diagnostics: on && !state.diagnostics.isEmpty ? state.diagnostics.joined(separator: "\n") : nil,
-                        hasProblems: !row.problems.isEmpty, sheet: $sheet) {
-            HostSwitch(label: "Enable WezTerm", isOn: Binding(get: { on }, set: { model.setHostSwitch(.wezTerm, on: $0) }))
-        } problems: {
-            ForEach(row.problems, id: \.self) { CardProblemLine($0.message) }
-        }
+                        diagnostics: diagnosticsText(state.diagnostics, shown: on),
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable WezTerm", isOn: model.hostSwitchBinding(.wezTerm))
+        } line: { CardProblemLine($0.message) }
     }
 }
 
@@ -1211,12 +1211,10 @@ private struct TmuxHostRow: View {
         let row = model.tmuxSettingsRow
         let on = model.hostSwitches.isOn(.tmux)
         TerminalHostRow(host: .tmux, version: nil, badge: row.badge.readiness,
-                        diagnostics: on && !state.diagnostics.isEmpty ? state.diagnostics.joined(separator: "\n") : nil,
-                        hasProblems: !row.problems.isEmpty, sheet: $sheet) {
-            HostSwitch(label: "Enable tmux", isOn: Binding(get: { on }, set: { model.setHostSwitch(.tmux, on: $0) }))
-        } problems: {
-            ForEach(row.problems, id: \.self) { CardProblemLine($0) }
-        }
+                        diagnostics: diagnosticsText(state.diagnostics, shown: on),
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable tmux", isOn: model.hostSwitchBinding(.tmux))
+        } line: { CardProblemLine($0) }
     }
 }
 
@@ -1230,12 +1228,10 @@ private struct ZellijHostRow: View {
         let row = model.zellijSettingsRow
         let on = model.hostSwitches.isOn(.zellij)
         TerminalHostRow(host: .zellij, version: nil, badge: row.badge.readiness,
-                        diagnostics: on && !state.diagnostics.isEmpty ? state.diagnostics.joined(separator: "\n") : nil,
-                        hasProblems: !row.problems.isEmpty, sheet: $sheet) {
-            HostSwitch(label: "Enable Zellij", isOn: Binding(get: { on }, set: { model.setHostSwitch(.zellij, on: $0) }))
-        } problems: {
-            ForEach(row.problems, id: \.self) { CardProblemLine($0) }
-        }
+                        diagnostics: diagnosticsText(state.diagnostics, shown: on),
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable Zellij", isOn: model.hostSwitchBinding(.zellij))
+        } line: { CardProblemLine($0) }
     }
 }
 
@@ -1251,15 +1247,11 @@ private struct HerdrHostRow: View {
         let row = HerdrPresentation.settingsRow(switches: model.hostSwitches, inUse: model.herdr.inUse,
                                                 outcome: model.herdrScanOutcome, agentsSeen: model.herdrAgentsSeen,
                                                 ttySupport: tty.support)
-        let diagnostics = model.herdr.inUse ? diagnostics : []
         TerminalHostRow(host: .herdr, version: nil, badge: row.badge,
-                        diagnostics: diagnostics.isEmpty ? nil : diagnostics.joined(separator: "\n"),
-                        hasProblems: !row.problems.isEmpty, sheet: $sheet) {
-            HostSwitch(label: "Enable herdr", isOn: Binding(get: { model.hostSwitches.isOn(.herdr) },
-                                                            set: { model.setHostSwitch(.herdr, on: $0) }))
-        } problems: {
-            ForEach(row.problems, id: \.self) { HerdrProblemLine(problem: $0) }
-        }
+                        diagnostics: model.herdr.inUse ? diagnosticsText(diagnostics) : nil,
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable herdr", isOn: model.hostSwitchBinding(.herdr))
+        } line: { HerdrProblemLine(problem: $0) }
         .onAppear { tty.refreshIfStale() }
         .onChange(of: model.herdrScanOutcome) { _, _ in tty.refreshIfStale() }
     }
@@ -1300,26 +1292,23 @@ private struct ITerm2HostRow: View {
         let row = ITerm2Presentation.settingsRow(on: on, installed: state.installed, access: state.access,
                                                  scan: state.scan, inUse: state.inUse)
         TerminalHostRow(host: .iTerm2, version: state.installed ? (state.version ?? "Installed") : "Not installed",
-                        badge: row.badge, diagnostics: on ? diagnostics : nil, hasProblems: !row.problems.isEmpty,
-                        sheet: $sheet) {
-            HostSwitch(label: "Enable iTerm2", isOn: Binding(get: { on }, set: { model.setHostSwitch(.iTerm2, on: $0) }))
-        } problems: {
-            ForEach(row.problems, id: \.self) { problem in
-                CardProblemLine(problem.message) {
-                    if problem == .automationDenied { OpenAutomationSettingsButton() }
-                }
+                        badge: row.badge, diagnostics: diagnosticsText(diagnostics, shown: on), problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable iTerm2", isOn: model.hostSwitchBinding(.iTerm2))
+        } line: { problem in
+            CardProblemLine(problem.message) {
+                if problem == .automationDenied { OpenAutomationSettingsButton() }
             }
         }
     }
 
     /// The scan's result and each session's latest Open in iTerm2 with its exact reason. Typed input is
     /// always unavailable there (ADR 0017).
-    private var diagnostics: String {
+    private var diagnostics: [String] {
         var lines = ["scan: \(state.scan)", "typed input: none (ADR 0017)"]
         for (session, line) in state.lastOpen.sorted(by: { $0.key < $1.key }) {
             lines.append("\(session.prefix(8)): \(line)")
         }
-        return lines.joined(separator: "\n")
+        return lines
     }
 }
 
@@ -1409,8 +1398,8 @@ private struct NotificationControls: View {
                         .onChange(of: model.desktopReadStateEnabled) { _, enabled in model.desktopReadStateChanged(enabled) }
                 }
                 .help(model.desktopReadStateMessage)
-                if model.desktopReadStateEnabled, model.desktopReadState == .unavailable {
-                    CardProblemLine("Herdly can't read Codex's read state, so desktop completions clear only when dismissed.")
+                if model.desktopReadStateEnabled, let problem = model.desktopReadState.problemLine {
+                    CardProblemLine(problem)
                         .padding(.horizontal, SettingsStyle.rowInset)
                         .padding(.bottom, 10)
                 }
