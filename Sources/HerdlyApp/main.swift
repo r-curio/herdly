@@ -150,7 +150,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var attention = Attention(restored: UserDefaults.standard.bool(forKey: "testCompletion"))
     @Published var muted = UserDefaults.standard.bool(forKey: "muted")
     @Published var taskID = ""
-    @Published var navigationMessage = ""
+    /// Each approval's or question's delivery note after the user acted on it (D10); memory only.
+    @Published var rowNotes = RowNotes()
     @Published var openingTask = false
     /// Each terminal card's Open line: the latest scan's unavailable cause, or a click's (#267).
     @Published var openLines = OpenUnavailableLines<String>()
@@ -498,17 +499,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
               result.work.scanGeneration == claudeApprovalScanGeneration || current != nil else { return }
         verifiedClaudeApprovalReceipts.removeValue(forKey: result.work.requestID)
         verifiedClaudeApprovalRoots.removeValue(forKey: result.work.requestID)
-        guard result.published else {
-            navigationMessage = "Claude could not receive this decision; continue in Claude."
-            refresh()
-            return
-        }
-        if result.delivered {
-            navigationMessage = result.work.decision == .allowOnce
-                ? "Claude received the one-time approval."
-                : "Claude received the denial."
-        } else {
-            navigationMessage = "Claude decision delivery is unconfirmed; continue in Claude."
+        if let note = RowNote.claudeDecision(result.work.decision, published: result.published,
+                                             delivered: result.delivered) {
+            recordRowNote(note, for: .approval(result.work.approvalID))
         }
         refresh()
     }
@@ -874,11 +867,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         case .disable:
             ghosttyEnabled = false
             ghosttyChanged(false)
-            navigationMessage = "Herdly is not allowed to control Ghostty. \(GhosttyAutomationPermission.deniedGuidance) Then enable Ghostty controls again."
         case .awaitGhostty:
             ghosttyPermissionVerified = false
             ghosttyFocusState = .unknown
-            navigationMessage = "macOS will ask for access to Ghostty when Ghostty is open."
         case .unverified:
             break
         }
@@ -1554,6 +1545,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if expired != queue { queue = expired }
         pruneAnswerProgress()
         pruneReplyProgress()
+        pruneRowNotes()
         pruneClaudeReplies()
         if previewMode == nil {
             // A waiting question on a thread Herdly has not subscribed to yet: ask for the list now.
@@ -1921,11 +1913,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func openTestTask() {
         guard !openingTask else { return }
         openingTask = true
-        navigationMessage = "Opening link…"
         let id = taskID
         Task { @MainActor in
-            let result = await desktopAdapter.open(taskID: id)
-            navigationMessage = result.rawValue
+            _ = await desktopAdapter.open(taskID: id)
             openingTask = false
             // Navigation never calls dismissTest or writes the saved completion flag.
         }
@@ -1995,9 +1985,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
               approval.identity.session.surface == .cli,
               let requestID = UUID(uuidString: approval.identity.call),
               let request = queue.items.compactMap(\.request).first(where: { $0.id == requestID }) else {
-            navigationMessage = approval.identity.session.source == .claude
-                ? "Claude decisions are unavailable here; decide in Claude."
-                : "Desktop Codex decisions are handled by Codex's native prompt."
             refresh()
             return
         }
@@ -2036,7 +2023,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
               !root.eventsPath.isEmpty,
               let receipt = verifiedClaudeApprovalReceipts[requestID],
               pendingClaudeApprovalDecisions.insert(requestID).inserted else {
-            navigationMessage = "This Claude permission is no longer actionable; continue in Claude."
             refresh()
             return
         }
@@ -2046,7 +2032,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // the helper's output acknowledgment separately; a crash leaves Claude's native prompt
         // available without leaving a second direct control.
         agentQueue.apply(.approval(approval.with(state: .handedBack)), now: now)
-        navigationMessage = "Sending the Claude decision; delivery confirmation is pending."
+        recordRowNote(.sending, for: .approval(approval.id))
         publishClaudeApprovalDecision(ClaudeApprovalDecisionWork(
             requestID: requestID, approvalID: approval.id, decision: decision, decidedAt: now,
             receipt: receipt,
@@ -2207,12 +2193,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                progress: reply(for: completion), text: text,
                                                at: Date().timeIntervalSince1970)
         switch plan.outcome {
-        case let .refused(rejection):
-            navigationMessage = SessionReplyPolicy.message(for: rejection)
+        case .refused:
             refresh()
         case let .sending(next):
             guard previewMode == nil else {
-                navigationMessage = "Preview only; nothing was sent."
                 refresh()
                 return
             }
@@ -2228,7 +2212,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             guard let params = plan.params else { return }
             replying = true
             replyProgress[completion.id] = next
-            navigationMessage = "Sending your reply to Codex's daemon…"
             refresh()
             daemonClient.call(SessionReplyRequest.method, params: params) { [weak self] accepted, error in
                 Task { @MainActor in
@@ -2238,7 +2221,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                     self.replyProgress[completion.id] = accepted
                         ? progress.recordingSent(at: Date().timeIntervalSince1970)
                         : progress.recordingFailure(SessionReplyPolicy.daemonRefused(error))
-                    self.navigationMessage = accepted ? "Reply sent to Codex's daemon." : "Could not send the reply to Codex's daemon."
                     self.refresh()
                 }
             }
@@ -2260,22 +2242,22 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     func decide(_ request: AttentionRequest, as decision: ApprovalDecision) {
         // Re-read the queue's current copy: a request handed back since the row rendered must not be answered.
-        guard !eventsPath.isEmpty else { navigationMessage = "Codex events are not connected."; refresh(); return }
+        guard !eventsPath.isEmpty else { refresh(); return }
         guard let current = queue.items.compactMap(\.request).first(where: { $0.identity == request.identity }) else {
-            navigationMessage = "This request is no longer in the queue."; refresh(); return
+            refresh(); return
         }
         guard ApprovalDecisionPolicy.accepts(current, decision: decision, now: Date().timeIntervalSince1970) else {
-            navigationMessage = "This request was handed back to Codex; answer it there."; refresh(); return
+            refresh(); return
         }
         let record = ApprovalDecisionRecord(requestID: request.id, decision: decision,
                                             decidedAt: Date().timeIntervalSince1970)
         guard ApprovalStore.publish(record, in: URL(fileURLWithPath: eventsPath)) else {
-            navigationMessage = "This approval was already answered or is no longer available."
             refresh()
             return
         }
+        // Herdly wrote the decision; Codex sends no receipt. The note clears as the request leaves.
+        recordRowNote(.sentUnconfirmed, for: .approval(CodexAttentionAdapter.approval(from: current).id))
         queue.dismiss(.request(request.identity))
-        navigationMessage = decision == .allowOnce ? "Approved once." : "Denied."
         refresh()
     }
 
@@ -2287,7 +2269,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let released = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision, decidedAt: now), in: events)
             if !released && ApprovalDecisions.existing(for: request.id, in: events) == nil {
                 // The helper still waits for its own deadline; the row loses its controls regardless.
-                navigationMessage = "Herdly could not write the handoff record; Codex will show its own prompt within 30 seconds."
             }
         }
         let handedBack = AttentionRequest(id: request.id, source: request.source, session: request.session,

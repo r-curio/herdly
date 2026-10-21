@@ -97,7 +97,6 @@ extension Companion {
     func chooseAgentOption(_ question: AgentQuestion, index: Int, option: Int) {
         if question.identity.session.source == .claude {
             guard index == 0, let prompt = question.prompts.first, option >= 0, option < prompt.options.count else {
-                navigationMessage = "Claude question shape is unavailable; answer it in Claude."
                 refresh()
                 return
             }
@@ -108,7 +107,6 @@ extension Companion {
               let session = codexSession(question.identity.session),
               let turn = UUID(uuidString: question.turn),
               let current = queue.items.compactMap(\.question).first(where: { $0.session == session && $0.turn == turn && $0.callID == question.identity.call }) else {
-            navigationMessage = "Claude questions are answered in Claude."
             refresh()
             return
         }
@@ -155,12 +153,10 @@ extension Companion {
 
     func answerClaudeQuestion(_ question: AgentQuestion, kind: ClaudeQuestionAnswerKind, answer: String) {
         if previewMode != nil {
-            navigationMessage = "Preview answer: \(answer)"
             refresh()
             return
         }
         guard let live = liveClaudeQuestion(for: question) else {
-            navigationMessage = "Claude's question answer control is unavailable; check Claude's native question."
             refresh()
             return
         }
@@ -174,25 +170,25 @@ extension Companion {
                                           kind: kind, answer: answer,
                                           decidedAt: Date().timeIntervalSince1970)
         guard ClaudeQuestionAnswerPolicy.accepts(request: live.request, answer: record) else {
-            navigationMessage = "That answer is not valid for Claude's current question."
             refresh()
             return
         }
         let now = Date().timeIntervalSince1970
         guard let liveness = ClaudeQuestionStore.liveness(for: live.request.requestID, in: live.events),
               claudeQuestionLivenessIsCurrent(liveness, request: live.request, now: now) else {
-            navigationMessage = "Claude answer delivery is unavailable; check Claude's question."
             refresh()
             return
         }
         // Spend the memory-only capability before writing. A failed write is never retried.
         availableClaudeQuestionTokens.remove(live.request.requestID)
         spentClaudeQuestionTokens.insert(live.request.requestID)
+        let noteID = AgentAttentionID.question(question.id)
         guard ClaudeQuestionStore.publish(record, in: live.events) else {
-            navigationMessage = "Claude answer delivery could not be confirmed; check Claude's question."
+            settleRowNote(RowNote.claudeAnswer(published: false, delivered: false), for: noteID)
             refresh()
             return
         }
+        recordRowNote(.sending, for: noteID)
         let request = live.request
         let events = live.events
         Task { @MainActor [weak self] in
@@ -200,9 +196,8 @@ extension Companion {
                 claudeQuestionAwaitDeliveryAndCleanUp(request, answer: record, in: events)
             }.value
             guard let self else { return }
-            self.navigationMessage = delivered
-                ? "Answer sent to Claude."
-                : "Claude answer delivery could not be confirmed; check Claude's question."
+            // Confirmed delivery is resolution evidence for this call; otherwise the note says so.
+            self.settleRowNote(RowNote.claudeAnswer(published: true, delivered: delivered), for: noteID)
             self.refresh()
         }
     }
@@ -276,7 +271,7 @@ extension Companion {
             answerThroughDaemon(question, question: index, answer: .option(option))
             return
         case .daemonAnswered:
-            navigationMessage = AppServerAnswerPolicy.message(for: .alreadyAnswered); refresh()
+            refresh()
             return
         case .herdrRelay:
             answerThroughHerdr(question, question: index, option: option)
@@ -284,8 +279,8 @@ extension Companion {
         case .terminalRelay:
             answerThroughTerminalKeys(question, question: index, option: option)
             return
-        case let .relayUnavailable(reason):
-            navigationMessage = reason.message; refresh()
+        case .relayUnavailable:
+            refresh()
             return
         case .desktopPick, .ghosttyRelay:
             break
@@ -300,14 +295,14 @@ extension Companion {
         // Re-read the queue's current copy: a question answered since the row rendered must not be relayed.
         let current = queue.items.compactMap(\.question).first { $0.id == question.id }
         let progress = progress(for: question)
-        if let rejection = QuestionAnswerPolicy.rejection(for: current, ghosttyEnabled: ghosttyEnabled, progress: progress,
-                                                          question: index, option: option) {
-            navigationMessage = QuestionAnswerPolicy.message(for: rejection); refresh(); return
+        if QuestionAnswerPolicy.rejection(for: current, ghosttyEnabled: ghosttyEnabled, progress: progress,
+                                                          question: index, option: option) != nil {
+            refresh(); return
         }
         guard let current, previewMode == nil else { return }
         // Spend the key before sending; it is released only when Ghostty certainly sent nothing.
         guard relayLedger.spend(current.id, question: index, route: .ghostty) else {
-            navigationMessage = QuestionAnswerPolicy.message(for: .notReady); refresh(); return
+            refresh(); return
         }
         answering = true
         answerProgress[question.id] = progress.startingSend(question: index, option: option)
@@ -317,7 +312,7 @@ extension Companion {
         let switches = hostSwitches
         // Read on the main actor: a host that is not running holds nothing and is not asked.
         let running = Set(TerminalKeyRelayCheck.hostsToRead(switches: switches).filter(TerminalApps.isRunning))
-        navigationMessage = "Sending \(key)…"
+        noteCodexAnswerSending(current)
         refresh()
         Task { @MainActor in
             let result = await Task.detached { () -> (sent: Bool, message: String) in
@@ -345,7 +340,7 @@ extension Companion {
                 return GhosttyNavigation.answer(session: current.session, live: live, keys: [key])
             }.value
             answering = false
-            navigationMessage = result.message
+            noteCodexAnswer(current, sent: result.sent)
             if !result.sent { relayLedger.release(current.id, question: index) }
             guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
                 // Answered or ended while the key was in flight: the card is gone and so is the progress.
@@ -378,12 +373,12 @@ extension Companion {
         let start: HerdrQuestionRelay.Start
         switch HerdrQuestionRelay.start(current: current, progress: progress(for: question), ledger: relayLedger,
                                         ghosttyEnabled: ghosttyEnabled, pane: pane, question: index, option: option) {
-        case let .failure(.policy(rejection)):
-            navigationMessage = QuestionAnswerPolicy.message(for: rejection); refresh(); return
+        case .failure(.policy):
+            refresh(); return
         case .failure(.noPane):
-            navigationMessage = HerdrQuestionRelayUnavailable.leftHerdr.message; refresh(); return
+            refresh(); return
         case .failure(.alreadySent):
-            navigationMessage = QuestionAnswerPolicy.message(for: .notReady); refresh(); return
+            refresh(); return
         case let .success(value):
             start = value
         }
@@ -391,7 +386,7 @@ extension Companion {
         answering = true
         relayLedger = start.ledger
         answerProgress[question.id] = start.progress
-        navigationMessage = "Sending \(start.key)…"
+        noteCodexAnswerSending(current)
         refresh()
         let rolloutRoot = Companion.rolloutRoot
         let client = HerdrClient()
@@ -408,14 +403,7 @@ extension Companion {
                 }
             }.value
             answering = false
-            switch outcome {
-            case let .delivered(delivery) where delivery.countsAsSent:
-                navigationMessage = "Sent \(start.key) as a key."
-            case let .vetoed(reason):
-                navigationMessage = reason.message
-            case .delivered:
-                navigationMessage = HerdrQuestionRelayUnavailable.herdrRefused(.notRunning).message
-            }
+            noteCodexAnswer(current, sent: outcome.countsAsSent)
             guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
                 // Answered or ended while the key was in flight: the card is gone and so is the progress.
                 answerProgress[question.id] = nil
@@ -435,7 +423,7 @@ extension Companion {
     /// A typed answer; only the daemon path takes one.
     func answerText(_ question: AttentionQuestion, question index: Int, text: String) {
         guard case .daemon = route(for: question) else {
-            navigationMessage = "Typed answers need Codex's daemon; answer this one in Codex."; refresh()
+            refresh()
             return
         }
         answerThroughDaemon(question, question: index, answer: .text(text))
@@ -448,9 +436,9 @@ extension Companion {
                              expectedRequest: AppServerQuestionRequest? = nil) {
         guard !answering else { return }
         let current = queue.items.compactMap(\.question).first { $0.id == question.id }
-        if let rejection = AppServerAnswerPolicy.rejection(for: current, book: daemonBook, progress: progress(for: question),
-                                                           question: index, answer: answer) {
-            navigationMessage = AppServerAnswerPolicy.message(for: rejection); refresh(); return
+        if AppServerAnswerPolicy.rejection(for: current, book: daemonBook, progress: progress(for: question),
+                                                           question: index, answer: answer) != nil {
+            refresh(); return
         }
         guard let current, current.turn == question.turn, let request = daemonBook.request(for: current),
               expectedRequest == nil || expectedRequest == request else { return }
@@ -473,7 +461,6 @@ extension Companion {
         let isLast = index + 1 >= request.questions.count
         let editing = index < progress(for: question).questionIndex
         answering = true
-        navigationMessage = ""
         let rolloutRoot = Companion.rolloutRoot
         Task { @MainActor in
             // The rollout as of this instant, only when the answer would leave Herdly: an answer Codex
@@ -485,7 +472,6 @@ extension Companion {
             let latest = queue.items.compactMap(\.question).first { $0.id == question.id }
             guard latest?.turn == current.turn, daemonBook.request(for: current) == request else {
                 answering = false
-                navigationMessage = "This question changed or is no longer waiting; nothing was sent."
                 refresh()
                 return
             }
@@ -493,8 +479,8 @@ extension Companion {
                                                   question: index, answer: answer, stillPending: { pending }, now: now)
             daemonBook = plan.book
             switch plan.outcome {
-            case let .refused(rejection):
-                navigationMessage = AppServerAnswerPolicy.message(for: rejection)
+            case .refused:
+                break
             case let .drafted(next):
                 answerProgress[question.id] = next
                 daemonDraftRequests[question.id] = request
@@ -506,7 +492,7 @@ extension Companion {
                         ? next.recordingSent(question: index, answer: answer, of: latest, at: now)
                         : next.recordingFailure("Could not write to Codex's daemon; Herdly will not retry. Answer in Codex.")
                 }
-                navigationMessage = written ? "Answer sent to Codex's daemon." : "Could not write to Codex's daemon."
+                noteCodexAnswer(current, sent: written)
             }
             answering = false
             refresh()

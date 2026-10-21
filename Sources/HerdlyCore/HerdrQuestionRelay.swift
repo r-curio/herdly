@@ -292,6 +292,12 @@ public enum HerdrQuestionRelay {
     public enum Outcome: Equatable, Sendable {
         case vetoed(HerdrQuestionRelayUnavailable)
         case delivered(HerdrKeyDelivery)
+
+        /// True when the key may have been written; a veto sent nothing.
+        public var countsAsSent: Bool {
+            if case let .delivered(delivery) = self { return delivery.countsAsSent }
+            return false
+        }
     }
 
     /// Settles the progress and ledger after one click. A key that may have been written counts as

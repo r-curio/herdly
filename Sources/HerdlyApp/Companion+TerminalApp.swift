@@ -268,7 +268,6 @@ extension Companion {
             if GhosttyControlsPolicy.outcome(for: access) == .disable {
                 setHostSwitch(.terminalApp, on: false)
                 terminalApp.access = .denied
-                navigationMessage = "Herdly is not allowed to control Terminal.app. Turn on Herdly › Terminal in System Settings › Privacy & Security › Automation, then turn Terminal.app on again."
             }
             refresh()
         }
@@ -413,7 +412,6 @@ extension Companion {
     func openCodexWithTerminalApp(_ session: UUID, otherwise: @escaping @MainActor () -> Void) {
         guard !openingTask else { return }
         openingTask = true
-        navigationMessage = "Finding the matching tab…"
         let others = otherTabHosts
         let title = GhosttyMatch.title(session)
         Task { @MainActor in
@@ -452,7 +450,6 @@ extension Companion {
                 }.value
                 return OpenFallback.codexApp(candidates: candidates, switches: switches)
             }
-            navigationMessage = message(for: result, opened: "Opened the matching Terminal tab.")
             recordOpen(result, codex: session)
             let queued = cliItems.filter { $0.session == session }.map(TerminalCompletionCandidate.init)
             let acknowledged = TerminalVisitAcknowledgment.afterOpen(queued, result: result, preOpenAt: preOpenAt)
@@ -472,7 +469,6 @@ extension Companion {
                                    otherwise: @escaping @MainActor () -> Void) {
         guard !openingTask else { return }
         openingTask = true
-        navigationMessage = "Finding the matching tab…"
         let others = otherTabHosts
         let roots = configuredClaudeNavigationRoots()
         Task { @MainActor in
@@ -483,7 +479,6 @@ extension Companion {
             }.value
             guard let rows else {
                 openingTask = false
-                navigationMessage = claudeReturnUnavailableMessage
                 refresh()
                 return
             }
@@ -516,7 +511,6 @@ extension Companion {
                 let walk = await Task.detached { pid.map(TerminalApps.walk(from:)) ?? .failed }.value
                 return OpenFallback.processApp(walks: [walk], agent: .claude, switches: switches)
             }
-            navigationMessage = message(for: result, opened: "Opened the matching Terminal tab.")
             recordOpen(result, claude: identity)
             if case .unavailable = result {} else {
                 // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included.
@@ -646,7 +640,6 @@ extension Companion {
         guard !terminalApp.replying else { return }
         terminalApp.replying = true
         replyProgress[completion.id] = progress
-        navigationMessage = "Typing your reply into the session…"
         refresh()
         let others = otherTabHosts
         let rolloutRoot = Companion.rolloutRoot
@@ -676,11 +669,6 @@ extension Companion {
             terminalApp.replying = false
             let current = reply(for: completion)
             replyProgress[completion.id] = current.settling(run, at: Date().timeIntervalSince1970)
-            switch run {
-            case .sent: navigationMessage = "Reply typed into the session."
-            case .sentTextOnly: navigationMessage = "Typed the reply, but Herdly couldn't press Return. The text may be waiting in Codex's composer."
-            case .notSent: navigationMessage = ""
-            }
             refresh()
         }
     }
@@ -735,12 +723,12 @@ extension Companion {
         let progress = claudeReply(for: outcome)
         let current = agentQueue.snapshot.outcomes.first { $0.id == outcome.id }
         guard let current, let target = claudeReplyTarget(for: current) else {
-            navigationMessage = SessionReplyPolicy.message(for: .notInQueue); refresh(); return
+            refresh(); return
         }
         let send: SessionReplySending.TerminalSend
         switch ClaudeReplyRouting.prepare(target: target, progress: progress, text: text) {
-        case .failure(let rejection):
-            navigationMessage = SessionReplyPolicy.message(for: rejection, agent: .claude); refresh(); return
+        case .failure:
+            refresh(); return
         case .success(let value): send = value
         }
         // A pane in WezTerm types through WezTerm's send (#240).
@@ -750,7 +738,6 @@ extension Companion {
         }
         terminalApp.replying = true
         terminalApp.claudeReplies[outcome.id] = progress.startingSend(text: text, route: .terminal(send.pane))
-        navigationMessage = "Typing your reply into the session…"
         refresh()
         let others = otherTabHosts
         let roots = configuredClaudeNavigationRoots().filter { $0.root.path == outcome.session.sourceScope }
@@ -782,7 +769,6 @@ extension Companion {
                 pause: { seconds in try? await Task.sleep(for: .seconds(seconds)) })
             terminalApp.replying = false
             terminalApp.claudeReplies[outcome.id] = claudeReply(for: outcome).settling(run, at: Date().timeIntervalSince1970)
-            navigationMessage = run == .sent ? "Reply typed into the session." : ""
             refresh()
         }
     }

@@ -226,7 +226,6 @@ extension Companion {
     func openCodexWithTmux(_ session: UUID, otherwise: @escaping @MainActor () -> Void) {
         guard !openingTask else { return }
         openingTask = true
-        navigationMessage = "Finding the matching tmux pane…"
         let title = GhosttyMatch.title(session)
         Task { @MainActor in
             let first = await Task.detached { TmuxRunner.read() }.value
@@ -254,7 +253,6 @@ extension Companion {
                 let acknowledged = TerminalVisitAcknowledgment.afterOpen(queued, result: .opened, preOpenAt: preOpenAt)
                 if !acknowledged.isEmpty { acknowledgeCodexCompletions(Array(acknowledged)); saveCompletions() }
             }
-            navigationMessage = message(for: result.open, opened: "Opened the matching tmux pane.")
             recordOpen(result.open, codex: session)
             endVisitIntervalsAfterOpen()
             openingTask = false
@@ -268,7 +266,6 @@ extension Companion {
                             otherwise: @escaping @MainActor () -> Void) {
         guard !openingTask else { return }
         openingTask = true
-        navigationMessage = "Finding the matching tmux pane…"
         let roots = configuredClaudeNavigationRoots()
         Task { @MainActor in
             let rows = await Task.detached { () -> [ClaudeInventorySession]? in
@@ -278,7 +275,6 @@ extension Companion {
             }.value
             guard let rows else {
                 openingTask = false
-                navigationMessage = claudeReturnUnavailableMessage
                 refresh()
                 return
             }
@@ -307,7 +303,6 @@ extension Companion {
                 guard let self, let process = latest.process else { return .unavailable(.sessionEnded) }
                 return self.claudeBinding(identity, process: process, reads: reads)
             })
-            navigationMessage = message(for: result.open, opened: "Opened the matching tmux pane.")
             recordOpen(result.open, claude: identity)
             if case .unavailable = result.open {} else {
                 // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included.
@@ -507,7 +502,7 @@ extension Companion {
         answering = true
         relayLedger = start.ledger
         answerProgress[question.id] = start.progress
-        navigationMessage = "Sending \(start.key)…"
+        noteCodexAnswerSending(current)
         refresh()
         let others = otherTabHosts
         let rolloutRoot = Companion.rolloutRoot
@@ -527,11 +522,7 @@ extension Companion {
                 return .delivered(TerminalQuestionKeys.delivery(delivery))
             }.value
             answering = false
-            switch outcome {
-            case let .delivered(delivery) where delivery.countsAsSent: navigationMessage = "Sent \(start.key) as a key."
-            case let .vetoed(reason): navigationMessage = reason.message
-            case .delivered: navigationMessage = "Could not send the key; nothing was sent. Answer in Codex."
-            }
+            noteCodexAnswer(current, sent: outcome.countsAsSent)
             guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
                 answerProgress[question.id] = nil
                 refresh()
