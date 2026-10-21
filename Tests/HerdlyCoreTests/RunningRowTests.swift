@@ -176,3 +176,22 @@ private func running(_ session: AgentSessionIdentity = codexCLI, prompt: String?
     #expect(RunningRowDetails.make(running(codexDesktop), host: nil).place == "Codex Desktop")
     #expect(RunningRowDetails.make(running(claude), host: .iTerm2).place == "Claude Code · iTerm2")
 }
+
+@Test func toggleReportsWhetherTheRowOpensInPlace() {
+    var open = OpenRunningRow()
+    let opened = open.toggle(row(.running, codexCLI))
+    let closed = open.toggle(row(.running, codexCLI))
+    let waiting = open.toggle(row(.waiting))
+    let approval = open.toggle(row(.actionableApproval))
+    #expect(opened && closed)
+    #expect(!waiting && !approval)
+    #expect(open.open == nil)
+}
+
+@Test func sourceLabelNamesTheAgentSurface() {
+    #expect(codexCLI.sourceLabel == "Codex CLI")
+    #expect(codexDesktop.sourceLabel == "Codex Desktop")
+    #expect(claude.sourceLabel == "Claude Code")
+    let claudeDesktop = AgentSessionIdentity(source: .claude, sourceScope: "/Users/u/.claude", session: "d1", surface: .desktop)
+    #expect(claudeDesktop.sourceLabel == "Claude Code")
+}

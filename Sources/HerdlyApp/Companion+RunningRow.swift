@@ -7,9 +7,10 @@ extension Companion {
     /// or closes it. Returns false when `id` is not a working row on screen, so the key is not handled.
     @discardableResult
     func toggleRunningRow(_ id: AgentAttentionID) -> Bool {
-        guard let row = selectableItems.first(where: { $0.id == id }), row.kind == .running else { return false }
-        updateOpenRunningRow { $0.toggle(row) }
-        return true
+        guard let row = selectableItems.first(where: { $0.id == id }) else { return false }
+        var handled = false
+        updateOpenRunningRow { handled = $0.toggle(row) }
+        return handled
     }
 
     /// Escape closes an open running row and reports true; with none open it reports false.
@@ -28,6 +29,15 @@ extension Companion {
         guard openRunningRow.open != nil else { return }
         let rows = selectableItems
         updateOpenRunningRow { $0.reconcile(visible: rows) }
+    }
+
+    /// The terminal app or multiplexer whose inventory last showed this session, for the opened row's
+    /// "where" line. Presentation only: Open still revalidates the exact target.
+    func lastSeenHost(for session: AgentSessionIdentity) -> TerminalHost? {
+        switch session.source {
+        case .codex: codexSession(session).flatMap { lastSeenHosts[$0] }
+        case .claude: openLineKey(session).flatMap { lastSeenClaudeHosts[$0] }
+        }
     }
 
     /// The open queue's on-screen rows in reading order; empty while it is not shown.

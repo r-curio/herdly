@@ -875,7 +875,8 @@ struct Notch: View {
     private func runningDetails(_ item: AgentAttentionItem, subject: String, herdr: HerdrOpenAvailability,
                                 codexOpen: Bool) -> some View {
         if let running = item.running {
-            let details = RunningRowDetails.make(running, host: lastSeenHost(item.session))
+            let details = RunningRowDetails.make(running, host: model.lastSeenHost(for: item.session))
+            let promptKey = "prompt:\(item.session.session)"
             let agent = item.session.source == .claude ? "Claude" : "Codex"
             VStack(alignment: .leading, spacing: 6) {
                 if let now = details.now {
@@ -896,17 +897,11 @@ struct Notch: View {
                     terminalOpenLine(item, reason: reason)
                 }
                 if item.session.source == .claude { claudeReturnMessage(item) }
-                HStack(alignment: .top, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
                     if let you = details.you, let title = you.disclosureTitle {
+                        // The toggle only; what it reveals goes below the whole line, not beside Open.
                         NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject,
-                                        expanded: disclosure("prompt:\(item.session.session)")) {
-                            if let full = you.full { fullText(full) }
-                            if you.keptOnlyStart {
-                                // Herdly kept only the start; the disclosure must not call it full.
-                                Text("Shortened; the full prompt is in \(agent).")
-                                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                            }
-                        }
+                                        expanded: disclosure(promptKey)) { EmptyView() }
                     }
                     Spacer(minLength: 6)
                     if item.session.source == .codex, codexOpen {
@@ -919,6 +914,19 @@ struct Notch: View {
                     claudeRemoveControl(item, subject: subject)
                 }
                 .padding(.top, 4)
+                if let you = details.you, you.disclosureTitle != nil, openDisclosures.contains(promptKey) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let full = you.full { fullText(full) }
+                        if you.keptOnlyStart {
+                            // Herdly kept only the start; the disclosure must not call it full.
+                            Text("Shortened; the full prompt is in \(agent).")
+                                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                }
             }
             .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
             // With the row's 3pt spacing below the header line, 4pt above the first detail line.
@@ -946,15 +954,6 @@ struct Notch: View {
     private func fullText(_ text: String) -> some View {
         Text(text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
-    }
-
-    /// The terminal app or multiplexer whose inventory last showed this session, for the "where"
-    /// line. Presentation only: Open still revalidates the exact target.
-    private func lastSeenHost(_ session: AgentSessionIdentity) -> TerminalHost? {
-        switch session.source {
-        case .codex: model.codexSession(session).flatMap { model.lastSeenHosts[$0] }
-        case .claude: model.openLineKey(session).flatMap { model.lastSeenClaudeHosts[$0] }
-        }
     }
 
     /// D10/D21: the row's note after the user acted, in place of its dim "project @ branch" until
@@ -1686,7 +1685,7 @@ struct Notch: View {
             .accessibilityLabel(rowHeading(item))
             .accessibilityAddTraits(.isHeader)
             let directory = model.rowDirectory(for: item)
-            let source = item.session.source == .claude ? "Claude Code" : (item.session.surface == .cli ? "Codex CLI" : "Codex Desktop")
+            let source = item.session.sourceLabel
             Text(source + (directory.map { " · " + ($0 as NSString).abbreviatingWithTildeInPath } ?? ""))
                 .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
                 .padding(.leading, Sprite.slotWidth + Sprite.slotGap)

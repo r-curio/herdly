@@ -1,5 +1,13 @@
 import Foundation
 
+extension AgentSessionIdentity {
+    /// The agent surface a session runs on, as rows name it: "Codex CLI", "Codex Desktop", or
+    /// "Claude Code" (every Claude session).
+    public var sourceLabel: String {
+        source == .claude ? "Claude Code" : (surface == .cli ? "Codex CLI" : "Codex Desktop")
+    }
+}
+
 /// The one running row opened in place in the open queue (#319, F3). A running row is one line until
 /// the user opens it; only one is open at a time, so opening another moves the open state to it and
 /// a second click on the open row closes it. Escape closes an open row before it collapses the panel.
@@ -11,11 +19,14 @@ public struct OpenRunningRow: Equatable, Sendable {
 
     public func isOpen(_ id: AgentAttentionID) -> Bool { open == id }
 
-    /// Opens `row`, or closes it when it is already open. Only a working row (`.running`) opens in
-    /// place: a request opens as its own card, and a waiting turn and the other rows keep their body.
-    public mutating func toggle(_ row: AgentAttentionItem) {
-        guard row.kind == .running else { return }
+    /// Opens `row`, or closes it when it is already open, and returns true. Only a working row
+    /// (`.running`) opens in place: a request opens as its own card, and a waiting turn and the other
+    /// rows keep their body, so for them nothing changes and the result is false.
+    @discardableResult
+    public mutating func toggle(_ row: AgentAttentionItem) -> Bool {
+        guard row.kind == .running else { return false }
         open = open == row.id ? nil : row.id
+        return true
     }
 
     public mutating func close() { open = nil }
@@ -88,8 +99,7 @@ public struct RunningRowDetails: Equatable, Sendable {
 
     /// `host` is the terminal app or multiplexer whose inventory last showed the session, if any.
     public static func make(_ running: AgentRunning, host: TerminalHost?) -> RunningRowDetails {
-        let session = running.identity.session
-        let source = session.source == .claude ? "Claude Code" : (session.surface == .cli ? "Codex CLI" : "Codex Desktop")
+        let source = running.identity.session.sourceLabel
         let you = prompt(running)
         var now = action(running)
         if now == nil && you == nil {
