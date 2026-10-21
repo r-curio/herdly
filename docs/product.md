@@ -153,7 +153,7 @@ is issue #82; mixed source presentation and counts in the existing notch are iss
 ## Agreed mixed-source notch behavior
 
 The notch presents Codex and Claude observations in one priority queue. Every row names its
-source explicitly. Open in Codex and Open in Claude are the action's names; its visible label is "Open Session" (agreed 2026-10-08) except on approval cards and one-line queue rows, which read "Open" beside Approve and Deny or on the row, and "Open in Codex" or "Open in Claude" on a handed-back approval card (#320). VoiceOver reads "Open Session: <subject>" everywhere. Claude cards explain when returning to the exact
+source explicitly. Open in Codex and Open in Claude are the action's names; its visible label is "Open Session" (agreed 2026-10-08), except in three places that read plain "Open": an opened running row (#319), an approval row's "Not delivered · answer in Claude" note, and a live approval card beside Approve and Deny; a handed-back approval card reads "Open in Codex" or "Open in Claude" (#320). VoiceOver reads "Open Session: <subject>" everywhere. Claude cards explain when returning to the exact
 tab is unavailable and show Open in Claude only after Ghostty controls, a complete live Claude
 inventory, and one exact unsplit target are verified. Claude
 uses its supplied session name for display when available and otherwise shows a shortened session
