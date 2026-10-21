@@ -1248,225 +1248,225 @@ struct Notch: View {
                 .frame(minHeight: inQueue ? 26 : nil)
             }
             if !collapsed || rowNote(item)?.offersOpen == true {
-            VStack(alignment: .leading, spacing: bodySpacing) {
-            if let note = rowNote(item), note.offersOpen {
-                // "Not delivered · answer in Claude": Open takes the user to the session to answer there.
-                HStack(spacing: 6) { claudeReturnControl(item, subject: subject) }
-            }
-            if !collapsed {
-                if let request = spotlightDetails?.request {
-                    spotlightRequest(request, item: item, subject: subject)
-                } else if item.kind != .question, let directory = spotlightDetails?.directory {
-                    directoryLine(directory)
-                }
-                if let details = item.approval?.details, spotlightDetails == nil {
-                    let missing = item.session.source == .claude ? "Not provided by Claude" : "Not provided by Codex"
-                    VStack(alignment: .leading, spacing: 3) {
-                        detail("task", details.taskName, missing: missing)
-                        detail("project", details.project, missing: missing)
-                        detail("action", details.action, missing: missing)
-                        detail(details.commandLabel ?? "command", details.command, selectable: true, missing: missing)
-                        detail("reason", details.reason, selectable: true, missing: missing)
+                VStack(alignment: .leading, spacing: bodySpacing) {
+                    if let note = rowNote(item), note.offersOpen {
+                        // "Not delivered · answer in Claude": Open takes the user to the session to answer there.
+                        HStack(spacing: 6) { claudeReturnControl(item, subject: subject) }
                     }
-                    if let longText = details.longText {
-                        NotchDisclosure(title: "Show full request", subject: subject, expanded: disclosure("request:\(item.session.session)")) {
-                            Text(longText).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
+                    if !collapsed {
+                        if let request = spotlightDetails?.request {
+                            spotlightRequest(request, item: item, subject: subject)
+                        } else if item.kind != .question, let directory = spotlightDetails?.directory {
+                            directoryLine(directory)
                         }
-                    }
-                }
-                switch item.kind {
-                case .handedBackApproval where spotlightDetails?.request != nil:
-                    EmptyView()
-                case .handedBackApproval:
-                    Text("Handed back with no decision. Continue in \(item.session.source == .claude ? "Claude" : "Codex") to decide.")
-                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
-                    if item.session.source == .claude {
-                        claudeReturnMessage(item)
-                    }
-                case .actionableApproval:
-                    if item.session.source == .claude {
-                        if let approval = item.approval, !model.canDecideAgent(approval) {
-                            Text("Claude's native permission prompt remains available.")
-                                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-                        }
-                        claudeReturnMessage(item)
-                    }
-                case .outcome, .earlierOutcome:
-                    if item.outcome?.uncertain == true {
-                        Text("Queued before Herdly last started. You may already have seen this result; Herdly cannot verify it.")
-                            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
-                    }
-                    if let prompt = spotlightDetails?.originalPrompt {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Original prompt").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
-                            Text(prompt).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    if item.session.source == .claude {
-                        claudeReturnMessage(item)
-                    }
-                case .question:
-                    if let question = item.question { agentQuestionBody(question, subject: subject) }
-                    if item.session.source == .claude {
-                        claudeReturnMessage(item)
-                    }
-                    if item.session.source == .claude, herdr == .notInHerdr, let question = item.question,
-                       !model.isBackgroundClaudeSession(item.session),
-                       !model.canAnswerAgentQuestion(question) {
-                        Text("The exact Claude tab cannot be opened until Herdly can verify it; continue in Claude.")
-                            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-                    }
-                case .waiting, .running:
-                    if let running = item.running, let row = running.rowText {
-                        // A prompt opens in place: the row's own text grows to the full prompt rather
-                        // than repeating it below. An action keeps its labelled row and shows the full
-                        // command beneath, since the row may not be the command itself.
-                        let promptKey = "prompt:\(item.session.session)"
-                        let expandsPrompt = running.fullAction == nil && running.fullPrompt.map { $0 != row } == true
-                        let promptOpen = expandsPrompt && openDisclosures.contains(promptKey)
-                        if promptOpen, let full = running.fullPrompt {
-                            Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                        } else {
-                            Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).lineLimit(2).truncationMode(.tail)
-                        }
-                        if let full = running.fullAction {
-                            // D11: a shortened shell command is named as a command; other tools keep "action".
-                            NotchDisclosure(title: running.action?.disclosureTitle ?? "Show full action", subject: subject, expanded: disclosure("action:\(item.session.session)")) {
-                                Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        if let details = item.approval?.details, spotlightDetails == nil {
+                            let missing = item.session.source == .claude ? "Not provided by Claude" : "Not provided by Codex"
+                            VStack(alignment: .leading, spacing: 3) {
+                                detail("task", details.taskName, missing: missing)
+                                detail("project", details.project, missing: missing)
+                                detail("action", details.action, missing: missing)
+                                detail(details.commandLabel ?? "command", details.command, selectable: true, missing: missing)
+                                detail("reason", details.reason, selectable: true, missing: missing)
                             }
-                        } else if expandsPrompt {
-                            // A shortened prompt is only its start; the disclosure must not call it full.
-                            let title = running.promptShortened ? "Show more of prompt" : "Show full prompt"
-                            NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject, expanded: disclosure(promptKey)) {
-                                if running.promptShortened {
-                                    Text("Shortened; the full prompt is in \(item.session.source == .claude ? "Claude" : "Codex").")
-                                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                            if let longText = details.longText {
+                                NotchDisclosure(title: "Show full request", subject: subject, expanded: disclosure("request:\(item.session.session)")) {
+                                    Text(longText).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        switch item.kind {
+                        case .handedBackApproval where spotlightDetails?.request != nil:
+                            EmptyView()
+                        case .handedBackApproval:
+                            Text("Handed back with no decision. Continue in \(item.session.source == .claude ? "Claude" : "Codex") to decide.")
+                                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+                            if item.session.source == .claude {
+                                claudeReturnMessage(item)
+                            }
+                        case .actionableApproval:
+                            if item.session.source == .claude {
+                                if let approval = item.approval, !model.canDecideAgent(approval) {
+                                    Text("Claude's native permission prompt remains available.")
+                                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                                }
+                                claudeReturnMessage(item)
+                            }
+                        case .outcome, .earlierOutcome:
+                            if item.outcome?.uncertain == true {
+                                Text("Queued before Herdly last started. You may already have seen this result; Herdly cannot verify it.")
+                                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+                            }
+                            if let prompt = spotlightDetails?.originalPrompt {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Original prompt").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
+                                    Text(prompt).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            if item.session.source == .claude {
+                                claudeReturnMessage(item)
+                            }
+                        case .question:
+                            if let question = item.question { agentQuestionBody(question, subject: subject) }
+                            if item.session.source == .claude {
+                                claudeReturnMessage(item)
+                            }
+                            if item.session.source == .claude, herdr == .notInHerdr, let question = item.question,
+                               !model.isBackgroundClaudeSession(item.session),
+                               !model.canAnswerAgentQuestion(question) {
+                                Text("The exact Claude tab cannot be opened until Herdly can verify it; continue in Claude.")
+                                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                            }
+                        case .waiting, .running:
+                            if let running = item.running, let row = running.rowText {
+                                // A prompt opens in place: the row's own text grows to the full prompt rather
+                                // than repeating it below. An action keeps its labelled row and shows the full
+                                // command beneath, since the row may not be the command itself.
+                                let promptKey = "prompt:\(item.session.session)"
+                                let expandsPrompt = running.fullAction == nil && running.fullPrompt.map { $0 != row } == true
+                                let promptOpen = expandsPrompt && openDisclosures.contains(promptKey)
+                                if promptOpen, let full = running.fullPrompt {
+                                    Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                } else {
+                                    Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).lineLimit(2).truncationMode(.tail)
+                                }
+                                if let full = running.fullAction {
+                                    // D11: a shortened shell command is named as a command; other tools keep "action".
+                                    NotchDisclosure(title: running.action?.disclosureTitle ?? "Show full action", subject: subject, expanded: disclosure("action:\(item.session.session)")) {
+                                        Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                } else if expandsPrompt {
+                                    // A shortened prompt is only its start; the disclosure must not call it full.
+                                    let title = running.promptShortened ? "Show more of prompt" : "Show full prompt"
+                                    NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject, expanded: disclosure(promptKey)) {
+                                        if running.promptShortened {
+                                            Text("Shortened; the full prompt is in \(item.session.source == .claude ? "Claude" : "Codex").")
+                                                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                                        }
+                                    }
+                                }
+                            }
+                            if item.session.source == .claude {
+                                claudeReturnMessage(item)
+                            }
+                        case .statusUnavailable:
+                            Text(item.unavailableReason ?? "Status unavailable. Continue in Claude to inspect the session.")
+                                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+                        }
+                        if item.session.source == .codex, case let .unavailable(cause) = herdr {
+                            herdrReasonLine(item, cause: cause)
+                        } else if item.session.source == .codex, let reason = model.terminalOpenLine(item.session) {
+                            terminalOpenLine(item, reason: reason)
+                        }
+                        HStack(spacing: 6) {
+                            if let question = item.question {
+                                questionNavigation(question)
+                                Spacer(minLength: 6)
+                            }
+                            switch item.kind {
+                            case .actionableApproval:
+                                if item.session.source == .codex && item.session.surface == .cli {
+                                    NotchButton(title: "Approve once", emphasized: true) { if let approval = item.approval { model.decideAgent(approval, as: .allowOnce) } }
+                                        .accessibilityLabel("Approve once: \(subject)")
+                                        .accessibilityHint("Approves this Codex permission request once.")
+                                    NotchButton(title: "Deny") { if let approval = item.approval { model.decideAgent(approval, as: .deny) } }
+                                        .accessibilityLabel("Deny: \(subject)")
+                                        .accessibilityHint("Denies this Codex permission request.")
+                                }
+                                if item.session.source == .claude, let approval = item.approval, model.canDecideAgent(approval) {
+                                    NotchButton(title: "Approve once", emphasized: true) { model.decideAgent(approval, as: .allowOnce) }
+                                        .accessibilityLabel("Approve once: \(subject)")
+                                        .accessibilityHint("Approves this Claude \(Self.claudeRequestKind(approval)) request once.")
+                                    NotchButton(title: "Deny") { model.decideAgent(approval, as: .deny) }
+                                        .accessibilityLabel("Deny: \(subject)")
+                                        .accessibilityHint("Denies this Claude \(Self.claudeRequestKind(approval)) request.")
+                                }
+                                if item.session.source == .codex, codexOpen {
+                                    NotchButton(title: "Open Session") {
+                                        if let approval = item.approval { model.openAgentApproval(approval) }
+                                    }
+                                    .disabled(model.openingTask)
+                                    .accessibilityLabel("Open Session: \(subject)")
+                                    .accessibilityHint("Hands this request back to Codex's own prompt.")
+                                }
+                                claudeReturnControl(item, subject: subject)
+                            case .handedBackApproval:
+                                if item.session.source == .codex, codexOpen {
+                                    NotchButton(title: "Open Session") { model.openAgent(item.session) }
+                                        .disabled(model.openingTask)
+                                        .accessibilityLabel("Open Session: \(subject)")
+                                        .accessibilityHint("Open this session in Codex.")
+                                }
+                                claudeReturnControl(item, subject: subject)
+                            case .statusUnavailable:
+                                if item.session.source == .codex, codexOpen {
+                                    NotchButton(title: "Open Session") { model.openAgent(item.session) }
+                                        .disabled(model.openingTask)
+                                        .accessibilityLabel("Open Session: \(subject)")
+                                        .accessibilityHint("Open this session in Codex.")
+                                }
+                                claudeRemoveControl(item, subject: subject)
+                            case .question:
+                                if item.session.source == .claude {
+                                    claudeReturnControl(item, subject: subject, emphasized: true)
+                                } else if item.session.surface == .cli && !model.cliTerminalHostOn {
+                                    NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
+                                        .accessibilityLabel("Set up Ghostty: \(subject)")
+                                        .accessibilityHint("Opens Herdly controls to enable Ghostty controls.")
+                                } else if codexOpen {
+                                    NotchButton(title: "Open Session", emphasized: true) { model.openAgent(item.session) }
+                                        .disabled(model.openingTask)
+                                        .accessibilityLabel("Open Session: \(subject)")
+                                        .accessibilityHint("Answer the question in Codex's own panel.")
+                                }
+                                // Dismiss only clears the card; nothing is sent, so the agent's own question stays authoritative.
+                                NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+                                    .accessibilityLabel("Dismiss question: \(subject)")
+                            case .outcome, .earlierOutcome:
+                                if item.session.source == .codex, codexOpen {
+                                    NotchButton(title: "Open Session") { model.openAgent(item.session) }
+                                        .disabled(model.openingTask)
+                                        .accessibilityLabel("Open Session: \(subject)")
+                                        .accessibilityHint("Open this session in Codex.")
+                                }
+                                claudeReturnControl(item, subject: subject)
+                                NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+                                    .accessibilityLabel("Dismiss completion: \(subject)")
+                            case .waiting, .running:
+                                if item.session.source == .codex, codexOpen {
+                                    NotchButton(title: "Open Session") { model.openAgent(item.session) }
+                                        .disabled(model.openingTask)
+                                        .accessibilityLabel("Open Session: \(subject)")
+                                        .accessibilityHint("Open this session in Codex.")
+                                }
+                                claudeReturnControl(item, subject: subject)
+                                claudeRemoveControl(item, subject: subject)
+                            }
+                        }
+                        if let outcome = item.outcome, outcome.session.source == .codex, let completion = model.codexCompletion(for: outcome),
+                           completion.source == .cli {
+                            replyBody(completion, subject: subject)
+                        }
+                        if let outcome = item.outcome, let target = model.claudeReplyTarget(for: outcome) {
+                            claudeReplyBody(outcome, target: target, subject: subject)
+                        }
+                        if item.outcome != nil, let spotlightDetails {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Final response").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
+                                switch spotlightDetails.response {
+                                case let .available(preview): Text(preview.text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                                case let .unavailable(reason): Text(reason).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                                case nil: EmptyView()
                                 }
                             }
                         }
                     }
-                    if item.session.source == .claude {
-                        claudeReturnMessage(item)
-                    }
-                case .statusUnavailable:
-                    Text(item.unavailableReason ?? "Status unavailable. Continue in Claude to inspect the session.")
-                        .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
                 }
-                if item.session.source == .codex, case let .unavailable(cause) = herdr {
-                    herdrReasonLine(item, cause: cause)
-                } else if item.session.source == .codex, let reason = model.terminalOpenLine(item.session) {
-                    terminalOpenLine(item, reason: reason)
-                }
-                HStack(spacing: 6) {
-                    if let question = item.question {
-                        questionNavigation(question)
-                        Spacer(minLength: 6)
-                    }
-                    switch item.kind {
-                    case .actionableApproval:
-                        if item.session.source == .codex && item.session.surface == .cli {
-                            NotchButton(title: "Approve once", emphasized: true) { if let approval = item.approval { model.decideAgent(approval, as: .allowOnce) } }
-                                .accessibilityLabel("Approve once: \(subject)")
-                                .accessibilityHint("Approves this Codex permission request once.")
-                            NotchButton(title: "Deny") { if let approval = item.approval { model.decideAgent(approval, as: .deny) } }
-                                .accessibilityLabel("Deny: \(subject)")
-                                .accessibilityHint("Denies this Codex permission request.")
-                        }
-                        if item.session.source == .claude, let approval = item.approval, model.canDecideAgent(approval) {
-                            NotchButton(title: "Approve once", emphasized: true) { model.decideAgent(approval, as: .allowOnce) }
-                                .accessibilityLabel("Approve once: \(subject)")
-                                .accessibilityHint("Approves this Claude \(Self.claudeRequestKind(approval)) request once.")
-                            NotchButton(title: "Deny") { model.decideAgent(approval, as: .deny) }
-                                .accessibilityLabel("Deny: \(subject)")
-                                .accessibilityHint("Denies this Claude \(Self.claudeRequestKind(approval)) request.")
-                        }
-                        if item.session.source == .codex, codexOpen {
-                            NotchButton(title: "Open Session") {
-                                if let approval = item.approval { model.openAgentApproval(approval) }
-                            }
-                            .disabled(model.openingTask)
-                            .accessibilityLabel("Open Session: \(subject)")
-                            .accessibilityHint("Hands this request back to Codex's own prompt.")
-                        }
-                        claudeReturnControl(item, subject: subject)
-                    case .handedBackApproval:
-                        if item.session.source == .codex, codexOpen {
-                            NotchButton(title: "Open Session") { model.openAgent(item.session) }
-                                .disabled(model.openingTask)
-                                .accessibilityLabel("Open Session: \(subject)")
-                                .accessibilityHint("Open this session in Codex.")
-                        }
-                        claudeReturnControl(item, subject: subject)
-                    case .statusUnavailable:
-                        if item.session.source == .codex, codexOpen {
-                            NotchButton(title: "Open Session") { model.openAgent(item.session) }
-                                .disabled(model.openingTask)
-                                .accessibilityLabel("Open Session: \(subject)")
-                                .accessibilityHint("Open this session in Codex.")
-                        }
-                        claudeRemoveControl(item, subject: subject)
-                    case .question:
-                        if item.session.source == .claude {
-                            claudeReturnControl(item, subject: subject, emphasized: true)
-                        } else if item.session.surface == .cli && !model.cliTerminalHostOn {
-                            NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
-                                .accessibilityLabel("Set up Ghostty: \(subject)")
-                                .accessibilityHint("Opens Herdly controls to enable Ghostty controls.")
-                        } else if codexOpen {
-                            NotchButton(title: "Open Session", emphasized: true) { model.openAgent(item.session) }
-                                .disabled(model.openingTask)
-                                .accessibilityLabel("Open Session: \(subject)")
-                                .accessibilityHint("Answer the question in Codex's own panel.")
-                        }
-                        // Dismiss only clears the card; nothing is sent, so the agent's own question stays authoritative.
-                        NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
-                            .accessibilityLabel("Dismiss question: \(subject)")
-                    case .outcome, .earlierOutcome:
-                        if item.session.source == .codex, codexOpen {
-                            NotchButton(title: "Open Session") { model.openAgent(item.session) }
-                                .disabled(model.openingTask)
-                                .accessibilityLabel("Open Session: \(subject)")
-                                .accessibilityHint("Open this session in Codex.")
-                        }
-                        claudeReturnControl(item, subject: subject)
-                        NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
-                            .accessibilityLabel("Dismiss completion: \(subject)")
-                    case .waiting, .running:
-                        if item.session.source == .codex, codexOpen {
-                            NotchButton(title: "Open Session") { model.openAgent(item.session) }
-                                .disabled(model.openingTask)
-                                .accessibilityLabel("Open Session: \(subject)")
-                                .accessibilityHint("Open this session in Codex.")
-                        }
-                        claudeReturnControl(item, subject: subject)
-                        claudeRemoveControl(item, subject: subject)
-                    }
-                }
-                if let outcome = item.outcome, outcome.session.source == .codex, let completion = model.codexCompletion(for: outcome),
-                   completion.source == .cli {
-                    replyBody(completion, subject: subject)
-                }
-                if let outcome = item.outcome, let target = model.claudeReplyTarget(for: outcome) {
-                    claudeReplyBody(outcome, target: target, subject: subject)
-                }
-                if item.outcome != nil, let spotlightDetails {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Final response").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
-                        switch spotlightDetails.response {
-                        case let .available(preview): Text(preview.text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                        case let .unavailable(reason): Text(reason).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-                        case nil: EmptyView()
-                        }
-                    }
-                }
-            }
-            }
-            // Room below a row's details before the next row's 26pt heading line.
-            .padding(.bottom, inQueue ? 8 : 0)
+                // Room below a row's details before the next row's 26pt heading line.
+                .padding(.bottom, inQueue ? 8 : 0)
             }
         }
         .accessibilityElement(children: .contain)
