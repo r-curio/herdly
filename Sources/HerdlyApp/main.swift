@@ -1995,8 +1995,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Approve, Deny or Send on a clicked card returns to the queue at once (D10); the row note
     /// carries the outcome from there. The caller refreshes.
     func leaveClickedCard(after id: AgentAttentionID) {
-        guard presentationMode == .clickedCard(id) else { return }
-        notchPresentation.backToQueue()
+        notchPresentation.leaveCard(after: id)
     }
 
     /// Keeps the selection on a row that is still on screen; it clears when the queue closes, its
@@ -2164,14 +2163,30 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             decideClaudeApproval(approval, as: decision)
             return
         }
-        guard approval.identity.session.source == .codex,
-              approval.identity.session.surface == .cli,
-              let requestID = UUID(uuidString: approval.identity.call),
-              let request = queue.items.compactMap(\.request).first(where: { $0.id == requestID }) else {
+        guard let request = codexCLIRequest(for: approval) else {
             refresh()
             return
         }
         decide(request, as: decision)
+    }
+
+    /// Whether this approval row takes Approve and Deny from Herdly right now (#320): a live Codex
+    /// CLI request still in the queue that `ApprovalDecisionPolicy` accepts, or a Claude request with
+    /// a verified live helper (`canDecideAgent`). The same checks guard `decideAgent`, which re-reads
+    /// them at the click, so a card never offers a decision its button would refuse.
+    func canDecide(_ item: AgentAttentionItem) -> Bool {
+        guard item.kind == .actionableApproval, let approval = item.approval else { return false }
+        if approval.identity.session.source == .claude { return canDecideAgent(approval) }
+        guard let request = codexCLIRequest(for: approval) else { return false }
+        return ApprovalDecisionPolicy.accepts(request, decision: .allowOnce, now: Date().timeIntervalSince1970)
+    }
+
+    /// The queue's own copy of a Codex CLI approval, by its request id; nil for any other source.
+    private func codexCLIRequest(for approval: AgentApproval) -> AttentionRequest? {
+        guard approval.identity.session.source == .codex,
+              approval.identity.session.surface == .cli,
+              let requestID = UUID(uuidString: approval.identity.call) else { return nil }
+        return queue.items.compactMap(\.request).first { $0.id == requestID }
     }
 
     func canDecideAgent(_ approval: AgentApproval) -> Bool {

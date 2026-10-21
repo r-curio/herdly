@@ -153,6 +153,15 @@ public struct NotchPresentationController: Equatable, Sendable {
         clicked = nil
         manualOpen = true
     }
+    /// Approve, Deny, or Send taken on the clicked card `item` (D10): back to the queue, where the
+    /// row note shows. A decision on any other request leaves the open card alone. Returns whether
+    /// it left.
+    @discardableResult
+    public mutating func leaveCard(after item: AgentAttentionID) -> Bool {
+        guard clicked == item else { return false }
+        backToQueue()
+        return true
+    }
     /// The one Escape rule (D6): a clicked card returns to the queue; otherwise the panel collapses.
     public mutating func escape() -> NotchEscape {
         if clicked != nil {

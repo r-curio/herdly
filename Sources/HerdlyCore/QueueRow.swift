@@ -92,6 +92,12 @@ public enum QueueRowPresentation {
         return ApprovalCountdown(arrivedAt: approval.arrivedAt, expiresAt: approval.expiresAt, now: now)
     }
 
+    /// A single approval card's dim source word after its kind (#320): "CLI" or "Desktop" for Codex,
+    /// "Claude" for Claude. Queue rows name no source (D17).
+    public static func cardSource(_ session: AgentSessionIdentity) -> String {
+        session.source == .claude ? "Claude" : (session.surface == .cli ? "CLI" : "Desktop")
+    }
+
     /// The place after a row's name, from the session's working directory: the folder's last
     /// component, its checked-out branch, or both, as `format` asks. A part Herdly has not seen is
     /// left out, so Branch only without a branch shows nothing. Nil without a directory.

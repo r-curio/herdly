@@ -75,7 +75,6 @@ private func approvalRow(_ session: AgentSessionIdentity, readAt: Double) -> Age
     #expect(stage == .live(try #require(ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 112.2))))
     #expect(stage.countdown?.label == "18s left")
     #expect(stage.offersDecision && stage.showsDecisionControls)
-    #expect(stage.kindWord == .approve)
     #expect(stage.openTitle(for: .claude) == "Open" && stage.openTitle(for: .codex) == "Open")
 }
 
@@ -88,7 +87,6 @@ private func approvalRow(_ session: AgentSessionIdentity, readAt: Double) -> Age
     // No countdown, never "0s left", and Approve and Deny stay visible but cannot be pressed.
     #expect(stage.countdown == nil)
     #expect(!stage.offersDecision && stage.showsDecisionControls)
-    #expect(stage.kindWord == .approve)
 }
 
 @Test func aHandedBackCardOffersOnlyOpenInItsAgent() throws {
@@ -97,7 +95,6 @@ private func approvalRow(_ session: AgentSessionIdentity, readAt: Double) -> Age
     let stage = try #require(ApprovalCardStage(codexRow, now: 131))
     #expect(stage == .handedBack)
     #expect(!stage.offersDecision && !stage.showsDecisionControls && stage.countdown == nil)
-    #expect(stage.kindWord == .exception(.handedBack))
     #expect(stage.openTitle(for: .codex) == "Open in Codex")
     #expect(stage.openTitle(for: .claude) == "Open in Claude")
     // A hand-back stays a hand-back even if the card's clock reads earlier than the deadline.
@@ -111,7 +108,24 @@ private func approvalRow(_ session: AgentSessionIdentity, readAt: Double) -> Age
 }
 
 @Test func aCardNamesItsSourceInOneShortWord() {
-    #expect(codexCLI.cardSourceLabel == "CLI")
-    #expect(codexDesktop.cardSourceLabel == "Desktop")
-    #expect(claude.cardSourceLabel == "Claude")
+    #expect(QueueRowPresentation.cardSource(codexCLI) == "CLI")
+    // A desktop request reaches the queue (its decision stays native), so its card names it too.
+    #expect(QueueRowPresentation.cardSource(codexDesktop) == "Desktop")
+    #expect(QueueRowPresentation.cardSource(claude) == "Claude")
+}
+
+@Test func theApprovePillShowsOnlyWhileTheRequestCanBeDecidedHere() throws {
+    let live = try #require(approvalRow(claude, readAt: 110))
+    #expect(ApprovalCardKindWord(live, decidable: true) == .approve)
+    #expect(ApprovalCardKindWord(live, decidable: true)?.word == "Approve")
+    // A desktop request, or a Claude request with no live helper, is decided in the agent: no pill.
+    #expect(ApprovalCardKindWord(live, decidable: false) == nil)
+    // Handed back reads the queue's own word whatever the source could do.
+    let handedBack = try #require(approvalRow(codexCLI, readAt: 131))
+    #expect(ApprovalCardKindWord(handedBack, decidable: true) == .exception(.handedBack))
+    #expect(ApprovalCardKindWord(handedBack, decidable: false)?.word == "Handed back")
+    // Other rows have no card kind word.
+    var queue = AgentAttentionQueue()
+    queue.apply(.outcome(AgentOutcome(session: codexCLI, turn: "t2", status: .finished, arrivedAt: 100)))
+    #expect(queue.items(at: 100).first.flatMap { ApprovalCardKindWord($0, decidable: true) } == nil)
 }

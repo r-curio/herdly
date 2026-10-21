@@ -38,11 +38,6 @@ public enum ApprovalCardStage: Equatable, Sendable {
     /// Approve and Deny are drawn, pressable or not. A handed-back card offers only Open.
     public var showsDecisionControls: Bool { self != .handedBack }
 
-    /// The card header's kind word: the "Approve" pill until the hand-back, then "Handed back".
-    public var kindWord: ApprovalCardKindWord {
-        self == .handedBack ? .exception(.handedBack) : .approve
-    }
-
     /// Open's visible label. Beside Approve and Deny it is plain "Open"; once handed back it names
     /// the agent the user now decides in. VoiceOver keeps "Open Session: <subject>" either way.
     public func openTitle(for source: AgentSource) -> String {
@@ -58,17 +53,23 @@ public enum ApprovalCardKindWord: Equatable, Sendable {
     /// The queue's own exception word, such as "Handed back".
     case exception(RowException)
 
+    /// The kind word of an approval row's card: "Handed back" once handed back; "Approve" only while
+    /// `decidable`, the source taking a decision from Herdly (a Codex CLI request, or a Claude request
+    /// with a verified live helper); otherwise none, since the request is decided in the agent. Nil
+    /// for every other row. It reads the row's kind, not a clock, so a request past its deadline
+    /// keeps "Approve" until its hand-back is recorded.
+    public init?(_ item: AgentAttentionItem, decidable: Bool) {
+        switch item.kind {
+        case .handedBackApproval: self = .exception(.handedBack)
+        case .actionableApproval where decidable: self = .approve
+        default: return nil
+        }
+    }
+
     public var word: String {
         switch self {
         case .approve: "Approve"
         case let .exception(exception): exception.word
         }
-    }
-}
-
-extension AgentSessionIdentity {
-    /// The card header's dim source label: "CLI" or "Desktop" for Codex, "Claude" for Claude.
-    public var cardSourceLabel: String {
-        source == .claude ? "Claude" : (surface == .cli ? "CLI" : "Desktop")
     }
 }
