@@ -137,6 +137,12 @@ public struct HerdrSettingsRow: Equatable, Sendable {
 }
 
 public enum HerdrPresentation {
+    /// The row's targeting rule and what Open does otherwise (ADRs 0011, 0014, 0015): Herdly focuses the
+    /// bound pane, then selects the tab of the enabled terminal running herdr's single client, joined by
+    /// tty. A split, several clients, or a tab it cannot join raises that terminal instead.
+    public static let howOpenWorks =
+        "Herdly returns to a herdr pane alone in its tab, with one herdr client, and the terminal tab running that client; otherwise Open raises that terminal. Codex question options are sent to the exact pane."
+
     // MARK: - Grouping
 
     public static func group(_ reason: HerdrSessionUnavailable) -> HerdrReasonGroup {
