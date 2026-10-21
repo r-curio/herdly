@@ -24,52 +24,144 @@ public enum QueueRowPresentation {
         return unit(Int(seconds / 86_400), "day")
     }
 
-    /// The gray source tag: which agent and, for Codex, which surface the row came from.
-    public static func sourceTag(_ session: AgentSessionIdentity) -> String {
-        switch (session.source, session.surface) {
-        case (.claude, _): return "Claude"
-        case (.codex, .desktop): return "Codex app"
-        case (.codex, .cli): return "Codex CLI"
-        }
-    }
-
-    /// The session's name without its source, which the tag already shows: the supplied name when
-    /// known, otherwise the shortened identifier.
+    /// The session's name without its source: the supplied name when known, otherwise the shortened
+    /// identifier.
     public static func sessionName(_ session: AgentSessionIdentity, names: [AgentSessionIdentity: String] = [:]) -> String {
         if let name = names[session], !name.isEmpty { return name }
         return "session " + String(session.session.prefix(8)).lowercased()
     }
 
-    /// The short tag after a row's session name saying what the row needs from the user, or nil for
-    /// a running row, whose sprite step alone says it is working. A result keeps a failed, stopped,
-    /// or unknown status in its tag so a failure never reads as a plain finish.
-    public static func attentionTag(_ item: AgentAttentionItem) -> String? {
+    /// The one word a row carries when it is off its normal path (D17), or nil. Approve, answer, and
+    /// check are said by the row's section heading, and a stopped result is a normal end, so none of
+    /// them gets a word; a working row's sprite step says it is working.
+    public static func exception(_ item: AgentAttentionItem) -> RowException? {
         switch item.kind {
-        case .actionableApproval: return "approve"
-        case .question: return "answer"
-        case .handedBackApproval: return "handed back"
-        case .waiting: return "waiting"
-        case .statusUnavailable: return "status unknown"
+        case .handedBackApproval: return .handedBack
+        case .waiting: return .waiting
+        case .statusUnavailable: return .statusUnknown
         case .outcome, .earlierOutcome:
             switch item.outcome?.status {
-            case .finished: return "check"
-            case .failed: return "failed"
-            case .stopped: return "stopped"
-            case .unavailable, nil: return "status unknown"
+            case .failed: return .failed
+            case .unavailable, nil: return .statusUnknown
+            case .finished, .stopped: return nil
             }
-        case .running: return nil
+        case .actionableApproval, .question, .running: return nil
         }
     }
 
-    /// "project @ branch" for the identity line, from the session's working directory: the
-    /// folder's last component and, when known, its checked-out branch. Nil without a directory.
-    public static func place(directory: String?, branch: String?) -> String? {
+    /// The row's state in full, as VoiceOver reads it after the name: the reading the visual word
+    /// and section heading shorten.
+    public static func spokenState(_ item: AgentAttentionItem) -> String {
+        let agent = item.session.source == .claude ? "Claude" : "Codex"
+        switch item.kind {
+        case .actionableApproval: return item.session.source == .claude ? "Claude permission needed" : "Permission needed"
+        case .handedBackApproval: return "Continue in \(agent)"
+        case .question: return item.session.source == .claude ? "Claude waiting" : "Codex needs an answer"
+        case .outcome, .earlierOutcome:
+            let label = switch item.outcome?.status {
+            case .finished: "finished"
+            case .failed: "failed"
+            case .stopped: "stopped"
+            case .unavailable, nil: "status unavailable"
+            }
+            return "\(agent) \(label)"
+        case .statusUnavailable: return "Claude status unavailable"
+        case .waiting: return "Waiting"
+        case .running: return "Working"
+        }
+    }
+
+    /// A row's spoken heading: name, place, any row note, the full state, and a live approval's
+    /// seconds left. Parts Herdly does not have are left out; the state is always read.
+    public static func spokenHeading(_ item: AgentAttentionItem, name: String, place: String?, note: RowNote?,
+                                     countdown: ApprovalCountdown?) -> String {
+        [name, place, note?.text, spokenState(item), countdown?.spoken].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    /// The trailing age lane. A status-unavailable row has no arrival time (it is dated to the
+    /// moment the queue is read), so it shows a dash rather than a misleading "<1m".
+    public static func rowAge(_ item: AgentAttentionItem, now: Double) -> RowAge {
+        guard item.kind != .statusUnavailable else { return RowAge(text: "—", spoken: "No update time") }
+        return RowAge(text: age(since: item.lastUpdate, now: now), spoken: spokenAge(since: item.lastUpdate, now: now))
+    }
+
+    /// "Ns left" for a live approval, from its own window; nil for every other row. Display only:
+    /// it reads the deadline and never moves it.
+    public static func countdown(_ item: AgentAttentionItem, now: Double) -> ApprovalCountdown? {
+        guard item.kind == .actionableApproval, let approval = item.approval else { return nil }
+        return ApprovalCountdown(arrivedAt: approval.arrivedAt, expiresAt: approval.expiresAt, now: now)
+    }
+
+    /// The place after a row's name, from the session's working directory: the folder's last
+    /// component, its checked-out branch, or both, as `format` asks. A part Herdly has not seen is
+    /// left out, so Branch only without a branch shows nothing. Nil without a directory.
+    public static func place(directory: String?, branch: String?, format: QueueLabelFormat = .repoAtBranch) -> String? {
         guard let directory = directory?.trimmingCharacters(in: .whitespacesAndNewlines), !directory.isEmpty else { return nil }
         let project = URL(fileURLWithPath: directory).lastPathComponent
         guard !project.isEmpty, project != "/" else { return nil }
-        guard let branch, !branch.isEmpty else { return project }
-        return "\(project) @ \(branch)"
+        let branch = branch.flatMap { $0.isEmpty ? nil : $0 }
+        switch format {
+        case .repoOnly: return project
+        case .branchOnly: return branch
+        case .repoAtBranch: return branch.map { "\(project) @ \($0)" } ?? project
+        }
     }
+}
+
+/// A queue row's single off-path word (D17). Only a failure is drawn in the red well (D14); the
+/// others are plain dim text.
+public enum RowException: Equatable, Sendable {
+    case failed
+    case handedBack
+    case waiting
+    case statusUnknown
+
+    public var word: String {
+        switch self {
+        case .failed: "Failed"
+        case .handedBack: "Handed back"
+        case .waiting: "Waiting"
+        case .statusUnknown: "Status unknown"
+        }
+    }
+
+    public var isFailure: Bool { self == .failed }
+}
+
+/// The age lane's visible and spoken readings.
+public struct RowAge: Equatable, Sendable {
+    public let text: String
+    public let spoken: String
+
+    public init(text: String, spoken: String) {
+        self.text = text
+        self.spoken = spoken
+    }
+}
+
+/// How much of a live approval's own window is left at `now` (D7, D12): whole seconds, rounded up,
+/// and the remaining share of `expiresAt - arrivedAt` for the pill's bar, never above one. There is
+/// no countdown (nil) once the deadline has passed or when the deadline or clock is unreadable, so a
+/// pill never reads "0s left" or guesses; an unreadable or zero-length window only empties the bar.
+public struct ApprovalCountdown: Equatable, Sendable {
+    public let seconds: Int
+    public let fraction: Double
+
+    init(seconds: Int, fraction: Double) {
+        self.seconds = seconds
+        self.fraction = fraction
+    }
+
+    public init?(arrivedAt: Double, expiresAt: Double, now: Double) {
+        let remaining = expiresAt - now
+        guard expiresAt.isFinite, now.isFinite, remaining > 0 else { return nil }
+        let window = expiresAt - arrivedAt
+        let fraction = window.isFinite && window > 0 ? min(1, remaining / window) : 0
+        self.init(seconds: Int(min(remaining.rounded(.up), Double(Int32.max))), fraction: fraction)
+    }
+
+    public var label: String { "\(seconds)s left" }
+    public var spoken: String { "\(seconds) \(seconds == 1 ? "second" : "seconds") left" }
 }
 
 /// Reads the checked-out branch of the git work tree containing a directory, from `.git/HEAD`

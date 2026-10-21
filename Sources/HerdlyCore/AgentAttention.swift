@@ -332,8 +332,10 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         AgentAttentionSnapshot(outcomes: outcomes.values.sorted(by: Self.older), acknowledged: acknowledged)
     }
 
-    /// Rows in display order. `earlier` decides when outcomes move under "Earlier"; `sort` chooses
-    /// between queue priority and newest activity for everything below live approvals and questions.
+    /// Rows in display order. Live approvals lead by soonest deadline, then arrival (D12); every
+    /// other group is oldest arrival first. `earlier` decides when outcomes move under "Earlier";
+    /// `sort` chooses between queue priority and newest activity for everything below live approvals
+    /// and questions. Presentation only: Codex's execution order and every deadline are untouched.
     public func items(at now: Double, earlier: EarlierDelay = .fiveMinutes,
                       sort: QueueSort = .needsAttention) -> [AgentAttentionItem] {
         let approvalItems = approvals.values.map { approval in
@@ -373,6 +375,9 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         }
         let byPriority = (approvalItems + questionItems + outcomeItems + unavailableItems + activeItems).sorted {
             if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
+            // D12: live approvals by soonest deadline (a merged request holds its min(expiresAt)).
+            if $0.kind == .actionableApproval, let first = $0.approval?.expiresAt, let second = $1.approval?.expiresAt,
+               first != second { return first < second }
             if $0.arrivedAt != $1.arrivedAt { return $0.arrivedAt < $1.arrivedAt }
             return Self.sortKey($0.id) < Self.sortKey($1.id)
         }
@@ -717,7 +722,8 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         lhs.arrivedAt == rhs.arrivedAt ? sortKey(.outcome(lhs.id)) < sortKey(.outcome(rhs.id)) : lhs.arrivedAt < rhs.arrivedAt
     }
 
-    private static func sortKey(_ id: AgentAttentionID) -> String {
+    /// A stable identity order for ties; also the spotlight's tie-break.
+    static func sortKey(_ id: AgentAttentionID) -> String {
         switch id {
         case let .approval(value): return "approval:\(value.session.source.rawValue):\(value.session.sourceScope):\(value.session.session):\(value.turn):\(value.call)"
         case let .question(value): return "question:\(value.session.source.rawValue):\(value.session.sourceScope):\(value.session.session):\(value.turn):\(value.call)"

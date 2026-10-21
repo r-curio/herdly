@@ -12,6 +12,7 @@ colors:
   sprite-light: "#4cdc80"
   usage-codex: "#3b82f6"
   usage-claude: "#d97757"
+  failure: "#3a1d1d"
   seam: "rgba(255, 255, 255, 0.08)"
 typography:
   title:
@@ -97,6 +98,24 @@ components:
   row-title:
     textColor: "{colors.ink}"
     typography: "{typography.title}"
+  seconds-left:
+    backgroundColor: "{colors.well}"
+    textColor: "{colors.ink}"
+    typography: "10pt 600"
+    rounded: "{rounded.badge}"
+    padding: "1pt 6pt"
+  failed-word:
+    backgroundColor: "{colors.failure}"
+    textColor: "{colors.ink}"
+    typography: "{typography.caption}"
+    rounded: "{rounded.badge}"
+    padding: "1pt 6pt"
+  more-rows:
+    backgroundColor: "{colors.well}"
+    textColor: "{colors.text}"
+    typography: "{typography.caption}"
+    rounded: "{rounded.badge}"
+    padding: "1pt 6pt"
   row-session:
     textColor: "{colors.dim}"
     typography: "{typography.body}"
@@ -128,12 +147,12 @@ The instrument is configurable within those materials. In Settings the user choo
 - how the open queue is sorted and grouped;
 - when completions move to "Earlier".
 
-The MacBook notch and external displays each keep their own choices. Every option is drawn from the same black ground, gray ladder, wells, and session colors. An option may change what is shown, but never adds a new material: no glow, no fade-pulse, no gradient. The defaults are the instrument described here: sprites and count, the Sheep sprite, compact usage, standard panel width, needs-attention order, no grouping, Earlier after 5 minutes.
+The MacBook notch and external displays each keep their own choices. Every option is drawn from the same black ground, gray ladder, wells, and session colors. An option may change what is shown, but never adds a new material: no glow, no fade-pulse, no gradient. The defaults are the instrument described here: sprites and count, the Sheep sprite, compact usage, standard panel width, "By need" order, no grouping, "repo @ branch" after each name, Earlier after 5 minutes.
 
 **Key Characteristics:**
 - One black shape fused to the menu bar: flat top, concave 8pt ears, deep 18pt bottom radii, no window shadow
 - One monospaced face (SF Mono via the system monospaced design) at 10, 11, and 12pt; semibold only for titles and the emphasized action
-- One color: the green sprite body and its lighter highlight; every other value is a gray on black, except the fills of the strip's usage bars, which name their source
+- One color: the green sprite body and its lighter highlight; every other value is a gray on black, except the fills of the strip's usage bars, which name their source, and the dark red well behind "Failed"
 - Dark-gray wells (#2a2a2a) for the badge and every control; a pressed control inverts to light ink with black text
 - Dense, left-aligned rows separated by whitespace, not lines; the single seam is the only rule drawn
 - Motion carries meaning: a 0.5 s sprite step means working, a 0.18 s ease-out resize means the panel changed size
@@ -150,16 +169,19 @@ An achromatic ladder on pure black with a single green, reserved for the sprite,
 - **Codex Blue** (`{colors.usage-codex}`): the fill of Codex's usage bars (`NotchStyle.codexUsage`), and nothing else.
 - **Claude Orange** (`{colors.usage-claude}`): the fill of Claude's usage bars (`NotchStyle.claudeUsage`), and nothing else.
 
+### Failure
+- **Failure Well** (`{colors.failure}`): the well behind a queue row's "Failed" (`NotchStyle.failure`), and nothing else. Red marks only failures (D14, agreed 2026-10-21, #314); Handed back, Waiting, and Status unknown stay on the gray ladder.
+
 ### Neutral
 - **Ground** (`{colors.ground}`): the panel itself, pure black so it fuses with the menu bar and the camera housing. Also the text color of a pressed control.
 - **Ink** (`{colors.ink}`): row titles, badge digits, control labels, the focus ring, and the fill of a pressed control. The brightest gray; reserved for what must be read first.
 - **Text** (`{colors.text}`): the task name in the strip, detail values, and explanatory sentences. The reading gray.
-- **Dim** (`{colors.dim}`): session labels, row ages, the row header's project and branch, detail-table labels, the "Not provided by Codex" placeholder, the keyboard hint, and the label of a disabled control. Holds 4.7:1 on black, so tertiary never drops below legibility.
-- **Well** (`{colors.well}`): the badge and every control at rest, and every cell of the unlit sprite. The only surface tone other than black.
+- **Dim** (`{colors.dim}`): session labels, row ages, the row header's place, a row's plain exception word, queue section names, detail-table labels, the "Not provided by Codex" placeholder, the keyboard hint, and the label of a disabled control. Holds 4.7:1 on black, so tertiary never drops below legibility.
+- **Well** (`{colors.well}`): the badge and every control at rest, a live approval's "Ns left", a section's "+N more", and every cell of the unlit sprite. The only surface tone other than black.
 - **Seam** (`{colors.seam}`): a one-point line between the strip and the open queue. White at eight percent is the only edge drawn inside the panel.
 
 ### Named Rules
-**The One Color Rule.** A session's colour belongs to its mark, the sprite. The mark lends it to exactly one other place: the answer options of that session's question, where the digit is drawn in the session's highlight and the option the user chose fills with the session's body colour under black text. The one exception is the usage bars in the strip: each bar's fill carries a fixed source hue, Codex blue (#3b82f6) and Claude orange (#d97757), so the two subscriptions read apart at a glance; their captions and percents stay gray. No badge, title, ring, or other control carries hue; every other state is spoken through motion and gray. A question row is headed by its session's standing sprite so the colour on the options reads as "this session", never as a category.
+**The One Color Rule.** A session's colour belongs to its mark, the sprite. The mark lends it to exactly one other place: the answer options of that session's question, where the digit is drawn in the session's highlight and the option the user chose fills with the session's body colour under black text. The exceptions are the "Failed" well (see Failure) and the usage bars in the strip: each bar's fill carries a fixed source hue, Codex blue (#3b82f6) and Claude orange (#d97757), so the two subscriptions read apart at a glance; their captions and percents stay gray. No badge, title, ring, or other control carries hue; every other state is spoken through motion and gray. A question row is headed by its session's standing sprite so the colour on the options reads as "this session", never as a category.
 
 **The Gray Ladder Rule.** Emphasis moves down four fixed steps: ink for what is read first, text for what is read, dim for what is there if needed, well for what is pressable. Do not add a fifth gray.
 
@@ -172,11 +194,11 @@ An achromatic ladder on pure black with a single green, reserved for the sprite,
 **Character:** One typeface at three sizes. The monospaced face makes the strip read like an instrument readout and lets the detail table align as a grid without rules. Weight, not size, carries hierarchy: 12pt semibold for a row title, 12pt regular for the task name, 11pt for everything the user reads or presses, 10pt for the single keyboard hint.
 
 ### Hierarchy
-- **Title** (600, 12pt): row titles in the open queue (the session's name on every row, followed by its tag when the row needs the user), the test-notification heading. Ink.
+- **Title** (600, 12pt): row titles in the open queue (the session's name on every row), the test-notification heading. Ink.
 - **Label** (400, 12pt): the task name in the collapsed strip. Text gray; single line, tail-truncated. The only truncation in the system.
 - **Body** (400, 11pt): detail values, explanatory sentences, session labels, control labels, the disclosure title. Text gray for values, dim for labels and session identifiers. Wraps in full.
 - **Count** (500, 11pt, tabular digits): the badge number.
-- **Caption** (400, 10pt): the keyboard hint at the foot of the full queue. Dim.
+- **Caption** (400, 10pt): the keyboard hint at the foot of the full queue, group and section headings, a row's exception word, and "+N more". Dim, except that a section's count is 600 in text gray, "Ns left" is 600 in ink, "Failed" is ink on its red well, and "+N more" is text gray.
 
 ### Named Rules
 **The One Face Rule.** Every glyph on the panel is the system monospaced face. No second family, no display face, no proportional fallback for prose.
@@ -189,7 +211,7 @@ An achromatic ladder on pure black with a single green, reserved for the sprite,
 
 The panel is one column, left-aligned, centered on the display. On a display with a camera housing the collapsed strip is the housing row itself: exactly the housing height, anchored to the top edge of the screen, with one sprite per session (at most three, each in its own color; the unlit sprite while there is none), the "+N" overflow mark, and the count in a 112pt wing left of the housing and the Codex weekly limit readout (a 4pt by 14pt vertical bar, well track filled in Codex blue from the bottom, with the percent in ink beside it; an empty track and a dim dash when unknown) in a 60pt wing right of it (the name is read in the open queue); while Codex also reports a five-hour window, the same readout with a dim "5h" caption sits 8pt ahead of the weekly one and that wing is 112pt, the left wing unmoved; while a Claude root reports current windows, the newest reading's "5h" and "7d" readouts, filled in Claude orange, sit ahead of Codex's, 12pt from the Codex group, and the wing grows 62pt per Claude readout (room for "100%") plus that 4pt group gap (`UsageStripReadouts.wingWidth`); the open queue grows downward from that row. Elsewhere the strip is inline with the menu bar row, as tall as the bar and anchored to the top edge, or, on an external monitor showing no menu bar (a full-screen app), 40pt tall and tucked above the screen edge and slid in only while the pointer touches the top edge, the panel is hovered or focused, or a new item is spotlit. Its frame is the body width plus two 8pt ears. Collapsed, the body is the two wings plus the housing width (never narrower than 200pt); open, it is 60pt wider than collapsed, split evenly between the two wings so the housing stays centered (`NotchPlacement.expandedGrowth`; on a display without a housing the left wing takes it), and never narrower than 380pt; the Wide and Extra wide panel widths grow it by 160pt or 260pt instead, never narrower than 480pt or 580pt, and never past 16pt from either side of the display (`PanelWidth`); it becomes exactly as tall as its content, capped at 480pt with the queue scrolling inside. On a display without a housing the same shape appears as a compact top-center strip.
 
-Content is inset 16pt from each side of the frame (ear plus 8pt). In the strip the first sprite sits 4pt in from the inset, the sprites, overflow mark, and badge follow at 6pt gaps, and the usage readouts are pushed to the right edge of their wing. The open queue begins with the seam, 12pt above the first row. Rows stack at 14pt; inside a row, the title line, any sentence, the detail table, and the control row stack at 8pt; the detail table's own lines sit at 3pt. Detail labels occupy a fixed 58pt column with an 8pt gutter, so values align as a grid. Controls sit in a row at 6pt gaps. A 14pt bottom pad closes the queue.
+Content is inset 16pt from each side of the frame (ear plus 8pt). In the strip the first sprite sits 4pt in from the inset, the sprites, overflow mark, and badge follow at 6pt gaps, and the usage readouts are pushed to the right edge of their wing. The open queue begins with the seam, 12pt above the first row. Each row's heading line is 26pt tall, so one-line rows stack edge to edge; a row with details below its heading keeps 8pt under them. Inside a row, the title line, any sentence, the detail table, and the control row stack at 8pt (counted from the heading text); the detail table's own lines sit at 3pt. Every headed run of rows (a State, Agent, or Project group, or a kind section) sits 16pt from the next, its heading 2pt above its first row (#314). Detail labels occupy a fixed 58pt column with an 8pt gutter, so values align as a grid. Controls sit in a row at 6pt gaps. A 14pt bottom pad closes the queue.
 
 No breakpoints and no grid beyond this: the panel is a single fixed-width column on every display.
 
@@ -265,29 +287,32 @@ The collapsed reading and the header of the open panel.
 ### Group headings
 With grouping on (State, Agent, or Project), the open queue inserts a heading above each group.
 - **Text:** the group name ("Needs you", "Done", "Working"; the agent name; or the project folder's last path component).
-- **Style:** 10pt caption, dim, 6pt above the group's first row. No rule or line is drawn.
+- **Style:** 10pt caption, dim, 2pt above the group's first row's 26pt heading line; groups sit 16pt apart. This rhythm is the same for every heading: State, Agent, and Project groups and the kind sections below. No rule or line is drawn.
 - **Sorting:** groups keep queue priority, so a group holding a live approval comes first. Rows sort inside their group.
-- **"Earlier":** stays a heading inside whichever group holds the older completions, followed by the number of Earlier rows in 11pt dim. A "Dismiss all" button sits at the heading's trailing edge and dismisses exactly the rows counted there.
-- **Working fold:** while any row needs the user, running rows sit below them behind one disclosure, "N working" (11pt text gray, chevron, ink focus ring), closed whenever the panel opens. Without grouping the rows above it take a "Needs you" heading; with State grouping the fold stands in for "Working". With nothing needing the user, running rows show unfolded.
-- **Folded Earlier row:** one line: a chevron, the session name in 11pt text gray, and the result's tag, with the age lane on the right. The fold is a plain button with the ink focus ring; opening it restores the full row header and shows the details and controls.
+- **"Earlier":** stays a heading inside whichever group holds the older completions, followed by the number of Earlier rows in that group in 11pt dim, folded ones included. A "Dismiss all" button sits at the heading's trailing edge and dismisses exactly the results it counts.
+- **Kind sections** (no grouping; D13, agreed 2026-10-21, #314): rows that need the user sit under "Approve", "Answer", and "Check", each in 10pt dim with its count 6pt after it in 10pt semibold text gray, inset 6pt; an empty section has no heading. They replace the "Needs you" heading. A card is never sectioned.
+- **"+N more":** a later section shows its first rows and folds the rest (`QueueFold`: 11 lines below the strip, one per live approval, which never fold; at most three rows and a pill per folded section, the last taking what is left; never a single row folded). The pill is 10pt text gray on a well with 4pt corners and 6pt by 1pt padding, 2pt under the section's last row and indented to the title (sprite slot plus 6pt). It is a plain button with the ink focus ring, spoken "Show 5 more in Answer", and opens the rest of its section in place. Folds close whenever the panel opens.
+- **Working fold:** while any row needs the user, running rows sit below them behind one disclosure, "N working" (11pt text gray, chevron, ink focus ring), closed whenever the panel opens. With State grouping the fold stands in for "Working". With nothing needing the user, running rows show unfolded.
+- **Folded Earlier row:** one line: a chevron, the session name in 11pt text gray, and the result's exception word when it has one, with the age lane on the right. The fold is a plain button with the ink focus ring; opening it restores the full row header and shows the details and controls.
 
 ### Cards / Containers
 Rows are not cards. There is no card surface, border, or shadow; a row is a left-aligned stack on the black ground, separated from its neighbors by 14pt of whitespace.
-- **Row header:** one line: the session's mark, then its name in 12pt semibold ink, then "· project @ branch" in 11pt dim when Herdly has seen the session's working directory (it truncates first, so the name and tags stay whole), then, when the row needs the user, a tag at 6pt: 10pt text gray on a well with a 4pt corner, the same material as the source tag ("approve", "answer", "handed back", "waiting", "status unknown", or for a result "check", "failed", "stopped"). A working row has no tag; the mark's step says it is working. The source tag sits right-aligned before the age lane, which sits on the right in 11pt dim tabular digits (at least 36pt wide, right-aligned, refreshed every 30 s), aligned on the first baseline with 10pt spacing. The spotlight uses the same header.
-- **Source tag:** "Claude", "Codex app", or "Codex CLI" in the row header, right-aligned before the age. The source tag is 10pt text gray on a well with 4pt corners and 5pt by 1pt padding; it carries no hue.
+- **Row header** (D17, D21, agreed 2026-10-21, #314): one 26pt line at 8pt gaps: the session's mark in its 18pt slot with the name 6pt after it in 12pt semibold ink; then "· repo @ branch" (or the profile's label format) in 11pt dim when Herdly has seen the session's working directory, taking the free width and tail-truncating first so the name and word stay whole; then at most one word; then the age lane on the right in 11pt dim tabular digits (at least 36pt wide, right-aligned, refreshed every 30 s; "—" for a status-unavailable row), aligned on the first baseline. The row names no source and carries no kind tag; the section heading says the kind. The spotlight uses the same header without "Ns left".
+- **Exception word:** "Failed" in 10pt ink on the failure well (4pt corners, 6pt by 1pt padding); "Handed back", "Waiting", and "Status unknown" in plain 10pt dim, with no well. Approve, answer, check, stopped, and working rows have none.
+- **"Ns left"** (live approvals in the open queue only): "18s left" in 10pt semibold ink on a well with 4pt corners and 6pt by 1pt padding, with a 2pt ink bar pinned to its bottom-left edge, as wide as the share of the request's own window left and clipped to the pill. It steps once a second without animation and never moves the deadline. VoiceOver reads "18 seconds left" with the row heading.
 - **Sentence (when present):** 11pt text gray, wrapping in full.
 - **Detail table:** label column 58pt wide in dim, values in text gray, 8pt gutter, 3pt line spacing; missing values read "Not provided by Codex" in dim. Command and reason are selectable.
-- **Disclosure:** "Show full request" in 11pt text gray reveals the long text inline. A working row's "Show full prompt" instead grows the row's own two-line prompt to the full text in place and reads "Show less" while open, so the prompt is never shown twice.
+- **Disclosure:** "Show full request" in 11pt text gray reveals the long text inline. A working row's shortened shell command opens with "Show full command"; other tool actions keep "Show full action" (D11). A working row's "Show full prompt" instead grows the row's own two-line prompt to the full text in place and reads "Show less" while open, so the prompt is never shown twice.
 - **Controls:** a row of wells at 6pt gaps beneath the details.
 - **Foot (full queue only):** the keyboard hint in 10pt dim, 2pt above the 14pt bottom pad.
-- **Row note:** after the user approves, denies, or answers from the notch, the row's dim "· project @ branch" (a question row's dim place) is replaced by the note in the same 11pt dim ("Sending…", "Claude got your approval", "Sent, not confirmed", "Not delivered · answer in Claude", "Sent, waiting for Codex") until that request clears. "Not delivered" adds the row's Open well beneath the header. VoiceOver reads the note where it reads the place.
-- **Selected row (keyboard):** Up and Down arrows move one selection over the open queue's rows in reading order (a closed working fold is skipped). The selected row carries the focus ring's vocabulary around the whole row: 1.5pt ink at 90%, 6pt continuous corners, 6pt outside horizontally and 4pt vertically; VoiceOver adds the selected trait. Return on a selected approval or question opens its clicked card. Tab still moves through controls.
+- **Row note:** after the user approves, denies, or answers from the notch, the row's dim "· project @ branch" (a question row's dim place) is replaced by the note in the same 11pt dim ("Sending…", "Claude got your approval", "Sent, not confirmed", "Not delivered · answer in Claude", "Sent, waiting for Codex") until that request clears. "Not delivered" adds the row's Open well beneath the header. VoiceOver still reads the place, then the note, then the state.
+- **Selected row (keyboard):** Up and Down arrows move one selection over the open queue's rows in reading order (a closed working fold and rows folded behind "+N more" are skipped; Tab reaches "+N more"). The selected row carries the focus ring's vocabulary around the whole row: 1.5pt ink at 90%, 6pt continuous corners, 6pt outside horizontally and 4pt vertically; VoiceOver adds the selected trait. Return on a selected approval or question opens its clicked card. Tab still moves through controls.
 - **Clicked card:** clicking an approval or question row's header opens that row alone with the spotlight body (see Spotlight detail) under a "‹ Queue" well at the top of the panel; no stepper, no arrows to other items. Approve, Deny, or Send returns to the queue at once; a question answered one typed key per question stays open until the key for its last question. Escape returns to the queue first, then collapses.
 - **Empty queue:** with nothing listed, the open queue holds one row in the same grammar (`EmptyQueueReading`). The unlit sprite leads a 12pt semibold ink title. "Nothing running" is followed by a dim line naming the connected sources ("Listening for Codex and Claude."), or by no line while setup is still being checked. "Not connected" appears only once both setups are checked and neither is connected; a text-gray line ("Codex and Claude aren’t reporting to Herdly yet.") and an Open Controls well follow it. The strip's spoken label reads the same title.
 
 ### Panel motion
 - **Resize:** the frame animates to its new size over 0.18 s with an ease-out curve; no spring, no overshoot. Under Reduce Motion, or before first presentation, the frame is set without animation.
-- **Rows:** open-queue rows keep their identity, so a reorder slides each row to its new place over 0.28 s on a smooth curve with no bounce. A new row fades in from 6pt above at 98% scale; a leaving row fades and shrinks toward its top edge while the rows below close the gap. Group headings move with their rows. Under Reduce Motion rows and headings only crossfade over 0.15 s, with no offset or scaling.
+- **Rows:** open-queue rows keep their identity, so a reorder slides each row to its new place over 0.28 s on a smooth curve with no bounce. A new row fades in from 6pt above at 98% scale; a leaving row fades and shrinks toward its top edge while the rows below close the gap. Group headings and "+N more" move with their rows, and opening "+N more" brings its rows in with the same transition. Under Reduce Motion rows, headings, and pills only crossfade over 0.15 s, with no offset or scaling. The "Ns left" bar steps each second and is never animated.
 - **Hover hold:** the panel treats the pointer as inside for 0.3 s after it leaves, so a slip off the edge does not snap it shut.
 - **Spotlight:** a new completion or actionable approval opens only its own row for 3 s; interaction holds it open and the original deadline applies afterward.
 - **Clicked card:** opening a card from the queue, and ‹ Queue or Escape back, use the same row motion: the other rows leave and return with the row transition, and the frame resizes on the panel's curve. Under Reduce Motion both are the 0.15 s crossfade and an unanimated resize.

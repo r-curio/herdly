@@ -41,6 +41,13 @@ public enum QueueSort: String, CaseIterable, Sendable {
     case lastUpdate
 }
 
+/// What follows each name in the open queue (D21): the repo folder and branch, or one of them.
+public enum QueueLabelFormat: String, CaseIterable, Sendable {
+    case repoAtBranch
+    case repoOnly
+    case branchOnly
+}
+
 public enum QueueGrouping: String, CaseIterable, Sendable {
     case none
     case state
@@ -105,14 +112,16 @@ public struct NotchAppearance: Equatable, Sendable {
     public var grouping: QueueGrouping
     public var earlier: EarlierDelay
     public var panelWidth: PanelWidth
+    /// What follows each name in the open queue. The Settings menu for it is #324.
+    public var labelFormat: QueueLabelFormat
 
     public static let standard = NotchAppearance(leftWing: .spritesAndCount, centerLabel: .taskName, usage: .compact,
                                                  sprite: .sheep, sort: .needsAttention, grouping: .none,
-                                                 earlier: .fiveMinutes, panelWidth: .standard)
+                                                 earlier: .fiveMinutes, panelWidth: .standard, labelFormat: .repoAtBranch)
 
     public init(leftWing: StripLeftWing, centerLabel: StripCenterLabel, usage: UsageDisplay,
                 sprite: SpriteKind, sort: QueueSort, grouping: QueueGrouping, earlier: EarlierDelay,
-                panelWidth: PanelWidth = .standard) {
+                panelWidth: PanelWidth = .standard, labelFormat: QueueLabelFormat = .repoAtBranch) {
         self.leftWing = leftWing
         self.centerLabel = centerLabel
         self.usage = usage
@@ -121,6 +130,7 @@ public struct NotchAppearance: Equatable, Sendable {
         self.grouping = grouping
         self.earlier = earlier
         self.panelWidth = panelWidth
+        self.labelFormat = labelFormat
     }
 
     /// The camera housing covers the centre of the strip, so the label is never drawn there.
@@ -143,7 +153,8 @@ public struct NotchAppearance: Equatable, Sendable {
                                sort: read("sort", standard.sort),
                                grouping: read("grouping", standard.grouping),
                                earlier: read("earlier", standard.earlier),
-                               panelWidth: read("panelWidth", standard.panelWidth))
+                               panelWidth: read("panelWidth", standard.panelWidth),
+                               labelFormat: read("labelFormat", standard.labelFormat))
     }
 
     public func save(profile: DisplayProfile, write: (String, String) -> Void) {
@@ -155,6 +166,7 @@ public struct NotchAppearance: Equatable, Sendable {
         write(Self.key(profile, "grouping"), grouping.rawValue)
         write(Self.key(profile, "earlier"), earlier.rawValue)
         write(Self.key(profile, "panelWidth"), panelWidth.rawValue)
+        write(Self.key(profile, "labelFormat"), labelFormat.rawValue)
     }
 
     static func key(_ profile: DisplayProfile, _ field: String) -> String {
@@ -165,7 +177,88 @@ public struct NotchAppearance: Equatable, Sendable {
 /// A run of queue rows under one optional heading.
 public struct QueueGroup: Equatable, Sendable {
     public let heading: String?
+    /// The rows on screen; a folded section leaves out its later rows.
     public let items: [AgentAttentionItem]
+    /// The kind section this group is, when the queue is split by kind (D13).
+    public let section: QueueKindSection?
+    /// Every row in the group, folded ones included; a kind section's heading shows it.
+    public let count: Int
+    /// Every Earlier result in the group, folded ones included, in queue order. The "Earlier"
+    /// heading counts these and its "Dismiss all" dismisses exactly these.
+    public let earlierIDs: [AgentAttentionID]
+    /// Rows behind the group's "+N more" pill; zero when nothing is folded.
+    public var folded: Int { count - items.count }
+
+    /// `items` are the rows shown; `all`, when the group folds, is every row it holds.
+    public init(heading: String?, items: [AgentAttentionItem], section: QueueKindSection? = nil,
+                all: [AgentAttentionItem]? = nil) {
+        let all = all ?? items
+        self.heading = heading
+        self.items = items
+        self.section = section
+        self.count = max(items.count, all.count)
+        self.earlierIDs = all.filter { $0.kind == .earlierOutcome }.map(\.id)
+    }
+}
+
+/// The open queue's kind sections when it is not grouped (D13): live approvals, waiting questions,
+/// and everything else that needs the user. Each heading says the kind, so rows carry no kind word.
+public enum QueueKindSection: String, CaseIterable, Hashable, Sendable {
+    case approve
+    case answer
+    case check
+
+    public var heading: String {
+        switch self {
+        case .approve: "Approve"
+        case .answer: "Answer"
+        case .check: "Check"
+        }
+    }
+
+    /// The section a row belongs in, or nil for a running row, which sits in the working fold.
+    public init?(_ kind: AgentAttentionKind) {
+        switch kind {
+        case .actionableApproval: self = .approve
+        case .question: self = .answer
+        case .handedBackApproval, .waiting, .outcome, .earlierOutcome, .statusUnavailable: self = .check
+        case .running: return nil
+        }
+    }
+}
+
+/// How many rows each kind section shows before its "+N more" pill (D13). The open queue has a
+/// budget of `lineBudget` lines below the strip; every live approval spends one and never folds.
+/// When the remaining rows all fit, nothing folds. Otherwise each later section, in order, shows at
+/// most `rowsBeforeFold` rows and spends one line on its pill, while leaving each section after it
+/// room for one row and a pill; the last section takes what budget is left. Every section keeps at
+/// least one row, and a section never folds a single row. Headings are not counted. Presentation
+/// only: no count, deadline, or order changes.
+public enum QueueFold {
+    public static let lineBudget = 11
+    public static let rowsBeforeFold = 3
+
+    /// Rows shown per section, for sections of `sections` rows following `approvals` live approvals.
+    public static func shownRows(approvals: Int, sections: [Int], budget: Int = lineBudget) -> [Int] {
+        var linesLeft = budget - approvals
+        guard sections.reduce(0, +) > linesLeft else { return sections }
+        // The fewest lines a section can take: all of one or two rows, or one row and its pill.
+        func fewest(_ rows: Int) -> Int { min(rows, 2) }
+        return sections.indices.map { index in
+            let rows = sections[index]
+            let isLast = index == sections.count - 1
+            let reservedForLater = sections[(index + 1)...].map(fewest).reduce(0, +)
+            let allowed = max(fewest(rows), linesLeft - reservedForLater)
+            let cap = isLast ? rows : rowsBeforeFold
+            var shown = rows
+            if rows > min(cap, allowed) {
+                shown = max(1, min(cap, allowed - 1))
+                if rows - shown == 1 { shown = rows }
+            }
+            linesLeft -= shown + (shown < rows ? 1 : 0)
+            return shown
+        }
+    }
 }
 
 public enum QueueGroups {
@@ -227,22 +320,46 @@ public struct QueueSections: Equatable, Sendable {
         return (attention + working).flatMap(\.items).map(\.id)
     }
 
-    /// Splits already-ordered rows. While folding, ungrouped requests gain a "Needs you" heading and
-    /// folded working rows drop the State grouping's "Working" heading, since the fold already names
-    /// them; Agent and Project headings stay inside the fold.
+    /// Splits already-ordered rows. With `kindSections` and no grouping (the open queue), rows that
+    /// need the user sit under Approve, Answer, and Check headings with their counts, an empty section
+    /// leaves no heading, and later sections fold behind "+N more" (`QueueFold`) unless named in
+    /// `openSections`. A card passes no `kindSections` and stays one unheaded row. Folded working rows
+    /// drop the State grouping's "Working" heading, since the fold already names them; Agent and
+    /// Project headings stay inside the fold.
     public static func make(_ items: [AgentAttentionItem], grouping: QueueGrouping,
-                            project: (AgentAttentionItem) -> String?) -> QueueSections {
+                            project: (AgentAttentionItem) -> String?, kindSections: Bool = false,
+                            openSections: Set<QueueKindSection> = []) -> QueueSections {
         let needsUser = items.filter { $0.kind != .running }
         let running = items.filter { $0.kind == .running }
         let folds = !needsUser.isEmpty && !running.isEmpty
-        var attention = QueueGroups.make(needsUser, grouping: grouping, project: project)
-        if folds && grouping == .none {
-            // Without grouping, one heading still separates the requests from the fold below them.
-            attention = [QueueGroup(heading: "Needs you", items: needsUser)]
-        }
+        let attention = kindSections && grouping == .none
+            ? sectionsByKind(needsUser, open: openSections)
+            : QueueGroups.make(needsUser, grouping: grouping, project: project)
         let workingGrouping: QueueGrouping = folds && grouping == .state ? .none : grouping
         return QueueSections(attention: attention,
                              working: QueueGroups.make(running, grouping: workingGrouping, project: project),
                              workingCount: running.count)
+    }
+
+    /// One kind section's rows before folding.
+    private struct KindRows {
+        let section: QueueKindSection
+        let rows: [AgentAttentionItem]
+    }
+
+    private static func sectionsByKind(_ items: [AgentAttentionItem], open: Set<QueueKindSection>) -> [QueueGroup] {
+        let sections = QueueKindSection.allCases
+            .map { section in KindRows(section: section, rows: items.filter { QueueKindSection($0.kind) == section }) }
+            .filter { !$0.rows.isEmpty }
+        let approvalCount = sections.first { $0.section == .approve }?.rows.count ?? 0
+        let foldable = sections.filter { $0.section != .approve }
+        let shownPerFoldable = QueueFold.shownRows(approvals: approvalCount, sections: foldable.map(\.rows.count))
+        return sections.map { kind in
+            let foldableIndex = foldable.firstIndex { $0.section == kind.section }
+            let shown = kind.section == .approve || open.contains(kind.section)
+                ? kind.rows.count : foldableIndex.map { shownPerFoldable[$0] } ?? kind.rows.count
+            return QueueGroup(heading: kind.section.heading, items: Array(kind.rows.prefix(shown)),
+                              section: kind.section, all: kind.rows)
+        }
     }
 }
