@@ -836,7 +836,7 @@ struct Notch: View {
         switch model.presentationMode {
         case .collapsed: return []
         case .queue: return model.queueAgentAttentionItems
-        case .agentSpotlight(let id): return model.orderedAgentAttentionItems.filter { $0.id == id }
+        case .agentSpotlight(let id), .clickedCard(let id): return model.orderedAgentAttentionItems.filter { $0.id == id }
         case .spotlight: return []
         }
     }

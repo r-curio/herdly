@@ -1,11 +1,13 @@
 import Foundation
 
 /// The one valid presentation the notch body can have. A live spotlight outranks passive hover;
-/// only an explicit header activation replaces it with the complete queue.
+/// only an explicit header activation replaces it with the complete queue. A clicked card is the
+/// one approval or question the user opened from the queue (docs/product.md, D5/D18).
 public enum NotchPresentationMode: Equatable, Sendable {
     case collapsed
     case spotlight(AttentionItemID)
     case agentSpotlight(AgentAttentionID)
+    case clickedCard(AgentAttentionID)
     case queue
 
     public static func resolve(spotlight: AttentionItemID?, manualOpen: Bool,
@@ -37,40 +39,140 @@ public enum AgentPresentationEligibility {
     }
 }
 
-/// Owns the causal transition between automatic spotlighting and an explicit queue open.
+/// What one Escape did: a clicked card steps back to the queue; anything else collapses (D6).
+/// Neither dismisses an item.
+public enum NotchEscape: Equatable, Sendable {
+    case backToQueue
+    case collapse
+}
+
+/// Owns the causal transition between automatic spotlighting, an explicit queue open, and a card
+/// the user clicked open from the queue.
 public struct NotchPresentationController: Equatable, Sendable {
     private var spotlight = Spotlight()
     private var agentSpotlight = AgentSpotlight()
     private var manualOpen = false
+    /// The exact approval or question the user clicked open. It has no timed close and never
+    /// touches its request's deadline; it ends on Escape, ‹ Queue, an action, the end of
+    /// interaction, or its item leaving the queue.
+    private var clicked: AgentAttentionID?
 
     public init() {}
     public mutating func present(_ item: AttentionItemID, now: Double) { spotlight.present(item, now: now) }
     /// With `holdUntilInteraction`, the card stays open until the user interacts with it, then closes once
     /// that interaction ends. Approval deadlines are separate and never move.
     public mutating func present(_ item: AgentAttentionID, now: Double, holdUntilInteraction: Bool = false) {
+        guard clicked == nil else { return }
         agentSpotlight.present(item, now: now, holdUntilInteraction: holdUntilInteraction)
     }
     public func agentSpotlightIsActive(interacting: Bool, now: Double) -> Bool {
         agentSpotlight.isActive(interacting: interacting, now: now)
     }
-    /// Whether a fresh card may take the spotlight now. Never while one is active, and never while
-    /// the user has unsent text in a field on screen, which a new card would take away.
+    /// Whether a fresh card may take the spotlight now. Never while one is active or a clicked card
+    /// is open, and never while the user has unsent text in a field on screen, which a new card
+    /// would take away.
     public func acceptsAgentSpotlight(interacting: Bool, draftInProgress: Bool, now: Double) -> Bool {
-        !draftInProgress && !agentSpotlight.isActive(interacting: interacting, now: now)
+        clicked == nil && !draftInProgress && !agentSpotlight.isActive(interacting: interacting, now: now)
     }
-    public mutating func openQueue() { manualOpen = true }
-    public mutating func collapse() { manualOpen = false; spotlight.clear(); agentSpotlight.clear() }
+    /// The header's explicit open: the whole queue, leaving any clicked card.
+    public mutating func openQueue() { manualOpen = true; clicked = nil }
+    /// Opens one approval or question as its own card in place of the queue. Other rows (results,
+    /// running work) are not cards here and return false.
+    @discardableResult
+    public mutating func openCard(_ item: AgentAttentionID) -> Bool {
+        switch item {
+        case .approval, .question:
+            clicked = item
+            manualOpen = true
+            agentSpotlight.clear()
+            spotlight.clear()
+            return true
+        case .outcome, .running, .unavailable:
+            return false
+        }
+    }
+    /// ‹ Queue, or an action taken on the card: back to the queue. Nothing is dismissed.
+    public mutating func backToQueue() {
+        guard clicked != nil else { return }
+        clicked = nil
+        manualOpen = true
+    }
+    /// The one Escape rule (D6): a clicked card returns to the queue; otherwise the panel collapses.
+    public mutating func escape() -> NotchEscape {
+        if clicked != nil {
+            backToQueue()
+            return .backToQueue
+        }
+        collapse()
+        return .collapse
+    }
+    public mutating func collapse() { manualOpen = false; clicked = nil; spotlight.clear(); agentSpotlight.clear() }
     /// `draftInProgress` (unsent text in a field on screen) keeps the current card open like
     /// interaction does, so a hover or focus gap cannot swap it for the queue mid-answer. It does
-    /// not open anything by itself; Escape still collapses through `collapse()`.
+    /// not open anything by itself; Escape still ends the hold through `escape()`.
+    /// `queued` is the queue's current identities: a clicked card whose item has left falls back to
+    /// the queue and never shows another item. Nil leaves the clicked card unchecked.
     public mutating func update(interacting: Bool, draftInProgress: Bool = false, now: Double,
-                                legacyPopup: Bool = false) -> NotchPresentationMode {
+                                legacyPopup: Bool = false, queued: Set<AgentAttentionID>? = nil) -> NotchPresentationMode {
+        if let card = clicked {
+            if let queued, !queued.contains(card) {
+                clicked = nil
+            } else if interacting || draftInProgress {
+                return .clickedCard(card)
+            } else {
+                // The card closes with the panel, as the queue it was opened from does.
+                clicked = nil
+                manualOpen = false
+            }
+        }
         if !interacting { manualOpen = false }
         if let id = agentSpotlight.update(interacting: interacting || draftInProgress, now: now) {
             return manualOpen ? .queue : .agentSpotlight(id)
         }
         return NotchPresentationMode.resolve(spotlight: spotlight.update(interacting: interacting, now: now),
                                              manualOpen: manualOpen, interacting: interacting, legacyPopup: legacyPopup)
+    }
+}
+
+/// Keyboard selection over the open queue's rows (Up and Down arrows). The selection follows its
+/// row's identity through reorders and goes when that row leaves; it never jumps to another row
+/// by position.
+public struct QueueRowSelection: Equatable, Sendable {
+    public enum Direction: Sendable { case up, down }
+
+    /// What Return on the selected row asks for. Opening a session from a row is wired by #322.
+    public enum ReturnAction: Equatable, Sendable {
+        case openCard(AgentAttentionID)
+        case openSession(AgentAttentionID)
+    }
+
+    public private(set) var selected: AgentAttentionID?
+
+    public init(selected: AgentAttentionID? = nil) { self.selected = selected }
+
+    /// Moves one row, stopping at either end. With nothing selected, Down selects the first row
+    /// and Up the last.
+    public mutating func move(_ direction: Direction, in rows: [AgentAttentionID]) {
+        guard !rows.isEmpty else { selected = nil; return }
+        guard let selected, let index = rows.firstIndex(of: selected) else {
+            self.selected = direction == .down ? rows.first : rows.last
+            return
+        }
+        let next = direction == .down ? min(rows.count - 1, index + 1) : max(0, index - 1)
+        self.selected = rows[next]
+    }
+
+    public mutating func reconcile(rows: [AgentAttentionID]) {
+        if let selected, !rows.contains(selected) { self.selected = nil }
+    }
+
+    public mutating func clear() { selected = nil }
+
+    public static func returnAction(for row: AgentAttentionID) -> ReturnAction {
+        switch row {
+        case .approval, .question: return .openCard(row)
+        case .outcome, .running, .unavailable: return .openSession(row)
+        }
     }
 }
 
