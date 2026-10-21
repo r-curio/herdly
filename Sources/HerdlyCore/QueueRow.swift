@@ -139,24 +139,22 @@ public struct RowAge: Equatable, Sendable {
     }
 }
 
-/// How much of a live approval's own window is left at `now` (D7, D12): whole seconds, rounded up
-/// so "0s" appears only at the deadline, and the remaining share of `expiresAt - arrivedAt` for the
-/// pill's bar. Never negative, never above one; a zero-length or unreadable window reads empty.
+/// How much of a live approval's own window is left at `now` (D7, D12): whole seconds, rounded up,
+/// and the remaining share of `expiresAt - arrivedAt` for the pill's bar, never above one. There is
+/// no countdown (nil) once the deadline has passed or when the deadline or clock is unreadable, so a
+/// pill never reads "0s left" or guesses; an unreadable or zero-length window only empties the bar.
 public struct ApprovalCountdown: Equatable, Sendable {
     public let seconds: Int
     public let fraction: Double
 
-    public init(seconds: Int, fraction: Double) {
+    init(seconds: Int, fraction: Double) {
         self.seconds = seconds
         self.fraction = fraction
     }
 
-    public init(arrivedAt: Double, expiresAt: Double, now: Double) {
+    public init?(arrivedAt: Double, expiresAt: Double, now: Double) {
         let remaining = expiresAt - now
-        guard remaining.isFinite, remaining > 0 else {
-            self.init(seconds: 0, fraction: 0)
-            return
-        }
+        guard expiresAt.isFinite, now.isFinite, remaining > 0 else { return nil }
         let window = expiresAt - arrivedAt
         let fraction = window.isFinite && window > 0 ? min(1, remaining / window) : 0
         self.init(seconds: Int(min(remaining.rounded(.up), Double(Int32.max))), fraction: fraction)

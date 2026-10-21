@@ -187,29 +187,39 @@ private func temporaryTree() throws -> URL {
     #expect(QueueRowPresentation.rowAge(row, now: 400) == RowAge(text: "5m", spoken: "Updated 5 minutes ago"))
 }
 
-@Test func secondsLeftCountsDownTheRequestsOwnWindow() {
+@Test func secondsLeftCountsDownTheRequestsOwnWindow() throws {
     // A 30-second window received at 100.
-    let start = ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 100)
+    let start = try #require(ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 100))
     #expect(start.seconds == 30 && start.fraction == 1)
     #expect(start.label == "30s left" && start.spoken == "30 seconds left")
 
-    // Partial seconds round up, so "0s" appears only at the deadline itself.
-    let mid = ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 112.2)
+    // Partial seconds round up.
+    let mid = try #require(ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 112.2))
     #expect(mid.seconds == 18 && mid.label == "18s left")
     #expect(abs(mid.fraction - 17.8 / 30) < 0.000_1)
-    let last = ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 129.5)
+    let last = try #require(ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 129.5))
     #expect(last.seconds == 1 && last.spoken == "1 second left")
 
-    // Never negative, never past full.
-    let over = ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 200)
-    #expect(over.seconds == 0 && over.fraction == 0)
-    let early = ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 50)
+    // A clock before arrival never reads past a full bar.
+    let early = try #require(ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 50))
     #expect(early.seconds == 80 && early.fraction == 1)
 
-    // A zero-length or inverted window has nothing left to show.
-    #expect(ApprovalCountdown(arrivedAt: 100, expiresAt: 100, now: 100).fraction == 0)
-    #expect(ApprovalCountdown(arrivedAt: 100, expiresAt: 90, now: 95).fraction == 0)
-    #expect(ApprovalCountdown(arrivedAt: 100, expiresAt: .nan, now: 95) == ApprovalCountdown(seconds: 0, fraction: 0))
+    // A zero-length or inverted window has no bar left to show.
+    #expect(ApprovalCountdown(arrivedAt: 95, expiresAt: 100, now: 90)?.fraction == 1)
+    #expect(ApprovalCountdown(arrivedAt: 100, expiresAt: 100, now: 99)?.fraction == 0)
+    #expect(ApprovalCountdown(arrivedAt: 100, expiresAt: 90, now: 85)?.fraction == 0)
+}
+
+@Test func anUnreadableOrPassedDeadlineHasNoCountdownSoNeverReadsZeroSeconds() {
+    // At or past the deadline there is nothing left: no pill, never "0s left".
+    #expect(ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 130) == nil)
+    #expect(ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: 200) == nil)
+    // A non-finite deadline or clock is unknown, not zero.
+    #expect(ApprovalCountdown(arrivedAt: 100, expiresAt: .nan, now: 95) == nil)
+    #expect(ApprovalCountdown(arrivedAt: 100, expiresAt: .infinity, now: 95) == nil)
+    #expect(ApprovalCountdown(arrivedAt: 100, expiresAt: 130, now: .nan) == nil)
+    // An unreadable arrival only loses the bar.
+    #expect(ApprovalCountdown(arrivedAt: .nan, expiresAt: 130, now: 120) == ApprovalCountdown(seconds: 10, fraction: 0))
 }
 
 @Test func onlyALiveApprovalShowsSecondsLeftAndAMergedOneUsesItsSoonestDeadline() {
