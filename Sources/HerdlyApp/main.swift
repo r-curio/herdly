@@ -239,10 +239,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var keepCardsOpen = UserDefaults.standard.bool(forKey: "keepCardsOpen") {
         didSet { UserDefaults.standard.set(keepCardsOpen, forKey: "keepCardsOpen") }
     }
-    /// A light haptic tap when the pointer enters the strip, on trackpads that support it.
-    @Published var hapticFeedback = UserDefaults.standard.bool(forKey: "hapticFeedback") {
-        didSet { UserDefaults.standard.set(hapticFeedback, forKey: "hapticFeedback") }
-    }
     /// Codex's own thread names by session, refreshed every scan; unknown sessions keep their identifier.
     @Published var threadNames: [UUID: String] = [:]
     /// Checked-out branch by working directory, for the queue row's identity line. Read off the
@@ -710,9 +706,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                     && NotchHover.pointerTouchesTopEdge(of: self.panel.frame, pointer: NSEvent.mouseLocation)
                 guard onEdge != self.pointerOnTopEdge else { return }
                 self.pointerOnTopEdge = onEdge
-                if onEdge && !self.hovering && self.hapticFeedback {
-                    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-                }
                 // Refreshes now and, on leaving, again once the hover grace has passed.
                 self.setHovering(self.hovering)
             }
@@ -1853,9 +1846,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func setHovering(_ hovering: Bool) {
-        if hovering && !self.hovering && hapticFeedback {
-            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-        }
         self.hovering = hovering
         hoverExitTask?.cancel()
         hoverExitTask = nil
