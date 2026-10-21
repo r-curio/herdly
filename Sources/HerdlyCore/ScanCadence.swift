@@ -22,3 +22,11 @@ public enum SharedTabScan {
         eligible.values.contains { now >= $0 } ? Set(eligible.keys) : []
     }
 }
+
+/// Whether a scheduled scan may reuse a reading another scheduled scan took (#306): its read began no
+/// earlier than this scan read the frontmost app (`notBefore`, ADR 0016), and less than `maxAge` ago.
+public enum SharedReading {
+    public static func reusable(takenAt: Double, notBefore: Double, now: Double, maxAge: Double) -> Bool {
+        takenAt.isFinite && takenAt >= notBefore && now - takenAt < maxAge
+    }
+}
