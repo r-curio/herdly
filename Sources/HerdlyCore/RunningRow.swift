@@ -1,5 +1,10 @@
 import Foundation
 
+extension AgentSource {
+    /// The agent's short name in row text: "Codex" or "Claude".
+    public var displayName: String { self == .claude ? "Claude" : "Codex" }
+}
+
 extension AgentSessionIdentity {
     /// The agent surface a session runs on, as rows name it: "Codex CLI", "Codex Desktop", or
     /// "Claude Code" (every Claude session).

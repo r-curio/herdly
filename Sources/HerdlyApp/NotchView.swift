@@ -877,7 +877,7 @@ struct Notch: View {
         if let running = item.running {
             let details = RunningRowDetails.make(running, host: model.lastSeenHost(for: item.session))
             let promptKey = "prompt:\(item.session.session)"
-            let agent = item.session.source == .claude ? "Claude" : "Codex"
+            let agent = item.session.source.displayName
             VStack(alignment: .leading, spacing: 6) {
                 if let now = details.now {
                     runningLine("now", now.text, tone: now.isUnknown ? NotchStyle.dim : NotchStyle.ink)
@@ -1469,7 +1469,7 @@ struct Notch: View {
                                     let title = running.promptShortened ? "Show more of prompt" : "Show full prompt"
                                     NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject, expanded: disclosure(promptKey)) {
                                         if running.promptShortened {
-                                            Text("Shortened; the full prompt is in \(item.session.source == .claude ? "Claude" : "Codex").")
+                                            Text("Shortened; the full prompt is in \(item.session.source.displayName).")
                                                 .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                                         }
                                     }
@@ -1598,8 +1598,8 @@ struct Notch: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(rowHeading(item)), \(subject)")
         .accessibilityAddTraits(selected ? .isSelected : [])
-        // The opened running row is one container on the well, 6pt outside the row's own edges so the
-        // header line does not move when it opens (F3).
+        // The opened running row is one container on its own ground (NotchStyle.openRow), 6pt outside
+        // the row's left and right edges so the header line does not move when it opens (F3).
         .background {
             if runningOpen {
                 RoundedRectangle(cornerRadius: 6, style: .continuous).fill(NotchStyle.openRow)

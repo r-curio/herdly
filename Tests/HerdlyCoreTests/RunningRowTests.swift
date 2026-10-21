@@ -195,3 +195,8 @@ private func running(_ session: AgentSessionIdentity = codexCLI, prompt: String?
     let claudeDesktop = AgentSessionIdentity(source: .claude, sourceScope: "/Users/u/.claude", session: "d1", surface: .desktop)
     #expect(claudeDesktop.sourceLabel == "Claude Code")
 }
+
+@Test func agentSourceDisplayNameIsTheShortAgentName() {
+    #expect(AgentSource.codex.displayName == "Codex")
+    #expect(AgentSource.claude.displayName == "Claude")
+}
