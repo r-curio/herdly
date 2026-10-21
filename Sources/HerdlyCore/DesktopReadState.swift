@@ -10,8 +10,8 @@ import Foundation
 ///
 /// - Desktop 26.930.61225 keeps them under `electron-thread-read-state-v1` → `unreadByIdentity`
 ///   → a signed-in identity key → an execution host key such as `local:<hash>`. Both keys are
-///   hashes Herdly cannot recompute, so it accepts exactly one identity holding exactly one
-///   `local:` host.
+///   hashes Herdly cannot recompute, so it requires exactly one `local:` host in each identity
+///   and treats a thread as unread when any identity flags it.
 /// - Desktop 26.901.51231 kept them under `electron-persisted-atom-state` →
 ///   `unread-thread-ids-by-host-v1` → `local`. Newer builds migrate and delete this key.
 ///
@@ -77,18 +77,24 @@ public enum DesktopReadStateReader {
         return DesktopReadStateSnapshot(unread: unread, modifiedAt: modifiedAt)
     }
 
-    /// The local host's array in the per-identity layout. Several identities mean several signed-in
-    /// accounts and Herdly cannot tell which is current; several `local:` hosts mean it cannot tell
-    /// which is this Mac. Either way, and when the version or shape is unexpected, nil.
+    /// The local host's ids in the per-identity layout, merged across signed-in identities. Herdly
+    /// cannot tell which identity is current, but a thread unread under any of them stays unread, so
+    /// the merge can only keep completions queued, never clear one the current account still flags.
+    /// No identity, an identity without exactly one `local:` host (Herdly cannot tell which is this
+    /// Mac), or an unexpected version or shape returns nil.
     private static func localUnread(readState: Any) -> [Any]? {
         guard let state = readState as? [String: Any],
               (state["version"] as? NSNumber)?.intValue == readStateVersion,
               let identities = state[unreadByIdentityKey] as? [String: Any],
-              identities.count == 1,
-              let hosts = identities.values.first as? [String: Any] else { return nil }
-        let local = hosts.filter { $0.key.hasPrefix(localHostKeyPrefix) }
-        guard local.count == 1 else { return nil }
-        return local.first?.value as? [Any]
+              !identities.isEmpty else { return nil }
+        var merged: [Any] = []
+        for identity in identities.values {
+            guard let hosts = identity as? [String: Any] else { return nil }
+            let local = hosts.filter { $0.key.hasPrefix(localHostKeyPrefix) }
+            guard local.count == 1, let ids = local.first?.value as? [Any] else { return nil }
+            merged += ids
+        }
+        return merged
     }
 
     /// Any entry that is not a thread id means the format moved; refuse the whole snapshot.
