@@ -665,29 +665,23 @@ private func wingStrip(sessions count: Int, working: Set<Int> = []) -> AgentStri
     return AgentStripSummary.make(items: queue.items(at: Double(count)))
 }
 
-private func spriteSessions(_ wing: StripWing) -> [AgentSessionIdentity?] {
-    wing.sprites.map { sprite in
-        if case .session(let session) = sprite { session.session } else { nil }
-    }
-}
-
 @Test func collapsedWingShowsUpToThreeSpritesAndABareCount() {
     let empty = StripWing.make(summary: wingStrip(sessions: 0), leftWing: .spritesAndCount, expanded: false)
     #expect(empty.sprites == [.unlit] && empty.badge == nil)
 
     let one = StripWing.make(summary: wingStrip(sessions: 1), leftWing: .spritesAndCount, expanded: false)
-    #expect(spriteSessions(one) == [wingSession(0)] && one.badge == "1")
+    #expect(one.sprites.map(\.identity) == [wingSession(0)] && one.badge == .count(1))
 
     let three = StripWing.make(summary: wingStrip(sessions: 3), leftWing: .spritesAndCount, expanded: false)
-    #expect(spriteSessions(three) == [wingSession(0), wingSession(1), wingSession(2)] && three.badge == "3")
+    #expect(three.sprites.map(\.identity) == [wingSession(0), wingSession(1), wingSession(2)] && three.badge == .count(3))
 
     // Nine sessions still draw exactly three sprites; the rest appear only in the open queue, and
     // nothing on the strip counts them.
     let nineSummary = wingStrip(sessions: 9)
     let nine = StripWing.make(summary: nineSummary, leftWing: .spritesAndCount, expanded: false)
     #expect(nine.sprites.count == 3)
-    #expect(spriteSessions(nine) == [wingSession(0), wingSession(1), wingSession(2)])
-    #expect(nine.badge == "9" && nineSummary.toCheck == 9)
+    #expect(nine.sprites.map(\.identity) == [wingSession(0), wingSession(1), wingSession(2)])
+    #expect(nine.badge == .count(9) && nineSummary.toCheck == 9)
 }
 
 @Test func openWingShowsOneSpriteAndNamesTheBadge() {
@@ -695,13 +689,13 @@ private func spriteSessions(_ wing: StripWing) -> [AgentSessionIdentity?] {
     #expect(empty.sprites == [.unlit] && empty.badge == nil)
 
     let one = StripWing.make(summary: wingStrip(sessions: 1), leftWing: .spritesAndCount, expanded: true)
-    #expect(spriteSessions(one) == [wingSession(0)] && one.badge == "1 to check")
+    #expect(one.sprites.map(\.identity) == [wingSession(0)] && one.badge == .named(1))
 
     let three = StripWing.make(summary: wingStrip(sessions: 3), leftWing: .spritesAndCount, expanded: true)
-    #expect(spriteSessions(three) == [wingSession(0)] && three.badge == "3 to check")
+    #expect(three.sprites.map(\.identity) == [wingSession(0)] && three.badge == .named(3))
 
     let nine = StripWing.make(summary: wingStrip(sessions: 9), leftWing: .spritesAndCount, expanded: true)
-    #expect(spriteSessions(nine) == [wingSession(0)] && nine.badge == "9 to check")
+    #expect(nine.sprites.map(\.identity) == [wingSession(0)] && nine.badge == .named(9))
 }
 
 @Test func openWingStepsTheFirstWorkingSessionsSprite() {
@@ -712,18 +706,21 @@ private func spriteSessions(_ wing: StripWing) -> [AgentSessionIdentity?] {
     #expect(open.sprites.count == 1)
     guard case .session(let sprite) = open.sprites.first else { Issue.record("expected a session sprite"); return }
     #expect(sprite.working && sprite.session == wingSession(1))
-    #expect(open.badge == "1 to check")
+    #expect(open.badge == .named(1))
+    // A working session among the shown three keeps the color it has on the strip.
+    #expect(sprite.color == summary.sessions[1].color)
 
     // The only working session ranks below the three collapsed sprites: collapsed it is not drawn,
     // open its sprite still steps.
     let deep = wingStrip(sessions: 9, working: [6])
     let deepCollapsed = StripWing.make(summary: deep, leftWing: .spritesAndCount, expanded: false)
-    #expect(deepCollapsed.sprites.count == 3 && !spriteSessions(deepCollapsed).contains(wingSession(6)))
+    #expect(deepCollapsed.sprites.count == 3 && !deepCollapsed.sprites.map(\.identity).contains(wingSession(6)))
     let deepOpen = StripWing.make(summary: deep, leftWing: .spritesAndCount, expanded: true)
-    #expect(spriteSessions(deepOpen) == [wingSession(6)] && deepOpen.badge == "8 to check")
+    #expect(deepOpen.sprites.map(\.identity) == [wingSession(6)] && deepOpen.badge == .named(8))
+    // Its color matches its queue row: a session not on the strip takes its preferred color.
     if case .session(let session) = deepOpen.sprites.first {
-        #expect(session.working && !deep.sessions.map(\.color).contains(session.color))
-    }
+        #expect(session.working && session.color == AgentStripSummary.preferredColor(for: wingSession(6)))
+    } else { Issue.record("expected a session sprite") }
 
     // Only working sessions: nothing to check, so no badge, and the sprite still steps.
     let busy = StripWing.make(summary: wingStrip(sessions: 2, working: [0, 1]), leftWing: .spritesAndCount, expanded: true)
@@ -733,15 +730,15 @@ private func spriteSessions(_ wing: StripWing) -> [AgentSessionIdentity?] {
 
 @Test func countOnlyWingKeepsOneSteppingSpriteAndNamesTheBadgeWhenOpen() {
     let idle = wingStrip(sessions: 3)
-    #expect(StripWing.make(summary: idle, leftWing: .countOnly, expanded: false) == StripWing(sprites: [], badge: "3"))
-    #expect(StripWing.make(summary: idle, leftWing: .countOnly, expanded: true) == StripWing(sprites: [], badge: "3 to check"))
+    #expect(StripWing.make(summary: idle, leftWing: .countOnly, expanded: false) == StripWing(sprites: [], badge: .count(3)))
+    #expect(StripWing.make(summary: idle, leftWing: .countOnly, expanded: true) == StripWing(sprites: [], badge: .named(3)))
     #expect(StripWing.make(summary: wingStrip(sessions: 0), leftWing: .countOnly, expanded: true) == StripWing(sprites: [], badge: nil))
 
     let busy = wingStrip(sessions: 9, working: [4])
     for expanded in [false, true] {
         let wing = StripWing.make(summary: busy, leftWing: .countOnly, expanded: expanded)
-        #expect(spriteSessions(wing) == [wingSession(4)])
-        #expect(wing.badge == (expanded ? "8 to check" : "8"))
+        #expect(wing.sprites.map(\.identity) == [wingSession(4)])
+        #expect(wing.badge == (expanded ? .named(8) : .count(8)))
     }
 }
 
@@ -752,4 +749,28 @@ private func spriteSessions(_ wing: StripWing) -> [AgentSessionIdentity?] {
             #expect(wing == StripWing(sprites: [], badge: nil))
         }
     }
+}
+
+@Test func badgeTextIsTheBareCountCollapsedAndNamedOpen() {
+    #expect(StripWing.Badge.count(3).text == "3")
+    #expect(StripWing.Badge.named(3).text == "3 to check")
+    #expect(StripWing.Badge.named(12).text == "12 to check")
+}
+
+@Test func stripSpokenLabelNamesNoSessionCount() {
+    let readouts = ["Codex weekly 40 percent used"]
+    let nine = wingStrip(sessions: 9, working: [4])
+    let label = nine.spokenLabel(emptyQueueTitle: "Nothing running", readouts: readouts)
+    #expect(label == "\(nine.subject), working, 8 to check, Codex weekly 40 percent used")
+    #expect(!label.contains("sessions"))
+
+    let busy = wingStrip(sessions: 2, working: [0, 1])
+    #expect(busy.spokenLabel(emptyQueueTitle: "Nothing running", readouts: []) == "\(busy.subject), working")
+
+    let idle = wingStrip(sessions: 1)
+    #expect(idle.spokenLabel(emptyQueueTitle: "Nothing running", readouts: []) == "\(idle.subject), 1 to check")
+
+    let empty = wingStrip(sessions: 0)
+    #expect(empty.spokenLabel(emptyQueueTitle: "Not connected", readouts: readouts)
+        == "Not connected, Codex weekly 40 percent used")
 }

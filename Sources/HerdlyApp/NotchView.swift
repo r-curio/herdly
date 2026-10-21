@@ -173,19 +173,23 @@ struct Sprite: View {
 /// The count of items that need the user: the bare number on the collapsed strip, "N to check"
 /// while the queue is open (`StripWing`); hidden at zero by the caller.
 struct Badge: View {
-    var text: String
+    var badge: StripWing.Badge
 
-    init(count: Int) { text = "\(count)" }
-    init(text: String) { self.text = text }
+    init(count: Int) { badge = .count(count) }
+    init(_ badge: StripWing.Badge) { self.badge = badge }
+
+    private var named: Bool {
+        if case .named = badge { true } else { false }
+    }
 
     var body: some View {
-        Text(text)
+        Text(badge.text)
             .font(NotchStyle.mono(11, .medium)).monospacedDigit()
             .foregroundStyle(NotchStyle.ink)
             .lineLimit(1).fixedSize()
             .frame(minWidth: 16, minHeight: 16)
-            // A named badge keeps the well's shape with a little more room either side.
-            .padding(.horizontal, text.count > 3 ? 4 : 2)
+            // A named badge keeps the well's shape with a little more room either side (`badge-named`).
+            .padding(.horizontal, named ? 4 : 2)
             .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
     }
 }
@@ -1717,13 +1721,8 @@ struct Notch: View {
     }
 
     private var stripLabel: String {
-        let summary = strip
-        let empty = summary.sessions.isEmpty && summary.toCheck == 0
-        var parts: [String] = [empty ? model.emptyQueueReading.title : summary.subject]
-        if summary.working { parts.append("working") }
-        if summary.toCheck > 0 { parts.append("\(summary.toCheck) to check") }
-        parts += model.usageStripReadouts.map(\.spokenLabel)
-        return parts.joined(separator: ", ")
+        strip.spokenLabel(emptyQueueTitle: model.emptyQueueReading.title,
+                          readouts: model.usageStripReadouts.map(\.spokenLabel))
     }
 
     /// Rows under their optional group headings, with each run of Earlier rows under its count. Each
@@ -1832,7 +1831,7 @@ struct Notch: View {
                                        color: session.color)
                             }
                         }
-                        if let badge = wing.badge { Badge(text: badge) }
+                        if let badge = wing.badge { Badge(badge) }
                         Spacer(minLength: 0)
                     }
                     .padding(.leading, 4)

@@ -282,8 +282,8 @@ The one picture in the system and the working signal. The user picks one animal 
 The collapsed reading and the header of the open panel.
 - **Layout:** 40pt tall; sprite, then task name 18pt to its right in 12pt regular text gray (one line, tail-truncated), then the badge at the far right.
 - **Left wing** (user option):
-  - **Sprites and count (default):** as described in Layout: up to three sprites and the bare count collapsed. Open, one sprite (the first working session's while any session works, so it steps; otherwise the top-priority session's; the unlit sprite while none is listed) and the named badge, "N to check" (`StripWing`).
-  - **Count only:** keeps the badge and drops the sprites. While any session is working, one stepping sprite (the first working session's) sits before the badge, so the working signal is never lost. Open, the badge reads "N to check".
+  - **Sprites and count (default):** as described in Layout: up to three sprites and the bare count collapsed. Open, one sprite (the first working session's while any session works, so it steps, even when that session ranks below the three; otherwise the top-priority session's; the unlit sprite while none is listed) and the named badge, "N to check" (`StripWing`). That sprite is always in the colour its queue row uses.
+  - **Count only:** keeps the badge and drops the sprites. While any session is working, one stepping sprite (the first working session's, in the colour its queue row uses) sits before the badge, so the working signal is never lost. Open, the badge reads "N to check".
   - **None:** leaves the wing empty, so the strip is a quiet black shape. Hovering still opens the queue, and a new item still spotlights.
 - **Center label** (external displays only): Task name (the top-priority item's task name), Session name, or Off.
   - It is drawn in 12pt regular text gray, one line, tail-truncated, centred between the wings.

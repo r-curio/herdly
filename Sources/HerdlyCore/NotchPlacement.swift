@@ -451,6 +451,14 @@ public struct StripSummary: Equatable, Sendable {
         self.sessions = sessions
     }
 
+    /// `preferred`, or the next color after it that `taken` does not hold. `taken` holds fewer than
+    /// `colorCount` colors (at most `maximumSprites`), so a free one always exists.
+    static func nextFreeColor(preferred: Int, taken: Set<Int>) -> Int {
+        var color = preferred
+        while taken.contains(color) { color = (color + 1) % colorCount }
+        return color
+    }
+
     /// A session's preferred color, derived from its identifier so it survives queue changes.
     public static func preferredColor(for session: Foundation.UUID) -> Int {
         let bytes = session.uuid
@@ -458,9 +466,10 @@ public struct StripSummary: Equatable, Sendable {
         return sum % colorCount
     }
 
-    /// The first `maximumSprites` sessions in first-appearance order of the priority-ordered items. Each takes its preferred
-    /// color unless a session shown before it already has that color, in which case the next free
-    /// color is used, so the sprites on the strip are never two of the same color.
+    /// The first `maximumSprites` sessions in first-appearance order of the priority-ordered items.
+    /// Each takes its preferred color unless a session shown before it already has that color, in
+    /// which case the next free color is used, so the sprites on the strip are never two of the
+    /// same color.
     public static func sessions(in items: [AttentionItem]) -> [StripSession] {
         var order: [Foundation.UUID] = []
         var working: Set<Foundation.UUID> = []
@@ -471,8 +480,7 @@ public struct StripSummary: Equatable, Sendable {
         var taken: Set<Int> = []
         var shown: [StripSession] = []
         for session in order.prefix(maximumSprites) {
-            var color = preferredColor(for: session)
-            while taken.contains(color) { color = (color + 1) % colorCount }
+            let color = nextFreeColor(preferred: preferredColor(for: session), taken: taken)
             taken.insert(color)
             shown.append(StripSession(session: session, working: working.contains(session), color: color))
         }
@@ -528,7 +536,9 @@ public struct AgentStripSummary: Equatable, Sendable {
     public let toCheck: Int
     public let sessions: [AgentStripSession]
     /// The first working session in priority order, even when it ranks below the shown sprites, so
-    /// a wing that draws one sprite can still step while anything works. `nil` while nothing works.
+    /// a wing that draws one sprite can still step while anything works. Its color is the one its
+    /// queue row uses: its strip color when shown, otherwise its preferred color. `nil` while
+    /// nothing works.
     public let busy: AgentStripSession?
 
     public init(subject: String, working: Bool, toCheck: Int, sessions: [AgentStripSession] = [],
@@ -578,19 +588,27 @@ public struct AgentStripSummary: Equatable, Sendable {
         var colors = Set<Int>()
         for item in items where seen.insert(item.session).inserted {
             guard sessions.count < maximumSprites else { break }
-            var color = preferredColor(for: item.session)
-            while colors.contains(color) { color = (color + 1) % colorCount }
+            let color = StripSummary.nextFreeColor(preferred: preferredColor(for: item.session), taken: colors)
             colors.insert(color)
             sessions.append(AgentStripSession(session: item.session, working: item.running?.status == .working, color: color))
         }
         var busy = sessions.first(where: \.working)
         if busy == nil, let item = items.first(where: { $0.running?.status == .working }) {
-            // Below the shown sprites: the next color none of them uses (three of six are taken).
-            var color = preferredColor(for: item.session)
-            while colors.contains(color) { color = (color + 1) % colorCount }
-            busy = AgentStripSession(session: item.session, working: true, color: color)
+            // Below the shown sprites: its preferred color, as its queue row draws it.
+            busy = AgentStripSession(session: item.session, working: true, color: preferredColor(for: item.session))
         }
         return Self(subject: subject, working: working, toCheck: toCheck, sessions: sessions, busy: busy)
+    }
+
+    /// What VoiceOver reads for the strip: the subject (or `emptyQueueTitle` while nothing is
+    /// listed), "working" while any session works, "N to check" above zero, then each usage
+    /// readout's spoken label. It never counts sessions; those beyond the sprites are read in the
+    /// open queue (D2, #318).
+    public func spokenLabel(emptyQueueTitle: String, readouts: [String]) -> String {
+        var parts = [sessions.isEmpty && toCheck == 0 ? emptyQueueTitle : subject]
+        if working { parts.append("working") }
+        if toCheck > 0 { parts.append("\(toCheck) to check") }
+        return (parts + readouts).joined(separator: ", ")
     }
 }
 
@@ -620,16 +638,29 @@ public struct StripWing: Equatable, Sendable {
         }
     }
 
-    public let sprites: [Sprite]
-    public let badge: String?
+    /// The to-check badge: the bare count collapsed, named while the queue is open.
+    public enum Badge: Equatable, Sendable {
+        case count(Int)
+        case named(Int)
 
-    public init(sprites: [Sprite], badge: String?) {
+        public var text: String {
+            switch self {
+            case .count(let count): "\(count)"
+            case .named(let count): "\(count) to check"
+            }
+        }
+    }
+
+    public let sprites: [Sprite]
+    public let badge: Badge?
+
+    public init(sprites: [Sprite], badge: Badge?) {
         self.sprites = sprites
         self.badge = badge
     }
 
     public static func make(summary: AgentStripSummary, leftWing: StripLeftWing, expanded: Bool) -> Self {
-        let badge: String? = summary.toCheck > 0 ? (expanded ? "\(summary.toCheck) to check" : "\(summary.toCheck)") : nil
+        let badge: Badge? = summary.toCheck > 0 ? (expanded ? .named(summary.toCheck) : .count(summary.toCheck)) : nil
         let busy = summary.busy
         switch leftWing {
         case .spritesAndCount:
