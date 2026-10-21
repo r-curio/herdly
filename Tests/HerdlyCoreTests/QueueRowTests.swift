@@ -231,3 +231,43 @@ private func temporaryTree() throws -> URL {
     #expect(ToolAction(name: "Edit", input: ["file_path": "/a/b.swift"])?.disclosureTitle == "Show full action")
     #expect(ToolAction(name: "Grep", input: ["pattern": "x"])?.disclosureTitle == "Show full action")
 }
+
+@Test func spokenHeadingReadsNamePlaceNoteStateAndSecondsLeft() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(AgentApproval(session: codexCLI, turn: "t1", call: "a1", arrivedAt: 100)))
+    queue.apply(.outcome(AgentOutcome(session: claude, turn: "t2", status: .failed, arrivedAt: 100)))
+    let rows = queue.items(at: 112)
+    let approval = rows[0], failed = rows[1]
+    let countdown = QueueRowPresentation.countdown(approval, now: 112)
+
+    #expect(QueueRowPresentation.spokenHeading(approval, name: "Fix sort", place: "herdly @ main", note: nil,
+                                                countdown: countdown)
+            == "Fix sort, herdly @ main, Permission needed, 18 seconds left")
+    // A row note no longer hides the place: both are read, then the state.
+    #expect(QueueRowPresentation.spokenHeading(approval, name: "Fix sort", place: "herdly @ main", note: .sending,
+                                                countdown: nil)
+            == "Fix sort, herdly @ main, Sending…, Permission needed")
+    // Missing parts are left out; the state is always read.
+    #expect(QueueRowPresentation.spokenHeading(failed, name: "session abcdef12", place: nil, note: nil, countdown: nil)
+            == "session abcdef12, Claude failed")
+}
+
+@Test func spokenStateNamesEveryKindInFull() {
+    var queue = AgentAttentionQueue()
+    let codex = { (name: String) in AgentSessionIdentity(source: .codex, sourceScope: "codex", session: name, surface: .cli) }
+    queue.apply(.approval(AgentApproval(session: codex("live"), turn: "t", call: "a", arrivedAt: 100)))
+    queue.apply(.approval(AgentApproval(session: claude, turn: "t", call: "a", arrivedAt: 0, expiresAt: 1)))
+    queue.apply(.question(AgentQuestion(session: codex("asked"), turn: "t", call: "q", arrivedAt: 100)))
+    queue.apply(.outcome(AgentOutcome(session: codex("done"), turn: "t", status: .finished, arrivedAt: 100)))
+    queue.apply(.outcome(AgentOutcome(session: codex("odd"), turn: "t", status: .unavailable, arrivedAt: 100)))
+    queue.apply(.running(AgentRunning(session: codex("busy"), turn: "t", arrivedAt: 100)))
+    let states = Dictionary(uniqueKeysWithValues: queue.items(at: 101).map {
+        ($0.session.session, QueueRowPresentation.spokenState($0))
+    })
+    #expect(states["live"] == "Permission needed")
+    #expect(states[claude.session] == "Continue in Claude")
+    #expect(states["asked"] == "Codex needs an answer")
+    #expect(states["done"] == "Codex finished")
+    #expect(states["odd"] == "Codex status unavailable")
+    #expect(states["busy"] == "Working")
+}

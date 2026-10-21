@@ -680,26 +680,6 @@ struct Notch: View {
         }
     }
 
-    private func rowTitle(_ item: AgentAttentionItem) -> String {
-        switch item.kind {
-        case .actionableApproval: return item.session.source == .claude ? "Claude permission needed" : "Permission needed"
-        case .handedBackApproval: return item.session.source == .claude ? "Continue in Claude" : "Continue in Codex"
-        case .question: return item.session.source == .claude ? "Claude waiting" : "Codex needs an answer"
-        case .outcome, .earlierOutcome:
-            let status = item.outcome?.status
-            let label = switch status {
-            case .finished: "finished"
-            case .failed: "failed"
-            case .stopped: "stopped"
-            case .unavailable, nil: "status unavailable"
-            }
-            return "\(item.session.source == .claude ? "Claude" : "Codex") \(label)"
-        case .statusUnavailable: return "Claude status unavailable"
-        case .waiting: return "Waiting"
-        case .running: return "Working"
-        }
-    }
-
     private func sessionLabel(_ session: AgentSessionIdentity) -> String {
         AgentStripSummary.sessionLabel(session, names: sessionNames)
     }
@@ -1480,13 +1460,11 @@ struct Notch: View {
         .environment(\.questionCard, item.kind == .question)
     }
 
-    /// The spoken heading: the session's name, its place when known, the full state the visual
-    /// word shortens, and a live approval's seconds left.
+    /// The spoken heading (`QueueRowPresentation.spokenHeading`): name, place, any row note, the
+    /// full state the visual word shortens, and a live approval's seconds left.
     private func rowHeading(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil) -> String {
-        let name = QueueRowPresentation.sessionName(item.session, names: sessionNames)
-        let place = (rowNote(item)?.text ?? model.rowPlace(for: item)).map { ", \($0)" } ?? ""
-        let left = countdown.map { ", \($0.spoken)" } ?? ""
-        return "\(name)\(place), \(rowTitle(item))\(left)"
+        QueueRowPresentation.spokenHeading(item, name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
+                                           place: model.rowPlace(for: item), note: rowNote(item), countdown: countdown)
     }
 
     /// A non-question row's heading line (D17): sprite, name, dim "· place" (it truncates first),

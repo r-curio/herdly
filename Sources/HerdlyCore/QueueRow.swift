@@ -49,6 +49,35 @@ public enum QueueRowPresentation {
         }
     }
 
+    /// The row's state in full, as VoiceOver reads it after the name: the reading the visual word
+    /// and section heading shorten.
+    public static func spokenState(_ item: AgentAttentionItem) -> String {
+        let agent = item.session.source == .claude ? "Claude" : "Codex"
+        switch item.kind {
+        case .actionableApproval: return item.session.source == .claude ? "Claude permission needed" : "Permission needed"
+        case .handedBackApproval: return "Continue in \(agent)"
+        case .question: return item.session.source == .claude ? "Claude waiting" : "Codex needs an answer"
+        case .outcome, .earlierOutcome:
+            let label = switch item.outcome?.status {
+            case .finished: "finished"
+            case .failed: "failed"
+            case .stopped: "stopped"
+            case .unavailable, nil: "status unavailable"
+            }
+            return "\(agent) \(label)"
+        case .statusUnavailable: return "Claude status unavailable"
+        case .waiting: return "Waiting"
+        case .running: return "Working"
+        }
+    }
+
+    /// A row's spoken heading: name, place, any row note, the full state, and a live approval's
+    /// seconds left. Parts Herdly does not have are left out; the state is always read.
+    public static func spokenHeading(_ item: AgentAttentionItem, name: String, place: String?, note: RowNote?,
+                                     countdown: ApprovalCountdown?) -> String {
+        [name, place, note?.text, spokenState(item), countdown?.spoken].compactMap { $0 }.joined(separator: ", ")
+    }
+
     /// The trailing age lane. A status-unavailable row has no arrival time (it is dated to the
     /// moment the queue is read), so it shows a dash rather than a misleading "<1m".
     public static func rowAge(_ item: AgentAttentionItem, now: Double) -> RowAge {
