@@ -488,6 +488,40 @@ struct EarlierFold: View {
     }
 }
 
+/// The panel's small pill: 10pt mono on a fill, 6pt by 1pt padding, 4pt continuous corners, sized to
+/// its text. Shared by "Failed", "Ns left", and "+N more". `bar` draws a 2pt ink bar along the bottom
+/// edge, that share of the pill wide and clipped to it; nil draws none.
+struct SmallPill: ViewModifier {
+    let fill: Color
+    let textColor: Color
+    var weight: Font.Weight = .regular
+    var bar: Double? = nil
+
+    func body(content: Content) -> some View {
+        content
+            .font(NotchStyle.mono(10, weight)).foregroundStyle(textColor)
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(fill)
+            .overlay(alignment: .bottomLeading) {
+                if let bar {
+                    GeometryReader { proxy in
+                        Rectangle().fill(NotchStyle.ink)
+                            .frame(width: proxy.size.width * bar, height: 2)
+                            .frame(maxHeight: .infinity, alignment: .bottom)
+                    }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .fixedSize()
+    }
+}
+
+extension View {
+    func smallPill(fill: Color, textColor: Color, weight: Font.Weight = .regular, bar: Double? = nil) -> some View {
+        modifier(SmallPill(fill: fill, textColor: textColor, weight: weight, bar: bar))
+    }
+}
+
 /// A row's one off-path word (D17). "Failed" sits in the dark red well, the panel's only red (D14);
 /// "Handed back", "Waiting", and "Status unknown" are plain dim text with no well. Spoken through the
 /// row heading, so it is hidden from VoiceOver here.
@@ -496,10 +530,7 @@ struct ExceptionWord: View {
     var body: some View {
         if exception.isFailure {
             Text(exception.word)
-                .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.ink)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(NotchStyle.failure, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                .fixedSize()
+                .smallPill(fill: NotchStyle.failure, textColor: NotchStyle.ink)
                 .accessibilityHidden(true)
         } else {
             Text(exception.word)
@@ -517,18 +548,8 @@ struct SecondsLeftPill: View {
     let countdown: ApprovalCountdown
     var body: some View {
         Text(countdown.label)
-            .font(NotchStyle.mono(10, .semibold)).foregroundStyle(NotchStyle.ink).monospacedDigit()
-            .padding(.horizontal, 6).padding(.vertical, 1)
-            .background(NotchStyle.well)
-            .overlay(alignment: .bottomLeading) {
-                GeometryReader { proxy in
-                    Rectangle().fill(NotchStyle.ink)
-                        .frame(width: proxy.size.width * countdown.fraction, height: 2)
-                        .frame(maxHeight: .infinity, alignment: .bottom)
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            .fixedSize()
+            .monospacedDigit()
+            .smallPill(fill: NotchStyle.well, textColor: NotchStyle.ink, weight: .semibold, bar: countdown.fraction)
             .transaction { $0.animation = nil }
             .accessibilityHidden(true)
     }
@@ -544,10 +565,7 @@ struct MoreRowsPill: View {
     var body: some View {
         Button(action: action) {
             Text("+\(count) more")
-                .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.text)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                .fixedSize()
+                .smallPill(fill: NotchStyle.well, textColor: NotchStyle.text)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
