@@ -2035,9 +2035,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return true
     }
 
-    /// Return on the selected row. Approvals and questions open as their clicked card; a working row
-    /// opens or closes in place (#319); opening a session from any other row is the hook #322 fills in
-    /// (until then the key is not handled).
     /// Hands a digit or Return to the one question card on screen (the spotlight or a clicked card).
     /// False when no question card is shown, so the key goes on to the queue or AppKit.
     func pressQuestionCardKey(_ key: QuestionCardKeyPress.Key) -> Bool {
@@ -2046,6 +2043,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return true
     }
 
+    /// Return on the selected row. Approvals and questions open as their clicked card; a working row
+    /// opens or closes in place (#319); opening a session from any other row is the hook #322 fills in
+    /// (until then the key is not handled).
     func activateSelectedRow() -> Bool {
         reconcileSelection()
         guard let selected = queueSelection.selected else { return false }

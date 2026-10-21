@@ -69,14 +69,19 @@ public struct QuestionAnswerProgress: Equatable, Sendable {
     /// drafted question's answer is replaced in place; a sent key is never revised. The caller has
     /// already applied its route's policy to `answer`.
     public func selecting(question index: Int, answer: ChosenAnswer, revisesDrafts: Bool = false) -> QuestionAnswerProgress {
-        guard phase == .ready else { return self }
-        if index == questionIndex, self.answer(for: index) == nil {
-            var next = self
-            next.selected[index] = answer
-            return next
-        }
-        guard revisesDrafts else { return self }
-        return replacingDraft(question: index, answer: answer)
+        guard canSelect(question: index, revisesDrafts: revisesDrafts) else { return self }
+        guard index == questionIndex else { return replacingDraft(question: index, answer: answer) }
+        var next = self
+        next.selected[index] = answer
+        return next
+    }
+
+    /// Whether question `index` takes a selection now: the question being answered, or with
+    /// `revisesDrafts` (the daemon path) an earlier question whose answer is an unsent draft.
+    public func canSelect(question index: Int, revisesDrafts: Bool = false) -> Bool {
+        guard phase == .ready else { return false }
+        if index == questionIndex { return answer(for: index) == nil }
+        return revisesDrafts && index >= 0 && index < questionIndex && answer(for: index) != nil
     }
 
     /// The answer held for a question, drafted or sent.

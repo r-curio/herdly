@@ -755,7 +755,8 @@ struct Notch: View {
     @State private var openDisclosures: Set<String> = []
     /// Typed answers being composed, by call id and question index; sent only on Return or Send.
     @State private var drafts: [String: String] = [:]
-    @State private var questionDrafts: [ClaudeQuestionViewStateKey: String] = [:]
+    /// Text typed in a Codex daemon card's field, per card (`QuestionTypedDrafts`).
+    @State private var questionDrafts: [ClaudeQuestionViewStateKey: QuestionTypedDrafts] = [:]
     @State private var viewedQuestions: [ClaudeQuestionViewStateKey: Int] = [:]
     /// A Claude question's selection is kept in the view until the user presses Send (D16).
     @State private var claudeSelections: [ClaudeQuestionViewStateKey: ClaudeQuestionSelection] = [:]
@@ -773,7 +774,7 @@ struct Notch: View {
                 set: { open in if open { openDisclosures.insert(key) } else { openDisclosures.remove(key) } })
     }
 
-    private func claudeSelectionKey(_ question: AgentQuestion, _ index: Int) -> ClaudeQuestionViewStateKey {
+    private func questionViewStateKey(_ question: AgentQuestion, _ index: Int) -> ClaudeQuestionViewStateKey {
         let requestID: String?
         if let legacy = model.codexQuestion(for: question), case let .daemon(request) = model.route(for: legacy) {
             requestID = "\(request.requestID):\(request.receivedAt)"
@@ -783,13 +784,14 @@ struct Notch: View {
         return ClaudeQuestionViewStateKey(question: question, index: index, requestID: requestID)
     }
 
-    private func questionDraft(_ question: AgentQuestion, index: Int, answer: ChosenAnswer? = nil) -> Binding<String> {
-        let key = claudeSelectionKey(question, index)
+    /// The daemon field for the card's viewed question: what it shows is what Send or Return sends.
+    private func questionDraft(_ card: CodexCard) -> Binding<String> {
+        let key = questionViewStateKey(card.agent, 0)
         return Binding(get: {
-            if let text = questionDrafts[key] { return text }
-            if case let .text(text) = answer { return text }
-            return ""
-        }, set: { questionDrafts[key] = $0 })
+            (questionDrafts[key] ?? QuestionTypedDrafts()).text(for: card.viewed, route: card.route, progress: card.progress)
+        }, set: {
+            questionDrafts[key] = (questionDrafts[key] ?? QuestionTypedDrafts()).editing(card.viewed, text: $0, route: card.route)
+        })
     }
 
     private func questionPrompts(_ question: AgentQuestion) -> [QuestionPrompt] {
@@ -804,21 +806,28 @@ struct Notch: View {
     }
 
     private func viewedQuestion(_ question: AgentQuestion, current: Int, count: Int) -> Int {
-        min(max(viewedQuestions[claudeSelectionKey(question, 0)] ?? model.previewViewedQuestion ?? current, 0), max(0, count - 1))
+        min(max(viewedQuestions[questionViewStateKey(question, 0)] ?? model.previewViewedQuestion ?? current, 0), max(0, count - 1))
     }
 
+    /// Steps the card to question `index`. An earlier step's unsubmitted text is discarded on the way
+    /// out, so no step shows text that Send would not send (`QuestionTypedDrafts.leaving`).
     private func showQuestion(_ index: Int, of question: AgentQuestion) {
-        viewedQuestions[claudeSelectionKey(question, 0)] = index
+        let key = questionViewStateKey(question, 0)
+        if let legacy = model.codexQuestion(for: question) {
+            let card = codexCard(legacy)
+            questionDrafts[key] = questionDrafts[key]?.leaving(card.viewed, current: card.current)
+        }
+        viewedQuestions[key] = index
     }
 
     private func toggleClaudeSelection(_ question: AgentQuestion, prompt: QuestionPrompt, option: Int) {
-        let key = claudeSelectionKey(question, 0)
+        let key = questionViewStateKey(question, 0)
         claudeSelections[key] = claudeSelection(question, prompt: prompt).toggling(option, of: prompt.options.count)
     }
 
     /// What the user has ticked on a Claude question; nothing until they select.
     private func claudeSelection(_ question: AgentQuestion, prompt: QuestionPrompt) -> ClaudeQuestionSelection {
-        claudeSelections[claudeSelectionKey(question, 0)] ?? ClaudeQuestionSelection(multiSelect: prompt.multiSelect)
+        claudeSelections[questionViewStateKey(question, 0)] ?? ClaudeQuestionSelection(multiSelect: prompt.multiSelect)
     }
 
     /// Send on a Claude card: the selected option, or the ticked options, through the live helper's
@@ -826,13 +835,13 @@ struct Notch: View {
     private func sendClaudeSelection(_ question: AgentQuestion, prompt: QuestionPrompt) {
         guard let answer = claudeSelection(question, prompt: prompt).answer(labels: prompt.options) else { return }
         model.answerClaudeQuestion(question, kind: answer.kind, answer: answer.answer)
-        claudeSelections[claudeSelectionKey(question, 0)] = nil
+        claudeSelections[questionViewStateKey(question, 0)] = nil
     }
 
     /// The Claude field's text; typing clears any selected option (`ClaudeQuestionSelection.typing`).
     private func claudeTypedText(_ question: AgentQuestion, prompt: QuestionPrompt) -> Binding<String> {
         Binding(get: { claudeSelection(question, prompt: prompt).text },
-                set: { claudeSelections[claudeSelectionKey(question, 0)] = claudeSelection(question, prompt: prompt).typing($0) })
+                set: { claudeSelections[questionViewStateKey(question, 0)] = claudeSelection(question, prompt: prompt).typing($0) })
     }
 
     private var sessionNames: [AgentSessionIdentity: String] {
@@ -888,17 +897,9 @@ struct Notch: View {
         let controls: Bool
         var current: Int { progress.questionIndex }
         /// The daemon's request, when the card answers through it.
-        var request: AppServerQuestionRequest? {
-            if case let .daemon(request) = route, !request.questions.isEmpty { return request }
-            return nil
-        }
+        var request: AppServerQuestionRequest? { route.daemonRequest }
         /// One typed digit per Send (ADR 0006, ADR 0017).
-        var keyRoute: Bool {
-            switch route {
-            case .ghosttyRelay, .herdrRelay, .terminalRelay: true
-            case .daemon, .daemonAnswered, .relayUnavailable, .desktopReadOnly: false
-            }
-        }
+        var keyRoute: Bool { route.isKeyRoute }
     }
 
     private func codexCard(_ legacy: AttentionQuestion) -> CodexCard {
@@ -910,35 +911,25 @@ struct Notch: View {
                          controls: model.showsOptionControls(for: legacy))
     }
 
-    /// Whether the viewed question's options can be selected now: the question being answered, or on
-    /// the daemon path an earlier unsent draft. A key already typed and a later question are not.
+    /// Whether the viewed question's options can be selected now (`QuestionCardOptions.selectable`).
     private func selectable(_ card: CodexCard) -> Bool {
-        guard card.progress.phase == .ready, card.controls else { return false }
-        if let request = card.request {
-            guard request.questions.indices.contains(card.viewed), !request.questions[card.viewed].isSecret else { return false }
-            return card.viewed == card.current || (card.viewed < card.current && card.progress.answer(for: card.viewed) != nil)
-        }
-        guard card.keyRoute, card.viewed == card.current,
-              case .options = QuestionAnswerProgress.offer(card.question, at: card.viewed) else { return false }
-        return true
+        QuestionCardOptions.selectable(route: card.route, question: card.question, progress: card.progress,
+                                       viewed: card.viewed, controls: card.controls)
     }
 
     private func optionCount(_ card: CodexCard) -> Int {
-        if let request = card.request, request.questions.indices.contains(card.viewed) {
-            return request.questions[card.viewed].displayPrompt.options.count
-        }
-        return card.prompts.indices.contains(card.viewed) ? card.prompts[card.viewed].options.count : 0
+        QuestionCardOptions.options(route: card.route, question: card.question, at: card.viewed).count
     }
 
     /// The daemon field's text for the viewed question; empty when there is no field.
     private func typedText(_ card: CodexCard) -> String {
         guard card.request != nil else { return "" }
-        return questionDraft(card.agent, index: card.viewed, answer: card.progress.answer(for: card.viewed)).wrappedValue
+        return questionDraft(card).wrappedValue
     }
 
     /// A click on an option or its digit: selects it (D16). The typed field gives way to it.
     private func select(_ card: CodexCard, option: Int) {
-        if card.request != nil { questionDrafts[claudeSelectionKey(card.agent, card.viewed)] = "" }
+        if card.request != nil { questionDraft(card).wrappedValue = "" }
         model.selectQuestionAnswer(card.question, question: card.viewed, answer: .option(option))
     }
 
@@ -1099,7 +1090,7 @@ struct Notch: View {
             if prompt.isSecret {
                 statusLine(QuestionCardLines.secret)
             } else {
-                let typed = questionDraft(card.agent, index: card.viewed, answer: card.progress.answer(for: card.viewed))
+                let typed = questionDraft(card)
                 let typing = !typed.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 let chosen: Int? = { if !typing, case let .option(option) = card.progress.selection(for: card.viewed) { return option }; return nil }()
                 optionList(shown.options, subject: subject, tone: tone, selected: chosen, enabled: canSelect) { select(card, option: $0) }
@@ -2320,7 +2311,7 @@ struct Notch: View {
 
     private var questionStateKeys: Set<ClaudeQuestionViewStateKey> {
         Set(model.orderedAgentAttentionItems.compactMap(\.question).flatMap { question in
-            (0..<max(1, questionPrompts(question).count)).map { claudeSelectionKey(question, $0) }
+            (0..<max(1, questionPrompts(question).count)).map { questionViewStateKey(question, $0) }
         })
     }
 
@@ -2459,15 +2450,10 @@ struct Notch: View {
                         || progress.texts != previous[legacy.id]?.texts else { continue }
                 // Next or a key moves the view to the new question; changing an earlier draft stays on it.
                 if progress.questionIndex != previous[legacy.id]?.questionIndex {
-                    viewedQuestions[claudeSelectionKey(question, 0)] = nil
+                    viewedQuestions[questionViewStateKey(question, 0)] = nil
                 }
-                for index in questionPrompts(question).indices {
-                    let key = claudeSelectionKey(question, index)
-                    if case let .text(text) = progress.answer(for: index),
-                       questionDrafts[key]?.trimmingCharacters(in: .whitespacesAndNewlines) == text.trimmingCharacters(in: .whitespacesAndNewlines) {
-                        questionDrafts[key] = nil
-                    }
-                }
+                let key = questionViewStateKey(question, 0)
+                questionDrafts[key] = questionDrafts[key]?.committing(progress)
             }
         }
         .onChange(of: model.questionCardKeyPress) { _, press in handleQuestionCardKey(press) }

@@ -115,3 +115,97 @@ public struct ClaudeQuestionSelection: Equatable, Sendable {
 
     private func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 }
+
+extension QuestionAnswerRoute {
+    /// The routes that type one option digit per Send (Ghostty, herdr, a terminal host's pane; ADR
+    /// 0006, ADR 0017). They carry no typed answer and never revise a sent answer.
+    public var isKeyRoute: Bool {
+        switch self {
+        case .ghosttyRelay, .herdrRelay, .terminalRelay: true
+        case .daemon, .daemonAnswered, .relayUnavailable, .desktopReadOnly: false
+        }
+    }
+
+    /// The daemon's request when the card answers through it and the request holds questions.
+    public var daemonRequest: AppServerQuestionRequest? {
+        if case let .daemon(request) = self, !request.questions.isEmpty { return request }
+        return nil
+    }
+}
+
+/// Which of a Codex question card's options can be selected (#321). Display rules only: every Send
+/// still runs its route's own policy and fresh pending-request check.
+public enum QuestionCardOptions {
+    /// The option labels the card shows for question `index`: the daemon's own list on the daemon
+    /// path, otherwise the rollout prompt's; empty beyond either.
+    public static func options(route: QuestionAnswerRoute, question: AttentionQuestion, at index: Int) -> [String] {
+        if let request = route.daemonRequest {
+            return request.questions.indices.contains(index) ? request.questions[index].displayPrompt.options : []
+        }
+        return question.prompts.indices.contains(index) ? question.prompts[index].options : []
+    }
+
+    /// Whether the viewed question's options can be selected now: the question being answered, or on
+    /// the daemon path an earlier unsent draft (`QuestionAnswerProgress.canSelect`). Never a secret, a
+    /// question a key route cannot number, a read-only route, or a route without option controls.
+    public static func selectable(route: QuestionAnswerRoute, question: AttentionQuestion, progress: QuestionAnswerProgress,
+                                  viewed: Int, controls: Bool) -> Bool {
+        guard controls else { return false }
+        if let request = route.daemonRequest {
+            guard request.questions.indices.contains(viewed), !request.questions[viewed].isSecret else { return false }
+            return progress.canSelect(question: viewed, revisesDrafts: true)
+        }
+        guard route.isKeyRoute, case .options = QuestionAnswerProgress.offer(question, at: viewed) else { return false }
+        return progress.canSelect(question: viewed)
+    }
+}
+
+/// Text typed in a daemon card's "Or type an answer" field, by question index, before it becomes a
+/// draft (#321). What the card shows is what Send sends: an earlier step's text becomes its draft only
+/// on Return, and is discarded when the card leaves that step; the step being answered keeps its text
+/// for Next or Send. Text belongs to the route (and daemon request) it was typed on and is never
+/// offered to another. View state only; never persisted.
+public struct QuestionTypedDrafts: Equatable, Sendable {
+    public private(set) var route: QuestionAnswerRoute?
+    private var edits: [Int: String] = [:]
+
+    public init() {}
+
+    public var hasEdits: Bool { !edits.isEmpty }
+
+    /// The field's text for question `index`: this route's edit, else the drafted text, else empty.
+    public func text(for index: Int, route: QuestionAnswerRoute, progress: QuestionAnswerProgress) -> String {
+        if self.route == route, let edit = edits[index] { return edit }
+        if case let .text(text) = progress.answer(for: index) { return text }
+        return ""
+    }
+
+    /// The user typed in question `index`'s field. Text typed under another route is dropped first.
+    public func editing(_ index: Int, text: String, route: QuestionAnswerRoute) -> QuestionTypedDrafts {
+        var next = self.route == route ? self : QuestionTypedDrafts()
+        next.route = route
+        next.edits[index] = text
+        return next
+    }
+
+    /// The card left question `index`. An earlier question's unsubmitted text is discarded, so the
+    /// step shows its draft again; the question being answered (`current`) keeps its text.
+    public func leaving(_ index: Int, current: Int) -> QuestionTypedDrafts {
+        guard index < current else { return self }
+        var next = self
+        next.edits[index] = nil
+        return next
+    }
+
+    /// The progress changed: an edit equal to what is now drafted for its question is no longer one.
+    public func committing(_ progress: QuestionAnswerProgress) -> QuestionTypedDrafts {
+        var next = self
+        for (index, edit) in edits {
+            if case let .text(text) = progress.answer(for: index),
+               text.trimmingCharacters(in: .whitespacesAndNewlines) == edit.trimmingCharacters(in: .whitespacesAndNewlines) {
+                next.edits[index] = nil
+            }
+        }
+        return next
+    }
+}
