@@ -6,12 +6,23 @@ private let codexCLI = AgentSessionIdentity(source: .codex, sourceScope: "codex"
 private let codexApp = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "3f9a2c1e-0000-4000-8000-000000000002", surface: .desktop)
 private let claudeCLI = AgentSessionIdentity(source: .claude, sourceScope: "/Users/u/.claude", session: "abcdef12-3456", surface: .cli)
 
+/// Every observation spelled out; the fixture's defaults describe a reachable session so each test
+/// names only what it changes. The Core initializer itself has no defaults.
+private func observe(_ source: AgentSource, herdr: HerdrOpenAvailability = .notInHerdr, scan: Bool = true,
+                     line: OpenUnavailableReason? = nil, known: Bool = true, hostsOff: Bool = false,
+                     claudeOpenable: Bool = true, background: Bool = false,
+                     lastSeen: OpenUnavailableReason? = nil) -> ResultRowObservation {
+    ResultRowObservation(source: source, herdr: herdr, scanOffersOpen: scan, terminalLine: line,
+                         codexSessionKnown: known, codexTerminalHostsOff: hostsOff, claudeOpenable: claudeOpenable,
+                         claudeBackground: background, claudeLastSeen: lastSeen)
+}
+
 private func read(_ source: AgentSource, herdr: HerdrOpenAvailability = .notInHerdr, scan: Bool = true,
-                  line: OpenUnavailableReason? = nil, known: Bool = true, claudeOpenable: Bool = true,
-                  background: Bool = false, lastSeen: OpenUnavailableReason? = nil) -> ResultRowReading {
-    ResultRowReading.resolve(ResultRowObservation(source: source, herdr: herdr, scanOffersOpen: scan, terminalLine: line,
-                                                  codexSessionKnown: known, claudeOpenable: claudeOpenable,
-                                                  claudeBackground: background, claudeLastSeen: lastSeen))
+                  line: OpenUnavailableReason? = nil, known: Bool = true, hostsOff: Bool = false,
+                  claudeOpenable: Bool = true, background: Bool = false,
+                  lastSeen: OpenUnavailableReason? = nil) -> ResultRowReading {
+    ResultRowReading.resolve(observe(source, herdr: herdr, scan: scan, line: line, known: known, hostsOff: hostsOff,
+                                     claudeOpenable: claudeOpenable, background: background, lastSeen: lastSeen))
 }
 
 private func reach(_ source: AgentSource, herdr: HerdrOpenAvailability = .notInHerdr, scan: Bool = true,
@@ -59,6 +70,9 @@ private func rows() -> [AgentAttentionItem] {
     #expect(read(.codex, known: false) == ResultRowReading(target: .unreachable, line: .terminal(.appNotIdentified)))
     // A click whose recheck failed keeps the row reachable until the next scan, with the click's line.
     #expect(read(.codex, line: .sessionEnded) == ResultRowReading(target: .reachable, line: .terminal(.sessionEnded)))
+    // Every terminal host switched off: the scan skips the session, and its app cannot be identified
+    // (product.md "Notch", ADR 0015's amendment).
+    #expect(read(.codex, hostsOff: true) == ResultRowReading(target: .unreachable, line: .terminal(.appNotIdentified)))
     // The Claude inputs never decide a Codex row.
     #expect(reach(.codex, claudeOpenable: false) == .reachable)
 }
@@ -181,8 +195,7 @@ private func rows() -> [AgentAttentionItem] {
     for id in TerminalVisitAcknowledgment.afterOpen([TerminalCompletionCandidate(outcome)], result: result, preOpenAt: 100) {
         queue.dismiss(.outcome(id))
     }
-    let reading = ResultRowReading.resolve(ResultRowObservation(source: .codex, scanOffersOpen: lines.offersOpen(key),
-                                                                terminalLine: lines.line(for: key)))
+    let reading = ResultRowReading.resolve(observe(.codex, scan: lines.offersOpen(key), line: lines.line(for: key)))
     #expect(reading == ResultRowReading(target: .reachable, line: nil))
     #expect(fold.settle(opening: false, reading: reading, clickLineAt: lines.clickedAt(key)) == .collapse)
     // Raising the app acknowledged nothing: the result is still queued.
@@ -191,8 +204,7 @@ private func rows() -> [AgentAttentionItem] {
     // The same click finding the session ended instead keeps the panel with its line, result retained.
     fold.begin(codexCLI, at: 200)
     lines.recordOpen(.unavailable(.sessionEnded), for: key, at: 201)
-    let failed = ResultRowReading.resolve(ResultRowObservation(source: .codex, scanOffersOpen: lines.offersOpen(key),
-                                                               terminalLine: lines.line(for: key)))
+    let failed = ResultRowReading.resolve(observe(.codex, scan: lines.offersOpen(key), line: lines.line(for: key)))
     #expect(failed == ResultRowReading(target: .reachable, line: .terminal(.sessionEnded)))
     #expect(fold.settle(opening: false, reading: failed, clickLineAt: lines.clickedAt(key)) == .stay)
     #expect(queue.items(at: 202).compactMap(\.outcome).map(\.id) == [outcome.id])

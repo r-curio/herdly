@@ -44,6 +44,9 @@ public struct ResultRowObservation: Equatable, Sendable {
     public var terminalLine: OpenUnavailableReason?
     /// A Codex identity names a session Herdly can open (a readable session id).
     public var codexSessionKnown: Bool
+    /// A Codex terminal session while every terminal host is switched off: the scan skips it and its
+    /// app cannot be identified (ADR 0015's amendment). Always false for a Codex app thread.
+    public var codexTerminalHostsOff: Bool
     /// A Claude CLI session is live exactly once in complete inventories and Ghostty, when on, has
     /// its permission (`Companion.canOpenClaude`).
     public var claudeOpenable: Bool
@@ -52,15 +55,16 @@ public struct ResultRowObservation: Equatable, Sendable {
     /// The last-seen app's line for a Claude session that is no longer live (#280).
     public var claudeLastSeen: OpenUnavailableReason?
 
-    public init(source: AgentSource, herdr: HerdrOpenAvailability = .notInHerdr, scanOffersOpen: Bool = true,
-                terminalLine: OpenUnavailableReason? = nil, codexSessionKnown: Bool = true,
-                claudeOpenable: Bool = true, claudeBackground: Bool = false,
-                claudeLastSeen: OpenUnavailableReason? = nil) {
+    /// Every input is required, so a missing observation can never read as reachable.
+    public init(source: AgentSource, herdr: HerdrOpenAvailability, scanOffersOpen: Bool,
+                terminalLine: OpenUnavailableReason?, codexSessionKnown: Bool, codexTerminalHostsOff: Bool,
+                claudeOpenable: Bool, claudeBackground: Bool, claudeLastSeen: OpenUnavailableReason?) {
         self.source = source
         self.herdr = herdr
         self.scanOffersOpen = scanOffersOpen
         self.terminalLine = terminalLine
         self.codexSessionKnown = codexSessionKnown
+        self.codexTerminalHostsOff = codexTerminalHostsOff
         self.claudeOpenable = claudeOpenable
         self.claudeBackground = claudeBackground
         self.claudeLastSeen = claudeLastSeen
@@ -90,6 +94,8 @@ public struct ResultRowReading: Equatable, Sendable {
             // Adapters only file Codex sessions by their UUID, so an unreadable id is malformed data:
             // Herdly cannot tell where the session is, which is what this line says.
             guard observed.codexSessionKnown else { return unreachable(.terminal(.appNotIdentified)) }
+            // A switched-off app cannot be identified, so with every host off no Open is offered.
+            guard !observed.codexTerminalHostsOff else { return unreachable(.terminal(.appNotIdentified)) }
             guard observed.scanOffersOpen else { return unreachable(scanLine) }
             return ResultRowReading(target: .reachable, line: clickLine)
         case .claude:

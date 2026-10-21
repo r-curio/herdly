@@ -205,9 +205,10 @@ public struct NotchPresentationController: Equatable, Sendable {
 public struct QueueRowSelection: Equatable, Sendable {
     public enum Direction: Sendable { case up, down }
 
-    /// What a click on a row, or Return on the selected row (the same action), asks for: a request opens as its
-    /// clicked card (D5, D18), a working row opens or closes in place (#319), and a result row opens
-    /// its session (D20, #322) through the session's usual Open, which revalidates the exact target.
+    /// What a click on a row, or Return on the selected row (the same action), asks for: a request
+    /// opens as its clicked card (D5, D18), a working row opens or closes in place (#319), and a
+    /// result row opens its session (D20, #322) through the session's usual Open, which revalidates
+    /// the exact target.
     public enum RowAction: Equatable, Sendable {
         case openCard(AgentAttentionID)
         case openInPlace(AgentAttentionID)

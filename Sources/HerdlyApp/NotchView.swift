@@ -656,8 +656,8 @@ struct ApprovalKindWordView: View {
 
 /// The hover ground behind a queue row that opens as a card (#320) or a reachable result row that
 /// opens its session (#322): #1c1c1c with 5pt continuous corners, 6pt outside the row horizontally
-/// like the selection ring. Hover only highlights; it never
-/// opens, selects, or acts. Under Reduce Motion the ground appears without animation.
+/// like the selection ring. Hover only highlights; it never opens, selects, or acts. Under Reduce
+/// Motion the ground appears without animation.
 struct CardRowHover: ViewModifier {
     let id: AgentAttentionID
     let active: Bool
@@ -1334,8 +1334,7 @@ struct Notch: View {
         case let .claudeLastSeen(reason)?:
             terminalOpenLine(item, reason: reason, replacesOpen: true)
         case .claudeNotVerified?:
-            Text(model.claudeReturnUnavailableMessage)
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+            claudeNotVerifiedLine
         case nil:
             EmptyView()
         }
@@ -2177,12 +2176,18 @@ struct Notch: View {
             if let reason = model.claudeLastSeenLine(session) {
                 terminalOpenLine(item, reason: reason, replacesOpen: true)
             } else {
-                Text(model.claudeReturnUnavailableMessage)
-                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                claudeNotVerifiedLine
             }
         } else if herdr == .notInHerdr, let reason = model.terminalOpenLine(session) {
             terminalOpenLine(item, reason: reason)
         }
+    }
+
+    /// "Open is unavailable until Herdly can verify this Claude session is live." (or Ghostty's
+    /// awaiting-permission line), shared by the card and the result row.
+    private var claudeNotVerifiedLine: some View {
+        Text(model.claudeReturnUnavailableMessage)
+            .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder

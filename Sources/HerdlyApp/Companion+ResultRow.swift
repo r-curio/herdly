@@ -7,7 +7,7 @@ import HerdlyCore
 /// (`ResultRowReading`, `QueueRowSelection.action`, `RowOpenFold`); these only feed them what the
 /// latest scans observed. Opening acknowledges nothing: a verified visit (ADR 0016), the Codex app's
 /// read state, a new prompt, or Dismiss still decides when a result clears. `rowOpenFold` is changed
-/// only here.
+/// only here (and cancelled by `collapse`).
 extension Companion {
     /// herdr's Open availability for `session` as the notch presents it, from the shared Ghostty
     /// `tty` support reading the view also observes.
@@ -22,6 +22,7 @@ extension Companion {
             source: session.source, herdr: presentedHerdrOpen(session),
             scanOffersOpen: offersTerminalOpen(session), terminalLine: terminalOpenLine(session),
             codexSessionKnown: session.source != .codex || codexSession(session) != nil,
+            codexTerminalHostsOff: session.source == .codex && isCodexTerminalSession(session) && !cliTerminalHostOn,
             claudeOpenable: canOpenClaude(session), claudeBackground: isBackgroundClaudeSession(session),
             claudeLastSeen: session.source == .claude ? claudeLastSeenLine(session) : nil))
     }
