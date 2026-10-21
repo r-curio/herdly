@@ -126,13 +126,6 @@ extension ClaudeConnectionStatus {
     }
 }
 
-public enum ClaudeGhosttyStatus: Equatable, Sendable {
-    case off
-    case permissionRequired
-    case ready
-    case unavailable(String)
-}
-
 public struct ClaudeSetupRoots: Equatable, Sendable {
     public let configDirectory: URL
     public let helperDirectory: URL
