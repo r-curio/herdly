@@ -1576,7 +1576,7 @@ private struct NotchControls: View {
                 }
                 PlaceSampleRow(sprite: appearance.sprite, format: appearance.labelFormat, reduceMotion: model.reduceMotion)
                     .animation(SettingsMotion.curve(reduceMotion: model.reduceMotion), value: appearance.labelFormat)
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, SettingsStyle.rowInset)
                     .padding(.bottom, 10)
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
                 SettingsRow(title: "Group by", detail: nil) {
@@ -1656,25 +1656,34 @@ private struct NotchPreview: View {
     }
 }
 
-/// A sample queue row under "After each name", drawn like the notch: the chosen sprite idle in the
-/// first session colour, a fixed title, then the place in the chosen format. Display only.
+/// A sample queue row under "After each name": the chosen sprite idle in the first session colour,
+/// a fixed title, then the place in the chosen format. It follows the Paper artboard, not the
+/// notch's row header: system 12pt text (#F5F5F7 title, #8F8F8F place) on a black well. Display only.
 private struct PlaceSampleRow: View {
     let sprite: SpriteKind
     let format: QueueLabelFormat
     let reduceMotion: Bool
 
+    private static let sampleTitle = "Fix flaky tests"
     /// The sample's title colour, #F5F5F7; the notch has no token this bright.
-    private static let title = Color(red: 0.961, green: 0.961, blue: 0.969)
+    private static let titleColor = Color(red: 0.961, green: 0.961, blue: 0.969)
 
+    /// The place in the chosen format, or nil when the format shows nothing.
     private var place: String? {
         QueueRowPresentation.place(directory: "/Users/you/code/herdly", branch: "main", format: format)
+    }
+
+    /// What follows the title on screen ("· herdly @ main") and the matching VoiceOver label, from
+    /// the same place so the two never disagree.
+    private var placeSuffix: String { place.map { " · \($0)" } ?? "" }
+    private var spokenLabel: String {
+        "Sample row: \(Self.sampleTitle)" + (place.map { ", \($0)" } ?? "")
     }
 
     var body: some View {
         HStack(spacing: 7) {
             Sprite(kind: sprite, working: false, reduceMotion: reduceMotion, color: 0)
-            (Text("Fix flaky tests").foregroundStyle(Self.title)
-                + Text(place.map { " · \($0)" } ?? "").foregroundStyle(NotchStyle.text))
+            Text("\(Text(Self.sampleTitle).foregroundStyle(Self.titleColor))\(Text(placeSuffix).foregroundStyle(NotchStyle.text))")
                 .font(.system(size: 12))
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -1686,7 +1695,7 @@ private struct PlaceSampleRow: View {
         .background(NotchStyle.ground, in: .rect(cornerRadius: 9, style: .continuous))
         .allowsHitTesting(false)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(place.map { "Sample row: Fix flaky tests, \($0)" } ?? "Sample row: Fix flaky tests")
+        .accessibilityLabel(spokenLabel)
     }
 }
 
