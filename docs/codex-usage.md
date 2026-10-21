@@ -1,6 +1,6 @@
 # Codex usage limits
 
-The collapsed strip shows how much of Codex's weekly usage limit is used, as a small bar with the percent beside it in the wing right of the camera housing. While Codex also reports a five-hour window that has not yet reset, a second bar and percent, captioned "5h", sit ahead of the weekly one and the wing widens for them; otherwise the strip is unchanged and nothing stands in for the missing window. The sprites, the "+N" overflow mark, and the to-check badge sit together in the wing left of it. Like [thread names](thread-names.md), this rides on a private Codex format and fails soft.
+The collapsed strip shows how much of Codex's weekly usage limit is used, as a small bar with the percent beside it in the wing right of the camera housing. While Codex also reports a five-hour window that has not yet reset, a second bar and percent, captioned "5h", sit ahead of the weekly one and the wing widens for them; otherwise the strip is unchanged and nothing stands in for the missing window. The sprites and the to-check badge sit together in the wing left of it. Like [thread names](thread-names.md), this rides on a private Codex format and fails soft.
 
 ## What Codex records
 
@@ -32,7 +32,7 @@ Since 2026-09-11 the only events carrying a 300-minute window are for a separate
 
 Each two-second scan reads the newest rollouts off the main actor alongside the hook events, rollouts, read state, and thread names, and publishes the reading on the companion model. The weekly readout is a 4-by-14-point vertical bar (dark-well track, ink fill from the bottom to the used share) with the percent in ink beside it, or an empty track and a dim dash while there is no current reading. The five-hour readout is the same bar and percent with a dim "5h" caption ahead of it, 8 points left of the weekly one, and exists only while a current five-hour reading does; without one the weekly readout's layout is untouched. The strip's accessibility label speaks "five-hour limit 40% used, weekly limit 8% used", "weekly limit 8% used", or "weekly limit unknown"; it never mentions a five-hour limit that Codex has not reported. `--reminder-rollouts <path>` points a lab run at a copy of the sessions tree, as it already does for reminders. Preview runs seed 37% weekly and 40% five-hour.
 
-The wing left of the housing widened from 64 to 112 points so three sprites, the overflow mark, and the badge fit without clipping. The wing right of it is 60 points, or 112 while the five-hour readout is shown (`NotchPlacement.trailingWing(fiveHourShown:)`); the strip re-lays out on the next refresh when the reading appears or its window resets, and the left wing never moves for it.
+The wing left of the housing widened from 64 to 112 points so three sprites and the badge fit without clipping. The wing right of it is 60 points, or 112 while the five-hour readout is shown (`NotchPlacement.trailingWing(fiveHourShown:)`); the strip re-lays out on the next refresh when the reading appears or its window resets, and the left wing never moves for it.
 
 ## Verification
 
