@@ -124,6 +124,12 @@ extension ClaudeConnectionStatus {
         if requiresConfigure || !usageMatches { return true }
         return self != .connected && !isAwaitingRestart
     }
+
+    /// Whether Undo Setup is offered: only once the root's setup preview is ready and Herdly's setup
+    /// is present in some form.
+    public func offersUndo(planReady: Bool) -> Bool {
+        planReady && self != .notConfigured
+    }
 }
 
 public struct ClaudeSetupRoots: Equatable, Sendable {

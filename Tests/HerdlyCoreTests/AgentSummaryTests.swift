@@ -42,7 +42,7 @@ private func codex(cli: (installed: Bool, supported: Bool, version: String?),
 }
 
 @Test func claudeSubtitleIsVersionAndFolder() {
-    let summary = AgentSummary.claude(ClaudeCapabilities(installed: true, supported: true, version: "2.1.300"),
+    let summary = AgentSummary.claude(checked: true, ClaudeCapabilities(installed: true, supported: true, version: "2.1.300"),
                                       displayPath: "~/.claude", status: .connected, statusText: "Connected",
                                       addsHooks: false)
     #expect(summary.subtitle == "2.1.300 · ~/.claude")
@@ -50,7 +50,7 @@ private func codex(cli: (installed: Bool, supported: Bool, version: String?),
 }
 
 @Test func claudeUnsupportedVersionReplacesTheMatchingStatusRow() {
-    let summary = AgentSummary.claude(ClaudeCapabilities(installed: true, supported: false, version: "2.1.4"),
+    let summary = AgentSummary.claude(checked: true, ClaudeCapabilities(installed: true, supported: false, version: "2.1.4"),
                                       displayPath: "~/.claude",
                                       status: .unsupported("Claude Code 2.1.4 is older than the tested minimum 2.1.273."),
                                       statusText: "Claude Code 2.1.4 is older than the tested minimum 2.1.273.",
@@ -59,7 +59,7 @@ private func codex(cli: (installed: Bool, supported: Bool, version: String?),
 }
 
 @Test func claudeNotDetectedAndNotConnectedShowsStatus() {
-    let summary = AgentSummary.claude(ClaudeCapabilities(installed: false, supported: false),
+    let summary = AgentSummary.claude(checked: true, ClaudeCapabilities(installed: false, supported: false),
                                       displayPath: "~/work/.claude", status: .notConfigured,
                                       statusText: "Not configured", addsHooks: false)
     #expect(summary.subtitle == "Not detected · ~/work/.claude")
@@ -67,12 +67,12 @@ private func codex(cli: (installed: Bool, supported: Bool, version: String?),
 }
 
 @Test func claudeMissingHooksIsAProblemOnlyWhileInstalled() {
-    let connected = AgentSummary.claude(ClaudeCapabilities(installed: true, supported: true, version: "2.1.300"),
+    let connected = AgentSummary.claude(checked: true, ClaudeCapabilities(installed: true, supported: true, version: "2.1.300"),
                                         displayPath: "~/.claude", status: .connected, statusText: "Connected",
                                         addsHooks: true)
     #expect(connected.problems == [AgentProblem(kind: .newHooks, label: "New hooks", value: "Configure to add them, such as file approvals")])
 
-    let restarting = AgentSummary.claude(ClaudeCapabilities(installed: true, supported: true, version: "2.1.300"),
+    let restarting = AgentSummary.claude(checked: true, ClaudeCapabilities(installed: true, supported: true, version: "2.1.300"),
                                          displayPath: "~/.claude", status: .configuredAwaitingRestart("Restart Claude Code."),
                                          statusText: "Restart Claude Code.", addsHooks: true)
     #expect(restarting.problems == [
@@ -80,7 +80,7 @@ private func codex(cli: (installed: Bool, supported: Bool, version: String?),
         AgentProblem(kind: .newHooks, label: "New hooks", value: "Configure to add them, such as file approvals")
     ])
 
-    let fresh = AgentSummary.claude(ClaudeCapabilities(installed: true, supported: true, version: "2.1.300"),
+    let fresh = AgentSummary.claude(checked: true, ClaudeCapabilities(installed: true, supported: true, version: "2.1.300"),
                                     displayPath: "~/.claude", status: .notConfigured, statusText: "Not configured",
                                     addsHooks: true)
     #expect(fresh.problems == [AgentProblem(kind: .status, label: "Status", value: "Not configured")])
@@ -119,11 +119,11 @@ private func codex(cli: (installed: Bool, supported: Bool, version: String?),
 
 @Test func claudeHeaderStatusMatchesTodaysWording() {
     let caps = ClaudeCapabilities(installed: true, supported: true, version: "2.1.300")
-    #expect(AgentSummary.claude(caps, displayPath: "~/.claude", status: .connected, statusText: "Connected",
+    #expect(AgentSummary.claude(checked: true, caps, displayPath: "~/.claude", status: .connected, statusText: "Connected",
                                 addsHooks: false).status == .connected)
-    #expect(AgentSummary.claude(caps, displayPath: "~/.claude", status: .configuredAwaitingRestart("Restart."),
+    #expect(AgentSummary.claude(checked: true, caps, displayPath: "~/.claude", status: .configuredAwaitingRestart("Restart."),
                                 statusText: "Restart.", addsHooks: false).status == .attention("Restart required"))
-    #expect(AgentSummary.claude(caps, displayPath: "~/.claude", status: .notConfigured,
+    #expect(AgentSummary.claude(checked: true, caps, displayPath: "~/.claude", status: .notConfigured,
                                 statusText: "Not configured", addsHooks: false).status == .attention("Not ready"))
 }
 
@@ -132,17 +132,57 @@ private func codex(cli: (installed: Bool, supported: Bool, version: String?),
                                      fiveHour: ClaudeUsageWindow(usedPercentage: 32.2, resetsAt: 2_000),
                                      sevenDay: ClaudeUsageWindow(usedPercentage: 61, resetsAt: 9_000),
                                      observedAt: 900)
-    #expect(AgentSummary.claudeUsage(reading, status: .ready, now: 1_000) == AgentUsage(text: "5h 32% · 7d 61%", isProblem: false))
-    #expect(AgentSummary.claudeUsage(reading, status: .ready, now: 5_000) == AgentUsage(text: "5h unavailable · 7d 61%", isProblem: false))
-    #expect(AgentSummary.claudeUsage(reading, status: .ready, now: 10_000) == AgentUsage(text: "No current reading", isProblem: false))
-    #expect(AgentSummary.claudeUsage(nil, status: .off, now: 1_000) == AgentUsage(text: "No current reading", isProblem: false))
+    #expect(AgentSummary.claudeUsage(reading, status: .ready, now: 1_000) == .reading("5h 32% · 7d 61%"))
+    #expect(AgentSummary.claudeUsage(reading, status: .ready, now: 5_000) == .reading("5h unavailable · 7d 61%"))
+    #expect(AgentSummary.claudeUsage(reading, status: .ready, now: 10_000) == .unavailable)
+    #expect(AgentSummary.claudeUsage(nil, status: .off, now: 1_000) == .unavailable)
+    #expect(AgentUsage.unavailable.problem == nil)
+    #expect(AgentUsage.reading("5h 32% · 7d 61%").problem == nil)
 }
 
 @Test func claudeUsageThatCannotBeReadIsAProblem() {
-    #expect(AgentSummary.claudeUsage(nil, status: .conflict("Status line conflict"), now: 1_000)
-            == AgentUsage(text: "Status line conflict", isProblem: true))
-    #expect(AgentSummary.claudeUsage(nil, status: .unavailable("Probe failed"), now: 1_000)
-            == AgentUsage(text: "Probe failed", isProblem: true))
+    let conflict = AgentSummary.claudeUsage(nil, status: .conflict("Status line conflict"), now: 1_000)
+    #expect(conflict == .problem("Status line conflict"))
+    #expect(conflict.problem == AgentProblem(kind: .usage, label: "Usage limits", value: "Status line conflict"))
+    #expect(AgentSummary.claudeUsage(nil, status: .unavailable("Probe failed"), now: 1_000) == .problem("Probe failed"))
+}
+
+@Test func claudeIsCheckingUntilTheFirstDetection() {
+    let summary = AgentSummary.claude(checked: false, ClaudeCapabilities(installed: false, supported: false),
+                                      displayPath: "~/.claude", status: .unavailable("Checking Claude Code setup…"),
+                                      statusText: "Checking Claude Code setup…", addsHooks: false)
+    #expect(summary.status == .checking)
+    #expect(summary.subtitle == "Checking…")
+    #expect(summary.problems.isEmpty)
+}
+
+@Test func claudeWithoutAnyFolderStillHasAHeader() {
+    #expect(AgentSummary.claudeWithoutFolders(checked: false)
+            == AgentSummary(subtitle: "Checking…", status: .checking, problems: []))
+    #expect(AgentSummary.claudeWithoutFolders(checked: true)
+            == AgentSummary(subtitle: "No Claude folder", status: .attention("Not ready"), problems: []))
+}
+
+@Test func codexUnsupportedStatusIsCoveredByTheVersionRows() {
+    let caps = codex(cli: (true, false, "0.100.0"), desktop: (false, false, nil))
+    let summary = AgentSummary.codex(caps, status: .unsupported("Codex CLI 0.100.0 is older than the tested minimum 0.145.0."),
+                                     statusText: "Codex CLI 0.100.0 is older than the tested minimum 0.145.0.")
+    #expect(summary.problems == [
+        AgentProblem(kind: .codexCLI, label: "Codex CLI", value: "Update to 0.145.0 or later"),
+        AgentProblem(kind: .codexDesktop, label: "Codex desktop", value: "Not installed")
+    ])
+
+    let unexplained = AgentSummary.codex(codex(cli: (true, true, "0.150.0"), desktop: (false, false, nil)),
+                                         status: .unsupported("Unsupported platform."), statusText: "Unsupported platform.")
+    #expect(unexplained.problems == [AgentProblem(kind: .status, label: "Status", value: "Unsupported platform.")])
+}
+
+@Test func claudeUndoNeedsAReadyPlanAndAnInstalledSetup() {
+    #expect(ClaudeConnectionStatus.connected.offersUndo(planReady: true))
+    #expect(ClaudeConnectionStatus.configuredAwaitingRestart("Restart.").offersUndo(planReady: true))
+    #expect(ClaudeConnectionStatus.repairRequired("Repair.").offersUndo(planReady: true))
+    #expect(!ClaudeConnectionStatus.notConfigured.offersUndo(planReady: true))
+    #expect(!ClaudeConnectionStatus.connected.offersUndo(planReady: false))
 }
 
 @Test func problemRowsAreIdentifiedByKind() {

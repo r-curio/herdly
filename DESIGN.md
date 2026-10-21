@@ -373,7 +373,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - The card's ⋯ menu holds Review Again, Show Setup Changes…, Add Another Claude Folder… (Claude), then Undo Setup…. Items appear only when they apply today. Its VoiceOver label names the agent, and the folder for Claude.
   - Show Setup Changes… opens a sheet with the exact, selectable monospaced preview and a Done button (Return or Esc).
   - A problem row appears only when something needs fixing: label left, an orange dot and the fix right, such as "Codex desktop · Update to 26.901.51231 or later". A missing surface is not a problem while the other is supported.
-  - Claude's rows: "Usage limits on the strip" (the current "5h 32% · 7d 61%" reading before the switch, or, with an orange dot, why usage cannot be read) and "Name sessions with Haiku", without descriptions.
+  - Claude's rows: "Usage limits on the strip" (the current "5h 32% · 7d 61%" reading before the switch, "Unavailable" when no window is current, or, with an orange dot, why usage cannot be read) and "Name sessions with Haiku", without descriptions.
   - The last setup action's result stays in its card as secondary text until replaced, so a failure stays readable. Terminal status lives in Terminals, not here.
 - **Sound picker:**
   - A list of the macOS system sounds, with a check mark for the selection and a play button to preview it.

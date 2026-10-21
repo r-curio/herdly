@@ -766,7 +766,16 @@ private struct ClaudeAgentControls: View {
 
     var body: some View {
         SettingsCard {
-            if let root = setup.roots.first { defaultFolder(root) }
+            if let root = setup.roots.first {
+                defaultFolder(root)
+            } else {
+                // No folder to describe yet: keep the card's header so adding a folder stays reachable.
+                header(AgentSummary.claudeWithoutFolders(checked: setup.checked), menuLabel: "Claude Code actions") {
+                    EmptyView()
+                } actions: {
+                    Button("Add Another Claude Folder…", action: setup.addAlternateRoot)
+                }
+            }
             ForEach(Array(setup.roots.dropFirst())) { root in addedFolder(root) }
             AgentMessageRow(message: setup.message)
         }
@@ -778,7 +787,7 @@ private struct ClaudeAgentControls: View {
     }
 
     private func summary(_ root: ClaudeSetupModel.Root) -> AgentSummary {
-        AgentSummary.claude(root.capabilities, displayPath: root.displayPath, status: root.status,
+        AgentSummary.claude(checked: setup.checked, root.capabilities, displayPath: root.displayPath, status: root.status,
                             statusText: ClaudeSetupModel.statusText(root.status),
                             addsHooks: readyPlan(root)?.addsHooks ?? false)
     }
@@ -788,18 +797,33 @@ private struct ClaudeAgentControls: View {
         return AgentSummary.claudeUsage(root.usage, status: root.usageStatus, now: Date().timeIntervalSince1970)
     }
 
+    private func actionsLabel(_ root: ClaudeSetupModel.Root) -> String {
+        "Claude Code actions for \(root.displayPath)"
+    }
+
+    private func offersUndo(_ root: ClaudeSetupModel.Root) -> Bool {
+        root.status.offersUndo(planReady: readyPlan(root) != nil)
+    }
+
+    private func header<Configure: View, Actions: View>(
+        _ summary: AgentSummary, menuLabel: String,
+        @ViewBuilder configure: () -> Configure, @ViewBuilder actions: () -> Actions
+    ) -> some View {
+        AgentCardHeader(name: "Claude Code", subtitle: summary.subtitle, symbol: "sparkle",
+                        tile: Color(red: 0.851, green: 0.467, blue: 0.341), status: summary.status,
+                        menuLabel: menuLabel, configure: configure, actions: actions)
+    }
+
     @ViewBuilder
     private func defaultFolder(_ root: ClaudeSetupModel.Root) -> some View {
         let summary = summary(root)
         let plan = readyPlan(root)
-        AgentCardHeader(name: "Claude Code", subtitle: summary.subtitle, symbol: "sparkle",
-                        tile: Color(red: 0.851, green: 0.467, blue: 0.341), status: summary.status,
-                        menuLabel: "Claude Code actions for \(root.displayPath)") {
+        header(summary, menuLabel: actionsLabel(root)) {
             configureButton(root)
         } actions: {
             reviewActions(root)
             Button("Add Another Claude Folder…", action: setup.addAlternateRoot)
-            if plan != nil, root.status != .notConfigured {
+            if offersUndo(root) {
                 Divider()
                 undoButton(root)
             }
@@ -809,12 +833,11 @@ private struct ClaudeAgentControls: View {
             Divider().padding(.horizontal, SettingsStyle.rowInset)
             SettingsRow(title: "Usage limits on the strip", detail: nil) {
                 HStack(spacing: 10) {
-                    if let usage = usage(root) {
-                        if usage.isProblem {
-                            ProblemValue(text: usage.text)
-                        } else {
-                            Text(usage.text).foregroundStyle(.secondary)
-                        }
+                    switch usage(root) {
+                    case .reading(let text)?: Text(text).foregroundStyle(.secondary)
+                    case .unavailable?: Text("Unavailable").foregroundStyle(.secondary)
+                    case .problem(let reason)?: ProblemValue(text: reason)
+                    case nil: EmptyView()
                     }
                     usageToggle(root).labelsHidden().toggleStyle(.switch).controlSize(.mini)
                 }
@@ -839,14 +862,14 @@ private struct ClaudeAgentControls: View {
             Spacer(minLength: 8)
             AgentStatusBadge(status: summary.status)
             configureButton(root)
-            AgentActionsMenu(label: "Claude Code actions for \(root.displayPath)") {
+            AgentActionsMenu(label: actionsLabel(root)) {
                 reviewActions(root)
                 if plan != nil {
                     usageToggle(root)
                     titlesToggle(root)
                 }
                 Divider()
-                if plan != nil, root.status != .notConfigured { undoButton(root) }
+                if offersUndo(root) { undoButton(root) }
                 Button("Remove Folder", role: .destructive) { setup.removeAlternateRoot(root) }
                     .accessibilityLabel("Remove Claude folder \(root.displayPath)")
             }
@@ -854,13 +877,7 @@ private struct ClaudeAgentControls: View {
         .padding(.horizontal, SettingsStyle.rowInset)
         .padding(.vertical, 8)
         .frame(minHeight: 36)
-        AgentProblemRows(problems: summary.problems, indent: 16)
-        if let usage = usage(root), usage.isProblem {
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Usage limits", detail: nil) { ProblemValue(text: usage.text) }
-                .padding(.leading, 16)
-                .accessibilityElement(children: .combine)
-        }
+        AgentProblemRows(problems: summary.problems + [usage(root)?.problem].compactMap { $0 }, indent: 16)
     }
 
     @ViewBuilder
