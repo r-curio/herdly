@@ -416,7 +416,7 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     queue.apply(running: [running], now: 1)
     var strip = StripSummary.make(items: queue.items, testPending: false)
     let first = StripSession(session: session, working: true, color: StripSummary.preferredColor(for: session))
-    #expect(strip == StripSummary(subject: "session 01a0916c", working: true, toCheck: 0, sessions: [first], overflow: 0))
+    #expect(strip == StripSummary(subject: "session 01a0916c", working: true, toCheck: 0, sessions: [first]))
 
     let details = ApprovalDetails(taskName: "fix auth bug", project: "herdly", action: "run", command: "swift test", reason: nil)
     let request = AttentionRequest(id: UUID(), source: .cli, session: UUID(), turn: UUID(), arrivedAt: 2, details: details)
@@ -424,7 +424,7 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     queue.apply(requests: [request], completions: [completion], now: 3)
     strip = StripSummary.make(items: queue.items, testPending: true)
     #expect(strip.subject == "fix auth bug" && strip.working && strip.toCheck == 3)
-    #expect(strip.sessions.count == 3 && strip.overflow == 0)
+    #expect(strip.sessions.count == 3)
 
     #expect(StripSummary.make(items: [], testPending: false) == StripSummary(subject: "idle", working: false, toCheck: 0))
 }
@@ -449,7 +449,7 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     #expect(neither.sentence == "Codex and Claude aren’t reporting to Herdly yet.")
 }
 
-@Test func stripShowsAtMostThreeSessionsInDistinctColorsAndCountsTheRest() {
+@Test func stripShowsAtMostThreeSessionsInDistinctColors() {
     var completions: [AttentionCompletion] = []
     for i in 1...5 {
         // Identifiers chosen so every session prefers the same color.
@@ -459,8 +459,8 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     var queue = AttentionQueue()
     queue.apply(requests: [], completions: completions, now: 5)
     let strip = StripSummary.make(items: queue.items, testPending: false)
+    // Sessions beyond three appear only in the open queue (D2, #318).
     #expect(strip.sessions.count == StripSummary.maximumSprites)
-    #expect(strip.overflow == 2)
     #expect(Set(strip.sessions.map(\.color)).count == 3)
     #expect(strip.sessions.allSatisfy { !$0.working })
     // The first shown session keeps its preferred color; later ones step to the next free one.
@@ -643,4 +643,113 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     // A changed target always moves, animating or not.
     #expect(NotchFrameSync.action(target: open, lastTarget: strip, actual: strip, animating: true) == .moveToNewTarget)
     #expect(NotchFrameSync.action(target: open, lastTarget: strip, actual: strip, animating: false) == .moveToNewTarget)
+}
+
+// MARK: - Strip left wing (D2, D3, D22; #318)
+
+private func wingSession(_ index: Int) -> AgentSessionIdentity {
+    AgentSessionIdentity(source: .claude, sourceScope: "root", session: "session-\(index)", surface: .cli)
+}
+
+/// A strip whose queue holds one completion per session, with the listed sessions also working.
+private func wingStrip(sessions count: Int, working: Set<Int> = []) -> AgentStripSummary {
+    var queue = AgentAttentionQueue()
+    for index in 0..<count {
+        if working.contains(index) {
+            queue.apply(.running(AgentRunning(session: wingSession(index), turn: "run-\(index)", arrivedAt: Double(index))))
+        } else {
+            queue.apply(.outcome(AgentOutcome(session: wingSession(index), turn: "done-\(index)", status: .finished,
+                                              arrivedAt: Double(index))))
+        }
+    }
+    return AgentStripSummary.make(items: queue.items(at: Double(count)))
+}
+
+private func spriteSessions(_ wing: StripWing) -> [AgentSessionIdentity?] {
+    wing.sprites.map { sprite in
+        if case .session(let session) = sprite { session.session } else { nil }
+    }
+}
+
+@Test func collapsedWingShowsUpToThreeSpritesAndABareCount() {
+    let empty = StripWing.make(summary: wingStrip(sessions: 0), leftWing: .spritesAndCount, expanded: false)
+    #expect(empty.sprites == [.unlit] && empty.badge == nil)
+
+    let one = StripWing.make(summary: wingStrip(sessions: 1), leftWing: .spritesAndCount, expanded: false)
+    #expect(spriteSessions(one) == [wingSession(0)] && one.badge == "1")
+
+    let three = StripWing.make(summary: wingStrip(sessions: 3), leftWing: .spritesAndCount, expanded: false)
+    #expect(spriteSessions(three) == [wingSession(0), wingSession(1), wingSession(2)] && three.badge == "3")
+
+    // Nine sessions still draw exactly three sprites; the rest appear only in the open queue, and
+    // nothing on the strip counts them.
+    let nineSummary = wingStrip(sessions: 9)
+    let nine = StripWing.make(summary: nineSummary, leftWing: .spritesAndCount, expanded: false)
+    #expect(nine.sprites.count == 3)
+    #expect(spriteSessions(nine) == [wingSession(0), wingSession(1), wingSession(2)])
+    #expect(nine.badge == "9" && nineSummary.toCheck == 9)
+}
+
+@Test func openWingShowsOneSpriteAndNamesTheBadge() {
+    let empty = StripWing.make(summary: wingStrip(sessions: 0), leftWing: .spritesAndCount, expanded: true)
+    #expect(empty.sprites == [.unlit] && empty.badge == nil)
+
+    let one = StripWing.make(summary: wingStrip(sessions: 1), leftWing: .spritesAndCount, expanded: true)
+    #expect(spriteSessions(one) == [wingSession(0)] && one.badge == "1 to check")
+
+    let three = StripWing.make(summary: wingStrip(sessions: 3), leftWing: .spritesAndCount, expanded: true)
+    #expect(spriteSessions(three) == [wingSession(0)] && three.badge == "3 to check")
+
+    let nine = StripWing.make(summary: wingStrip(sessions: 9), leftWing: .spritesAndCount, expanded: true)
+    #expect(spriteSessions(nine) == [wingSession(0)] && nine.badge == "9 to check")
+}
+
+@Test func openWingStepsTheFirstWorkingSessionsSprite() {
+    // Completions outrank running work, so the working session is not first in priority order.
+    let summary = wingStrip(sessions: 3, working: [1, 2])
+    #expect(summary.sessions.first?.working == false)
+    let open = StripWing.make(summary: summary, leftWing: .spritesAndCount, expanded: true)
+    #expect(open.sprites.count == 1)
+    guard case .session(let sprite) = open.sprites.first else { Issue.record("expected a session sprite"); return }
+    #expect(sprite.working && sprite.session == wingSession(1))
+    #expect(open.badge == "1 to check")
+
+    // The only working session ranks below the three collapsed sprites: collapsed it is not drawn,
+    // open its sprite still steps.
+    let deep = wingStrip(sessions: 9, working: [6])
+    let deepCollapsed = StripWing.make(summary: deep, leftWing: .spritesAndCount, expanded: false)
+    #expect(deepCollapsed.sprites.count == 3 && !spriteSessions(deepCollapsed).contains(wingSession(6)))
+    let deepOpen = StripWing.make(summary: deep, leftWing: .spritesAndCount, expanded: true)
+    #expect(spriteSessions(deepOpen) == [wingSession(6)] && deepOpen.badge == "8 to check")
+    if case .session(let session) = deepOpen.sprites.first {
+        #expect(session.working && !deep.sessions.map(\.color).contains(session.color))
+    }
+
+    // Only working sessions: nothing to check, so no badge, and the sprite still steps.
+    let busy = StripWing.make(summary: wingStrip(sessions: 2, working: [0, 1]), leftWing: .spritesAndCount, expanded: true)
+    #expect(busy.badge == nil && busy.sprites.count == 1)
+    if case .session(let session) = busy.sprites.first { #expect(session.working) } else { Issue.record("expected a sprite") }
+}
+
+@Test func countOnlyWingKeepsOneSteppingSpriteAndNamesTheBadgeWhenOpen() {
+    let idle = wingStrip(sessions: 3)
+    #expect(StripWing.make(summary: idle, leftWing: .countOnly, expanded: false) == StripWing(sprites: [], badge: "3"))
+    #expect(StripWing.make(summary: idle, leftWing: .countOnly, expanded: true) == StripWing(sprites: [], badge: "3 to check"))
+    #expect(StripWing.make(summary: wingStrip(sessions: 0), leftWing: .countOnly, expanded: true) == StripWing(sprites: [], badge: nil))
+
+    let busy = wingStrip(sessions: 9, working: [4])
+    for expanded in [false, true] {
+        let wing = StripWing.make(summary: busy, leftWing: .countOnly, expanded: expanded)
+        #expect(spriteSessions(wing) == [wingSession(4)])
+        #expect(wing.badge == (expanded ? "8 to check" : "8"))
+    }
+}
+
+@Test func noneWingIsEmptyAndHasNoBadge() {
+    for expanded in [false, true] {
+        for count in [0, 1, 3, 9] {
+            let wing = StripWing.make(summary: wingStrip(sessions: count, working: [0]), leftWing: .none, expanded: expanded)
+            #expect(wing == StripWing(sprites: [], badge: nil))
+        }
+    }
 }

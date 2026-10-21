@@ -187,8 +187,8 @@ public struct NotchDisplayChoices: Equatable, Sendable {
 /// Geometry depends only on these inputs, so a display change or an interaction never changes what
 /// the queue holds or when items expire.
 public enum NotchPlacement {
-    /// Visible body left of the camera housing, where up to three session sprites, the overflow
-    /// mark, and the to-check count live.
+    /// Visible body left of the camera housing, where up to three session sprites and the to-check
+    /// count live (`StripWing`).
     public static let leadingWing: CGFloat = 112
     /// Visible body right of the camera housing while it holds only Codex's weekly readout.
     public static let trailingWing: CGFloat = 60
@@ -432,8 +432,8 @@ public struct StripSession: Equatable, Sendable {
 }
 
 /// What the collapsed strip shows: one sprite per session (at most `maximumSprites`, in priority
-/// order), how many further sessions are not shown, the subject of the top-priority item, and how
-/// many items need the user.
+/// order), the subject of the top-priority item, and how many items need the user. Sessions beyond
+/// `maximumSprites` appear only in the open queue; the strip does not count them (D2, #318).
 public struct StripSummary: Equatable, Sendable {
     public static let maximumSprites = 3
     /// Number of distinct sprite colors; a session keeps its color from its identifier.
@@ -443,14 +443,12 @@ public struct StripSummary: Equatable, Sendable {
     public let working: Bool
     public let toCheck: Int
     public let sessions: [StripSession]
-    public let overflow: Int
 
-    public init(subject: String, working: Bool, toCheck: Int, sessions: [StripSession] = [], overflow: Int = 0) {
+    public init(subject: String, working: Bool, toCheck: Int, sessions: [StripSession] = []) {
         self.subject = subject
         self.working = working
         self.toCheck = toCheck
         self.sessions = sessions
-        self.overflow = overflow
     }
 
     /// A session's preferred color, derived from its identifier so it survives queue changes.
@@ -460,10 +458,10 @@ public struct StripSummary: Equatable, Sendable {
         return sum % colorCount
     }
 
-    /// Sessions in first-appearance order of the priority-ordered items. Each takes its preferred
+    /// The first `maximumSprites` sessions in first-appearance order of the priority-ordered items. Each takes its preferred
     /// color unless a session shown before it already has that color, in which case the next free
     /// color is used, so the sprites on the strip are never two of the same color.
-    public static func sessions(in items: [AttentionItem]) -> (shown: [StripSession], overflow: Int) {
+    public static func sessions(in items: [AttentionItem]) -> [StripSession] {
         var order: [Foundation.UUID] = []
         var working: Set<Foundation.UUID> = []
         for item in items {
@@ -478,7 +476,7 @@ public struct StripSummary: Equatable, Sendable {
             taken.insert(color)
             shown.append(StripSession(session: session, working: working.contains(session), color: color))
         }
-        return (shown, max(0, order.count - maximumSprites))
+        return shown
     }
 
     /// Items arrive already ordered by priority; the first one names the strip. Codex's own thread
@@ -497,8 +495,7 @@ public struct StripSummary: Equatable, Sendable {
         } else {
             subject = "idle"
         }
-        let (sessions, overflow) = StripSummary.sessions(in: items)
-        return StripSummary(subject: subject, working: working, toCheck: toCheck, sessions: sessions, overflow: overflow)
+        return StripSummary(subject: subject, working: working, toCheck: toCheck, sessions: StripSummary.sessions(in: items))
     }
 
     /// The thread name Codex gave the session when known; otherwise the shortened identifier.
@@ -519,6 +516,9 @@ public struct AgentStripSession: Equatable, Sendable {
     }
 }
 
+/// What the strip shows across agents: one sprite per session (at most `maximumSprites`, in priority
+/// order), the subject of the top-priority item, and how many items need the user. Sessions beyond
+/// `maximumSprites` appear only in the open queue; the strip does not count them (D2, #318).
 public struct AgentStripSummary: Equatable, Sendable {
     public static let maximumSprites = StripSummary.maximumSprites
     public static let colorCount = StripSummary.colorCount
@@ -527,14 +527,17 @@ public struct AgentStripSummary: Equatable, Sendable {
     public let working: Bool
     public let toCheck: Int
     public let sessions: [AgentStripSession]
-    public let overflow: Int
+    /// The first working session in priority order, even when it ranks below the shown sprites, so
+    /// a wing that draws one sprite can still step while anything works. `nil` while nothing works.
+    public let busy: AgentStripSession?
 
-    public init(subject: String, working: Bool, toCheck: Int, sessions: [AgentStripSession] = [], overflow: Int = 0) {
+    public init(subject: String, working: Bool, toCheck: Int, sessions: [AgentStripSession] = [],
+                busy: AgentStripSession? = nil) {
         self.subject = subject
         self.working = working
         self.toCheck = toCheck
         self.sessions = sessions
-        self.overflow = overflow
+        self.busy = busy
     }
 
     public static func preferredColor(for session: AgentSessionIdentity) -> Int {
@@ -574,14 +577,70 @@ public struct AgentStripSummary: Equatable, Sendable {
         var seen = Set<AgentSessionIdentity>()
         var colors = Set<Int>()
         for item in items where seen.insert(item.session).inserted {
-            guard sessions.count < maximumSprites else { continue }
+            guard sessions.count < maximumSprites else { break }
             var color = preferredColor(for: item.session)
             while colors.contains(color) { color = (color + 1) % colorCount }
             colors.insert(color)
             sessions.append(AgentStripSession(session: item.session, working: item.running?.status == .working, color: color))
         }
-        return Self(subject: subject, working: working, toCheck: toCheck, sessions: sessions,
-                    overflow: max(0, seen.count - maximumSprites))
+        var busy = sessions.first(where: \.working)
+        if busy == nil, let item = items.first(where: { $0.running?.status == .working }) {
+            // Below the shown sprites: the next color none of them uses (three of six are taken).
+            var color = preferredColor(for: item.session)
+            while colors.contains(color) { color = (color + 1) % colorCount }
+            busy = AgentStripSession(session: item.session, working: true, color: color)
+        }
+        return Self(subject: subject, working: working, toCheck: toCheck, sessions: sessions, busy: busy)
+    }
+}
+
+/// What the strip's left wing draws, given the display profile's wing setting and whether the queue
+/// is open (D2, D3, D22; #318).
+///
+/// - Sprites and count, collapsed: up to three session sprites in priority order (the unlit sprite
+///   when no session is listed) and the bare to-check count.
+/// - Sprites and count, open: one sprite, the first working session's while any session works so the
+///   wing still steps, otherwise the top-priority session's; the unlit sprite when no session is
+///   listed. The badge reads "N to check" in the room the open panel adds to the wing.
+/// - Count only: one stepping sprite, the first working session's, only while any session works;
+///   the badge is the bare count collapsed and "N to check" open.
+/// - None: nothing.
+///
+/// The badge is absent at zero in every case.
+public struct StripWing: Equatable, Sendable {
+    public enum Sprite: Equatable, Sendable {
+        /// The gray sprite standing in while no session is listed.
+        case unlit
+        case session(AgentStripSession)
+
+        /// Stable identity for drawing: the session, or `nil` for the unlit sprite. A wing holds
+        /// at most one unlit sprite and never the same session twice.
+        public var identity: AgentSessionIdentity? {
+            if case .session(let session) = self { session.session } else { nil }
+        }
+    }
+
+    public let sprites: [Sprite]
+    public let badge: String?
+
+    public init(sprites: [Sprite], badge: String?) {
+        self.sprites = sprites
+        self.badge = badge
+    }
+
+    public static func make(summary: AgentStripSummary, leftWing: StripLeftWing, expanded: Bool) -> Self {
+        let badge: String? = summary.toCheck > 0 ? (expanded ? "\(summary.toCheck) to check" : "\(summary.toCheck)") : nil
+        let busy = summary.busy
+        switch leftWing {
+        case .spritesAndCount:
+            guard let top = summary.sessions.first else { return Self(sprites: [.unlit], badge: badge) }
+            let shown = expanded ? [busy ?? top] : summary.sessions
+            return Self(sprites: shown.map(Sprite.session), badge: badge)
+        case .countOnly:
+            return Self(sprites: busy.map { [.session($0)] } ?? [], badge: badge)
+        case .none:
+            return Self(sprites: [], badge: nil)
+        }
     }
 }
 
