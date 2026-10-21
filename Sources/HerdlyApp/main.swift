@@ -695,11 +695,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// `--preview-queue` modes that open the sample item in the spotlight.
     static let spotlightPreviewModes: Set<String> = ["spotlight", "spotlight-approval", "spotlight-handed-back",
                                                        "spotlight-question", "spotlight-question-edit", "spotlight-question-review",
-                                                       "spotlight-question-long", "spotlight-question-unavailable", "spotlight-claude-question", "spotlight-claude-multiselect"]
+                                                       "spotlight-question-long", "spotlight-question-unavailable", "spotlight-claude-question", "spotlight-claude-multiselect",
+                                                       "spotlight-result"]
     private var targetFrame: CGRect = .zero
     /// The frame animation in flight, so a refresh mid-animation does not mistake it for drift.
     private var frameAnimation: UUID?
-    /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|expanded>`
+    /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|spotlight-result|row-note-reply|expanded>`
     /// seeds in-memory sample items for screenshots; `clicked-approval` shows the approval sample as a
     /// clicked card (`clicked-approval-long` with a command past the six-line cap, `clicked-claude-approval`
     /// a Claude request with no command), and `row-note` the queue with that row selected and carrying a note;
@@ -1523,7 +1524,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let newAgentItems = currentAgent.filter { !previousAgent.contains($0.id) }
             let newAgentOutcomes = newAgentItems.compactMap(\.outcome)
             let newAgentQuestions = newAgentItems.compactMap(\.question)
-            let freshAgentOutcomes = newAgentOutcomes.filter { !$0.uncertain && $0.arrivedAt >= Companion.launchedAt }
+            // #323: a restored or pre-launch result goes to the queue without a card or a sound.
+            let freshAgentOutcomes = newAgentOutcomes.filter { ResultPop.isFresh($0, launchedAt: Companion.launchedAt) }
             let freshAgentQuestions = newAgentQuestions.filter { $0.arrivedAt >= Companion.launchedAt }
             let newAgentRequests = newAgentItems.filter {
                 ($0.kind == .actionableApproval || $0.kind == .handedBackApproval)
@@ -1737,9 +1739,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         switch ghosttyFocusState {
         case .disabled: ghosttyFocus = .disabled
         case .checking: ghosttyFocus = .checking
-        case .known(let snapshot): ghosttyFocus = snapshot.selected == nil ? .unknown : .away
+        // A Ghostty reading in hand: whether the session's own tab is the one in front is
+        // `ResultPop`'s call below; a reading with no tab selected means Ghostty is not in front (#323).
+        case .known: ghosttyFocus = .away
         case .unknown: ghosttyFocus = .unknown
         }
+        let ghosttySnapshot: GhosttySnapshot? = if case .known(let snapshot) = ghosttyFocusState { snapshot } else { nil }
         func completionIsEligible(_ item: AgentAttentionItem) -> Bool {
             guard let outcome = item.outcome, !outcome.uncertain else { return false }
             guard outcome.session.source == .claude else {
@@ -1747,13 +1752,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 let source: AttentionSource = outcome.session.surface == .cli ? .cli : .desktop
                 guard CompletionVisibility.allows(source: source, codexForeground: codexForeground,
                                                  ghosttyFocus: ghosttyFocus) else { return false }
-                guard source == .cli, ghosttyEnabled else { return true }
-                guard case .known(let snapshot) = ghosttyFocusState,
-                      let target = GhosttyMatch.target(session: session, live: liveCLI, snapshot: snapshot)
-                else { return false }
-                return snapshot.selected != target
+                return ResultPop.ghosttyAllows(source: source, session: session, ghosttyEnabled: ghosttyEnabled,
+                                               live: liveCLI, snapshot: ghosttySnapshot,
+                                               reading: ghosttyFocus == .checking)
             }
-            return true
+            // ADR 0016's one rule for Claude too: no pop while its own Ghostty tab is in front.
+            return ResultPop.claudeGhosttyAllows(outcome.session, ghosttyEnabled: ghosttyEnabled,
+                                                 liveSessionsByScope: liveClaudeSessions,
+                                                 inventoryAvailable: claudeInventoryAvailable,
+                                                 configuredScopes: Set(configuredClaudeNavigationRoots().map { $0.root.path }),
+                                                 snapshot: ghosttySnapshot)
         }
         let freshCompletions = agentItems.filter { freshAgentCompletionIDs.contains($0.id) }
         let eligibleFreshCompletions = freshCompletions.filter(completionIsEligible)
@@ -1855,7 +1863,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                             now: now, legacyPopup: attention.expanded, queued: liveAgentIDs)
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
-        case "expanded", "empty-expanded", "empty-not-connected", "row-note": presentationMode = .queue
+        case "expanded", "empty-expanded", "empty-not-connected", "row-note", "row-note-reply": presentationMode = .queue
         case "clicked-approval", "clicked-approval-long", "clicked-claude-approval":
             let mode = previewSpotlightAgent.map(NotchPresentationMode.clickedCard) ?? .collapsed
             if presentationMode != mode { presentationMode = mode }
@@ -2171,7 +2179,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return UUID(uuidString: identity.session)
     }
 
-    private func codexTurn(_ identity: AgentTurnIdentity) -> AttentionCompletion? {
+    func codexTurn(_ identity: AgentTurnIdentity) -> AttentionCompletion? {
         guard let session = codexSession(identity.session), let turn = UUID(uuidString: identity.turn) else { return nil }
         return queue.items.compactMap(\.completion).first { $0.session == session && $0.turn == turn }
     }
@@ -2740,6 +2748,29 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                          now: now)
         previewSpotlightAgent = .outcome(CodexAttentionAdapter.outcome(from: completion).id)
         if mode.hasPrefix("spotlight-question") { previewSpotlightAgent = .question(CodexAttentionAdapter.question(from: question).id) }
+        if mode == "spotlight-result" || mode == "row-note-reply" {
+            // #323: a CLI result's card (9NU): a message past five lines, the turn's prompt, and a
+            // reachable reply field; `row-note-reply` shows its row after a send, with the reply's note.
+            let notes = UUID(uuidString: "2B7C9E10-3D4F-4A5B-8C6D-0000000000F6")!
+            let result = AttentionCompletion(source: .cli, session: notes, turn: UUID(), arrivedAt: now - 1)
+            queue.apply(completions: [completion, result], running: [running], now: now)
+            let project = NSHomeDirectory() + "/Developer/herdly"
+            threadNames[notes] = "Release notes"
+            gitBranches[project] = "docs/release-notes"
+            spotlightContexts[.completion(result.id)] = SpotlightRecordContext(
+                workingDirectory: project, prompt: "Draft the 1.4 release notes from the merged PRs since 1.3.")
+            let message = ["Drafted the 1.4 notes in docs/release-notes.md: three fixes, the new sprite picker, and the tmux",
+                           "support marked as preview. I left the version date blank for you to fill in.",
+                           "", "Fixes:", "- Snapshots write atomically.", "- Approval deadlines no longer drift.",
+                           "- Question cards keep their drafts.", "", "Run `make release-notes` to regenerate."].joined(separator: "\n")
+            if let preview = CompletionPreview(message) { completionPreviews[result.id] = .available(preview) }
+            syncAgentQueueWithCodex(now: now)
+            if mode == "row-note-reply" {
+                replyProgress[result.id] = SessionReplyProgress(completion: result.id)
+                    .startingSend(text: "Use today's date and commit it", at: now).recordingSent(at: now)
+            }
+            previewSpotlightAgent = .outcome(CodexAttentionAdapter.outcome(from: result).id)
+        }
         if mode == "spotlight-claude-multiselect" {
             let sample = AgentQuestion(session: claudeSession, turn: "preview-multi", call: "toolu_multi", arrivedAt: now,
                                        prompts: [QuestionPrompt(header: "Checks", question: "Which checks should run before handing this back?",

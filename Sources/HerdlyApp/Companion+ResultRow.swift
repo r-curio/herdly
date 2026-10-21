@@ -31,7 +31,7 @@ extension Companion {
     /// nothing (an unreachable result row, or a row no longer on screen), so the key goes on.
     @discardableResult
     func activateRow(_ id: AgentAttentionID) -> Bool {
-        guard let item = selectableItems.first(where: { $0.id == id }) else { return false }
+        guard let item = selectableItems.first(where: { $0.id == id }) else { return activateSpotlitResult(id) }
         let target = item.kind.opensSession ? resultRowReading(item.session).target : .reachable
         switch QueueRowSelection.action(for: item, target: target) {
         case let .openCard(id)?:
@@ -45,6 +45,85 @@ extension Companion {
         case nil:
             return false
         }
+    }
+
+    /// A click on the popped result card's header line (#323, 8DW "New ones"): the same Open as the
+    /// queue's result row, through the same reading, so an unreachable session does nothing. Only the
+    /// result card on screen as the spotlight is reached here; queue rows keep `selectableItems`.
+    private func activateSpotlitResult(_ id: AgentAttentionID) -> Bool {
+        guard case .agentSpotlight(id) = presentationMode,
+              let item = orderedAgentAttentionItems.first(where: { $0.id == id }), item.outcome != nil,
+              case let .openSession(session)? = QueueRowSelection.action(for: item, target: resultRowReading(item.session).target)
+        else { return false }
+        openSessionFromRow(session)
+        return true
+    }
+
+    /// One result's reply, resolved once for either agent (#323): a Codex card's progress is keyed by
+    /// its queued completion, a Claude card's by its outcome. Nil for a Codex result no longer queued.
+    enum ResultReply {
+        case codex(AttentionCompletion, SessionReplyProgress)
+        case claude(ReplyProgress<AgentTurnIdentity>)
+
+        var phase: SessionReplyPhase {
+            switch self {
+            case let .codex(_, progress): progress.phase
+            case let .claude(progress): progress.phase
+            }
+        }
+
+        /// The field's VoiceOver hint: where the text goes, and that sending clears nothing.
+        var hint: String {
+            switch self {
+            case .codex: "Sends a follow-up prompt to this session. Sending does not mark the result as checked."
+            case .claude: "Types a follow-up prompt into this session's tab. Sending does not mark the result as checked."
+            }
+        }
+
+        var note: RowNote? {
+            switch self {
+            case let .codex(_, progress): RowNote.reply(progress, agent: .codex)
+            case let .claude(progress): RowNote.reply(progress, agent: .claude)
+            }
+        }
+    }
+
+    func resultReply(_ turn: AgentTurnIdentity) -> ResultReply? {
+        switch turn.session.source {
+        case .codex: codexTurn(turn).map { .codex($0, reply(for: $0)) }
+        case .claude: .claude(claudeReply(for: turn))
+        }
+    }
+
+    /// Whether the result card shows its reply field now (`ResultCardReply.offersField`).
+    func resultCardOffersReply(_ outcome: AgentOutcome) -> Bool {
+        switch resultReply(outcome.id) {
+        case let .codex(completion, progress)?:
+            ResultCardReply.offersField(for: completion, target: replyTarget(for: completion), phase: progress.phase)
+        case let .claude(progress)?:
+            ResultCardReply.offersField(target: claudeReplyTarget(for: outcome), phase: progress.phase)
+        case nil:
+            false
+        }
+    }
+
+    /// One Send on the result card, by the agent's own one-reply path. A send that took the reply out
+    /// of `.ready` folds the card (#323): the spotlight collapses as Escape's does, nothing is
+    /// dismissed, and the result row carries the reply's note from then on. A refused send stays
+    /// `.ready` and keeps the card. Returns the phase after the send, so the caller keeps refused text.
+    @discardableResult
+    func sendResultReply(_ outcome: AgentOutcome, text: String) -> SessionReplyPhase {
+        guard let before = resultReply(outcome.id) else { return .ready }
+        switch before {
+        case let .codex(completion, _): sendReply(to: completion, text: text)
+        case .claude: sendClaudeReply(outcome, text: text)
+        }
+        let after = resultReply(outcome.id)?.phase ?? .ready
+        if ResultCardReply.foldsCard(before: before.phase, after: after),
+           presentationMode.singleCard == .outcome(outcome.id) {
+            collapse()
+        }
+        return after
     }
 
     /// Opens a result row's session, then folds the panel back once the Open has finished (8DW),

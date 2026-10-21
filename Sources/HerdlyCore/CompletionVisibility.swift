@@ -8,15 +8,17 @@ public enum CompletionFocus: Equatable, Sendable {
 }
 
 public enum CompletionVisibility {
-    /// Unknown Ghostty focus is never treated as a verified visit. Desktop app
-    /// identity remains the only desktop visibility gate.
+    /// Whether a completion may pop now. A CLI result waits only while Ghostty is being read
+    /// (`checking`) or its tab is focused; an unreadable or not-running Ghostty (`unknown`) shows
+    /// nothing visible, so the card pops (#323, ADR 0016). Popping acknowledges nothing, and unknown
+    /// focus is never treated as a verified visit. Desktop app identity remains the only desktop gate.
     public static func allows(source: AttentionSource, codexForeground: Bool?, ghosttyFocus: CompletionFocus) -> Bool {
         guard codexForeground != true else { return false }
         switch source {
         case .desktop:
             return true
         case .cli:
-            return ghosttyFocus == .disabled || ghosttyFocus == .away
+            return ghosttyFocus == .disabled || ghosttyFocus == .away || ghosttyFocus == .unknown
         }
     }
 }

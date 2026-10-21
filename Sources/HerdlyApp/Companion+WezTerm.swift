@@ -537,7 +537,7 @@ extension Companion {
                 },
                 pause: { seconds in try? await Task.sleep(for: .seconds(seconds)) })
             terminalApp.replying = false
-            terminalApp.claudeReplies[outcome.id] = claudeReply(for: outcome).settling(run, at: Date().timeIntervalSince1970)
+            terminalApp.claudeReplies[outcome.id] = claudeReply(for: outcome.id).settling(run, at: Date().timeIntervalSince1970)
             refresh()
         }
     }
