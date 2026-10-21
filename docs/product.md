@@ -291,7 +291,7 @@ Agreed with the user on 2026-10-11 ([issue #213](https://github.com/r-curio/herd
 
 **How Open Works…** opens a sheet with the app's targeting rule and what Open does otherwise, for example "Herdly returns to unsplit tabs; otherwise Open raises iTerm2." Because an Open fallback is silent on the card (ADR 0015), this is where it is explained.
 
-**Show Diagnostics…** opens a sheet with the exact internal reasons: the scan's result and, for each queued session in that app, its Open availability, its last Open result (verified, fallback or unavailable) with the reason, and why typed input is unavailable. It is disabled while there is nothing to show.
+**Show Diagnostics…** opens a sheet with the exact internal reasons an app's integration records, such as the scan's result and, for each queued session in that app, its Open availability, its last Open result (verified, fallback or unavailable) with the reason, and why typed input is unavailable. It is disabled while there is nothing to show; Ghostty records none today, so its item is always disabled.
 
 **Problem lines.**
 

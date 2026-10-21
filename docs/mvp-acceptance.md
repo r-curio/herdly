@@ -65,7 +65,7 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 
 | # | Step | Expected | Result |
 | --- | --- | --- | --- |
-| G1 | Enable **Enable Ghostty controls**; macOS asks for Automation access to Ghostty; allow. | Herdly reports the permission verified after the first navigation. | |
+| G1 | Turn on the **Ghostty** switch in Settings › Terminals; macOS asks for Automation access to Ghostty; allow. | Herdly reports the permission verified after the first navigation. | |
 | G2 | Two unsplit tabs in the same project, one `codex` session each. Complete a turn in tab A while tab B is focused. | A's completion presents; B stays unaffected. | |
 | G3 | **Open in Codex** on A's item. | Exactly tab A in its window is selected; the item is acknowledged by the verified Open (ADR 0016). | |
 | G4 | Split a tab and run a session in one pane. | Open in Codex raises Ghostty without selecting a tab or pane (ADR 0015); nothing is acknowledged. | |
