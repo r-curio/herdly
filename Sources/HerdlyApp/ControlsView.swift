@@ -1562,7 +1562,7 @@ private struct NotchControls: View {
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
                 SettingsRow(title: "Sort by", detail: nil) {
                     SlidingSegments(title: "Sort by", selection: binding(\.sort),
-                                    options: [(QueueSort.needsAttention, "Needs attention"), (QueueSort.lastUpdate, "Last update")])
+                                    options: [(QueueSort.needsAttention, "By need"), (QueueSort.lastUpdate, "Newest first")])
                 }
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
                 SettingsRow(title: "Group by", detail: nil) {
@@ -1576,7 +1576,7 @@ private struct NotchControls: View {
                                        (.twentyMinutes, "20 minutes"), (.never, "Never")])
                 }
             }
-            SettingsFooter("Panel width sets how far the open list widens past the strip; it never runs past the display's edges. Live approvals and waiting questions always stay first. Last update orders everything else newest first. Older completions stay listed until you dismiss or open them.")
+            SettingsFooter("Panel width sets how far the open list widens past the strip; it never runs past the display's edges. Live approvals always stay first, soonest deadline first, then waiting questions. Newest first orders everything else by its latest update. Older completions stay listed until you dismiss or open them.")
         }
     }
 }

@@ -58,6 +58,8 @@ enum NotchStyle {
     static let sprite = Color(red: 0.133, green: 0.773, blue: 0.369)    // #22c55e body
     static let spriteLight = Color(red: 0.298, green: 0.863, blue: 0.502) // #4cdc80 highlight
     static let seam = Color.white.opacity(0.08)
+    /// The well behind "Failed" and nothing else: the one red in the panel (D14).
+    static let failure = Color(red: 0.227, green: 0.114, blue: 0.114)  // #3a1d1d
     /// Usage bar fills name their source: Codex blue, Claude orange. Nothing else uses these.
     static let codexUsage = Color(red: 0.231, green: 0.510, blue: 0.965)  // #3b82f6
     static let claudeUsage = Color(red: 0.851, green: 0.467, blue: 0.341) // #d97757
@@ -450,8 +452,8 @@ struct NotchDisclosure<Content: View>: View {
 /// Session and Dismiss stay one keypress away for keyboard and VoiceOver users.
 struct EarlierFold: View {
     let name: String
-    let tag: String?
-    /// The full spoken heading, since the tag is a shortened reading.
+    let exception: RowException?
+    /// The full spoken heading, since the word is a shortened reading.
     let spoken: String
     let subject: String
     let reduceMotion: Bool
@@ -471,7 +473,7 @@ struct EarlierFold: View {
                     .font(NotchStyle.mono(open ? 12 : 11, open ? .semibold : .regular))
                     .foregroundStyle(open ? NotchStyle.ink : NotchStyle.text)
                     .lineLimit(1).truncationMode(.tail)
-                if let tag { RowTag(text: tag) }
+                if let exception { ExceptionWord(exception: exception) }
             }
             .contentShape(Rectangle())
         }
@@ -486,15 +488,73 @@ struct EarlierFold: View {
     }
 }
 
-/// A small gray well holding a short reading: a row's source, or what the row needs from the user.
-struct RowTag: View {
-    let text: String
+/// A row's one off-path word (D17). "Failed" sits in the dark red well, the panel's only red (D14);
+/// "Handed back", "Waiting", and "Status unknown" are plain dim text with no well. Spoken through the
+/// row heading, so it is hidden from VoiceOver here.
+struct ExceptionWord: View {
+    let exception: RowException
     var body: some View {
-        Text(text)
-            .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.text)
-            .padding(.horizontal, 5).padding(.vertical, 1)
-            .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+        if exception.isFailure {
+            Text(exception.word)
+                .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.ink)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(NotchStyle.failure, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .fixedSize()
+                .accessibilityHidden(true)
+        } else {
+            Text(exception.word)
+                .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
+                .lineLimit(1).fixedSize()
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+/// "18s left" on a live approval (D7, D12): ink on a well, with a 2pt ink bar along its bottom edge
+/// as long as the remaining share of the request's own window. It steps once a second with no
+/// animation, so Reduce Motion needs nothing extra. Display only; the deadline never moves.
+struct SecondsLeftPill: View {
+    let countdown: ApprovalCountdown
+    var body: some View {
+        Text(countdown.label)
+            .font(NotchStyle.mono(10, .semibold)).foregroundStyle(NotchStyle.ink).monospacedDigit()
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background(NotchStyle.well)
+            .overlay(alignment: .bottomLeading) {
+                GeometryReader { proxy in
+                    Rectangle().fill(NotchStyle.ink)
+                        .frame(width: proxy.size.width * countdown.fraction, height: 2)
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             .fixedSize()
+            .transaction { $0.animation = nil }
+            .accessibilityHidden(true)
+    }
+}
+
+/// A kind section's "+N more" (D13): a pressable well that opens the rest of that section in place.
+/// It is a plain button, so Tab and VoiceOver reach it; the arrow-key row selection does not.
+struct MoreRowsPill: View {
+    let count: Int
+    let section: String
+    let action: () -> Void
+    @FocusState private var focused: Bool
+    var body: some View {
+        Button(action: action) {
+            Text("+\(count) more")
+                .font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.text)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                .fixedSize()
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focused($focused)
+        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .stroke(NotchStyle.ink.opacity(focused ? 0.9 : 0), lineWidth: 1.5).padding(-2))
+        .accessibilityLabel("Show \(count) more in \(section)")
     }
 }
 
@@ -771,12 +831,13 @@ struct Notch: View {
     /// Makes a row header the click target that opens its card, keeping its look. VoiceOver reads it
     /// as a button naming the action.
     @ViewBuilder
-    private func cardOpener<Header: View>(_ item: AgentAttentionItem, @ViewBuilder header: () -> Header) -> some View {
+    private func cardOpener<Header: View>(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil,
+                                          @ViewBuilder header: () -> Header) -> some View {
         if opensAsCard(item) {
             Button { model.openCard(item.id) } label: { header().contentShape(Rectangle()) }
                 .buttonStyle(.plain)
                 .focusable(false)
-                .accessibilityLabel("Open card: \(rowHeading(item))")
+                .accessibilityLabel("Open card: \(rowHeading(item, countdown: countdown))")
                 .accessibilityHint("Shows this request alone. Escape or Queue returns to the queue.")
         } else {
             header()
@@ -1158,30 +1219,38 @@ struct Notch: View {
         let earlierOpen = disclosure(earlierKey(item))
         let collapsed = item.kind == .earlierOutcome && !earlierOpen.wrappedValue && !spotlit
         let selected = model.presentationMode.showsAll && model.queueSelection.selected == item.id
-        VStack(alignment: .leading, spacing: item.kind == .question ? 14 : 8) {
+        // In the open queue a row's heading line is 26pt tall, so one-line rows stack like the
+        // artboards; the space it adds above and below the text replaces part of the row spacing.
+        let inQueue = model.presentationMode.showsAll
+        let bodySpacing: CGFloat = item.kind == .question ? 14 : 8
+        VStack(alignment: .leading, spacing: inQueue ? bodySpacing - 5 : bodySpacing) {
             // Every row is headed by its session's mark and name; the mark steps only while the
-            // session is working, and the tag says what, if anything, the row needs from the user.
+            // session is working, and a word appears only when the row is off its normal path.
             let folded = item.kind == .earlierOutcome && !spotlit
             let working = item.running?.status == .working
             if item.kind == .question {
-                cardOpener(item) { questionHeader(item) }
+                cardOpener(item) { questionHeader(item, inQueue: inQueue) }
             } else {
-                cardOpener(item) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    if folded {
-                        earlierToggle(item, open: earlierOpen)
+                Group {
+                    if item.kind == .actionableApproval && inQueue {
+                        // A live approval's "Ns left" steps once a second, seen and spoken. The
+                        // spotlight and clicked card say "Decide by" instead, so they do not repeat it.
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            let countdown = QueueRowPresentation.countdown(item, now: context.date.timeIntervalSince1970)
+                            cardOpener(item, countdown: countdown) {
+                                headerLine(item, folded: folded, working: working, earlierOpen: earlierOpen, countdown: countdown)
+                            }
+                        }
                     } else {
-                        HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
-                            spriteSlot(working: working, color: spriteColor(for: item.session))
-                            rowHeader(item)
+                        cardOpener(item) {
+                            headerLine(item, folded: folded, working: working, earlierOpen: earlierOpen, countdown: nil)
                         }
                     }
-                    Spacer(minLength: 8)
-                    
-                    rowAge(item)
                 }
-                }
+                .frame(minHeight: inQueue ? 26 : nil)
             }
+            if !collapsed || rowNote(item)?.offersOpen == true {
+            VStack(alignment: .leading, spacing: bodySpacing) {
             if let note = rowNote(item), note.offersOpen {
                 // "Not delivered · answer in Claude": Open takes the user to the session to answer there.
                 HStack(spacing: 6) { claudeReturnControl(item, subject: subject) }
@@ -1266,7 +1335,8 @@ struct Notch: View {
                             Text(row).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).lineLimit(2).truncationMode(.tail)
                         }
                         if let full = running.fullAction {
-                            NotchDisclosure(title: "Show full action", subject: subject, expanded: disclosure("action:\(item.session.session)")) {
+                            // D11: a shortened shell command is named as a command; other tools keep "action".
+                            NotchDisclosure(title: running.action?.disclosureTitle ?? "Show full action", subject: subject, expanded: disclosure("action:\(item.session.session)")) {
                                 Text(full).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -1396,6 +1466,10 @@ struct Notch: View {
                     }
                 }
             }
+            }
+            // Room below a row's details before the next row's 26pt heading line.
+            .padding(.bottom, inQueue ? 8 : 0)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(rowHeading(item)), \(subject)")
@@ -1406,12 +1480,36 @@ struct Notch: View {
         .environment(\.questionCard, item.kind == .question)
     }
 
-    /// The spoken heading: the session's name, its place when known, then the full reading the
-    /// visual tag shortens.
-    private func rowHeading(_ item: AgentAttentionItem) -> String {
+    /// The spoken heading: the session's name, its place when known, the full state the visual
+    /// word shortens, and a live approval's seconds left.
+    private func rowHeading(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil) -> String {
         let name = QueueRowPresentation.sessionName(item.session, names: sessionNames)
         let place = (rowNote(item)?.text ?? model.rowPlace(for: item)).map { ", \($0)" } ?? ""
-        return "\(name)\(place), \(rowTitle(item))"
+        let left = countdown.map { ", \($0.spoken)" } ?? ""
+        return "\(name)\(place), \(rowTitle(item))\(left)"
+    }
+
+    /// A non-question row's heading line (D17): sprite, name, dim "· place" (it truncates first),
+    /// then at most one word or a live approval's "Ns left", then the age lane.
+    private func headerLine(_ item: AgentAttentionItem, folded: Bool, working: Bool, earlierOpen: Binding<Bool>,
+                            countdown: ApprovalCountdown?) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if folded {
+                earlierToggle(item, open: earlierOpen)
+                Spacer(minLength: 0)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
+                    spriteSlot(working: working, color: spriteColor(for: item.session))
+                    rowHeader(item, countdown: countdown)
+                }
+                if let countdown {
+                    SecondsLeftPill(countdown: countdown)
+                } else if let exception = QueueRowPresentation.exception(item) {
+                    ExceptionWord(exception: exception)
+                }
+            }
+            rowAge(item)
+        }
     }
 
     private func earlierKey(_ item: AgentAttentionItem) -> String { "earlier:\(item.id)" }
@@ -1428,11 +1526,11 @@ struct Notch: View {
 
     private func earlierToggle(_ item: AgentAttentionItem, open: Binding<Bool>) -> some View {
         EarlierFold(name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
-                    tag: QueueRowPresentation.exception(item)?.word, spoken: rowHeading(item),
+                    exception: QueueRowPresentation.exception(item), spoken: rowHeading(item),
                     subject: rowSubject(item), reduceMotion: model.reduceMotion, open: open)
     }
 
-    private func questionHeader(_ item: AgentAttentionItem) -> some View {
+    private func questionHeader(_ item: AgentAttentionItem, inQueue: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
@@ -1451,6 +1549,7 @@ struct Notch: View {
                 Spacer(minLength: 0)
                 rowAge(item)
             }
+            .frame(minHeight: inQueue ? 26 : nil)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(rowHeading(item))
             .accessibilityAddTraits(.isHeader)
@@ -1464,38 +1563,44 @@ struct Notch: View {
         }
     }
 
-    /// The row's one-line heading: the session's name, then "· project @ branch" when Herdly has seen
-    /// the working directory, then the tag saying what the row needs. The place truncates first so
-    /// the name and tag stay whole. Presentation only; nothing here selects a target.
-    private func rowHeader(_ item: AgentAttentionItem) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
+    /// The row's name, then "· project @ branch" (in the profile's label format) when Herdly has seen
+    /// the working directory. The place takes the free width and tail-truncates first, so the name
+    /// and any word after it stay whole. Presentation only; nothing here selects a target.
+    private func rowHeader(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
                 .font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
                 .lineLimit(1).truncationMode(.tail).layoutPriority(2)
             if let note = rowNote(item) {
-                Text("·").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                rowNoteText(note, questionCard: false)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("·").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                    rowNoteText(note, questionCard: false)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else if let place = model.rowPlace(for: item) {
                 Text("· \(place)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                     .lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .help(model.rowDirectory(for: item) ?? place)
+            } else {
+                Spacer(minLength: 0)
             }
-            if let tag = QueueRowPresentation.exception(item)?.word { RowTag(text: tag).layoutPriority(3) }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(rowHeading(item))
+        .accessibilityLabel(rowHeading(item, countdown: countdown))
         .accessibilityAddTraits(.isHeader)
     }
 
-    /// The trailing age lane: time since the row's latest evidence, refreshed every 30 seconds.
+    /// The trailing age lane: time since the row's latest evidence, refreshed every 30 seconds; a
+    /// dash for a status-unavailable row, which has no arrival time.
     private func rowAge(_ item: AgentAttentionItem) -> some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            let now = context.date.timeIntervalSince1970
-            Text(QueueRowPresentation.age(since: item.lastUpdate, now: now))
+            let age = QueueRowPresentation.rowAge(item, now: context.date.timeIntervalSince1970)
+            Text(age.text)
                 .font(item.kind == .question ? QuestionCardStyle.font(11) : NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).monospacedDigit()
                 .lineLimit(1).fixedSize()
                 .frame(minWidth: 36, alignment: .trailing)
-                .accessibilityLabel(QueueRowPresentation.spokenAge(since: item.lastUpdate, now: now))
+                .accessibilityLabel(age.spoken)
         }
         .fixedSize()
     }
@@ -1620,43 +1725,76 @@ struct Notch: View {
         return parts.joined(separator: ", ")
     }
 
-    /// Rows under their optional group headings, with each run of Earlier rows under its count.
+    /// Rows under their optional group headings, with each run of Earlier rows under its count. Each
+    /// group is its own stack: heading 2pt above its first row, rows on their 26pt heading lines, a
+    /// kind section's "+N more" beneath, and 16pt between groups.
     @ViewBuilder
     private func groupRows(_ groups: [QueueGroup]) -> some View {
         let rowTransition = QueueMotion.rowTransition(reduceMotion: model.reduceMotion)
-        // Groups are identified by heading so a regrouped row moves rather than every
-        // later group redrawing under a new index.
-        ForEach(groups, id: \.heading) { group in
-            if let heading = group.heading {
-                // Group headings: 10pt dim caption, 6pt above the group's first row.
-                Text(heading).font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.bottom, -8)
-                    .transition(rowTransition)
-            }
-            ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
-                if item.kind == .earlierOutcome && (index == 0 || group.items[index - 1].kind != .earlierOutcome) {
-                    // Dismiss all clears exactly the results listed under this heading.
-                    let earlierIDs = group.items[index...].prefix { $0.kind == .earlierOutcome }.map(\.id)
-                    let count = earlierIDs.count
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text("Earlier").font(NotchStyle.mono(11, .semibold))
-                            Text("\(count)").font(NotchStyle.mono(11)).monospacedDigit()
-                        }
-                        .foregroundStyle(NotchStyle.dim)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Earlier, \(count) \(count == 1 ? "result" : "results")")
-                        .accessibilityAddTraits(.isHeader)
-                        Spacer(minLength: 8)
-                        NotchButton(title: "Dismiss all") { model.dismissAgents(earlierIDs) }
-                            .accessibilityLabel("Dismiss all \(count) earlier \(count == 1 ? "result" : "results")")
+        VStack(alignment: .leading, spacing: 16) {
+            // Groups are identified by heading so a regrouped row moves rather than every
+            // later group redrawing under a new index.
+            ForEach(groups, id: \.heading) { group in
+                VStack(alignment: .leading, spacing: 0) {
+                    if let heading = group.heading {
+                        groupHeading(heading, group: group)
+                            .padding(.bottom, 2)
+                            .transition(rowTransition)
                     }
-                    .transition(rowTransition)
+                    ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
+                        if item.kind == .earlierOutcome && (index == 0 || group.items[index - 1].kind != .earlierOutcome) {
+                            // Dismiss all clears exactly the results listed under this heading.
+                            let earlierIDs = group.items[index...].prefix { $0.kind == .earlierOutcome }.map(\.id)
+                            let count = earlierIDs.count
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text("Earlier").font(NotchStyle.mono(11, .semibold))
+                                    Text("\(count)").font(NotchStyle.mono(11)).monospacedDigit()
+                                }
+                                .foregroundStyle(NotchStyle.dim)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("Earlier, \(count) \(count == 1 ? "result" : "results")")
+                                .accessibilityAddTraits(.isHeader)
+                                Spacer(minLength: 8)
+                                NotchButton(title: "Dismiss all") { model.dismissAgents(earlierIDs) }
+                                    .accessibilityLabel("Dismiss all \(count) earlier \(count == 1 ? "result" : "results")")
+                            }
+                            .padding(.vertical, 4)
+                            .transition(rowTransition)
+                        }
+                        attentionRow(item)
+                            .transition(rowTransition)
+                    }
+                    if let section = group.section, group.folded > 0 {
+                        // Indented to the title, past the sprite slot.
+                        MoreRowsPill(count: group.folded, section: section.heading) {
+                            model.openQueueFolds.insert(section)
+                        }
+                        .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
+                        .padding(.top, 2)
+                        .transition(rowTransition)
+                    }
                 }
-                attentionRow(item)
-                    .transition(rowTransition)
             }
+        }
+    }
+
+    /// A group heading: a kind section reads "Approve" in 10pt dim with its count in 10pt semibold
+    /// text gray (D13); other groupings keep their plain 10pt dim caption.
+    @ViewBuilder
+    private func groupHeading(_ heading: String, group: QueueGroup) -> some View {
+        if group.section != nil {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(heading).font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
+                Text("\(group.count)").font(NotchStyle.mono(10, .semibold)).foregroundStyle(NotchStyle.text).monospacedDigit()
+            }
+            .padding(.horizontal, 6)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(heading), \(group.count)")
+            .accessibilityAddTraits(.isHeader)
+        } else {
+            Text(heading).font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
+                .accessibilityAddTraits(.isHeader)
         }
     }
 
@@ -1751,12 +1889,13 @@ struct Notch: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         if model.presentationMode.clickedCard != nil { clickedCardBar }
-                        groupRows(sections.attention)
+                        // An empty stack would still take the column's spacing, so each part is drawn only with rows.
+                        if !sections.attention.isEmpty { groupRows(sections.attention) }
                         if sections.foldsWorking {
                             NotchDisclosure(title: "\(sections.workingCount) working", expanded: $model.workingFoldOpen) {
-                                VStack(alignment: .leading, spacing: 14) { groupRows(sections.working) }
+                                groupRows(sections.working)
                             }
-                        } else {
+                        } else if !sections.working.isEmpty {
                             groupRows(sections.working)
                         }
                         if model.presentationMode.showsAll && sections.isEmpty && !showsTestRow {
