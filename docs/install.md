@@ -75,7 +75,7 @@ If the setting says **Approval required**, choose **Open Login Items** and allow
 
 ### Connect Codex
 
-Connecting is explicit and previewed. In the controls window, review the setup preview, then click **Configure Codex**. Herdly then:
+Connecting is explicit and previewed. In **Settings → Agents**, review the preview from the Codex card's **⋯ → Show Setup Changes…**, then click **Configure Codex**. Herdly then:
 
 - copies `Contents/Helpers/HerdlyHook` from the bundle to `~/Library/Application Support/Herdly/HerdlyHook` (mode 755) after running its self-test, and records the install in `~/Library/Application Support/Herdly/install.json`;
 - adds to `~/.codex/hooks.json` one command hook per event for `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`, `Stop` and `SessionEnd`, each running that helper with `--events-dir ~/Library/Application Support/Herdly/events --installation-id <uuid>`;
@@ -92,7 +92,7 @@ Codex keeps working if Herdly is quit or crashes. Every hook either records meta
 
 ### Connect Claude Code
 
-Claude is configured separately in **Agents → Claude Code**. Herdly previews the default `~/.claude` root first; use **Add alternate Claude root** for a manually selected `CLAUDE_CONFIG_DIR` root. Each root has its own helper, events, install record, installation identity, and undo path. See [Claude setup](claude-setup.md) for ownership and state details.
+Claude is configured separately in **Agents → Claude Code**. Herdly previews the default `~/.claude` root first; use **⋯ → Add Another Claude Folder…** for a manually selected `CLAUDE_CONFIG_DIR` root, which then gets its own card. Each root has its own helper, events, install record, installation identity, and undo path. See [Claude setup](claude-setup.md) for ownership and state details.
 
 Configure Claude adds only Herdly's exact hook entries and `env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` to that root's `settings.json`, then installs the packaged helper under Herdly's Application Support directory. The `SessionStart` entry emits the full-session-ID Ghostty title through Claude's JSON `terminalSequence`, and `SessionEnd` requests a reset. Existing Claude sessions are not restarted; Herdly reports **Configured; restart required** until a newly started session sends a root-matching event. Ghostty Automation readiness remains separate from this connection state.
 

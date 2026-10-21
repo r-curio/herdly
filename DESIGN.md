@@ -366,6 +366,15 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - A live preview of the strip on a desktop backdrop sits above the sections and redraws as options change.
   - Options that do not apply to the selected profile, such as Center label on the MacBook notch, are shown disabled with a footer saying why.
 - **Indicator picker:** four tiles in a row, Sprite, Dot, Bar, and Tint. Each tile previews two rows on black, one working and one idle. The selected tile has a 2pt accent ring with a 2pt gap.
+- **Agents pane:**
+  - One card per agent with no section header above it, 28pt apart: Codex, then one Claude Code card per configuration folder (the default first, then each added folder).
+  - The 52pt header row holds a 28pt tile with 7pt corners (Codex: near-black with a white `terminal` symbol; Claude Code: #D97757 with a white `sparkle`), the 13pt semibold name over an 11pt secondary subtitle, the status dot and text, a Configure button while setup is needed, and a 22pt borderless ⋯ menu.
+  - Subtitles: Codex lists each surface ("CLI 0.150.0 · Desktop 26.1015", or "Desktop not installed"); Claude shows "version · folder".
+  - The ⋯ menu holds Review Again, Show Setup Changes…, Add Another Claude Folder… (Claude), then Undo Setup… and, for an added folder, Remove Folder. Items appear only when they apply today. Its VoiceOver label names the agent, and the folder for Claude.
+  - Show Setup Changes… opens a sheet with the exact, selectable monospaced preview and a Done button (Return or Esc).
+  - A problem row appears only when something needs fixing: label left, an orange dot and the fix right, such as "Codex desktop · Update to 26.901.51231 or later". A missing surface is not a problem while the other is supported.
+  - Claude's rows: "Usage limits on the strip" (the current "5h 32% · 7d 61%" reading, or why it is unavailable, before the switch) and "Name sessions with Haiku", without descriptions.
+  - The last setup action's result stays in its card as secondary text until replaced, so a failure stays readable. Terminal status lives in Terminals, not here.
 - **Sound picker:**
   - A list of the macOS system sounds, with a check mark for the selection and a play button to preview it.
   - Glass is marked Default.
