@@ -321,8 +321,13 @@ public struct QueueSections: Equatable, Sendable {
     /// The rows the keyboard selection steps through, in reading order. Rows in a closed working
     /// fold are not on screen and are skipped.
     public func selectableRows(workingOpen: Bool) -> [AgentAttentionID] {
+        selectableItems(workingOpen: workingOpen).map(\.id)
+    }
+
+    /// The on-screen rows themselves, in the same order as `selectableRows`.
+    public func selectableItems(workingOpen: Bool) -> [AgentAttentionItem] {
         let working = foldsWorking && !workingOpen ? [] : self.working
-        return (attention + working).flatMap(\.items).map(\.id)
+        return (attention + working).flatMap(\.items)
     }
 
     /// Splits already-ordered rows. With `kindSections` and no grouping (the open queue), rows that

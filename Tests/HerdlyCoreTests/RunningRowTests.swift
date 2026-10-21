@@ -12,36 +12,55 @@ private func runningID(_ session: AgentSessionIdentity, _ turn: String = "t1") -
 
 // MARK: One open running row (#319)
 
+/// Queue rows: a working Codex CLI turn, a working Claude turn, a waiting Claude turn, an approval
+/// and a result, in that order.
+private func rows() -> [AgentAttentionItem] {
+    let waitingClaude = AgentSessionIdentity(source: .claude, sourceScope: "/Users/u/.claude", session: "waiting-1", surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: codexCLI, turn: "t1", arrivedAt: 1)))
+    queue.apply(.running(AgentRunning(session: claude, turn: "t1", arrivedAt: 2)))
+    queue.apply(.running(AgentRunning(session: waitingClaude, turn: "t1", arrivedAt: 3, status: .waiting)))
+    queue.apply(.approval(AgentApproval(session: codexDesktop, turn: "t2", call: "a1", arrivedAt: 4)))
+    queue.apply(.outcome(AgentOutcome(session: codexDesktop, turn: "t3", status: .finished, arrivedAt: 5)))
+    return queue.items(at: 6)
+}
+
+private func row(_ kind: AgentAttentionKind, _ session: AgentSessionIdentity? = nil) -> AgentAttentionItem {
+    rows().first { $0.kind == kind && (session == nil || $0.session == session) }!
+}
+
 @Test func clickingARunningRowOpensItAndASecondClickClosesIt() {
     var open = OpenRunningRow()
     #expect(open.open == nil)
-    open.toggle(runningID(codexCLI))
+    open.toggle(row(.running, codexCLI))
     #expect(open.open == runningID(codexCLI))
     #expect(open.isOpen(runningID(codexCLI)))
-    open.toggle(runningID(codexCLI))
+    open.toggle(row(.running, codexCLI))
     #expect(open.open == nil)
 }
 
 @Test func clickingAnotherRunningRowMovesTheOpenState() {
     var open = OpenRunningRow()
-    open.toggle(runningID(codexCLI))
-    open.toggle(runningID(claude))
+    open.toggle(row(.running, codexCLI))
+    open.toggle(row(.running, claude))
     #expect(open.open == runningID(claude))
     #expect(!open.isOpen(runningID(codexCLI)))
 }
 
-@Test func onlyRunningRowsOpenInPlace() {
+@Test func onlyWorkingRowsOpenInPlace() {
     var open = OpenRunningRow()
-    open.toggle(runningID(codexCLI))
-    // An approval opens as its own card, and a result keeps its body; neither moves the open row.
-    open.toggle(.approval(AgentCallIdentity(session: claude, turn: "t1", call: "a1")))
-    open.toggle(.outcome(AgentTurnIdentity(session: claude, turn: "t1")))
+    open.toggle(row(.running, codexCLI))
+    // A waiting Claude turn keeps its body, an approval opens as its own card, and a result keeps
+    // its body; none of them moves or closes the open row.
+    open.toggle(row(.waiting))
+    open.toggle(row(.actionableApproval))
+    open.toggle(row(.outcome))
     #expect(open.open == runningID(codexCLI))
 }
 
 @Test func escapeClosesAnOpenRowFirstAndOnlyThenFallsThrough() {
     var open = OpenRunningRow()
-    open.toggle(runningID(codexCLI))
+    open.toggle(row(.running, codexCLI))
     let closedRow = open.escape()
     #expect(closedRow)
     #expect(open.open == nil)
@@ -52,20 +71,27 @@ private func runningID(_ session: AgentSessionIdentity, _ turn: String = "t1") -
 
 @Test func theOpenRowClosesWhenItLeavesTheVisibleRows() {
     var open = OpenRunningRow()
-    open.toggle(runningID(codexCLI))
-    open.reconcile(visible: [runningID(claude), runningID(codexCLI)])
+    open.toggle(row(.running, codexCLI))
+    open.reconcile(visible: rows())
     #expect(open.open == runningID(codexCLI))
     // Its turn ended, or the "N working" fold closed over it.
-    open.reconcile(visible: [runningID(claude)])
+    open.reconcile(visible: rows().filter { $0.session != codexCLI })
     #expect(open.open == nil)
-    // A new turn of the same session is a different row and does not reopen.
-    open.reconcile(visible: [runningID(codexCLI, "t2")])
+}
+
+@Test func theOpenRowClosesWhenItsTurnStopsWorking() {
+    var open = OpenRunningRow()
+    open.toggle(row(.running, claude))
+    // The same turn now waits on the user: same id, but no longer a one-line working row.
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: claude, turn: "t1", arrivedAt: 2, updatedAt: 9, status: .waiting)))
+    open.reconcile(visible: queue.items(at: 10))
     #expect(open.open == nil)
 }
 
 @Test func closeClearsTheOpenRow() {
     var open = OpenRunningRow()
-    open.toggle(runningID(codexCLI))
+    open.toggle(row(.running, codexCLI))
     open.close()
     #expect(open == OpenRunningRow())
 }

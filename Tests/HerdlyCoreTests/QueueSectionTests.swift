@@ -267,3 +267,10 @@ private func foldedCheck(fresh: Int, earlier: Int) -> QueueSections {
     // List order does not matter.
     #expect(AgentPresentationSelection.highestPriority(in: rows.reversed(), candidates: Set(rows.map(\.id))) == rows[1].id)
 }
+
+@Test func selectableItemsAreTheOnScreenRowsInReadingOrder() {
+    let sections = kindSections(queue(approvals: 1, results: 1, running: 2))
+    #expect(sections.selectableItems(workingOpen: false).map(\.session.session) == ["approve-0", "check-0"])
+    #expect(sections.selectableItems(workingOpen: true).map(\.session.session) == ["approve-0", "check-0", "run-0", "run-1"])
+    #expect(sections.selectableItems(workingOpen: true).map(\.id) == sections.selectableRows(workingOpen: true))
+}

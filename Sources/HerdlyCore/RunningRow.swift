@@ -11,11 +11,11 @@ public struct OpenRunningRow: Equatable, Sendable {
 
     public func isOpen(_ id: AgentAttentionID) -> Bool { open == id }
 
-    /// Opens `id`, or closes it when it is already open. Rows that are not running are ignored: a
-    /// request opens as its own card and the other rows keep their body.
-    public mutating func toggle(_ id: AgentAttentionID) {
-        guard case .running = id else { return }
-        open = open == id ? nil : id
+    /// Opens `row`, or closes it when it is already open. Only a working row (`.running`) opens in
+    /// place: a request opens as its own card, and a waiting turn and the other rows keep their body.
+    public mutating func toggle(_ row: AgentAttentionItem) {
+        guard row.kind == .running else { return }
+        open = open == row.id ? nil : row.id
     }
 
     public mutating func close() { open = nil }
@@ -28,10 +28,10 @@ public struct OpenRunningRow: Equatable, Sendable {
         return true
     }
 
-    /// Closes the open row once it is no longer on screen: its turn left the queue, or a closed
-    /// "N working" fold hides it. It never reopens by itself.
-    public mutating func reconcile(visible rows: [AgentAttentionID]) {
-        if let open, !rows.contains(open) { self.open = nil }
+    /// Closes the open row once it is no longer an on-screen working row: its turn left the queue or
+    /// stopped working, or a closed "N working" fold hides it. It never reopens by itself.
+    public mutating func reconcile(visible rows: [AgentAttentionItem]) {
+        if let open, !rows.contains(where: { $0.id == open && $0.kind == .running }) { self.open = nil }
     }
 }
 
