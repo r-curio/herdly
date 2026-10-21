@@ -683,7 +683,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var frameAnimation: UUID?
     /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|expanded>`
     /// seeds in-memory sample items for screenshots; `clicked-approval` shows the approval sample as a
-    /// clicked card, and `row-note` the queue with that row selected and carrying a note;
+    /// clicked card (`clicked-approval-long` with a command past the six-line cap, `clicked-claude-approval`
+    /// a Claude request with no command), and `row-note` the queue with that row selected and carrying a note;
     /// `empty-collapsed`, `empty-expanded`, and `empty-not-connected` seed only the usage readouts, to show the empty notch.
     /// It never scans Codex events, never saves, and never releases approvals.
     let previewMode = Companion.argumentValue(for: "--preview-queue")
@@ -1831,7 +1832,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
         case "expanded", "empty-expanded", "empty-not-connected", "row-note": presentationMode = .queue
-        case "clicked-approval":
+        case "clicked-approval", "clicked-approval-long", "clicked-claude-approval":
             let mode = previewSpotlightAgent.map(NotchPresentationMode.clickedCard) ?? .collapsed
             if presentationMode != mode { presentationMode = mode }
         case "collapsed", "empty-collapsed": presentationMode = .collapsed
@@ -2364,6 +2365,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return legacy.map { spotlightDetails(for: $0) }
     }
 
+    /// The one approval card body (#320), for the spotlight and the clicked card alike: Codex's
+    /// exact-turn context when Herdly has it, otherwise the approval's own details placed in the
+    /// session's directory, so a Claude request reads the same way. Nil for every other row.
+    func approvalCard(for item: AgentAttentionItem) -> SpotlightRequest? {
+        guard let approval = item.approval else { return nil }
+        if let request = spotlightDetails(for: item)?.request { return request }
+        return SpotlightRequest(approval: approval, contextDirectory: rowDirectory(for: item), home: NSHomeDirectory())
+    }
+
     func codexCompletion(for outcome: AgentOutcome) -> AttentionCompletion? { codexTurn(outcome.identity) }
 
     /// One Send on a completion card. The reply starts a new turn on that exact thread through the
@@ -2685,19 +2695,32 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if mode == "spotlight-claude-question" {
             previewSpotlightAgent = .question(AgentCallIdentity(session: claudeSession, turn: "preview-turn", call: "toolu_preview"))
         }
-        if mode == "spotlight-approval" || mode == "spotlight-handed-back" || mode == "clicked-approval" || mode == "row-note" {
+        if mode == "clicked-claude-approval" {
+            // A Claude request that names no command (D9); with no live helper it cannot be decided here.
+            let approval = AgentApproval(session: claudeSession, turn: "preview-turn", call: "toolu_preview_approval",
+                                         arrivedAt: now - 4, details: ApprovalDetails(action: "Bash"))
+            agentQueue.apply(.approval(approval), now: now)
+            previewSpotlightAgent = .approval(approval.id)
+        }
+        if mode == "spotlight-approval" || mode == "spotlight-handed-back" || mode == "clicked-approval"
+            || mode == "clicked-approval-long" || mode == "row-note" {
             // One request in the spotlight's own reading order: Codex's ask lifted from its tool input,
             // a command the card already shows, and a home-relative working directory.
             let handedBack = mode == "spotlight-handed-back"
             let fetching = UUID(uuidString: "5B1E7A20-6C4D-4F8E-A3B9-0000000000D4")!
             let input = #"{"command":"git fetch origin","description":"Allow fetching remote main so I can update this checkout?"}"#
+            // Nine lines, so the card's command box caps at six and offers "Show full command".
+            let command = mode == "clicked-approval-long"
+                ? (1...9).map { "swift test --filter ApprovalCardTests/case\($0) --parallel --num-workers 4" }.joined(separator: " && \\\n  ")
+                : "git fetch origin"
             let fetch = AttentionRequest(id: UUID(), source: .cli, session: fetching, turn: UUID(),
                                          arrivedAt: handedBack ? now - 130 : now - 4,
                                          expiresAt: handedBack ? now - 100 : now + 26,
                                          state: handedBack ? .handedBack : .actionable,
                                          details: ApprovalDetails(taskName: "Pull from remote main",
                                                                   project: NSHomeDirectory() + "/Developer/herdly",
-                                                                  action: "Bash", command: "git fetch origin", longText: input))
+                                                                  action: "Bash", command: command,
+                                                                  longText: mode == "clicked-approval-long" ? nil : input))
             queue.recordReceipts([fetch], now: now)
             syncAgentQueueWithCodex(now: now)
             previewSpotlightAgent = .approval(CodexAttentionAdapter.approval(from: fetch).id)
