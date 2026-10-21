@@ -643,6 +643,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     /// The one running row opened in place (#319). Changed only through Companion+RunningRow.swift.
     @Published var openRunningRow = OpenRunningRow()
+    /// A result row's Open waiting to fold the panel back once it finishes (#322). Not published:
+    /// it changes nothing on screen by itself.
+    var rowOpenFold = RowOpenFold()
     /// The rows the open panel shows, under their group headings: the explicit queue (working rows
     /// folded below anything that needs the user), or only the one card. A card is never grouped.
     /// The view draws these and the keyboard selection steps through them.
@@ -1661,6 +1664,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func refresh() {
+        // A result row's finished Open folds the panel back; collapsing refreshes on its own (#322).
+        if settleRowOpenFold() { return }
         scanReminders()
         pruneEventRecords()
         // Published values are written back only when they change: each write re-renders the notch,
@@ -2043,23 +2048,19 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return true
     }
 
-    /// Return on the selected row. Approvals and questions open as their clicked card; a working row
-    /// opens or closes in place (#319); opening a session from any other row is the hook #322 fills in
-    /// (until then the key is not handled).
+    /// Return on the selected row does what a click on it does (`activateRow`): approvals and
+    /// questions open as their clicked card, a working row opens or closes in place (#319), and a
+    /// result row opens its session (#322). An unreachable result row does nothing, so the key is
+    /// not handled.
     func activateSelectedRow() -> Bool {
         reconcileSelection()
         guard let selected = queueSelection.selected else { return false }
-        switch QueueRowSelection.returnAction(for: selected) {
-        case let .openCard(id):
-            openCard(id)
-            return true
-        case let .openSession(id):
-            return toggleRunningRow(id)
-        }
+        return activateRow(selected)
     }
 
     /// Collapses the panel and hands keyboard input back to the app the user was using.
     func collapse() {
+        rowOpenFold.cancel()
         attention.collapse()
         reminderPresentation.collapse()
         completionPresentation.collapse()

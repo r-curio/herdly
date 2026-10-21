@@ -41,7 +41,7 @@ extension Companion {
     }
 
     /// The open queue's on-screen rows in reading order; empty while it is not shown.
-    private var selectableItems: [AgentAttentionItem] {
+    var selectableItems: [AgentAttentionItem] {
         presentationMode.showsAll ? visibleSections.selectableItems(workingOpen: workingFoldOpen) : []
     }
 
