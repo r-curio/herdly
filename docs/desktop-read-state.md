@@ -42,11 +42,11 @@ Live walkthrough to repeat after each desktop update, with two disposable deskto
 
 1. Send a no-tools prompt in A, switch to another app before it finishes. Expect: A's completion appears in the notch; the probe shows A unread.
 2. Bring Codex forward with B selected. Expect: A stays queued; the probe still shows A unread.
-3. Select A. Expect: within about three seconds A's completion clears without a dismissal; the probe shows A absent and the status line reports one cleared.
+3. Select A. Expect: within about three seconds A's completion clears without a dismissal; the probe shows A absent and the status line (the tooltip of "Clear when read in Codex" in Settings › Notifications, since #317) reports one cleared.
 4. Send a prompt in A and stay on it until it finishes. Expect: no popup and no sound; the completion is acknowledged on its first scan.
 5. Quit Herdly, complete a turn in B, view B, relaunch Herdly. Expect: B's restored uncertain completion clears on the first scan.
 
-Record the desktop version and results in this file. If the status line reports the file unavailable after an update, turn the toggle off and re-run the source inspection described in the investigation document.
+Record the desktop version and results in this file. If Settings › Notifications shows the read state unavailable under the switch after an update, turn the toggle off and re-run the source inspection described in the investigation document.
 
 ### 2026-10-21, two signed-in identities
 
