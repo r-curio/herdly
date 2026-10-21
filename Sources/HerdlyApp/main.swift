@@ -1749,11 +1749,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 let source: AttentionSource = outcome.session.surface == .cli ? .cli : .desktop
                 guard CompletionVisibility.allows(source: source, codexForeground: codexForeground,
                                                  ghosttyFocus: ghosttyFocus) else { return false }
-                guard source == .cli, ghosttyEnabled else { return true }
-                guard case .known(let snapshot) = ghosttyFocusState,
-                      let target = GhosttyMatch.target(session: session, live: liveCLI, snapshot: snapshot)
-                else { return false }
-                return snapshot.selected != target
+                let snapshot: GhosttySnapshot? = if case .known(let snapshot) = ghosttyFocusState { snapshot } else { nil }
+                return ResultPop.ghosttyAllows(source: source, session: session, ghosttyEnabled: ghosttyEnabled,
+                                               live: liveCLI, snapshot: snapshot)
             }
             return true
         }
@@ -2173,7 +2171,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return UUID(uuidString: identity.session)
     }
 
-    private func codexTurn(_ identity: AgentTurnIdentity) -> AttentionCompletion? {
+    func codexTurn(_ identity: AgentTurnIdentity) -> AttentionCompletion? {
         guard let session = codexSession(identity.session), let turn = UUID(uuidString: identity.turn) else { return nil }
         return queue.items.compactMap(\.completion).first { $0.session == session && $0.turn == turn }
     }
@@ -2433,7 +2431,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func codexCompletion(for outcome: AgentOutcome) -> AttentionCompletion? { codexTurn(outcome.identity) }
-    func codexCompletion(for turn: AgentTurnIdentity) -> AttentionCompletion? { codexTurn(turn) }
 
     /// One Send on a completion card. The reply starts a new turn on that exact thread through the
     /// daemon, after re-reading the queue and the target as they are right now. Sending does not

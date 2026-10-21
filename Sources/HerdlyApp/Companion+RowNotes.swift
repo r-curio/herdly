@@ -20,14 +20,8 @@ extension Companion {
     /// The result row's note while its card's reply is under way or settled (D21, #323). The progress
     /// is kept only while its result is queued, so a cleared result has no note.
     func resultReplyNote(_ turn: AgentTurnIdentity) -> RowNote? {
-        switch turn.session.source {
-        case .codex:
-            guard !replyProgress.isEmpty, let completion = codexCompletion(for: turn),
-                  let progress = replyProgress[completion.id] else { return nil }
-            return RowNote.reply(progress, agent: .codex)
-        case .claude:
-            return terminalApp.claudeReplies[turn].flatMap { RowNote.reply($0, agent: .claude) }
-        }
+        guard !replyProgress.isEmpty || !terminalApp.claudeReplies.isEmpty else { return nil }
+        return resultReply(turn)?.note
     }
 
     /// Applies one note update. `userAction` marks the update written by the user's own Approve, Deny
