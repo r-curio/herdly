@@ -76,7 +76,7 @@ The action that returns the user to the Codex session associated with a notch no
 The ordered collection of Codex activity presented in the shared notch, with approval requests ahead of other activity. Its order determines presentation, not when Codex sessions execute. The user may sort the remaining rows "Newest first" instead of "By need"; live approvals (soonest deadline first) and waiting questions stay first either way. Ungrouped, its rows that need the user sit under kind sections (see **Queue section**).
 
 **Queue section**:
-One of the open queue's kind headings when it is not grouped: Approve (live approvals), Answer (waiting questions), or Check (everything else that needs the user), each with its count; working rows stay in the "N working" fold. A later section may fold its extra rows behind "+N more", which opens in place; live approvals never fold. Presentation only: a section or fold never changes counts, the strip, acknowledgment, or a deadline (D13, agreed 2026-10-21, #314).
+One of the open queue's kind headings when it is not grouped: Approve (live approvals), Answer (waiting questions), or Check (everything else that needs the user), each with its count; working rows stay in the "N working" fold, or, when nothing needs the user, sit under Working with their count (#319, F1, agreed 2026-10-21). A later section may fold its extra rows behind "+N more", which opens in place; live approvals never fold. Presentation only: a section or fold never changes counts, the strip, acknowledgment, or a deadline (D13, agreed 2026-10-21, #314).
 _Avoid_: Group (that is the user's Group by choice), "Needs you" (the retired heading)
 
 **Exception word**:
