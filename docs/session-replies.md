@@ -1,6 +1,6 @@
 # Replying to a session from its completion card
 
-A CLI completion card carries a single-line field: the user reads that a session finished, types "now add tests", and sends it to that session without switching applications. The reply starts a new turn on that exact thread through the local app-server daemon, the same verified transport that answers questions by call id ([user-input requests](user-input-requests.md), [ADR 0007](adr/0007-connect-to-the-codex-daemon-socket-as-the-same-user.md)). Desktop completion cards omit the reply field, Send button, and reply status because Herdly has no supported desktop reply transport. Open in Codex and dismissal remain available. The field lives on the completion's card (the spotlight); since #322 a result row in the open queue is one line with Dismiss and no reply field, and clicking it opens the session.
+A CLI completion card carries a single-line field: the user reads that a session finished, types "now add tests", and sends it to that session without switching applications. The reply starts a new turn on that exact thread through the local app-server daemon, the same verified transport that answers questions by call id ([user-input requests](user-input-requests.md), [ADR 0007](adr/0007-connect-to-the-codex-daemon-socket-as-the-same-user.md)). Desktop completion cards omit the reply field and Send because Herdly has no supported desktop reply transport. Open and Dismiss remain available. The field lives on the result card (the spotlight, #323); since #322 a result row in the open queue is one line with Dismiss and no reply field, and clicking it opens the session.
 
 ## The only transport
 
@@ -26,7 +26,7 @@ The Ghostty relay is not a second path. It delivers one key name to a matched ta
 - **Writes:** Claude gets text and submit in one write; Codex gets the text, then a separate submit one second later (`TypedReplyWrites`). On Terminal.app each write is one `do script … in <tab>`, which appends the newline itself, so Codex's submit is an empty `do script` (`TerminalAppInput`).
 - **Fresh check before every write** (`TypedReplyCheck`): the completion still queued and the session's latest; the session idle (Codex: not in a turn and the rollout shows the turn ended; Claude: a fresh interactive inventory reads idle); no pending question or approval; the daemon not holding the thread; and the binding re-run on fresh reads (two Terminal.app inventories and `ps -t`) naming the same tab. Any veto before the first write sends nothing. The card then refuses another send, including when the daemon took over the thread after the click ("Codex's daemon now holds this session; nothing was sent. Reply in Codex."). That is the current conservative choice, applying "one card sends at most one reply" to a send that started; whether a card whose send sent nothing may send again is an open product decision, not agreed behavior.
 - **Sent:** `TypedReplySequence` sends each write at most once. A write that may have reached the tab counts as sent and is never resent. If Codex's text went in but its submit was vetoed or not written, the card says the text may be waiting in Codex's composer, and Herdly never presses Return later. Confirmation is a turn started after the send (below). If none is seen within ten seconds the card says "Check the session; Herdly will not resend.", and a turn start found later still confirms it.
-- **Claude cards** show the field only while a host that types replies is on (`ClaudeReplyRouting`), with the same one-reply rules.
+- **Claude cards** show the field only while a host that types replies is on and the session's route is one exact pane (`ClaudeReplyRouting`, `ResultCardReply.offersField`), with the same one-reply rules.
 
 Automated: `TerminalTypedInputTests` (hosts and routes, the daemon winning, text rules, write plans, Terminal.app delivery, every fresh-check veto, the check before every write, the one-second submit, no resend, the composer case, Claude routing) and `TerminalAppTests`. Live application proof: none; not run — needs live acceptance (#244).
 
@@ -44,15 +44,18 @@ Zellij is the route's fourth host (`TerminalHost.zellij.typesReplies`), behind i
 
 ## When the field is offered
 
-For CLI cards, `SessionReplyRouting.target` reads what Herdly can see at that instant, in this order:
+For CLI cards, `SessionReplyRouting.target` reads what Herdly can see at that instant, in this order. Since #323 the card shows the field only for a reachable target while it has sent nothing (`ResultCardReply.offersField`); every other row has no field and no reason line, and the card offers Open and Dismiss. The sentences are still what a refused send is judged by (`SessionReplyPolicy.message`).
 
 | Evidence | Card |
 | --- | --- |
-| Codex recorded the session's end | disabled: "This session has ended; there is nothing to reply to." |
-| The session is in a turn | disabled: "This session is working again; send your next prompt in Codex." |
-| No daemon connection | disabled: "No Codex daemon is running, so Herdly cannot reach this session; reply in Codex." |
-| The daemon does not list the thread as loaded | disabled: "Codex's daemon is not holding this session; reply in Codex." |
-| The daemon holds the thread | the field and Send are live |
+| Codex recorded the session's end | no field ("This session has ended; there is nothing to reply to.") |
+| The session is in a turn | no field ("This session is working again; send your next prompt in Codex.") |
+| No daemon connection, and no typed route | no field ("No Codex daemon is running, so Herdly cannot reach this session; reply in Codex.") |
+| The daemon does not list the thread as loaded, and no typed route | no field ("Codex's daemon is not holding this session; reply in Codex.") |
+| A typed route without one exact pane, or iTerm2 | no field ("Herdly can't reach this session's tab. Reply in the session." / "Herdly can't type into iTerm2. Reply in the session.") |
+| The daemon holds the thread, or a typed route names one exact pane | the field is live; Send appears in it once there is text |
+
+A Codex app result has no field even when the daemon holds its thread. A Claude result shows the field only with a typed route to one exact pane while the session is idle.
 
 An ended session has nowhere to put a turn; a session that started another turn is an ambiguous target, because a `turn/start` against it is not the interjection the user is imagining (`turn/herdly`, which does interject, is a different method with an `expectedTurnId` precondition and is not used here). Both are told plainly rather than attempted.
 
@@ -60,31 +63,31 @@ An ended session has nowhere to put a turn; a session that started another turn 
 
 ## One card, one reply
 
-Enter in the field or the Send button sends once. The policy is re-applied against the queue's current copy of the completion and the target as they are at that moment, never the row that was rendered, and the text is trimmed, non-empty and at most 4000 characters. Then the card follows one path only:
+Enter in the field or the Send button sends once. The policy is re-applied against the queue's current copy of the completion and the target as they are at that moment, never the row that was rendered, and the text is trimmed, non-empty and at most 4000 characters. A refused send (a session that started another turn, text the route refuses) sends nothing, keeps the card and its text, and leaves no note. A send that leaves `.ready` folds the card at once (`ResultCardReply.foldsCard`, #323): the spotlight collapses as Escape's does, nothing is dismissed, and from then on the result row in the open queue carries the reply's progress as its row note, in place of its place label (`RowNote.reply`). The reply follows one path only:
 
-- **sending** — the request is in flight; the field and button are disabled.
-- **sent** — the daemon accepted it: "Sent “now add tests”. Waiting for Codex to record the turn."
-- **working** — Codex started a turn on the session after the send, and a late turn still counts. The evidence is either the session seen in a turn, or a `UserPromptSubmit` record for the session dated at or after the second the send began (`ReplyTurnStarts`, `ReplyProgress.observing`). The record matters for a turn that starts and finishes between two scans, which no scan ever sees running (#271); it is read both from the CLI events and from the hook reader that decodes every record, so a session the scan did not classify as CLI this time still confirms. Hook records are dated to the whole second, and a turn can start before the daemon's or the host's answer marks the reply sent, so the bound is the second in which the user pressed Send, not the moment the reply counted as sent. That turn start also acknowledges the completion (below), so the card usually leaves the queue in the same scan; when it stays, its sentence is "Codex started a turn after your reply.", never that the session is working, since that turn may already be over. The card still never sends again.
-- **unconfirmed** — ten seconds passed with no turn started after the send: "Check Codex; Herdly will not resend." A turn start found later still moves the card to confirmed.
-- **failed** — the daemon refused the request or the write never left: the reason, and "Herdly will not retry."
+- **sending** — the request is in flight. Row note: "Sending…".
+- **sent** — the daemon accepted it, or the text and its submit were typed. Row note: "Sent, waiting for Codex" ("Sent, not confirmed" for a Claude reply, and for Codex text whose submit was not written, which may be waiting in the composer).
+- **working** — Codex started a turn on the session after the send, and a late turn still counts. The evidence is either the session seen in a turn, or a `UserPromptSubmit` record for the session dated at or after the second the send began (`ReplyTurnStarts`, `ReplyProgress.observing`). The record matters for a turn that starts and finishes between two scans, which no scan ever sees running (#271); it is read both from the CLI events and from the hook reader that decodes every record, so a session the scan did not classify as CLI this time still confirms. Hook records are dated to the whole second, and a turn can start before the daemon's or the host's answer marks the reply sent, so the bound is the second in which the user pressed Send, not the moment the reply counted as sent. That turn start also acknowledges the completion (below), so the result usually leaves the queue in the same scan; when it stays, its row note is still "Sent, waiting for Codex" ("Sent, not confirmed" for Claude), never that the session is working, since that turn may already be over. The card still never sends again.
+- **unconfirmed** — ten seconds passed with no turn started after the send. Row note: "Sent, not confirmed". A turn start found later still moves the reply to confirmed.
+- **failed** — the daemon refused the request or the write never left. Row note: "Not delivered · reply in Codex" (or Claude), with Open beside it; Herdly will not retry.
 
-No phase but `.ready` sends anything, no timer sends anything, and a failure is final: Herdly never resends a prompt it cannot prove failed to arrive. Progress is in memory, so a restart returns the card with an empty field and nothing is re-sent.
+No phase but `.ready` sends anything, no timer sends anything, and a failure is final: Herdly never resends a prompt it cannot prove failed to arrive. Progress is in memory, so after a restart the result has no note and nothing is re-sent; a restored result does not pop a card.
 
 ## Sending is not acknowledgment
 
-Sending leaves the completion exactly where it was: a send Codex never takes acknowledges nothing. Amended on 2026-10-08: once Codex records the turn the reply started (its `UserPromptSubmit`), that turn start acknowledges the session's earlier completions, as any prompt in a CLI session does ([product behavior](product.md)). The card then leaves the queue and the session shows as working.
+Sending leaves the completion exactly where it was: a send Codex never takes acknowledges nothing. Seeing the card, "Show all", unfolding "Your prompt" and the fold after a send acknowledge nothing either. Amended on 2026-10-08: once Codex records the turn the reply started (its `UserPromptSubmit`), that turn start acknowledges the session's earlier completions, as any prompt in a CLI session does ([product behavior](product.md)). The card then leaves the queue and the session shows as working.
 
 ## Verification
 
 Source inspection: the generated schema defines `TurnStartParams` and `UserInput` as used above. Nothing here has been run against a live daemon.
 
-Automated: `Tests/HerdlyCoreTests/SessionReplyTests.swift` covers the target for a loaded thread, each unavailable reason, the `turn/start` shape, send-once (in flight, after the daemon took it, after it failed), refusal for an absent completion and unusable text, a session blocked on a question counting as in a turn, the waiting-then-confirmed/unconfirmed rule, a turn that started and finished between scans confirming by its start record while only a turn started before the send leaves the reply unconfirmed (#271), and that sending acknowledges nothing. `Tests/HerdlyCoreTests/CodexReplyAcknowledgmentTests.swift` covers the turn start acknowledging only that session's earlier completions from other turns, and the acknowledgment reaching the shared queue's card.
+Automated: `Tests/HerdlyCoreTests/SessionReplyTests.swift` covers the target for a loaded thread, each unavailable reason, the `turn/start` shape, send-once (in flight, after the daemon took it, after it failed), refusal for an absent completion and unusable text, a session blocked on a question counting as in a turn, the waiting-then-confirmed/unconfirmed rule, a turn that started and finished between scans confirming by its start record while only a turn started before the send leaves the reply unconfirmed (#271), and that sending acknowledges nothing. `Tests/HerdlyCoreTests/ResultCardTests.swift` covers the result card (#323): the field for reachable daemon and typed targets only, none for each unreachable reason or a Codex app result (daemon or typed route), Claude with and without a typing host, none once the reply left; the fold only for a send that leaves `.ready`; a reply refused mid-turn staying ready with no note and no fold; each Codex and Claude row-note phase, the composer case and Open on "Not delivered"; that request notes never take a reply note; the five-line preview, "Show all" text and its 20,000-character cap; restored and pre-launch results not popping; a Codex CLI or Claude result whose own Ghostty tab is in front not popping, while one with no Ghostty tab, another tab in front, or Ghostty not in front pops, and a Codex CLI result waits only while a Ghostty read is in flight and pops when Ghostty is unreadable or not running (`ResultPop.ghosttyAllows`, `ResultPop.claudeGhosttyAllows`); and, through `CodexReplyAcknowledgment`, that a sent and folded reply leaves the result queued until the turn it starts, at or after the send, acknowledges it. `Tests/HerdlyCoreTests/CodexReplyAcknowledgmentTests.swift` covers the turn start acknowledging only that session's earlier completions from other turns, and the acknowledgment reaching the shared queue's card.
 
 Automated against the real binary: `scripts/daemon_lab.py` seeds a second, finished session beside the one holding the pending question, and records where each completion card's reply field would send, without sending anything — `daemon(thread: …)` behind a private socket, `unavailable(noDaemon)` with no socket (`docs/evidence/app-server-daemon-lab.json`).
 
 Live walkthrough, once a daemon is running (`codex app-server daemon start`):
 
-1. Finish a turn in a CLI session attached to the daemon and switch away. Expect: the completion card with a live reply field.
-2. Type "now add tests" and press Enter. Expect: "Waiting for Codex to record the turn", then the card leaving the queue and the session shown as working, and that prompt as the next turn in Codex — in that session and no other.
+1. Finish a turn in a CLI session attached to the daemon and switch away. Expect: the result card with the message, "Your prompt ›", a live "› Reply to this session" field, and Open and Dismiss.
+2. Type "now add tests" and press Enter. Expect: the card folds at once; opening the queue shows the result row with "Sent, waiting for Codex", then the result leaving the queue and the session shown as working, and that prompt as the next turn in Codex — in that session and no other.
 3. If Codex never records the turn, the completion stays on the queue until it is dismissed or its tab is visited.
-4. Stop the daemon and finish another turn. Expect: the field disabled and the card saying no daemon is running.
+4. Stop the daemon and finish another turn. Expect: the card with no reply field and no reason line, only Open and Dismiss.

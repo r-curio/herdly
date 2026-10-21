@@ -273,11 +273,11 @@ struct NotchButton: View {
     }
 }
 
-/// One line of text the user types into a card and sends: a typed answer to a Codex question, or a
-/// reply to a finished session. Return in the field and the button do the same thing, and an empty
-/// or all-space draft sends nothing. Escape follows the panel's one Escape rule from the field (a
-/// clicked card steps back to the queue, otherwise the panel collapses) without dismissing
-/// anything. The caller owns the text and decides what sending means.
+/// The result card's reply field (#323, 9NU): one line the user types and sends to a finished
+/// session. Return in the field and Send do the same thing, and an empty or all-space draft sends
+/// nothing. Escape follows the panel's one Escape rule from the field (a clicked card steps back to
+/// the queue, otherwise the panel collapses) without dismissing anything. The caller owns the text
+/// and decides what sending means.
 struct DraftField: View {
     let placeholder: String
     @Binding var text: String
@@ -289,25 +289,30 @@ struct DraftField: View {
     var committedText: String?
     let onEscape: () -> Void
     let send: () -> Void
-    @Environment(\.questionCard) private var questionCard
     @Environment(\.isEnabled) private var enabled
 
+    private var hasText: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// A 30pt `{colors.open-row}` ground with 6pt corners and no outline (D23 keeps the outline for the
+    /// question field); Send sits inside it once there is text. Unsent text holds the card open.
     var body: some View {
         HStack(spacing: 6) {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
-                .font(questionCard ? QuestionCardStyle.font(11) : NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
-                .padding(.horizontal, 8).padding(.vertical, questionCard ? 6 : 4)
-                .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
                 .onSubmit { if enabled { send() } }
                 .onExitCommand(perform: onEscape)
                 .accessibilityLabel(fieldLabel)
                 .accessibilityHint(hint ?? "")
-            NotchButton(title: sendTitle, action: send)
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityLabel(sendLabel)
+            if hasText {
+                NotchButton(title: sendTitle, action: send)
+                    .accessibilityLabel(sendLabel)
+            }
         }
-        .preference(key: DraftInProgressKey.self, value: text != committedText && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .padding(.leading, 10).padding(.trailing, 4)
+        .frame(height: 30)
+        .background(NotchStyle.openRow, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .preference(key: DraftInProgressKey.self, value: text != committedText && hasText)
     }
 }
 
@@ -456,18 +461,59 @@ struct QuestionStepRail: View {
     }
 }
 
+/// Result card text (#323): the last message and the prompt in 11pt mono text gray at a 16pt line
+/// height, wrapping in full and selectable.
+struct ResultText: View {
+    let text: String
+    var body: some View {
+        Text(text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
+            // SF Mono 11pt sets about 13pt of line; three more make the 16pt line height.
+            .lineSpacing(3).textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The whole last message after "Show all" (#323): its own scroll, as tall as the text up to
+/// `cap`, so a long message never pushes Open and Dismiss off the panel.
+struct ResultMessageScroll: View {
+    let text: String
+    /// Twelve 16pt lines.
+    private static let cap: CGFloat = 192
+    @State private var naturalHeight: CGFloat = 0
+
+    var body: some View {
+        ScrollView(.vertical) {
+            ResultText(text: text)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear { naturalHeight = proxy.size.height }
+                            .onChange(of: proxy.size.height) { _, height in naturalHeight = height }
+                    }
+                }
+        }
+        .frame(height: min(max(naturalHeight, 16), Self.cap))
+    }
+}
+
 /// A disclosure that keeps its content on the panel's left edge. SwiftUI's DisclosureGroup indents
 /// and centers what it reveals; here the revealed rows align with everything above them.
 /// The label names what pressing it does, so an open disclosure reads "Hide …" (or `expandedTitle`)
-/// rather than still offering to show what is already shown.
+/// rather than still offering to show what is already shown. The result card's toggles (#323, 9NU:
+/// "Show all ›", "Your prompt ›") use the trailing style: dim words, then "›" turning down when open.
 struct NotchDisclosure<Content: View>: View {
+    enum Chevron { case leading, trailing }
     let title: String
     var expandedTitle: String? = nil
     /// Names the item for VoiceOver, so the spoken label follows the visible one.
     var subject: String? = nil
+    var chevron: Chevron = .leading
     @Binding var expanded: Bool
     @ViewBuilder let content: () -> Content
     @FocusState private var focused: Bool
+    /// The system setting, as the controls window reads it; the model's `reduceMotion` mirrors the same one.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var currentTitle: String {
         guard expanded else { return title }
         if let expandedTitle { return expandedTitle }
@@ -476,16 +522,22 @@ struct NotchDisclosure<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() }
+                if reduceMotion { expanded.toggle() } else { withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() } }
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                        .frame(width: 10)
-                    Text(currentTitle)
+                    switch chevron {
+                    case .leading:
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .rotationEffect(.degrees(expanded ? 90 : 0))
+                            .frame(width: 10)
+                        Text(currentTitle)
+                    case .trailing:
+                        Text(currentTitle)
+                        Text("›").rotationEffect(.degrees(expanded ? 90 : 0))
+                    }
                 }
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
+                .font(NotchStyle.mono(11)).foregroundStyle(chevron == .leading ? NotchStyle.text : NotchStyle.dim)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1296,16 +1348,29 @@ struct Notch: View {
     private func sessionOpener<Header: View>(_ item: AgentAttentionItem, target: ResultRowTarget,
                                              @ViewBuilder header: () -> Header) -> some View {
         if target == .reachable {
-            Button { model.activateRow(item.id) } label: { header().contentShape(Rectangle()) }
-                .buttonStyle(.plain)
-                .focusable(false)
-                .accessibilityLabel("Open Session: \(rowHeading(item))")
-                .accessibilityHint("Opens this session in \(item.session.source.displayName). Opening it does not mark anything as checked.")
+            sessionOpenButton(item, header: header)
         } else {
             header()
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(rowHeading(item)), \(RowException.unreachable.word)")
         }
+    }
+
+    /// The result card's header line (#323, 8DW "New ones"): the same click as a result row while the
+    /// session is reachable; otherwise its plain heading, since the card's body says why Open is not
+    /// offered.
+    @ViewBuilder
+    private func resultCardHeaderOpener<Header: View>(_ item: AgentAttentionItem, target: ResultRowTarget,
+                                                      @ViewBuilder header: () -> Header) -> some View {
+        if target == .reachable { sessionOpenButton(item, header: header) } else { header() }
+    }
+
+    private func sessionOpenButton<Header: View>(_ item: AgentAttentionItem, @ViewBuilder header: () -> Header) -> some View {
+        Button { model.activateRow(item.id) } label: { header().contentShape(Rectangle()) }
+            .buttonStyle(.plain)
+            .focusable(false)
+            .accessibilityLabel("Open Session: \(rowHeading(item))")
+            .accessibilityHint(Self.resultOpenHint(item.session.source))
     }
 
     /// A result row's one control, inline before the age lane (#322): Dismiss on a result, which
@@ -1319,6 +1384,23 @@ struct Notch: View {
         } else {
             claudeRemoveControl(item, subject: subject)
         }
+    }
+
+    /// A result's Open (#323): beside a result row's "Not delivered · reply in …" note, where the user
+    /// replies in the agent, and on the result card. Codex's only when Open is offered and the result's
+    /// reading (`target`, the one its click and reason line read) is reachable; Claude's return control,
+    /// whose Open follows the same reading.
+    @ViewBuilder
+    private func resultOpen(_ item: AgentAttentionItem, subject: String, codexOpen: Bool,
+                            target: ResultRowTarget) -> some View {
+        if item.session.source == .codex, codexOpen, target == .reachable {
+            NotchButton(title: Self.rowOpenTitle) { model.openAgent(item.session) }
+                .disabled(model.openingTask)
+                .accessibilityLabel("Open Session: \(subject)")
+                .accessibilityHint(Self.resultOpenHint(item.session.source))
+        }
+        claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle,
+                            openHint: Self.resultOpenHint(item.session.source))
     }
 
     /// The line under a result row's name (`ResultRowReading.line`): why Open is not offered, or
@@ -1693,76 +1775,96 @@ struct Notch: View {
         return !model.offersTerminalOpen(identity)
     }
 
-    /// The completion card's own sentence about the reply the user sent from it. Every phase says
-    /// what Herdly did and nothing more; a reply the daemon took, or text typed into the session's tab
-    /// (ADR 0017), is never called an answer the agent has.
-    private func replyStatus<ID>(_ progress: ReplyProgress<ID>, target: SessionReplyTarget,
-                                 agent: AgentSource = .codex) -> String? {
-        let name = agent == .claude ? "Claude" : "Codex"
-        let typed = progress.route.map { $0 != .daemon } ?? false
-        switch progress.phase {
-        case .ready:
-            if case let .unavailable(reason) = target { return SessionReplyPolicy.message(for: reason, agent: agent) }
-            return nil
-        case .sending:
-            return typed ? "Typing your reply into the session…" : "Sending your reply to Codex's daemon…"
-        case let .sent(text, _):
-            if progress.composerMayHoldText {
-                return "Typed “\(text)”, but Herdly couldn't press Return. The text may be waiting in Codex's composer; Herdly won't press Return later."
+    /// The result card a finished turn pops (#323, Paper D33, 9NU, 9RW), inset to the title: the last
+    /// message clamped to five lines with "Show all ›" for the rest, or one dim line saying why it
+    /// cannot be read; the restored-result line; "Your prompt ›" folded to one line; the reply field
+    /// only where Herdly can reach the session; the line its result row would show when Open is not
+    /// offered (`reading`, the same one its header click reads); then Open and Dismiss on the right.
+    /// Show all and the prompt toggle are view state only (`openDisclosures`); nothing on the card
+    /// acknowledges the result: not seeing it, not unfolding it, not sending.
+    @ViewBuilder
+    private func resultCardBody(_ item: AgentAttentionItem, subject: String, reading: ResultRowReading,
+                                codexOpen: Bool) -> some View {
+        let details = model.spotlightDetails(for: item)
+        VStack(alignment: .leading, spacing: 10) {
+            switch details?.response {
+            case let .available(preview)?:
+                resultMessage(preview, item: item, subject: subject)
+            case let .unavailable(reason)?:
+                Text(reason).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            case nil:
+                EmptyView()
             }
-            return typed ? "Typed “\(text)”. Waiting for \(name) to start the turn." : "Sent “\(text)”. Waiting for Codex to record the turn."
-        case let .working(text):
-            // A Codex reply's turn may already have finished (#271), so its card never claims the
-            // session is working. Claude cards keep their sentence.
-            guard agent == .codex else { return "Sent “\(text)”. \(name) started a turn; this session is working again." }
-            return "Sent “\(text)”. Codex started a turn after your reply."
-        case let .unconfirmed(text, _):
-            return typed ? "Typed “\(text)”, but \(name) has not started a turn. Check the session; Herdly will not resend."
-                : "Sent “\(text)”, but Codex has not started a turn. Check Codex; Herdly will not resend."
-        case let .failed(reason):
-            return reason
+            if item.outcome?.uncertain == true {
+                Text("Queued before Herdly last started. You may already have seen this result; Herdly cannot verify it.")
+                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
+            }
+            if let prompt = details?.originalPrompt {
+                NotchDisclosure(title: "Your prompt", subject: subject, chevron: .trailing,
+                                expanded: disclosure("result-prompt:\(item.id)")) {
+                    ResultText(text: prompt)
+                }
+            }
+            if let outcome = item.outcome { resultReplyField(outcome, subject: subject) }
+            resultRowLine(item, reading: reading)
+            HStack(spacing: 6) {
+                Spacer(minLength: 6)
+                resultOpen(item, subject: subject, codexOpen: codexOpen, target: reading.target)
+                NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+                    .accessibilityLabel("Dismiss completion: \(subject)")
+            }
+        }
+        .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
+        .padding(.trailing, 6)
+        .padding(.top, 2)
+    }
+
+    /// Open on a result never marks it as checked; only a verified visit (ADR 0016), the Codex app's
+    /// read state, a new prompt, or Dismiss does.
+    private static func resultOpenHint(_ source: AgentSource) -> String {
+        "Opens this session in \(source.displayName). Opening it does not mark anything as checked."
+    }
+
+    /// The last message: five lines at most, then "Show all ›" (only when that cut it), which shows the
+    /// whole message inside the card in its own bounded scroll. A message even "Show all" had to cut
+    /// says so: the full message stays in the agent.
+    @ViewBuilder
+    private func resultMessage(_ preview: CompletionPreview, item: AgentAttentionItem, subject: String) -> some View {
+        let key = "result-message:\(item.id)"
+        if openDisclosures.contains(key), let full = preview.extent.full {
+            ResultMessageScroll(text: full)
+            if case .cutAndCapped = preview.extent {
+                Text("Shortened; the full message is in \(item.session.source.displayName).")
+                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            ResultText(text: preview.text)
+        }
+        if preview.truncated {
+            NotchDisclosure(title: "Show all", expandedTitle: "Show less", subject: subject, chevron: .trailing,
+                            expanded: disclosure(key)) { EmptyView() }
         }
     }
 
-    /// A Claude completion card's reply (ADR 0017): typed into the session's bound tab, shown only
-    /// while a host that types replies is on. The same one-reply rules as a Codex card.
+    /// One follow-up prompt for the finished session, sent to that session and no other, by its
+    /// agent's one-reply path (`Companion.sendResultReply`). The field is shown only while a verified
+    /// route reaches the session and the card has sent nothing; otherwise there is no field and no
+    /// reason line. A send that leaves `.ready` folds the card; a refusal keeps the text.
     @ViewBuilder
-    private func claudeReplyBody(_ outcome: AgentOutcome, target: SessionReplyTarget, subject: String) -> some View {
-        let progress = model.claudeReply(for: outcome)
-        let key = "reply:\(outcome.session.sourceScope):\(outcome.session.session):\(outcome.turn)"
-        DraftField(placeholder: "Reply to this session", text: draft(key), sendTitle: "Send",
-                   fieldLabel: "Reply to \(subject)", sendLabel: "Send reply to \(subject)",
-                   hint: "Types a follow-up prompt into this session's tab.", onEscape: model.escape) {
-            model.sendClaudeReply(outcome, text: drafts[key] ?? "")
-            if model.claudeReply(for: outcome).phase != .ready { drafts[key] = nil }
-        }
-        .disabled(!target.isReachable || progress.phase != .ready)
-        if let status = replyStatus(progress, target: target, agent: .claude) {
-            Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+    private func resultReplyField(_ outcome: AgentOutcome, subject: String) -> some View {
+        if model.resultCardOffersReply(outcome), let reply = model.resultReply(outcome.id) {
+            let key = "reply:\(outcome.session.sourceScope):\(outcome.session.session):\(outcome.turn)"
+            DraftField(placeholder: Self.replyPlaceholder, text: draft(key), sendTitle: "Send",
+                       fieldLabel: "Reply to \(subject)", sendLabel: "Send reply to \(subject)",
+                       hint: reply.hint, onEscape: model.escape) {
+                if model.sendResultReply(outcome, text: drafts[key] ?? "") != .ready { drafts[key] = nil }
+            }
         }
     }
 
-    /// One follow-up prompt for a finished session, sent to that session and no other. The field is
-    /// disabled whenever Herdly cannot reach the session or has already sent this card's one reply;
-    /// the sentence below says which. Sending never acknowledges the completion.
-    @ViewBuilder
-    private func replyBody(_ completion: AttentionCompletion, subject: String) -> some View {
-        let progress = model.reply(for: completion)
-        let target = model.replyTarget(for: completion)
-        let key = "reply:\(completion.session.uuidString):\(completion.turn.uuidString)"
-        DraftField(placeholder: "Reply to this session", text: draft(key), sendTitle: "Send",
-                   fieldLabel: "Reply to \(subject)", sendLabel: "Send reply to \(subject)",
-                   hint: "Sends a follow-up prompt to this session.", onEscape: model.escape) {
-            // The typed text is cleared only once the send is under way; a refusal keeps it to edit.
-            model.sendReply(to: completion, text: drafts[key] ?? "")
-            if model.reply(for: completion).phase != .ready { drafts[key] = nil }
-        }
-        .disabled(!target.isReachable || progress.phase != .ready)
-        // ADR 0017: a session another host may hold gets that host's line through its typed route.
-        if let status = replyStatus(progress, target: target) {
-            Text(status).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-        }
-    }
+    private static let replyPlaceholder = "› Reply to this session"
 
     /// The open queue with nothing in it, in a row's own grammar: the unlit sprite leads the title,
     /// one line follows, and Open Controls appears only while no source reports to Herdly.
@@ -1812,10 +1914,13 @@ struct Notch: View {
         // session, Dismiss (or Remove) sits before the age, and an unreachable row's reason line sits
         // under the name. Its body, reply field and preview stay on the spotlight card.
         let resultRow = inQueue && !spotlit && item.kind.opensSession
-        let rowReading = resultRow ? model.resultRowReading(item.session) : ResultRowReading(target: .reachable, line: nil)
-        let rowTarget = rowReading.target
         // Whether Approve and Deny are this card's to offer; one rule with the decide path.
         let decidable = spotlit && approvalRow && model.canDecide(item)
+        // #323: a result on its own card (the pop). Its header line opens the session like a result row.
+        let resultCard = spotlit && item.outcome != nil
+        // One reading of the session for a result row or card: its click, word, reason line and Open
+        // all read it, so they never disagree. Nil for every other row.
+        let sessionReading = resultRow || resultCard ? model.resultRowReading(item.session) : nil
         VStack(alignment: .leading, spacing: inQueue ? bodySpacing - 5 : bodySpacing) {
             // Every row is headed by its session's mark and name; the mark steps only while the
             // session is working, and a word appears only when the row is off its normal path.
@@ -1837,11 +1942,15 @@ struct Notch: View {
                         runningOpener(item, open: runningOpen) {
                             headerLine(item, working: working, countdown: nil)
                         }
-                    } else if resultRow {
+                    } else if resultRow, let reading = sessionReading {
                         // The control sits outside the row's own button, so the two never nest.
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            sessionOpener(item, target: rowTarget) {
-                                headerLine(item, working: working, countdown: nil, target: rowTarget, showsAge: false)
+                            sessionOpener(item, target: reading.target) {
+                                headerLine(item, working: working, countdown: nil, target: reading.target, showsAge: false)
+                            }
+                            if rowNote(item)?.offersOpen == true {
+                                // "Not delivered · reply in Codex": Open beside the note, as on an approval row.
+                                resultOpen(item, subject: subject, codexOpen: codexOpen, target: reading.target)
                             }
                             resultRowControl(item, subject: subject)
                             rowAge(item)
@@ -1854,6 +1963,11 @@ struct Notch: View {
                             }
                             claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle)
                             rowAge(item)
+                        }
+                    } else if resultCard, let reading = sessionReading {
+                        // 8DW "New ones": clicking the pop opens the session, by the result row's rule.
+                        resultCardHeaderOpener(item, target: reading.target) {
+                            headerLine(item, working: working, countdown: nil)
                         }
                     } else if spotlit && approvalRow {
                         // The card header reads the same `ApprovalCardReading` as the card body below.
@@ -1868,8 +1982,8 @@ struct Notch: View {
                         }
                     }
                 }
-                .frame(minHeight: inQueue ? 26 : nil)
-                .modifier(CardRowHover(id: item.id, active: opensAsCard(item) || (resultRow && rowTarget == .reachable),
+                .frame(minHeight: inQueue || resultCard ? 26 : nil)
+                .modifier(CardRowHover(id: item.id, active: opensAsCard(item) || (resultRow && sessionReading?.target == .reachable),
                                        hovered: $hoveredCardRow,
                                        reduceMotion: model.reduceMotion))
             }
@@ -1889,10 +2003,12 @@ struct Notch: View {
                 if spotlit {
                     questionCardBody(item, subject: subject, herdr: herdr, codexOpen: codexOpen)
                 }
-            } else if resultRow {
+            } else if resultCard, let reading = sessionReading {
+                resultCardBody(item, subject: subject, reading: reading, codexOpen: codexOpen)
+            } else if resultRow, let reading = sessionReading {
                 // Why Open is not offered (an unreachable row), or why the last click did not open,
                 // under the name: the cards' own line, never a greyed button.
-                resultRowLine(item, reading: rowReading)
+                resultRowLine(item, reading: reading)
                     .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
                     .padding(.bottom, 4)
             } else {
@@ -1909,20 +2025,8 @@ struct Notch: View {
                         // Approval rows render the approval card body instead (#320).
                         EmptyView()
                     case .outcome, .earlierOutcome:
-                        if item.outcome?.uncertain == true {
-                            Text("Queued before Herdly last started. You may already have seen this result; Herdly cannot verify it.")
-                                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
-                        }
-                        if let prompt = spotlightDetails?.originalPrompt {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Original prompt").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
-                                Text(prompt).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        if item.session.source == .claude {
-                            claudeReturnMessage(item)
-                        }
+                        // A result is its row in the queue and its result card when spotlit (#322, #323).
+                        EmptyView()
                     case .question:
                         // Question rows render the question card body instead (#321).
                         EmptyView()
@@ -1986,15 +2090,8 @@ struct Notch: View {
                             // Question rows render their controls in the question card body (#321).
                             EmptyView()
                         case .outcome, .earlierOutcome:
-                            if item.session.source == .codex, codexOpen {
-                                NotchButton(title: "Open Session") { model.openAgent(item.session) }
-                                    .disabled(model.openingTask)
-                                    .accessibilityLabel("Open Session: \(subject)")
-                                    .accessibilityHint("Open this session in Codex.")
-                            }
-                            claudeReturnControl(item, subject: subject)
-                            NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
-                                .accessibilityLabel("Dismiss completion: \(subject)")
+                            // The result card has its own controls (#323).
+                            EmptyView()
                         case .waiting, .running:
                             if item.session.source == .codex, codexOpen {
                                 NotchButton(title: "Open Session") { model.openAgent(item.session) }
@@ -2004,23 +2101,6 @@ struct Notch: View {
                             }
                             claudeReturnControl(item, subject: subject)
                             claudeRemoveControl(item, subject: subject)
-                        }
-                    }
-                    if let outcome = item.outcome, outcome.session.source == .codex, let completion = model.codexCompletion(for: outcome),
-                       completion.source == .cli {
-                        replyBody(completion, subject: subject)
-                    }
-                    if let outcome = item.outcome, let target = model.claudeReplyTarget(for: outcome) {
-                        claudeReplyBody(outcome, target: target, subject: subject)
-                    }
-                    if item.outcome != nil, let spotlightDetails {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Final response").font(NotchStyle.mono(11, .semibold)).foregroundStyle(NotchStyle.ink)
-                            switch spotlightDetails.response {
-                            case let .available(preview): Text(preview.text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                            case let .unavailable(reason): Text(reason).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-                            case nil: EmptyView()
-                            }
                         }
                     }
                 }
@@ -2192,13 +2272,13 @@ struct Notch: View {
 
     @ViewBuilder
     private func claudeReturnControl(_ item: AgentAttentionItem, subject: String, emphasized: Bool = false,
-                                     openTitle: String = "Open Session") -> some View {
+                                     openTitle: String = "Open Session", openHint: String? = nil) -> some View {
         if item.session.source == .claude {
             let herdr = herdrOpen(item.session)
             if herdr == .available || (herdr == .notInHerdr && model.canOpenClaude(item.session)) {
                 // The terminal scan's line replaces Open with no disabled button (#267).
                 if herdr == .available || model.offersTerminalOpen(item.session) {
-                    claudeOpenButton(item, subject: subject, emphasized: emphasized, title: openTitle)
+                    claudeOpenButton(item, subject: subject, emphasized: emphasized, title: openTitle, hint: openHint)
                 }
             } else if herdr == .notInHerdr, !model.ghosttyEnabled, model.claudeLastSeenLine(item.session) == nil {
                 NotchButton(title: "Set up Ghostty", emphasized: emphasized, action: model.showControls)
@@ -2221,7 +2301,7 @@ struct Notch: View {
     }
 
     private func claudeOpenButton(_ item: AgentAttentionItem, subject: String, emphasized: Bool,
-                                  title: String = "Open Session") -> some View {
+                                  title: String = "Open Session", hint: String? = nil) -> some View {
         NotchButton(title: title, emphasized: emphasized) {
             if let approval = item.approval {
                 model.openAgentApproval(approval)
@@ -2231,7 +2311,7 @@ struct Notch: View {
         }
             .disabled(model.openingTask)
             .accessibilityLabel("Open Session: \(subject)")
-            .accessibilityHint("Open this Claude session in its terminal.")
+            .accessibilityHint(hint ?? "Open this Claude session in its terminal.")
     }
 
     /// The one line a terminal card shows when Open is unavailable (product.md, "Open unavailable"):
