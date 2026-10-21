@@ -115,20 +115,20 @@ components:
 
 **Creative North Star: "The Instrument in the Housing"**
 
-Herdly has two designed surfaces. The notch panel, described in most of this document, is the instrument. The Settings window, described in its own section near the end, is a native macOS window where the user tunes that instrument. The notch panel is a single pure-black shape that grows out of the bottom of the macOS menu bar as if it were part of the camera housing. It is read the way a gauge is read. Three readings sit on one line: a green 8-bit sprite that steps while Codex is working, the name of the task in a gray monospaced face, and a dark-gray count of items that need the user. Everything else lives one hover away and is drawn from the same three materials: black ground, gray type in a single monospaced family, and dark wells for anything pressable.
+Herdly has two designed surfaces. The notch panel, described in most of this document, is the instrument. The Settings window, described in its own section near the end, is a native macOS window where the user tunes that instrument. The notch panel is a single pure-black shape that grows out of the bottom of the macOS menu bar as if it were part of the camera housing. It is read the way a gauge is read. Three readings sit on one line: a green 8-bit sprite, the animal the user chose, that steps while Codex is working, the name of the task in a gray monospaced face, and a dark-gray count of items that need the user. Everything else lives one hover away and is drawn from the same three materials: black ground, gray type in a single monospaced family, and dark wells for anything pressable.
 
-The world is deliberately austere. Color belongs to each session's mark alone: each session has one of six colors, chosen from its identifier so it stays with the session, and its mark is the sprite unless the user picks another indicator style. There is one typeface, and it is the system monospaced face at 10 to 12 points. Depth is not a shadow; the panel has no window shadow at all, because a shadow rim would outline the shape and break its fusion with the menu bar. The only edge inside the panel is a one-point seam at eight percent white between the strip and the open queue. Motion is a reading, not an ornament: the sprite's two-frame step is the working signal, the frame resize is a short ease-out, and Reduce Motion replaces the step with a slow breathe and removes the resize animation entirely.
+The world is deliberately austere. Color belongs to each session's mark alone: each session has one of six colors, chosen from its identifier so it stays with the session, and its mark is the sprite: one animal, chosen by the user, drawn for every session. There is one typeface, and it is the system monospaced face at 10 to 12 points. Depth is not a shadow; the panel has no window shadow at all, because a shadow rim would outline the shape and break its fusion with the menu bar. The only edge inside the panel is a one-point seam at eight percent white between the strip and the open queue. Motion is a reading, not an ornament: the sprite's two-frame step is the working signal, the frame resize is a short ease-out, and Reduce Motion replaces the step with a slow breathe and removes the resize animation entirely.
 
 This is not the glossy dynamic island. It refuses glow, gradient, glass, the pulsing dot, and the spring bounce. It also refuses pictorial chrome: no glyph icons, no logo, no wordmark. The sprite is the one picture in the system.
 
 The instrument is configurable within those materials. In Settings the user chooses:
 - what the strip shows: the left wing, a center label on external displays, and the usage bars;
-- the session indicator style;
+- the sprite drawn for every session (Sheep, Critter, Sheepdog, Cow, or Blob);
 - how wide the open panel is (Standard, Wide, Extra wide);
 - how the open queue is sorted and grouped;
 - when completions move to "Earlier".
 
-The MacBook notch and external displays each keep their own choices. Every option is drawn from the same black ground, gray ladder, wells, and session colors. An option may change what is shown, but never adds a new material: no glow, no fade-pulse, no gradient. The defaults are the instrument described here: sprites and count, sprite indicator, compact usage, standard panel width, needs-attention order, no grouping, Earlier after 5 minutes.
+The MacBook notch and external displays each keep their own choices. Every option is drawn from the same black ground, gray ladder, wells, and session colors. An option may change what is shown, but never adds a new material: no glow, no fade-pulse, no gradient. The defaults are the instrument described here: sprites and count, the Sheep sprite, compact usage, standard panel width, needs-attention order, no grouping, Earlier after 5 minutes.
 
 **Key Characteristics:**
 - One black shape fused to the menu bar: flat top, concave 8pt ears, deep 18pt bottom radii, no window shadow
@@ -144,7 +144,7 @@ An achromatic ladder on pure black with a single green, reserved for the sprite,
 
 ### Primary
 - **Sprite Green** (`{colors.sprite}`): the sprite's body cells, and nothing else. It is the only chroma outside the usage bars; it appears in the strip, and again at the head of each row in the open queue.
-- **Sprite Highlight** (`{colors.sprite-light}`): the sprite's ear and eye cells. A lighter green that gives the 6x4 bitmap its read at two points per cell.
+- **Sprite Highlight** (`{colors.sprite-light}`): the sprite's highlight cells (ears, eyes, faces, and markings). A lighter green that gives each small bitmap its read at two points per cell.
 
 ### Usage
 - **Codex Blue** (`{colors.usage-codex}`): the fill of Codex's usage bars (`NotchStyle.codexUsage`), and nothing else.
@@ -159,7 +159,7 @@ An achromatic ladder on pure black with a single green, reserved for the sprite,
 - **Seam** (`{colors.seam}`): a one-point line between the strip and the open queue. White at eight percent is the only edge drawn inside the panel.
 
 ### Named Rules
-**The One Color Rule.** A session's colour belongs to its mark: the sprite, or the dot, bar, or tint the user chose instead (see Session indicator styles). The mark lends it to exactly one other place: the answer options of that session's question, where the digit is drawn in the session's highlight and the option the user chose fills with the session's body colour under black text. The one exception is the usage bars in the strip: each bar's fill carries a fixed source hue, Codex blue (#3b82f6) and Claude orange (#d97757), so the two subscriptions read apart at a glance; their captions and percents stay gray. No badge, title, ring, or other control carries hue; every other state is spoken through motion and gray. A question row is headed by its session's standing sprite so the colour on the options reads as "this session", never as a category.
+**The One Color Rule.** A session's colour belongs to its mark, the sprite. The mark lends it to exactly one other place: the answer options of that session's question, where the digit is drawn in the session's highlight and the option the user chose fills with the session's body colour under black text. The one exception is the usage bars in the strip: each bar's fill carries a fixed source hue, Codex blue (#3b82f6) and Claude orange (#d97757), so the two subscriptions read apart at a glance; their captions and percents stay gray. No badge, title, ring, or other control carries hue; every other state is spoken through motion and gray. A question row is headed by its session's standing sprite so the colour on the options reads as "this session", never as a category.
 
 **The Gray Ladder Rule.** Emphasis moves down four fixed steps: ink for what is read first, text for what is read, dim for what is there if needed, well for what is pressable. Do not add a fifth gray.
 
@@ -212,7 +212,7 @@ Flat, by construction. The window carries no shadow (`hasShadow = false`) becaus
 
 The silhouette is the system's signature. The top edge is flat and meets the menu bar; at each top corner a concave quarter-circle ear (8pt, centered outside the body on the menu bar edge) fillets the panel into the housing so it reads as one shape growing out of it; the two bottom corners are deep convex arcs (18pt). When the panel is too short for the full corner, the radius shrinks to fit rather than overlapping.
 
-Inside, every corner is continuous (SwiftUI `.continuous` style) and small: 4pt on the badge, 5pt on controls, 6pt on the focus ring that sits 2pt outside a control. The sprite is the only hard-edged shape: a 6x4 bitmap at 2pt per cell, 12x8pt total, with no anti-aliased corners.
+Inside, every corner is continuous (SwiftUI `.continuous` style) and small: 4pt on the badge, 5pt on controls, 6pt on the focus ring that sits 2pt outside a control. The sprite is the only hard-edged shape: a bitmap of at most 9x5 cells at 2pt per cell, at most 18x10pt, with no anti-aliased corners.
 
 ## Components
 
@@ -240,27 +240,14 @@ The count of items to check, hidden at zero.
 - **State:** none. It counts; it does not blink or change color.
 
 ### Sprite
-The one picture in the system and the default working signal. The strip always uses sprites when its left wing shows them; the open queue uses the user's chosen indicator style.
-- **Form:** a 6-column by 4-row bitmap at 2pt per cell (12x8pt). Body cells in sprite green, ear and eye cells in sprite highlight.
-- **Working:** alternates two frames every 0.5 s (the feet step). Under Reduce Motion it holds frame one and breathes in opacity between 50% and 100% on a 2.4 s cycle.
+The one picture in the system and the working signal. The user picks one animal for each display profile, and every session draws it in its own colour, in the strip and at the head of each queue row.
+- **Kinds:** Sheep (default, 9x5 cells), Critter (6x4), Sheepdog (9x5), Cow (9x5), and Blob (7x5), each copied cell for cell from its Paper sprite artboard (`SpriteKind`). Each is two frames at 2pt per cell, drawn at its own size, at most 18x10pt, so three fit the 112pt left wing at 6pt gaps.
+- **Form:** body cells in the session's body colour, highlight cells in its highlight.
+- **Working:** alternates its two frames every 0.5 s. Under Reduce Motion it holds frame one and breathes in opacity between 50% and 100% on a 2.4 s cycle.
 - **Idle:** frame one, still. Hidden from accessibility; the strip's label speaks for it.
-- **Unlit:** the mark of an empty notch, shown while no session is listed. Frame one with every cell in well gray, so the eyes close into the body; still, with no step or breathe, and no session's color, so it never reads as a session. It sits where the first sprite would.
-- **Placement:** leads the strip; leads every row title in the open queue except a folded Earlier result (offset up 1pt to sit on the baseline). It steps only while that session is working.
-
-### Session indicator styles
-The mark that leads each row in the open queue. The user picks one style for each display profile. Every style uses the session's colour and follows the sprite's timing: a two-step change every 0.5 s while working, never a fade or pulse.
-- **Sprite (default):** described above.
-- **Dot:** a 6pt circle centred in the sprite's 12pt slot.
-  - Working: steps between body and highlight every 0.5 s.
-  - Idle: holds the body colour.
-  - Unlit: well gray.
-- **Bar:** a 3x12pt rounded bar at the row's leading edge, in the same slot, with the same states as the dot.
-- **Tint:** the row header sits on a 5pt continuous well filled with the session's body colour at 18%.
-  - Working: the tint steps to 26% and back every 0.5 s.
-  - Idle: holds at 18%.
-  - Nothing else in the row changes colour.
-- **Reduce Motion:** the sprite breathes as it does today. Dot, bar, and tint hold their working value still.
-- **Slot:** every style occupies the same 12pt leading slot, or the row header for tint, so titles stay aligned whichever style is chosen.
+- **Unlit:** the mark of an empty notch, shown while no session is listed. The chosen kind's frame one with every cell in well gray, so the highlights close into the body; still, with no step or breathe, and no session's color, so it never reads as a session. It sits where the first sprite would.
+- **Placement:** leads the strip; leads every row title in the open queue except a folded Earlier result. It steps only while that session is working.
+- **Slot:** in the open queue the sprite sits in a fixed 18x10pt slot, leading-aligned and centred vertically, with the title 6pt after it, so titles line up whichever kind is chosen. The slot's bottom sits on the title's baseline.
 
 ### Strip
 The collapsed reading and the header of the open panel.
@@ -315,7 +302,7 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 - **Do** show a 1.5pt ink ring at 6pt continuous corners on any control with keyboard focus.
 - **Do** wrap commands and reasons in full; align the detail table on a fixed 58pt label column.
 - **Do** animate frame changes with a 0.18 s ease-out and honor Reduce Motion by dropping the animation and switching the sprite to its breathe.
-- **Do** keep a working signal visible in every configuration: the sprite steps at 0.5 s by default, and dot, bar, and tint step on the same beat. A row is still when idle, and the mark is unlit when no session is listed.
+- **Do** keep a working signal visible in every configuration: the sprite steps at 0.5 s, whichever kind is chosen. A row is still when idle, and the mark is unlit when no session is listed.
 
 ### Don't:
 - **Don't** put green anywhere but the sprite; no green badges, rings, titles, or status dots.
@@ -342,7 +329,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - Grouped sections fill the detail area.
   - Sidebar panes in labeled groups: "Notch" (General, Notch, Notifications), "Connections" (Agents, Terminals), then About on its own. There is no sidebar collapse button.
   - Each sidebar row is 32pt tall with a 20pt colour tile holding a white SF Symbol: gray gear, black sprite, red bell, purple sparkles, dark terminal, blue info.
-  - The Notch tile shows the green sprite, the one place the notch's colour appears in the window.
+  - The Notch tile shows the chosen sprite in green, the one place the notch's colour appears in the window.
   - The sidebar footer shows the "N working · N to check" status in 11pt secondary text.
 - **Forms:**
   - `.formStyle(.grouped)` with system fills. Sections have 12pt continuous corners; rows are 36pt, or 40pt with a segmented control. Separators are inset 10pt.
@@ -356,16 +343,16 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
 - **Behaviour:** every change applies immediately. There is no Apply, OK, or Cancel button.
 - **Motion:** every click answers within half a second.
   - Pages crossfade and rise 10pt as you switch panes.
-  - The preview, indicator tiles, sound list, and disabled rows ease to their new state over 0.4 s.
+  - The preview, sprite tiles, sound list, and disabled rows ease to their new state over 0.4 s.
   - Pressed tiles and rows dip to 97%.
   - Reduce Motion keeps only a 0.15 s crossfade with no movement or scaling.
   - Unlike the notch, the Settings window may use the system's smooth easing.
-- **Sound:** switching panes, segments, or indicator tiles plays a soft click (the system "Tink" at 30% volume). It follows the macOS "Play user interface sound effects" setting. The notch never clicks.
+- **Sound:** switching panes, segments, or sprite tiles plays a soft click (the system "Tink" at 30% volume). It follows the macOS "Play user interface sound effects" setting. The notch never clicks.
 - **Notch pane:**
   - A segmented "MacBook notch | External display" picker in the toolbar chooses which profile is being edited.
   - A live preview of the strip on a desktop backdrop sits above the sections and redraws as options change.
   - Options that do not apply to the selected profile, such as Center label on the MacBook notch, are shown disabled with a footer saying why.
-- **Indicator picker:** four tiles in a row, Sprite, Dot, Bar, and Tint. Each tile previews two rows on black, one working and one idle. The selected tile has a 2pt accent ring with a 2pt gap.
+- **Sprite picker:** a "Sprite" section with no footer holding five equal-width tiles in a row at 10pt gaps: Sheep, Critter, Sheepdog, Cow, and Blob. Each tile is a 76pt black well with 9pt continuous corners and the kind's idle frame centred at 6pt per cell in the first session colour, with its 12pt name 6pt below. The selected tile has a 2pt accent ring with a 2pt gap and a medium-weight name. Each tile is a button named for its kind.
 - **Agents pane:**
   - One card per agent with no section header above it, 28pt apart: Codex, then Claude Code. The Claude Code card describes the default folder; each added folder is a row in that card with its monospaced path, status, a Configure button while it needs setup, and its own ⋯ menu (Review Again, Show Setup Changes…, the two switches as menu items, Undo Setup…, Remove Folder). Its problems sit indented beneath it.
   - The 52pt header row holds a 28pt tile with 7pt corners (Codex: near-black with a white `terminal` symbol; Claude Code: #D97757 with a white `sparkle`), the 13pt semibold name over an 11pt secondary subtitle, the status dot and text (green Connected, orange Restart required or another short reason, gray Checking until the first detection), a Configure button while setup is needed, and a 22pt borderless ⋯ menu.
@@ -384,7 +371,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
 
 The [Paper reference](https://app.paper.design/file/01M51985RZGVMFW23BNQWAFNY5/p-1-0), accepted on 2026-10-16, supersedes the earlier question-card composition. It applies to Codex and Claude, in spotlight and the full queue. Other card types and the shared strip retain their existing typography and layout.
 
-Question cards use bundled JetBrains Mono Regular and SemiBold (v2.304, OFL-1.1), at 10pt for rail headings and recommendation labels, 11pt for options and metadata, and 12pt for the session heading and question. The reference's 560pt body is a visual comparison size, not a replacement for the user's Standard/Wide/Extra wide setting. Keep the existing session color and chosen indicator; the reference's amber is one session, not a global accent.
+Question cards use bundled JetBrains Mono Regular and SemiBold (v2.304, OFL-1.1), at 10pt for rail headings and recommendation labels, 11pt for options and metadata, and 12pt for the session heading and question. The reference's 560pt body is a visual comparison size, not a replacement for the user's Standard/Wide/Extra wide setting. Keep the existing session color and chosen sprite; the reference's amber is one session, not a global accent.
 
 Reading order: session heading with project/branch and age; source and working directory; question rail with answer summaries; the viewed question; full-width option wells; typed answer when supported; navigation left and Open Session/Dismiss right. Use 14pt section gaps, 10pt question-to-options spacing, 4pt option gaps, 8pt horizontal/7pt vertical option padding, and 5pt control corners. The shared panel retains its placement contract and housing shape. Real metadata alone populates the heading; missing fields are omitted.
 

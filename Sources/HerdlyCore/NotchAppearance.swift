@@ -34,15 +34,6 @@ public enum UsageDisplay: String, CaseIterable, Sendable {
     case hidden
 }
 
-/// The mark that leads each row of the open queue. Every style uses the session's colour and the
-/// sprite's 0.5 s step; none fades or pulses.
-public enum SessionIndicatorStyle: String, CaseIterable, Sendable {
-    case sprite
-    case dot
-    case bar
-    case tint
-}
-
 public enum QueueSort: String, CaseIterable, Sendable {
     /// Queue priority, oldest arrival first within each group.
     case needsAttention
@@ -109,23 +100,23 @@ public struct NotchAppearance: Equatable, Sendable {
     public var leftWing: StripLeftWing
     public var centerLabel: StripCenterLabel
     public var usage: UsageDisplay
-    public var indicator: SessionIndicatorStyle
+    public var sprite: SpriteKind
     public var sort: QueueSort
     public var grouping: QueueGrouping
     public var earlier: EarlierDelay
     public var panelWidth: PanelWidth
 
     public static let standard = NotchAppearance(leftWing: .spritesAndCount, centerLabel: .taskName, usage: .compact,
-                                                 indicator: .sprite, sort: .needsAttention, grouping: .none,
+                                                 sprite: .sheep, sort: .needsAttention, grouping: .none,
                                                  earlier: .fiveMinutes, panelWidth: .standard)
 
     public init(leftWing: StripLeftWing, centerLabel: StripCenterLabel, usage: UsageDisplay,
-                indicator: SessionIndicatorStyle, sort: QueueSort, grouping: QueueGrouping, earlier: EarlierDelay,
+                sprite: SpriteKind, sort: QueueSort, grouping: QueueGrouping, earlier: EarlierDelay,
                 panelWidth: PanelWidth = .standard) {
         self.leftWing = leftWing
         self.centerLabel = centerLabel
         self.usage = usage
-        self.indicator = indicator
+        self.sprite = sprite
         self.sort = sort
         self.grouping = grouping
         self.earlier = earlier
@@ -138,6 +129,8 @@ public struct NotchAppearance: Equatable, Sendable {
     }
 
     /// Reads one profile through `value(key)`. A missing or unrecognised value keeps the standard choice.
+    /// The retired `indicator` key (Sprite, Dot, Bar, Tint) is not read, so a profile saved with it
+    /// shows the standard Sheep until the user picks another sprite.
     public static func load(profile: DisplayProfile, value: (String) -> String?) -> NotchAppearance {
         func read<T: RawRepresentable>(_ field: String, _ fallback: T) -> T where T.RawValue == String {
             value(key(profile, field)).flatMap(T.init(rawValue:)) ?? fallback
@@ -146,7 +139,7 @@ public struct NotchAppearance: Equatable, Sendable {
         return NotchAppearance(leftWing: read("leftWing", standard.leftWing),
                                centerLabel: read("centerLabel", standard.centerLabel),
                                usage: read("usage", standard.usage),
-                               indicator: read("indicator", standard.indicator),
+                               sprite: read("sprite", standard.sprite),
                                sort: read("sort", standard.sort),
                                grouping: read("grouping", standard.grouping),
                                earlier: read("earlier", standard.earlier),
@@ -157,7 +150,7 @@ public struct NotchAppearance: Equatable, Sendable {
         write(Self.key(profile, "leftWing"), leftWing.rawValue)
         write(Self.key(profile, "centerLabel"), centerLabel.rawValue)
         write(Self.key(profile, "usage"), usage.rawValue)
-        write(Self.key(profile, "indicator"), indicator.rawValue)
+        write(Self.key(profile, "sprite"), sprite.rawValue)
         write(Self.key(profile, "sort"), sort.rawValue)
         write(Self.key(profile, "grouping"), grouping.rawValue)
         write(Self.key(profile, "earlier"), earlier.rawValue)

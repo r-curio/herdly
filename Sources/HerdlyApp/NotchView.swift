@@ -111,41 +111,46 @@ struct NotchShape: Shape {
     }
 }
 
-/// A 6-by-4 cell creature at two points per cell. It steps between two frames while a session is
-/// working and stands still otherwise; with Reduce Motion it breathes instead of stepping. Unlit, it
-/// is the empty notch's mark: the silhouette in well gray with its eyes shut, still, and no session's
-/// color, so it never reads as a session.
+/// The user's chosen animal (`SpriteKind`) at two points per cell, drawn at its own size, at most
+/// 18 by 10 points. It steps between its two frames while a session is working and stands still
+/// otherwise; with Reduce Motion it breathes on frame one instead of stepping. Unlit, it is the empty
+/// notch's mark: frame one with every cell in well gray, still, and no session's color, so it never
+/// reads as a session.
 struct Sprite: View {
+    var kind: SpriteKind
     var working: Bool
     var reduceMotion: Bool
     var color: Int = 0
     var unlit = false
+    /// Points per cell: the notch's 2pt, or larger for a Settings preview so edges stay crisp.
+    var cellSize: CGFloat = Sprite.cell
     static let cell: CGFloat = 2
-    /// `#` is the body green, `+` the lighter highlight on the ears and eyes.
-    static let frames: [[String]] = [
-        [".++.++", "######", "#+##+#", ".#..#."],
-        [".++.++", "######", "#+##+#", "#....#"]
-    ]
+    /// The fixed leading slot of a queue row, 18x10pt: the widest and tallest kinds, so titles
+    /// align whichever kind is chosen. The title follows 6pt after it.
+    static let slotWidth = cell * CGFloat(SpriteKind.maximumColumns)
+    static let slotHeight = cell * CGFloat(SpriteKind.maximumRows)
+    static let slotGap: CGFloat = 6
 
     var body: some View {
+        let frames = kind.frames
         Group {
             if unlit {
-                bitmap(Sprite.frames[0])
+                bitmap(frames[0])
             } else if working && !reduceMotion {
                 TimelineView(.periodic(from: .now, by: 0.5)) { context in
                     let frame = Int(context.date.timeIntervalSinceReferenceDate * 2) & 1
-                    bitmap(Sprite.frames[frame])
+                    bitmap(frames[frame])
                 }
             } else if working {
                 TimelineView(.periodic(from: .now, by: 0.1)) { context in
                     let phase = sin(context.date.timeIntervalSinceReferenceDate * 2 * .pi / 2.4)
-                    bitmap(Sprite.frames[0]).opacity(0.75 + 0.25 * phase)
+                    bitmap(frames[0]).opacity(0.75 + 0.25 * phase)
                 }
             } else {
-                bitmap(Sprite.frames[0])
+                bitmap(frames[0])
             }
         }
-        .frame(width: Sprite.cell * 6, height: Sprite.cell * 4)
+        .frame(width: cellSize * CGFloat(kind.columns), height: cellSize * CGFloat(kind.rows))
         .accessibilityHidden(true)
     }
 
@@ -153,87 +158,13 @@ struct Sprite: View {
         Canvas { context, _ in
             for (y, row) in rows.enumerated() {
                 for (x, ch) in row.enumerated() where ch != "." {
-                    let rect = CGRect(x: CGFloat(x) * Sprite.cell, y: CGFloat(y) * Sprite.cell, width: Sprite.cell, height: Sprite.cell)
-                    // One tone when unlit: the highlight cells fill like the body, so the eyes close.
+                    let rect = CGRect(x: CGFloat(x) * cellSize, y: CGFloat(y) * cellSize, width: cellSize, height: cellSize)
+                    // One tone when unlit: the highlight cells fill like the body and close into it.
                     let tone = unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color)
                     context.fill(Path(rect), with: .color(ch == "+" ? tone.light : tone.body))
                 }
             }
         }
-    }
-}
-
-/// The mark leading a queue row in the user's chosen style. Dot and bar step between the session's
-/// body and highlight on the sprite's 0.5 s beat while working and hold still otherwise; tint is
-/// drawn behind the row header by `SessionTint`, so it has no mark of its own.
-struct SessionMark: View {
-    var style: SessionIndicatorStyle
-    var working: Bool
-    var reduceMotion: Bool
-    var color: Int
-
-    var body: some View {
-        switch style {
-        case .sprite:
-            Sprite(working: working, reduceMotion: reduceMotion, color: color)
-        case .dot, .bar:
-            Group {
-                if working && !reduceMotion {
-                    TimelineView(.periodic(from: .now, by: 0.5)) { context in
-                        shape(lit: Int(context.date.timeIntervalSinceReferenceDate * 2) & 1 == 1)
-                    }
-                } else {
-                    shape(lit: working)
-                }
-            }
-            .frame(width: Sprite.cell * 6, height: style == .bar ? 12 : Sprite.cell * 4)
-            .accessibilityHidden(true)
-        case .tint:
-            EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private func shape(lit: Bool) -> some View {
-        let tone = NotchStyle.spriteColor(color)
-        let fill = lit ? tone.light : tone.body
-        if style == .bar {
-            RoundedRectangle(cornerRadius: 1.5, style: .continuous).fill(fill).frame(width: 3, height: 12)
-        } else {
-            Circle().fill(fill).frame(width: 6, height: 6)
-        }
-    }
-}
-
-/// The tint style: the row header sits on a well of the session's body colour, stepping from 18% to
-/// 26% on the sprite's beat while working.
-struct SessionTint: ViewModifier {
-    var active: Bool
-    var working: Bool
-    var reduceMotion: Bool
-    var color: Int
-
-    func body(content: Content) -> some View {
-        if active {
-            content
-                .padding(.horizontal, 6).padding(.vertical, 3)
-                .background {
-                    if working && !reduceMotion {
-                        TimelineView(.periodic(from: .now, by: 0.5)) { context in
-                            well(Int(context.date.timeIntervalSinceReferenceDate * 2) & 1 == 1 ? 0.26 : 0.18)
-                        }
-                    } else {
-                        well(working ? 0.26 : 0.18)
-                    }
-                }
-                .padding(.horizontal, -6)
-        } else {
-            content
-        }
-    }
-
-    private func well(_ opacity: Double) -> some View {
-        RoundedRectangle(cornerRadius: 5, style: .continuous).fill(NotchStyle.spriteColor(color).body.opacity(opacity))
     }
 }
 
@@ -1199,8 +1130,8 @@ struct Notch: View {
     @ViewBuilder
     private func emptyQueueRow(_ reading: EmptyQueueReading) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Sprite(working: false, reduceMotion: model.reduceMotion, unlit: true).offset(y: -1)
+            HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
+                spriteSlot(working: false, color: 0, unlit: true)
                 Text(reading.title).font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
                     .accessibilityAddTraits(.isHeader)
             }
@@ -1231,29 +1162,24 @@ struct Notch: View {
             // Every row is headed by its session's mark and name; the mark steps only while the
             // session is working, and the tag says what, if anything, the row needs from the user.
             let folded = item.kind == .earlierOutcome && !spotlit
-            let marked = !folded
-            let indicator = model.appearance.indicator
             let working = item.running?.status == .working
             if item.kind == .question {
                 cardOpener(item) { questionHeader(item) }
             } else {
                 cardOpener(item) {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    if marked && indicator != .tint {
-                        SessionMark(style: indicator, working: working, reduceMotion: model.reduceMotion,
-                                    color: spriteColor(for: item.session)).offset(y: -1)
-                    }
                     if folded {
                         earlierToggle(item, open: earlierOpen)
                     } else {
-                        rowHeader(item)
+                        HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
+                            spriteSlot(working: working, color: spriteColor(for: item.session))
+                            rowHeader(item)
+                        }
                     }
                     Spacer(minLength: 8)
                     if !folded { RowTag(text: QueueRowPresentation.sourceTag(item.session)) }
                     rowAge(item)
                 }
-                .modifier(SessionTint(active: marked && indicator == .tint, working: working,
-                                      reduceMotion: model.reduceMotion, color: spriteColor(for: item.session)))
                 }
             }
             if let note = rowNote(item), note.offersOpen {
@@ -1490,6 +1416,16 @@ struct Notch: View {
 
     private func earlierKey(_ item: AgentAttentionItem) -> String { "earlier:\(item.id)" }
 
+    /// A row's leading mark: the chosen sprite in a fixed slot as wide as the widest kind and as tall
+    /// as the tallest, leading-aligned and centred in it, so titles line up whichever kind is chosen.
+    /// The slot's bottom sits on the title's baseline, which keeps its centre where the old 12x8pt
+    /// sprite's was.
+    private func spriteSlot(working: Bool, color: Int, unlit: Bool = false) -> some View {
+        Sprite(kind: model.appearance.sprite, working: working, reduceMotion: model.reduceMotion,
+               color: color, unlit: unlit)
+            .frame(width: Sprite.slotWidth, height: Sprite.slotHeight, alignment: .leading)
+    }
+
     private func earlierToggle(_ item: AgentAttentionItem, open: Binding<Bool>) -> some View {
         EarlierFold(name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
                     tag: QueueRowPresentation.attentionTag(item), spoken: rowHeading(item),
@@ -1499,13 +1435,13 @@ struct Notch: View {
     private func questionHeader(_ item: AgentAttentionItem) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                if model.appearance.indicator != .tint {
-                    SessionMark(style: model.appearance.indicator, working: false, reduceMotion: model.reduceMotion,
-                                color: spriteColor(for: item.session))
+                HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
+                    spriteSlot(working: false, color: spriteColor(for: item.session))
+                    Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
+                        .font(QuestionCardStyle.font(12, .semibold)).foregroundStyle(NotchStyle.ink)
+                        .lineLimit(1).truncationMode(.tail)
                 }
-                Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
-                    .font(QuestionCardStyle.font(12, .semibold)).foregroundStyle(NotchStyle.ink)
-                    .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                .layoutPriority(1)
                 if let note = rowNote(item) {
                     rowNoteText(note, questionCard: true)
                 } else if let place = model.rowPlace(for: item) {
@@ -1515,8 +1451,6 @@ struct Notch: View {
                 Spacer(minLength: 0)
                 rowAge(item)
             }
-            .modifier(SessionTint(active: model.appearance.indicator == .tint, working: false,
-                                  reduceMotion: model.reduceMotion, color: spriteColor(for: item.session)))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(rowHeading(item))
             .accessibilityAddTraits(.isHeader)
@@ -1524,7 +1458,7 @@ struct Notch: View {
             let source = item.session.source == .claude ? "Claude Code" : (item.session.surface == .cli ? "Codex CLI" : "Codex Desktop")
             Text(source + (directory.map { " · " + ($0 as NSString).abbreviatingWithTildeInPath } ?? ""))
                 .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
-                .padding(.leading, model.appearance.indicator == .tint ? 0 : 20)
+                .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
                 .fixedSize(horizontal: false, vertical: true)
                 .help(directory ?? source)
         }
@@ -1751,15 +1685,16 @@ struct Notch: View {
                         switch leftWing {
                         case .spritesAndCount:
                             if summary.sessions.isEmpty {
-                                Sprite(working: false, reduceMotion: model.reduceMotion, unlit: true)
+                                Sprite(kind: model.appearance.sprite, working: false, reduceMotion: model.reduceMotion, unlit: true)
                             }
                             ForEach(summary.sessions, id: \.session) { session in
-                                Sprite(working: session.working, reduceMotion: model.reduceMotion, color: session.color)
+                                Sprite(kind: model.appearance.sprite, working: session.working, reduceMotion: model.reduceMotion,
+                                       color: session.color)
                             }
                         case .countOnly:
                             // One stepping sprite keeps the working signal when sessions are hidden.
                             if let busy = summary.sessions.first(where: \.working) {
-                                Sprite(working: true, reduceMotion: model.reduceMotion, color: busy.color)
+                                Sprite(kind: model.appearance.sprite, working: true, reduceMotion: model.reduceMotion, color: busy.color)
                             }
                         case .none:
                             EmptyView()
