@@ -522,11 +522,6 @@ private struct GeneralControls: View {
                     Toggle("Keep new cards open until I act", isOn: $model.keepCardsOpen)
                         .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                 }
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Haptic feedback on hover", detail: nil) {
-                    Toggle("Haptic feedback on hover", isOn: $model.hapticFeedback)
-                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                }
             }
             SettingsFooter("Keeping a card open never extends an approval. Each request still hands back to its agent 30 seconds after it arrives. Closing this window keeps Herdly running in the menu bar.")
         }
