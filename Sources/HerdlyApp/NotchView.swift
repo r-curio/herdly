@@ -326,7 +326,8 @@ struct NotchButton: View {
 /// One line of text the user types into a card and sends: a typed answer to a Codex question, or a
 /// reply to a finished session. Return in the field and the button do the same thing, and an empty
 /// or all-space draft sends nothing. Escape follows the panel's one Escape rule from the field (a
-/// clicked card steps back to the queue, otherwise the panel collapses) without dismissing anything. The caller owns the text and decides what sending means.
+/// clicked card steps back to the queue, otherwise the panel collapses) without dismissing
+/// anything. The caller owns the text and decides what sending means.
 struct DraftField: View {
     let placeholder: String
     @Binding var text: String
@@ -583,8 +584,6 @@ struct Notch: View {
     @State private var drafts: [String: String] = [:]
     @State private var questionDrafts: [ClaudeQuestionViewStateKey: String] = [:]
     @State private var viewedQuestions: [ClaudeQuestionViewStateKey: Int] = [:]
-    /// Whether the user opened the "N working" fold; closed again whenever the panel collapses.
-    @State private var workingOpen = false
     /// Multi-select labels are kept in the view until the user presses Send.
     @State private var claudeSelections: [ClaudeQuestionViewStateKey: Set<Int>] = [:]
     /// Ghostty's `tty` support for herdr Open availability; refreshed off the main actor.
@@ -857,19 +856,7 @@ struct Notch: View {
 
     /// An approval or question row in the full queue opens as its own card when clicked (D5, D18).
     private func opensAsCard(_ item: AgentAttentionItem) -> Bool {
-        guard model.presentationMode.showsAll else { return false }
-        switch item.id {
-        case .approval, .question: return true
-        case .outcome, .running, .unavailable: return false
-        }
-    }
-
-    /// The open queue's rows in reading order, as the arrows step through them: folded working rows
-    /// count only while their fold is open.
-    private func selectableRows(_ sections: QueueSections) -> [AgentAttentionID] {
-        guard model.presentationMode.showsAll else { return [] }
-        let working = sections.foldsWorking && !workingOpen ? [] : sections.working
-        return (sections.attention + working).flatMap(\.items).map(\.id)
+        model.presentationMode.showsAll && item.id.isRequest
     }
 
     /// Makes a row header the click target that opens its card, keeping its look. VoiceOver reads it
@@ -1853,7 +1840,7 @@ struct Notch: View {
                         if showsClickedCard { clickedCardBar }
                         groupRows(sections.attention)
                         if sections.foldsWorking {
-                            NotchDisclosure(title: "\(sections.workingCount) working", expanded: $workingOpen) {
+                            NotchDisclosure(title: "\(sections.workingCount) working", expanded: $model.workingFoldOpen) {
                                 VStack(alignment: .leading, spacing: 14) { groupRows(sections.working) }
                             }
                         } else {
@@ -1905,8 +1892,6 @@ struct Notch: View {
         .background(NotchStyle.ground, in: NotchShape())
         .preferredColorScheme(.dark)
         .onHover(perform: model.setHovering)
-        .onChange(of: model.expanded) { _, expanded in if !expanded { workingOpen = false } }
-        .onChange(of: selectableRows(visibleSections), initial: true) { _, rows in model.selectableRows = rows }
         .onChange(of: model.answerProgress) { previous, next in
             for question in model.orderedAgentAttentionItems.compactMap(\.question) {
                 guard let legacy = model.codexQuestion(for: question), let progress = next[legacy.id],

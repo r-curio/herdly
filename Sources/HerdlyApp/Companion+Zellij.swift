@@ -362,7 +362,8 @@ extension Companion {
         answering = true
         relayLedger = start.ledger
         answerProgress[question.id] = start.progress
-        noteCodexAnswerSending(current)
+        updateRowNote(RowNote.codexKeySending(final: current.isFinalQuestion(index)), for: Self.rowNoteID(current),
+                      userAction: true)
         refresh()
         let others = otherTabHosts
         let rolloutRoot = Companion.rolloutRoot
@@ -386,7 +387,7 @@ extension Companion {
                 return .delivered(TerminalQuestionKeys.delivery(delivery))
             }.value
             answering = false
-            noteCodexAnswer(current, sent: outcome.countsAsSent)
+            updateRowNote(RowNote.codexKeyAnswer(outcome, final: current.isFinalQuestion(index)), for: Self.rowNoteID(current))
             guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
                 answerProgress[question.id] = nil
                 refresh()

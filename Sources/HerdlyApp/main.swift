@@ -116,9 +116,18 @@ final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     var onEscape: (() -> Void)?
     /// Up and Down arrows move the queue's row selection; Return acts on the selected row. Only
-    /// keys no control in the panel handled reach here.
-    var onMoveSelection: ((QueueRowSelection.Direction) -> Void)?
-    var onReturn: (() -> Void)?
+    /// keys no control in the panel handled reach here. Each returns false when it did nothing, so
+    /// the key continues to AppKit.
+    var onMoveSelection: ((QueueRowSelection.Direction) -> Bool)?
+    var onReturn: (() -> Bool)?
+
+    /// Virtual key codes from the HIToolbox `kVK_*` table.
+    private enum KeyCode {
+        static let returnKey: UInt16 = 36
+        static let keypadEnter: UInt16 = 76
+        static let downArrow: UInt16 = 125
+        static let upArrow: UInt16 = 126
+    }
     /// True once the user has clicked in the panel; launch or app activation can also make the
     /// panel key, and that must not count as the user interacting with it.
     private(set) var clickedForKey = false
@@ -142,13 +151,14 @@ final class NotchPanel: NSPanel {
 
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-        guard modifiers.isEmpty else { return super.keyDown(with: event) }
-        switch event.keyCode {
-        case 125: onMoveSelection?(.down)
-        case 126: onMoveSelection?(.up)
-        case 36, 76: onReturn?()
-        default: super.keyDown(with: event)
+        let handled: Bool
+        switch (modifiers.isEmpty, event.keyCode) {
+        case (true, KeyCode.downArrow): handled = onMoveSelection?(.down) ?? false
+        case (true, KeyCode.upArrow): handled = onMoveSelection?(.up) ?? false
+        case (true, KeyCode.returnKey), (true, KeyCode.keypadEnter): handled = onReturn?() ?? false
+        default: handled = false
         }
+        if !handled { super.keyDown(with: event) }
     }
 
     /// AppKit pulls a frame back on screen; the tucked strip rests entirely above the screen edge.
@@ -515,10 +525,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
               result.work.scanGeneration == claudeApprovalScanGeneration || current != nil else { return }
         verifiedClaudeApprovalReceipts.removeValue(forKey: result.work.requestID)
         verifiedClaudeApprovalRoots.removeValue(forKey: result.work.requestID)
-        if let note = RowNote.claudeDecision(result.work.decision, published: result.published,
-                                             delivered: result.delivered) {
-            recordRowNote(note, for: .approval(result.work.approvalID), userAction: false)
-        }
+        updateRowNote(RowNote.claudeDecision(result.work.decision, published: result.published, delivered: result.delivered),
+                      for: .approval(result.work.approvalID))
         refresh()
     }
 
@@ -565,8 +573,17 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var presentationMode: NotchPresentationMode = .collapsed
     /// The open queue's keyboard selection (Up and Down arrows); cleared whenever the queue closes.
     @Published private(set) var queueSelection = QueueRowSelection()
-    /// The open queue's rows in reading order, which the view reports so arrows follow what is on screen.
-    var selectableRows: [AgentAttentionID] = []
+    /// Whether the user opened the "N working" fold; closed again whenever the panel collapses.
+    @Published var workingFoldOpen = false {
+        didSet { if workingFoldOpen != oldValue { reconcileSelection() } }
+    }
+    /// The open queue's rows in reading order as they are on screen: the arrows step through these,
+    /// skipping a closed working fold.
+    var selectableRows: [AgentAttentionID] {
+        guard presentationMode.showsAll else { return [] }
+        return QueueSections.make(queueAgentAttentionItems, grouping: appearance.grouping, project: projectFolder(for:))
+            .selectableRows(workingOpen: workingFoldOpen)
+    }
     /// Fresh response previews are intentionally process-memory only.
     @Published private(set) var completionPreviews: [CompletionIdentity: CompletionPreviewAvailability] = [:]
     @Published private(set) var spotlightContexts: [AttentionItemID: SpotlightRecordContext] = [:]
@@ -704,8 +721,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = NSHostingView(rootView: Notch(model: self, claudeSetup: claude))
         panel.onEscape = { [weak self] in self?.escape() }
-        panel.onMoveSelection = { [weak self] in self?.moveSelection($0) }
-        panel.onReturn = { [weak self] in self?.activateSelectedRow() }
+        panel.onMoveSelection = { [weak self] in self?.moveSelection($0) ?? false }
+        panel.onReturn = { [weak self] in self?.activateSelectedRow() ?? false }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in self?.refresh() } }
@@ -1758,10 +1775,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         default:
             if presentationMode != resolvedPresentation { presentationMode = resolvedPresentation }
         }
-        if expanded != presentationMode.expanded { expanded = presentationMode.expanded }
-        var selection = queueSelection
-        if presentationMode.showsAll { selection.reconcile(rows: Array(liveAgentIDs)) } else { selection.clear() }
-        if selection != queueSelection { queueSelection = selection }
+        if expanded != presentationMode.expanded {
+            expanded = presentationMode.expanded
+            if !expanded { workingFoldOpen = false }
+        }
+        reconcileSelection()
         let actionableApproval = agentItems.contains { $0.kind == .actionableApproval }
             || queue.items.contains { $0.request?.state == .actionable }
         scheduleRefreshTimer(RefreshCadence.interval(presenting: presentationMode != .collapsed,
@@ -1911,20 +1929,35 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         notchPresentation.backToQueue()
     }
 
-    func moveSelection(_ direction: QueueRowSelection.Direction) {
-        guard presentationMode.showsAll else { return }
+    /// Keeps the selection on a row that is still on screen; it clears when the queue closes, its
+    /// row leaves, or its fold closes, so Return never acts on a hidden row.
+    private func reconcileSelection() {
         var selection = queueSelection
-        selection.move(direction, in: selectableRows)
+        selection.reconcile(rows: selectableRows)
         if selection != queueSelection { queueSelection = selection }
     }
 
+    /// Returns false when the queue is not shown or has no rows, so the arrow key goes on to AppKit.
+    func moveSelection(_ direction: QueueRowSelection.Direction) -> Bool {
+        let rows = selectableRows
+        guard !rows.isEmpty else { return false }
+        var selection = queueSelection
+        selection.move(direction, in: rows)
+        if selection != queueSelection { queueSelection = selection }
+        return true
+    }
+
     /// Return on the selected row. Approvals and questions open as their clicked card; opening a
-    /// session from any other row is the hook #322 fills in.
-    func activateSelectedRow() {
-        guard presentationMode.showsAll, let selected = queueSelection.selected else { return }
+    /// session from any other row is the hook #322 fills in (until then the key is not handled).
+    func activateSelectedRow() -> Bool {
+        reconcileSelection()
+        guard let selected = queueSelection.selected else { return false }
         switch QueueRowSelection.returnAction(for: selected) {
-        case let .openCard(id): openCard(id)
-        case .openSession: break
+        case let .openCard(id):
+            openCard(id)
+            return true
+        case .openSession:
+            return false
         }
     }
 
@@ -2110,7 +2143,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // the helper's output acknowledgment separately; a crash leaves Claude's native prompt
         // available without leaving a second direct control.
         agentQueue.apply(.approval(approval.with(state: .handedBack)), now: now)
-        recordRowNote(.sending, for: .approval(approval.id))
+        updateRowNote(.record(.sending), for: .approval(approval.id), userAction: true)
         publishClaudeApprovalDecision(ClaudeApprovalDecisionWork(
             requestID: requestID, approvalID: approval.id, decision: decision, decidedAt: now,
             receipt: receipt,
@@ -2334,7 +2367,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             return
         }
         // Herdly wrote the decision; Codex sends no receipt. The note clears as the request leaves.
-        recordRowNote(.sentUnconfirmed, for: .approval(CodexAttentionAdapter.approval(from: current).id))
+        updateRowNote(.record(.sentUnconfirmed), for: .approval(CodexAttentionAdapter.approval(from: current).id),
+                      userAction: true)
         queue.dismiss(.request(request.identity))
         refresh()
     }
@@ -2344,10 +2378,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let now = Date().timeIntervalSince1970
         if !eventsPath.isEmpty {
             let events = URL(fileURLWithPath: eventsPath)
-            let released = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision, decidedAt: now), in: events)
-            if !released && ApprovalDecisions.existing(for: request.id, in: events) == nil {
-                // The helper still waits for its own deadline; the row loses its controls regardless.
-            }
+            // A failed write leaves the helper waiting for its own deadline; the row loses its controls regardless.
+            ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision, decidedAt: now), in: events)
         }
         let handedBack = AttentionRequest(id: request.id, source: request.source, session: request.session,
                                           turn: request.turn, arrivedAt: request.arrivedAt, expiresAt: request.expiresAt,

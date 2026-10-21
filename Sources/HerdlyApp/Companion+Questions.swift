@@ -184,11 +184,11 @@ extension Companion {
         spentClaudeQuestionTokens.insert(live.request.requestID)
         let noteID = AgentAttentionID.question(question.id)
         guard ClaudeQuestionStore.publish(record, in: live.events) else {
-            settleRowNote(RowNote.claudeAnswer(published: false, delivered: false), for: noteID, userAction: true)
+            updateRowNote(RowNote.claudeAnswer(published: false, delivered: false), for: noteID, userAction: true)
             refresh()
             return
         }
-        recordRowNote(.sending, for: noteID)
+        updateRowNote(.record(.sending), for: noteID, userAction: true)
         let request = live.request
         let events = live.events
         Task { @MainActor [weak self] in
@@ -197,7 +197,7 @@ extension Companion {
             }.value
             guard let self else { return }
             // Confirmed delivery is resolution evidence for this call; otherwise the note says so.
-            self.settleRowNote(RowNote.claudeAnswer(published: true, delivered: delivered), for: noteID)
+            self.updateRowNote(RowNote.claudeAnswer(published: true, delivered: delivered), for: noteID)
             self.refresh()
         }
     }
@@ -312,7 +312,8 @@ extension Companion {
         let switches = hostSwitches
         // Read on the main actor: a host that is not running holds nothing and is not asked.
         let running = Set(TerminalKeyRelayCheck.hostsToRead(switches: switches).filter(TerminalApps.isRunning))
-        noteCodexAnswerSending(current)
+        updateRowNote(RowNote.codexKeySending(final: current.isFinalQuestion(index)), for: Self.rowNoteID(current),
+                      userAction: true)
         refresh()
         Task { @MainActor in
             let result = await Task.detached { () -> (sent: Bool, message: String) in
@@ -340,7 +341,8 @@ extension Companion {
                 return GhosttyNavigation.answer(session: current.session, live: live, keys: [key])
             }.value
             answering = false
-            noteCodexAnswer(current, sent: result.sent)
+            updateRowNote(RowNote.ghosttyKeyAnswer(sent: result.sent, final: current.isFinalQuestion(index)),
+                          for: Self.rowNoteID(current))
             if !result.sent { relayLedger.release(current.id, question: index) }
             guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
                 // Answered or ended while the key was in flight: the card is gone and so is the progress.
@@ -386,7 +388,8 @@ extension Companion {
         answering = true
         relayLedger = start.ledger
         answerProgress[question.id] = start.progress
-        noteCodexAnswerSending(current)
+        updateRowNote(RowNote.codexKeySending(final: current.isFinalQuestion(index)), for: Self.rowNoteID(current),
+                      userAction: true)
         refresh()
         let rolloutRoot = Companion.rolloutRoot
         let client = HerdrClient()
@@ -403,7 +406,7 @@ extension Companion {
                 }
             }.value
             answering = false
-            noteCodexAnswer(current, sent: outcome.countsAsSent)
+            updateRowNote(RowNote.codexKeyAnswer(outcome, final: current.isFinalQuestion(index)), for: Self.rowNoteID(current))
             guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
                 // Answered or ended while the key was in flight: the card is gone and so is the progress.
                 answerProgress[question.id] = nil
@@ -492,7 +495,7 @@ extension Companion {
                         ? next.recordingSent(question: index, answer: answer, of: latest, at: now)
                         : next.recordingFailure("Could not write to Codex's daemon; Herdly will not retry. Answer in Codex.")
                 }
-                noteCodexAnswer(current, sent: written, userAction: true)
+                updateRowNote(RowNote.codexDaemonAnswer(sent: written), for: Self.rowNoteID(current), userAction: true)
             }
             answering = false
             refresh()

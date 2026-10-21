@@ -90,27 +90,75 @@ private let otherApprovalID = AgentAttentionID.approval(AgentCallIdentity(sessio
 }
 
 @Test func clickingHoveringAndEscapeNeverMoveTheApprovalDeadline() {
-    var queue = AgentAttentionQueue()
-    let call = AgentCallIdentity(session: claude, turn: "t1", call: "toolu_1")
-    queue.apply(.approval(AgentApproval(session: claude, turn: "t1", call: "toolu_1", arrivedAt: 100, handoffAfter: 30)), now: 100)
-    let id = AgentAttentionID.approval(call)
+    // The deadline's owners: the source-neutral queue (a Claude approval) and the Codex queue (a CLI
+    // request), both arriving at 100 with the 30-second handoff, driven on one explicit clock.
+    var agentQueue = AgentAttentionQueue()
+    agentQueue.apply(.approval(AgentApproval(session: claude, turn: "t1", call: "toolu_1", arrivedAt: 100)), now: 100)
+    let id = AgentAttentionID.approval(AgentCallIdentity(session: claude, turn: "t1", call: "toolu_1"))
+    var codexQueue = AttentionQueue(observingSince: 0)
+    let request = AttentionRequest(id: UUID(), source: .cli, session: UUID(), turn: UUID(), arrivedAt: 100)
+    codexQueue.recordReceipts([request], now: 100)
+
     var controller = NotchPresentationController()
     controller.openQueue()
     controller.openCard(id)
-    let queued = Set(queue.items(at: 120).map(\.id))
-    do { let result = controller.update(interacting: true, now: 120, queued: queued); #expect(result == .clickedCard(id)) }
-    do { let result = controller.update(interacting: true, draftInProgress: true, now: 125, queued: queued); #expect(result == .clickedCard(id)) }
-    do { let result = controller.escape(); #expect(result == .backToQueue) }
-    controller.openCard(id)
-    #expect(queue.items(at: 129.9).first?.approval?.expiresAt == 130)
-    #expect(queue.items(at: 129.9).first?.kind == .actionableApproval)
+    // Interaction right up to the deadline: hover, a draft, Escape back and a reopen, then hover again.
+    let steps: [(at: Double, act: (inout NotchPresentationController) -> Void)] = [
+        (105, { _ = $0.update(interacting: true, now: 105, queued: [id]) }),
+        (110, { _ = $0.update(interacting: false, draftInProgress: true, now: 110, queued: [id]) }),
+        (120, { _ = $0.escape(); $0.openCard(id) }),
+        (129.999, { _ = $0.update(interacting: true, now: 129.999, queued: [id]) }),
+    ]
+    for step in steps {
+        step.act(&controller)
+        agentQueue.expire(at: step.at)
+        codexQueue.expire(at: step.at)
+        let approval = agentQueue.items(at: step.at).first { $0.id == id }
+        #expect(approval?.kind == .actionableApproval)
+        #expect(approval?.approval?.expiresAt == 130)
+        let codex = codexQueue.items.compactMap(\.request).first { $0.id == request.id }
+        #expect(codex?.state == .actionable)
+        #expect(codex?.expiresAt == 130)
+    }
 
-    // At expiry the clicked card stays on the same request, now handed back in place.
-    queue.expire(at: 130)
-    let handedBack = queue.items(at: 130)
-    #expect(handedBack.first?.kind == .handedBackApproval)
-    #expect(handedBack.first?.approval?.expiresAt == 130)
-    do { let result = controller.update(interacting: true, now: 130, queued: Set(handedBack.map(\.id))); #expect(result == .clickedCard(id)) }
+    // Handback lands exactly at arrival + 30 s, and the clicked card stays on that request in place.
+    agentQueue.expire(at: 130)
+    codexQueue.expire(at: 130)
+    let handedBack = agentQueue.items(at: 130).first { $0.id == id }
+    #expect(handedBack?.kind == .handedBackApproval)
+    #expect(handedBack?.approval?.expiresAt == 130)
+    #expect(codexQueue.items.compactMap(\.request).first { $0.id == request.id }?.state == .handedBack)
+    do { let result = controller.update(interacting: true, now: 130, queued: [id]); #expect(result == .clickedCard(id)) }
+}
+
+@Test func onlyApprovalsAndQuestionsAreRequests() {
+    let session = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "s3", surface: .desktop)
+    #expect(approvalID.isRequest)
+    #expect(questionID.isRequest)
+    #expect(!AgentAttentionID.outcome(AgentTurnIdentity(session: session, turn: "t")).isRequest)
+    #expect(!AgentAttentionID.running(AgentTurnIdentity(session: session, turn: "t")).isRequest)
+    #expect(!AgentAttentionID.unavailable(session).isRequest)
+}
+
+@Test func selectableRowsSkipAClosedWorkingFoldAndASelectionThereClears() {
+    let session = AgentSessionIdentity(source: .codex, sourceScope: "codex", session: "s4", surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(AgentApproval(session: claude, turn: "t1", call: "toolu_1", arrivedAt: 10)), now: 10)
+    queue.apply(.running(AgentRunning(session: session, turn: "t9", arrivedAt: 11)), now: 11)
+    let items = queue.items(at: 12)
+    let running = AgentAttentionID.running(AgentTurnIdentity(session: session, turn: "t9"))
+    let sections = QueueSections.make(items, grouping: .none, project: { _ in nil })
+    #expect(sections.foldsWorking)
+    #expect(sections.selectableRows(workingOpen: false) == [approvalID])
+    #expect(sections.selectableRows(workingOpen: true) == [approvalID, running])
+
+    var selection = QueueRowSelection(selected: running)
+    selection.reconcile(rows: sections.selectableRows(workingOpen: false))
+    #expect(selection.selected == nil)
+
+    // With nothing needing the user the working rows are the queue, never folded away.
+    let unfolded = QueueSections.make(items.filter { $0.id == running }, grouping: .none, project: { _ in nil })
+    #expect(unfolded.selectableRows(workingOpen: false) == [running])
 }
 
 @Test func arrowKeysMoveTheRowSelectionAndItFollowsItsRow() {

@@ -225,6 +225,13 @@ public struct QueueSections: Equatable, Sendable {
     /// Working rows fold only when something above them needs the user; otherwise they are the queue.
     public var foldsWorking: Bool { !attention.isEmpty && workingCount > 0 }
 
+    /// The rows the keyboard selection steps through, in reading order. Rows in a closed working
+    /// fold are not on screen and are skipped.
+    public func selectableRows(workingOpen: Bool) -> [AgentAttentionID] {
+        let working = foldsWorking && !workingOpen ? [] : self.working
+        return (attention + working).flatMap(\.items).map(\.id)
+    }
+
     /// Splits already-ordered rows. While folding, ungrouped requests gain a "Needs you" heading and
     /// folded working rows drop the State grouping's "Working" heading, since the fold already names
     /// them; Agent and Project headings stay inside the fold.

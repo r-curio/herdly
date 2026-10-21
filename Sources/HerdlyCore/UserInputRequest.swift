@@ -173,6 +173,12 @@ public struct AttentionQuestion: Identifiable, Equatable, Sendable {
         self.questionCount = max(questionCount ?? prompts.count, prompts.count)
     }
 
+    /// Whether `index` is the call's last question, whose answer completes it. An index outside the
+    /// call is never final.
+    public func isFinalQuestion(_ index: Int) -> Bool {
+        index == max(1, questionCount) - 1
+    }
+
     public func with(source: AttentionSource) -> AttentionQuestion {
         AttentionQuestion(source: source, session: session, turn: turn, callID: callID, arrivedAt: arrivedAt,
                           prompts: prompts, questionCount: questionCount)

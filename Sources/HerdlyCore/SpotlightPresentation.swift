@@ -80,16 +80,12 @@ public struct NotchPresentationController: Equatable, Sendable {
     /// running work) are not cards here and return false.
     @discardableResult
     public mutating func openCard(_ item: AgentAttentionID) -> Bool {
-        switch item {
-        case .approval, .question:
-            clicked = item
-            manualOpen = true
-            agentSpotlight.clear()
-            spotlight.clear()
-            return true
-        case .outcome, .running, .unavailable:
-            return false
-        }
+        guard item.isRequest else { return false }
+        clicked = item
+        manualOpen = true
+        agentSpotlight.clear()
+        spotlight.clear()
+        return true
     }
     /// ‹ Queue, or an action taken on the card: back to the queue. Nothing is dismissed.
     public mutating func backToQueue() {
@@ -169,10 +165,7 @@ public struct QueueRowSelection: Equatable, Sendable {
     public mutating func clear() { selected = nil }
 
     public static func returnAction(for row: AgentAttentionID) -> ReturnAction {
-        switch row {
-        case .approval, .question: return .openCard(row)
-        case .outcome, .running, .unavailable: return .openSession(row)
-        }
+        row.isRequest ? .openCard(row) : .openSession(row)
     }
 }
 
