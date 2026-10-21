@@ -45,17 +45,43 @@ import Testing
     let single = ClaudeQuestionSelection(multiSelect: false)
     #expect(!single.canSend && single.answer(labels: labels) == nil)
     let picked = single.toggling(1, of: 3)
-    #expect(picked.canSend && picked.answer(labels: labels) == "Keep version 1")
+    #expect(picked.canSend && picked.answer(labels: labels)?.answer == "Keep version 1")
+    #expect(picked.answer(labels: labels)?.kind == .option)
     // Single-select keeps one option; clicking it again keeps it selected.
-    #expect(picked.toggling(0, of: 3).answer(labels: labels) == "Version 2")
-    #expect(picked.toggling(1, of: 3).answer(labels: labels) == "Keep version 1")
+    #expect(picked.toggling(0, of: 3).answer(labels: labels)?.answer == "Version 2")
+    #expect(picked.toggling(1, of: 3).answer(labels: labels)?.answer == "Keep version 1")
     #expect(single.toggling(3, of: 3) == single)
 
     let multi = ClaudeQuestionSelection(multiSelect: true)
     let two = multi.toggling(2, of: 3).toggling(0, of: 3)
-    #expect(two.answer(labels: labels) == "Version 2, Ask later")
+    #expect(two.answer(labels: labels)?.answer == "Version 2, Ask later")
+    #expect(two.answer(labels: labels)?.kind == .multiSelect)
     let none = two.toggling(2, of: 3).toggling(0, of: 3)
     #expect(!none.canSend && none.answer(labels: labels) == nil)
     // Labels that no longer hold a ticked option send nothing.
     #expect(two.answer(labels: ["Only one"]) == nil)
+}
+
+@Test func aClaudeTypedAnswerAndAnOptionAreNeverSentTogether() {
+    let labels = ["Version 2", "Keep version 1"]
+    // Typing clears the selected option; Send carries the trimmed text alone.
+    let typed = ClaudeQuestionSelection(multiSelect: false).toggling(0, of: 2).typing("  Version 3  ")
+    #expect(typed.options.isEmpty)
+    #expect(typed.canSend)
+    #expect(typed.answer(labels: labels)?.kind == .text)
+    #expect(typed.answer(labels: labels)?.answer == "Version 3")
+    // Selecting an option clears the text; Send carries the option alone.
+    let reselected = typed.toggling(1, of: 2)
+    #expect(reselected.text.isEmpty)
+    #expect(reselected.answer(labels: labels)?.kind == .option)
+    #expect(reselected.answer(labels: labels)?.answer == "Keep version 1")
+    // Ticks on a multi-select give way to typing the same way.
+    let multi = ClaudeQuestionSelection(multiSelect: true).toggling(0, of: 2).toggling(1, of: 2).typing("Neither")
+    #expect(multi.options.isEmpty && multi.answer(labels: labels)?.kind == .text)
+    // Blank text neither clears a selection nor counts as an answer.
+    let blank = ClaudeQuestionSelection(multiSelect: false).toggling(1, of: 2).typing("   ")
+    #expect(blank.options == [1] && blank.answer(labels: labels)?.kind == .option)
+    #expect(!ClaudeQuestionSelection(multiSelect: false).typing("  ").canSend)
+    // A typed-only question (no options) sends its text.
+    #expect(ClaudeQuestionSelection(multiSelect: false).typing("Herdly").answer(labels: [])?.answer == "Herdly")
 }

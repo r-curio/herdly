@@ -371,11 +371,13 @@ struct OptionButton: View {
     }
 }
 
-/// The daemon path's "Or type an answer" field (D23): the one surface that keeps a faint outline, so
-/// it reads as a place to type. A dim "›" leads the text. Return does the card's Next or Send with
-/// the typed text in place of a selected option; the bottom row's button does the same. Escape follows
+/// A question card's "Or type an answer" field (D23), on the daemon path and on a Claude question: the
+/// one surface that keeps a faint outline, so it reads as a place to type. A dim "›" leads the text.
+/// Return does the card's Next or Send with the typed text in place of a selected option; the bottom
+/// row's button does the same. Escape follows
 /// the panel's one Escape rule. Unsent text holds the card open (`DraftInProgressKey`).
 struct QuestionTypedField: View {
+    var placeholder = "Or type an answer"
     @Binding var text: String
     let fieldLabel: String
     var committedText: String?
@@ -386,7 +388,7 @@ struct QuestionTypedField: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text("›").foregroundStyle(NotchStyle.dim).accessibilityHidden(true)
-            TextField("Or type an answer", text: $text)
+            TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
                 .foregroundStyle(NotchStyle.ink)
                 .onSubmit { if enabled { submit() } }
@@ -823,8 +825,14 @@ struct Notch: View {
     /// own checks (`answerClaudeQuestion`). Nothing is sent while nothing is selected.
     private func sendClaudeSelection(_ question: AgentQuestion, prompt: QuestionPrompt) {
         guard let answer = claudeSelection(question, prompt: prompt).answer(labels: prompt.options) else { return }
-        model.answerClaudeQuestion(question, kind: prompt.multiSelect ? .multiSelect : .option, answer: answer)
+        model.answerClaudeQuestion(question, kind: answer.kind, answer: answer.answer)
         claudeSelections[claudeSelectionKey(question, 0)] = nil
+    }
+
+    /// The Claude field's text; typing clears any selected option (`ClaudeQuestionSelection.typing`).
+    private func claudeTypedText(_ question: AgentQuestion, prompt: QuestionPrompt) -> Binding<String> {
+        Binding(get: { claudeSelection(question, prompt: prompt).text },
+                set: { claudeSelections[claudeSelectionKey(question, 0)] = claudeSelection(question, prompt: prompt).typing($0) })
     }
 
     private var sessionNames: [AgentSessionIdentity: String] {
@@ -1242,6 +1250,11 @@ struct Notch: View {
                     .accessibilityHint("Nothing is sent until Send.")
                 }
             }
+            QuestionTypedField(placeholder: prompt.options.isEmpty ? "Type your answer" : "Or type an answer",
+                               text: claudeTypedText(question, prompt: prompt), fieldLabel: "Typed answer for \(subject)",
+                               onEscape: model.escape) {
+                sendClaudeSelection(question, prompt: prompt)
+            }
             if prompt.truncated { statusLine("Shortened; the full question is in Claude.") }
         }
     }
@@ -1252,8 +1265,7 @@ struct Notch: View {
                 NotchButton(title: "Send", emphasized: true) { sendClaudeSelection(question, prompt: prompt) }
                     .disabled(!claudeSelection(question, prompt: prompt).canSend)
                     .accessibilityLabel("Send answer to \(subject)")
-                    .accessibilityHint(prompt.multiSelect ? "Sends the ticked options to Claude once."
-                                                          : "Sends the selected option to Claude once.")
+                    .accessibilityHint("Sends the selected option, the ticked options, or the typed answer to Claude once.")
             }
             Spacer(minLength: 6)
             claudeReturnControl(item, subject: subject, openTitle: "Open")

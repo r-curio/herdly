@@ -66,11 +66,15 @@ public enum QuestionCardPrimary: Equatable, Sendable {
     }
 }
 
-/// A Claude question's options as the user ticks them, before Send (#321, D16). Single-select keeps
-/// one option; multi-select toggles. Nothing is sent until Send, and Send needs at least one option.
+/// A Claude question's answer as the user composes it, before Send (#321, D16): the options they
+/// ticked (single-select keeps one, multi-select toggles) or the text they typed, never both. Typing
+/// text clears the options and selecting an option clears the text, so one Send carries exactly one
+/// unambiguous answer. Nothing is sent until Send, and Send needs an option or non-blank text.
 public struct ClaudeQuestionSelection: Equatable, Sendable {
     public let multiSelect: Bool
     public private(set) var options: Set<Int> = []
+    /// The typed answer as it stands in the field; empty when an option was selected since.
+    public private(set) var text: String = ""
 
     public init(multiSelect: Bool) {
         self.multiSelect = multiSelect
@@ -80,6 +84,7 @@ public struct ClaudeQuestionSelection: Equatable, Sendable {
     public func toggling(_ option: Int, of count: Int) -> ClaudeQuestionSelection {
         guard option >= 0, option < count else { return self }
         var next = self
+        next.text = ""
         if multiSelect {
             if !next.options.insert(option).inserted { next.options.remove(option) }
         } else {
@@ -88,12 +93,25 @@ public struct ClaudeQuestionSelection: Equatable, Sendable {
         return next
     }
 
-    public var canSend: Bool { !options.isEmpty }
-
-    /// The answer text Send carries: the one label, or the ticked labels in list order joined by
-    /// ", ". Nil while nothing is selected or an option is no longer in `labels`.
-    public func answer(labels: [String]) -> String? {
-        guard canSend, options.allSatisfy(labels.indices.contains) else { return nil }
-        return options.sorted().map { labels[$0] }.joined(separator: ", ")
+    /// The selection after the field's text changed. Any non-blank text clears the options.
+    public func typing(_ text: String) -> ClaudeQuestionSelection {
+        var next = self
+        next.text = text
+        if !trimmed(text).isEmpty { next.options = [] }
+        return next
     }
+
+    public var canSend: Bool { !options.isEmpty || !trimmed(text).isEmpty }
+
+    /// What Send carries: the trimmed typed text as `.text`; otherwise the one label as `.option`, or
+    /// the ticked labels in list order joined by ", " as `.multiSelect`. Nil while nothing is selected
+    /// or an option is no longer in `labels`. The helper's own policy still judges the answer.
+    public func answer(labels: [String]) -> (kind: ClaudeQuestionAnswerKind, answer: String)? {
+        let typed = trimmed(text)
+        if !typed.isEmpty { return (.text, typed) }
+        guard !options.isEmpty, options.allSatisfy(labels.indices.contains) else { return nil }
+        return (multiSelect ? .multiSelect : .option, options.sorted().map { labels[$0] }.joined(separator: ", "))
+    }
+
+    private func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 }
