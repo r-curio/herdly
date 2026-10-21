@@ -159,6 +159,8 @@ private let otherApprovalID = AgentAttentionID.approval(AgentCallIdentity(sessio
     // With nothing needing the user the working rows are the queue, never folded away.
     let unfolded = QueueSections.make(items.filter { $0.id == running }, grouping: .none, project: { _ in nil })
     #expect(unfolded.selectableRows(workingOpen: false) == [running])
+    #expect(!sections.isEmpty)
+    #expect(QueueSections.make([], grouping: .state, project: { _ in nil }).isEmpty)
 }
 
 @Test func arrowKeysMoveTheRowSelectionAndItFollowsItsRow() {
@@ -194,4 +196,16 @@ private let otherApprovalID = AgentAttentionID.approval(AgentCallIdentity(sessio
     #expect(QueueRowSelection.returnAction(for: questionID) == .openCard(questionID))
     let outcome = AgentAttentionID.outcome(AgentTurnIdentity(session: session, turn: "t"))
     #expect(QueueRowSelection.returnAction(for: outcome) == .openSession(outcome))
+}
+
+@Test func singleCardModesNameTheirOneItem() {
+    #expect(NotchPresentationMode.clickedCard(approvalID).singleCard == approvalID)
+    #expect(NotchPresentationMode.clickedCard(approvalID).clickedCard == approvalID)
+    #expect(NotchPresentationMode.agentSpotlight(questionID).singleCard == questionID)
+    #expect(NotchPresentationMode.agentSpotlight(questionID).clickedCard == nil)
+    #expect(NotchPresentationMode.agentSpotlight(questionID).showsSingleCard)
+    for mode: NotchPresentationMode in [.queue, .collapsed] {
+        #expect(mode.singleCard == nil)
+        #expect(!mode.showsSingleCard)
+    }
 }

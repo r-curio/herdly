@@ -184,7 +184,7 @@ extension Companion {
         spentClaudeQuestionTokens.insert(live.request.requestID)
         let noteID = AgentAttentionID.question(question.id)
         guard ClaudeQuestionStore.publish(record, in: live.events) else {
-            updateRowNote(RowNote.claudeAnswer(published: false, delivered: false), for: noteID, userAction: true)
+            updateRowNote(RowNoteUpdate.claudeAnswer(published: false, delivered: false), for: noteID, userAction: true)
             refresh()
             return
         }
@@ -197,7 +197,7 @@ extension Companion {
             }.value
             guard let self else { return }
             // Confirmed delivery is resolution evidence for this call; otherwise the note says so.
-            self.updateRowNote(RowNote.claudeAnswer(published: true, delivered: delivered), for: noteID)
+            self.updateRowNote(RowNoteUpdate.claudeAnswer(published: true, delivered: delivered), for: noteID)
             self.refresh()
         }
     }
@@ -296,7 +296,7 @@ extension Companion {
         let current = queue.items.compactMap(\.question).first { $0.id == question.id }
         let progress = progress(for: question)
         if QuestionAnswerPolicy.rejection(for: current, ghosttyEnabled: ghosttyEnabled, progress: progress,
-                                                          question: index, option: option) != nil {
+                                          question: index, option: option) != nil {
             refresh(); return
         }
         guard let current, previewMode == nil else { return }
@@ -312,8 +312,7 @@ extension Companion {
         let switches = hostSwitches
         // Read on the main actor: a host that is not running holds nothing and is not asked.
         let running = Set(TerminalKeyRelayCheck.hostsToRead(switches: switches).filter(TerminalApps.isRunning))
-        updateRowNote(RowNote.codexKeySending(final: current.isFinalQuestion(index)), for: Self.rowNoteID(current),
-                      userAction: true)
+        noteCodexKeySending(current, index: index)
         refresh()
         Task { @MainActor in
             let result = await Task.detached { () -> (sent: Bool, message: String) in
@@ -341,8 +340,8 @@ extension Companion {
                 return GhosttyNavigation.answer(session: current.session, live: live, keys: [key])
             }.value
             answering = false
-            updateRowNote(RowNote.ghosttyKeyAnswer(sent: result.sent, final: current.isFinalQuestion(index)),
-                          for: Self.rowNoteID(current))
+            updateRowNote(RowNoteUpdate.ghosttyKeyAnswer(sent: result.sent, final: current.isFinalQuestion(index)),
+                          for: Self.codexQuestionNoteID(current))
             if !result.sent { relayLedger.release(current.id, question: index) }
             guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
                 // Answered or ended while the key was in flight: the card is gone and so is the progress.
@@ -375,11 +374,7 @@ extension Companion {
         let start: HerdrQuestionRelay.Start
         switch HerdrQuestionRelay.start(current: current, progress: progress(for: question), ledger: relayLedger,
                                         ghosttyEnabled: ghosttyEnabled, pane: pane, question: index, option: option) {
-        case .failure(.policy):
-            refresh(); return
-        case .failure(.noPane):
-            refresh(); return
-        case .failure(.alreadySent):
+        case .failure:
             refresh(); return
         case let .success(value):
             start = value
@@ -388,8 +383,7 @@ extension Companion {
         answering = true
         relayLedger = start.ledger
         answerProgress[question.id] = start.progress
-        updateRowNote(RowNote.codexKeySending(final: current.isFinalQuestion(index)), for: Self.rowNoteID(current),
-                      userAction: true)
+        noteCodexKeySending(current, index: index)
         refresh()
         let rolloutRoot = Companion.rolloutRoot
         let client = HerdrClient()
@@ -406,7 +400,7 @@ extension Companion {
                 }
             }.value
             answering = false
-            updateRowNote(RowNote.codexKeyAnswer(outcome, final: current.isFinalQuestion(index)), for: Self.rowNoteID(current))
+            noteCodexKeyAnswer(current, index: index, outcome: outcome)
             guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
                 // Answered or ended while the key was in flight: the card is gone and so is the progress.
                 answerProgress[question.id] = nil
@@ -440,7 +434,7 @@ extension Companion {
         guard !answering else { return }
         let current = queue.items.compactMap(\.question).first { $0.id == question.id }
         if AppServerAnswerPolicy.rejection(for: current, book: daemonBook, progress: progress(for: question),
-                                                           question: index, answer: answer) != nil {
+                                           question: index, answer: answer) != nil {
             refresh(); return
         }
         guard let current, current.turn == question.turn, let request = daemonBook.request(for: current),
@@ -495,7 +489,7 @@ extension Companion {
                         ? next.recordingSent(question: index, answer: answer, of: latest, at: now)
                         : next.recordingFailure("Could not write to Codex's daemon; Herdly will not retry. Answer in Codex.")
                 }
-                updateRowNote(RowNote.codexDaemonAnswer(sent: written), for: Self.rowNoteID(current), userAction: true)
+                updateRowNote(RowNoteUpdate.codexDaemonAnswer(sent: written), for: Self.codexQuestionNoteID(current), userAction: true)
             }
             answering = false
             refresh()

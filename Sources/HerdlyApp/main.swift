@@ -522,10 +522,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
               result.work.receipt == verifiedClaudeApprovalReceipts[result.work.requestID],
               result.work.root == verifiedClaudeApprovalRoots[result.work.requestID],
               result.work.receipt.expiresAt > result.work.decidedAt,
-              result.work.scanGeneration == claudeApprovalScanGeneration || current != nil else { return }
+              result.work.scanGeneration == claudeApprovalScanGeneration || current != nil else {
+            // Receipt can no longer be verified against this root and scan; the note says what was written.
+            updateRowNote(.claudeDecisionUnverified(published: result.published), for: .approval(result.work.approvalID))
+            refresh()
+            return
+        }
         verifiedClaudeApprovalReceipts.removeValue(forKey: result.work.requestID)
         verifiedClaudeApprovalRoots.removeValue(forKey: result.work.requestID)
-        updateRowNote(RowNote.claudeDecision(result.work.decision, published: result.published, delivered: result.delivered),
+        updateRowNote(RowNoteUpdate.claudeDecision(result.work.decision, published: result.published, delivered: result.delivered),
                       for: .approval(result.work.approvalID))
         refresh()
     }
@@ -577,12 +582,25 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var workingFoldOpen = false {
         didSet { if workingFoldOpen != oldValue { reconcileSelection() } }
     }
+    /// The rows the open panel shows, under their group headings: the explicit queue (working rows
+    /// folded below anything that needs the user), or only the one card. A card is never grouped.
+    /// The view draws these and the keyboard selection steps through them.
+    var visibleSections: QueueSections {
+        let items: [AgentAttentionItem]
+        if presentationMode.showsAll {
+            items = queueAgentAttentionItems
+        } else if let id = presentationMode.singleCard {
+            items = orderedAgentAttentionItems.filter { $0.id == id }
+        } else {
+            items = []
+        }
+        let grouping = presentationMode.showsAll ? appearance.grouping : .none
+        return QueueSections.make(items, grouping: grouping, project: projectFolder(for:))
+    }
     /// The open queue's rows in reading order as they are on screen: the arrows step through these,
     /// skipping a closed working fold.
     var selectableRows: [AgentAttentionID] {
-        guard presentationMode.showsAll else { return [] }
-        return QueueSections.make(queueAgentAttentionItems, grouping: appearance.grouping, project: projectFolder(for:))
-            .selectableRows(workingOpen: workingFoldOpen)
+        presentationMode.showsAll ? visibleSections.selectableRows(workingOpen: workingFoldOpen) : []
     }
     /// Fresh response previews are intentionally process-memory only.
     @Published private(set) var completionPreviews: [CompletionIdentity: CompletionPreviewAvailability] = [:]
@@ -1815,10 +1833,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let width = appearance.panelWidth
         let layout = NotchPlacement.strip(on: display, expanded: expanded, wing: wing, centerLabel: center, width: width)
         if stripLayout != layout { stripLayout = layout }
-        let singleCard: Bool = switch presentationMode {
-        case .agentSpotlight, .clickedCard: true
-        default: false
-        }
+        let singleCard = presentationMode.showsSingleCard
         let rows = presentationMode.showsAll ? orderedAgentAttentionItems.count : (singleCard ? 1 : 0)
         var frame = contentHeight > 0
             ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, wing: wing, centerLabel: center,

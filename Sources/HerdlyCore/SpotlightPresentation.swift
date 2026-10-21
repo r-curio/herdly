@@ -20,6 +20,18 @@ public enum NotchPresentationMode: Equatable, Sendable {
 
     public var expanded: Bool { self != .collapsed }
     public var showsAll: Bool { self == .queue }
+    /// The one item a spotlight or clicked card shows; nil for the queue and the collapsed strip.
+    public var singleCard: AgentAttentionID? {
+        switch self {
+        case let .agentSpotlight(id), let .clickedCard(id): return id
+        case .collapsed, .spotlight, .queue: return nil
+        }
+    }
+    public var showsSingleCard: Bool { singleCard != nil }
+    public var clickedCard: AgentAttentionID? {
+        if case let .clickedCard(id) = self { return id }
+        return nil
+    }
 }
 
 /// Chooses among fresh source-aware cards after each card class has applied its own

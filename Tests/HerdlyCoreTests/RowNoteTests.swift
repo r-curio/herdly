@@ -78,11 +78,11 @@ private let question = AgentAttentionID.question(AgentCallIdentity(session: code
 
 @Test func malformedOrPartialInputNeverCreatesANoteImplyingDelivery() {
     // Delivery without publication is contradictory: treat it as not delivered.
-    #expect(RowNote.claudeDecision(.allowOnce, published: false, delivered: true) == .record(.notDelivered))
-    #expect(RowNote.claudeDecision(.allowOnce, published: true, delivered: false) == .record(.sentUnconfirmed))
-    #expect(RowNote.claudeDecision(.allowOnce, published: true, delivered: true) == .record(.approvalReceived))
+    #expect(RowNoteUpdate.claudeDecision(.allowOnce, published: false, delivered: true) == .record(.notDelivered))
+    #expect(RowNoteUpdate.claudeDecision(.allowOnce, published: true, delivered: false) == .record(.sentUnconfirmed))
+    #expect(RowNoteUpdate.claudeDecision(.allowOnce, published: true, delivered: true) == .record(.approvalReceived))
     // A no-decision release is never the user's decision and changes no note.
-    #expect(RowNote.claudeDecision(.noDecision, published: true, delivered: true) == .unchanged)
+    #expect(RowNoteUpdate.claudeDecision(.noDecision, published: true, delivered: true) == .unchanged)
 
     var notes = RowNotes()
     // Not a request at all.
@@ -97,11 +97,11 @@ private let question = AgentAttentionID.question(AgentCallIdentity(session: code
 }
 
 @Test func aConfirmedDenyIsResolutionEvidenceAndClearsTheNote() {
-    #expect(RowNote.claudeDecision(.deny, published: true, delivered: true) == .resolve)
-    #expect(RowNote.claudeDecision(.deny, published: true, delivered: false) == .record(.sentUnconfirmed))
+    #expect(RowNoteUpdate.claudeDecision(.deny, published: true, delivered: true) == .resolve)
+    #expect(RowNoteUpdate.claudeDecision(.deny, published: true, delivered: false) == .record(.sentUnconfirmed))
     var notes = RowNotes()
     notes.record(.sending, for: approval, pending: [approval])
-    notes.apply(RowNote.claudeDecision(.deny, published: true, delivered: true), for: approval, pending: [approval])
+    notes.apply(RowNoteUpdate.claudeDecision(.deny, published: true, delivered: true), for: approval, pending: [approval])
     #expect(notes.note(for: approval) == nil)
     // A late duplicate confirmation cannot bring a note back.
     notes.apply(.record(.sentUnconfirmed), for: approval, pending: [approval])
@@ -109,12 +109,12 @@ private let question = AgentAttentionID.question(AgentCallIdentity(session: code
 }
 
 @Test func aClaudeAnswerAndADaemonAnswerNoteOnlyWhatWasSent() {
-    #expect(RowNote.claudeAnswer(published: false, delivered: true) == .record(.notDelivered))
-    #expect(RowNote.claudeAnswer(published: true, delivered: false) == .record(.sentUnconfirmed))
+    #expect(RowNoteUpdate.claudeAnswer(published: false, delivered: true) == .record(.notDelivered))
+    #expect(RowNoteUpdate.claudeAnswer(published: true, delivered: false) == .record(.sentUnconfirmed))
     // Claude's helper confirming the answer is resolution evidence for that call: no note remains.
-    #expect(RowNote.claudeAnswer(published: true, delivered: true) == .resolve)
-    #expect(RowNote.codexDaemonAnswer(sent: true) == .record(.awaitingCodex))
-    #expect(RowNote.codexDaemonAnswer(sent: false) == .withdraw)
+    #expect(RowNoteUpdate.claudeAnswer(published: true, delivered: true) == .resolve)
+    #expect(RowNoteUpdate.codexDaemonAnswer(sent: true) == .record(.awaitingCodex))
+    #expect(RowNoteUpdate.codexDaemonAnswer(sent: false) == .withdraw)
 }
 
 @Test func onlyTheFinalQuestionOfAKeyedSetNotesAndAKeyThatMayHaveBeenWrittenIsUnconfirmed() {
@@ -128,16 +128,28 @@ private let question = AgentAttentionID.question(AgentCallIdentity(session: code
     #expect(one.isFinalQuestion(0))
 
     // A non-final key writes no note and leaves no card.
-    #expect(RowNote.codexKeySending(final: false) == .unchanged)
-    #expect(RowNote.codexKeySending(final: true) == .record(.sending))
-    #expect(RowNote.codexKeyAnswer(.delivered(.queued), final: false) == .unchanged)
-    #expect(RowNote.codexKeyAnswer(.delivered(.possiblySent(.timeout)), final: false) == .unchanged)
+    #expect(RowNoteUpdate.codexKeySending(final: false) == .unchanged)
+    #expect(RowNoteUpdate.codexKeySending(final: true) == .record(.sending))
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.queued), final: false) == .unchanged)
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.possiblySent(.timeout)), final: false) == .unchanged)
     // Final key: written → waiting for Codex; may have been written → not confirmed; nothing sent → withdrawn.
-    #expect(RowNote.codexKeyAnswer(.delivered(.queued), final: true) == .record(.awaitingCodex))
-    #expect(RowNote.codexKeyAnswer(.delivered(.possiblySent(.timeout)), final: true) == .record(.sentUnconfirmed))
-    #expect(RowNote.codexKeyAnswer(.delivered(.notSent(.notRunning)), final: true) == .withdraw)
-    #expect(RowNote.codexKeyAnswer(.vetoed(.leftHerdr), final: true) == .withdraw)
-    #expect(RowNote.ghosttyKeyAnswer(sent: true, final: true) == .record(.awaitingCodex))
-    #expect(RowNote.ghosttyKeyAnswer(sent: true, final: false) == .unchanged)
-    #expect(RowNote.ghosttyKeyAnswer(sent: false, final: true) == .withdraw)
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.queued), final: true) == .record(.awaitingCodex))
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.possiblySent(.timeout)), final: true) == .record(.sentUnconfirmed))
+    #expect(RowNoteUpdate.codexKeyAnswer(.delivered(.notSent(.notRunning)), final: true) == .withdraw)
+    #expect(RowNoteUpdate.codexKeyAnswer(.vetoed(.leftHerdr), final: true) == .withdraw)
+    #expect(RowNoteUpdate.ghosttyKeyAnswer(sent: true, final: true) == .record(.awaitingCodex))
+    #expect(RowNoteUpdate.ghosttyKeyAnswer(sent: true, final: false) == .unchanged)
+    #expect(RowNoteUpdate.ghosttyKeyAnswer(sent: false, final: true) == .withdraw)
+}
+
+@Test func aClaudeDecisionWhoseCheckGoesStaleSettlesByWhatWasWritten() {
+    // The root, receipt or scan changed before the result came back: Herdly cannot verify receipt.
+    #expect(RowNoteUpdate.claudeDecisionUnverified(published: true) == .record(.sentUnconfirmed))
+    #expect(RowNoteUpdate.claudeDecisionUnverified(published: false) == .withdraw)
+    var notes = RowNotes()
+    notes.record(.sending, for: approval, pending: [approval])
+    notes.apply(RowNoteUpdate.claudeDecisionUnverified(published: true), for: approval, pending: [approval])
+    #expect(notes.note(for: approval) == .sentUnconfirmed)
+    notes.apply(RowNoteUpdate.claudeDecisionUnverified(published: false), for: approval, pending: [approval])
+    #expect(notes.note(for: approval) == nil)
 }

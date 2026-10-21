@@ -224,6 +224,8 @@ public struct QueueSections: Equatable, Sendable {
 
     /// Working rows fold only when something above them needs the user; otherwise they are the queue.
     public var foldsWorking: Bool { !attention.isEmpty && workingCount > 0 }
+    /// No rows at all.
+    public var isEmpty: Bool { attention.isEmpty && working.isEmpty }
 
     /// The rows the keyboard selection steps through, in reading order. Rows in a closed working
     /// fold are not on screen and are skipped.

@@ -679,13 +679,6 @@ struct Notch: View {
                                names: sessionNames)
     }
 
-    /// The open queue's rows under their group headings, with working rows folded below anything
-    /// that needs the user; a spotlight card is never grouped.
-    private var visibleSections: QueueSections {
-        let grouping = model.presentationMode.showsAll ? model.appearance.grouping : .none
-        return QueueSections.make(visibleItems, grouping: grouping, project: model.projectFolder(for:))
-    }
-
     /// The strip's center label, when the profile shows one and the layout has room for it.
     private var centerLabel: String? {
         guard model.stripLayout.gap > 0 else { return nil }
@@ -830,28 +823,13 @@ struct Notch: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    /// Which rows the open panel shows: the explicit queue, or only the notification that opened it.
-    private var visibleItems: [AgentAttentionItem] {
-        switch model.presentationMode {
-        case .collapsed: return []
-        case .queue: return model.queueAgentAttentionItems
-        case .agentSpotlight(let id), .clickedCard(let id): return model.orderedAgentAttentionItems.filter { $0.id == id }
-        case .spotlight: return []
-        }
-    }
-
     private var showsTestRow: Bool {
         model.attention.pending && !model.desktopForeground && model.presentationMode.showsAll
     }
 
     /// A spotlit or clicked card renders the single-item spotlight body.
     private func isSpotlight(_ item: AgentAttentionItem) -> Bool {
-        model.presentationMode == .agentSpotlight(item.id) || model.presentationMode == .clickedCard(item.id)
-    }
-
-    private var showsClickedCard: Bool {
-        if case .clickedCard = model.presentationMode { return true }
-        return false
+        model.presentationMode.singleCard == item.id
     }
 
     /// An approval or question row in the full queue opens as its own card when clicked (D5, D18).
@@ -1833,11 +1811,11 @@ struct Notch: View {
 
             if model.expanded {
                 Rectangle().fill(NotchStyle.seam).frame(height: 1).padding(.bottom, 12)
-                let sections = visibleSections
+                let sections = model.visibleSections
                 let rowTransition = QueueMotion.rowTransition(reduceMotion: model.reduceMotion)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
-                        if showsClickedCard { clickedCardBar }
+                        if model.presentationMode.clickedCard != nil { clickedCardBar }
                         groupRows(sections.attention)
                         if sections.foldsWorking {
                             NotchDisclosure(title: "\(sections.workingCount) working", expanded: $model.workingFoldOpen) {
@@ -1846,7 +1824,7 @@ struct Notch: View {
                         } else {
                             groupRows(sections.working)
                         }
-                        if model.presentationMode.showsAll && visibleItems.isEmpty && !showsTestRow {
+                        if model.presentationMode.showsAll && sections.isEmpty && !showsTestRow {
                             emptyQueueRow(model.emptyQueueReading)
                                 .transition(rowTransition)
                         }

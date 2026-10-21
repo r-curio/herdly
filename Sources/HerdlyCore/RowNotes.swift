@@ -27,51 +27,6 @@ public enum RowNote: Equatable, Sendable, CaseIterable {
 
     /// Whether the row offers Open beside the note.
     public var offersOpen: Bool { self == .notDelivered }
-
-    /// A Claude approval decision's delivery settled. Delivery counts only when the decision was
-    /// published and the helper confirmed it. A confirmed denial is resolution evidence for the call
-    /// (there is no agreed note for it), so its note clears; a no-decision release changes nothing.
-    public static func claudeDecision(_ decision: ApprovalDecision, published: Bool, delivered: Bool) -> RowNoteUpdate {
-        guard decision.isUserDecision else { return .unchanged }
-        guard published else { return .record(.notDelivered) }
-        guard delivered else { return .record(.sentUnconfirmed) }
-        return decision == .allowOnce ? .record(.approvalReceived) : .resolve
-    }
-
-    /// A Claude question answer's delivery settled. The helper's confirmation is resolution evidence
-    /// for the call, so the note clears.
-    public static func claudeAnswer(published: Bool, delivered: Bool) -> RowNoteUpdate {
-        guard published else { return .record(.notDelivered) }
-        return delivered ? .resolve : .record(.sentUnconfirmed)
-    }
-
-    /// The daemon's one write of a whole Codex answer. Nothing written withdraws the note.
-    public static func codexDaemonAnswer(sent: Bool) -> RowNoteUpdate {
-        sent ? .record(.awaitingCodex) : .withdraw
-    }
-
-    /// A Codex question's digit is about to be typed. Only the final question of the call notes and
-    /// leaves the clicked card; earlier questions stay unanswered (their wording is #321).
-    public static func codexKeySending(final: Bool) -> RowNoteUpdate {
-        final ? .record(.sending) : .unchanged
-    }
-
-    /// A typed digit settled (herdr, tmux, Zellij, WezTerm). Written → waiting for Codex; may have
-    /// been written → not confirmed; nothing written, or vetoed → the note is withdrawn.
-    public static func codexKeyAnswer(_ outcome: HerdrQuestionRelay.Outcome, final: Bool) -> RowNoteUpdate {
-        guard final else { return .unchanged }
-        switch outcome {
-        case .delivered(.queued): return .record(.awaitingCodex)
-        case .delivered(.possiblySent): return .record(.sentUnconfirmed)
-        case .delivered(.notSent), .vetoed: return .withdraw
-        }
-    }
-
-    /// A Ghostty digit settled: Ghostty reports only whether it sent the key.
-    public static func ghosttyKeyAnswer(sent: Bool, final: Bool) -> RowNoteUpdate {
-        guard final else { return .unchanged }
-        return sent ? .record(.awaitingCodex) : .withdraw
-    }
 }
 
 /// One change to a request's row note.
@@ -82,6 +37,59 @@ public enum RowNoteUpdate: Equatable, Sendable {
     /// Nothing was sent: the note goes, and a later send may note again.
     case withdraw
     case unchanged
+}
+
+extension RowNoteUpdate {
+    /// A Claude approval decision's delivery settled. Delivery counts only when the decision was
+    /// published and the helper confirmed it. A confirmed denial is resolution evidence for the call
+    /// (there is no agreed note for it), so its note clears; a no-decision release changes nothing.
+    public static func claudeDecision(_ decision: ApprovalDecision, published: Bool, delivered: Bool) -> Self {
+        guard decision.isUserDecision else { return .unchanged }
+        guard published else { return .record(.notDelivered) }
+        guard delivered else { return .record(.sentUnconfirmed) }
+        return decision == .allowOnce ? .record(.approvalReceived) : .resolve
+    }
+
+    /// A Claude question answer's delivery settled. The helper's confirmation is resolution evidence
+    /// for the call, so the note clears.
+    public static func claudeAnswer(published: Bool, delivered: Bool) -> Self {
+        guard published else { return .record(.notDelivered) }
+        return delivered ? .resolve : .record(.sentUnconfirmed)
+    }
+
+    /// The daemon's one write of a whole Codex answer. Nothing written withdraws the note.
+    public static func codexDaemonAnswer(sent: Bool) -> Self {
+        sent ? .record(.awaitingCodex) : .withdraw
+    }
+
+    /// A Codex question's digit is about to be typed. Only the final question of the call notes and
+    /// leaves the clicked card; earlier questions stay unanswered (their wording is #321).
+    public static func codexKeySending(final: Bool) -> Self {
+        final ? .record(.sending) : .unchanged
+    }
+
+    /// A typed digit settled (herdr, tmux, Zellij, WezTerm). Written → waiting for Codex; may have
+    /// been written → not confirmed; nothing written, or vetoed → the note is withdrawn.
+    public static func codexKeyAnswer(_ outcome: HerdrQuestionRelay.Outcome, final: Bool) -> Self {
+        guard final else { return .unchanged }
+        switch outcome {
+        case .delivered(.queued): return .record(.awaitingCodex)
+        case .delivered(.possiblySent): return .record(.sentUnconfirmed)
+        case .delivered(.notSent), .vetoed: return .withdraw
+        }
+    }
+
+    /// A Ghostty digit settled: Ghostty reports only whether it sent the key.
+    public static func ghosttyKeyAnswer(sent: Bool, final: Bool) -> Self {
+        guard final else { return .unchanged }
+        return sent ? .record(.awaitingCodex) : .withdraw
+    }
+
+    /// A Claude approval decision whose root, receipt or scan changed before its result came back:
+    /// receipt cannot be verified. Written → not confirmed; nothing written → the note is withdrawn.
+    public static func claudeDecisionUnverified(published: Bool) -> Self {
+        published ? .record(.sentUnconfirmed) : .withdraw
+    }
 }
 
 /// Row notes by the exact request identity (source, scope, session, turn and call). A note is

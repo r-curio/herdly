@@ -30,7 +30,21 @@ extension Companion {
         if next != rowNotes { rowNotes = next }
     }
 
-    static func rowNoteID(_ question: AttentionQuestion) -> AgentAttentionID {
+    /// A Codex question's note identity, as the source-neutral queue holds it.
+    static func codexQuestionNoteID(_ question: AttentionQuestion) -> AgentAttentionID {
         .question(CodexAttentionAdapter.question(from: question).id)
+    }
+
+    /// A typed digit for question `index` is about to be sent (Ghostty, herdr, tmux, Zellij, WezTerm).
+    /// Only the call's final question notes and leaves the clicked card.
+    func noteCodexKeySending(_ question: AttentionQuestion, index: Int) {
+        updateRowNote(.codexKeySending(final: question.isFinalQuestion(index)), for: Self.codexQuestionNoteID(question),
+                      userAction: true)
+    }
+
+    /// A typed digit settled (herdr, tmux, Zellij, WezTerm).
+    func noteCodexKeyAnswer(_ question: AttentionQuestion, index: Int, outcome: HerdrQuestionRelay.Outcome) {
+        updateRowNote(.codexKeyAnswer(outcome, final: question.isFinalQuestion(index)),
+                      for: Self.codexQuestionNoteID(question))
     }
 }
