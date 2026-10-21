@@ -1177,7 +1177,7 @@ struct Notch: View {
                         }
                     }
                     Spacer(minLength: 8)
-                    if !folded { RowTag(text: QueueRowPresentation.sourceTag(item.session)) }
+                    
                     rowAge(item)
                 }
                 }
@@ -1428,7 +1428,7 @@ struct Notch: View {
 
     private func earlierToggle(_ item: AgentAttentionItem, open: Binding<Bool>) -> some View {
         EarlierFold(name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
-                    tag: QueueRowPresentation.attentionTag(item), spoken: rowHeading(item),
+                    tag: QueueRowPresentation.exception(item)?.word, spoken: rowHeading(item),
                     subject: rowSubject(item), reduceMotion: model.reduceMotion, open: open)
     }
 
@@ -1480,7 +1480,7 @@ struct Notch: View {
                     .lineLimit(1).truncationMode(.tail)
                     .help(model.rowDirectory(for: item) ?? place)
             }
-            if let tag = QueueRowPresentation.attentionTag(item) { RowTag(text: tag).layoutPriority(3) }
+            if let tag = QueueRowPresentation.exception(item)?.word { RowTag(text: tag).layoutPriority(3) }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(rowHeading(item))

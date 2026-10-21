@@ -392,6 +392,23 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         return pinned + rest + earlierItems
     }
 
+    /// The open queue's rows: `items(at:earlier:sort:)` with live approvals ordered by soonest
+    /// deadline (a merged request already holds its `min(expiresAt)`), then arrival, then identity, in
+    /// either sort (D12). Presentation only: the strip, spotlight, counts, and Codex's own execution
+    /// keep reading the priority order, and no deadline moves.
+    public func queueItems(at now: Double, earlier: EarlierDelay = .fiveMinutes,
+                           sort: QueueSort = .needsAttention) -> [AgentAttentionItem] {
+        let rows = items(at: now, earlier: earlier, sort: sort)
+        let live = rows.prefix { $0.kind == .actionableApproval }
+        let bySoonestDeadline = live.sorted {
+            let first = $0.approval?.expiresAt ?? .infinity, second = $1.approval?.expiresAt ?? .infinity
+            if first != second { return first < second }
+            if $0.arrivedAt != $1.arrivedAt { return $0.arrivedAt < $1.arrivedAt }
+            return Self.sortKey($0.id) < Self.sortKey($1.id)
+        }
+        return bySoonestDeadline + rows.dropFirst(live.count)
+    }
+
     public mutating func apply(_ observation: AgentObservation, now: Double? = nil) {
         if let now { self.now = now }
         switch observation {

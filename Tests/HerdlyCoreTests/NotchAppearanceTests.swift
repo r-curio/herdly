@@ -82,6 +82,22 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
     #expect(appearance.grouping == .none)
     #expect(appearance.earlier == .fiveMinutes)
     #expect(appearance.panelWidth == .standard)
+    #expect(appearance.labelFormat == .repoAtBranch)
+}
+
+@Test(arguments: QueueLabelFormat.allCases)
+func labelFormatRoundTripsPerProfileAndAnUnknownValueFallsBack(format: QueueLabelFormat) {
+    var stored: [String: String] = [:]
+    var appearance = NotchAppearance.standard
+    appearance.labelFormat = format
+    appearance.save(profile: .macBookNotch) { stored[$0] = $1 }
+    stored["appearance.externalDisplay.labelFormat"] = "repoAndPath"
+
+    #expect(NotchAppearance.load(profile: .macBookNotch) { stored[$0] }.labelFormat == format)
+    #expect(NotchAppearance.load(profile: .externalDisplay) { stored[$0] }.labelFormat == .repoAtBranch)
+    // A profile saved before the field existed reads the default.
+    stored.removeValue(forKey: "appearance.macBookNotch.labelFormat")
+    #expect(NotchAppearance.load(profile: .macBookNotch) { stored[$0] }.labelFormat == .repoAtBranch)
 }
 
 @Test func appearanceStoreRoundTripsEachProfileSeparatelyAndIgnoresUnknownValues() {
@@ -246,13 +262,14 @@ func eachSpriteKindIsTwoSameSizedFramesWithinTheEighteenByTenPointBox(kind: Spri
     queue.apply(.running(AgentRunning(session: session("other", .claude), turn: "t5", arrivedAt: 5)))
     let items = queue.items(at: 6)
 
-    let none = QueueSections.make(items, grouping: .none, project: { _ in nil })
+    let none = QueueSections.make(items, grouping: .none, project: { _ in nil }, kindSections: true)
     let byState = QueueSections.make(items, grouping: .state, project: { _ in nil })
     let byAgent = QueueSections.make(items, grouping: .agent, project: { _ in nil })
 
     // The split matches the to-check badge and keeps queue order inside each part.
     #expect(none.foldsWorking && none.workingCount == 2)
-    #expect(none.attention.map(\.heading) == ["Needs you"])
+    // Without grouping, kind sections replace the old "Needs you" heading (D13).
+    #expect(none.attention.map(\.heading) == ["Approve", "Answer", "Check"])
     #expect(none.attention.flatMap(\.items).map(\.session.session) == ["approval", "question", "done"])
     #expect(none.working.flatMap(\.items).map(\.session.session) == ["busy", "other"])
     #expect(none.attention.flatMap(\.items).count == AgentStripSummary.make(items: items).toCheck)

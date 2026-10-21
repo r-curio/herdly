@@ -1,0 +1,187 @@
+import Foundation
+import Testing
+@testable import HerdlyCore
+
+private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSessionIdentity {
+    AgentSessionIdentity(source: source, sourceScope: source.rawValue, session: name, surface: .cli)
+}
+
+// MARK: Approval order (D12)
+
+@Test(arguments: QueueSort.allCases)
+func liveApprovalsLeadTheOpenQueueBySoonestDeadline(sort: QueueSort) {
+    var queue = AgentAttentionQueue()
+    // Arrival order a, b, c; deadline order c, a, b.
+    queue.apply(.approval(AgentApproval(session: session("a"), turn: "t1", call: "a1", arrivedAt: 10, expiresAt: 50)))
+    queue.apply(.approval(AgentApproval(session: session("b"), turn: "t2", call: "b1", arrivedAt: 11, expiresAt: 60)))
+    queue.apply(.approval(AgentApproval(session: session("c"), turn: "t3", call: "c1", arrivedAt: 12, expiresAt: 40)))
+    queue.apply(.question(AgentQuestion(session: session("q"), turn: "t4", call: "q1", arrivedAt: 1)))
+    queue.apply(.outcome(AgentOutcome(session: session("done"), turn: "t5", status: .finished, arrivedAt: 2)))
+
+    let rows = queue.queueItems(at: 20, sort: sort).map(\.session.session)
+    #expect(rows == ["c", "a", "b", "q", "done"])
+}
+
+@Test(arguments: QueueSort.allCases)
+func aMergedApprovalSortsByItsSoonestDeadline(sort: QueueSort) {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(AgentApproval(session: session("first"), turn: "t1", call: "a1", arrivedAt: 10, expiresAt: 40)))
+    queue.apply(.approval(AgentApproval(session: session("merged"), turn: "t2", call: "m1", arrivedAt: 11, expiresAt: 70)))
+    // The same request seen again with an earlier deadline: the merged request keeps min(expiresAt).
+    queue.apply(.approval(AgentApproval(session: session("merged"), turn: "t2", call: "m1", arrivedAt: 12, expiresAt: 35)))
+
+    #expect(queue.queueItems(at: 20, sort: sort).map(\.session.session) == ["merged", "first"])
+}
+
+@Test func equalDeadlinesFallBackToArrivalThenIdentity() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(AgentApproval(session: session("late"), turn: "t1", call: "a1", arrivedAt: 12, expiresAt: 40)))
+    queue.apply(.approval(AgentApproval(session: session("y"), turn: "t2", call: "a1", arrivedAt: 10, expiresAt: 40)))
+    queue.apply(.approval(AgentApproval(session: session("x"), turn: "t3", call: "a1", arrivedAt: 10, expiresAt: 40)))
+
+    #expect(queue.queueItems(at: 20).map(\.session.session) == ["x", "y", "late"])
+}
+
+@Test func deadlineOrderIsOpenQueuePresentationOnly() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(AgentApproval(session: session("old"), turn: "t1", call: "a1", arrivedAt: 10, expiresAt: 50)))
+    queue.apply(.approval(AgentApproval(session: session("soon"), turn: "t2", call: "a1", arrivedAt: 11, expiresAt: 30)))
+
+    // The strip, spotlight, and counts read the priority order, which stays oldest arrival first.
+    #expect(queue.items(at: 20).map(\.session.session) == ["old", "soon"])
+    #expect(queue.queueItems(at: 20).map(\.session.session) == ["soon", "old"])
+    // Both orders hold the same rows.
+    #expect(Set(queue.items(at: 20).map(\.id)) == Set(queue.queueItems(at: 20).map(\.id)))
+    // An expired request is handed back and leaves the live group, whatever its deadline was.
+    #expect(queue.queueItems(at: 35).map(\.kind) == [.actionableApproval, .handedBackApproval])
+}
+
+// MARK: Kind sections (D13)
+
+/// A queue with `approvals` live approvals, `questions` waiting questions, `results` finished results,
+/// and `running` working rows, each in its own session.
+private func queue(approvals: Int = 0, questions: Int = 0, results: Int = 0, running: Int = 0) -> [AgentAttentionItem] {
+    var queue = AgentAttentionQueue()
+    for index in 0..<approvals {
+        queue.apply(.approval(AgentApproval(session: session("approve-\(index)"), turn: "t", call: "a",
+                                            arrivedAt: Double(index), expiresAt: 100 + Double(index))))
+    }
+    for index in 0..<questions {
+        queue.apply(.question(AgentQuestion(session: session("answer-\(index)"), turn: "t", call: "q", arrivedAt: Double(index))))
+    }
+    for index in 0..<results {
+        queue.apply(.outcome(AgentOutcome(session: session("check-\(index)"), turn: "t", status: .finished, arrivedAt: 50 + Double(index))))
+    }
+    for index in 0..<running {
+        queue.apply(.running(AgentRunning(session: session("run-\(index)"), turn: "t", arrivedAt: Double(index))))
+    }
+    return queue.queueItems(at: 60)
+}
+
+private func kindSections(_ items: [AgentAttentionItem], open: Set<QueueKindSection> = []) -> QueueSections {
+    QueueSections.make(items, grouping: .none, project: { _ in nil }, kindSections: true, openSections: open)
+}
+
+@Test func rowsThatNeedTheUserSitUnderApproveAnswerAndCheck() {
+    var raw = AgentAttentionQueue()
+    raw.apply(.approval(AgentApproval(session: session("live"), turn: "t", call: "a", arrivedAt: 1)))
+    raw.apply(.approval(AgentApproval(session: session("handed"), turn: "t", call: "a", arrivedAt: 0, expiresAt: 5)))
+    raw.apply(.question(AgentQuestion(session: session("asked"), turn: "t", call: "q", arrivedAt: 2)))
+    raw.apply(.outcome(AgentOutcome(session: session("done"), turn: "t", status: .failed, arrivedAt: 3)))
+    raw.apply(.running(AgentRunning(session: session("idle", .claude), turn: "t", arrivedAt: 4, status: .waiting)))
+    raw.apply(.running(AgentRunning(session: session("busy"), turn: "t", arrivedAt: 5)))
+    let sections = kindSections(raw.queueItems(at: 10))
+
+    #expect(sections.attention.map(\.heading) == ["Approve", "Answer", "Check"])
+    #expect(sections.attention.map(\.section) == [.approve, .answer, .check])
+    #expect(sections.attention.map(\.count) == [1, 1, 3])
+    #expect(sections.attention[2].items.map(\.session.session) == ["handed", "idle", "done"])
+    // Running rows keep their "N working" fold, with no heading of their own.
+    #expect(sections.foldsWorking && sections.workingCount == 1)
+    #expect(sections.working.map(\.heading) == [nil])
+}
+
+@Test func anEmptySectionAndItsHeadingDisappear() {
+    let sections = kindSections(queue(approvals: 1, results: 2))
+    #expect(sections.attention.map(\.heading) == ["Approve", "Check"])
+
+    // With nothing needing the user, the working rows are the queue: no section heading.
+    let working = kindSections(queue(running: 2))
+    #expect(working.attention.isEmpty && !working.foldsWorking)
+    #expect(working.working.map(\.heading) == [nil])
+}
+
+@Test func otherGroupingsAndCardsKeepTheirOwnHeadings() {
+    let items = queue(approvals: 1, questions: 5, results: 14, running: 1)
+    let byState = QueueSections.make(items, grouping: .state, project: { _ in nil }, kindSections: true)
+    #expect(byState.attention.map(\.heading) == ["Needs you", "Done"])
+    #expect(byState.attention.allSatisfy { $0.folded == 0 })
+    // A spotlight or clicked card is one row with no heading.
+    let card = QueueSections.make(Array(items.prefix(1)), grouping: .none, project: { _ in nil })
+    #expect(card.attention.map(\.heading) == [nil])
+}
+
+// MARK: "+N more" fold (D13)
+
+@Test func theCalmerGlanceArtboardFitsWithoutFolding() {
+    // 5ZV-0: Approve 2, Answer 3, Check 5 is ten rows, inside the eleven-line budget.
+    let sections = kindSections(queue(approvals: 2, questions: 3, results: 5))
+    #expect(sections.attention.map(\.items.count) == [2, 3, 5])
+    #expect(sections.attention.map(\.folded) == [0, 0, 0])
+}
+
+@Test func theThirtyFiveThingsArtboardFoldsAnswerAndCheck() {
+    // 4C9-0: 4 approvals, 8 questions, 14 results.
+    let sections = kindSections(queue(approvals: 4, questions: 8, results: 14, running: 9))
+    #expect(sections.attention.map(\.heading) == ["Approve", "Answer", "Check"])
+    #expect(sections.attention.map(\.count) == [4, 8, 14])
+    #expect(sections.attention.map(\.items.count) == [4, 3, 2])
+    #expect(sections.attention.map(\.folded) == [0, 5, 12])
+    // The rows shown are each section's first rows, in queue order.
+    #expect(sections.attention[1].items.map(\.session.session) == ["answer-0", "answer-1", "answer-2"])
+}
+
+@Test func foldAllocationFollowsTheElevenLineBudget() {
+    // Everything fits: nothing folds, even a section longer than three rows.
+    #expect(QueueFold.shownRows(approvals: 0, sections: [5, 6]) == [5, 6])
+    #expect(QueueFold.shownRows(approvals: 4, sections: [3, 4]) == [3, 4])
+    // One row too many: the earlier section folds to three, the last takes what is left.
+    #expect(QueueFold.shownRows(approvals: 4, sections: [8, 14]) == [3, 2])
+    #expect(QueueFold.shownRows(approvals: 0, sections: [12]) == [10])
+    // A section never folds a single row: it shows that row instead.
+    #expect(QueueFold.shownRows(approvals: 0, sections: [4, 9]) == [4, 6])
+    // Two lines left for three rows: one row and its "+2 more".
+    #expect(QueueFold.shownRows(approvals: 9, sections: [3]) == [1])
+    // Live approvals never fold, however many there are; every later section keeps one row.
+    #expect(QueueFold.shownRows(approvals: 20, sections: [8, 14]) == [1, 1])
+    #expect(QueueFold.shownRows(approvals: 20, sections: [2, 1]) == [2, 1])
+    #expect(QueueFold.shownRows(approvals: 11, sections: [1, 3]) == [1, 1])
+    #expect(QueueFold.shownRows(approvals: 0, sections: []) == [])
+}
+
+@Test func approvalsNeverFold() {
+    let sections = kindSections(queue(approvals: 15, questions: 4, results: 4))
+    #expect(sections.attention.map(\.items.count) == [15, 1, 1])
+    #expect(sections.attention.map(\.folded) == [0, 3, 3])
+}
+
+@Test func anOpenedFoldShowsTheRestOfThatSectionOnly() {
+    let items = queue(approvals: 4, questions: 8, results: 14)
+    let opened = kindSections(items, open: [.answer])
+    #expect(opened.attention.map(\.items.count) == [4, 8, 2])
+    #expect(opened.attention.map(\.folded) == [0, 0, 12])
+}
+
+@Test func keyboardSelectionSkipsFoldedRows() {
+    let items = queue(approvals: 4, questions: 8, results: 14, running: 1)
+    let sections = kindSections(items)
+    let rows = sections.selectableRows(workingOpen: false)
+    #expect(rows.count == 4 + 3 + 2)
+    #expect(rows == sections.attention.flatMap(\.items).map(\.id))
+    let folded = Set(items.map(\.id)).subtracting(rows)
+    #expect(folded.count == 5 + 12 + 1)
+
+    var selection = QueueRowSelection(selected: items.first { $0.session.session == "answer-6" }?.id)
+    selection.reconcile(rows: rows)
+    #expect(selection.selected == nil)
+}
