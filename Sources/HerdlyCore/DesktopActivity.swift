@@ -78,18 +78,23 @@ public struct DesktopCompletion: Equatable, Identifiable, Sendable {
     public var id: TurnIdentity { TurnIdentity(session: session, turn: turn) }
 }
 
-/// Codex's own background jobs, which are not the user's work. Codex runs memory consolidation as a
-/// session of its own with the user's hooks: it reports SessionStart, UserPromptSubmit and tool
-/// events like any session, but writes no rollout and was seen shutting down without Stop or
-/// SessionEnd, so its row would stay working. Codex submits the prompt itself, and this heading is
-/// a constant in each Codex checked (CLI 0.154.0, 0.160.1 and 0.161.0, and the desktop app's
-/// bundled CLI). If Codex changes it, the job shows as working again rather than hiding a user's
-/// session.
+/// Codex's own background jobs, which are not the user's work. Each runs as a session of its own
+/// with the user's hooks, reporting SessionStart, UserPromptSubmit and tool events like any session,
+/// but writes no rollout, so its row would show the bare session id. Codex submits the prompt
+/// itself, and each heading is a constant in the Codex builds checked. If Codex changes one, the
+/// job shows as the user's work again rather than hiding a user's session.
+///
+/// - Memory consolidation (CLI 0.154.0, 0.160.1 and 0.161.0, and the desktop app's bundled CLI)
+///   was seen shutting down without Stop or SessionEnd, so its row would stay working.
+/// - The desktop app's next-message suggestion (bundled CLI 0.163.0-alpha.11) runs after each
+///   finished turn to fill the empty composer, and its Stop would queue a completion to check.
 public enum CodexBackgroundJob {
     static let memoryConsolidationHeading = "## Memory Writing Agent: Phase 2 (Consolidation)"
+    static let composerSuggestionHeading = "This is an app-generated request for a suggested next user message."
 
     public static func isBackgroundJob(prompt: String?) -> Bool {
-        prompt?.hasPrefix(memoryConsolidationHeading) == true
+        guard let prompt else { return false }
+        return prompt.hasPrefix(memoryConsolidationHeading) || prompt.hasPrefix(composerSuggestionHeading)
     }
 }
 

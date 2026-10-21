@@ -245,6 +245,30 @@ import Testing
     #expect(state.running.map(\.session) == [user])
 }
 
+@Test func theDesktopNextMessageSuggestionIsNeverQueuedAsTheUsersWork() {
+    // The shapes recorded on 2026-10-21: after each finished turn in thread 01a15cf2 the desktop app
+    // ran a short session of its own (01a15cf5, 01a15cf6, 01a15cf9) with this prompt, then sent Stop.
+    let thread = UUID(), threadTurn = UUID(), suggestion = UUID()
+    let prompt = "This is an app-generated request for a suggested next user message. The user did not write this message.\n\n"
+        + "Your suggestion will appear in the user's empty message composer."
+    var state = DesktopState()
+
+    state.apply(.promptSubmitted(session: thread, turn: threadTurn, prompt: "can you provide me with like a mascot led icon", receivedAt: "01"))
+    state.apply(.turnCompleted(session: thread, turn: threadTurn, receivedAt: "02"))
+    state.apply(.sessionStarted(session: suggestion, receivedAt: "03"))
+    state.apply(.promptSubmitted(session: suggestion, turn: suggestion, prompt: prompt, receivedAt: "03"))
+    #expect(state.running.isEmpty)
+    state.apply(.turnCompleted(session: suggestion, turn: suggestion, receivedAt: "04"))
+    #expect(state.completed.map(\.session) == [thread])
+
+    // A user's prompt that merely quotes the heading is still their work.
+    let quoting = UUID()
+    state.apply(.promptSubmitted(session: quoting, turn: UUID(),
+                                 prompt: "Why does Herdly hide \"This is an app-generated request for a suggested next user message.\"?",
+                                 receivedAt: "05"))
+    #expect(state.running.map(\.session) == [quoting])
+}
+
 @Test func onlyAPromptThatOpensWithTheMemoryHeadingIsTreatedAsCodexsOwn() {
     let session = UUID(), turn = UUID()
     var state = DesktopState()

@@ -15,7 +15,7 @@ The set of flagged ids is persisted in `~/.codex/.codex-global-state.json`, debo
 
 ## Herdly's rule
 
-`DesktopReadStateReader` reads the file with the same bounds as other Codex files (regular file, no symlink, at most 20 MB) and returns a snapshot of the local unread set and the file's modification time. When `electron-thread-read-state-v1` is present it is the only source: Herdly cannot recompute either hashed key, so it requires version 1, exactly one identity, and exactly one `local:` host within it, and ignores `durable:` and other hosts. No identity (signed out), two identities, or zero or two local hosts return no snapshot, because an absent list must never read as "every thread is read". Without that key the older layout is read. Any other deviation from the exact key path or an entry that is not a UUID returns no snapshot.
+`DesktopReadStateReader` reads the file with the same bounds as other Codex files (regular file, no symlink, at most 20 MB) and returns a snapshot of the local unread set and the file's modification time. When `electron-thread-read-state-v1` is present it is the only source: Herdly cannot recompute either hashed key, so it requires version 1, at least one identity, and exactly one `local:` host within each, and ignores `durable:` and other hosts. With several identities Herdly cannot tell which account is current, so it merges their local sets: a thread flagged unread under any identity stays unread, and only a thread absent from all of them reads as read (agreed with the user on 2026-10-21). No identity (signed out), or an identity with zero or two local hosts, returns no snapshot, because an absent list must never read as "every thread is read". Without that key the older layout is read. Any other deviation from the exact key path or an entry that is not a UUID returns no snapshot.
 
 `DesktopReadAcknowledgment` acknowledges a queued desktop completion when all of these hold:
 
@@ -47,6 +47,10 @@ Live walkthrough to repeat after each desktop update, with two disposable deskto
 5. Quit Herdly, complete a turn in B, view B, relaunch Herdly. Expect: B's restored uncertain completion clears on the first scan.
 
 Record the desktop version and results in this file. If the status line reports the file unavailable after an update, turn the toggle off and re-run the source inspection described in the investigation document.
+
+### 2026-10-21, two signed-in identities
+
+The live file held two identities: one with 355 local unread threads and one with an empty local list. The reader required exactly one identity, so it returned no snapshot and nothing cleared; viewing thread `01a15cf2` left its completions queued even though it was absent from both local sets. The reader now merges the identities' local sets as described above; `readStateMergesTheLocalHostsOfSeveralSignedInIdentities` covers it, and the probe reads the live file again. The live walkthrough above has not been rerun.
 
 ### 2026-10-09, desktop 26.930.61225
 

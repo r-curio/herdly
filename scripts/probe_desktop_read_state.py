@@ -31,12 +31,15 @@ def read_state(path):
         if state["version"] != 1:
             raise ValueError(f"unknown read-state version {state['version']!r}")
         identities = state["unreadByIdentity"]
-        if len(identities) != 1:
-            raise ValueError(f"{len(identities)} signed-in identities; Herdly needs exactly one")
-        hosts = [key for key in next(iter(identities.values())) if key.startswith("local:")]
-        if len(hosts) != 1:
-            raise ValueError(f"{len(hosts)} local hosts; Herdly needs exactly one")
-        local = next(iter(identities.values()))[hosts[0]]
+        if not identities:
+            raise ValueError("no signed-in identity")
+        # Several identities: a thread flagged unread under any of them stays unread.
+        local = []
+        for hosts in identities.values():
+            keys = [key for key in hosts if key.startswith("local:")]
+            if len(keys) != 1:
+                raise ValueError(f"{len(keys)} local hosts in an identity; Herdly needs exactly one")
+            local += hosts[keys[0]]
     else:
         # Desktop 26.901.51231, before the app migrated to the per-identity layout.
         local = root["electron-persisted-atom-state"]["unread-thread-ids-by-host-v1"]["local"]

@@ -43,11 +43,23 @@ private func identityState(_ identities: [String: [String: Any]], version: Any =
     #expect(try #require(DesktopReadStateReader.parse(withLegacy, modifiedAt: 1)).unread == [a])
 }
 
+@Test func readStateMergesTheLocalHostsOfSeveralSignedInIdentities() throws {
+    // Seen live on 2026-10-21: a second identity with an empty local list beside the active one.
+    // Herdly cannot tell which account is current, so a thread flagged under either stays unread.
+    let a = UUID(), b = UUID(), cloud = UUID()
+    let data = identityState(["3430d589": ["local:092af2cb": [a.uuidString], "durable:431f7bac": [cloud.uuidString]],
+                              "7be1c044": ["durable:431f7bac": [cloud.uuidString], "local:5d0e19aa": [b.uuidString]]])
+    #expect(try #require(DesktopReadStateReader.parse(data, modifiedAt: 1)).unread == [a, b])
+    let oneEmpty = identityState(["3430d589": ["local:092af2cb": [a.uuidString]], "7be1c044": ["local:5d0e19aa": []]])
+    #expect(try #require(DesktopReadStateReader.parse(oneEmpty, modifiedAt: 1)).unread == [a])
+}
+
 @Test func readStateFailsClosedWhenTheLocalHostIsAmbiguous() {
     let id = UUID().uuidString
-    // No identity (after a logout clears it), or two accounts: Herdly cannot tell which is current.
+    // No identity (after a logout clears it), or one of several accounts without a single local host.
     #expect(DesktopReadStateReader.parse(identityState([:]), modifiedAt: 1) == nil)
-    #expect(DesktopReadStateReader.parse(identityState(["a": ["local:1": [id]], "b": ["local:1": []]]), modifiedAt: 1) == nil)
+    #expect(DesktopReadStateReader.parse(identityState(["a": ["local:1": [id]], "b": ["durable:1": []]]), modifiedAt: 1) == nil)
+    #expect(DesktopReadStateReader.parse(identityState(["a": ["local:1": [id]], "b": ["local:1": ["thread-1"]]]), modifiedAt: 1) == nil)
     // No local host, or two: absence must never read as "every local thread is read".
     #expect(DesktopReadStateReader.parse(identityState(["a": ["durable:1": [id]]]), modifiedAt: 1) == nil)
     #expect(DesktopReadStateReader.parse(identityState(["a": ["local:1": [id], "local:2": []]]), modifiedAt: 1) == nil)

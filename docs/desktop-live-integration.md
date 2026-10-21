@@ -73,6 +73,19 @@ so Herdly does not rely on them. Covered by
 `aMemoryJobThatNeverSendsStopOrSessionEndIsNotLeftWorking` and its neighbours in
 `DesktopActivityTests.swift`.
 
+### Next-message suggestion (2026-10-21)
+
+After each finished turn, the desktop app (bundled CLI 0.163.0-alpha.11) runs a
+short session of its own to suggest the user's next message in the empty
+composer. With thread `01a15cf2` open, sessions `01a15cf5`, `01a15cf6` and
+`01a15cf9` each sent `SessionStart`, a `UserPromptSubmit` opening with
+`This is an app-generated request for a suggested next user message.`, and
+`Stop`, and wrote no rollout. Herdly queued each `Stop` as a completion named
+only by its shortened session id. `DesktopState` now treats that heading like
+the memory heading above. Covered by
+`theDesktopNextMessageSuggestionIsNeverQueuedAsTheUsersWork`. A suggestion
+completion already queued before this change stays until dismissed.
+
 ## Completion notification demonstration (#8)
 
 The controllable-clock tests cover a completion staying queued while Codex is
