@@ -2381,9 +2381,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             refresh()
             return
         }
-        // Herdly wrote the decision; Codex sends no receipt. The note clears as the request leaves.
-        updateRowNote(.record(.sentUnconfirmed), for: .approval(CodexAttentionAdapter.approval(from: current).id),
-                      userAction: true)
+        // A Codex CLI request leaves the queue as soon as its decision is written, so its row carries
+        // no note (an accepted decision, #312); a clicked card on it returns to the queue explicitly.
+        leaveClickedCard(after: .approval(CodexAttentionAdapter.approval(from: current).id))
         queue.dismiss(.request(request.identity))
         refresh()
     }
