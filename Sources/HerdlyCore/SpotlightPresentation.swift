@@ -65,6 +65,45 @@ public enum NotchEscape: Equatable, Sendable {
     case collapse
 }
 
+/// How long a fresh agent card stays open on its own (Settings › General › Keep new cards open).
+/// Interaction holds any card open past its time; Until I act holds it until the user interacts.
+/// None of these touch an approval's 30-second handoff deadline.
+public enum CardOpenDuration: String, CaseIterable, Sendable {
+    case threeSeconds = "3s"
+    case fiveSeconds = "5s"
+    case tenSeconds = "10s"
+    case untilIAct
+
+    public static let standard = Self.threeSeconds
+
+    public var title: String {
+        switch self {
+        case .threeSeconds: "3 seconds"
+        case .fiveSeconds: "5 seconds"
+        case .tenSeconds: "10 seconds"
+        case .untilIAct: "Until I act"
+        }
+    }
+
+    /// The saved choice, migrating the old on/off "Keep new cards open until I act" switch: a
+    /// readable saved duration wins; otherwise a saved `true` becomes Until I act, and `false`, no
+    /// value, or an unreadable duration becomes the 3-second default.
+    public static func resolve(saved: String?, legacyKeepCardsOpen: Bool?) -> Self {
+        if let saved = saved.flatMap(Self.init(rawValue:)) { return saved }
+        return legacyKeepCardsOpen == true ? .untilIAct : .standard
+    }
+
+    /// The timed close, or nil for Until I act.
+    public var seconds: Double? {
+        switch self {
+        case .threeSeconds: 3
+        case .fiveSeconds: 5
+        case .tenSeconds: 10
+        case .untilIAct: nil
+        }
+    }
+}
+
 /// Owns the causal transition between automatic spotlighting, an explicit queue open, and a card
 /// the user clicked open from the queue.
 public struct NotchPresentationController: Equatable, Sendable {
@@ -78,11 +117,12 @@ public struct NotchPresentationController: Equatable, Sendable {
 
     public init() {}
     public mutating func present(_ item: AttentionItemID, now: Double) { spotlight.present(item, now: now) }
-    /// With `holdUntilInteraction`, the card stays open until the user interacts with it, then closes once
-    /// that interaction ends. Approval deadlines are separate and never move.
-    public mutating func present(_ item: AgentAttentionID, now: Double, holdUntilInteraction: Bool = false) {
+    /// A timed card closes `duration.seconds` after it opens unless the user is interacting then.
+    /// Until I act keeps it open until the user interacts with it, then closes it once that
+    /// interaction ends. Approval deadlines are separate and never move.
+    public mutating func present(_ item: AgentAttentionID, now: Double, duration: CardOpenDuration = .threeSeconds) {
         guard clicked == nil else { return }
-        agentSpotlight.present(item, now: now, holdUntilInteraction: holdUntilInteraction)
+        agentSpotlight.present(item, now: now, duration: duration)
     }
     public func agentSpotlightIsActive(interacting: Bool, now: Double) -> Bool {
         agentSpotlight.isActive(interacting: interacting, now: now)
@@ -192,9 +232,9 @@ private struct AgentSpotlight: Equatable, Sendable {
     private var item: AgentAttentionID?
     private var until: Double = 0
 
-    mutating func present(_ item: AgentAttentionID, now: Double, holdUntilInteraction: Bool) {
+    mutating func present(_ item: AgentAttentionID, now: Double, duration: CardOpenDuration) {
         self.item = item
-        until = holdUntilInteraction ? .infinity : now + Spotlight.duration
+        until = duration.seconds.map { now + $0 } ?? .infinity
     }
 
     mutating func update(interacting: Bool, now: Double) -> AgentAttentionID? {

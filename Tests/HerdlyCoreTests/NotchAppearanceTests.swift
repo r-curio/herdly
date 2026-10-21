@@ -213,7 +213,7 @@ func eachSpriteKindIsTwoSameSizedFramesWithinTheEighteenByTenPointBox(kind: Spri
 @Test func spotlightCanHoldUntilTheUserActsWithoutExtendingAfterInteraction() {
     let id = AgentAttentionID.running(AgentTurnIdentity(session: session("busy"), turn: "t1"))
     var presentation = NotchPresentationController()
-    presentation.present(id, now: 0, holdUntilInteraction: true)
+    presentation.present(id, now: 0, duration: .untilIAct)
 
     #expect(presentation.update(interacting: false, now: 100) == .agentSpotlight(id))
     #expect(presentation.update(interacting: true, now: 101) == .agentSpotlight(id))

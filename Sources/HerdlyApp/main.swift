@@ -291,9 +291,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The macOS system sound played when a completion or question card opens.
     @Published private(set) var completionSound = UserDefaults.standard.string(forKey: "completionSound") ?? Companion.defaultSound
     nonisolated static let defaultSound = "Glass"
-    /// Keep a new card open until the user acts on it instead of closing after three seconds.
-    @Published var keepCardsOpen = UserDefaults.standard.bool(forKey: "keepCardsOpen") {
-        didSet { UserDefaults.standard.set(keepCardsOpen, forKey: "keepCardsOpen") }
+    /// How long a new card stays open on its own. Read once from the old "keepCardsOpen" switch
+    /// until a duration is saved; the old key is left in place and no longer written.
+    @Published var cardOpenDuration = CardOpenDuration.resolve(
+        saved: UserDefaults.standard.string(forKey: "cardOpenDuration"),
+        legacyKeepCardsOpen: UserDefaults.standard.object(forKey: "keepCardsOpen") as? Bool) {
+        didSet { UserDefaults.standard.set(cardOpenDuration.rawValue, forKey: "cardOpenDuration") }
     }
     /// Codex's own thread names by session, refreshed every scan; unknown sessions keep their identifier.
     @Published var threadNames: [UUID: String] = [:]
@@ -1812,7 +1815,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             || (selectedCompletion != nil && firstCompletionPresentation)
             || (selectedQuestion != nil && firstQuestionPresentation)
         if selectedPresentationWasFresh, let id = selectedFreshAgent {
-            notchPresentation.present(id, now: now, holdUntilInteraction: keepCardsOpen)
+            notchPresentation.present(id, now: now, duration: cardOpenDuration)
         }
         if let mode = previewMode, Self.spotlightPreviewModes.contains(mode), let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
         let resolvedPresentation = notchPresentation.update(interacting: interacting, draftInProgress: notchDraftInProgress,

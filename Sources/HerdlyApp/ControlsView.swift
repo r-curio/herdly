@@ -531,7 +531,9 @@ private struct GeneralControls: View {
             SettingsHeader("Behavior")
             SettingsCard {
                 SettingsRow(title: "Keep new cards open until I act", detail: "Instead of closing after 3 seconds") {
-                    Toggle("Keep new cards open until I act", isOn: $model.keepCardsOpen)
+                    Toggle("Keep new cards open until I act", isOn: Binding(
+                        get: { model.cardOpenDuration == .untilIAct },
+                        set: { model.cardOpenDuration = $0 ? .untilIAct : .threeSeconds }))
                         .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                 }
             }
