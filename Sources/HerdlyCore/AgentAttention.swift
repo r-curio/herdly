@@ -332,8 +332,10 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         AgentAttentionSnapshot(outcomes: outcomes.values.sorted(by: Self.older), acknowledged: acknowledged)
     }
 
-    /// Rows in display order. `earlier` decides when outcomes move under "Earlier"; `sort` chooses
-    /// between queue priority and newest activity for everything below live approvals and questions.
+    /// Rows in display order. Live approvals lead by soonest deadline, then arrival (D12); every
+    /// other group is oldest arrival first. `earlier` decides when outcomes move under "Earlier";
+    /// `sort` chooses between queue priority and newest activity for everything below live approvals
+    /// and questions. Presentation only: Codex's execution order and every deadline are untouched.
     public func items(at now: Double, earlier: EarlierDelay = .fiveMinutes,
                       sort: QueueSort = .needsAttention) -> [AgentAttentionItem] {
         let approvalItems = approvals.values.map { approval in
@@ -373,6 +375,9 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         }
         let byPriority = (approvalItems + questionItems + outcomeItems + unavailableItems + activeItems).sorted {
             if $0.kind.rawValue != $1.kind.rawValue { return $0.kind.rawValue < $1.kind.rawValue }
+            // D12: live approvals by soonest deadline (a merged request holds its min(expiresAt)).
+            if $0.kind == .actionableApproval, let first = $0.approval?.expiresAt, let second = $1.approval?.expiresAt,
+               first != second { return first < second }
             if $0.arrivedAt != $1.arrivedAt { return $0.arrivedAt < $1.arrivedAt }
             return Self.sortKey($0.id) < Self.sortKey($1.id)
         }
@@ -390,23 +395,6 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         }.sorted(by: newestFirst)
         let earlierItems = byPriority.filter { $0.kind == .earlierOutcome }.sorted(by: newestFirst)
         return pinned + rest + earlierItems
-    }
-
-    /// The open queue's rows: `items(at:earlier:sort:)` with live approvals ordered by soonest
-    /// deadline (a merged request already holds its `min(expiresAt)`), then arrival, then identity, in
-    /// either sort (D12). Presentation only: the strip, spotlight, counts, and Codex's own execution
-    /// keep reading the priority order, and no deadline moves.
-    public func queueItems(at now: Double, earlier: EarlierDelay = .fiveMinutes,
-                           sort: QueueSort = .needsAttention) -> [AgentAttentionItem] {
-        let rows = items(at: now, earlier: earlier, sort: sort)
-        let live = rows.prefix { $0.kind == .actionableApproval }
-        let bySoonestDeadline = live.sorted {
-            let first = $0.approval?.expiresAt ?? .infinity, second = $1.approval?.expiresAt ?? .infinity
-            if first != second { return first < second }
-            if $0.arrivedAt != $1.arrivedAt { return $0.arrivedAt < $1.arrivedAt }
-            return Self.sortKey($0.id) < Self.sortKey($1.id)
-        }
-        return bySoonestDeadline + rows.dropFirst(live.count)
     }
 
     public mutating func apply(_ observation: AgentObservation, now: Double? = nil) {

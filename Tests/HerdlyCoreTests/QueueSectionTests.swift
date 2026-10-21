@@ -18,7 +18,7 @@ func liveApprovalsLeadTheOpenQueueBySoonestDeadline(sort: QueueSort) {
     queue.apply(.question(AgentQuestion(session: session("q"), turn: "t4", call: "q1", arrivedAt: 1)))
     queue.apply(.outcome(AgentOutcome(session: session("done"), turn: "t5", status: .finished, arrivedAt: 2)))
 
-    let rows = queue.queueItems(at: 20, sort: sort).map(\.session.session)
+    let rows = queue.items(at: 20, sort: sort).map(\.session.session)
     #expect(rows == ["c", "a", "b", "q", "done"])
 }
 
@@ -30,7 +30,7 @@ func aMergedApprovalSortsByItsSoonestDeadline(sort: QueueSort) {
     // The same request seen again with an earlier deadline: the merged request keeps min(expiresAt).
     queue.apply(.approval(AgentApproval(session: session("merged"), turn: "t2", call: "m1", arrivedAt: 12, expiresAt: 35)))
 
-    #expect(queue.queueItems(at: 20, sort: sort).map(\.session.session) == ["merged", "first"])
+    #expect(queue.items(at: 20, sort: sort).map(\.session.session) == ["merged", "first"])
 }
 
 @Test func equalDeadlinesFallBackToArrivalThenIdentity() {
@@ -39,21 +39,26 @@ func aMergedApprovalSortsByItsSoonestDeadline(sort: QueueSort) {
     queue.apply(.approval(AgentApproval(session: session("y"), turn: "t2", call: "a1", arrivedAt: 10, expiresAt: 40)))
     queue.apply(.approval(AgentApproval(session: session("x"), turn: "t3", call: "a1", arrivedAt: 10, expiresAt: 40)))
 
-    #expect(queue.queueItems(at: 20).map(\.session.session) == ["x", "y", "late"])
+    #expect(queue.items(at: 20).map(\.session.session) == ["x", "y", "late"])
 }
 
-@Test func deadlineOrderIsOpenQueuePresentationOnly() {
+@Test func deadlineOrderIsTheQueuePriorityButNotWhatIsSpotlitOnArrival() {
     var queue = AgentAttentionQueue()
     queue.apply(.approval(AgentApproval(session: session("old"), turn: "t1", call: "a1", arrivedAt: 10, expiresAt: 50)))
     queue.apply(.approval(AgentApproval(session: session("soon"), turn: "t2", call: "a1", arrivedAt: 11, expiresAt: 30)))
 
-    // The strip, spotlight, and counts read the priority order, which stays oldest arrival first.
-    #expect(queue.items(at: 20).map(\.session.session) == ["old", "soon"])
-    #expect(queue.queueItems(at: 20).map(\.session.session) == ["soon", "old"])
-    // Both orders hold the same rows.
-    #expect(Set(queue.items(at: 20).map(\.id)) == Set(queue.queueItems(at: 20).map(\.id)))
+    // D12 changes the priority order itself, so the strip and every reader of it follow it.
+    let rows = queue.items(at: 20)
+    #expect(rows.map(\.session.session) == ["soon", "old"])
+    // Two requests fresh in the same scan: the spotlight still opens the one that arrived first.
+    #expect(AgentPresentationSelection.highestPriority(in: rows, candidates: Set(rows.map(\.id))) == rows[1].id)
+    // Only one of them fresh: that one, whatever its place.
+    #expect(AgentPresentationSelection.highestPriority(in: rows, candidates: [rows[0].id]) == rows[0].id)
     // An expired request is handed back and leaves the live group, whatever its deadline was.
-    #expect(queue.queueItems(at: 35).map(\.kind) == [.actionableApproval, .handedBackApproval])
+    #expect(queue.items(at: 35).map(\.kind) == [.actionableApproval, .handedBackApproval])
+    // Deadlines and counts are untouched.
+    #expect(queue.items(at: 20).compactMap(\.approval?.expiresAt) == [30, 50])
+    #expect(queue.toCheckCount == 2)
 }
 
 // MARK: Kind sections (D13)
@@ -75,7 +80,7 @@ private func queue(approvals: Int = 0, questions: Int = 0, results: Int = 0, run
     for index in 0..<running {
         queue.apply(.running(AgentRunning(session: session("run-\(index)"), turn: "t", arrivedAt: Double(index))))
     }
-    return queue.queueItems(at: 60)
+    return queue.items(at: 60)
 }
 
 private func kindSections(_ items: [AgentAttentionItem], open: Set<QueueKindSection> = []) -> QueueSections {
@@ -90,7 +95,7 @@ private func kindSections(_ items: [AgentAttentionItem], open: Set<QueueKindSect
     raw.apply(.outcome(AgentOutcome(session: session("done"), turn: "t", status: .failed, arrivedAt: 3)))
     raw.apply(.running(AgentRunning(session: session("idle", .claude), turn: "t", arrivedAt: 4, status: .waiting)))
     raw.apply(.running(AgentRunning(session: session("busy"), turn: "t", arrivedAt: 5)))
-    let sections = kindSections(raw.queueItems(at: 10))
+    let sections = kindSections(raw.items(at: 10))
 
     #expect(sections.attention.map(\.heading) == ["Approve", "Answer", "Check"])
     #expect(sections.attention.map(\.section) == [.approve, .answer, .check])

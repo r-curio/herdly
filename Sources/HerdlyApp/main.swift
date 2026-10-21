@@ -556,15 +556,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// on the next refresh instead of waiting out another directory's interval.
     private var eventPruneDue: [String: Double] = [:]
     var orderedAttentionItems: [AttentionItem] { queue.items }
-    /// Queue priority order. The strip, spotlight, and center label always read this order, so the
-    /// "Newest first" sort and the open queue's deadline order can never move what needs the user
-    /// outside the open queue.
+    /// Queue priority order (live approvals by soonest deadline, D12). The strip, spotlight, and
+    /// center label always read this order, so the "Newest first" sort can never move what needs the
+    /// user outside the open queue.
     var orderedAgentAttentionItems: [AgentAttentionItem] {
         agentQueue.items(at: Date().timeIntervalSince1970, earlier: appearance.earlier)
     }
-    /// The open queue's rows in the user's chosen sort, live approvals by soonest deadline (D12).
+    /// The open queue's rows in the user's chosen sort.
     var queueAgentAttentionItems: [AgentAttentionItem] {
-        agentQueue.queueItems(at: Date().timeIntervalSince1970, earlier: appearance.earlier, sort: appearance.sort)
+        agentQueue.items(at: Date().timeIntervalSince1970, earlier: appearance.earlier, sort: appearance.sort)
     }
     var count: Int { orderedAgentAttentionItems.count + (attention.pending ? 1 : 0) }
     var workingCount: Int { agentQueue.workingCount }
