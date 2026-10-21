@@ -254,7 +254,7 @@ Agreed on 2026-09-14 (issue #46): a completion card carries a single-line reply 
 Play a short completion sound as that card opens. Provide a mute control. With Reduce Motion on, the sprite breathes instead of stepping and the panel resizes without animation. Reopening the queue does not replay the sound.
 
 Notch customization was agreed on 2026-10-09. Settings offers the following options:
-- **Completion sound:** any macOS system sound, Glass by default, with a preview button (issue #57).
+- **Completion sound:** any macOS system sound, Glass by default (issue #57). Settings › Notifications shows the sounds as a grid of tiles; choosing one selects it and plays it once, and the grid is dimmed while sound is off (#317).
 - **Panel width** (per display profile, agreed 2026-10-09): Standard (default), Wide, or Extra wide. Opening widens the panel past the collapsed strip by 60, 160, or 260 points, never narrower than 380, 480, or 580 points, and never past 16 points from each side of the display. It changes only geometry, never the queue, counts, or a deadline.
 - **Earlier delay:** 2, 5 (default), 10 or 20 minutes, or Never. Completions move into Earlier after this delay. Moving is still presentation decay, not acknowledgment.
 - **Keep new cards open until I act:** off by default. When on, a spotlight card stays open until the user interacts with it or opens the queue, instead of closing after three seconds. It never extends an approval's 30-second deadline.
@@ -277,26 +277,30 @@ Agreed with the user on 2026-10-11 ([issue #213](https://github.com/r-curio/herd
 
 ### Settings
 
-**Layout.** The Terminals page has two sections. **Terminals** lists Ghostty, iTerm2, Terminal.app and WezTerm. **Multiplexers** lists tmux, Zellij and herdr. Each has its own card with its own switch; Herdly scans and contacts only what is switched on. herdr gains a switch: on upgrade it starts in the position of the Ghostty switch, so existing behavior is unchanged. Every other new switch starts off.
+**Layout.** The Terminals page has two sections. **Terminals** lists Ghostty, iTerm2, Terminal.app and WezTerm. **Multiplexers** lists tmux, Zellij and herdr. Each section is one card with one row per shown app, and each app has its own switch; Herdly scans and contacts only what is switched on. herdr gains a switch: on upgrade it starts in the position of the Ghostty switch, so existing behavior is unchanged. Every other new switch starts off.
 
-**Card.** Each card shows:
+**Card.** Agreed 2026-10-21 (#317, D31/D32): each app is one row in its section's card, with inset dividers between apps and no footer. A row shows:
 
-- **Switch.** Off means Herdly never scans or contacts that app.
-- **Version.** The installed version, for information only. Herdly checks the capabilities it needs (such as Ghostty's `tty`) rather than comparing version numbers. The one hard floor is Zellij 0.44.1, which is needed for `focus-pane-id` and `--pane-id`. A message names a version only once a release has been verified to provide the capability.
-- **Permission** (iTerm2, Terminal.app and Ghostty only). These need macOS Automation access and follow Ghostty's existing flow: turning the switch on asks macOS; a denial turns the switch back off and offers Open Settings…; if the app isn't running, Herdly asks when it next launches. The badge reads Allowed, Not allowed or Not verified. WezTerm and the multiplexers use command-line tools or sockets and have no Permission row.
+- **Name and version.** The installed version in dim text after the name, for information only. Herdly checks the capabilities it needs (such as Ghostty's `tty`) rather than comparing version numbers. The one hard floor is Zellij 0.44.1, which is needed for `focus-pane-id` and `--pane-id`. A message names a version only once a release has been verified to provide the capability.
 - **Status badge.** Off while the switch is off. Not in use while nothing has been seen there. Otherwise Ready or Needs attention.
-- **Problem lines.** Every problem that applies, one per line, because each is a separate fix. Commands come with a Copy button; Herdly never runs them or edits the app's configuration.
-- **Footer.** The card's targeting rule and what Open does otherwise, for example "Herdly returns to unsplit tabs; otherwise Open raises iTerm2." Because an Open fallback is silent on the card (ADR 0015), this footer is where it is explained.
-- **Show diagnostics.** The exact internal reasons: the scan's result and, for each queued session in that app, its Open availability, its last Open result (verified, fallback or unavailable) with the reason, and why typed input is unavailable.
+- **Switch.** Off means Herdly never scans or contacts that app.
+- **⋯ menu** with **Show Diagnostics…** and **How Open Works…**.
+- **Problem lines** beneath the row, only when something needs fixing: every problem that applies, one per line, because each is a separate fix. Commands come with a Copy button; Herdly never runs them or edits the app's configuration.
+
+**Permission** (iTerm2, Terminal.app and Ghostty only). These need macOS Automation access and follow Ghostty's existing flow: turning the switch on asks macOS; a denial turns the switch back off and offers Open Settings…; if the app isn't running, Herdly asks when it next launches. There is no separate Permission row: Allowed shows as Ready once the app is in use (for Ghostty, once a scan has read it), Not allowed shows as a problem line with Open Settings… and Needs attention while the switch is on, and Not verified (not yet checked, the app not running, or consent not yet given) shows as Not in use. WezTerm and the multiplexers use command-line tools or sockets and have no permission line.
+
+**How Open Works…** opens a sheet with the app's targeting rule and what Open does otherwise, for example "Herdly returns to unsplit tabs; otherwise Open raises iTerm2." Because an Open fallback is silent on the card (ADR 0015), this is where it is explained.
+
+**Show Diagnostics…** opens a sheet with the exact internal reasons an app's integration records, such as the scan's result and, for each queued session in that app, its Open availability, its last Open result (verified, fallback or unavailable) with the reason, and why typed input is unavailable. It is disabled while there is nothing to show; Ghostty records none today, so its item is always disabled.
 
 **Problem lines.**
 
-- **Every card:** not found in its fixed locations; can't be read (a scripting error, Automation denied, a socket that is missing or fails its trust check).
-- **A switched-off app holding sessions:** once Herdly sees a live Claude session whose process ancestry reaches an installed app that is switched off, its card says sessions were seen there and offers to turn it on. Ancestry needs no Automation access.
+- **Every app:** not found in its fixed locations; can't be read (a scripting error, Automation denied, a socket that is missing or fails its trust check).
+- **A switched-off app holding sessions:** once Herdly sees a live Claude session whose process ancestry reaches an installed app that is switched off, its row says sessions were seen there and offers to turn it on. Ancestry needs no Automation access.
 - **Multiplexer with no terminal on:** the switch stays usable, the badge reads Needs attention, and the line says "Turn on the terminal you run tmux in." (naming that multiplexer). Herdly contacts a multiplexer only while a terminal is also on (ADR 0014).
 - **tmux:** sessions seen on a socket other than the default can't be reached.
 - **Zellij:** older than 0.44.1; more than one `zellij` client process running.
-- **herdr:** its Claude integration missing or not current while Herdly has seen Claude in herdr: the exact `herdr integration install claude` command. herdr unavailable (not running, unsupported protocol, untrusted socket and similar): generic wording. Until ADR 0009's gate opens, the card says "No herdr sessions seen", Herdly does not contact herdr, and the badge reads Not in use.
+- **herdr:** its Claude integration missing or not current while Herdly has seen Claude in herdr: the exact `herdr integration install claude` command. herdr unavailable (not running, unsupported protocol, untrusted socket and similar): generic wording. Until ADR 0009's gate opens, Herdly does not contact herdr and the badge reads Not in use.
 - **Ghostty without `tty`:** "Update Ghostty", decided by checking that Ghostty exposes each terminal's `tty`. ADR 0011's sole-terminal rule still applies; a second Ghostty tab, window or quick terminal brings this guidance back.
 
 ### First-launch offer

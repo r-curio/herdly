@@ -770,7 +770,7 @@ private let inputPane = TypedInputPane(host: .zellij, paneID: "lab/terminal_1", 
     let ready = ZellijPresentation.settingsRow(on: true, anyTerminalOn: true, read: .snapshot(try #require(zellijSnapshot())), sessionsSeen: true)
     #expect(ready.badge == .ready && ready.problems.isEmpty)
     #expect(ZellijPresentation.settingsRow(on: true, anyTerminalOn: true, read: .notRunning, sessionsSeen: false).badge == .notInUse)
-    #expect(!ZellijPresentation.footer.contains("Codex questions"))
+    #expect(!ZellijPresentation.howOpenWorks.contains("Codex questions"))
     #expect(TerminalHost.zellij.showsCard == false)
 }
 

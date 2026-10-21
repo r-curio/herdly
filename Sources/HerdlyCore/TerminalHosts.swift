@@ -51,6 +51,21 @@ public enum TerminalHost: String, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// The host's targeting rule and what Open does when it cannot reach the exact tab or pane, shown
+    /// from its row's How Open Works… item. An Open fallback is silent on notch cards (ADR 0015), so
+    /// this is where it is explained.
+    public var howOpenWorks: String {
+        switch self {
+        case .ghostty: GhosttyPresentation.howOpenWorks
+        case .iTerm2: ITerm2Presentation.howOpenWorks
+        case .terminalApp: TerminalAppPresentation.howOpenWorks
+        case .wezTerm: WezTermPresentation.howOpenWorks
+        case .tmux: TmuxPresentation.howOpenWorks
+        case .zellij: ZellijPresentation.howOpenWorks
+        case .herdr: HerdrPresentation.howOpenWorks
+        }
+    }
+
     /// The bundle identifier of a terminal app, which a process walk matches (ADR 0015); nil for a
     /// multiplexer, which is not an app.
     public var bundleIdentifier: String? {

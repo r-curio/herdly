@@ -365,7 +365,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - The sidebar footer shows the "N working · N to check" status in 11pt secondary text.
 - **Forms:**
   - `.formStyle(.grouped)` with system fills. Sections have 12pt continuous corners; rows are 36pt, or 40pt with a segmented control. Separators are inset 10pt.
-  - Section headers are 13pt bold. Explanations go in footers, 11pt secondary text.
+  - Section headers are 13pt bold. Where a pane has footers, explanations go there in 11pt secondary text; Notifications and Terminals have none.
 - **Controls:**
   - Mini switches for booleans, menu pickers for lists, and segmented pickers for two or three short choices.
   - Push buttons for actions. Destructive actions sit alone in the last section, end in an ellipsis, use the destructive role, and confirm first.
@@ -375,7 +375,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
 - **Behaviour:** every change applies immediately. There is no Apply, OK, or Cancel button.
 - **Motion:** every click answers within half a second.
   - Pages crossfade and rise 10pt as you switch panes.
-  - The preview, sprite tiles, sound list, and disabled rows ease to their new state over 0.4 s.
+  - The preview, sprite tiles, sound tiles, and disabled rows ease to their new state over 0.4 s.
   - Pressed tiles and rows dip to 97%.
   - Reduce Motion keeps only a 0.15 s crossfade with no movement or scaling.
   - Unlike the notch, the Settings window may use the system's smooth easing.
@@ -394,10 +394,23 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - A problem row appears only when something needs fixing: label left, an orange dot and the fix right, such as "Codex desktop · Update to 26.901.51231 or later". A missing surface is not a problem while the other is supported.
   - Claude's rows: "Usage limits on the strip" (the current "5h 32% · 7d 61%" reading before the switch, "Unavailable" when no window is current, or, with an orange dot, why usage cannot be read) and "Name sessions with Haiku", without descriptions.
   - The last setup action's result stays in its card as secondary text until replaced, so a failure stays readable. Terminal status lives in Terminals, not here.
-- **Sound picker:**
-  - A list of the macOS system sounds, with a check mark for the selection and a play button to preview it.
-  - Glass is marked Default.
-  - Choosing a sound plays it once.
+- **Notifications pane:**
+  - "Sound": one card with a "Completions and questions" mini switch, an inset divider, then the sound tiles. "Completions": one card with a "Clear when read in Codex" mini switch and no description. While that switch is on and Codex's read state cannot be read, a 12pt problem line with an orange dot sits under it; the switch's tooltip carries the latest read-state status.
+  - Below the cards, right-aligned 6pt lower: a "Send Test Notification" push button, with "Dismiss" before it only while the test notification is showing.
+  - No footers.
+- **Sound tiles:**
+  - Every macOS system sound as a 120x28pt tile in a leading-aligned wrapping grid with 6pt gaps and 10pt padding inside the card. Tiles have 7pt continuous corners and 13pt names.
+  - Unselected: primary at 4% (#0000000A in light mode) with regular primary text. Selected: an accent fill with white medium text. No check mark, play button, or Default label; Glass is the default selection.
+  - Choosing a tile selects it and plays the sound once; it eases over 0.4 s and dips to 97% when pressed. While sound is off the grid is disabled at 50% opacity.
+  - Each tile is a button named for its sound, with the selected trait when chosen, and reachable with Tab under full keyboard access.
+- **Terminals pane:**
+  - "Terminals" and "Multiplexers", each one card holding a row per shown app, with 10pt inset dividers between apps.
+  - A row is at least 38pt tall with 10pt spacing: the 13pt name and an 11pt dim version (primary at 40%) on one baseline 6pt apart, then the status pill, the mini switch, and a 22pt borderless ⋯ menu.
+  - Status pill: 11pt medium text, 7pt by 1pt padding, 5pt corners. Ready is green text on 12% green, Needs attention orange text on 12% orange, Not in use and Off secondary text on primary at 6%. A small spinner stands in while herdr's first scan runs. VoiceOver reads "Status: X".
+  - The ⋯ menu holds Show Diagnostics… (the exact, selectable monospaced reasons in a sheet; disabled when there are none) and How Open Works… (the app's targeting rule and Open fallback as plain text in a sheet). Both sheets close with Done, Return or Esc. VoiceOver names the menu "<App> actions", and the switch "Enable <App>".
+  - Problem lines sit under their row with no divider between them, 12pt with an orange dot, 10pt above the next divider. A denied Automation permission ends its line with a small Open Settings… button; a herdr command follows its line in 12pt monospace with a Copy button.
+  - No footers, and no separate Version, Permission, or Status rows.
+  - Reduce Motion keeps only the crossfade.
 
 ## Question cards — Paper redesign
 

@@ -447,10 +447,10 @@ public struct WezTermSettingsRow: Equatable, Sendable {
 }
 
 public enum WezTermPresentation {
-    /// The card's targeting rule and what Open does otherwise; a fallback is silent on notch cards (ADR
-    /// 0015), so this is where it is explained. It says nothing about question digits, so it holds
+    /// The row's targeting rule and what Open does otherwise, shown by How Open Works…; a fallback is
+    /// silent on notch cards (ADR 0015), so this is where it is explained. It says nothing about question digits, so it holds
     /// whether or not `WezTermInput.questionDigitsProvenLive` is on.
-    public static let footer =
+    public static let howOpenWorks =
         "Herdly returns to unsplit tabs in WezTerm's front window; otherwise Open raises WezTerm. Replies are typed into the exact pane."
 
     /// The card from the switch, whether a `wezterm` binary is in its fixed locations, the latest read,

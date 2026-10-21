@@ -360,23 +360,23 @@ private func runOpen(_ revalidated: Result<ITerm2OpenPlan, OpenMiss> = .success(
     #expect(ITerm2Presentation.typedInputLine == "Herdly can't type into iTerm2. Reply in the session.")
 }
 
-@Test func iTerm2SettingsCardShowsItsSwitchPermissionBadgeProblemsAndFooter() {
+@Test func iTerm2SettingsRowShowsItsBadgeProblemsAndHowOpenWorks() {
     func row(on: Bool = true, installed: Bool = true, access: GhosttyAutomationAccess? = .granted,
              scan: ITerm2ScanStatus = .read, inUse: Bool = true) -> ITerm2SettingsRow {
         ITerm2Presentation.settingsRow(on: on, installed: installed, access: access, scan: scan, inUse: inUse)
     }
-    #expect(row(on: false) == ITerm2SettingsRow(badge: .off, permission: "Allowed", problems: []))
-    #expect(row(inUse: false) == ITerm2SettingsRow(badge: .notInUse, permission: "Allowed", problems: []))
-    #expect(row() == ITerm2SettingsRow(badge: .ready, permission: "Allowed", problems: []))
+    #expect(row(on: false) == ITerm2SettingsRow(badge: .off, problems: []))
+    #expect(row(inUse: false) == ITerm2SettingsRow(badge: .notInUse, problems: []))
+    #expect(row() == ITerm2SettingsRow(badge: .ready, problems: []))
     // A denial turns the switch back off; the card keeps the denial and its fix.
-    #expect(row(on: false, access: .denied) == ITerm2SettingsRow(badge: .off, permission: "Not allowed", problems: [.automationDenied]))
-    #expect(row(access: nil, scan: .notRead, inUse: false) == ITerm2SettingsRow(badge: .notInUse, permission: "Not verified", problems: []))
-    #expect(row(scan: .unreadable) == ITerm2SettingsRow(badge: .needsAttention, permission: "Allowed", problems: [.unreadable]))
+    #expect(row(on: false, access: .denied) == ITerm2SettingsRow(badge: .off, problems: [.automationDenied]))
+    #expect(row(access: nil, scan: .notRead, inUse: false) == ITerm2SettingsRow(badge: .notInUse, problems: []))
+    #expect(row(scan: .unreadable) == ITerm2SettingsRow(badge: .needsAttention, problems: [.unreadable]))
     #expect(row(installed: false, access: nil, scan: .notRead, inUse: false)
-            == ITerm2SettingsRow(badge: .needsAttention, permission: "Not verified", problems: [.notFound]))
+            == ITerm2SettingsRow(badge: .needsAttention, problems: [.notFound]))
     // Every problem line is its own fix.
     #expect(Set(ITerm2SettingsProblem.allCases.map(\.message)).count == ITerm2SettingsProblem.allCases.count)
-    #expect(ITerm2Presentation.footer == "Herdly returns to unsplit tabs; otherwise Open raises iTerm2.")
+    #expect(ITerm2Presentation.howOpenWorks == "Herdly returns to unsplit tabs; otherwise Open raises iTerm2.")
 }
 
 @Test func iTerm2SelectRepliesComeOnlyFromTheScriptsThreeStatuses() {

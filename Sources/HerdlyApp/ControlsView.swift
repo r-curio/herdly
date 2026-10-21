@@ -39,16 +39,24 @@ private enum ControlSection: String, CaseIterable, Identifiable {
 /// In dark mode the window takes a near-black tint, closer to the notch, with sections one step
 /// lighter; light mode keeps the system's measured values.
 enum SettingsStyle {
-    static func dynamic(dark: CGFloat, light: CGFloat) -> NSColor {
+    static func dynamic(dark: NSColor, light: NSColor) -> NSColor {
         NSColor(name: nil) { appearance in
-            NSColor(white: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light, alpha: 1)
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
         }
+    }
+    static func dynamic(dark: CGFloat, light: CGFloat) -> NSColor {
+        dynamic(dark: NSColor(white: dark, alpha: 1), light: NSColor(white: light, alpha: 1))
     }
     static let windowBackground = dynamic(dark: 0.075, light: 1)
     static let pageBackground = Color(nsColor: windowBackground)
     static let sectionFill = Color(nsColor: dynamic(dark: 0.125, light: 0.976))
     static let sidebarFill = Color(nsColor: dynamic(dark: 0.11, light: 0.93))
     static let rowInset: CGFloat = 10
+    /// Status pill text: a darker green and orange in light mode so they read on their 12% tint.
+    static let readyText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 0.19, green: 0.82, blue: 0.35, alpha: 1),
+                                                  light: NSColor(srgbRed: 0.14, green: 0.54, blue: 0.24, alpha: 1)))
+    static let attentionText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 1, green: 0.62, blue: 0.04, alpha: 1),
+                                                      light: NSColor(srgbRed: 0.79, green: 0.2, blue: 0, alpha: 1)))
 }
 
 /// Settings-window feedback: every click answers within about half a second with a smooth ease, and
@@ -598,10 +606,12 @@ private struct AgentControls: View {
     }
 }
 
-/// Exact setup text shown in a sheet from an agent's "Show Setup Changes…" action.
+/// Text shown in a sheet from a ⋯ menu: exact, monospaced setup changes or diagnostics, or a plain
+/// explanation such as a terminal's How Open Works….
 private struct SetupPreview: Identifiable {
     let title: String
     let text: String
+    var monospaced = true
     var id: String { title }
 }
 
@@ -614,7 +624,7 @@ private struct SetupPreviewSheet: View {
             Text(preview.title).font(.headline).accessibilityAddTraits(.isHeader)
             ScrollView {
                 Text(preview.text)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(preview.monospaced ? .system(.caption, design: .monospaced) : .body)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(10)
@@ -626,7 +636,7 @@ private struct SetupPreviewSheet: View {
             }
         }
         .padding(20)
-        .frame(width: 560, height: 440)
+        .frame(width: 560, height: preview.monospaced ? 440 : 200)
         .onExitCommand { dismiss() }
     }
 }
@@ -740,25 +750,6 @@ private struct AgentMessageRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, SettingsStyle.rowInset).padding(.vertical, 9)
         }
-    }
-}
-
-/// A row that reveals exact, selectable text such as a configuration preview.
-private struct PreviewDisclosure: View {
-    let title: String
-    let text: () -> String
-
-    var body: some View {
-        DisclosureGroup(title) {
-            Text(text())
-                .font(.system(.caption, design: .monospaced))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 6)
-        }
-        .padding(.horizontal, SettingsStyle.rowInset)
-        .padding(.vertical, 9)
     }
 }
 
@@ -953,284 +944,313 @@ private struct ClaudeAgentControls: View {
     }
 }
 
+/// Settings › Terminals: one card per section, one row per shown host (product.md, "Agreed terminal
+/// host presentation"; #317). Each row's ⋯ menu opens its diagnostics or its How Open Works text in a sheet.
 private struct TerminalControls: View {
     @ObservedObject var model: Companion
+    @State private var sheet: SetupPreview?
 
     var body: some View {
         ControlsPage(section: .terminals) {
             SettingsHeader("Terminals")
-            ForEach(TerminalHost.terminals.filter(\.showsCard), id: \.self, content: card)
+            section(TerminalHost.terminals)
             SettingsHeader("Multiplexers")
-            ForEach(TerminalHost.multiplexers.filter(\.showsCard), id: \.self, content: card)
+            section(TerminalHost.multiplexers)
         }
+        .sheet(item: $sheet) { SetupPreviewSheet(preview: $0) }
     }
 
-    /// A host's card. Each host's acceptance ticket adds its card here and turns on `showsCard`.
+    /// The section's card, with an inset divider between hosts. Each host's acceptance ticket turns on
+    /// `showsCard` to add its row here.
     @ViewBuilder
-    private func card(_ host: TerminalHost) -> some View {
-        switch host {
-        case .ghostty: ghosttyCard
-        case .herdr: HerdrControls(model: model)
-        case .iTerm2: ITerm2Controls(model: model, state: model.iTerm2)
-        case .terminalApp: TerminalAppControls(model: model)
-        case .wezTerm: WezTermControls(model: model, state: model.wezTerm)
-        case .tmux: TmuxControls(model: model, state: model.tmux)
-        case .zellij: ZellijControls(model: model, state: model.zellij)
-        }
-    }
-
-    @ViewBuilder
-    private var ghosttyCard: some View {
-        SettingsCard {
-            SettingsRow(title: TerminalHost.ghostty.displayName, detail: "Open sessions in their exact tab, and answer questions there") {
-                Toggle("Ghostty controls", isOn: $model.ghosttyEnabled)
-                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                    .accessibilityLabel("Enable Ghostty controls")
-                    .onChange(of: model.ghosttyEnabled) { _, enabled in model.ghosttyChanged(enabled) }
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Version", detail: nil) {
-                Text(AgentControls.version(installed: model.setupCapabilities.ghosttyInstalled,
-                                           supported: model.setupCapabilities.ghostty,
-                                           version: model.setupCapabilities.ghosttyVersion,
-                                           minimum: CodexSetupRequirements.minimumGhosttyVersion))
-                    .foregroundStyle(.secondary)
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Automation permission",
-                        detail: model.ghosttyPermissionVerified ? nil : automationDetail) {
-                HStack(spacing: 10) {
-                    if model.ghosttyAccess == .denied {
-                        Button("Open Settings…", action: GhosttyAutomationPermission.openSettings)
+    private func section(_ hosts: [TerminalHost]) -> some View {
+        let shown = hosts.filter(\.showsCard)
+        if !shown.isEmpty {
+            SettingsCard {
+                ForEach(shown, id: \.self) { host in
+                    VStack(spacing: 0) {
+                        if host != shown.first { Divider().padding(.horizontal, SettingsStyle.rowInset) }
+                        row(host)
                     }
-                    StatusBadge(title: automationBadge, color: model.ghosttyPermissionVerified ? .green : .orange)
                 }
             }
         }
-        SettingsFooter("Herdly targets only unsplit tabs it can match exactly. If a tab is split, closed, or duplicated, Open Session reports it unavailable instead of guessing.")
     }
 
-    private var automationBadge: String {
-        if model.ghosttyPermissionVerified { return "Allowed" }
-        return model.ghosttyAccess == .denied ? "Not allowed" : "Not verified"
-    }
-
-    private var automationDetail: String {
-        if model.ghosttyPermissionVerified { return "Granted in System Settings." }
-        switch model.ghosttyAccess {
-        case .denied: return "Not allowed. " + GhosttyAutomationPermission.deniedGuidance
-        case .ghosttyNotRunning: return "Waiting for Ghostty to open; macOS asks then."
-        default: return model.ghosttyEnabled ? "Waiting for macOS to confirm access." : "Enable Ghostty to let macOS request access."
+    @ViewBuilder
+    private func row(_ host: TerminalHost) -> some View {
+        switch host {
+        case .ghostty: GhosttyHostRow(model: model, sheet: $sheet)
+        case .herdr: HerdrHostRow(model: model, sheet: $sheet)
+        case .iTerm2: ITerm2HostRow(model: model, state: model.iTerm2, sheet: $sheet)
+        case .terminalApp: TerminalAppHostRow(model: model, sheet: $sheet)
+        case .wezTerm: WezTermHostRow(model: model, state: model.wezTerm, sheet: $sheet)
+        case .tmux: TmuxHostRow(model: model, state: model.tmux, sheet: $sheet)
+        case .zellij: ZellijHostRow(model: model, state: model.zellij, sheet: $sheet)
         }
     }
 }
 
-/// The Terminal.app card (product.md, "Agreed terminal host presentation"; #239), shown since
-/// Terminal.app's acceptance run passed (#244, `TerminalHost.showsCard`).
-private struct TerminalAppControls: View {
+/// A host's row: name and dim version, status badge, switch and ⋯ menu, with a `line` per problem
+/// beneath it and no divider between them. `diagnostics` is nil when there is nothing to show, which
+/// disables Show Diagnostics….
+private struct TerminalHostRow<Switch: View, Problem: Hashable, Line: View>: View {
+    let host: TerminalHost
+    let version: String?
+    let badge: HerdrReadinessBadge?
+    let diagnostics: String?
+    let problems: [Problem]
+    @Binding var sheet: SetupPreview?
+    @ViewBuilder let toggle: Switch
+    @ViewBuilder let line: (Problem) -> Line
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(host.displayName).font(.system(size: 13))
+                    if let version {
+                        Text(version).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.4))
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                Spacer(minLength: 8)
+                HostStatusBadge(host: host, badge: badge)
+                toggle
+                AgentActionsMenu(label: "\(host.displayName) actions") {
+                    Button("Show Diagnostics…") {
+                        if let diagnostics { sheet = SetupPreview(title: "\(host.displayName) diagnostics", text: diagnostics) }
+                    }
+                    .disabled(diagnostics == nil)
+                    Button("How Open Works…") {
+                        sheet = SetupPreview(title: "How Open works in \(host.displayName)", text: host.howOpenWorks,
+                                             monospaced: false)
+                    }
+                }
+            }
+            .padding(.horizontal, SettingsStyle.rowInset)
+            .frame(minHeight: 38)
+            if !problems.isEmpty {
+                VStack(alignment: .leading, spacing: 6) { ForEach(problems, id: \.self, content: line) }
+                    .padding(.horizontal, SettingsStyle.rowInset)
+                    .padding(.bottom, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+/// The exact diagnostics text for Show Diagnostics…, nil when hidden or empty.
+private func diagnosticsText(_ lines: [String], shown: Bool = true) -> String? {
+    shown && !lines.isEmpty ? lines.joined(separator: "\n") : nil
+}
+
+private extension Companion {
+    /// A Settings binding to the switch of a host without Automation access (`setHostSwitch`).
+    func hostSwitchBinding(_ host: TerminalHost) -> Binding<Bool> {
+        Binding(get: { self.hostSwitches.isOn(host) }, set: { self.setHostSwitch(host, on: $0) })
+    }
+}
+
+/// The host's switch as a mini switch; `label` is its VoiceOver name.
+private struct HostSwitch: View {
+    let label: String
+    let isOn: Binding<Bool>
+
+    var body: some View {
+        Toggle(label, isOn: isOn)
+            .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            .accessibilityLabel(label)
+    }
+}
+
+/// A tinted status pill: green Ready, orange Needs attention, gray Not in use or Off, and a small
+/// spinner while herdr's first scan runs.
+private struct HostStatusBadge: View {
+    let host: TerminalHost
+    let badge: HerdrReadinessBadge?
+
+    var body: some View {
+        if let badge {
+            Text(badge.title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(foreground(badge))
+                .padding(.horizontal, 7).padding(.vertical, 1)
+                .background(fill(badge), in: .rect(cornerRadius: 5, style: .continuous))
+                .accessibilityLabel("Status: \(badge.title)")
+        } else {
+            ProgressView().controlSize(.small).accessibilityLabel("Checking \(host.displayName)")
+        }
+    }
+
+    private func foreground(_ badge: HerdrReadinessBadge) -> Color {
+        switch badge {
+        case .ready: SettingsStyle.readyText
+        case .needsAttention: SettingsStyle.attentionText
+        case .off, .notInUse: .secondary
+        }
+    }
+
+    private func fill(_ badge: HerdrReadinessBadge) -> Color {
+        switch badge {
+        case .ready: Color.green.opacity(0.12)
+        case .needsAttention: Color.orange.opacity(0.12)
+        case .off, .notInUse: Color.primary.opacity(0.06)
+        }
+    }
+}
+
+/// One problem under a row or in a card: 12pt text after an orange dot, with an optional fix at its
+/// trailing edge.
+private struct CardProblemLine<Fix: View>: View {
+    let text: String
+    @ViewBuilder let fix: Fix
+
+    init(_ text: String, @ViewBuilder fix: () -> Fix = { EmptyView() }) {
+        self.text = text
+        self.fix = fix()
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Circle().fill(.orange).frame(width: 6, height: 6).accessibilityHidden(true)
+                Text(text).font(.system(size: 12)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            fix
+        }
+    }
+}
+
+/// Open Settings… for a denied Automation permission: opens Privacy & Security › Automation.
+private struct OpenAutomationSettingsButton: View {
+    var body: some View {
+        Button("Open Settings…", action: GhosttyAutomationPermission.openSettings)
+            .controlSize(.small)
+    }
+}
+
+private struct GhosttyHostRow: View {
     @ObservedObject var model: Companion
+    @Binding var sheet: SetupPreview?
+
+    var body: some View {
+        let capabilities = model.setupCapabilities
+        let row = GhosttyPresentation.settingsRow(on: model.ghosttyEnabled, installed: capabilities.ghosttyInstalled,
+                                                  supported: capabilities.ghostty,
+                                                  minimum: CodexSetupRequirements.minimumGhosttyVersion,
+                                                  access: model.ghosttyAccess,
+                                                  permissionVerified: model.ghosttyPermissionVerified)
+        TerminalHostRow(host: .ghostty,
+                        version: AgentControls.version(installed: capabilities.ghosttyInstalled,
+                                                       supported: capabilities.ghostty,
+                                                       version: capabilities.ghosttyVersion,
+                                                       minimum: CodexSetupRequirements.minimumGhosttyVersion),
+                        badge: row.badge, diagnostics: nil, problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable Ghostty", isOn: $model.ghosttyEnabled)
+                .onChange(of: model.ghosttyEnabled) { _, enabled in model.ghosttyChanged(enabled) }
+        } line: { problem in
+            CardProblemLine(problem.message) {
+                if problem.opensAutomationSettings { OpenAutomationSettingsButton() }
+            }
+        }
+    }
+}
+
+/// Terminal.app (#239), shown since its acceptance (#244). A denied Automation permission offers
+/// Open Settings… on its line.
+private struct TerminalAppHostRow: View {
+    @ObservedObject var model: Companion
+    @Binding var sheet: SetupPreview?
 
     var body: some View {
         let row = model.terminalAppSettingsRow
-        SettingsCard {
-            SettingsRow(title: TerminalHost.terminalApp.displayName, detail: "Open sessions in their exact tab, and type replies there") {
-                Toggle("Terminal.app", isOn: Binding(get: { model.hostSwitches.isOn(.terminalApp) },
-                                                     set: { model.setHostSwitch(.terminalApp, on: $0) }))
-                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                    .accessibilityLabel("Enable Terminal.app")
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Version", detail: nil) {
-                Text(model.terminalApp.version ?? "Not installed").foregroundStyle(.secondary)
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Automation permission", detail: nil) {
-                HStack(spacing: 10) {
-                    if model.terminalApp.shownAccess == .denied {
-                        Button("Open Settings…", action: GhosttyAutomationPermission.openSettings)
-                    }
-                    StatusBadge(title: row.permission, color: row.permission == "Allowed" ? .green : .orange)
-                }
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Status", detail: row.detail) {
-                StatusBadge(title: row.badge.title, color: row.badge == .ready ? .green : row.badge == .needsAttention ? .orange : .secondary)
-            }
-            ForEach(row.problems, id: \.self) { problem in
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: problem, detail: nil) { EmptyView() }
-            }
-            if !model.terminalApp.diagnostics.isEmpty {
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                PreviewDisclosure(title: "Show diagnostics") { model.terminalApp.diagnostics.joined(separator: "\n") }
+        TerminalHostRow(host: .terminalApp, version: model.terminalApp.version ?? "Not installed",
+                        badge: row.badge.readiness, diagnostics: diagnosticsText(model.terminalApp.diagnostics),
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable Terminal.app", isOn: model.hostSwitchBinding(.terminalApp))
+        } line: { problem in
+            CardProblemLine(problem.message) {
+                if problem.opensAutomationSettings { OpenAutomationSettingsButton() }
             }
         }
-        SettingsFooter(TerminalAppPresentation.footer)
     }
 }
 
-/// The WezTerm card (product.md, "Agreed terminal host presentation"; #240), shown since WezTerm's
-/// acceptance run passed (#245, `TerminalHost.showsCard`). WezTerm needs no Automation access, so the card
-/// has no Permission row.
-private struct WezTermControls: View {
+/// WezTerm (#240), shown since its acceptance (#245). It needs no Automation access.
+private struct WezTermHostRow: View {
     @ObservedObject var model: Companion
     @ObservedObject var state: WezTermState
+    @Binding var sheet: SetupPreview?
 
     var body: some View {
         let row = model.wezTermSettingsRow
-        SettingsCard {
-            SettingsRow(title: TerminalHost.wezTerm.displayName, detail: "Open sessions in their exact tab, and type replies there") {
-                Toggle("WezTerm", isOn: Binding(get: { model.hostSwitches.isOn(.wezTerm) },
-                                                set: { model.setHostSwitch(.wezTerm, on: $0) }))
-                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                    .accessibilityLabel("Enable WezTerm")
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Version", detail: nil) {
-                Text(state.installed ? state.version ?? "Unknown" : "Not installed").foregroundStyle(.secondary)
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Status", detail: nil) {
-                StatusBadge(title: row.badge.title,
-                            color: row.badge == .ready ? .green : row.badge == .needsAttention ? .orange : .secondary)
-            }
-            ForEach(row.problems, id: \.self) { problem in
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                Text(problem.message).fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, SettingsStyle.rowInset)
-                    .padding(.vertical, 9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if model.hostSwitches.isOn(.wezTerm), !state.diagnostics.isEmpty {
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                PreviewDisclosure(title: "Show diagnostics") { state.diagnostics.joined(separator: "\n") }
-            }
-        }
-        SettingsFooter(WezTermPresentation.footer)
+        let on = model.hostSwitches.isOn(.wezTerm)
+        TerminalHostRow(host: .wezTerm, version: state.installed ? state.version ?? "Unknown" : "Not installed",
+                        badge: row.badge,
+                        diagnostics: diagnosticsText(state.diagnostics, shown: on),
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable WezTerm", isOn: model.hostSwitchBinding(.wezTerm))
+        } line: { CardProblemLine($0.message) }
     }
 }
 
-/// The tmux card (product.md, "Agreed terminal host presentation"; #241). Shown only once
-/// `TerminalHost.tmux.showsCard` is turned on by its acceptance (#246). tmux has no Permission row.
-private struct TmuxControls: View {
+/// tmux (#241). Shown only once its acceptance (#246) turns on `TerminalHost.tmux.showsCard`.
+private struct TmuxHostRow: View {
     @ObservedObject var model: Companion
     @ObservedObject var state: TmuxState
+    @Binding var sheet: SetupPreview?
 
     var body: some View {
         let row = model.tmuxSettingsRow
-        SettingsCard {
-            SettingsRow(title: TerminalHost.tmux.displayName, detail: "Open sessions in their exact pane, and type replies there") {
-                Toggle("tmux", isOn: Binding(get: { model.hostSwitches.isOn(.tmux) },
-                                             set: { model.setHostSwitch(.tmux, on: $0) }))
-                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                    .accessibilityLabel("Enable tmux")
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Status", detail: row.detail) {
-                StatusBadge(title: row.badge.title, color: row.badge == .ready ? .green : row.badge == .needsAttention ? .orange : .secondary)
-            }
-            ForEach(row.problems, id: \.self) { problem in
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                Text(problem).fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, SettingsStyle.rowInset)
-                    .padding(.vertical, 9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if model.hostSwitches.isOn(.tmux), !state.diagnostics.isEmpty {
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                PreviewDisclosure(title: "Show diagnostics") { state.diagnostics.joined(separator: "\n") }
-            }
-        }
-        SettingsFooter(TmuxPresentation.footer)
+        let on = model.hostSwitches.isOn(.tmux)
+        TerminalHostRow(host: .tmux, version: nil, badge: row.badge.readiness,
+                        diagnostics: diagnosticsText(state.diagnostics, shown: on),
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable tmux", isOn: model.hostSwitchBinding(.tmux))
+        } line: { CardProblemLine($0) }
     }
 }
 
-/// The Zellij card (product.md, "Agreed terminal host presentation"; #242). Shown only once
-/// `TerminalHost.zellij.showsCard` is turned on by its acceptance (#247). Zellij has no Permission row.
-private struct ZellijControls: View {
+/// Zellij (#242). Shown only once its acceptance (#247) turns on `TerminalHost.zellij.showsCard`.
+private struct ZellijHostRow: View {
     @ObservedObject var model: Companion
     @ObservedObject var state: ZellijState
+    @Binding var sheet: SetupPreview?
 
     var body: some View {
         let row = model.zellijSettingsRow
-        SettingsCard {
-            SettingsRow(title: TerminalHost.zellij.displayName, detail: "Open sessions in their exact pane, and type replies there") {
-                Toggle("Zellij", isOn: Binding(get: { model.hostSwitches.isOn(.zellij) },
-                                               set: { model.setHostSwitch(.zellij, on: $0) }))
-                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                    .accessibilityLabel("Enable Zellij")
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Status", detail: row.detail) {
-                StatusBadge(title: row.badge.title, color: row.badge == .ready ? .green : row.badge == .needsAttention ? .orange : .secondary)
-            }
-            ForEach(row.problems, id: \.self) { problem in
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                Text(problem).fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, SettingsStyle.rowInset)
-                    .padding(.vertical, 9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if model.hostSwitches.isOn(.zellij), !state.diagnostics.isEmpty {
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                PreviewDisclosure(title: "Show diagnostics") { state.diagnostics.joined(separator: "\n") }
-            }
-        }
-        SettingsFooter(ZellijPresentation.footer)
+        let on = model.hostSwitches.isOn(.zellij)
+        TerminalHostRow(host: .zellij, version: nil, badge: row.badge.readiness,
+                        diagnostics: diagnosticsText(state.diagnostics, shown: on),
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable Zellij", isOn: model.hostSwitchBinding(.zellij))
+        } line: { CardProblemLine($0) }
     }
 }
 
-/// The herdr card (product.md, "Agreed terminal host presentation"). Its switch is herdr's own;
-/// Herdly contacts herdr only while it and a terminal are on. Copy places a command on the
-/// pasteboard and never runs it. Exact internal reasons appear only under diagnostics, never on a
-/// notch card.
-private struct HerdrControls: View {
+/// herdr's row. Its switch is herdr's own; Herdly contacts herdr only while it and a terminal are on.
+/// Copy places a command on the pasteboard and never runs it. Exact internal reasons appear only in
+/// its diagnostics, never on a notch card.
+private struct HerdrHostRow: View {
     @ObservedObject var model: Companion
+    @Binding var sheet: SetupPreview?
     @ObservedObject private var tty = GhosttyTTYSupportMonitor.shared
 
-    private var row: HerdrSettingsRow {
-        HerdrPresentation.settingsRow(switches: model.hostSwitches, inUse: model.herdr.inUse,
-                                      outcome: model.herdrScanOutcome, agentsSeen: model.herdrAgentsSeen,
-                                      ttySupport: tty.support)
-    }
-
     var body: some View {
-        let row = row
-        SettingsCard {
-            SettingsRow(title: TerminalHost.herdr.displayName, detail: "Open sessions in their exact pane, and answer questions there") {
-                Toggle("herdr", isOn: Binding(get: { model.hostSwitches.isOn(.herdr) },
-                                              set: { model.setHostSwitch(.herdr, on: $0) }))
-                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                    .accessibilityLabel("Enable herdr")
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Status", detail: nil) {
-                if let badge = row.badge {
-                    StatusBadge(title: badge.title, color: color(badge))
-                } else {
-                    ProgressView().controlSize(.small).accessibilityLabel("Checking herdr")
-                }
-            }
-            ForEach(row.problems, id: \.self) { problem in
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                HerdrProblemLine(problem: problem)
-            }
-            if model.herdr.inUse, !diagnostics.isEmpty {
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                PreviewDisclosure(title: "Show diagnostics") { diagnostics.joined(separator: "\n") }
-            }
-        }
+        let row = HerdrPresentation.settingsRow(switches: model.hostSwitches, inUse: model.herdr.inUse,
+                                                outcome: model.herdrScanOutcome, agentsSeen: model.herdrAgentsSeen,
+                                                ttySupport: tty.support)
+        TerminalHostRow(host: .herdr, version: nil, badge: row.badge,
+                        diagnostics: model.herdr.inUse ? diagnosticsText(diagnostics) : nil,
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable herdr", isOn: model.hostSwitchBinding(.herdr))
+        } line: { HerdrProblemLine(problem: $0) }
         .onAppear { tty.refreshIfStale() }
         .onChange(of: model.herdrScanOutcome) { _, _ in tty.refreshIfStale() }
-        SettingsFooter(row.detail)
-    }
-
-    private func color(_ badge: HerdrReadinessBadge) -> Color {
-        switch badge {
-        case .off, .notInUse: .secondary
-        case .ready: .green
-        case .needsAttention: .orange
-        }
     }
 
     /// The scan's exact reason and each queued herdr session's exact reasons: Open's availability,
@@ -1257,70 +1277,30 @@ private struct HerdrControls: View {
     }
 }
 
-/// The iTerm2 card (product.md, "Agreed terminal host presentation"), shown since iTerm2's acceptance
-/// run passed (#243, `TerminalHost.showsCard`). Its switch asks macOS for Automation access as Ghostty's does.
-private struct ITerm2Controls: View {
+/// iTerm2 (#238), shown since its acceptance (#243). Its switch asks macOS for Automation access as
+/// Ghostty's does.
+private struct ITerm2HostRow: View {
     @ObservedObject var model: Companion
     @ObservedObject var state: ITerm2State
-
-    private var row: ITerm2SettingsRow {
-        ITerm2Presentation.settingsRow(on: model.hostSwitches.isOn(.iTerm2), installed: state.installed,
-                                       access: state.access, scan: state.scan, inUse: state.inUse)
-    }
+    @Binding var sheet: SetupPreview?
 
     var body: some View {
-        let row = row
-        SettingsCard {
-            SettingsRow(title: TerminalHost.iTerm2.displayName, detail: "Open sessions in their exact tab") {
-                Toggle("iTerm2", isOn: Binding(get: { model.hostSwitches.isOn(.iTerm2) },
-                                               set: { model.setHostSwitch(.iTerm2, on: $0) }))
-                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                    .accessibilityLabel("Enable iTerm2")
+        let on = model.hostSwitches.isOn(.iTerm2)
+        let row = ITerm2Presentation.settingsRow(on: on, installed: state.installed, access: state.access,
+                                                 scan: state.scan, inUse: state.inUse)
+        TerminalHostRow(host: .iTerm2, version: state.installed ? (state.version ?? "Installed") : "Not installed",
+                        badge: row.badge, diagnostics: diagnosticsText(diagnostics, shown: on), problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable iTerm2", isOn: model.hostSwitchBinding(.iTerm2))
+        } line: { problem in
+            CardProblemLine(problem.message) {
+                if problem == .automationDenied { OpenAutomationSettingsButton() }
             }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Version", detail: nil) {
-                Text(state.installed ? (state.version ?? "Installed") : "Not installed").foregroundStyle(.secondary)
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Automation permission", detail: nil) {
-                HStack(spacing: 10) {
-                    if state.access == .denied {
-                        Button("Open Settings…", action: GhosttyAutomationPermission.openSettings)
-                    }
-                    StatusBadge(title: row.permission, color: state.access == .granted ? .green : .orange)
-                }
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Status", detail: nil) {
-                StatusBadge(title: row.badge.title, color: color(row.badge))
-            }
-            ForEach(row.problems, id: \.self) { problem in
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                Text(problem.message).fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, SettingsStyle.rowInset)
-                    .padding(.vertical, 9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            if !diagnostics.isEmpty {
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                PreviewDisclosure(title: "Show diagnostics") { diagnostics.joined(separator: "\n") }
-            }
-        }
-        SettingsFooter(ITerm2Presentation.footer)
-    }
-
-    private func color(_ badge: HerdrReadinessBadge) -> Color {
-        switch badge {
-        case .off, .notInUse: .secondary
-        case .ready: .green
-        case .needsAttention: .orange
         }
     }
 
     /// The scan's result and each session's latest Open in iTerm2 with its exact reason. Typed input is
     /// always unavailable there (ADR 0017).
     private var diagnostics: [String] {
-        guard model.hostSwitches.isOn(.iTerm2) else { return [] }
         var lines = ["scan: \(state.scan)", "typed input: none (ADR 0017)"]
         for (session, line) in state.lastOpen.sorted(by: { $0.key < $1.key }) {
             lines.append("\(session.prefix(8)): \(line)")
@@ -1329,16 +1309,29 @@ private struct ITerm2Controls: View {
     }
 }
 
+private extension TerminalAppSettingsRow.Badge {
+    /// The same four states as every other host's badge.
+    var readiness: HerdrReadinessBadge {
+        switch self {
+        case .off: .off
+        case .notInUse: .notInUse
+        case .ready: .ready
+        case .needsAttention: .needsAttention
+        }
+    }
+}
+
+/// A herdr problem: the fix, and for an integration the exact command in monospace with Copy.
 private struct HerdrProblemLine: View {
     let problem: HerdrSettingsProblem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(problem.message).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 6) {
+            CardProblemLine(problem.message)
             if let command = problem.command {
                 HStack(spacing: 12) {
                     Text(command)
-                        .font(.system(.callout, design: .monospaced))
+                        .font(.system(size: 12, design: .monospaced))
                         .textSelection(.enabled)
                         .padding(.horizontal, 8)
                         .frame(height: 24)
@@ -1348,94 +1341,97 @@ private struct HerdrProblemLine: View {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(command, forType: .string)
                     }
+                    .controlSize(.small)
                     .accessibilityLabel("Copy \(command)")
                     .accessibilityHint("Copies the command. Herdly does not run it.")
                 }
+                .padding(.leading, 12)
             }
         }
-        .padding(.horizontal, SettingsStyle.rowInset)
-        .padding(.vertical, 9)
         .accessibilityElement(children: .contain)
     }
 }
 
+/// Settings › Notifications (#317): the sound switch and tiles, the read-state switch, and the test
+/// notification buttons. No footers.
 private struct NotificationControls: View {
     @ObservedObject var model: Companion
     private let sounds = Companion.systemSoundNames
+    private let soundColumns = [GridItem(.adaptive(minimum: 120, maximum: 120), spacing: 6, alignment: .leading)]
 
     var body: some View {
         ControlsPage(section: .notifications) {
             SettingsHeader("Sound")
             SettingsCard {
-                SettingsRow(title: "Play a sound for new completions and questions", detail: nil) {
+                SettingsRow(title: "Completions and questions", detail: nil) {
                     Toggle("Play a sound for new completions and questions",
                            isOn: Binding(get: { !model.muted }, set: { enabled in
                                withAnimation(SettingsMotion.curve(reduceMotion: model.reduceMotion)) { model.setSoundEnabled(enabled) }
                            }))
                         .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                        .accessibilityLabel("Play a sound for new completions and questions")
                 }
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
-                VStack(spacing: 0) {
+                LazyVGrid(columns: soundColumns, alignment: .leading, spacing: 6) {
                     ForEach(sounds, id: \.self) { name in
-                        SoundRow(name: name, selected: name == model.completionSound,
-                                 isDefault: name == Companion.defaultSound) {
+                        SoundTile(name: name, selected: name == model.completionSound) {
                             withAnimation(SettingsMotion.curve(reduceMotion: model.reduceMotion)) {
                                 model.setCompletionSound(name)
                             }
                         }
                     }
                 }
-                .padding(4)
+                .padding(10)
                 .disabled(model.muted)
                 .opacity(model.muted ? 0.5 : 1)
             }
-            SettingsFooter("Plays once when a card opens. Approvals stay silent, and so do items restored after a restart. Choosing a sound plays it.")
 
             SettingsHeader("Completions")
             SettingsCard {
-                SettingsRow(title: "Clear completions marked read in Codex", detail: model.desktopReadStateMessage) {
+                SettingsRow(title: "Clear when read in Codex", detail: nil) {
                     Toggle("Clear completions marked read in Codex", isOn: $model.desktopReadStateEnabled)
                         .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                        .accessibilityLabel("Clear completions marked read in Codex")
                         .onChange(of: model.desktopReadStateEnabled) { _, enabled in model.desktopReadStateChanged(enabled) }
                 }
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Test notification", detail: nil) {
-                    HStack {
-                        Button("Dismiss", action: model.dismissTest).disabled(!model.attention.pending)
-                        Button("Send Test", action: model.sendTest)
-                    }
+                .help(model.desktopReadState.message)
+                if model.desktopReadStateEnabled, let problem = model.desktopReadState.problemLine {
+                    CardProblemLine(problem)
+                        .padding(.horizontal, SettingsStyle.rowInset)
+                        .padding(.bottom, 10)
                 }
             }
-            SettingsFooter("Herdly reads Codex's own desktop read state and never marks a task read itself.")
+
+            HStack(spacing: 8) {
+                Spacer()
+                if model.attention.pending {
+                    Button("Dismiss", action: model.dismissTest)
+                        .accessibilityLabel("Dismiss test notification")
+                }
+                Button("Send Test Notification", action: model.sendTest)
+            }
+            .padding(.top, 6)
         }
     }
 }
 
-/// One system sound: a check mark when chosen, and a play button that previews it.
-private struct SoundRow: View {
+/// One system sound as a 120x28pt tile: the accent fill and white medium text when chosen. Choosing
+/// it plays it once.
+private struct SoundTile: View {
     let name: String
     let selected: Bool
-    let isDefault: Bool
     let choose: () -> Void
 
     var body: some View {
         Button(action: choose) {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.accentColor).opacity(selected ? 1 : 0).frame(width: 16)
-                Text(name)
-                Spacer(minLength: 8)
-                if isDefault { Text("Default").font(.subheadline).foregroundStyle(.secondary) }
-                Button { NSSound(named: name)?.play() } label: {
-                    Image(systemName: "play.fill").font(.system(size: 10))
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Preview \(name)")
-            }
-            .padding(.horizontal, 6)
-            .frame(height: 28)
-            .background(selected ? Color.accentColor.opacity(0.1) : .clear, in: .rect(cornerRadius: 6, style: .continuous))
-            .contentShape(Rectangle())
+            Text(name)
+                .font(.system(size: 13, weight: selected ? .medium : .regular))
+                .foregroundStyle(selected ? Color.white : Color.primary)
+                .lineLimit(1)
+                .frame(width: 120, height: 28)
+                .background(selected ? Color.accentColor : Color.primary.opacity(0.04),
+                            in: .rect(cornerRadius: 7, style: .continuous))
+                .contentShape(.rect(cornerRadius: 7, style: .continuous))
         }
         .buttonStyle(PressFeedback())
         .accessibilityLabel(name)
