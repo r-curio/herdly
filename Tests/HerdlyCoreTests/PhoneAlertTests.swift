@@ -69,18 +69,30 @@ private func candidates(_ items: [AgentAttentionItem]) -> [PhoneAlertCandidate] 
     #expect(ledger.consider(candidates(rows()), idleSeconds: .nan, setting: .on).isEmpty)
 }
 
-@Test func runningWorkAndOtherRowKindsNeverAlert() {
-    #expect(PhoneAlertKind(.running) == nil)
-    #expect(PhoneAlertKind(.waiting) == nil)
-    #expect(PhoneAlertKind(.statusUnavailable) == nil)
+@Test func runningWorkNeverAlerts() {
     let running = rows().filter { $0.running != nil }
     #expect(running.count == 1)
+    #expect(running.compactMap(PhoneAlertKind.init).isEmpty)
     #expect(candidates(running).isEmpty)
 }
 
 @Test func aHandedBackApprovalAndAnEarlierResultStillCountAsTheirKind() {
-    #expect(PhoneAlertKind(.handedBackApproval) == .approval)
-    #expect(PhoneAlertKind(.earlierOutcome) == .completion)
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(AgentApproval(session: codexDesktop, turn: "t1", call: "a1", arrivedAt: 10, state: .handedBack)), now: 10)
+    queue.apply(.outcome(AgentOutcome(session: claude, turn: "t2", status: .finished, arrivedAt: 10)), now: 10)
+    let later = queue.items(at: 10_000)
+    #expect(later.map(\.kind) == [.handedBackApproval, .earlierOutcome])
+    #expect(later.compactMap(PhoneAlertKind.init) == [.approval, .completion(.finished)])
+}
+
+@Test func onlyASuccessfulTurnReadsFinished() {
+    let title = { (status: AgentOutcomeStatus, source: AgentSource) in
+        PhoneAlertPolicy.text(kind: .completion(PhoneAlertCompletion(status)), source: source, project: "herdly").title
+    }
+    #expect(title(.finished, .codex) == "Codex finished")
+    #expect(title(.failed, .codex) == "Codex stopped")
+    #expect(title(.stopped, .claude) == "Claude stopped")
+    #expect(title(.unavailable, .claude) == "Claude ended a turn")
 }
 
 @Test func duplicateAndReorderedArrivalsSendOnce() {
@@ -110,7 +122,7 @@ private func candidates(_ items: [AgentAttentionItem]) -> [PhoneAlertCandidate] 
     #expect(ledger.consider(beforeLaunch, idleSeconds: 3_600, setting: .on).isEmpty)
 
     var other = PhoneAlertLedger()
-    let uncertain = candidates(rows(uncertain: true)).filter { $0.kind == .completion }
+    let uncertain = candidates(rows(uncertain: true)).filter { $0.kind == .completion(.finished) }
     #expect(uncertain.map(\.arrival) == [.restored])
     #expect(other.consider(uncertain, idleSeconds: 3_600, setting: .on).isEmpty)
 }
@@ -149,14 +161,16 @@ private func candidates(_ items: [AgentAttentionItem]) -> [PhoneAlertCandidate] 
     #expect(PhoneAlertPolicy.text(kind: .approval, source: .claude, project: nil)
         == PhoneAlertMessage(title: "Claude needs permission", body: "Decide on your Mac", priority: .high, tags: ["lock"]))
     #expect(PhoneAlertPolicy.text(kind: .question, source: .codex, project: nil).body == "Answer on your Mac")
-    #expect(PhoneAlertPolicy.text(kind: .completion, source: .codex, project: nil).body == "The result is on your Mac")
+    #expect(PhoneAlertPolicy.text(kind: .completion(.finished), source: .codex, project: nil).body == "The result is on your Mac")
 }
 
 // MARK: ntfy request
 
+private let testTopic = NtfyTopic("herdly-abc234")!
+
 @Test func theNtfyRequestIsAJSONPostToTheServerRoot() throws {
     let message = PhoneAlertPolicy.text(kind: .approval, source: .codex, project: "café")
-    let request = try #require(NtfyPublish.request(topic: "herdly-abc234", message: message))
+    let request = try #require(NtfyPublish.request(topic: testTopic, message: message))
     #expect(request.url?.absoluteString == "https://ntfy.sh/")
     #expect(request.httpMethod == "POST")
     #expect(request.value(forHTTPHeaderField: "Content-Type") == "application/json")
@@ -173,26 +187,31 @@ private func candidates(_ items: [AgentAttentionItem]) -> [PhoneAlertCandidate] 
     #expect(Set(json.keys) == ["topic", "title", "message", "priority", "tags"])
 }
 
-@Test func anInvalidTopicBuildsNoRequest() {
-    for topic in ["", "has space", "slash/topic", "ünïcode", String(repeating: "a", count: 65)] {
-        #expect(NtfyPublish.request(topic: topic, message: .test) == nil)
+@Test func anInvalidTopicNameIsNoTopic() {
+    for name in ["", "has space", "slash/topic", "ünïcode", String(repeating: "a", count: 65)] {
+        #expect(NtfyTopic(name) == nil)
     }
+    #expect(NtfyTopic("Herdly_topic-64")?.name == "Herdly_topic-64")
 }
 
 @Test func aNewTopicIsPrivateAndValid() {
     var generator = SystemRandomNumberGenerator()
-    let first = NtfyPublish.newTopic(using: &generator)
-    let second = NtfyPublish.newTopic(using: &generator)
-    #expect(first.hasPrefix("herdly-"))
-    #expect(first.count == 27)
-    #expect(NtfyPublish.isValidTopic(first))
+    let first = NtfyTopic.random(using: &generator)
+    let second = NtfyTopic.random(using: &generator)
+    #expect(first.name.hasPrefix("herdly-"))
+    #expect(first.name.count == 27)
+    #expect(NtfyTopic(first.name) == first)
     #expect(first != second)
+}
+
+@Test func theIdleCopyFollowsTheThreshold() {
+    #expect(PhoneAlertPolicy.idleThresholdText == "2 minutes")
 }
 
 // MARK: Sender and controller (HerdlyApp)
 
 private final class RecordingTransport: PhoneAlertTransport, @unchecked Sendable {
-    // Test-only: one test drives it from one task at a time, guarded by the lock anyway.
+    // Unchecked: the only mutable state, `recorded`, is read and written under `lock`.
     private let lock = NSLock()
     private var recorded: [URLRequest] = []
     let status: Int?
@@ -210,7 +229,7 @@ private final class RecordingTransport: PhoneAlertTransport, @unchecked Sendable
 
 @Test func theNtfySenderPostsThroughItsTransport() async {
     let transport = RecordingTransport(status: 200)
-    let sender = NtfyPhoneAlertSender(topic: "herdly-test", transport: transport)
+    let sender = NtfyPhoneAlertSender(topic: testTopic, transport: transport)
     #expect(await sender.send(.test) == .delivered)
     #expect(transport.requests.count == 1)
     #expect(transport.requests.first?.url?.absoluteString == "https://ntfy.sh/")
@@ -219,22 +238,27 @@ private final class RecordingTransport: PhoneAlertTransport, @unchecked Sendable
 
 @Test func theNtfySenderReportsFailuresWithoutRetrying() async {
     let offline = RecordingTransport(status: nil)
-    #expect(await NtfyPhoneAlertSender(topic: "herdly-test", transport: offline).send(.test)
+    #expect(await NtfyPhoneAlertSender(topic: testTopic, transport: offline).send(.test)
         == .failed("Couldn't reach ntfy.sh. Check your connection."))
     #expect(offline.requests.count == 1)
     let limited = RecordingTransport(status: 429)
-    #expect(await NtfyPhoneAlertSender(topic: "herdly-test", transport: limited).send(.test) == .failed("ntfy.sh answered 429."))
+    #expect(await NtfyPhoneAlertSender(topic: testTopic, transport: limited).send(.test) == .failed("ntfy.sh answered 429."))
     #expect(limited.requests.count == 1)
-    let invalid = RecordingTransport(status: 200)
-    #expect(await NtfyPhoneAlertSender(topic: "bad topic", transport: invalid).send(.test)
-        == .failed("The phone topic is not a valid ntfy topic."))
-    #expect(invalid.requests.isEmpty)
 }
 
+/// An in-memory topic store: no test reads or writes the real login Keychain.
 private struct FixedTopicStore: PhoneAlertTopicStoring {
-    let topic: String?
-    func read() -> String? { topic }
-    func loadOrCreate() -> String? { topic }
+    let topic: NtfyTopic?
+    func read() -> NtfyTopic? { topic }
+    func loadOrCreate() -> NtfyTopic? { topic }
+}
+
+/// An in-memory switch: no test writes a preferences file.
+private final class MemorySwitch: PhoneAlertSwitchStoring {
+    var setting: PhoneAlertSetting
+    init(_ setting: PhoneAlertSetting = .off) { self.setting = setting }
+    func load() -> PhoneAlertSetting { setting }
+    func save(_ setting: PhoneAlertSetting) { self.setting = setting }
 }
 
 private struct FailingSender: PhoneAlertSender {
@@ -242,38 +266,56 @@ private struct FailingSender: PhoneAlertSender {
 }
 
 @MainActor
-private func controller(topic: String? = "herdly-test", idle: Double? = 600) -> PhoneAlerts {
-    let defaults = UserDefaults(suiteName: "PhoneAlertTests-\(UUID().uuidString)")!
-    return PhoneAlerts(defaults: defaults, store: FixedTopicStore(topic: topic),
-                       makeSender: { _ in FailingSender() }, idleSeconds: { idle })
+private func controller(topic: NtfyTopic? = testTopic, switchStore: MemorySwitch = MemorySwitch(),
+                        idle: Double? = 600) -> PhoneAlerts {
+    PhoneAlerts(switchStore: switchStore, store: FixedTopicStore(topic: topic),
+                makeSender: { _ in FailingSender() }, idleSeconds: { idle })
 }
 
 @MainActor
-@Test func phoneAlertsAreOffByDefaultAndPersistTheSwitch() {
-    let suite = "PhoneAlertTests-\(UUID().uuidString)"
-    let defaults = UserDefaults(suiteName: suite)!
-    let alerts = PhoneAlerts(defaults: defaults, store: FixedTopicStore(topic: "herdly-test"),
-                             makeSender: { _ in FailingSender() }, idleSeconds: { 600 })
+@Test func phoneAlertsAreOffByDefaultAndPersistTheSwitch() async {
+    let saved = MemorySwitch()
+    let alerts = controller(switchStore: saved)
     #expect(alerts.setting == .off)
-    #expect(alerts.arrived(candidates(rows())).isEmpty)
-    alerts.setEnabled(true)
-    #expect(alerts.topic == "herdly-test")
-    #expect(PhoneAlerts(defaults: defaults, store: FixedTopicStore(topic: nil),
-                        makeSender: { _ in FailingSender() }, idleSeconds: { 600 }).setting == .on)
+    #expect(alerts.start() == nil)
+    #expect(alerts.arrived(candidates(rows())).messages.isEmpty)
+    await alerts.setEnabled(true)?.value
+    #expect(alerts.topicState == .ready(testTopic))
+    #expect(saved.setting == .on)
+    let relaunched = controller(switchStore: saved)
+    #expect(relaunched.setting == .on)
+    #expect(relaunched.topicState == .notLoaded)
+    await relaunched.start()?.value
+    #expect(relaunched.topic == testTopic)
 }
 
 @MainActor
-@Test func aKeychainFailureKeepsTheSwitchOffAndSaysSo() {
-    let alerts = controller(topic: nil)
-    alerts.setEnabled(true)
+@Test func aKeychainFailureTurnsTheSwitchBackOffAndSaysSo() async {
+    let saved = MemorySwitch()
+    let alerts = controller(topic: nil, switchStore: saved)
+    await alerts.setEnabled(true)?.value
     #expect(alerts.setting == .off)
+    #expect(saved.setting == .off)
+    #expect(alerts.topicState == .unavailable)
     #expect(alerts.problem == "Couldn't save the phone topic in the Keychain.")
+}
+
+@MainActor
+@Test func anArrivalBeforeTheTopicLoadsIsRecordedAndSkipped() async {
+    let alerts = controller(switchStore: MemorySwitch(.on))
+    // The launch load has not run: nothing blocks, nothing is sent, and the items are spent.
+    let dispatch = alerts.arrived(candidates(rows()))
+    #expect(dispatch.messages.isEmpty)
+    #expect(dispatch.deliveries == nil)
+    #expect(alerts.ledger.count == 3)
+    await alerts.start()?.value
+    #expect(alerts.arrived(candidates(rows())).messages.isEmpty)
 }
 
 @MainActor
 @Test func aSenderFailureLeavesTheQueueAndLedgerAsTheyWere() async {
     let alerts = controller()
-    alerts.setEnabled(true)
+    await alerts.setEnabled(true)?.value
     var queue = AgentAttentionQueue()
     for item in rows() {
         if let approval = item.approval { queue.apply(.approval(approval), now: item.arrivedAt) }
@@ -282,22 +324,30 @@ private func controller(topic: String? = "herdly-test", idle: Double? = 600) -> 
     }
     let before = queue
     let items = queue.items(at: launchedAt + 5)
-    #expect(alerts.arrived(candidates(items)).count == 3)
-    // The failed publishes run detached; give them a turn, then nothing has changed or retried.
-    for _ in 0..<5 { await Task.yield() }
+    let dispatch = alerts.arrived(candidates(items))
+    #expect(dispatch.messages.count == 3)
+    #expect(await dispatch.deliveries?.value == Array(repeating: .failed("offline"), count: 3))
     #expect(queue == before)
     #expect(queue.items(at: launchedAt + 5) == items)
     #expect(alerts.ledger.count == 3)
     #expect(alerts.problem == nil)
-    #expect(alerts.arrived(candidates(items)).isEmpty)
+    #expect(alerts.arrived(candidates(items)).messages.isEmpty)
 }
 
 @MainActor
 @Test func aFailedTestShowsTheProblemLine() async {
     let alerts = controller()
-    alerts.setEnabled(true)
-    alerts.sendTest()
-    for _ in 0..<200 where alerts.testInFlight { try? await Task.sleep(nanoseconds: 1_000_000) }
+    await alerts.setEnabled(true)?.value
+    let test = alerts.sendTest()
+    #expect(alerts.testInFlight)
+    await test?.value
     #expect(!alerts.testInFlight)
     #expect(alerts.problem == "offline")
+}
+
+@MainActor
+@Test func aTestBeforeTheTopicLoadsSaysSoAndSendsNothing() {
+    let alerts = controller(switchStore: MemorySwitch(.on))
+    #expect(alerts.sendTest() == nil)
+    #expect(alerts.problem == "The phone topic isn't ready yet. Try again in a moment.")
 }

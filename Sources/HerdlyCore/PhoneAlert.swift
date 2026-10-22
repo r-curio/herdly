@@ -5,19 +5,38 @@ import Foundation
 /// the idle reading, and the switch, and gets back at most one message. Nothing here reads a clock,
 /// the network, or the Keychain, and nothing here changes the queue, acknowledgment, or a deadline.
 
+/// How a finished turn ended, as far as the phone says: "finished" only for success, "stopped" for
+/// a failed or interrupted turn, and a neutral word when the source did not say.
+public enum PhoneAlertCompletion: Equatable, Sendable {
+    case finished
+    case stopped
+    case unknown
+
+    public init(_ status: AgentOutcomeStatus) {
+        switch status {
+        case .finished: self = .finished
+        case .failed, .stopped: self = .stopped
+        case .unavailable: self = .unknown
+        }
+    }
+}
+
 /// The kinds of attention that may reach the phone. Running work, unknown waiting sessions, and
 /// status-unavailable rows have no phone kind.
 public enum PhoneAlertKind: Equatable, Sendable {
+    /// Live or handed back at arrival: Codex desktop approvals always hand back at once.
     case approval
     case question
-    case completion
+    case completion(PhoneAlertCompletion)
 
     /// The phone kind for a queue row, or nil for a row that never alerts.
-    public init?(_ kind: AgentAttentionKind) {
-        switch kind {
+    public init?(_ item: AgentAttentionItem) {
+        switch item.kind {
         case .actionableApproval, .handedBackApproval: self = .approval
         case .question: self = .question
-        case .outcome, .earlierOutcome: self = .completion
+        case .outcome, .earlierOutcome:
+            guard let outcome = item.outcome else { return nil }
+            self = .completion(PhoneAlertCompletion(outcome.status))
         case .waiting, .statusUnavailable, .running: return nil
         }
     }
@@ -29,10 +48,10 @@ public enum PhoneAlertArrival: Equatable, Sendable {
     case fresh
     case restored
 
-    /// Fresh when the item arrived at or after launch, and for a result, when it is not uncertain.
-    /// Matches the rule that decides whether a card pops (`ResultPop.isFresh`).
+    /// Fresh when the item arrived at or after launch; a result uses the rule that decides whether
+    /// its card pops (`ResultPop.isFresh`), which also keeps an uncertain result silent.
     public static func of(_ item: AgentAttentionItem, launchedAt: Double) -> PhoneAlertArrival {
-        if let outcome = item.outcome, outcome.uncertain { return .restored }
+        if let outcome = item.outcome { return ResultPop.isFresh(outcome, launchedAt: launchedAt) ? .fresh : .restored }
         return item.arrivedAt >= launchedAt ? .fresh : .restored
     }
 }
@@ -89,7 +108,7 @@ public struct PhoneAlertCandidate: Equatable, Sendable {
 
     /// The candidate for a queue row, or nil for a row kind that never alerts.
     public init?(_ item: AgentAttentionItem, project: String?, launchedAt: Double) {
-        guard let kind = PhoneAlertKind(item.kind) else { return nil }
+        guard let kind = PhoneAlertKind(item) else { return nil }
         self.init(id: item.id, kind: kind, source: item.session.source, project: project,
                   arrival: PhoneAlertArrival.of(item, launchedAt: launchedAt))
     }
@@ -98,6 +117,11 @@ public struct PhoneAlertCandidate: Equatable, Sendable {
 public enum PhoneAlertPolicy {
     /// No keyboard or pointer input for this long counts as away. Fixed for now (decided 2026-10-22).
     public static let idleThreshold: Double = 120
+    /// "2 minutes", for the Settings copy, from `idleThreshold`.
+    public static var idleThresholdText: String {
+        let minutes = Int((idleThreshold / 60).rounded())
+        return minutes == 1 ? "1 minute" : "\(minutes) minutes"
+    }
 
     /// The message for one arrival, or nil when the phone should stay quiet: the switch is off, the
     /// item was restored or was already considered once, the idle reading is unknown, or the user
@@ -112,7 +136,7 @@ public enum PhoneAlertPolicy {
     /// The title and body for one kind. The approval body says to decide on the Mac, so it never
     /// implies the request is still live when the user gets back.
     public static func text(kind: PhoneAlertKind, source: AgentSource, project: String?) -> PhoneAlertMessage {
-        let agent = source == .claude ? "Claude" : "Codex"
+        let agent = source.displayName
         switch kind {
         case .approval:
             return PhoneAlertMessage(title: "\(agent) needs permission",
@@ -121,9 +145,14 @@ public enum PhoneAlertPolicy {
         case .question:
             return PhoneAlertMessage(title: "\(agent) needs an answer", body: project ?? "Answer on your Mac",
                                      priority: .high, tags: ["question"])
-        case .completion:
-            return PhoneAlertMessage(title: "\(agent) finished", body: project ?? "The result is on your Mac",
-                                     priority: .standard, tags: ["white_check_mark"])
+        case let .completion(ending):
+            let (title, tag) = switch ending {
+            case .finished: ("\(agent) finished", "white_check_mark")
+            case .stopped: ("\(agent) stopped", "warning")
+            case .unknown: ("\(agent) ended a turn", "white_check_mark")
+            }
+            return PhoneAlertMessage(title: title, body: project ?? "The result is on your Mac",
+                                     priority: .standard, tags: [tag])
         }
     }
 
@@ -188,29 +217,10 @@ public enum NtfyPublish {
     public static let server = URL(string: "https://ntfy.sh/")!
     /// A bounded wait: a slow or absent server never holds an alert open.
     public static let timeout: TimeInterval = 10
-    static let topicPrefix = "herdly-"
-    static let topicAlphabet = Array("abcdefghijklmnopqrstuvwxyz234567")
-    static let topicRandomLength = 20
 
-    /// ntfy's rule: letters, digits, `_` and `-`, at most 64 characters.
-    public static func isValidTopic(_ topic: String) -> Bool {
-        guard !topic.isEmpty, topic.count <= 64 else { return false }
-        return topic.unicodeScalars.allSatisfy {
-            ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || $0 == "-" || $0 == "_"
-        }
-    }
-
-    /// A new private topic: "herdly-" and 20 base32 characters (100 random bits). The topic works
-    /// like a password, so the generator must be a secure one (`SystemRandomNumberGenerator`).
-    public static func newTopic<Generator: RandomNumberGenerator>(using generator: inout Generator) -> String {
-        let suffix = (0..<topicRandomLength).map { _ in topicAlphabet.randomElement(using: &generator)! }
-        return topicPrefix + String(suffix)
-    }
-
-    /// The publish request for one message, or nil for an invalid topic.
-    public static func request(topic: String, message: PhoneAlertMessage, server: URL = NtfyPublish.server) -> URLRequest? {
-        guard isValidTopic(topic) else { return nil }
-        let payload = Payload(topic: topic, title: message.title, message: message.body,
+    /// The publish request for one message, or nil if it could not be encoded.
+    public static func request(topic: NtfyTopic, message: PhoneAlertMessage, server: URL = NtfyPublish.server) -> URLRequest? {
+        let payload = Payload(topic: topic.name, title: message.title, message: message.body,
                               priority: message.priority.rawValue, tags: message.tags)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -228,5 +238,30 @@ public enum NtfyPublish {
         let message: String
         let priority: Int
         let tags: [String]
+    }
+}
+
+/// An ntfy topic name that passed ntfy's rule: letters, digits, `_` and `-`, at most 64 characters.
+/// It works like a password: anyone who knows it can read the alerts.
+public struct NtfyTopic: Hashable, Sendable {
+    public let name: String
+
+    public init?(_ name: String) {
+        guard !name.isEmpty, name.count <= 64,
+              name.unicodeScalars.allSatisfy({
+                  ($0.isASCII && CharacterSet.alphanumerics.contains($0)) || $0 == "-" || $0 == "_"
+              }) else { return nil }
+        self.name = name
+    }
+
+    static let prefix = "herdly-"
+    static let alphabet = Array("abcdefghijklmnopqrstuvwxyz234567")
+    static let randomLength = 20
+
+    /// A new private topic: "herdly-" and 20 base32 characters (100 random bits). The generator must
+    /// be a secure one (`SystemRandomNumberGenerator`).
+    public static func random<Generator: RandomNumberGenerator>(using generator: inout Generator) -> NtfyTopic {
+        let suffix = (0..<randomLength).map { _ in alphabet.randomElement(using: &generator)! }
+        return NtfyTopic(prefix + String(suffix))!
     }
 }

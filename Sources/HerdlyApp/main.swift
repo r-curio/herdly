@@ -779,6 +779,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         refreshLaunchAtLogin()
+        phoneAlerts.start()
         for flag in ["--reminder-events", "--desktop-events"] {
             if let path = Companion.argumentValue(for: flag) { eventsPath = path }
         }

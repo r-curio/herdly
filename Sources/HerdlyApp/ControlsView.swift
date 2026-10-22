@@ -1423,25 +1423,25 @@ private struct PhoneSection: View {
         SettingsHeader("Phone")
         SettingsCard {
             SettingsRow(title: "Alert my phone when I'm away",
-                        detail: "Approvals, questions and completions, after 2 minutes idle") {
+                        detail: "Approvals, questions and completions, after \(PhoneAlertPolicy.idleThresholdText) idle") {
                 Toggle("Alert my phone when I'm away",
                        isOn: Binding(get: { phone.enabled }, set: { enabled in
-                           withAnimation(SettingsMotion.curve(reduceMotion: reduceMotion)) { phone.setEnabled(enabled) }
+                           withAnimation(SettingsMotion.curve(reduceMotion: reduceMotion)) { _ = phone.setEnabled(enabled) }
                        }))
                     .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                     .accessibilityLabel("Alert my phone when I'm away")
-                    .accessibilityHint("Sends approvals, questions and completions to ntfy after 2 minutes idle.")
+                    .accessibilityHint("Sends approvals, questions and completions to ntfy after \(PhoneAlertPolicy.idleThresholdText) idle.")
             }
             if phone.enabled {
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
                 SettingsRow(title: "Topic", detail: "Subscribe to it in ntfy. Anyone with it can read your alerts.") {
                     HStack(spacing: 8) {
-                        Text(phone.topic ?? "Unavailable")
+                        Text(topicText)
                             .font(.system(size: 12, design: .monospaced))
                             .foregroundStyle(phone.topic == nil ? .secondary : .primary)
                             .textSelection(.enabled)
                             .lineLimit(1)
-                            .accessibilityLabel(phone.topic.map { "Topic \($0)" } ?? "Topic unavailable")
+                            .accessibilityLabel("Topic \(topicText)")
                         Button("Copy", action: phone.copyTopic)
                             .controlSize(.small)
                             .disabled(phone.topic == nil)
@@ -1456,7 +1456,15 @@ private struct PhoneSection: View {
                     .padding(.bottom, 10)
             }
         }
-        .onAppear(perform: phone.loadTopicIfNeeded)
+        .onAppear { phone.start() }
+    }
+
+    private var topicText: String {
+        switch phone.topicState {
+        case let .ready(topic): topic.name
+        case .notLoaded, .loading: "Loading…"
+        case .unavailable: "Unavailable"
+        }
     }
 }
 
@@ -1466,7 +1474,7 @@ private struct PhoneTestButton: View {
 
     var body: some View {
         if phone.enabled {
-            Button("Send Test to Phone", action: phone.sendTest)
+            Button("Send Test to Phone") { phone.sendTest() }
                 .disabled(phone.testInFlight)
                 .accessibilityLabel("Send test alert to phone")
                 .accessibilityHint("Publishes one test alert to your ntfy topic.")
