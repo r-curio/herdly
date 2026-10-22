@@ -313,9 +313,14 @@ public struct CompletionPreview: Equatable, Sendable {
     /// `sourceShortened`: the source kept only the start of the message (a Claude record, #341), so the
     /// card always offers "Show all" and says the full message is in the agent.
     public init?(_ source: String, sourceShortened: Bool) {
+        // Relative indentation is kept: it carries code blocks and nested lists (`MessageMarkdown`).
+        // Only the indent every line shares is removed.
         let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \Character.isNewline)
-            .map { $0.trimmingCharacters(in: CharacterSet.whitespaces) }
-        let normalized = lines.joined(separator: "\n").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            .map { String($0.reversed().drop(while: \.isWhitespace).reversed()) }
+        let sharedIndent = lines.filter { !$0.isEmpty }.map { $0.prefix(while: \.isWhitespace).count }.min() ?? 0
+        let normalized = lines.map { String($0.dropFirst(sharedIndent)) }
+            .drop(while: \.isEmpty).reversed().drop(while: \.isEmpty).reversed()
+            .joined(separator: "\n")
         guard !normalized.isEmpty else { return nil }
         let keptLines = Array(normalized.split(separator: "\n", omittingEmptySubsequences: false).prefix(Self.maximumLines))
         var value = keptLines.joined(separator: "\n")
