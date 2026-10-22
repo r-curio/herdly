@@ -16,13 +16,16 @@ The initial surfaces are Codex desktop and Codex CLI running directly in Ghostty
 | [Architecture decisions](docs/adr) | Before changing the relevant integration or architectural boundary. |
 | [Design system](DESIGN.md) | For UI, layout, typography, color, motion, and accessibility work. |
 | [MVP acceptance](docs/mvp-acceptance.md) and [evidence](docs/evidence) | Before making integration or release claims. |
+| Paper: [session states and journey](https://app.paper.design/file/01M5BZ6XS02TKJWZ4CF0MVYBNW/p-1-0) (decision log D1…), [Herdly Settings](https://app.paper.design/file/01M4E368NRBEWP2KJFYFTZ4P2J/p-2-0) | When a ticket or doc cites a D-number or artboard ID. The docs record the agreed wording; the artboard shows layout. |
+
+UI work runs design-first: the user agrees designs and numbered decisions in Paper (a design session leaves the repo untouched), `paper-to-issues` turns them into GitHub issues, and `ship-issue` / `ship-batch` implement them. "Steer" is Herdly's former name and still appears in old worktrees and Paper file names.
 
 Agreed behavior is authoritative. Older README summaries, dated investigations, and unrun acceptance steps can lag it. Apply explicit superseding decisions and identify conflicts; ask about unresolved product choices instead of inventing behavior. A draft integration, generated schema, closed ticket, or passing build is not live proof.
 
 ### Product invariants
 
 - **Attention:** one shared notch on the active display. Agreed visibility keeps it available across foreground apps; notification eligibility and acknowledgment have separate rules. Follow the placement contract for display-specific behavior.
-- **Queue:** actionable approvals, unanswered questions, handed-back requests, unknown Claude waiting sessions, unacknowledged completions, status-unavailable Claude sessions, then running work; oldest arrival first within each group. An optional "Last update" sort reorders everything below live approvals and waiting questions. Working and to-check counts are distinct. Queue order never serializes Codex execution.
+- **Queue:** actionable approvals, unanswered questions, handed-back requests, unknown Claude waiting sessions, unacknowledged completions, status-unavailable Claude sessions, then running work; oldest arrival first within each group, except live approvals, which go soonest deadline first. The default sort is "By need"; "Newest first" reorders everything below live approvals and waiting questions. Working and to-check counts are distinct. Queue order never serializes Codex execution.
 - **Approval:** only the user's explicit allow-once or deny choice produces a decision. Each request has its own 30-second deadline from receipt. Hover, queue position, retries, and display changes never extend it. Timeout, error, disconnect, or uncertainty hands back with no decision.
 - **Handoff:** after handoff, offer only Open in Codex. Retain the reminder until matching resolution evidence arrives; its presence does not prove Codex still needs permission. Desktop approvals remain native until their transport and handoff policy are verified.
 - **Identity:** distinguish source, session, turn, request/call, completion, and live approval interaction. A project directory, title, command string, or foreground app alone cannot identify the intended action.
@@ -77,12 +80,12 @@ Use native macOS and standard library facilities first. Add dependencies or abst
 ## Working process
 
 1. **Establish scope.** Read `git status --short`, `git branch --show-current`, the requested ticket or agreed task, and relevant product/architecture docs. Preserve existing user changes.
-2. **Isolate work.** Keep changes scoped to one ticket on its own branch, prefixed by the kind of change: `feat/` for new or changed behavior, `fix/` for a bug fix, `docs/` for documentation only. These are the only prefixes: any other change (a refactor, tests, scripts, packaging or CI) uses `fix/` when it corrects something broken and `feat/` otherwise, and a change that mixes kinds takes the prefix of its main purpose. Follow the prefix with the ticket number when there is one and a short slug, such as `fix/153-herdr-route-gaps` or `docs/branch-prefixes`. For a direct request without a ticket, use an equivalently scoped branch; do not invent a ticket number. Existing `codex/` branches keep their names. Avoid unrelated cleanup.
+2. **Isolate work.** Keep changes scoped to one ticket on its own branch, prefixed by the kind of change: `feat/` for new or changed behavior, `fix/` for a bug fix, `docs/` for documentation only. These are the only prefixes: any other change (a refactor, tests, scripts, packaging or CI) uses `fix/` when it corrects something broken and `feat/` otherwise, and a change that mixes kinds takes the prefix of its main purpose. Follow the prefix with the ticket number when there is one and a short slug, such as `fix/153-herdr-route-gaps` or `docs/branch-prefixes`. For a direct request without a ticket, use an equivalently scoped branch; do not invent a ticket number. Existing `codex/` branches keep their names. Avoid unrelated cleanup. Implement in a fresh worktree, `git worktree add ../Herdly-worktrees/<branch> -b <branch> origin/main`, and leave the primary checkout on whatever branch the user has it on. Parallel issues collide most in `ControlsView.swift`, `NotchView.swift` and `main.swift`; name any of these you edit in the handoff so the second merge knows to rebase.
 3. **Check dependencies.** Use GitHub Issues in `r-curio/herdly`. Verify blockers and their actual results before starting. Follow [issue tracker](docs/agents/issue-tracker.md) and [triage labels](docs/agents/triage-labels.md). External PRs are not a separate triage intake.
 4. **Choose tools.** Use the [local AI tooling guide](docs/agents/ai-tooling.md). Read applicable skills before using them; prefer this project's variants for SwiftUI and tracker workflows.
 5. **Implement completely.** Follow the real data/state path through affected surfaces. Continue routine authorized work; ask when an unresolved decision or unavailable dependency prevents a correct result.
 6. **Verify.** Every nontrivial behavior needs a focused runnable check, including affected failure and uncertainty paths. Update the relevant contract or runbook when behavior changes.
-7. **Review and hand off.** Inspect scope and whitespace. Report changes, checks, outcomes, and remaining uncertainty. Stage explicit files when committing. Local edits do not imply push, merge, release, or installation.
+7. **Review and hand off.** Inspect scope and whitespace. Report changes, checks, outcomes, and remaining uncertainty. Stage explicit files when committing. Local edits do not imply push, merge, release, or installation. When the user asks to merge, squash-merge (`gh pr merge <pr> --squash --delete-branch`) with the title `feat|fix|docs: <plain summary> (#<issue>)`, then close out the issue and worktree as `ship-issue` describes.
 
 Use `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix` according to the label guide. Blocked issues have no ready label. Follow [domain guidance](docs/agents/domain.md) when updating the glossary or recording architectural tradeoffs.
 
@@ -108,6 +111,14 @@ Separate evidence in reports:
 - **Source inspection:** what code, schemas, or docs establish.
 - **Automated checks:** exact checks and outcomes, including fixture/replay limitations.
 - **Live application proof:** installed runtime, tested scenario, and observed result. Identify the artifact/commit when known; the current checkout need not be the running app's source.
+
+The user runs Herdly from the primary checkout's `output/Herdly.app` (bundle ID `dev.rcurio.herdly.prototype`). "Relaunch my Herdly" means: update the primary checkout, `sh scripts/build-app.sh`, run the smoke test, then quit and reopen it:
+
+```sh
+osascript -e 'quit app id "dev.rcurio.herdly.prototype"'; for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -f output/Herdly.app/Contents/MacOS/Herdly >/dev/null || break; sleep 0.5; done; pkill -f output/Herdly.app/Contents/MacOS/Herdly; open output/Herdly.app
+```
+
+Keep one Herdly running: launch a worktree build only after quitting the user's copy, and relaunch theirs afterwards. A UI change keeps "matches the Paper artboard" as an open check until someone compares the running app with the cited artboard; report it as unticked, with the artboard ID and a two-minute compare step. Report CPU and memory in absolute units (CPU seconds per wall minute, wakeups/s, MB footprint from `top -l` and `vmmap --summary`), never percentages alone.
 
 A package or smoke test does not complete integrated operator acceptance. Ad-hoc signing is not Developer ID signing or notarization. Reconcile older checklist expectations with current product behavior before following them. For interactive manual testing, guide one checkpoint at a time.
 
