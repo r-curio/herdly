@@ -169,6 +169,9 @@ struct Sprite: View {
     static let slotWidth = cell * CGFloat(SpriteKind.maximumColumns)
     static let slotHeight = cell * CGFloat(SpriteKind.maximumRows)
     static let slotGap: CGFloat = 6
+    /// One shared anchor for every sprite's timeline. Anchored at `.now`, each sprite ticked on its
+    /// own offset from when it appeared, so sprites added at different moments stepped out of step.
+    static let beatEpoch = Date(timeIntervalSinceReferenceDate: 0)
 
     var body: some View {
         let frames = kind.frames
@@ -176,12 +179,13 @@ struct Sprite: View {
             if unlit {
                 bitmap(frames[0])
             } else if working && !reduceMotion {
-                TimelineView(.periodic(from: .now, by: 0.5)) { context in
-                    let frame = Int(context.date.timeIntervalSinceReferenceDate * 2) & 1
+                TimelineView(.periodic(from: Sprite.beatEpoch, by: 0.5)) { context in
+                    // Ticks land on the half-second grid; rounding keeps a tick a hair early on its own step.
+                    let frame = Int((context.date.timeIntervalSinceReferenceDate * 2).rounded()) & 1
                     bitmap(frames[frame])
                 }
             } else if working {
-                TimelineView(.periodic(from: .now, by: 0.1)) { context in
+                TimelineView(.periodic(from: Sprite.beatEpoch, by: 0.1)) { context in
                     let phase = sin(context.date.timeIntervalSinceReferenceDate * 2 * .pi / 2.4)
                     bitmap(frames[0]).opacity(0.75 + 0.25 * phase)
                 }
