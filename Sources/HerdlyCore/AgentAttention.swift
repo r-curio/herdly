@@ -626,10 +626,12 @@ public struct AgentAttentionQueue: Equatable, Sendable {
     /// Drops the desktop copy of a finished Codex turn that also has a terminal outcome, for
     /// sessions known to be terminal ones (`AttentionQueue.dropDesktopDuplicates`). Outcomes are
     /// kept across launches here rather than re-derived, so copies restored from a snapshot taken
-    /// before Herdly knew the session's surface are merged here too. The terminal outcome stays.
+    /// before Herdly knew the session's surface are merged here too. The terminal outcome stays; an
+    /// acknowledged one still makes its desktop copy a duplicate.
     @discardableResult
     public mutating func dropDesktopDuplicates(codexTerminalSessions sessions: Set<String>) -> [AgentTurnIdentity] {
-        let terminalTurns = Set(outcomes.keys.filter { $0.session.source == .codex && $0.session.surface == .cli }
+        let terminalTurns = Set(Set(outcomes.keys).union(acknowledged)
+            .filter { $0.session.source == .codex && $0.session.surface == .cli }
             .map { "\($0.session.sourceScope)|\($0.session.session)|\($0.turn)" })
         let duplicates = outcomes.keys.filter {
             $0.session.source == .codex && $0.session.surface == .desktop && sessions.contains($0.session.session)
