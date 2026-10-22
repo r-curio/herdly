@@ -97,7 +97,7 @@ public enum ClaudeObservationReader {
         let prompt: String?
         let promptShortened: Bool
         /// A Stop's bounded last message and whether it was shortened.
-        let lastMessage: (text: String, shortened: Bool)?
+        let lastMessage: KeptText?
         let toolName: String?
         let toolUseID: String?
         let helperRequestID: String?
@@ -122,7 +122,7 @@ public enum ClaudeObservationReader {
         var promptText: String?
         var promptShortened: Bool
         /// The latest Stop's last message; cleared when the turn goes on after it.
-        var lastMessage: (text: String, shortened: Bool)?
+        var lastMessage: KeptText?
         var startedAt: Double
         var updatedAt: Double
         var tool: Tool?
@@ -447,7 +447,7 @@ public enum ClaudeObservationReader {
                       promptShortened: object[promptShortenedKey] as? Bool ?? false,
                       lastMessage: event == "Stop"
                         ? lastMessage(object[lastMessageKey] as? String).map {
-                            ($0.text, $0.shortened || object[lastMessageShortenedKey] as? Bool == true)
+                            KeptText(text: $0.text, shortened: $0.shortened || object[lastMessageShortenedKey] as? Bool == true)
                         } : nil,
                       toolName: object["tool_name"] as? String, toolUseID: object["tool_use_id"] as? String,
                       helperRequestID: valid(object["helper_request_id"] as? String),
@@ -500,20 +500,26 @@ public enum ClaudeObservationReader {
         return value
     }
 
+    /// Text the helper stored and the reader re-bounds: the kept text, and whether it is only the start.
+    public struct KeptText: Equatable, Sendable {
+        public let text: String
+        public let shortened: Bool
+    }
+
     /// The prompt as the helper stores it and the reader shows it: trimmed and, past
     /// `maximumPrompt` characters, cut to that many plus an ellipsis. Nil when empty or when the
     /// prompt holds a character a terminal could act on.
-    public static func promptFallback(_ value: String?) -> (text: String, shortened: Bool)? {
+    public static func promptFallback(_ value: String?) -> KeptText? {
         guard let value, !value.contains(where: { $0 == "\u{1b}" || $0 == "\u{7}" || $0 == "\u{0}" }),
               let text = QuestionPrompt.display(value, limit: maximumPrompt) else { return nil }
-        return (text, QuestionPrompt.displayIsTruncated(value, limit: maximumPrompt))
+        return KeptText(text: text, shortened: QuestionPrompt.displayIsTruncated(value, limit: maximumPrompt))
     }
 
     /// Claude's last message as the helper stores it and the reader re-reads it: line breaks kept
     /// (CR and CRLF become LF), tabs kept, every other control character removed, trimmed, and past
     /// `maximumLastMessage` characters or `maximumLastMessageBytes` UTF-8 bytes cut to its start, with no
     /// ellipsis (the card adds one). Nil when nothing readable is left.
-    public static func lastMessage(_ value: String?) -> (text: String, shortened: Bool)? {
+    public static func lastMessage(_ value: String?) -> KeptText? {
         guard let value else { return nil }
         let lines = value.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         var scalars = String.UnicodeScalarView()
@@ -529,13 +535,13 @@ public enum ClaudeObservationReader {
         for character in text {
             let size = character.utf8.count
             guard count < maximumLastMessage, bytes + size <= maximumLastMessageBytes else {
-                return (kept.trimmingCharacters(in: .whitespacesAndNewlines), true)
+                return KeptText(text: kept.trimmingCharacters(in: .whitespacesAndNewlines), shortened: true)
             }
             kept.append(character)
             bytes += size
             count += 1
         }
-        return (kept, false)
+        return KeptText(text: kept, shortened: false)
     }
 
     private static func boundedText(_ value: String?, limit: Int = maximumIdentifier) -> String? {
