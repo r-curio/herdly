@@ -2085,7 +2085,7 @@ struct Notch: View {
 
     /// The result card a finished turn pops (#323, Paper D33, 9NU, 9RW), inset to the title: the last
     /// message whole in its own scroll, or one dim line saying why it
-    /// cannot be read; the restored-result line; "Your prompt ›" folded to one line; the reply field
+    /// cannot be read; the restored-result line; "Your prompt ›" folded to one line unless Settings opens it; the reply field
     /// only where Herdly can reach the session; the line its result row would show when Open is not
     /// offered (`reading`, the same one its header click reads); then Open and Dismiss on the right.
     /// The prompt toggle is view state only (`openDisclosures`); nothing on the card
@@ -2110,7 +2110,7 @@ struct Notch: View {
             }
             if let prompt = details?.originalPrompt {
                 NotchDisclosure(title: "Your prompt", subject: subject, chevron: .trailing,
-                                expanded: disclosure("result-prompt:\(item.id)")) {
+                                expanded: resultPromptDisclosure(item.id)) {
                     ResultText(text: prompt)
                 }
             }
@@ -2126,6 +2126,17 @@ struct Notch: View {
         .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
         .padding(.trailing, 6)
         .padding(.top, 2)
+    }
+
+    /// "Your prompt" starts open or folded by the Settings choice; `openDisclosures` holds the cards
+    /// whose toggle was clicked away from it.
+    private func resultPromptDisclosure(_ id: AgentAttentionID) -> Binding<Bool> {
+        let key = "result-prompt:\(id)"
+        return Binding(get: { ResultCardPrompt.isOpen(showsFullPrompt: model.showsFullResultPrompt,
+                                                     flipped: openDisclosures.contains(key)) },
+                       set: { open in
+                           if open != model.showsFullResultPrompt { openDisclosures.insert(key) } else { openDisclosures.remove(key) }
+                       })
     }
 
     /// Open on a result never marks it as checked; only a verified visit (ADR 0016), the Codex app's

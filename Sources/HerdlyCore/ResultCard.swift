@@ -31,6 +31,15 @@ public enum ResultCardReply {
     }
 }
 
+/// Whether the card's "Your prompt" is open. Settings › Notifications › "Show my full prompt" sets
+/// how every card's prompt starts; a click on one card's toggle flips that card only, and the saved
+/// choice never changes because of it. Unfolding acknowledges nothing.
+public enum ResultCardPrompt {
+    public static func isOpen(showsFullPrompt: Bool, flipped: Bool) -> Bool {
+        showsFullPrompt != flipped
+    }
+}
+
 extension RowNote {
     /// The result row's note once its card's reply has left (D21): in place of the place label, from
     /// the card's in-memory progress only. It never claims more than Herdly saw: a Codex reply the

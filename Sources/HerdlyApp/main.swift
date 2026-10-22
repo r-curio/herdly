@@ -294,6 +294,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Read the Codex desktop app's own unread flags to acknowledge desktop completions it has
     /// cleared. Private format; on by default, off with one switch when a desktop update breaks it.
     @Published var desktopReadStateEnabled = UserDefaults.standard.object(forKey: "desktopReadStateEnabled") as? Bool ?? true
+    /// Open "Your prompt" on every result card (Settings › Notifications); off keeps it folded to one
+    /// line. A click on one card still flips that card (`ResultCardPrompt`).
+    @Published var showsFullResultPrompt = UserDefaults.standard.bool(forKey: "showsFullResultPrompt") {
+        didSet { UserDefaults.standard.set(showsFullResultPrompt, forKey: "showsFullResultPrompt") }
+    }
     /// The latest read-state outcome; Settings shows a problem line only while it is `.unavailable`.
     @Published private(set) var desktopReadState = DesktopReadStateStatus.notChecked
     /// Follow the pointer, or keep the notch on one display; saved by `setNotchDisplayPreference`.
