@@ -194,7 +194,39 @@ public struct QueueGroup: Equatable, Sendable {
     public var folded: Int { count - items.count }
     /// The rows drawn on screen: `items` without the Earlier rows of a folded Earlier.
     public var shownItems: [AgentAttentionItem] {
-        earlierFolded ? items.filter { $0.kind != .earlierOutcome } : items
+        items.filter { !EarlierFold.hides($0, folded: earlierFolded) }
+    }
+    /// The arrow stop that stands for this group's folded Earlier heading: its first Earlier
+    /// result's ID. Nil while Earlier shows open, when its rows are the stops.
+    public var earlierHeadingStop: AgentAttentionID? { earlierFolded ? earlierIDs.first : nil }
+
+    /// One line of the group as drawn, below its heading.
+    public enum Line: Equatable, Sendable {
+        case row(AgentAttentionItem)
+        /// The "Earlier N" heading, before its run of Earlier rows; `stop` while folded.
+        case earlierHeading(stop: AgentAttentionID?)
+        /// The kind section's "+N more" pill (`folded` rows).
+        case moreRows
+    }
+
+    /// The group's lines in reading order: each run of Earlier rows under its heading (only the
+    /// heading while folded), and a kind section's "+N more" right after the last row shown outside
+    /// Earlier, so it never reads as Earlier's; at the end when no such row is shown.
+    public var lines: [Line] {
+        var lines: [Line] = []
+        var lastOutsideEarlier: Int?
+        var previous: AgentAttentionItem?
+        for item in items {
+            if item.kind == .earlierOutcome, previous?.kind != .earlierOutcome {
+                lines.append(.earlierHeading(stop: earlierHeadingStop))
+            }
+            previous = item
+            guard !EarlierFold.hides(item, folded: earlierFolded) else { continue }
+            lines.append(.row(item))
+            if item.kind != .earlierOutcome { lastOutsideEarlier = lines.count }
+        }
+        if section != nil, folded > 0 { lines.insert(.moreRows, at: lastOutsideEarlier ?? lines.count) }
+        return lines
     }
 
     /// `items` are the rows shown; `all`, when the group folds, is every row it holds.
@@ -207,12 +239,6 @@ public struct QueueGroup: Equatable, Sendable {
         self.count = max(items.count, all.count)
         self.earlierIDs = all.filter { $0.kind == .earlierOutcome }.map(\.id)
         self.earlierFolded = earlierFolded && !earlierIDs.isEmpty
-    }
-
-    /// The same unfolded group (every row in `items`, as `QueueGroups.make` builds it) with its
-    /// Earlier results folded or shown.
-    func foldingEarlier(_ fold: Bool) -> QueueGroup {
-        QueueGroup(heading: heading, items: items, section: section, earlierFolded: fold)
     }
 }
 
@@ -228,6 +254,11 @@ public enum EarlierFold {
         case automatic
         case opened
         case folded
+    }
+
+    /// Whether `item` sits hidden behind a folded Earlier heading: the one fold filter.
+    public static func hides(_ item: AgentAttentionItem, folded: Bool) -> Bool {
+        folded && item.kind == .earlierOutcome
     }
 
     public static func isFolded(_ items: [AgentAttentionItem], choice: Choice) -> Bool {
@@ -308,10 +339,13 @@ public enum QueueFold {
 public enum QueueGroups {
     /// Splits already-ordered rows into headed groups. Groups appear in the order of their first row,
     /// so the group holding the highest-priority item leads, and rows keep their order inside a group.
-    /// `project` returns a session's working folder when known.
+    /// `project` returns a session's working folder when known; `earlierFolded` folds each group's
+    /// Earlier results behind their heading (D34).
     public static func make(_ items: [AgentAttentionItem], grouping: QueueGrouping,
-                            project: (AgentAttentionItem) -> String?) -> [QueueGroup] {
-        guard grouping != .none else { return items.isEmpty ? [] : [QueueGroup(heading: nil, items: items)] }
+                            project: (AgentAttentionItem) -> String?, earlierFolded: Bool = false) -> [QueueGroup] {
+        guard grouping != .none else {
+            return items.isEmpty ? [] : [QueueGroup(heading: nil, items: items, earlierFolded: earlierFolded)]
+        }
         var order: [String] = []
         var members: [String: [AgentAttentionItem]] = [:]
         for item in items {
@@ -319,7 +353,7 @@ public enum QueueGroups {
             if members[heading] == nil { order.append(heading) }
             members[heading, default: []].append(item)
         }
-        return order.map { QueueGroup(heading: $0, items: members[$0] ?? []) }
+        return order.map { QueueGroup(heading: $0, items: members[$0] ?? [], earlierFolded: earlierFolded) }
     }
 
     private static func heading(for item: AgentAttentionItem, grouping: QueueGrouping,
@@ -351,8 +385,9 @@ public struct QueueSections: Equatable, Sendable {
     public let attention: [QueueGroup]
     public let working: [QueueGroup]
     public let workingCount: Int
-    /// Whether Earlier results sit folded behind their headings (`EarlierFold`, D34).
-    public let earlierFolded: Bool
+    /// Whether Earlier results sit folded behind their headings (`EarlierFold`, D34). Each group
+    /// carries its own flag for drawing; this one is read by tests.
+    let earlierFolded: Bool
 
     /// Working rows fold only when something above them needs the user; otherwise they are the queue.
     public var foldsWorking: Bool { !attention.isEmpty && workingCount > 0 }
@@ -363,11 +398,11 @@ public struct QueueSections: Equatable, Sendable {
     /// fold are not on screen and are skipped. A folded Earlier (D34) is one stop, its heading,
     /// held by its first Earlier result's ID (`earlierHeadingStops`); the rows behind it are skipped.
     public func selectableRows(workingOpen: Bool) -> [AgentAttentionID] {
-        shownGroups(workingOpen: workingOpen).flatMap { group -> [AgentAttentionID] in
-            let heading = group.earlierFolded ? group.earlierIDs.first : nil
-            return group.items.compactMap { item in
-                guard group.earlierFolded, item.kind == .earlierOutcome else { return item.id }
-                return item.id == heading ? item.id : nil
+        shownGroups(workingOpen: workingOpen).flatMap(\.lines).compactMap { line in
+            switch line {
+            case .row(let item): item.id
+            case .earlierHeading(let stop): stop
+            case .moreRows: nil
             }
         }
     }
@@ -381,7 +416,7 @@ public struct QueueSections: Equatable, Sendable {
     /// The IDs that stand for a folded Earlier heading in `selectableRows`: Return or → on one opens
     /// the fold rather than its row. Empty while Earlier shows open.
     public var earlierHeadingStops: [AgentAttentionID] {
-        attention.compactMap { $0.earlierFolded ? $0.earlierIDs.first : nil }
+        attention.compactMap(\.earlierHeadingStop)
     }
 
     private func shownGroups(workingOpen: Bool) -> [QueueGroup] {
@@ -407,7 +442,7 @@ public struct QueueSections: Equatable, Sendable {
         let earlierFolded = EarlierFold.isFolded(items, choice: earlier)
         let attention = kindSections && grouping == .none
             ? sectionsByKind(needsUser, open: openSections, earlierFolded: earlierFolded)
-            : QueueGroups.make(needsUser, grouping: grouping, project: project).map { $0.foldingEarlier(earlierFolded) }
+            : QueueGroups.make(needsUser, grouping: grouping, project: project, earlierFolded: earlierFolded)
         let workingGrouping: QueueGrouping = folds && grouping == .state ? .none : grouping
         let working = kindSections && grouping == .none && !folds && !running.isEmpty
             ? [QueueGroup(heading: QueueKindSection.working.heading, items: running, section: .working)]
@@ -430,7 +465,7 @@ public struct QueueSections: Equatable, Sendable {
             .map { section in KindRows(section: section, rows: items.filter { QueueKindSection($0.kind) == section }) }
             .filter { !$0.rows.isEmpty }
         func budgeted(_ rows: [AgentAttentionItem]) -> [AgentAttentionItem] {
-            earlierFolded ? rows.filter { $0.kind != .earlierOutcome } : rows
+            rows.filter { !EarlierFold.hides($0, folded: earlierFolded) }
         }
         let approvalCount = sections.first { $0.section == .approve }?.rows.count ?? 0
         let foldable = sections.filter { $0.section != .approve }
@@ -442,7 +477,7 @@ public struct QueueSections: Equatable, Sendable {
             let shown = kind.section == .approve || open.contains(kind.section)
                 ? rows.count : foldableIndex.map { shownPerFoldable[$0] } ?? rows.count
             let kept = Set(rows.prefix(shown).map(\.id))
-            let items = kind.rows.filter { kept.contains($0.id) || (earlierFolded && $0.kind == .earlierOutcome) }
+            let items = kind.rows.filter { kept.contains($0.id) || EarlierFold.hides($0, folded: earlierFolded) }
             return QueueGroup(heading: kind.section.heading, items: items, section: kind.section,
                               all: kind.rows, earlierFolded: earlierFolded)
         }

@@ -2117,10 +2117,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return true
     }
 
-    /// Opens or folds Earlier from its heading or a key, as `NotchDisclosure` does: at once under
-    /// Reduce Motion, otherwise with the disclosure's short ease.
+    /// Opens or folds Earlier from its heading or a key, moving as `NotchDisclosure` does
+    /// (`QueueMotion.disclose`).
     func setEarlierFold(_ choice: EarlierFold.Choice) {
-        if reduceMotion { earlierFold = choice } else { withAnimation(.easeOut(duration: 0.12)) { earlierFold = choice } }
+        QueueMotion.disclose(reduceMotion: reduceMotion) { earlierFold = choice }
     }
 
     /// Collapses the panel and hands keyboard input back to the app the user was using.

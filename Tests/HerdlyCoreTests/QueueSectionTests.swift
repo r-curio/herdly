@@ -388,3 +388,50 @@ private func earlierSections(_ items: [AgentAttentionItem], _ choice: EarlierFol
                                   grouping: .none, project: { _ in nil })
     #expect(!card.earlierFolded)
 }
+
+@Test func theMoreRowsPillFollowsTheLastRowOutsideEarlier() {
+    // Check spills behind "+N more" with a folded Earlier: the pill sits after the last recent
+    // result, before the Earlier heading, so it never reads as Earlier's.
+    let check = earlierSections(earlierQueue(approvals: 4, fresh: 9, earlier: 5)).attention[1]
+    let lines = check.lines
+    let pill = lines.firstIndex(of: .moreRows)
+    let heading = lines.firstIndex { if case .earlierHeading = $0 { true } else { false } }
+    #expect(pill != nil && heading != nil && pill! + 1 == heading!)
+    #expect(lines.filter { if case .row(let item) = $0 { item.kind == .earlierOutcome } else { false } }.isEmpty)
+    // Opened, the Earlier rows follow their heading and the pill still precedes it.
+    let opened = earlierSections(earlierQueue(approvals: 4, fresh: 9, earlier: 5), .opened).attention[1]
+    if let pill = opened.lines.firstIndex(of: .moreRows),
+       let heading = opened.lines.firstIndex(where: { if case .earlierHeading = $0 { true } else { false } }) {
+        #expect(pill < heading)
+    }
+}
+
+@Test func aFoldedEarlierHeadingNamesItsArrowStop() {
+    let items = earlierQueue(fresh: 1, earlier: 3)
+    let first = items.first { $0.kind == .earlierOutcome }!.id
+    let folded = earlierSections(items).attention[0]
+    #expect(folded.earlierHeadingStop == first)
+    #expect(folded.lines.contains(.earlierHeading(stop: first)))
+    let opened = earlierSections(items, .opened).attention[0]
+    #expect(opened.earlierHeadingStop == nil)
+    #expect(opened.lines.contains(.earlierHeading(stop: nil)))
+    #expect(opened.lines.count == 1 + 1 + 3)
+}
+
+@Test func foldingEarlierLeavesTheToCheckCountAlone() {
+    // The badge and settings count come from the queue, not the sections: Earlier results are
+    // never counted, folded or not (D22, D34).
+    var queue = AgentAttentionQueue()
+    for index in 0..<3 {
+        queue.apply(.outcome(AgentOutcome(session: session("old-\(index)"), turn: "t", status: .finished, arrivedAt: Double(index))))
+    }
+    queue.apply(.outcome(AgentOutcome(session: session("new"), turn: "t", status: .finished, arrivedAt: 990)))
+    let items = queue.items(at: 1_001)
+    let count = queue.toCheckCount(at: 1_001, earlier: .fiveMinutes)
+    #expect(count == 1)
+    for choice in [EarlierFold.Choice.automatic, .opened, .folded] {
+        _ = earlierSections(items, choice)
+        #expect(queue.toCheckCount(at: 1_001, earlier: .fiveMinutes) == count)
+    }
+    #expect(earlierSections(items).earlierFolded)
+}
