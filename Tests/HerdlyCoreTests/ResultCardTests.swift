@@ -286,3 +286,12 @@ private func claudeAllows(_ snapshot: GhosttySnapshot?, enabled: Bool = true) ->
                                                 configuredScopes: [claudeTab.sourceScope], snapshot: try ghostty(selected: "t-3"))
     #expect(unbound)
 }
+
+// MARK: Your prompt
+
+@Test func theSettingSetsHowEveryPromptStartsAndAClickFlipsOnlyThatCard() {
+    #expect(!ResultCardPrompt.isOpen(showsFullPrompt: false, flipped: false))
+    #expect(ResultCardPrompt.isOpen(showsFullPrompt: false, flipped: true))
+    #expect(ResultCardPrompt.isOpen(showsFullPrompt: true, flipped: false))
+    #expect(!ResultCardPrompt.isOpen(showsFullPrompt: true, flipped: true))
+}
