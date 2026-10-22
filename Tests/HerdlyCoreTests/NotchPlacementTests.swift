@@ -645,6 +645,17 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     #expect(NotchFrameSync.action(target: open, lastTarget: strip, actual: strip, animating: false) == .moveToNewTarget)
 }
 
+@Test func openingPanelWaitsForItsMeasuredHeightInsteadOfGrowingToTheEstimate() {
+    // A measurement always wins, even one that arrives at once.
+    #expect(NotchOpenHeight.choose(measured: 212, waitingSince: 10, now: 10) == .measured(212))
+    #expect(NotchOpenHeight.choose(measured: 212, waitingSince: 10, now: 30) == .measured(212))
+    // Without one the panel holds, so it never opens to the taller estimate and shrinks back.
+    #expect(NotchOpenHeight.choose(measured: 0, waitingSince: 10, now: 10) == .awaitingMeasurement)
+    #expect(NotchOpenHeight.choose(measured: 0, waitingSince: 10, now: 10 + NotchOpenHeight.grace - 0.01) == .awaitingMeasurement)
+    // A measurement that never comes cannot keep the panel closed.
+    #expect(NotchOpenHeight.choose(measured: 0, waitingSince: 10, now: 10 + NotchOpenHeight.grace) == .estimate)
+}
+
 // MARK: - Strip left wing (D2, D3, D22; #318)
 
 private func wingSession(_ index: Int) -> AgentSessionIdentity {

@@ -314,6 +314,28 @@ public enum NotchHover {
     }
 }
 
+/// Which height an opening panel grows to. The view measures the open content one layout pass
+/// after the panel opens, and the row estimate overshoots compact rows, so growing to the estimate
+/// first would open too tall and then shrink. The panel waits at its shortest open height for the
+/// measurement instead, and uses the estimate only if none has arrived within `grace` seconds.
+public enum NotchOpenHeight: Equatable, Sendable {
+    /// Grow to the measured content height.
+    case measured(CGFloat)
+    /// Hold at the shortest open height while the content is measured.
+    case awaitingMeasurement
+    /// No measurement arrived in time; grow to the row estimate.
+    case estimate
+
+    public static let grace: Double = 0.25
+
+    /// `measured` is the reported content height, zero when there is none; `waitingSince` is when
+    /// the open panel began without one.
+    public static func choose(measured: CGFloat, waitingSince: Double, now: Double) -> NotchOpenHeight {
+        if measured > 0 { return .measured(measured) }
+        return now - waitingSince < grace ? .awaitingMeasurement : .estimate
+    }
+}
+
 /// How a refresh brings the panel to its computed frame. The window server can move the panel
 /// while a display sleeps, wakes, or is reconfigured, leaving it mid-screen while the computed
 /// frame is unchanged, so the panel's actual frame is checked as well as the last target.
