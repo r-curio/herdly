@@ -64,6 +64,33 @@ private let day: TimeInterval = 86400
     #expect(!lab.exists(oldTool) && !lab.exists(oldDone))
 }
 
+@Test func retentionExpiresSubagentRecordsAfterAnHourEvenInAProtectedSession() throws {
+    let lab = try EventLab()
+    defer { lab.remove() }
+    let reminded = UUID(), session = reminded.uuidString, turn = UUID().uuidString
+    let request = ApprovalRequest(requestID: UUID(), sessionID: reminded, turnID: UUID(),
+                                  details: ApprovalDetails(command: "make"),
+                                  receivedAt: lab.now.timeIntervalSince1970 - 9 * day,
+                                  expiresAt: lab.now.timeIntervalSince1970 - 9 * day + 30, outcome: .noDecision)
+    try JSONEncoder().encode(request).write(to: ApprovalStore.requestURL(in: lab.root, id: request.id))
+    let recentStart = try lab.record("SubagentStart", session: session, age: 30 * 60, fields: ["turn_id": turn])
+    let recentStop = try lab.record("SubagentStop", session: session, age: 29 * 60, fields: ["turn_id": turn])
+    let oldStart = try lab.record("SubagentStart", session: session, age: 2 * hour, fields: ["turn_id": turn])
+    let oldStop = try lab.record("SubagentStop", session: session, age: 2 * hour - 5, fields: ["turn_id": turn])
+    let prompt = try lab.record("UserPromptSubmit", session: session, age: 2 * hour, fields: ["turn_id": turn])
+    let weekOldEnd = try lab.record("SessionEnd", session: session, age: 8 * day)
+    let weekOldStop = try lab.record("SubagentStop", session: session, age: 8 * day, fields: ["turn_id": turn])
+
+    HookEventRetention.prune(lab.root, now: lab.now)
+
+    #expect(lab.exists(recentStart) && lab.exists(recentStop))
+    #expect(!lab.exists(oldStart) && !lab.exists(oldStop))
+    #expect(lab.exists(prompt))
+    // The reminder keeps the session's lifecycle records past a week, but not its subagent records.
+    #expect(lab.exists(weekOldEnd))
+    #expect(!lab.exists(weekOldStop))
+}
+
 @Test func retentionKeepsAnUnansweredToolCallUntilItsTurnOrSessionEnds() throws {
     let lab = try EventLab()
     defer { lab.remove() }

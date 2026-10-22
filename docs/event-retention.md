@@ -11,6 +11,7 @@ The app runs `HookEventRetention.prune` on the Codex events directory and on eve
 | Record | Kept for |
 | --- | --- |
 | Tool records: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch` | 1 hour. About 95% of the volume; readers use them only to label the current tool. |
+| Claude subagent records: `SubagentStart`, `SubagentStop` | 1 hour, even in a session a reminder protects. No reader uses them by name. One busy Claude root wrote about 8,500 a day, 75% of its records, which shrank the 4,096-record window to about 14 hours. |
 | Every other Herdly record (session start/end, prompt, stop, permission request, …) | 7 days |
 
 Retention never removes:
@@ -26,7 +27,7 @@ The helper is unchanged: hooks stay fast and Codex-compatible output stays clean
 `HookEventListing` replaces the old all-or-nothing cap. A reader lists names and creation dates of up to 65,536 entries and fails closed beyond that. It then decodes only the newest 4,096 `.json` records. `DesktopEventReader`, `ClaudeObservationReader` and `ReminderReader` share this view.
 
 - `ReminderReader` always reads every approval request file. When a request's session has no `SessionEnd` inside the window, it looks back through up to 4,096 older records, newest first, for that session's end only.
-- Pruning runs every ten minutes and tool records expire after an hour, so the 4,096-record window normally spans days of session and turn records.
+- Pruning runs every ten minutes and tool and subagent records expire after an hour, so the 4,096-record window normally spans days of session and turn records.
 - If sessions together write more than 4,096 records in roughly 70 minutes, older records can still fall out of the window, though they remain on disk. Those records include a running turn's prompt, a CLI session's start, or a waiting Claude question's `PreToolUse`. That item then stops showing until newer records arrive.
 - The session-end look-back repeats on every scan while a reminded session is still running. A scan then decodes up to 8,192 records.
 - The Claude setup connection check (`ClaudeSetupInstaller.status`) lists entries within the same 65,536 bound but does not use the 4,096-record window. It decodes oldest first and stops at the first startup record that proves delivery, which normally sits near the front because startup records outlive tool-record retention. With no such record it decodes every listed entry. It runs off the main actor. Setup undo and the delivered-session scan still refuse a directory of more than 4,096 entries.

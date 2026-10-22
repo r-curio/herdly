@@ -138,7 +138,8 @@ public enum HookEventListing {
 }
 
 /// Deletes expired hook records from one of Herdly's event directories. Tool records only label the
-/// current tool, so they expire after `toolRecordAge`; every other record after `recordAge`.
+/// current tool and no reader uses subagent records by name, so both expire after `toolRecordAge`;
+/// every other record after `recordAge`.
 ///
 /// What is kept regardless of age: tool calls with no completion, turn end or session end (a
 /// waiting question lives in one), lifecycle records of sessions that still have an approval
@@ -149,6 +150,9 @@ public enum HookEventRetention {
     public static let toolRecordAge: TimeInterval = 60 * 60
     public static let recordAge: TimeInterval = 7 * 24 * 60 * 60
     public static let toolEvents: Set<String> = ["PreToolUse", "PostToolUse", "PostToolUseFailure", "PostToolBatch"]
+    /// Claude writes one pair per subagent, often the bulk of a busy directory. Kept a week, they
+    /// crowded session and turn records out of the readers' `maximumRecords` window.
+    public static let subagentEvents: Set<String> = ["SubagentStart", "SubagentStop"]
     static let sources: Set<String> = [CodexSetupRequirements.helperSource, ClaudeSetupRequirements.helperSource]
 
     public struct Outcome: Equatable, Sendable {
@@ -229,8 +233,11 @@ public enum HookEventRetention {
         var completions: [Record] = []
         for record in records {
             let isTool = toolEvents.contains(record.event)
+            let isSubagent = subagentEvents.contains(record.event)
             if record.age >= recordAge {
-                if isTool || !protectedSessions.contains(record.session) { expired.append(record.url) }
+                if isTool || isSubagent || !protectedSessions.contains(record.session) { expired.append(record.url) }
+            } else if isSubagent, record.age >= toolRecordAge {
+                expired.append(record.url)
             } else if isTool, record.age >= toolRecordAge {
                 if record.event == "PreToolUse" {
                     if isOpen(record) {
