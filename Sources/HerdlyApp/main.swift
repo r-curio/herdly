@@ -701,11 +701,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     static let spotlightPreviewModes: Set<String> = ["spotlight", "spotlight-approval", "spotlight-handed-back",
                                                        "spotlight-question", "spotlight-question-edit", "spotlight-question-review",
                                                        "spotlight-question-long", "spotlight-question-unavailable", "spotlight-claude-question", "spotlight-claude-multiselect",
-                                                       "spotlight-result"]
+                                                       "spotlight-result", "spotlight-result-markdown"]
     private var targetFrame: CGRect = .zero
     /// The frame animation in flight, so a refresh mid-animation does not mistake it for drift.
     private var frameAnimation: UUID?
-    /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|spotlight-result|row-note-reply|expanded>`
+    /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|spotlight-result|spotlight-result-markdown|row-note-reply|expanded>`
     /// seeds in-memory sample items for screenshots; `clicked-approval` shows the approval sample as a
     /// clicked card (`clicked-approval-long` with a command past the six-line cap, `clicked-claude-approval`
     /// a Claude request with no command), and `row-note` the queue with that row selected and carrying a note;
@@ -2791,7 +2791,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                          now: now)
         previewSpotlightAgent = .outcome(CodexAttentionAdapter.outcome(from: completion).id)
         if mode.hasPrefix("spotlight-question") { previewSpotlightAgent = .question(CodexAttentionAdapter.question(from: question).id) }
-        if mode == "spotlight-result" || mode == "row-note-reply" {
+        if mode == "spotlight-result" || mode == "spotlight-result-markdown" || mode == "row-note-reply" {
             // #323: a CLI result's card (9NU): a message past five lines, the turn's prompt, and a
             // reachable reply field; `row-note-reply` shows its row after a send, with the reply's note.
             let notes = UUID(uuidString: "2B7C9E10-3D4F-4A5B-8C6D-0000000000F6")!
@@ -2806,7 +2806,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                            "support marked as preview. I left the version date blank for you to fill in.",
                            "", "Fixes:", "- Snapshots write atomically.", "- Approval deadlines no longer drift.",
                            "- Question cards keep their drafts.", "", "Run `make release-notes` to regenerate."].joined(separator: "\n")
-            if let preview = CompletionPreview(message) { completionPreviews[result.id] = .available(preview) }
+            // `spotlight-result-markdown`: a reply whose table, emphasis, and code read as formatting.
+            let markdown = ["Rotate in this order, across **Production and Dev**:", "",
+                            "| Priority | Secrets | Why |", "|---|---|---|",
+                            "| **1 — Database access** | PostgreSQL password / `DATABASE_URL` | Could expose or alter customer data. |",
+                            "| **2 — Login and internal access** | `BETTER_AUTH_SECRET`, `INTERNAL_SECRET` | Could allow impersonation. |",
+                            "| **3 — Infrastructure access** | Private registry GitHub token | Could enable malicious deploys. |",
+                            "", "## Then", "1. Redeploy each service.", "2. Run:", "", "```", "make verify-secrets", "```",
+                            "> Old tokens stay valid until revoked."].joined(separator: "\n")
+            if let preview = CompletionPreview(mode == "spotlight-result-markdown" ? markdown : message) { completionPreviews[result.id] = .available(preview) }
             syncAgentQueueWithCodex(now: now)
             if mode == "row-note-reply" {
                 replyProgress[result.id] = SessionReplyProgress(completion: result.id)
