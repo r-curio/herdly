@@ -1397,15 +1397,87 @@ private struct NotificationControls: View {
                 }
             }
 
+            PhoneSection(phone: model.phoneAlerts, reduceMotion: model.reduceMotion)
+
             HStack(spacing: 8) {
                 Spacer()
                 if model.attention.pending {
                     Button("Dismiss", action: model.dismissTest)
                         .accessibilityLabel("Dismiss test notification")
                 }
+                PhoneTestButton(phone: model.phoneAlerts)
                 Button("Send Test Notification", action: model.sendTest)
             }
             .padding(.top, 6)
+        }
+    }
+}
+
+/// Settings › Notifications › Phone (#352, Paper "01 · Agreed · Send to phone (on)"): the switch,
+/// and while it is on the topic in monospace with Copy. A failed test shows the orange line below.
+private struct PhoneSection: View {
+    @ObservedObject var phone: PhoneAlerts
+    let reduceMotion: Bool
+
+    var body: some View {
+        SettingsHeader("Phone")
+        SettingsCard {
+            SettingsRow(title: "Alert my phone when I'm away",
+                        detail: "Approvals, questions and completions, after \(PhoneAlertPolicy.idleThresholdText) idle") {
+                Toggle("Alert my phone when I'm away",
+                       isOn: Binding(get: { phone.enabled }, set: { enabled in
+                           withAnimation(SettingsMotion.curve(reduceMotion: reduceMotion)) { _ = phone.setEnabled(enabled) }
+                       }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    .accessibilityLabel("Alert my phone when I'm away")
+                    .accessibilityHint("Sends approvals, questions and completions to ntfy after \(PhoneAlertPolicy.idleThresholdText) idle.")
+            }
+            if phone.enabled {
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                SettingsRow(title: "Topic", detail: "Subscribe to it in ntfy. Anyone with it can read your alerts.") {
+                    HStack(spacing: 8) {
+                        Text(topicText)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(phone.topic == nil ? .secondary : .primary)
+                            .textSelection(.enabled)
+                            .lineLimit(1)
+                            .accessibilityLabel("Topic \(topicText)")
+                        Button("Copy", action: phone.copyTopic)
+                            .controlSize(.small)
+                            .disabled(phone.topic == nil)
+                            .accessibilityLabel("Copy topic")
+                            .accessibilityHint("Copies the ntfy topic to subscribe to on your phone.")
+                    }
+                }
+            }
+            if let problem = phone.problem {
+                CardProblemLine(problem)
+                    .padding(.horizontal, SettingsStyle.rowInset)
+                    .padding(.bottom, 10)
+            }
+        }
+        .onAppear { phone.start() }
+    }
+
+    private var topicText: String {
+        switch phone.topicState {
+        case let .ready(topic): topic.name
+        case .notLoaded, .loading: "Loading…"
+        case .unavailable: "Unavailable"
+        }
+    }
+}
+
+/// "Send Test to Phone", beside "Send Test Notification", only while phone alerts are on.
+private struct PhoneTestButton: View {
+    @ObservedObject var phone: PhoneAlerts
+
+    var body: some View {
+        if phone.enabled {
+            Button("Send Test to Phone") { phone.sendTest() }
+                .disabled(phone.testInFlight)
+                .accessibilityLabel("Send test alert to phone")
+                .accessibilityHint("Publishes one test alert to your ntfy topic.")
         }
     }
 }
