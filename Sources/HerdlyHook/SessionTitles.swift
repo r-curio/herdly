@@ -22,8 +22,10 @@ func claudeSessionTitleOutput(_ object: [String: Any], eventsDirectory: URL,
     let registered = SafeFile.read(entry, limit: ClaudeSessionTitles.maximumRegistryEntrySize)
         .flatMap { ClaudeSessionTitles.registeredName($0, sessionID: sessionID) }
     let record = ClaudeSessionTitles.load(sessionID: sessionID, in: eventsDirectory)
+    let carriedOver = record?.status != .applied && registered?.isDerived == false
+        && ClaudeSessionTitles.isCarriedOver(registered, sessionID: sessionID, in: eventsDirectory)
     switch ClaudeSessionTitles.action(prompt: object["prompt"] as? String, registered: registered,
-                                      record: record, now: now) {
+                                      record: record, now: now, carriedOver: carriedOver) {
     case .none:
         return nil
     case let .apply(title):
