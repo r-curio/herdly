@@ -483,26 +483,205 @@ struct ResultText: View {
     }
 }
 
-/// The whole last message after "Show all" (#323): its own scroll, as tall as the text up to
-/// `cap`, so a long message never pushes Open and Dismiss off the panel.
+/// The last message with its markdown read as formatting (`MessageMarkdown`), in `ResultText`'s face:
+/// bold and headings in ink, code on the `well`, tables as aligned columns. A message cut mid-table or
+/// mid-fence still draws; only web links stay links, so a message cannot open another app.
+struct ResultMarkdown: View {
+    let blocks: [MessageMarkdownBlock]
+
+    init(text: String) {
+        blocks = MessageMarkdown.blocks(text)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                blockView(block)
+            }
+        }
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: MessageMarkdownBlock) -> some View {
+        switch block {
+        case let .paragraph(text):
+            Self.line(text)
+        case let .heading(level, text):
+            Self.line(text, size: level <= 2 ? 12 : 11, weight: .semibold, color: NotchStyle.ink)
+                .accessibilityAddTraits(.isHeader)
+        case let .listItem(marker, depth, text):
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(marker).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                Self.line(text)
+            }
+            .padding(.leading, CGFloat(depth) * 14)
+            .accessibilityElement(children: .combine)
+        case let .quote(text):
+            Self.line(text)
+                .padding(.leading, 10)
+                .overlay(alignment: .leading) { Rectangle().fill(NotchStyle.well).frame(width: 2) }
+        case let .code(text):
+            Text(verbatim: text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
+                .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(NotchStyle.typedField, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(NotchStyle.well, lineWidth: 1))
+        case let .table(header, rows):
+            ResultTable(header: header, rows: rows)
+        case .rule:
+            Rectangle().fill(NotchStyle.well).frame(height: 1)
+        }
+    }
+
+    static func line(_ text: String, size: CGFloat = 11, weight: Font.Weight = .regular,
+                     color: Color = NotchStyle.text) -> some View {
+        Text(inline(text)).font(NotchStyle.mono(size, weight)).foregroundStyle(color)
+            // SF Mono 11pt sets about 13pt of line; three more make the 16pt line height.
+            .lineSpacing(3)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Emphasis, code spans, and links within one block. Unparseable syntax stays as typed.
+    static func inline(_ source: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace, failurePolicy: .returnPartiallyParsedIfPossible)
+        var value = (try? AttributedString(markdown: source, options: options)) ?? AttributedString(source)
+        for (intent, range) in value.runs[\.inlinePresentationIntent].reversed() {
+            guard let intent else { continue }
+            if intent.contains(.code) {
+                value[range].foregroundColor = NotchStyle.ink
+                value[range].backgroundColor = NotchStyle.well
+            } else if intent.contains(.stronglyEmphasized) {
+                value[range].foregroundColor = NotchStyle.ink
+            }
+        }
+        for (link, range) in value.runs[\.link].reversed() {
+            guard let link else { continue }
+            if ["http", "https"].contains(link.scheme?.lowercased() ?? "") {
+                value[range].foregroundColor = NotchStyle.ink
+                value[range].underlineStyle = .single
+            } else {
+                value[range].link = nil
+            }
+        }
+        return value
+    }
+}
+
+/// A markdown table in the card's width: each column's share follows its longest cell, within
+/// bounds, so a short "Priority" column does not take a third of the row; cells wrap.
+private struct ResultTable: View {
+    let header: [String]
+    let rows: [[String]]
+
+    private var weights: [CGFloat] {
+        header.indices.map { column in
+            let longest = ([header] + rows).map { $0[column].count }.max() ?? 0
+            return CGFloat(min(max(longest, 6), 40))
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            row(header, header: true)
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, cells in
+                Rectangle().fill(NotchStyle.well).frame(height: 1)
+                row(cells, header: false)
+            }
+        }
+        .overlay(alignment: .top) { Rectangle().fill(NotchStyle.well).frame(height: 1).offset(y: -1) }
+    }
+
+    private func row(_ cells: [String], header: Bool) -> some View {
+        WeightedColumns(weights: weights, spacing: 10) {
+            ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
+                ResultMarkdown.line(cell, weight: header ? .semibold : .regular,
+                                    color: header ? NotchStyle.ink : NotchStyle.text)
+            }
+        }
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Lays subviews side by side, each given a width share in proportion to its weight, as tall as
+/// the tallest. Every row of a table uses the same weights, so columns line up.
+private struct WeightedColumns: Layout {
+    let weights: [CGFloat]
+    let spacing: CGFloat
+
+    private func widths(_ total: CGFloat, count: Int) -> [CGFloat] {
+        let used = (0..<count).map { $0 < weights.count ? weights[$0] : 1 }
+        let sum = max(used.reduce(0, +), 1)
+        let available = max(total - spacing * CGFloat(max(count - 1, 0)), 0)
+        return used.map { available * $0 / sum }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 320
+        let heights = zip(subviews, widths(width, count: subviews.count)).map { subview, columnWidth in
+            subview.sizeThatFits(ProposedViewSize(width: columnWidth, height: nil)).height
+        }
+        return CGSize(width: width, height: heights.max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        for (subview, columnWidth) in zip(subviews, widths(bounds.width, count: subviews.count)) {
+            subview.place(at: CGPoint(x: x, y: bounds.minY), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: columnWidth, height: nil))
+            x += columnWidth + spacing
+        }
+    }
+}
+
+/// The whole last message (#323): its own scroll, as tall as the text up to `cap`, so a long
+/// message never pushes Open and Dismiss off the panel. While text lies below the visible part, its
+/// bottom edge fades into the ground so the cut reads as "more to scroll", not the message's end.
 struct ResultMessageScroll: View {
     let text: String
     /// Twelve 16pt lines.
     private static let cap: CGFloat = 192
+    private static let fadeHeight: CGFloat = 28
+    private static let space = "result-message-scroll"
     @State private var naturalHeight: CGFloat = 0
+    /// The text's bottom edge in the scroll's own coordinates; past the visible height means more below.
+    @State private var contentBottom: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var height: CGFloat { min(max(naturalHeight, 16), Self.cap) }
+    private var moreBelow: Bool { contentBottom > height + 1 }
 
     var body: some View {
         ScrollView(.vertical) {
-            ResultText(text: text)
+            ResultMarkdown(text: text)
                 .background {
                     GeometryReader { proxy in
                         Color.clear
-                            .onAppear { naturalHeight = proxy.size.height }
+                            .onAppear {
+                                naturalHeight = proxy.size.height
+                                contentBottom = proxy.frame(in: .named(Self.space)).maxY
+                            }
                             .onChange(of: proxy.size.height) { _, height in naturalHeight = height }
+                            .onChange(of: proxy.frame(in: .named(Self.space)).maxY) { _, bottom in contentBottom = bottom }
                     }
                 }
         }
-        .frame(height: min(max(naturalHeight, 16), Self.cap))
+        .coordinateSpace(name: Self.space)
+        .frame(height: height)
+        .overlay(alignment: .bottom) {
+            LinearGradient(colors: [NotchStyle.ground.opacity(0), NotchStyle.ground],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: Self.fadeHeight)
+                .opacity(moreBelow ? 1 : 0)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: moreBelow)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -1785,11 +1964,11 @@ struct Notch: View {
     }
 
     /// The result card a finished turn pops (#323, Paper D33, 9NU, 9RW), inset to the title: the last
-    /// message clamped to five lines with "Show all ›" for the rest, or one dim line saying why it
+    /// message whole in its own scroll, or one dim line saying why it
     /// cannot be read; the restored-result line; "Your prompt ›" folded to one line; the reply field
     /// only where Herdly can reach the session; the line its result row would show when Open is not
     /// offered (`reading`, the same one its header click reads); then Open and Dismiss on the right.
-    /// Show all and the prompt toggle are view state only (`openDisclosures`); nothing on the card
+    /// The prompt toggle is view state only (`openDisclosures`); nothing on the card
     /// acknowledges the result: not seeing it, not unfolding it, not sending.
     @ViewBuilder
     private func resultCardBody(_ item: AgentAttentionItem, subject: String, reading: ResultRowReading,
@@ -1798,7 +1977,7 @@ struct Notch: View {
         VStack(alignment: .leading, spacing: 10) {
             switch details?.response {
             case let .available(preview)?:
-                resultMessage(preview, item: item, subject: subject)
+                resultMessage(preview, item: item)
             case let .unavailable(reason)?:
                 Text(reason).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1835,25 +2014,16 @@ struct Notch: View {
         "Opens this session in \(source.displayName). Opening it does not mark anything as checked."
     }
 
-    /// The last message: five lines at most, then "Show all ›" (only when that cut it), which shows the
-    /// whole message inside the card in its own bounded scroll. A message even "Show all" had to cut
-    /// says so: the full message stays in the agent.
+    /// The last message, whole, in its own bounded scroll (the five-line cut and "Show all ›" were
+    /// dropped at the user's request, 2026-10-22). A message Herdly kept only the start of says so:
+    /// the full message stays in the agent.
     @ViewBuilder
-    private func resultMessage(_ preview: CompletionPreview, item: AgentAttentionItem, subject: String) -> some View {
-        let key = "result-message:\(item.id)"
-        if openDisclosures.contains(key), let full = preview.extent.full {
-            ResultMessageScroll(text: full)
-            if case .cutAndCapped = preview.extent {
-                Text("Shortened; the full message is in \(item.session.source.displayName).")
-                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        } else {
-            ResultText(text: preview.text)
-        }
-        if preview.truncated {
-            NotchDisclosure(title: "Show all", expandedTitle: "Show less", subject: subject, chevron: .trailing,
-                            expanded: disclosure(key)) { EmptyView() }
+    private func resultMessage(_ preview: CompletionPreview, item: AgentAttentionItem) -> some View {
+        ResultMessageScroll(text: preview.extent.full ?? preview.text)
+        if case .cutAndCapped = preview.extent {
+            Text("Shortened; the full message is in \(item.session.source.displayName).")
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
