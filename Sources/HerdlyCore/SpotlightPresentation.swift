@@ -306,12 +306,12 @@ public struct CompletionPreview: Equatable, Sendable {
     public let extent: Extent
     public var truncated: Bool { extent != .whole }
 
-    /// `sourceShortened`: the source kept only the start of the message (a Claude record, #341), so the
-    /// card always offers "Show all" and says the full message is in the agent.
     public init?(_ source: String) {
         self.init(source, sourceShortened: false)
     }
 
+    /// `sourceShortened`: the source kept only the start of the message (a Claude record, #341), so the
+    /// card always offers "Show all" and says the full message is in the agent.
     public init?(_ source: String, sourceShortened: Bool) {
         let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \Character.isNewline)
             .map { $0.trimmingCharacters(in: CharacterSet.whitespaces) }
@@ -329,9 +329,7 @@ public struct CompletionPreview: Equatable, Sendable {
             ? value.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) + "…" : value
         if !wasTruncated && !sourceShortened {
             extent = .whole
-        } else if sourceShortened {
-            extent = .cutAndCapped(full: String(normalized.prefix(Self.maximumFullCharacters)))
-        } else if normalized.count > Self.maximumFullCharacters {
+        } else if sourceShortened || normalized.count > Self.maximumFullCharacters {
             extent = .cutAndCapped(full: String(normalized.prefix(Self.maximumFullCharacters)))
         } else {
             extent = .cut(full: normalized)
