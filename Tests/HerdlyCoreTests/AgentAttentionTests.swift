@@ -286,6 +286,28 @@ import Testing
     #expect(left == ["cli-true-true", "desktop-true-false", "cli-false-true", "desktop-false-true"])
 }
 
+@Test func aDesktopOutcomeCopyIsDroppedAfterItsTerminalTwinWasAcknowledged() {
+    // A later prompt acknowledged the terminal copy first; a restored snapshot keeps only that
+    // acknowledgment. The desktop copy of the same turn is still a duplicate.
+    let session = UUID(), turn = UUID(), soloTurn = UUID()
+    func outcome(_ source: AttentionSource, _ turn: UUID) -> AgentOutcome {
+        CodexAttentionAdapter.outcome(from: AttentionCompletion(source: source, session: session, turn: turn, arrivedAt: 10))
+    }
+    var queue = AgentAttentionQueue()
+    queue.apply([.outcome(outcome(.cli, turn)), .outcome(outcome(.desktop, turn)), .outcome(outcome(.desktop, soloTurn))], now: 20)
+    queue.dismiss(.outcome(outcome(.cli, turn).id))
+    var restored = AgentAttentionQueue(snapshot: queue.snapshot)
+    for var copy in [queue, restored] {
+        #expect(copy.dropDesktopDuplicates(codexTerminalSessions: []).isEmpty)
+        #expect(copy.dropDesktopDuplicates(codexTerminalSessions: [session.uuidString]) == [outcome(.desktop, turn).id])
+        #expect(copy.items(at: 20).compactMap(\.outcome).map(\.id) == [outcome(.desktop, soloTurn).id])
+    }
+    // Dropped for good: a later observation of the desktop copy does not bring it back.
+    restored.dropDesktopDuplicates(codexTerminalSessions: [session.uuidString])
+    restored.apply(.outcome(outcome(.desktop, turn)), now: 21)
+    #expect(!restored.items(at: 21).compactMap(\.outcome).contains { $0.id == outcome(.desktop, turn).id })
+}
+
 @Test func aCodexCardIsATerminalSessionByItsSurfaceOrAKnownTerminalSession() {
     let terminal = UUID(), desktop = UUID()
     let cliSessions: Set = [terminal]

@@ -428,10 +428,12 @@ public struct AttentionQueue: Equatable, Sendable {
     /// known to be terminal ones. A daemon-run Codex TUI labels its rollout like the desktop app
     /// (`source: vscode`), so before Herdly knew it was a terminal session the same turn could be
     /// queued once under each source. Only an exact duplicate (same session and turn) is dropped;
-    /// the terminal completion stays queued, so no turn loses its card.
+    /// the terminal completion stays queued, so no turn loses its card. A terminal completion already
+    /// acknowledged (a later prompt, a visit, Dismiss) still makes its desktop copy a duplicate.
     @discardableResult
     public mutating func dropDesktopDuplicates(terminalSessions: Set<UUID>) -> [CompletionIdentity] {
-        let terminalTurns = Set(completions.keys.filter { $0.source == .cli }.map { TurnIdentity(session: $0.session, turn: $0.turn) })
+        let terminalTurns = Set(Set(completions.keys).union(acknowledged).filter { $0.source == .cli }
+            .map { TurnIdentity(session: $0.session, turn: $0.turn) })
         let duplicates = completions.keys.filter {
             $0.source == .desktop && terminalSessions.contains($0.session)
                 && terminalTurns.contains(TurnIdentity(session: $0.session, turn: $0.turn))
