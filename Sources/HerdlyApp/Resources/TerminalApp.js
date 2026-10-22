@@ -10,7 +10,7 @@
 // custom title 'titl', frontmost 'pisf', `do script` 'coredosc' with `in` 'kfil'.
 function run(argv) {
     const request = JSON.parse(argv[0]);
-    return AppleEvents.run(request.pid, {status: 'not_running'}, app => {
+    return AppleEvents.run(request.pid, request.deadline, {status: 'not_running'}, app => {
         const E = AppleEvents;
         const get = (spec, name) => app.get(E.property(spec, name));
         const windows = () => app.get(E.every(null, 'cwin'));

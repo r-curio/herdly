@@ -40,7 +40,7 @@ Codex offers no way for another program to answer a question: the question tool 
 The rule, in `QuestionAnswer.swift`, fails closed at every step:
 
 1. A key is sent only after Send for an option the user selected on the card (a click or its digit only selects); never on a timer, retry, restart, or error. One Send carries one key, for the question being answered only.
-2. Only the unique unsplit Ghostty terminal whose title equals the session's shortened id receives it, re-inventoried inside the same osascript call (`Ghostty.js`, action `answer`); any mismatch sends nothing. The window is not activated; the key goes to the terminal object.
+2. Only the unique unsplit Ghostty terminal whose title equals the session's shortened id receives it, re-inventoried inside the same script request (`Ghostty.js`, action `answer`); any mismatch sends nothing. The window is not activated; the key goes to the terminal object.
 3. Immediately before sending, the rollout is re-read (`ReminderReader.currentEvidence`); if it cannot be read, shows an output for the call, shows the turn ended, or no longer shows the call as pending (a longer line after the call was skipped), nothing is sent (`QuestionAnswerGuard`).
 4. One key per call and question index; a second press for the same question is refused (`QuestionAnswerPolicy`, which judges the queue's current copy of the question, never the rendered row).
 5. Only `1` through `9` (and `enter`, if the live check below proves the digit alone does not commit) can leave Herdly. No text, no Other, no Skip, no Escape.
