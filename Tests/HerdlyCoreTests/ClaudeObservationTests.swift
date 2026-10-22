@@ -812,3 +812,133 @@ private func approvals(_ root: URL) -> [AgentApproval] {
     defer { try? FileManager.default.removeItem(at: root) }
     #expect(approvals(root).isEmpty)
 }
+
+// MARK: - Result card's last message (#341)
+
+private func stop(at: Double, promptID: String, message: Any? = nil, shortened: Bool = false,
+                  session: String = "session-1") -> [String: Any] {
+    var record = claudeRecord("Stop", at: at, promptID: promptID, session: session)
+    if let message { record[ClaudeObservationReader.lastMessageKey] = message }
+    if shortened { record[ClaudeObservationReader.lastMessageShortenedKey] = true }
+    return record
+}
+
+private func claudeTurn(_ promptID: String, session: String = "session-1", scope: URL) -> AgentTurnIdentity {
+    AgentTurnIdentity(session: AgentSessionIdentity(source: .claude, sourceScope: scope.path, session: session,
+                                                    surface: .cli),
+                      turn: promptID)
+}
+
+@Test func claudeLastMessageKeepsLinesAndDropsTerminalControls() {
+    let kept = ClaudeObservationReader.lastMessage("  Done.\r\nAll 12 tests pass.\n\n\tNext: ship \u{1b}[31mit\u{7}\u{0}  ")
+    #expect(kept?.text == "Done.\nAll 12 tests pass.\n\n\tNext: ship [31mit")
+    #expect(kept?.shortened == false)
+    #expect(ClaudeObservationReader.lastMessage(nil) == nil)
+    #expect(ClaudeObservationReader.lastMessage(" \n\t ") == nil)
+    #expect(ClaudeObservationReader.lastMessage("\u{1b}\u{7}") == nil)
+}
+
+@Test func claudeLastMessageKeepsItsStartWithinCharacterAndByteCaps() throws {
+    let exact = String(repeating: "a", count: ClaudeObservationReader.maximumLastMessage)
+    #expect(ClaudeObservationReader.lastMessage(exact)?.text == exact)
+    #expect(ClaudeObservationReader.lastMessage(exact)?.shortened == false)
+    let long = try #require(ClaudeObservationReader.lastMessage(exact + "tail"))
+    #expect(long.text == exact)
+    #expect(long.shortened)
+    // Wide characters are cut by bytes before characters, so a record always fits the reader's size bound.
+    let wide = try #require(ClaudeObservationReader.lastMessage(String(repeating: "😀", count: 19_000)))
+    #expect(wide.shortened)
+    #expect(wide.text.utf8.count <= ClaudeObservationReader.maximumLastMessageBytes)
+    #expect(wide.text == String(repeating: "😀", count: ClaudeObservationReader.maximumLastMessageBytes / 4))
+}
+
+@Test func claudeStopCarriesItsMessageAndPromptOntoThatExactTurnOnly() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Fix the flaky test"),
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Other session", session: "session-2"),
+        stop(at: 2, promptID: "p1", message: "Fixed it.\nAll tests pass."),
+        claudeRecord("UserPromptSubmit", at: 3, promptID: "p2", prompt: "Now document it"),
+        stop(at: 4, promptID: "p2", message: "Documented."),
+        stop(at: 5, promptID: "p9", message: "A turn Herdly never saw start.")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let results = scanClaude(root).results
+    let first = try #require(results[claudeTurn("p1", scope: root)])
+    #expect(first.message == "Fixed it.\nAll tests pass.")
+    #expect(first.prompt == "Fix the flaky test")
+    #expect(results[claudeTurn("p2", scope: root)]?.message == "Documented.")
+    // Another session's turn with the same prompt id gets nothing from this session's Stop.
+    #expect(results[claudeTurn("p1", session: "session-2", scope: root)]?.message == nil)
+    #expect(results[claudeTurn("p1", session: "session-2", scope: root)]?.prompt == "Other session")
+    #expect(results[claudeTurn("p9", scope: root)] == nil)
+}
+
+@Test func claudeLatestStopDecidesTheMessageAndNewActivityClearsIt() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "One"),
+        stop(at: 2, promptID: "p1", message: "First stop."),
+        stop(at: 3, promptID: "p1"),
+        claudeRecord("UserPromptSubmit", at: 4, promptID: "p2", prompt: "Two"),
+        stop(at: 5, promptID: "p2", message: "Stopped early."),
+        claudeRecord("PreToolUse", at: 6, promptID: "p2", toolName: "Bash", toolUseID: "t1",
+                     toolInput: ["command": "swift test"])
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let results = scanClaude(root).results
+    // A later Stop without a message never keeps an earlier Stop's message.
+    #expect(results[claudeTurn("p1", scope: root)]?.message == nil)
+    #expect(results[claudeTurn("p1", scope: root)]?.prompt == "One")
+    // The turn continued after its Stop, so that message is not its result.
+    #expect(results[claudeTurn("p2", scope: root)]?.message == nil)
+}
+
+@Test func claudeMalformedOrForgedMessageShowsNothingOrIsReBounded() throws {
+    let huge = String(repeating: "b", count: ClaudeObservationReader.maximumLastMessage + 500)
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "One"),
+        stop(at: 2, promptID: "p1", message: 42),
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Two", session: "session-2"),
+        stop(at: 2, promptID: "p1", message: huge, session: "session-2"),
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Three", session: "session-3"),
+        stop(at: 2, promptID: "p1", message: "Kept start", shortened: true, session: "session-3"),
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Four", session: "session-4"),
+        claudeRecord("StopFailure", at: 2, promptID: "p1", session: "session-4")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let results = scanClaude(root).results
+    #expect(results[claudeTurn("p1", scope: root)]?.message == nil)
+    let forged = try #require(results[claudeTurn("p1", session: "session-2", scope: root)])
+    #expect(forged.message?.count == ClaudeObservationReader.maximumLastMessage)
+    #expect(forged.messageShortened)
+    #expect(results[claudeTurn("p1", session: "session-3", scope: root)]?.messageShortened == true)
+    #expect(results[claudeTurn("p1", session: "session-4", scope: root)]?.message == nil)
+}
+
+@Test func claudeResultDetailsFeedTheResultCardLikeCodex() throws {
+    let identity = AgentTurnIdentity(session: AgentSessionIdentity(source: .claude, sourceScope: "/claude",
+                                                                   session: "s", surface: .cli), turn: "p1")
+    let lines = (1...8).map { "Line \($0)." }.joined(separator: "\n")
+    let details = ClaudeTurnResult(identity: identity, prompt: "Fix it", message: lines).details
+    #expect(details.originalPrompt == "Fix it")
+    #expect(details.request == nil)
+    guard case let .available(preview)? = details.response else { Issue.record("no message"); return }
+    #expect(preview.text.split(separator: "\n").count == CompletionPreview.maximumLines)
+    #expect(preview.extent == .cut(full: lines))
+
+    // No message: no message line at all, never an "unavailable" reason.
+    let silent = ClaudeTurnResult(identity: identity, prompt: "Fix it", message: nil).details
+    #expect(silent.response == nil)
+    #expect(silent.originalPrompt == "Fix it")
+}
+
+@Test func aHelperShortenedMessageSaysTheRestIsInTheAgent() throws {
+    let short = try #require(CompletionPreview("Kept start", sourceShortened: true))
+    #expect(short.text == "Kept start…")
+    #expect(short.extent == .cutAndCapped(full: "Kept start"))
+    let lines = (1...8).map { "Line \($0)." }.joined(separator: "\n")
+    #expect(CompletionPreview(lines, sourceShortened: true)?.extent == .cutAndCapped(full: lines))
+    #expect(CompletionPreview(lines, sourceShortened: false) == CompletionPreview(lines))
+}

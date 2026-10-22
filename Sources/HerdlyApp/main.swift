@@ -226,6 +226,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published private(set) var claudeSessionNames: [AgentSessionIdentity: String] = [:]
     /// Each Claude session's working directory from its inventory, for the row's "project @ branch".
     @Published private(set) var claudeSessionDirectories: [AgentSessionIdentity: String] = [:]
+    /// Each Claude turn's prompt and last message from the latest scan of its root, for its result
+    /// card (#341). Memory only, like Codex's completion previews; looked up by the exact turn.
+    @Published private(set) var claudeTurnResults: [AgentTurnIdentity: ClaudeTurnResult] = [:]
     /// Direct Claude controls are valid only for receipts issued by this running companion. A
     /// persisted receipt must not recreate an active decision connection after a restart.
     private var liveClaudeApprovalIDs: Set<String> = []
@@ -1385,6 +1388,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let scan = result.0
             let desktopEvents = result.1
             let readState = result.2
+            let claudeObservationScans = result.8
             guard eventsPath.isEmpty || eventsPath == events.path else { scanning = false; refresh(); return }
             self.rolloutCache = scan.rolloutCache
             self.hookCache = result.13
@@ -1393,7 +1397,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let previousAgent = Set(agentQueue.items(at: Date().timeIntervalSince1970).map(\.id))
             let scanNow = Date().timeIntervalSince1970
             var approvalReceiptWork: [ClaudeApprovalReceiptWork] = []
-            for (root, claudeScan) in zip(claudeRoots, result.8) {
+            for (root, claudeScan) in zip(claudeRoots, claudeObservationScans) {
                 for approval in claudeScan.observations.compactMap({ observation -> AgentApproval? in
                     if case let .approval(value) = observation { return value }
                     return nil
@@ -1412,10 +1416,19 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 }
             }
             var scannedAgent = agentQueue
-            for claudeScan in result.8 {
+            for claudeScan in claudeObservationScans {
                 scannedAgent.apply(claudeScan, now: scanNow)
             }
             if scannedAgent != agentQueue { agentQueue = scannedAgent }
+            // An unavailable root keeps its last results, as it keeps its queue state; a root no
+            // longer connected drops them.
+            let connectedScopes = Set(claudeObservationScans.map(\.sourceScope))
+            var turnResults = claudeTurnResults.filter { connectedScopes.contains($0.key.session.sourceScope) }
+            for claudeScan in claudeObservationScans where claudeScan.available {
+                turnResults = turnResults.filter { $0.key.session.sourceScope != claudeScan.sourceScope }
+                turnResults.merge(claudeScan.results) { _, latest in latest }
+            }
+            if turnResults != claudeTurnResults { claudeTurnResults = turnResults }
             // Receipt reads and writes happen off the main actor. The completion rechecks the
             // exact root, request, and deadline before making controls available.
             publishClaudeApprovalReceipts(approvalReceiptWork)
@@ -1455,7 +1468,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             }
             pruneClaudeQuestionState(now: scanNow, roots: currentClaudeQuestionRoots(),
                                      pendingIDs: pendingClaudeQuestionIDs,
-                                     observedIDs: observedClaudeQuestionIDs(result.8))
+                                     observedIDs: observedClaudeQuestionIDs(claudeObservationScans))
             // A root can contain many pending rendezvous files. Writes happen off the main actor;
             // the completion rechecks the scan generation, root identity, and request deadline.
             publishClaudeQuestionReceipts(receiptWork)
@@ -2414,6 +2427,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     func spotlightDetails(for item: AgentAttentionItem) -> SpotlightDetails? {
+        // A Claude result reads its exact turn's prompt and last message; other Claude rows have none.
+        if item.session.source == .claude {
+            return item.outcome.flatMap { claudeTurnResults[$0.identity]?.details }
+        }
         guard item.session.source == .codex,
               let session = UUID(uuidString: item.session.session) else { return nil }
         let legacy = queue.items.first { candidate in
