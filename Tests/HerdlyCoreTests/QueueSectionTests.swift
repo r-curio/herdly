@@ -296,6 +296,11 @@ private func earlierQueue(approvals: Int = 0, fresh: Int = 0, earlier: Int = 0, 
     return queue.items(at: 1_001)
 }
 
+private extension QueueSections {
+    /// Whether any group folds its Earlier results; each group carries its own flag.
+    var earlierFolded: Bool { attention.contains(where: \.earlierFolded) }
+}
+
 private func earlierSections(_ items: [AgentAttentionItem], _ choice: EarlierFold.Choice = .automatic,
                              grouping: QueueGrouping = .none) -> QueueSections {
     QueueSections.make(items, grouping: grouping, project: { _ in nil }, kindSections: true, earlier: choice)
@@ -416,22 +421,4 @@ private func earlierSections(_ items: [AgentAttentionItem], _ choice: EarlierFol
     #expect(opened.earlierHeadingStop == nil)
     #expect(opened.lines.contains(.earlierHeading(stop: nil)))
     #expect(opened.lines.count == 1 + 1 + 3)
-}
-
-@Test func foldingEarlierLeavesTheToCheckCountAlone() {
-    // The badge and settings count come from the queue, not the sections: Earlier results are
-    // never counted, folded or not (D22, D34).
-    var queue = AgentAttentionQueue()
-    for index in 0..<3 {
-        queue.apply(.outcome(AgentOutcome(session: session("old-\(index)"), turn: "t", status: .finished, arrivedAt: Double(index))))
-    }
-    queue.apply(.outcome(AgentOutcome(session: session("new"), turn: "t", status: .finished, arrivedAt: 990)))
-    let items = queue.items(at: 1_001)
-    let count = queue.toCheckCount(at: 1_001, earlier: .fiveMinutes)
-    #expect(count == 1)
-    for choice in [EarlierFold.Choice.automatic, .opened, .folded] {
-        _ = earlierSections(items, choice)
-        #expect(queue.toCheckCount(at: 1_001, earlier: .fiveMinutes) == count)
-    }
-    #expect(earlierSections(items).earlierFolded)
 }

@@ -218,6 +218,10 @@ public struct QueueGroup: Equatable, Sendable {
         var previous: AgentAttentionItem?
         for item in items {
             if item.kind == .earlierOutcome, previous?.kind != .earlierOutcome {
+                // Earlier rows form one run in queue order (they sort together under either sort),
+                // so a group has at most one heading; its drawn identity relies on that.
+                assert(!lines.contains { if case .earlierHeading = $0 { true } else { false } },
+                       "A group's Earlier rows must form one run")
                 lines.append(.earlierHeading(stop: earlierHeadingStop))
             }
             previous = item
@@ -385,9 +389,6 @@ public struct QueueSections: Equatable, Sendable {
     public let attention: [QueueGroup]
     public let working: [QueueGroup]
     public let workingCount: Int
-    /// Whether Earlier results sit folded behind their headings (`EarlierFold`, D34). Each group
-    /// carries its own flag for drawing; this one is read by tests.
-    let earlierFolded: Bool
 
     /// Working rows fold only when something above them needs the user; otherwise they are the queue.
     public var foldsWorking: Bool { !attention.isEmpty && workingCount > 0 }
@@ -447,8 +448,7 @@ public struct QueueSections: Equatable, Sendable {
         let working = kindSections && grouping == .none && !folds && !running.isEmpty
             ? [QueueGroup(heading: QueueKindSection.working.heading, items: running, section: .working)]
             : QueueGroups.make(running, grouping: workingGrouping, project: project)
-        return QueueSections(attention: attention, working: working, workingCount: running.count,
-                             earlierFolded: earlierFolded)
+        return QueueSections(attention: attention, working: working, workingCount: running.count)
     }
 
     /// One kind section's rows before folding.

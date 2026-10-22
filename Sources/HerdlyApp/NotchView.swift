@@ -1032,7 +1032,7 @@ struct EarlierHeading: View {
             .buttonStyle(.plain)
             .focused($focused)
             .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(NotchStyle.ink.opacity(focused || selected ? 0.9 : 0), lineWidth: 1.5).padding(.horizontal, -6))
+                .stroke(NotchStyle.ink.opacity(focused || selected ? 0.9 : 0), lineWidth: QueueRowMetrics.ringWidth).padding(.horizontal, -6))
             .accessibilityLabel("Earlier, \(count) \(results)")
             .accessibilityValue(open ? "expanded" : "collapsed")
             .accessibilityAddTraits(selected ? [.isHeader, .isSelected] : .isHeader)
@@ -1044,7 +1044,7 @@ struct EarlierHeading: View {
             .buttonStyle(.plain)
             .focused($dismissFocused)
             .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(NotchStyle.ink.opacity(dismissFocused ? 0.9 : 0), lineWidth: 1.5).padding(.horizontal, -4))
+                .stroke(NotchStyle.ink.opacity(dismissFocused ? 0.9 : 0), lineWidth: QueueRowMetrics.ringWidth).padding(.horizontal, -4))
             .accessibilityLabel("Dismiss all \(count) earlier \(results)")
         }
     }
@@ -2689,7 +2689,7 @@ struct Notch: View {
                                     model.openQueueFolds.insert(section)
                                 }
                                 .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
-                                .padding(.vertical, 2)
+                                .padding(.top, 2)
                                 .transition(rowTransition)
                             }
                         }
