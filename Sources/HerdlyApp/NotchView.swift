@@ -2533,9 +2533,7 @@ struct Notch: View {
                 .focusSection()
             }
         }
-        .onPreferenceChange(ContentHeightKey.self) { height in
-            if abs(model.contentHeight - height) > 0.5 { model.contentHeight = height }
-        }
+        .onPreferenceChange(ContentHeightKey.self) { model.reportContentHeight($0) }
         .onPreferenceChange(DraftInProgressKey.self) { model.notchDraftInProgress = $0 }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Herdly notch")
