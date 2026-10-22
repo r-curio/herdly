@@ -51,11 +51,11 @@ extension Companion {
         refresh()
     }
 
-    func refreshSetup() { refreshingSetup() }
+    func refreshSetup() { startSetupRefresh() }
 
     /// Starts a Codex setup detection; awaiting the task waits until its result has landed.
     @discardableResult
-    func refreshingSetup() -> Task<Void, Never> {
+    func startSetupRefresh() -> Task<Void, Never> {
         let roots = setupRoots
         return Task { @MainActor [weak self] in
             let (snapshot, helperUpdated) = await Task.detached {
@@ -70,7 +70,7 @@ extension Companion {
             self.setupPlan = snapshot.plan
             self.setupStatus = snapshot.status
             self.setupChecked = true
-            self.codexDetected()
+            self.resolveDesktopWaitAfterDetection()
             self.adoptInstalledEventsFolder(roots)
             // Until Codex is delivering events, the controls window is the only way to finish setup,
             // so a launch that finds setup incomplete shows it without waiting for a reopen.

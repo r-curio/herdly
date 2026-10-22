@@ -403,12 +403,12 @@ final class ClaudeSetupModel: ObservableObject {
         refresh()
     }
 
-    func refresh() { refreshing() }
+    func refresh() { startRefresh() }
 
     /// Starts a detection pass; awaiting the task waits until its result has landed (or been
     /// superseded by a newer pass).
     @discardableResult
-    func refreshing() -> Task<Void, Never> {
+    func startRefresh() -> Task<Void, Never> {
         let paths = [defaultRoot.path] + alternatePaths.filter { $0 != defaultRoot.path }
         refreshToken += 1
         let token = refreshToken

@@ -550,9 +550,11 @@ private struct AgentControls: View {
     @State private var preview: SetupPreview?
 
     /// `setupStatus` is only a default until the first detection lands, so it reads as unknown until then.
+    /// The header reads Restart required after an update until a new Codex session starts.
     private var summary: AgentSummary {
-        AgentSummary.codex(model.setupCapabilities, status: model.setupChecked ? model.setupStatus : nil,
-                           statusText: model.setupStatusText)
+        model.agentUpdates.summary(AgentSummary.codex(model.setupCapabilities,
+                                                      status: model.setupChecked ? model.setupStatus : nil,
+                                                      statusText: model.setupStatusText), for: .codex)
     }
 
     var body: some View {
@@ -571,7 +573,7 @@ private struct AgentControls: View {
         let capabilities = model.setupCapabilities
         return SettingsCard {
             AgentCardHeader(name: "Codex", subtitle: summary.subtitle, symbol: "terminal", tile: Color(white: 0.11),
-                            status: model.agentUpdates.header(summary.status, for: .codex), menuLabel: "Codex actions") {
+                            status: summary.status, menuLabel: "Codex actions") {
                 if model.canConfigureSetup {
                     Button("Configure Codex", action: model.configureCodex)
                         .buttonStyle(.borderedProminent).controlSize(.small)
@@ -594,7 +596,7 @@ private struct AgentControls: View {
                              actions: ProblemRowActions(updates: model.agentUpdates,
                                                         action: { AgentRowAction.codex($0, capabilities) },
                                                         perform: model.performAgentRowAction))
-            if model.setupChecked, let note = AgentUpdates.codexInstallNote(capabilities) { AgentNoteRow(text: note) }
+            if let note = AgentUpdates.codexInstallNote(summary, capabilities) { AgentNoteRow(text: note) }
             AgentMessageRow(message: model.setupMessage)
         }
     }
@@ -837,11 +839,9 @@ private struct ClaudeAgentControls: View {
 
     /// The folder's summary, its header reading Restart required after an update until a new session starts.
     private func summary(_ root: ClaudeSetupModel.Root) -> AgentSummary {
-        let summary = AgentSummary.claude(checked: setup.checked, root.capabilities, displayPath: root.displayPath,
-                                          status: root.status, statusText: ClaudeSetupModel.statusText(root.status),
-                                          addsHooks: readyPlan(root)?.addsHooks ?? false)
-        return AgentSummary(subtitle: summary.subtitle, status: updates.header(summary.status, for: .claude),
-                            problems: summary.problems)
+        updates.summary(AgentSummary.claude(checked: setup.checked, root.capabilities, displayPath: root.displayPath,
+                                            status: root.status, statusText: ClaudeSetupModel.statusText(root.status),
+                                            addsHooks: readyPlan(root)?.addsHooks ?? false), for: .claude)
     }
 
     private func rowActions(_ root: ClaudeSetupModel.Root) -> ProblemRowActions {

@@ -20,9 +20,9 @@ extension Companion {
             let result = await Task.detached(priority: .utility) { AgentUpdateRunner.run(command) }.value
             guard let self else { return }
             // Success needs detection to see the new version, as Review Again would.
-            let (version, meetsMinimum) = await self.redetect(target)
-            let message = self.agentUpdates.finish(target, command: command, result: result, version: version,
-                                                   meetsMinimum: meetsMinimum, now: Date().timeIntervalSince1970)
+            let detection = await self.redetect(target)
+            let message = self.agentUpdates.finish(target, command: command, result: result, detection: detection,
+                                                   now: Date().timeIntervalSince1970)
             if let message { self.showUpdateMessage(message, for: target.agent) }
         }
     }
@@ -42,20 +42,13 @@ extension Companion {
         }
     }
 
-    private func redetect(_ target: AgentUpdateTarget) async -> (version: String?, meetsMinimum: Bool) {
-        switch target {
-        case .codexCLI:
-            await refreshingSetup().value
-            return (setupCapabilities.cliVersion, setupCapabilities.cli)
-        case .codexDesktop:
-            await refreshingSetup().value
-            return (setupCapabilities.desktopVersion, setupCapabilities.desktop)
-        case .claudeCode:
-            await claude.refreshing().value
-            // Every folder shares one `claude` executable, so the default folder's reading is the version.
-            let capabilities = claude.roots.first?.capabilities
-            return (capabilities?.version, capabilities?.supported ?? false)
+    /// Reruns the target agent's detection, as Review Again does, and reads the target's version.
+    private func redetect(_ target: AgentUpdateTarget) async -> AgentUpdateDetection {
+        switch target.agent {
+        case .codex: await startSetupRefresh().value
+        case .claude: await claude.startRefresh().value
         }
+        return target.detected(codex: setupCapabilities, claude: claude.roots.first?.capabilities)
     }
 
     private func showUpdateMessage(_ message: String, for agent: AgentSource) {
@@ -66,12 +59,13 @@ extension Companion {
     }
 
     /// Called when a Codex setup detection lands: a desktop row waiting for Codex to update itself
-    /// stops waiting once the version meets the minimum.
-    func codexDetected() {
+    /// stops waiting, and counts as updated, once the version meets the minimum.
+    func resolveDesktopWaitAfterDetection() {
         guard agentUpdates.state(.codexDesktop) == .waitingForApp else { return }
         var next = agentUpdates
-        let message = next.detected(.codexDesktop, version: setupCapabilities.desktopVersion,
-                                    meetsMinimum: setupCapabilities.desktop, now: Date().timeIntervalSince1970)
+        let detection = AgentUpdateTarget.codexDesktop.detected(codex: setupCapabilities, claude: nil)
+        let message = next.detected(.codexDesktop, version: detection.version,
+                                    meetsMinimum: detection.meetsMinimum, now: Date().timeIntervalSince1970)
         if next != agentUpdates { agentUpdates = next }
         if let message { showUpdateMessage(message, for: .codex) }
     }
@@ -91,7 +85,7 @@ extension Companion {
         codexLaunchObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
             let launched = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier
-            guard launched == "com.openai.codex" else { return }
+            guard launched == CodexSetupDetection.desktopBundleIdentifier else { return }
             Task { @MainActor in
                 guard let self, self.agentUpdates.state(.codexDesktop) == .waitingForApp else { return }
                 self.refreshSetup()

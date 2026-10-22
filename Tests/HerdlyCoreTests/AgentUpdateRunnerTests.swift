@@ -47,3 +47,22 @@ private func script(_ body: String) throws -> (command: AgentUpdateCommand, fold
     #expect(lines.last?.hasPrefix(fake.folder.path + ":") == true)
     #expect(lines.last?.contains("/opt/homebrew/bin") == true)
 }
+
+@Test func runnerStopsTheWholeProcessGroupPastItsLimit() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-update-group-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let pidFile = folder.appendingPathComponent("grandchild.pid")
+    // The grandchild inherits the pipes, as a real updater's helper would.
+    let fake = try script("sleep 30 &\necho $! > '\(pidFile.path)'\nwait")
+    defer { try? FileManager.default.removeItem(at: fake.folder) }
+    let started = Date()
+    #expect(AgentUpdateRunner.run(fake.command, limit: 0.5) == .timedOut)
+    #expect(Date().timeIntervalSince(started) < 5)
+    let text = try String(contentsOf: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+    let grandchild = try #require(pid_t(text))
+    // Once killed it is reparented and reaped; until then a zombie still answers signal 0.
+    let deadline = Date().addingTimeInterval(3)
+    while kill(grandchild, 0) == 0, Date() < deadline { usleep(20_000) }
+    #expect(kill(grandchild, 0) == -1 && errno == ESRCH)
+}

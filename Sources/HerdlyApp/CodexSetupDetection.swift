@@ -17,6 +17,9 @@ enum BundledHelper {
 }
 
 enum CodexSetupDetection {
+    /// Codex desktop's bundle identifier.
+    static let desktopBundleIdentifier = "com.openai.codex"
+
     private enum DesktopSelection {
         case none
         case selected(URL)
@@ -30,13 +33,13 @@ enum CodexSetupDetection {
     }
 
     static func capabilities() -> CodexCapabilities {
-        let runningDesktopProcesses = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
+        let runningDesktopProcesses = NSRunningApplication.runningApplications(withBundleIdentifier: desktopBundleIdentifier)
         let runningDesktop = runningDesktopProcesses.compactMap(\.bundleURL)
         let installedDesktop = [
             "/Applications/Codex.app", "/Applications/ChatGPT.app",
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Codex.app").path,
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/ChatGPT.app").path,
-            NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex")?.path
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: desktopBundleIdentifier)?.path
         ].compactMap { $0 }.map(URL.init(fileURLWithPath:)).filter {
             FileManager.default.fileExists(atPath: $0.path)
         }.reduce(into: [URL]()) { result, url in

@@ -69,12 +69,59 @@ private func finished(_ status: Int32, out: String = "", err: String = "") -> Ag
     #expect(AgentRowAction.claude(.claudeVersion, ClaudeCapabilities(installed: true, supported: false)) == .none)
 }
 
-@Test func theUnknownInstallFootnoteShowsOnlyWhileTheCLIRowHasNoButton() {
-    #expect(AgentUpdates.codexInstallNote(codex(cliInstall: .unknown))
+@Test func theUnknownInstallFootnoteShowsOnlyWithACodexCLIVersionRowThatHasNoButton() {
+    func note(_ capabilities: CodexCapabilities, status: CodexConnectionStatus? = .connected) -> String? {
+        AgentUpdates.codexInstallNote(AgentSummary.codex(capabilities, status: status, statusText: "Status"), capabilities)
+    }
+    #expect(note(codex(cliInstall: .unknown))
             == "Herdly can't tell how Codex CLI was installed, so it can't update it for you. Update it the way you installed it, then choose Review Again from the ⋯ menu.")
-    #expect(AgentUpdates.codexInstallNote(codex()) == nil)
-    #expect(AgentUpdates.codexInstallNote(codex(cliSupported: true, cliInstall: .unknown)) == nil)
-    #expect(AgentUpdates.codexInstallNote(codex(cliInstalled: false, cliInstall: .unknown)) == nil)
+    #expect(note(codex()) == nil)
+    #expect(note(codex(cliSupported: true, cliInstall: .unknown)) == nil)
+    #expect(note(codex(cliInstalled: false, cliInstall: .unknown)) == nil)
+    // Until the first detection lands the card shows no rows, so no note either (artboard 05).
+    #expect(note(codex(cliInstall: .unknown), status: nil) == nil)
+}
+
+@Test func bothCardsTakeTheirHeaderFromTheSameSummaryHelper() {
+    var updates = AgentUpdates()
+    let summary = AgentSummary(subtitle: "2.1.308 · ~/.claude", status: .attention("Not ready"),
+                               problems: [AgentProblem(kind: .status, label: "Status", value: "x")])
+    #expect(updates.summary(summary, for: .claude) == summary)
+    let started = updates.begin(.claudeCode)
+    #expect(started)
+    updates.finish(.claudeCode, command: claudeCommand, result: finished(0), version: "2.1.308", meetsMinimum: true, now: 1)
+    #expect(updates.summary(summary, for: .claude)
+            == AgentSummary(subtitle: summary.subtitle, status: .attention("Restart required"), problems: summary.problems))
+    #expect(updates.summary(summary, for: .codex) == summary)
+}
+
+@Test func redetectionReadsTheTargetsOwnVersionAndMinimum() {
+    let capabilities = CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true,
+                                         cliVersion: "0.146.1", desktopVersion: "26.721.31836",
+                                         cliInstalled: true, desktopInstalled: true)
+    let claude = ClaudeCapabilities(installed: true, supported: false, version: "2.1.240")
+    #expect(AgentUpdateTarget.codexCLI.detected(codex: capabilities, claude: claude)
+            == AgentUpdateDetection(version: "0.146.1", meetsMinimum: true))
+    #expect(AgentUpdateTarget.codexDesktop.detected(codex: capabilities, claude: claude)
+            == AgentUpdateDetection(version: "26.721.31836", meetsMinimum: false))
+    #expect(AgentUpdateTarget.claudeCode.detected(codex: capabilities, claude: claude)
+            == AgentUpdateDetection(version: "2.1.240", meetsMinimum: false))
+    #expect(AgentUpdateTarget.claudeCode.detected(codex: capabilities, claude: nil)
+            == AgentUpdateDetection(version: nil, meetsMinimum: false))
+}
+
+@Test func aRunAndItsRedetectionDecideTheRowTogether() {
+    // The orchestration's decision: the runner's result plus what detection reads afterwards.
+    let capabilities = CodexCapabilities(cli: true, desktop: false, ghostty: false, supported: true,
+                                         cliVersion: "0.146.1", cliInstalled: true)
+    var updates = AgentUpdates()
+    let started = updates.begin(.codexCLI)
+    #expect(started)
+    let message = updates.finish(.codexCLI, command: brewCommand, result: finished(0, out: "==> Upgrading codex"),
+                                 detection: AgentUpdateTarget.codexCLI.detected(codex: capabilities, claude: nil), now: 9)
+    #expect(message == "Updated Codex CLI to 0.146.1. Sessions already open keep the old version until you restart them.")
+    #expect(updates.state(.codexCLI) == .idle)
+    #expect(updates.restartRequired(.codex))
 }
 
 // MARK: Row presentation

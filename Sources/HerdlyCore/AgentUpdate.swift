@@ -22,6 +22,17 @@ public enum AgentUpdateTarget: String, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// What detection read for this target once an update ended: its own version and whether that
+    /// meets the minimum. Every Claude folder shares one `claude`, so the default folder's reading
+    /// (`claude`, nil before any) stands for all.
+    public func detected(codex: CodexCapabilities, claude: ClaudeCapabilities?) -> AgentUpdateDetection {
+        switch self {
+        case .codexCLI: AgentUpdateDetection(version: codex.cliVersion, meetsMinimum: codex.cli)
+        case .codexDesktop: AgentUpdateDetection(version: codex.desktopVersion, meetsMinimum: codex.desktop)
+        case .claudeCode: AgentUpdateDetection(version: claude?.version, meetsMinimum: claude?.supported ?? false)
+        }
+    }
+
     /// The target behind a problem row, or nil for the kinds that never get a button.
     public init?(_ kind: AgentProblem.Kind) {
         switch kind {
@@ -30,6 +41,17 @@ public enum AgentUpdateTarget: String, CaseIterable, Hashable, Sendable {
         case .claudeVersion: self = .claudeCode
         case .status, .newHooks, .usage: return nil
         }
+    }
+}
+
+/// One target's version as detection read it after an update.
+public struct AgentUpdateDetection: Equatable, Sendable {
+    public let version: String?
+    public let meetsMinimum: Bool
+
+    public init(version: String?, meetsMinimum: Bool) {
+        self.version = version
+        self.meetsMinimum = meetsMinimum
     }
 }
 
@@ -214,9 +236,10 @@ public struct AgentUpdates: Equatable, Sendable {
 
     public init() {}
 
-    /// The Codex card's footnote while its CLI row is outdated with no Update button (artboard 05).
-    public static func codexInstallNote(_ capabilities: CodexCapabilities) -> String? {
-        guard capabilities.cliInstalled, !capabilities.cli, capabilities.cliInstall == .unknown else { return nil }
+    /// The Codex card's note while it shows a Codex CLI version row with no Update button (artboard 05).
+    public static func codexInstallNote(_ summary: AgentSummary, _ capabilities: CodexCapabilities) -> String? {
+        guard summary.problems.contains(where: { $0.kind == .codexCLI }), capabilities.cliInstalled,
+              AgentRowAction.codex(.codexCLI, capabilities) == .none else { return nil }
         return installNote
     }
 
@@ -243,6 +266,13 @@ public struct AgentUpdates: Equatable, Sendable {
     /// The update command ended and detection has rerun. Succeeds only when the command exited
     /// cleanly and the detected version now meets the minimum; returns the card's footnote then.
     /// A result for a row that is not updating is late and ignored.
+    @discardableResult
+    public mutating func finish(_ target: AgentUpdateTarget, command: AgentUpdateCommand, result: AgentUpdateRunResult,
+                                detection: AgentUpdateDetection, now: Double) -> String? {
+        finish(target, command: command, result: result, version: detection.version,
+               meetsMinimum: detection.meetsMinimum, now: now)
+    }
+
     @discardableResult
     public mutating func finish(_ target: AgentUpdateTarget, command: AgentUpdateCommand, result: AgentUpdateRunResult,
                                 version: String?, meetsMinimum: Bool, now: Double) -> String? {
@@ -291,6 +321,12 @@ public struct AgentUpdates: Equatable, Sendable {
     public func header(_ status: AgentHeaderStatus, for agent: AgentSource) -> AgentHeaderStatus {
         guard restartRequired(agent), status != .checking else { return status }
         return .attention("Restart required")
+    }
+
+    /// An agent card's summary as shown: the detected one, with the header reading Restart required
+    /// while that agent needs one. Both cards build their header here.
+    public func summary(_ summary: AgentSummary, for agent: AgentSource) -> AgentSummary {
+        AgentSummary(subtitle: summary.subtitle, status: header(summary.status, for: agent), problems: summary.problems)
     }
 
     /// How a version problem row with `value` and `action` reads in its current state.
