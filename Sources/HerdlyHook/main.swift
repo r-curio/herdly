@@ -67,6 +67,12 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
         record["prompt"] = prompt.text
         if prompt.shortened { record[ClaudeObservationReader.promptShortenedKey] = true }
     }
+    // Claude's last reply for the result card (#341): its start, marked shortened, without controls.
+    if event == "Stop",
+       let message = ClaudeObservationReader.lastMessage(object[ClaudeObservationReader.lastMessageKey] as? String) {
+        record[ClaudeObservationReader.lastMessageKey] = message.text
+        if message.shortened { record[ClaudeObservationReader.lastMessageShortenedKey] = true }
+    }
     if let requestID = boundedClaudeString(object["approval_request_id"], limit: 256) {
         record["approval_request_id"] = requestID
     }
@@ -91,6 +97,19 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
         try? FileManager.default.removeItem(at: temporary)
         return false
     }
+}
+
+/// Every Claude hook input is read up to 64 KiB, as before. Only a Stop may be longer, up to
+/// `maximumClaudeStopInput`, because its `last_assistant_message` can be a long reply; a longer Stop
+/// or any other oversized input stays unread, as before, and the hook still exits cleanly.
+let maximumClaudeHookInput = 64 * 1024
+let maximumClaudeStopInput = 1024 * 1024
+
+func claudeHookInput(_ data: Data?) -> [String: Any]? {
+    guard let data, data.count <= maximumClaudeStopInput,
+          let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+    guard data.count <= maximumClaudeHookInput || object["hook_event_name"] as? String == "Stop" else { return nil }
+    return object
 }
 
 private func boundedClaudeString(_ value: Any?, limit: Int = 4096, allowNewline: Bool = false) -> String? {
@@ -438,6 +457,40 @@ func selfTest() -> Int32 {
           let shortened = ClaudeObservationReader.promptFallback(longPrompt), shortened.shortened,
           promptRecord["prompt"] as? String == shortened.text,
           promptRecord[ClaudeObservationReader.promptShortenedKey] as? Bool == true else { return 1 }
+    // Stop keeps a bounded last message (#341). A hostile one (escape-heavy, past both caps, with
+    // terminal controls) still writes a record the reader accepts; a non-string or missing one writes none.
+    let stopDirectory = directory.appendingPathComponent("claude-stop", isDirectory: true)
+    let hostile = "\u{1b}[2J" + String(repeating: "\"/\\\n", count: 40_000)
+    func stopRecord(_ message: Any?, in folder: String) -> (record: [String: Any], size: Int)? {
+        var stop: [String: Any] = ["hook_event_name": "Stop", "session_id": session.uuidString, "prompt_id": "prompt-2"]
+        stop[ClaudeObservationReader.lastMessageKey] = message
+        let target = stopDirectory.appendingPathComponent(folder, isDirectory: true)
+        guard writeClaudeEvent(stop, to: target, installationID: UUID().uuidString),
+              let url = (try? FileManager.default.contentsOfDirectory(at: target, includingPropertiesForKeys: nil))?.first,
+              let data = try? Data(contentsOf: url),
+              let record = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return (record, data.count)
+    }
+    guard let plain = stopRecord("Done.\nAll tests pass.", in: "plain"),
+          plain.record[ClaudeObservationReader.lastMessageKey] as? String == "Done.\nAll tests pass.",
+          plain.record[ClaudeObservationReader.lastMessageShortenedKey] == nil,
+          let long = stopRecord(hostile, in: "hostile"),
+          long.size < ClaudeObservationReader.maximumRecordSize,
+          let kept = long.record[ClaudeObservationReader.lastMessageKey] as? String,
+          !kept.contains("\u{1b}"), kept.utf8.count <= ClaudeObservationReader.maximumLastMessageBytes,
+          long.record[ClaudeObservationReader.lastMessageShortenedKey] as? Bool == true,
+          let number = stopRecord(42, in: "number"), number.record[ClaudeObservationReader.lastMessageKey] == nil,
+          let missing = stopRecord(nil, in: "missing"), missing.record[ClaudeObservationReader.lastMessageKey] == nil
+    else { return 1 }
+    // A Stop past 64 KiB is still read; any other event that long, or a Stop past its own cap, is not.
+    let bigStop = try? JSONSerialization.data(withJSONObject: ["hook_event_name": "Stop", "session_id": "s",
+                                                                ClaudeObservationReader.lastMessageKey: String(repeating: "a", count: 100_000)])
+    let bigTool = try? JSONSerialization.data(withJSONObject: ["hook_event_name": "PreToolUse", "session_id": "s",
+                                                                "tool_input": ["content": String(repeating: "a", count: 100_000)]])
+    let hugeStop = try? JSONSerialization.data(withJSONObject: ["hook_event_name": "Stop", "session_id": "s",
+                                                                 ClaudeObservationReader.lastMessageKey: String(repeating: "a", count: maximumClaudeStopInput)])
+    guard claudeHookInput(bigStop) != nil, claudeHookInput(bigTool) == nil, claudeHookInput(hugeStop) == nil,
+          claudeHookInput(Data("not json".utf8)) == nil else { return 1 }
     return 0
 }
 
@@ -461,7 +514,7 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
         guard arguments.indices.contains(sourceIndex + 1) else { return nil }
         return URL(fileURLWithPath: arguments[sourceIndex + 1]).standardizedFileURL.path
     }
-    let input = (try? FileHandle.standardInput.read(upToCount: 64 * 1024)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    let input = claudeHookInput(try? FileHandle.standardInput.read(upToCount: maximumClaudeStopInput + 1))
     guard var object = input else { exit(0) }
     let isQuestion = arguments.contains("--question-helper") && object["hook_event_name"] as? String == "PreToolUse"
         && object["tool_name"] as? String == "AskUserQuestion"
