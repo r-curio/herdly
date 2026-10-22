@@ -10,6 +10,15 @@ action. A longer prompt keeps its first 240 characters with an ellipsis and a `p
 mark instead of being dropped, so its working row still shows it; the row's disclosure then says the
 text is shortened and the full prompt is in Claude. Helpers before 2026-10-08 dropped any prompt over
 240 bytes, so a working row started under one has no prompt text.
+A `Stop` record also keeps Claude's `last_assistant_message` for the result card (#341): line breaks
+and tabs kept, every other control character removed, trimmed, and past 20,000 characters or 32 KiB
+cut to its start with a `last_assistant_message_shortened` mark. The reader re-applies the same bound,
+and the card then says the full message is in Claude. A Stop input may be read up to 1 MiB so a long
+reply does not drop the whole Stop; every other Claude hook input stays bounded at 64 KiB. The message
+belongs only to the Stop's own session and prompt id. The turn's latest Stop decides it: a later Stop
+without one, new tool activity in that turn, or `StopFailure` leaves the turn with no message, and a
+missing or non-string field (older Claude Code) shows no message line. The message and prompt reach
+the app as a memory-only `ClaudeTurnResult` per exact turn and are never written to the snapshot.
 An `AskUserQuestion` record retains bounded question text and option labels so the notch can
 show the same choices Claude is showing. The separate live request carries the helper invocation
 identity, the normalized Claude configuration root, and the separate normalized event directory; its
