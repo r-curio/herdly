@@ -68,18 +68,21 @@ enum ZellijRunner {
         ZellijReader.send(arguments, to: target, expecting: expected, effects: effects)
     }
 
-    /// The process table, each `zellij` process's arguments and each one's start time, from the kernel
+    /// The process table, each of this user's `zellij` processes' arguments and each one's start time, from the kernel
     /// (#303): the table in `ps -axo pid=,ppid=,uid=,tty=,comm=` form, so `ZellijProcessTable.parse` reads
     /// it exactly as it read `ps`.
     static func processTable() -> ZellijProcessTable? {
-        guard let records = KernelProcessTable.records(arguments: true),
+        // Only this user's processes can be Zellij clients or servers (ADR 0014), so only their vectors
+        // are read; the rest show the kernel's short name as `comm`.
+        guard let records = KernelProcessTable.records(arguments: .owner(getuid())),
               let parsed = ZellijProcessTable.parse(ProcessListing.pidPPIDUIDTTYComm(records), owner: getuid(),
                                                     arguments: [:], startTimes: [:]) else { return nil }
-        let vectors = Dictionary(records.map { ($0.pid, $0.arguments) }, uniquingKeysWith: { first, _ in first })
+        var vectors: [Int32: [String]] = [:]
+        for record in records { if let argv = record.arguments { vectors[record.pid] = argv } }
         var arguments: [Int32: [String]] = [:]
         var starts: [Int32: Double] = [:]
         for pid in parsed.zellijPIDs {
-            if let argv = vectors[pid] ?? nil { arguments[pid] = argv }
+            if let argv = vectors[pid] { arguments[pid] = argv }
             if let started = HerdrProcessTree.startTime(of: pid) { starts[pid] = started }
         }
         return ZellijProcessTable(processes: Array(parsed.processes.values), owner: parsed.owner, arguments: arguments,

@@ -39,12 +39,9 @@ public struct KernelProcessRecord: Equatable, Sendable {
     /// The argument vector, `argv[0]` first; nil when the kernel would not give it (another user's or an
     /// exiting process), or when it was not read.
     public let arguments: [String]?
-    /// The executable's full path (`proc_pidpath`), read only when `arguments` is unreadable; it stands in
-    /// for the `argv[0]` `ps` would show.
-    public let executablePath: String?
 
     public init(pid: Int32, ppid: Int32, uid: UInt32, tty: String?, state: ProcessRunState, sessionLeader: Bool,
-                foreground: Bool, shortName: String, arguments: [String]?, executablePath: String? = nil) {
+                foreground: Bool, shortName: String, arguments: [String]?) {
         self.pid = pid
         self.ppid = ppid
         self.uid = uid
@@ -54,15 +51,17 @@ public struct KernelProcessRecord: Equatable, Sendable {
         self.foreground = foreground
         self.shortName = shortName
         self.arguments = arguments
-        self.executablePath = executablePath
     }
 }
 
 /// `ps` output shapes written from kernel records. Rows are ordered by pid, as `ps` prints them.
 public enum ProcessListing {
-    /// `ps -axo pid=,args=`.
-    public static func pidArgs(_ records: [KernelProcessRecord]) -> String {
-        rows(records) { "\(pid($0.pid)) \(args($0))" }
+    /// `ps -axo pid=,args=` for the processes whose argument vector was read; nil once the text would
+    /// pass `limit` bytes. A process without one is left out: the kernel withholds other users' vectors,
+    /// which `ps` shows, and a row without its arguments could hide what the Codex rules look for (an
+    /// `app-server` would read as a CLI). Herdly never targets another user's processes.
+    public static func pidArgs(_ records: [KernelProcessRecord], limit: Int) -> String? {
+        rows(records.filter { $0.arguments?.isEmpty == false }, limit: limit) { "\(pid($0.pid)) \(args($0))" }
     }
 
     /// `ps -axo pid=,ppid=,uid=,tty=,comm=`.
@@ -70,12 +69,14 @@ public enum ProcessListing {
         rows(records) { record in
             let tty = (record.tty ?? "??").padding(toLength: max(8, (record.tty ?? "??").count), withPad: " ", startingAt: 0)
             return "\(pid(record.pid)) \(pid(record.ppid)) \(column(String(record.uid))) \(tty) \(command(record))"
-        }
+        } ?? ""
     }
 
-    /// `ps -o pid=,stat=,comm= -t <tty>`: only the processes whose controlling terminal is `tty` (`ttys003`).
-    public static func pidStatComm(_ records: [KernelProcessRecord], tty: String) -> String {
-        rows(records.filter { $0.tty == tty }) { record in
+    /// `ps -o pid=,stat=,comm= -t <tty>`: only the processes whose controlling terminal is `tty` (`ttys003`);
+    /// nil once the text would pass `limit` bytes. Of `stat`, only the `+` flag is sure to match `ps`; the
+    /// state letter may differ (see `stat`).
+    public static func pidStatComm(_ records: [KernelProcessRecord], tty: String, limit: Int) -> String? {
+        rows(records.filter { $0.tty == tty }, limit: limit) { record in
             let stat = stat(record)
             return "\(pid(record.pid)) \(stat.padding(toLength: max(4, stat.count), withPad: " ", startingAt: 0)) \(command(record))"
         }
@@ -83,26 +84,20 @@ public enum ProcessListing {
 
     /// `ps -axo pid=,ppid=`.
     public static func pidPPID(_ records: [KernelProcessRecord]) -> String {
-        rows(records) { "\(pid($0.pid)) \(pid($0.ppid))" }
+        rows(records) { "\(pid($0.pid)) \(pid($0.ppid))" } ?? ""
     }
 
     /// `ps`'s `comm`: `argv[0]`, which a process may rewrite (`npm run dev`) and a login shell starts with
     /// `-`. `ps` reads other users' vectors, which Herdly cannot; for those, and for an empty first entry,
-    /// the executable's path, else the short name.
+    /// the kernel's short name (`ps` would show a path with the same basename, up to 16 bytes).
     public static func command(_ record: KernelProcessRecord) -> String {
-        guard let first = record.arguments?.first, !first.isEmpty else {
-            return visible(record.executablePath ?? record.shortName)
-        }
+        guard let first = record.arguments?.first, !first.isEmpty else { return visible(record.shortName) }
         return visible(first)
     }
 
-    /// `ps`'s `args`: the vector joined by spaces. Unreadable, it is the executable's path (where `ps`
-    /// would show the whole command line), else the short name in parentheses as `ps` prints it.
-    public static func args(_ record: KernelProcessRecord) -> String {
-        guard let arguments = record.arguments, !arguments.isEmpty else {
-            return record.executablePath.map(visible) ?? "(\(visible(record.shortName)))"
-        }
-        return visible(arguments.joined(separator: " "))
+    /// `ps`'s `args`: the vector joined by spaces.
+    static func args(_ record: KernelProcessRecord) -> String {
+        visible((record.arguments ?? []).joined(separator: " "))
     }
 
     /// `ps`'s `stat`: the state letter, then `s` for a session leader and `+` for the foreground group.
@@ -136,8 +131,17 @@ public enum ProcessListing {
         scalar.value < 0x20 || (0x7F..<0xA0).contains(scalar.value)
     }
 
-    private static func rows(_ records: [KernelProcessRecord], _ row: (KernelProcessRecord) -> String) -> String {
-        records.sorted { $0.pid < $1.pid }.map { row($0) + "\n" }.joined()
+    /// The rows in pid order; nil as soon as they pass `limit` bytes, before the rest are built.
+    private static func rows(_ records: [KernelProcessRecord], limit: Int = .max,
+                             _ row: (KernelProcessRecord) -> String) -> String? {
+        var text = "", bytes = 0
+        for record in records.sorted(by: { $0.pid < $1.pid }) {
+            let line = row(record) + "\n"
+            bytes += line.utf8.count
+            guard bytes <= limit else { return nil }
+            text += line
+        }
+        return text
     }
 
     private static func pid(_ value: Int32) -> String { column(String(value)) }

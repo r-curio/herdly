@@ -13,20 +13,28 @@ enum KernelProcessTable {
         return read(&mib)
     }
 
-    /// Every process except the kernel's own (pid 0, which `ps` does not list either). `arguments` reads
-    /// each one's argument vector, needed for `args` and `comm`.
-    static func records(arguments: Bool) -> [KernelProcessRecord]? {
-        kinfo().map { $0.filter { $0.kp_proc.p_pid > 0 }.map { record($0, arguments: arguments) } }
+    /// Whose argument vectors a read asks the kernel for (`KERN_PROCARGS2`, one call per process). The
+    /// kernel gives Herdly only its own user's, so asking for the rest only costs time.
+    enum Arguments {
+        case none
+        case all
+        case owner(uid_t)
     }
 
-    /// The processes whose controlling terminal is `/dev/<tty>`, with their argument vectors; nil when the
-    /// device or the table could not be read.
+    /// Every process except the kernel's own (pid 0, which `ps` does not list either), with the argument
+    /// vectors `arguments` names; nil when the table could not be read.
+    static func records(arguments: Arguments) -> [KernelProcessRecord]? {
+        kinfo().map { records($0, arguments: arguments) }
+    }
+
+    /// The processes whose controlling terminal is `/dev/<tty>`, with every argument vector the kernel
+    /// gives; nil when the device or the table could not be read.
     static func records(onTTY tty: String) -> [KernelProcessRecord]? {
         var info = stat()
         guard tty.allSatisfy({ $0.isLetter || $0.isNumber }), stat("/dev/" + tty, &info) == 0,
               info.st_mode & S_IFMT == S_IFCHR else { return nil }
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_TTY, Int32(bitPattern: UInt32(truncatingIfNeeded: info.st_rdev))]
-        return read(&mib).map { $0.filter { $0.kp_proc.p_pid > 0 }.map { record($0, arguments: true) } }
+        return read(&mib).map { records($0, arguments: .all) }
     }
 
     /// `pid`'s argument vector from the kernel (`KERN_PROCARGS2`), nil when it cannot be read.
@@ -39,14 +47,6 @@ enum KernelProcessTable {
         var buffer = [UInt8](repeating: 0, count: size)
         guard sysctl(&mib, u_int(mib.count), &buffer, &size, nil, 0) == 0 else { return nil }
         return KernelProcessArguments.parse(Array(buffer.prefix(size)))
-    }
-
-    /// `pid`'s executable path (`proc_pidpath`), which the kernel gives for other users' processes too.
-    static func executablePath(of pid: Int32) -> String? {
-        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        let path = text(buffer)
-        return path.isEmpty ? nil : path
     }
 
     /// The kernel's short command name (`p_comm`).
@@ -66,7 +66,18 @@ enum KernelProcessTable {
         return Array(processes.prefix(size / MemoryLayout<kinfo_proc>.stride))
     }
 
-    private static func record(_ process: kinfo_proc, arguments readArguments: Bool) -> KernelProcessRecord {
+    private static func records(_ table: [kinfo_proc], arguments: Arguments) -> [KernelProcessRecord] {
+        table.filter { $0.kp_proc.p_pid > 0 }.map { process in
+            let wanted = switch arguments {
+            case .none: false
+            case .all: true
+            case .owner(let uid): process.kp_eproc.e_ucred.cr_uid == uid
+            }
+            return record(process, readArguments: wanted)
+        }
+    }
+
+    private static func record(_ process: kinfo_proc, readArguments: Bool) -> KernelProcessRecord {
         let pid = process.kp_proc.p_pid, eproc = process.kp_eproc
         let controlled = process.kp_proc.p_flag & P_CONTROLT != 0
         let vector = readArguments ? arguments(of: pid) : nil
@@ -74,8 +85,7 @@ enum KernelProcessTable {
                                    tty: ttyName(eproc.e_tdev), state: state(process.kp_proc.p_stat),
                                    sessionLeader: Int32(eproc.e_flag) & EPROC_SLEADER != 0,
                                    foreground: controlled && eproc.e_pgid == eproc.e_tpgid,
-                                   shortName: shortName(process), arguments: vector,
-                                   executablePath: readArguments && vector == nil ? executablePath(of: pid) : nil)
+                                   shortName: shortName(process), arguments: vector)
     }
 
     private static func state(_ value: CChar) -> ProcessRunState {

@@ -192,7 +192,10 @@ host's inventory, the `ps -t` reads and the kernel read of Claude's registered p
   rows makes the whole read unreadable. Since #303 Herdly runs no `ps`: `KernelProcessTable` reads
   the tty's processes from the kernel and `ProcessListing` writes them in this exact shape, as it does
   for the other process listings (`pid=,args=`, `pid=,ppid=,uid=,tty=,comm=`, `pid=,ppid=`). Only
-  other users' processes differ: the kernel gives Herdly their executable path, not their arguments.
+  other users' processes differ, because the kernel gives Herdly none of their arguments: `comm`
+  is then the kernel's short name (same basename as the path `ps` showed), and the `pid=,args=`
+  listing leaves them out, so another user's `codex app-server` can never read as a Codex CLI.
+  Herdly never targets another user's processes.
 - **Codex:** `TerminalTabBindingRules.codex` checks, in order: the session is among the live
   sessions and its shortened identifier is unique among them; exactly one enabled tab shows that title; the
   tab has a tty and one pane; exactly one foreground `codex` runs on that tty; and a second

@@ -370,7 +370,7 @@ enum HerdrProcessTree {
             var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, current]
             guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { break }
             chain.append(HerdrProcessAncestor(pid: current, command: command(of: current, info: info),
-                                              tty: tty(info.kp_eproc.e_tdev)))
+                                              tty: KernelProcessTable.ttyName(info.kp_eproc.e_tdev)))
             let parent = info.kp_eproc.e_ppid
             guard parent != current else { break }
             current = parent
@@ -401,10 +401,5 @@ enum HerdrProcessTree {
         return withUnsafeBytes(of: &name) { raw in
             String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
         }
-    }
-
-    /// Cached device names (#301), shared with the kernel process table.
-    private static func tty(_ device: dev_t) -> String? {
-        KernelProcessTable.ttyName(device)
     }
 }

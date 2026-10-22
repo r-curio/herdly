@@ -48,8 +48,8 @@ enum TerminalTTYReads {
             guard let normalized = GhosttyTTYMatch.normalizedTTY(tty) else { continue }
             let name = String(normalized.dropFirst(5))
             guard let records = KernelProcessTable.records(onTTY: name) else { continue }
-            let output = ProcessListing.pidStatComm(records, tty: name)
-            guard output.utf8.count <= 64 * 1024, let parsed = TerminalForegroundProcesses.parse(output) else { continue }
+            guard let output = ProcessListing.pidStatComm(records, tty: name, limit: 64 * 1024),
+                  let parsed = TerminalForegroundProcesses.parse(output) else { continue }
             result[normalized] = parsed
         }
         return result
