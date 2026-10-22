@@ -46,8 +46,9 @@ enum TerminalScript: String, CaseIterable, Sendable {
 
     /// Runs the adapter in `resources` against process `pid` within `deadline` seconds (five; only tests
     /// under load pass more). The request carries the deadline, and every Apple Event the adapter sends
-    /// waits at most the time left (`AppleEvents.js`). Without a process the reply is the not-running
-    /// status, and no script runs.
+    /// waits at most the time left (`AppleEvents.js`): no event is sent after 5 s, and the caller waits at
+    /// most 5.5 s (`AppleEventScripts.grace`). Without a process the reply is the not-running status, and
+    /// no script runs.
     func run(_ request: [String: Any], pid: pid_t?, resources: URL?, deadline: TimeInterval = 5) -> Data? {
         guard let pid else { return Data(#"{"status":"\#(notRunningStatus)"}"#.utf8) }
         guard let resources else { return nil }
@@ -86,22 +87,27 @@ enum TerminalScript: String, CaseIterable, Sendable {
 ///
 /// A running script cannot be cancelled. Callers wait until the request's deadline plus `grace` and then
 /// give up with nil; a late script runs on, but its Apple Events never wait past the deadline the request
-/// carries, and a request still queued at its deadline never starts. Requests queue behind each other, so
-/// one slow app can make another app's read time out (unreadable, never partial).
+/// carries, no event is sent after it, and a request still queued at its deadline never starts. So the
+/// window for side effects is the one `osascript` had: terminating it never recalled an event already
+/// sent either. Requests queue behind each other, so one slow app can make another app's read time out
+/// (unreadable, never partial).
 final class AppleEventScripts: @unchecked Sendable {
+    /// The one runner the app uses; tests make their own so a slow test script delays nothing else.
     static let shared = AppleEventScripts()
 
     /// How long past the deadline a caller waits for the script to return its reply.
     static let grace: TimeInterval = 0.5
 
-    // Invariant for `@unchecked Sendable`: `jobs` is only touched while holding `condition`; `compiled` is
-    // only touched on `thread`.
+    // Invariant for `@unchecked Sendable`: `jobs` and `thread` are only read or written while holding
+    // `condition` (`thread` is set once, by the first `enqueue`). `compiled`, and every `OSAScript` in it,
+    // is only touched by jobs, which run one at a time on `thread`; no other thread ever reaches it.
     private let condition = NSCondition()
     private var jobs: [@Sendable () -> Void] = []
     private var compiled: [String: OSAScript] = [:]
     private var thread: Thread?
 
-    private init() {}
+    /// A runner with its own thread, started on its first request and kept for the process's life.
+    init() {}
 
     /// The string `run(argv)` returned for `argument` from the script `source` gives (compiled once per
     /// `key`); nil when it could not be compiled, threw, returned no string, or did not finish by `until`

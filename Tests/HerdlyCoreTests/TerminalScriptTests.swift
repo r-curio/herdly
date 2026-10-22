@@ -132,11 +132,14 @@ private func reply(_ text: String?) -> [String: Any]? {
 }
 
 @Suite(.serialized) struct InProcessScriptTests {
+    /// This suite's own runner: a script it keeps busy never delays another suite's requests.
+    let runner = AppleEventScripts()
+
     @Test func aScriptRunsInProcessWithItsArgumentAndIsCompiledOnce() throws {
         let key = "counting-\(UUID().uuidString)"
-        let first = try #require(reply(AppleEventScripts.shared.run(key: key, source: { counting }, argument: #"{"echo":"a"}"#,
+        let first = try #require(reply(runner.run(key: key, source: { counting }, argument: #"{"echo":"a"}"#,
                                                                     until: uptime() + 30)))
-        let second = try #require(reply(AppleEventScripts.shared.run(key: key, source: { nil }, argument: #"{"echo":"b"}"#,
+        let second = try #require(reply(runner.run(key: key, source: { nil }, argument: #"{"echo":"b"}"#,
                                                                      until: uptime() + 30)))
         #expect(first["echo"] as? String == "a")
         #expect(first["argc"] as? Int == 1)
@@ -151,7 +154,7 @@ private func reply(_ text: String?) -> [String: Any]? {
         let echoes = await withTaskGroup(of: String?.self) { group in
             for index in 0..<8 {
                 group.addTask {
-                    let text = AppleEventScripts.shared.run(key: key, source: { counting }, argument: #"{"echo":"\#(index)"}"#,
+                    let text = runner.run(key: key, source: { counting }, argument: #"{"echo":"\#(index)"}"#,
                                                             until: uptime() + 30)
                     return reply(text)?["echo"] as? String
                 }
@@ -166,14 +169,15 @@ private func reply(_ text: String?) -> [String: Any]? {
     @Test func aScriptThatOutlivesItsDeadlineIsAbandonedAndAQueuedRequestPastItsDeadlineNeverStarts() throws {
         let key = "late-\(UUID().uuidString)"
         let started = uptime()
-        // Sleeps four seconds against a one-second deadline: the caller gives up after the deadline and grace.
-        #expect(AppleEventScripts.shared.run(key: key, source: { counting }, argument: #"{"sleep":4}"#, until: started + 1) == nil)
+        // Sleeps 1.8 s against a 0.3 s deadline: the caller gives up after the deadline and grace (0.8 s),
+        // the one wall-clock bound in this suite.
+        #expect(runner.run(key: key, source: { counting }, argument: #"{"sleep":1.8}"#, until: started + 0.3) == nil)
         let waited = uptime() - started
-        #expect(waited >= 1 && waited < 1 + AppleEventScripts.grace + 1)
+        #expect(waited >= 0.3 + AppleEventScripts.grace && waited < 1.8)
         // Queued behind the sleeping script; its deadline passes before it could start.
-        #expect(AppleEventScripts.shared.run(key: key, source: { counting }, argument: #"{"echo":"skipped"}"#,
+        #expect(runner.run(key: key, source: { counting }, argument: #"{"echo":"skipped"}"#,
                                              until: uptime() + 0.2) == nil)
-        let next = try #require(reply(AppleEventScripts.shared.run(key: key, source: { counting }, argument: #"{"echo":"next"}"#,
+        let next = try #require(reply(runner.run(key: key, source: { counting }, argument: #"{"echo":"next"}"#,
                                                                    until: uptime() + 30)))
         #expect(next["echo"] as? String == "next")
         // The sleeping run and this one; the skipped request never ran.
@@ -182,11 +186,11 @@ private func reply(_ text: String?) -> [String: Any]? {
 
     @Test func aScriptThatThrowsOrDoesNotCompileIsNil() {
         let throwing = "function run(argv) { throw new Error('no'); }"
-        #expect(AppleEventScripts.shared.run(key: "throws-\(UUID().uuidString)", source: { throwing }, argument: "{}",
+        #expect(runner.run(key: "throws-\(UUID().uuidString)", source: { throwing }, argument: "{}",
                                              until: uptime() + 30) == nil)
-        #expect(AppleEventScripts.shared.run(key: "broken-\(UUID().uuidString)", source: { "function run(argv) {" },
+        #expect(runner.run(key: "broken-\(UUID().uuidString)", source: { "function run(argv) {" },
                                              argument: "{}", until: uptime() + 30) == nil)
-        #expect(AppleEventScripts.shared.run(key: "missing-\(UUID().uuidString)", source: { nil }, argument: "{}",
+        #expect(runner.run(key: "missing-\(UUID().uuidString)", source: { nil }, argument: "{}",
                                              until: uptime() + 30) == nil)
     }
 
@@ -207,7 +211,7 @@ private func reply(_ text: String?) -> [String: Any]? {
             var request: [String: Any] = ["pid": Int(absentPID)]
             if let deadline { request["deadline"] = deadline }
             let argument = String(decoding: try! JSONSerialization.data(withJSONObject: request), as: UTF8.self)
-            return AppleEventScripts.shared.run(key: key, source: { probe }, argument: argument, until: uptime() + 60)
+            return runner.run(key: key, source: { probe }, argument: argument, until: uptime() + 60)
         }
         // In time, the event reaches no process: gone.
         #expect(status(send(uptime() + 30).map { Data($0.utf8) }) == "gone")
