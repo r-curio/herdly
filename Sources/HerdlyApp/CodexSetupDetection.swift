@@ -53,7 +53,7 @@ enum CodexSetupDetection {
         case .selected(let url): desktopURL = url
         case .none, .ambiguous: desktopURL = nil
         }
-        let desktopVersion = desktopURL.flatMap { Bundle(url: $0)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
+        let desktopVersion = desktopURL.flatMap(shortVersion(ofApp:))
         let desktopInstalled = desktopURL != nil || !runningDesktop.isEmpty || !installedDesktop.isEmpty
         let desktop = desktopSelectionIsSupported(desktopSelection, version: desktopVersion)
 
@@ -77,7 +77,20 @@ enum CodexSetupDetection {
                                  unsupportedReason: reasons.joined(separator: " "), cliVersion: cliVersion,
                                  desktopVersion: desktopVersion, ghosttyVersion: ghosttyVersion,
                                  cliInstalled: cliInstalled, desktopInstalled: desktopInstalled,
-                                 ghosttyInstalled: ghosttyInstalled)
+                                 ghosttyInstalled: ghosttyInstalled,
+                                 // A Homebrew cask links its binary from the Caskroom; resolving every
+                                 // link shows whether that is where this CLI lives.
+                                 cliInstall: CodexCLIInstall.classify(resolvedPath: cliPath?.resolvingSymlinksInPath().path),
+                                 desktopPath: desktopURL?.path)
+    }
+
+    /// Read from Info.plist on every detection: `Bundle(url:)` caches its info per path, so it would
+    /// keep reporting the old version after Codex desktop updates itself in place.
+    private static func shortVersion(ofApp app: URL) -> String? {
+        let plist = app.appendingPathComponent("Contents/Info.plist")
+        guard let data = boundedRegularData(at: plist, maximum: 1024 * 1024),
+              let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return nil }
+        return info["CFBundleShortVersionString"] as? String
     }
 
     private static func desktopSelectionIsSupported(_ selection: DesktopSelection, version: String?) -> Bool {
