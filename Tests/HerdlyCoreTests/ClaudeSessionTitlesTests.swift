@@ -139,3 +139,39 @@ private func temporaryEventsDirectory() throws -> URL {
     #expect(ClaudeSessionTitles.load(sessionID: "fresh", in: events) == nil)
     #expect(ClaudeSessionTitles.isEnabled(eventsDirectory: events))
 }
+
+@Test func claudeSessionTitleReplacesAHerdlyTitleThatClearCarriedOver() throws {
+    let events = try temporaryEventsDirectory()
+    defer { try? FileManager.default.removeItem(at: events) }
+    let applied = ClaudeSessionTitles.Record(status: .applied, title: "ghostty-toggle-reverts", attempts: 1, updatedAt: 5)
+    #expect(ClaudeSessionTitles.save(applied, sessionID: "before-clear", in: events))
+    let carried = ClaudeSessionTitles.RegisteredName(name: "ghostty-toggle-reverts", source: "hook")
+
+    #expect(ClaudeSessionTitles.isCarriedOver(carried, sessionID: "after-clear", in: events))
+    // The session that earned the title, a user's name, and an unrelated hook name are not carry-overs.
+    #expect(!ClaudeSessionTitles.isCarriedOver(carried, sessionID: "before-clear", in: events))
+    #expect(!ClaudeSessionTitles.isCarriedOver(ClaudeSessionTitles.RegisteredName(name: "ghostty-toggle-reverts", source: "user"),
+                                               sessionID: "after-clear", in: events))
+    #expect(!ClaudeSessionTitles.isCarriedOver(ClaudeSessionTitles.RegisteredName(name: "probe", source: "hook"), sessionID: "after-clear", in: events))
+    #expect(!ClaudeSessionTitles.isCarriedOver(nil, sessionID: "after-clear", in: events))
+
+    let prompt = "fix the notch title after clear"
+    #expect(ClaudeSessionTitles.action(prompt: prompt, registered: carried, record: nil, now: 10, carriedOver: true)
+        == .generate(source: prompt))
+    let ready = ClaudeSessionTitles.Record(status: .ready, title: "notch-title-after-clear", attempts: 1, updatedAt: 12)
+    #expect(ClaudeSessionTitles.action(prompt: "keep going", registered: carried, record: ready, now: 20, carriedOver: true)
+        == .apply(title: "notch-title-after-clear"))
+    #expect(ClaudeSessionTitles.action(prompt: prompt, registered: nil, record: nil, now: 10, carriedOver: true) == .none)
+}
+
+@Test func claudeSessionTitleIgnoresUnreadableRecordsWhenCheckingCarryOver() throws {
+    let events = try temporaryEventsDirectory()
+    defer { try? FileManager.default.removeItem(at: events) }
+    let folder = ClaudeSessionTitles.directory(in: events)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data("{".utf8).write(to: folder.appendingPathComponent("torn.json"))
+    let pending = ClaudeSessionTitles.Record(status: .ready, title: "ghostty-toggle-reverts", attempts: 1, updatedAt: 5)
+    #expect(ClaudeSessionTitles.save(pending, sessionID: "other", in: events))
+    #expect(!ClaudeSessionTitles.isCarriedOver(ClaudeSessionTitles.RegisteredName(name: "ghostty-toggle-reverts", source: "hook"),
+                                               sessionID: "after-clear", in: events))
+}

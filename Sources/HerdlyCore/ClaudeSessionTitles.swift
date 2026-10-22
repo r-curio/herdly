@@ -1,12 +1,13 @@
 import Foundation
 
 /// Optional Haiku-written titles for Claude sessions that still carry Claude's derived placeholder
-/// name (`myproject-22`). The hook never delays a prompt for a title: the first eligible prompt
+/// name (`myproject-22`), or a title Herdly gave an earlier session that `/clear` carried over to
+/// this one (Claude keeps the process's name, `nameSource: "hook"`, across a clear). The hook never delays a prompt for a title: the first eligible prompt
 /// starts a detached generator, and a later prompt hands the finished title to Claude through
 /// `hookSpecificOutput.sessionTitle`, which Claude records in its session registry with
 /// `nameSource: "hook"`. A title is offered only while that registry entry still shows the derived
-/// name, so a `/rename`, `--name`, or Claude's own AI title always wins, and an unreadable registry
-/// offers nothing. Titles are presentation only; they never identify a session or a target.
+/// name or a carried-over Herdly title, so a `/rename`, `--name`, or Claude's own AI title always
+/// wins, and an unreadable registry offers nothing. Titles are presentation only; they never identify a session or a target.
 public enum ClaudeSessionTitles {
     public static let directoryName = "session-titles"
     public static let enabledMarkerName = "enabled"
@@ -21,6 +22,7 @@ public enum ClaudeSessionTitles {
     public static let recordAge: TimeInterval = 7 * 24 * 60 * 60
     static let maximumRecordSize = 4 * 1024
     public static let maximumRegistryEntrySize = 64 * 1024
+    static let maximumCarryOverRecords = 4_096
 
     public struct RegisteredName: Equatable, Sendable {
         public let name: String
@@ -119,10 +121,12 @@ public enum ClaudeSessionTitles {
     }
 
     /// What the hook does for one prompt. Nothing happens unless the registry shows Claude's
-    /// derived placeholder for this exact session. A finished title is applied once; a failed or
-    /// abandoned generation is retried on a later eligible prompt up to `maximumAttempts`.
-    public static func action(prompt: String?, registered: RegisteredName?, record: Record?, now: Double) -> Action {
-        guard registered?.isDerived == true else { return .none }
+    /// derived placeholder for this exact session, or `carriedOver` (see `isCarriedOver`). A
+    /// finished title is applied once; a failed or abandoned generation is retried on a later
+    /// eligible prompt up to `maximumAttempts`.
+    public static func action(prompt: String?, registered: RegisteredName?, record: Record?, now: Double,
+                              carriedOver: Bool = false) -> Action {
+        guard registered?.isDerived == true || (carriedOver && registered != nil) else { return .none }
         let generate: (Int) -> Action = { attempts in
             guard attempts < maximumAttempts, let source = titleSource(prompt) else { return .none }
             return .generate(source: source)
@@ -139,6 +143,24 @@ public enum ClaudeSessionTitles {
         case .failed:
             return generate(record.attempts)
         }
+    }
+
+    /// Whether the registry's name is a title Herdly applied to a different session, which a
+    /// `/clear` carried over to `sessionID`. Only a `hook` name that matches another session's
+    /// applied record counts, so a user's or Claude's own name never does, and once this session's
+    /// own title is applied it no longer matches. Reads at most `maximumCarryOverRecords` records.
+    public static func isCarriedOver(_ registered: RegisteredName?, sessionID: String, in eventsDirectory: URL) -> Bool {
+        guard let registered, registered.source == "hook",
+              let urls = try? FileManager.default.contentsOfDirectory(
+                  at: directory(in: eventsDirectory), includingPropertiesForKeys: nil) else { return false }
+        let own = sessionID + ".json"
+        for url in urls.prefix(maximumCarryOverRecords)
+        where url.pathExtension == "json" && url.lastPathComponent != own {
+            guard let data = SafeFile.read(url, limit: maximumRecordSize),
+                  let record = try? JSONDecoder().decode(Record.self, from: data) else { continue }
+            if record.status == .applied, record.title == registered.name { return true }
+        }
+        return false
     }
 
     // MARK: - Generation
