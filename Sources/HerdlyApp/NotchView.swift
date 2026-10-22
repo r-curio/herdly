@@ -162,8 +162,9 @@ struct Sprite: View {
         .accessibilityHidden(true)
     }
 
-    /// Two filled paths rather than a `Canvas`: SwiftUI draws a Canvas through Metal, and one
-    /// redrawn by the working TimelineView kept about 170 MB of GPU buffers resident (#343).
+    /// Two filled paths rather than a `Canvas`: SwiftUI draws a Canvas through Metal, which keeps
+    /// GPU buffer pools for the process even when still, and redrawn by the working TimelineView
+    /// held about 170 MB resident (#343).
     private func bitmap(_ rows: [String]) -> some View {
         // One tone when unlit: the highlight cells fill like the body and close into it.
         let tone = unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color)
