@@ -162,14 +162,23 @@ struct Sprite: View {
         .accessibilityHidden(true)
     }
 
+    /// Two filled paths rather than a `Canvas`: SwiftUI draws a Canvas through Metal, which keeps
+    /// GPU buffer pools for the process even when still, and redrawn by the working TimelineView
+    /// held about 170 MB resident (#343).
     private func bitmap(_ rows: [String]) -> some View {
-        Canvas { context, _ in
+        // One tone when unlit: the highlight cells fill like the body and close into it.
+        let tone = unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color)
+        return ZStack(alignment: .topLeading) {
+            cells(in: rows) { $0 != "." && $0 != "+" }.fill(tone.body)
+            cells(in: rows) { $0 == "+" }.fill(tone.light)
+        }
+    }
+
+    private func cells(in rows: [String], where matches: (Character) -> Bool) -> Path {
+        Path { path in
             for (y, row) in rows.enumerated() {
-                for (x, ch) in row.enumerated() where ch != "." {
-                    let rect = CGRect(x: CGFloat(x) * cellSize, y: CGFloat(y) * cellSize, width: cellSize, height: cellSize)
-                    // One tone when unlit: the highlight cells fill like the body and close into it.
-                    let tone = unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color)
-                    context.fill(Path(rect), with: .color(ch == "+" ? tone.light : tone.body))
+                for (x, ch) in row.enumerated() where matches(ch) {
+                    path.addRect(CGRect(x: CGFloat(x) * cellSize, y: CGFloat(y) * cellSize, width: cellSize, height: cellSize))
                 }
             }
         }
