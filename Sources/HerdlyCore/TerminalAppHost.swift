@@ -91,7 +91,7 @@ public struct TerminalAppSnapshot: Equatable, Sendable {
     }
 }
 
-/// How one `osascript` request to Terminal.app ended, from HerdlyApp's side.
+/// How one script request to Terminal.app ended, from HerdlyApp's side.
 public enum TerminalAppScriptResult: Equatable, Sendable {
     /// The script ran and printed this reply.
     case reply(Data)

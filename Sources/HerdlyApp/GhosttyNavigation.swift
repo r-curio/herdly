@@ -24,7 +24,7 @@ enum GhosttyNavigation {
 
     /// For the scheduled scans only: a snapshot whose read began no earlier than `notBefore` and at
     /// most `sharedAge` ago, with when its read began. The focus check and the shared tab read each
-    /// read Ghostty every two seconds, each through its own `osascript` (#306); callers that arrive
+    /// read Ghostty every two seconds, each through its own script request (#306); callers that arrive
     /// together wait for one read. `notBefore` is when the caller read the frontmost app (ADR 0016),
     /// so a snapshot never predates the frontmost reading it is combined with. Open, typed input and
     /// question keys call `snapshot()`, which always reads Ghostty.
