@@ -274,3 +274,109 @@ private func foldedCheck(fresh: Int, earlier: Int) -> QueueSections {
     #expect(sections.selectableItems(workingOpen: true).map(\.session.session) == ["approve-0", "check-0", "run-0", "run-1"])
     #expect(sections.selectableItems(workingOpen: true).map(\.id) == sections.selectableRows(workingOpen: true))
 }
+
+// MARK: Earlier fold (D34)
+
+/// `fresh` current results then `earlier` results that moved under Earlier, plus `approvals` live
+/// approvals and `running` working rows, each in its own session.
+private func earlierQueue(approvals: Int = 0, fresh: Int = 0, earlier: Int = 0, running: Int = 0) -> [AgentAttentionItem] {
+    var queue = AgentAttentionQueue()
+    for index in 0..<approvals {
+        queue.apply(.approval(AgentApproval(session: session("approve-\(index)"), turn: "t", call: "a", arrivedAt: 1_000)))
+    }
+    for index in 0..<earlier {
+        queue.apply(.outcome(AgentOutcome(session: session("old-\(index)"), turn: "t", status: .finished, arrivedAt: Double(index))))
+    }
+    for index in 0..<fresh {
+        queue.apply(.outcome(AgentOutcome(session: session("new-\(index)"), turn: "t", status: .finished, arrivedAt: 990 + Double(index))))
+    }
+    for index in 0..<running {
+        queue.apply(.running(AgentRunning(session: session("run-\(index)"), turn: "t", arrivedAt: 995 + Double(index))))
+    }
+    return queue.items(at: 1_001)
+}
+
+private func earlierSections(_ items: [AgentAttentionItem], opened: Bool, grouping: QueueGrouping = .none) -> QueueSections {
+    QueueSections.make(items, grouping: grouping, project: { _ in nil }, kindSections: true, earlierOpened: opened)
+}
+
+@Test func earlierFoldsWhileAnotherRowNeedsTheUser() {
+    // A recent result needs checking: Earlier opens folded (A3).
+    let sections = earlierSections(earlierQueue(fresh: 1, earlier: 3), opened: false)
+    #expect(sections.earlierFolded)
+    let check = sections.attention[0]
+    #expect(check.earlierFolded)
+    // The folded rows stay in the group, so the heading keeps its place, but none is shown.
+    #expect(check.shownItems.map(\.kind) == [.outcome])
+    #expect(check.folded == 0)
+    // An approval counts too, even with no recent result.
+    #expect(earlierSections(earlierQueue(approvals: 1, earlier: 2), opened: false).earlierFolded)
+}
+
+@Test func earlierShowsOpenWhenNothingElseNeedsTheUser() {
+    // A5: Earlier results alone, or beside working rows, show open.
+    #expect(!earlierSections(earlierQueue(earlier: 3), opened: false).earlierFolded)
+    let withWork = earlierSections(earlierQueue(earlier: 3, running: 2), opened: false)
+    #expect(!withWork.earlierFolded)
+    #expect(withWork.attention[0].shownItems.count == 3)
+    // No Earlier rows: nothing to fold.
+    #expect(!earlierSections(earlierQueue(fresh: 2), opened: false).earlierFolded)
+}
+
+@Test func anEarlierFoldTheUserOpenedStaysOpen() {
+    // A4: once opened it shows its rows whatever else needs the user.
+    let opened = earlierSections(earlierQueue(approvals: 1, fresh: 1, earlier: 3), opened: true)
+    #expect(!opened.earlierFolded)
+    #expect(opened.attention[1].shownItems.map(\.kind) == [.outcome, .earlierOutcome, .earlierOutcome, .earlierOutcome])
+}
+
+@Test func theArrowsSkipTheRowsOfAFoldedEarlier() {
+    let items = earlierQueue(fresh: 1, earlier: 3, running: 1)
+    let folded = earlierSections(items, opened: false)
+    let earlier = items.filter { $0.kind == .earlierOutcome }.map(\.id)
+    let fresh = items.first { $0.kind == .outcome }!.id
+    // The folded heading is one stop, held by its first Earlier result; the rows behind it are not.
+    let rows = folded.selectableRows(workingOpen: false)
+    #expect(rows == [fresh, earlier[0]])
+    #expect(folded.earlierHeadingStops == [earlier[0]])
+    #expect(folded.selectableItems(workingOpen: false).map(\.id) == [fresh])
+    var selection = QueueRowSelection(selected: earlier[1])
+    selection.reconcile(rows: rows)
+    #expect(selection.selected == nil)
+    // Opened, every Earlier row is a stop and the heading is not.
+    let opened = earlierSections(items, opened: true)
+    #expect(opened.selectableRows(workingOpen: false) == [fresh] + earlier)
+    #expect(opened.earlierHeadingStops.isEmpty)
+}
+
+@Test func dismissAllCountsTheFoldedEarlierRows() {
+    let items = earlierQueue(fresh: 1, earlier: 4)
+    let check = earlierSections(items, opened: false).attention[0]
+    #expect(check.earlierFolded)
+    #expect(check.earlierIDs == items.filter { $0.kind == .earlierOutcome }.map(\.id))
+    #expect(!check.earlierIDs.contains(items.first { $0.kind == .outcome }!.id))
+}
+
+@Test func aFoldedEarlierLeavesTheMoreRowsBudgetToTheRowsOnScreen() {
+    // 4 approvals and 9 recent results fold Check behind "+N more"; folded Earlier rows take no
+    // budget and are not behind the pill, which counts only the hidden recent results.
+    let items = earlierQueue(approvals: 4, fresh: 9, earlier: 5)
+    let check = earlierSections(items, opened: false).attention[1]
+    #expect(check.earlierFolded)
+    let shownFresh = check.shownItems.filter { $0.kind == .outcome }.count
+    #expect(check.folded == 9 - shownFresh)
+    #expect(check.items.filter { $0.kind == .earlierOutcome }.count == 5)
+    #expect(check.count == 14)
+}
+
+@Test func everyGroupingFoldsEarlier() {
+    let items = earlierQueue(fresh: 1, earlier: 2)
+    let byState = earlierSections(items, opened: false, grouping: .state)
+    #expect(byState.earlierFolded)
+    #expect(byState.attention.allSatisfy { $0.earlierIDs.isEmpty || $0.earlierFolded })
+    #expect(byState.selectableItems(workingOpen: false).allSatisfy { $0.kind != .earlierOutcome })
+    // A card is never folded.
+    let card = QueueSections.make(items.filter { $0.kind == .earlierOutcome }.prefix(1).map { $0 },
+                                  grouping: .none, project: { _ in nil })
+    #expect(!card.earlierFolded)
+}
