@@ -45,7 +45,7 @@ enum KernelProcessTable {
     static func executablePath(of pid: Int32) -> String? {
         var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
         guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        let path = String(cString: buffer)
+        let path = text(buffer)
         return path.isEmpty ? nil : path
     }
 
@@ -96,10 +96,14 @@ enum KernelProcessTable {
         // `devname_r`: reads run from several tasks at once, and `devname` shares one buffer.
         var buffer = [CChar](repeating: 0, count: 64)
         guard devname_r(device, S_IFCHR, &buffer, Int32(buffer.count)) != nil else { return nil }
-        let value = String(cString: buffer)
+        let value = text(buffer)
         guard !value.isEmpty, value != "??" else { return nil }
         ttyNames.store(value, for: device)
         return value
+    }
+
+    private static func text(_ buffer: [CChar]) -> String {
+        String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
     private static let ttyNames = TTYNames()
