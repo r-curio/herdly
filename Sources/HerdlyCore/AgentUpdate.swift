@@ -138,6 +138,8 @@ public enum AgentUpdateRunResult: Equatable, Sendable {
     case timedOut
     /// The executable could not be started, such as when it is missing.
     case couldNotStart
+    /// It started, but Herdly lost track of it (waiting for it failed), so how it ended is unknown.
+    case untracked
 }
 
 public enum AgentUpdateRequirements {
@@ -157,6 +159,7 @@ public enum AgentUpdateFailure {
         switch result {
         case .timedOut: return "took too long"
         case .couldNotStart: return "\(command.toolName) not found"
+        case .untracked: return "couldn't track the update"
         case .finished(0, _, _): return nil
         case let .finished(status, output, errors):
             guard let line = meaningfulLine(errors) ?? meaningfulLine(output) else {
@@ -269,19 +272,13 @@ public struct AgentUpdates: Equatable, Sendable {
     @discardableResult
     public mutating func finish(_ target: AgentUpdateTarget, command: AgentUpdateCommand, result: AgentUpdateRunResult,
                                 detection: AgentUpdateDetection, now: Double) -> String? {
-        finish(target, command: command, result: result, version: detection.version,
-               meetsMinimum: detection.meetsMinimum, now: now)
-    }
-
-    @discardableResult
-    public mutating func finish(_ target: AgentUpdateTarget, command: AgentUpdateCommand, result: AgentUpdateRunResult,
-                                version: String?, meetsMinimum: Bool, now: Double) -> String? {
         guard state(target) == .updating else { return nil }
         if let reason = AgentUpdateFailure.reason(result, command: command) {
             states[target] = .failed(reason)
             return nil
         }
-        guard meetsMinimum, let version else {
+        let version = detection.version
+        guard detection.meetsMinimum, let version else {
             states[target] = .failed(version.map { "still \($0) afterwards" } ?? "couldn't read the new version")
             return nil
         }

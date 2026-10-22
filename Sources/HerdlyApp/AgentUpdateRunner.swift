@@ -12,6 +12,20 @@ enum AgentUpdateRunner {
     /// How long a timed-out group gets to exit after SIGTERM before SIGKILL.
     static let terminationGrace: TimeInterval = 2
 
+    // `nonisolated(unsafe)`: read and written only while holding `readerLock`.
+    nonisolated(unsafe) private static var readerCount = 0
+    private static let readerLock = NSLock()
+
+    /// Pipe readers still running, for tests: zero once every run has returned.
+    static var liveReaders: Int {
+        readerLock.lock()
+        defer { readerLock.unlock() }
+        return readerCount
+    }
+
+    fileprivate static func readerStarted() { readerLock.lock(); readerCount += 1; readerLock.unlock() }
+    fileprivate static func readerEnded() { readerLock.lock(); readerCount -= 1; readerLock.unlock() }
+
     static func run(_ command: AgentUpdateCommand, limit: TimeInterval = AgentUpdateRequirements.timeLimit)
         -> AgentUpdateRunResult {
         guard FileManager.default.isExecutableFile(atPath: command.executable) else { return .couldNotStart }
@@ -32,18 +46,37 @@ enum AgentUpdateRunner {
         let outputTail = PipeTail(outputPipe[0])
         let errorTail = PipeTail(errorPipe[0])
 
-        guard let status = waitForExit(pid, until: Date().addingTimeInterval(limit)) else {
-            // The command leads its group (pgid == pid): stop it and anything it started.
-            killpg(pid, SIGTERM)
-            if waitForExit(pid, until: Date().addingTimeInterval(terminationGrace)) == nil {
-                killpg(pid, SIGKILL)
-                _ = waitForExit(pid, until: .distantFuture)
-            }
-            killpg(pid, SIGKILL)  // Members that outlived the leader's own exit.
-            return .timedOut
+        // Every exit path stops both readers, so no thread or descriptor outlives the run, even when a
+        // descendant that left the group (setsid, a daemon) still holds the pipes open.
+        defer {
+            outputTail.stop()
+            errorTail.stop()
         }
-        // A process it left running may hold the pipes open; read what arrived, bounded.
-        return .finished(status: status, output: outputTail.collect(waiting: 2), errors: errorTail.collect(waiting: 2))
+        switch waitForExit(pid, until: Date().addingTimeInterval(limit), reap: true) {
+        case .exited(let status):
+            // A process it left running may hold the pipes open; read what arrived, bounded.
+            return .finished(status: status, output: outputTail.collect(waiting: 2), errors: errorTail.collect(waiting: 2))
+        case .lost:
+            return .untracked
+        case .running:
+            break
+        }
+        // The command leads its group (pgid == pid). The leader is not reaped until the group has had
+        // its SIGKILL, so while these signals are sent its pid, and with it the pgid, cannot be reused
+        // by an unrelated group.
+        killpg(pid, SIGTERM)
+        _ = waitForExit(pid, until: Date().addingTimeInterval(terminationGrace), reap: false)
+        killpg(pid, SIGKILL)
+        _ = waitForExit(pid, until: .distantFuture, reap: true)
+        return .timedOut
+    }
+
+    private enum Wait: Equatable {
+        /// Exit status; death by signal reads as 128 + signal.
+        case exited(Int32)
+        case running
+        /// Waiting failed (such as ECHILD), so how it ended cannot be known.
+        case lost
     }
 
     /// Starts the command as the leader of a new process group, with /dev/null as stdin, the two
@@ -72,17 +105,25 @@ enum AgentUpdateRunner {
         return pid
     }
 
-    /// The exit status once `pid` ends, or nil at `deadline`. Death by signal reads as 128 + signal.
-    private static func waitForExit(_ pid: pid_t, until deadline: Date) -> Int32? {
-        var status: Int32 = 0
+    /// Polls until `pid` exits or `deadline` passes. With `reap` false the exited leader stays a
+    /// zombie (`WNOWAIT`), keeping its pid and process group reserved for a later `killpg`.
+    private static func waitForExit(_ pid: pid_t, until deadline: Date, reap: Bool) -> Wait {
         while true {
-            let result = waitpid(pid, &status, WNOHANG)
-            if result == pid {
-                let signal = status & 0x7f
-                return signal == 0 ? (status >> 8) & 0xff : 128 + signal
+            if reap {
+                var status: Int32 = 0
+                let result = waitpid(pid, &status, WNOHANG)
+                if result == pid {
+                    let signal = status & 0x7f
+                    return .exited(signal == 0 ? (status >> 8) & 0xff : 128 + signal)
+                }
+                if result == -1 && errno != EINTR { return .lost }
+            } else {
+                var info = siginfo_t()
+                let result = waitid(P_PID, id_t(pid), &info, WEXITED | WNOHANG | WNOWAIT)
+                if result == 0 && info.si_pid == pid { return .exited(info.si_status) }
+                if result == -1 && errno != EINTR { return .lost }
             }
-            if result == -1 && errno != EINTR { return -1 }
-            if Date() >= deadline { return nil }
+            if Date() >= deadline { return .running }
             usleep(20_000)
         }
     }
@@ -104,28 +145,50 @@ enum AgentUpdateRunner {
     }
 }
 
-/// Reads one pipe to EOF on a background thread, keeping only its last bytes. Owns the descriptor.
+/// Reads one pipe to EOF on a background thread, keeping only its last bytes. Owns the descriptor
+/// and closes it when the reader ends: at EOF, on a read error, or within a poll interval of `stop()`.
 private final class PipeTail: @unchecked Sendable {
-    // `@unchecked Sendable`: `data`, the only mutable state, is read and written only under `lock`.
+    // `@unchecked Sendable`: `data` and `stopped`, the only mutable state, are used only under `lock`.
     private let lock = NSLock()
     private var data = Data()
-    private let done = DispatchSemaphore(value: 0)
+    private var stopped = false
+    /// Left once the reader has closed its descriptor; waiting on a group never consumes that.
+    private let done = DispatchGroup()
 
     init(_ descriptor: Int32) {
-        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        AgentUpdateRunner.readerStarted()
+        done.enter()
         Thread.detachNewThread { [self] in
-            // `read(upToCount:)` throws on a read error, where `availableData` would raise.
-            while let chunk = try? handle.read(upToCount: 16 * 1024), !chunk.isEmpty {
+            var buffer = [UInt8](repeating: 0, count: 16 * 1024)
+            var poller = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            // Plain read(2) after poll: a read error ends the loop instead of raising, as
+            // `FileHandle.availableData` would, and the 100 ms poll lets `stop()` end a reader whose
+            // pipe a surviving descendant still holds open.
+            while !isStopped {
+                poller.revents = 0
+                let ready = poll(&poller, 1, 100)
+                if ready == 0 || (ready < 0 && errno == EINTR) { continue }
+                if ready < 0 { break }
+                let count = buffer.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
+                if count < 0 && errno == EINTR { continue }
+                if count <= 0 { break }
                 lock.lock()
-                data.append(chunk)
+                data.append(contentsOf: buffer[0..<count])
                 if data.count > AgentUpdateRequirements.maximumOutput {
                     data = data.suffix(AgentUpdateRequirements.maximumOutput)
                 }
                 lock.unlock()
             }
-            try? handle.close()
-            done.signal()
+            close(descriptor)
+            AgentUpdateRunner.readerEnded()
+            done.leave()
         }
+    }
+
+    private var isStopped: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopped
     }
 
     func collect(waiting seconds: TimeInterval) -> Data {
@@ -133,5 +196,13 @@ private final class PipeTail: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return Data(data)
+    }
+
+    /// Ends the reader and waits for it to close its descriptor.
+    func stop() {
+        lock.lock()
+        stopped = true
+        lock.unlock()
+        done.wait()
     }
 }

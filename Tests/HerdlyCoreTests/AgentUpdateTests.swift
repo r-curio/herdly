@@ -89,7 +89,7 @@ private func finished(_ status: Int32, out: String = "", err: String = "") -> Ag
     #expect(updates.summary(summary, for: .claude) == summary)
     let started = updates.begin(.claudeCode)
     #expect(started)
-    updates.finish(.claudeCode, command: claudeCommand, result: finished(0), version: "2.1.308", meetsMinimum: true, now: 1)
+    updates.finish(.claudeCode, command: claudeCommand, result: finished(0), detection: AgentUpdateDetection(version: "2.1.308", meetsMinimum: true), now: 1)
     #expect(updates.summary(summary, for: .claude)
             == AgentSummary(subtitle: summary.subtitle, status: .attention("Restart required"), problems: summary.problems))
     #expect(updates.summary(summary, for: .codex) == summary)
@@ -156,7 +156,7 @@ private func finished(_ status: Int32, out: String = "", err: String = "") -> Ag
 @Test func failedRowIsRedWithTryAgain() {
     var updates = AgentUpdates()
     _ = updates.begin(.claudeCode)
-    updates.finish(.claudeCode, command: claudeCommand, result: .timedOut, version: "2.1.240", meetsMinimum: false, now: 10)
+    updates.finish(.claudeCode, command: claudeCommand, result: .timedOut, detection: AgentUpdateDetection(version: "2.1.240", meetsMinimum: false), now: 10)
     let row = updates.row(.claudeCode, value: "Update to 2.1.273 or later", action: .update(claudeCommand))
     #expect(row == AgentUpdateRow(tone: .failure, text: "Couldn't update: took too long",
                                   button: .init(title: "Try Again", accessibilityLabel: "Update Claude Code again", enabled: true)))
@@ -180,7 +180,7 @@ private func finished(_ status: Int32, out: String = "", err: String = "") -> Ag
     let result5 = updates.begin(.codexCLI)
     #expect(result5)
     updates.finish(.codexCLI, command: brewCommand, result: finished(1, err: "Error: Another `brew update` process is already running."),
-                   version: "0.140.2", meetsMinimum: false, now: 5)
+                   detection: AgentUpdateDetection(version: "0.140.2", meetsMinimum: false), now: 5)
     #expect(updates.state(.claudeCode) == .updating)
     #expect(updates.state(.codexCLI) == .failed("Another `brew update` process is already running."))
     let result6 = updates.begin(.codexCLI)
@@ -191,7 +191,7 @@ private func finished(_ status: Int32, out: String = "", err: String = "") -> Ag
     var updates = AgentUpdates()
     _ = updates.begin(.claudeCode)
     let message = updates.finish(.claudeCode, command: claudeCommand, result: finished(0, out: "Successfully updated"),
-                                 version: "2.1.308", meetsMinimum: true, now: 100)
+                                 detection: AgentUpdateDetection(version: "2.1.308", meetsMinimum: true), now: 100)
     #expect(updates.state(.claudeCode) == .idle)
     #expect(message == "Updated Claude Code to 2.1.308. Sessions already open keep the old version until you restart them.")
     #expect(updates.restartRequired(.claude))
@@ -203,28 +203,26 @@ private func finished(_ status: Int32, out: String = "", err: String = "") -> Ag
 @Test func aZeroExitThatLeavesTheVersionOutdatedIsNotASuccess() {
     var updates = AgentUpdates()
     _ = updates.begin(.claudeCode)
-    let message = updates.finish(.claudeCode, command: claudeCommand, result: finished(0), version: "2.1.240",
-                                 meetsMinimum: false, now: 100)
+    let message = updates.finish(.claudeCode, command: claudeCommand, result: finished(0), detection: AgentUpdateDetection(version: "2.1.240", meetsMinimum: false), now: 100)
     #expect(message == nil)
     #expect(updates.state(.claudeCode) == .failed("still 2.1.240 afterwards"))
     #expect(!updates.restartRequired(.claude))
     _ = updates.begin(.claudeCode)
-    updates.finish(.claudeCode, command: claudeCommand, result: finished(0), version: nil, meetsMinimum: false, now: 100)
+    updates.finish(.claudeCode, command: claudeCommand, result: finished(0), detection: AgentUpdateDetection(version: nil, meetsMinimum: false), now: 100)
     #expect(updates.state(.claudeCode) == .failed("couldn't read the new version"))
 }
 
 @Test func aFailureLeavesTheHeaderStatusUnchanged() {
     var updates = AgentUpdates()
     _ = updates.begin(.codexCLI)
-    updates.finish(.codexCLI, command: brewCommand, result: .couldNotStart, version: "0.140.2", meetsMinimum: false, now: 1)
+    updates.finish(.codexCLI, command: brewCommand, result: .couldNotStart, detection: AgentUpdateDetection(version: "0.140.2", meetsMinimum: false), now: 1)
     #expect(updates.state(.codexCLI) == .failed("brew not found"))
     #expect(updates.header(.attention("Not ready"), for: .codex) == .attention("Not ready"))
 }
 
 @Test func aLateResultForARowNotUpdatingIsIgnored() {
     var updates = AgentUpdates()
-    let message = updates.finish(.claudeCode, command: claudeCommand, result: finished(0), version: "2.1.308",
-                                 meetsMinimum: true, now: 1)
+    let message = updates.finish(.claudeCode, command: claudeCommand, result: finished(0), detection: AgentUpdateDetection(version: "2.1.308", meetsMinimum: true), now: 1)
     #expect(message == nil)
     #expect(updates.state(.claudeCode) == .idle)
     #expect(!updates.restartRequired(.claude))
@@ -252,7 +250,7 @@ private func finished(_ status: Int32, out: String = "", err: String = "") -> Ag
 @Test func bothCodexSurfacesUpdatedShareOneFootnote() {
     var updates = AgentUpdates()
     _ = updates.begin(.codexCLI)
-    updates.finish(.codexCLI, command: brewCommand, result: finished(0), version: "0.146.1", meetsMinimum: true, now: 1)
+    updates.finish(.codexCLI, command: brewCommand, result: finished(0), detection: AgentUpdateDetection(version: "0.146.1", meetsMinimum: true), now: 1)
     updates.openedApp(.codexDesktop)
     let message = updates.detected(.codexDesktop, version: "26.1016.51333", meetsMinimum: true, now: 2)
     #expect(message == "Updated Codex CLI to 0.146.1 and Codex desktop to 26.1016.51333. Sessions already open keep the old version until you restart them.")
@@ -263,9 +261,9 @@ private func finished(_ status: Int32, out: String = "", err: String = "") -> Ag
 @Test func restartRequiredClearsOnlyOnTheMatchingAgentsNextSessionStart() {
     var updates = AgentUpdates()
     _ = updates.begin(.claudeCode)
-    updates.finish(.claudeCode, command: claudeCommand, result: finished(0), version: "2.1.308", meetsMinimum: true, now: 100)
+    updates.finish(.claudeCode, command: claudeCommand, result: finished(0), detection: AgentUpdateDetection(version: "2.1.308", meetsMinimum: true), now: 100)
     _ = updates.begin(.codexCLI)
-    updates.finish(.codexCLI, command: brewCommand, result: finished(0), version: "0.146.1", meetsMinimum: true, now: 200)
+    updates.finish(.codexCLI, command: brewCommand, result: finished(0), detection: AgentUpdateDetection(version: "0.146.1", meetsMinimum: true), now: 200)
 
     updates.sessionStarted(.codex, at: 150)       // before the Codex update: an old session
     #expect(updates.restartRequired(.codex))
@@ -283,7 +281,7 @@ private func finished(_ status: Int32, out: String = "", err: String = "") -> Ag
 @Test func restartRequiredNeverReplacesChecking() {
     var updates = AgentUpdates()
     _ = updates.begin(.claudeCode)
-    updates.finish(.claudeCode, command: claudeCommand, result: finished(0), version: "2.1.308", meetsMinimum: true, now: 1)
+    updates.finish(.claudeCode, command: claudeCommand, result: finished(0), detection: AgentUpdateDetection(version: "2.1.308", meetsMinimum: true), now: 1)
     #expect(updates.header(.checking, for: .claude) == .checking)
 }
 
@@ -315,6 +313,7 @@ private func finished(_ status: Int32, out: String = "", err: String = "") -> Ag
 
 @Test func timeoutAndMissingToolHaveFixedReasons() {
     #expect(AgentUpdateFailure.reason(.timedOut, command: claudeCommand) == "took too long")
+    #expect(AgentUpdateFailure.reason(.untracked, command: claudeCommand) == "couldn't track the update")
     #expect(AgentUpdateFailure.reason(.couldNotStart, command: claudeCommand) == "claude not found")
     #expect(AgentUpdateFailure.reason(finished(0, err: "warning"), command: claudeCommand) == nil)
 }
