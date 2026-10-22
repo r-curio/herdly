@@ -9,10 +9,8 @@ enum ClaudeStatusLineCompatibility {
     static let maximumProcessListBytes = 64 * 1024
     static let maximumProcessListRecords = 4096
 
-    /// `timeout` bounds the command and `processListTimeout` the descendant listing; running out of
-    /// either fails closed.
-    static func probe(command: String, timeout: TimeInterval = 0.75,
-                      processListTimeout: TimeInterval = 0.25) -> Bool {
+    /// `timeout` bounds the command; running out of it, or an unreadable process table, fails closed.
+    static func probe(command: String, timeout: TimeInterval = 0.75) -> Bool {
         let input = Data("{\"session_id\":\"probe\",\"rate_limits\":null}\n\u{1b}[32mprobe\u{1b}[0m\n".utf8)
         let process = Process()
         let stdin = Pipe()
@@ -42,7 +40,7 @@ enum ClaudeStatusLineCompatibility {
             _ = terminateProcessGroup(process.processIdentifier)
             return false
         }
-        guard let remaining = descendants(of: process.processIdentifier, timeout: processListTimeout) else { return false }
+        guard let remaining = descendants(of: process.processIdentifier) else { return false }
         guard remaining.isEmpty else {
             _ = terminateProcesses(remaining)
             return false
@@ -145,76 +143,11 @@ enum ClaudeStatusLineCompatibility {
         kill(-processGroup, 0) == 0 || errno == EPERM
     }
 
-    private static func descendants(of root: pid_t, timeout: TimeInterval = 0.25) -> [pid_t]? {
-        let process = Process()
-        let output = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-axo", "pid=,ppid="]
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return nil }
-        output.fileHandleForWriting.closeFile()
-        guard wait(for: process, until: Date().addingTimeInterval(timeout)) else {
-            terminateAndReapProcess(process)
-            return nil
-        }
-        guard let data = boundedOutput(from: output, limit: maximumProcessListBytes) else { return nil }
-        return parseProcessList(data, root: root)
-    }
-
-    private static func terminateAndReapProcess(_ process: Process) {
-        process.terminate()
-        guard !wait(for: process, until: Date().addingTimeInterval(0.05)) else { return }
-        _ = kill(process.processIdentifier, SIGKILL)
-        _ = wait(for: process, until: Date().addingTimeInterval(0.1))
-    }
-
-    private static func boundedOutput(from output: Pipe, limit: Int) -> Data? {
-        let descriptor = output.fileHandleForReading.fileDescriptor
-        let flags = fcntl(descriptor, F_GETFL)
-        guard flags >= 0, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0 else { return nil }
-        var data = Data()
-        let deadline = Date().addingTimeInterval(0.1)
-        while Date() < deadline {
-            switch readAvailable(descriptor, into: &data, limit: limit) {
-            case .end:
-                return data
-            case .overLimit, .failed:
-                return nil
-            case .wouldBlock:
-                var descriptorState = pollfd(fd: descriptor,
-                                             events: Int16(POLLIN | POLLHUP), revents: 0)
-                let remaining = max(1, Int32(min(0.01, deadline.timeIntervalSinceNow) * 1_000))
-                if poll(&descriptorState, 1, remaining) < 0 && errno != EINTR { return nil }
-            }
-        }
-        return nil
-    }
-
-    private enum ReadResult {
-        case end
-        case wouldBlock
-        case overLimit
-        case failed
-    }
-
-    private static func readAvailable(_ descriptor: Int32, into data: inout Data,
-                                      limit: Int) -> ReadResult {
-        var buffer = [UInt8](repeating: 0, count: min(4096, limit + 1))
-        while true {
-            let count = buffer.withUnsafeMutableBytes { bytes in
-                read(descriptor, bytes.baseAddress, bytes.count)
-            }
-            if count > 0 {
-                data.append(contentsOf: buffer.prefix(Int(count)))
-                if data.count > limit { return .overLimit }
-                continue
-            }
-            if count == 0 { return .end }
-            if errno == EAGAIN || errno == EWOULDBLOCK { return .wouldBlock }
-            if errno == EINTR { continue }
-            return .failed
-        }
+    /// The processes below `root`, from the kernel's table (#303) in `ps -axo pid=,ppid=` form; nil when
+    /// the table is unreadable or too large.
+    private static func descendants(of root: pid_t) -> [pid_t]? {
+        guard let records = KernelProcessTable.records(arguments: false) else { return nil }
+        return parseProcessList(Data(ProcessListing.pidPPID(records).utf8), root: root)
     }
 
     static func parseProcessList(_ data: Data, root: pid_t) -> [pid_t]? {

@@ -194,16 +194,9 @@ enum GhosttySurfaces {
     /// Each surface TTY as `/dev/ttysNNN`, one entry per child holding a terminal; nil when Ghostty is
     /// not running or the process table could not be read.
     static func ttys() -> [String]? {
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-        var size = 0
-        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return nil }
-        // Room for processes started between the two calls.
-        size += 64 * MemoryLayout<kinfo_proc>.stride
-        var processes = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
-        guard sysctl(&mib, u_int(mib.count), &processes, &size, nil, 0) == 0 else { return nil }
-        let table = processes.prefix(size / MemoryLayout<kinfo_proc>.stride)
+        guard let table = KernelProcessTable.kinfo(), !table.isEmpty else { return nil }
         // The short process name narrows the path lookups; the bundle identifier decides.
-        let parents = Set(table.filter { commandName($0) == "ghostty" }.map(\.kp_proc.p_pid).filter(isGhostty))
+        let parents = Set(table.filter { KernelProcessTable.shortName($0) == "ghostty" }.map(\.kp_proc.p_pid).filter(isGhostty))
         guard !parents.isEmpty else { return nil }
         var result: [String] = []
         for process in table where parents.contains(process.kp_eproc.e_ppid) {
@@ -215,12 +208,6 @@ enum GhosttySurfaces {
             result.append("/dev/" + String(cString: buffer))
         }
         return result
-    }
-
-    private static func commandName(_ process: kinfo_proc) -> String {
-        withUnsafeBytes(of: process.kp_proc.p_comm) { raw in
-            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
-        }
     }
 
     /// Whether `pid` runs the executable of an app bundle whose identifier is Ghostty's.

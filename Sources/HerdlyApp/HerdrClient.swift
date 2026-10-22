@@ -403,34 +403,8 @@ enum HerdrProcessTree {
         }
     }
 
-    /// `devname` searches `/dev` and dominated scan CPU once every scan walked several process
-    /// chains (#301). A character device number names the same tty for as long as the system runs,
-    /// so found names are kept; a miss is looked up again next time.
+    /// Cached device names (#301), shared with the kernel process table.
     private static func tty(_ device: dev_t) -> String? {
-        guard device != ~dev_t(0) else { return nil }
-        if let known = ttyNames.name(device) { return known }
-        guard let name = devname(device, S_IFCHR) else { return nil }
-        let value = String(cString: name)
-        guard !value.isEmpty, value != "??" else { return nil }
-        ttyNames.store(value, for: device)
-        return value
-    }
-
-    private static let ttyNames = TTYNames()
-
-    private final class TTYNames: @unchecked Sendable {
-        // Invariant for `@unchecked Sendable`: `names` is only touched while holding `lock`.
-        private let lock = NSLock()
-        private var names: [dev_t: String] = [:]
-
-        func name(_ device: dev_t) -> String? {
-            lock.lock(); defer { lock.unlock() }
-            return names[device]
-        }
-
-        func store(_ name: String, for device: dev_t) {
-            lock.lock(); defer { lock.unlock() }
-            names[device] = name
-        }
+        KernelProcessTable.ttyName(device)
     }
 }
