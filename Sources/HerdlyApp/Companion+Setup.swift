@@ -51,9 +51,13 @@ extension Companion {
         refresh()
     }
 
-    func refreshSetup() {
+    func refreshSetup() { startSetupRefresh() }
+
+    /// Starts a Codex setup detection; awaiting the task waits until its result has landed.
+    @discardableResult
+    func startSetupRefresh() -> Task<Void, Never> {
         let roots = setupRoots
-        Task { @MainActor [weak self] in
+        return Task { @MainActor [weak self] in
             let (snapshot, helperUpdated) = await Task.detached {
                 // Only Herdly's own unchanged helper is replaced; Codex's files are never touched here.
                 let refresh = BundledHelper.validated.flatMap { try? CodexSetupInstaller().refreshHelper(roots: roots, helper: $0) }
@@ -66,6 +70,7 @@ extension Companion {
             self.setupPlan = snapshot.plan
             self.setupStatus = snapshot.status
             self.setupChecked = true
+            self.resolveDesktopWaitAfterDetection()
             self.adoptInstalledEventsFolder(roots)
             // Until Codex is delivering events, the controls window is the only way to finish setup,
             // so a launch that finds setup incomplete shows it without waiting for a reopen.

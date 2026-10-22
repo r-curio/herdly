@@ -8,12 +8,12 @@ final class DesktopAdapter {
     /// foreground; it changes nothing unless passed.
     func codexForeground() -> Bool? {
         if CommandLine.arguments.contains("--assume-codex-away") { return false }
-        return NSWorkspace.shared.frontmostApplication?.bundleIdentifier.map { $0 == "com.openai.codex" }
+        return NSWorkspace.shared.frontmostApplication?.bundleIdentifier.map { $0 == CodexSetupDetection.desktopBundleIdentifier }
     }
 
     func runningInstallations() -> [URL?] {
         NSWorkspace.shared.runningApplications
-            .filter { $0.bundleIdentifier == "com.openai.codex" }
+            .filter { $0.bundleIdentifier == CodexSetupDetection.desktopBundleIdentifier }
             .map(\.bundleURL)
     }
 

@@ -550,16 +550,19 @@ private struct AgentControls: View {
     @State private var preview: SetupPreview?
 
     /// `setupStatus` is only a default until the first detection lands, so it reads as unknown until then.
+    /// The header reads Restart required after an update until a new Codex session starts.
     private var summary: AgentSummary {
-        AgentSummary.codex(model.setupCapabilities, status: model.setupChecked ? model.setupStatus : nil,
-                           statusText: model.setupStatusText)
+        model.agentUpdates.summary(AgentSummary.codex(model.setupCapabilities,
+                                                      status: model.setupChecked ? model.setupStatus : nil,
+                                                      statusText: model.setupStatusText), for: .codex)
     }
 
     var body: some View {
         ControlsPage(section: .agents) {
             VStack(alignment: .leading, spacing: 28) {
                 codexCard
-                ClaudeAgentControls(setup: model.claude, preview: $preview)
+                ClaudeAgentControls(setup: model.claude, preview: $preview, updates: model.agentUpdates,
+                                    perform: model.performAgentRowAction)
             }
         }
         .sheet(item: $preview) { SetupPreviewSheet(preview: $0) }
@@ -567,6 +570,7 @@ private struct AgentControls: View {
 
     private var codexCard: some View {
         let summary = summary
+        let capabilities = model.setupCapabilities
         return SettingsCard {
             AgentCardHeader(name: "Codex", subtitle: summary.subtitle, symbol: "terminal", tile: Color(white: 0.11),
                             status: summary.status, menuLabel: "Codex actions") {
@@ -588,7 +592,11 @@ private struct AgentControls: View {
                     Button("Undo Setup…", action: model.undoCodexSetup)
                 }
             }
-            AgentProblemRows(problems: summary.problems)
+            AgentProblemRows(problems: summary.problems,
+                             actions: ProblemRowActions(updates: model.agentUpdates,
+                                                        action: { AgentRowAction.codex($0, capabilities) },
+                                                        perform: model.performAgentRowAction))
+            if let note = AgentUpdates.codexInstallNote(summary, capabilities) { AgentNoteRow(text: note) }
             AgentMessageRow(message: model.setupMessage)
         }
     }
@@ -701,13 +709,23 @@ private struct AgentCardHeader<Configure: View, Actions: View>: View {
     }
 }
 
-/// A value with an orange dot before it: the fix for a problem row.
+/// A value with a dot before it: orange for the fix a problem row asks for, grey while an update is
+/// under way, red when it failed.
 private struct ProblemValue: View {
     let text: String
+    var tone: AgentUpdateRow.Tone = .attention
+
+    private var dot: Color {
+        switch tone {
+        case .attention: .orange
+        case .progress: .gray
+        case .failure: .red
+        }
+    }
 
     var body: some View {
         HStack(spacing: 6) {
-            Circle().fill(.orange).frame(width: 7, height: 7).accessibilityHidden(true)
+            Circle().fill(dot).frame(width: 7, height: 7).accessibilityHidden(true)
             Text(text).foregroundStyle(.secondary)
                 .multilineTextAlignment(.trailing)
                 .fixedSize(horizontal: false, vertical: true)
@@ -715,19 +733,60 @@ private struct ProblemValue: View {
     }
 }
 
-/// A row per problem: what needs fixing on the left, an orange dot and the fix on the right.
+/// What a card's version problem rows need for their one trailing button (#354): each row's update
+/// state, the button a problem gets, and what pressing it does.
+private struct ProblemRowActions {
+    let updates: AgentUpdates
+    let action: (AgentProblem.Kind) -> AgentRowAction
+    let perform: (AgentUpdateTarget, AgentRowAction) -> Void
+}
+
+/// A row per problem: what needs fixing on the left, an orange dot and the fix on the right, then
+/// for a version problem Herdly can act on, a small bordered Update or Open Codex button.
 /// `indent` sets a folder's own problems beneath its row.
 private struct AgentProblemRows: View {
     let problems: [AgentProblem]
     var indent: CGFloat = 0
+    var actions: ProblemRowActions?
 
     var body: some View {
         ForEach(problems) { problem in
             Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: problem.label, detail: nil) { ProblemValue(text: problem.value) }
+            if let actions, let target = AgentUpdateTarget(problem.kind) {
+                let action = actions.action(problem.kind)
+                let row = actions.updates.row(target, value: problem.value, action: action)
+                SettingsRow(title: problem.label, detail: nil) {
+                    HStack(spacing: 10) {
+                        ProblemValue(text: row.text, tone: row.tone)
+                        if let button = row.button {
+                            Button(button.title) { actions.perform(target, action) }
+                                .buttonStyle(.bordered).controlSize(.small)
+                                .disabled(!button.enabled)
+                                .accessibilityLabel(button.accessibilityLabel)
+                        }
+                    }
+                }
                 .padding(.leading, indent)
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: row.button == nil ? .combine : .contain)
+            } else {
+                SettingsRow(title: problem.label, detail: nil) { ProblemValue(text: problem.value) }
+                    .padding(.leading, indent)
+                    .accessibilityElement(children: .combine)
+            }
         }
+    }
+}
+
+/// A card's standing note directly under its rows, such as why Herdly can't update Codex CLI.
+private struct AgentNoteRow: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.subheadline).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, SettingsStyle.rowInset).padding(.top, 2).padding(.bottom, 9)
     }
 }
 
@@ -753,6 +812,8 @@ private struct AgentMessageRow: View {
 private struct ClaudeAgentControls: View {
     @ObservedObject var setup: ClaudeSetupModel
     @Binding var preview: SetupPreview?
+    let updates: AgentUpdates
+    let perform: (AgentUpdateTarget, AgentRowAction) -> Void
 
     var body: some View {
         SettingsCard {
@@ -776,10 +837,16 @@ private struct ClaudeAgentControls: View {
         return plan
     }
 
+    /// The folder's summary, its header reading Restart required after an update until a new session starts.
     private func summary(_ root: ClaudeSetupModel.Root) -> AgentSummary {
-        AgentSummary.claude(checked: setup.checked, root.capabilities, displayPath: root.displayPath, status: root.status,
-                            statusText: ClaudeSetupModel.statusText(root.status),
-                            addsHooks: readyPlan(root)?.addsHooks ?? false)
+        updates.summary(AgentSummary.claude(checked: setup.checked, root.capabilities, displayPath: root.displayPath,
+                                            status: root.status, statusText: ClaudeSetupModel.statusText(root.status),
+                                            addsHooks: readyPlan(root)?.addsHooks ?? false), for: .claude)
+    }
+
+    private func rowActions(_ root: ClaudeSetupModel.Root) -> ProblemRowActions {
+        let capabilities = root.capabilities
+        return ProblemRowActions(updates: updates, action: { AgentRowAction.claude($0, capabilities) }, perform: perform)
     }
 
     private func usage(_ root: ClaudeSetupModel.Root) -> AgentUsage? {
@@ -818,7 +885,7 @@ private struct ClaudeAgentControls: View {
                 undoButton(root)
             }
         }
-        AgentProblemRows(problems: summary.problems)
+        AgentProblemRows(problems: summary.problems, actions: rowActions(root))
         if plan != nil {
             Divider().padding(.horizontal, SettingsStyle.rowInset)
             SettingsRow(title: "Usage limits on the strip", detail: nil) {
@@ -867,7 +934,8 @@ private struct ClaudeAgentControls: View {
         .padding(.horizontal, SettingsStyle.rowInset)
         .padding(.vertical, 8)
         .frame(minHeight: 36)
-        AgentProblemRows(problems: summary.problems + [usage(root)?.problem].compactMap { $0 }, indent: 16)
+        AgentProblemRows(problems: summary.problems + [usage(root)?.problem].compactMap { $0 }, indent: 16,
+                         actions: rowActions(root))
     }
 
     @ViewBuilder

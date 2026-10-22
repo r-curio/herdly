@@ -98,6 +98,16 @@ Configure Claude adds only Herdly's exact hook entries and `env.CLAUDE_CODE_DISA
 
 The optional Claude usage bridge is displayed in the same preview and starts off. When selected, setup runs a bounded cancellation and descendant-exit probe before composing an existing `statusLine`; an incompatible command is left untouched while the core hooks remain independent. The bridge records only sanitized five-hour and seven-day subscription windows for the selected root and can be disabled through the same reversible setup flow. Known managed policy, malformed files, duplicate installs, and changed owned values are reported without writing. The setup snapshot has no project context and cannot resolve arbitrary project or command-line `--settings` precedence, so the preview warns that arbitrary future overrides may win and connection still requires a fresh exact-root SessionStart. Ghostty title application, clean SessionEnd reset, and the live old-session restart-required observation remain deferred operator checks; abrupt-exit restoration remains an unproven operator limitation without a launcher.
 
+### Update an outdated agent
+
+When an installed agent is older than the minimum in [Requirements](#requirements), its card in **Settings → Agents** shows a problem row such as "Codex CLI · Update to 0.145.0 or later". Each such row has one small button that acts on that one app:
+
+- **Claude Code → Update** runs the detected `claude` executable as `claude update`. Claude's own updater routes package-manager installs through their package manager, so the button is always offered.
+- **Codex CLI → Update** runs `<prefix>/bin/brew upgrade --cask codex`, and only when the detected `codex`, with every symlink resolved, lives inside a Homebrew `<prefix>/Caskroom/codex/` folder. Any other or unknown install (npm, a manual copy) gets no button; the card says Herdly can't tell how Codex CLI was installed, and you update it the way you installed it, then choose **⋯ → Review Again**.
+- **Codex desktop → Open Codex** opens the selected desktop app so it can update itself; Herdly never updates it. The row reads "Waiting for Codex to update itself" until a detection sees the minimum version (Herdly detects again when Codex relaunches).
+
+An update runs off the main thread with empty input, a five-minute limit, and its output kept to itself; then setup detection reruns as Review Again does. While it runs, the row reads "Updating…" with its button disabled; other rows stay usable. It succeeds only when the command exits cleanly and detection then sees a version at or above the minimum: the row disappears, the card notes "Updated <app> to <version>. Sessions already open keep the old version until you restart them.", and the header reads **Restart required** until Herdly receives that agent's next `SessionStart` (Codex and Claude Code are tracked separately). Restart required clears when you start a new session, or when Herdly relaunches, since Herdly keeps it in memory only. Otherwise the row reads "Couldn't update: <reason>" (took too long, `<tool>` not found, or the last error line the command printed) with **Try Again**; nothing retries automatically. Herdly never restarts sessions.
+
 ## Permissions macOS may ask for
 
 | Prompt | When | If declined |

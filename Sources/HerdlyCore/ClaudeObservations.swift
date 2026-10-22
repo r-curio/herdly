@@ -7,13 +7,17 @@ public struct ClaudeObservationScan: Equatable, Sendable {
     public let available: Bool
     /// What each turn's result card shows, keyed by the exact turn. Transient: never persisted.
     public let results: [AgentTurnIdentity: ClaudeTurnResult]
+    /// When the newest SessionStart record was captured, nil when there is none. It clears this
+    /// agent's Restart required after an update (AgentUpdates).
+    public let latestSessionStartAt: Double?
 
     public init(sourceScope: String, observations: [AgentObservation] = [], available: Bool = true,
-                results: [AgentTurnIdentity: ClaudeTurnResult] = [:]) {
+                results: [AgentTurnIdentity: ClaudeTurnResult] = [:], latestSessionStartAt: Double? = nil) {
         self.sourceScope = sourceScope
         self.observations = observations
         self.available = available
         self.results = results
+        self.latestSessionStartAt = latestSessionStartAt
     }
 }
 
@@ -179,10 +183,12 @@ public enum ClaudeObservationReader {
         var sessionEndAt: [String: Double] = [:]
         var seenApprovals = Set<AgentCallIdentity>()
         var seenQuestions = Set<AgentCallIdentity>()
+        var latestSessionStartAt: Double?
 
         for record in records {
             switch record.event {
             case "SessionStart":
+                latestSessionStartAt = max(latestSessionStartAt ?? record.capturedAt, record.capturedAt)
                 endedSessions.remove(record.session)
                 sessionEndAt.removeValue(forKey: record.session)
             case "SessionEnd":
@@ -427,7 +433,8 @@ public enum ClaudeObservationReader {
                                                  message: turn.lastMessage?.text,
                                                  messageShortened: turn.lastMessage?.shortened ?? false)
         }
-        return (ClaudeObservationScan(sourceScope: scope, observations: observations, results: results), next)
+        return (ClaudeObservationScan(sourceScope: scope, observations: observations, results: results,
+                                      latestSessionStartAt: latestSessionStartAt), next)
     }
 
     private static func record(at url: URL, installationID: String, observingSince: Double) -> Record? {

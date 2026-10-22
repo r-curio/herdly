@@ -13,12 +13,17 @@ public struct CodexCapabilities: Equatable, Sendable {
     public let cliVersion: String?
     public let desktopVersion: String?
     public let ghosttyVersion: String?
+    /// How the detected CLI was installed, which decides whether Herdly can update it.
+    public let cliInstall: CodexCLIInstall
+    /// The one desktop app Herdly selected, for Open Codex; nil when none or several were found.
+    public let desktopPath: String?
 
     public init(cli: Bool, desktop: Bool, ghostty: Bool, supported: Bool,
                 unsupportedReason: String? = nil, cliVersion: String? = nil,
                 desktopVersion: String? = nil, ghosttyVersion: String? = nil,
                 cliInstalled: Bool = false, desktopInstalled: Bool = false,
-                ghosttyInstalled: Bool = false) {
+                ghosttyInstalled: Bool = false, cliInstall: CodexCLIInstall = .unknown,
+                desktopPath: String? = nil) {
         self.cli = cli
         self.desktop = desktop
         self.ghostty = ghostty
@@ -30,6 +35,8 @@ public struct CodexCapabilities: Equatable, Sendable {
         self.cliVersion = cliVersion
         self.desktopVersion = desktopVersion
         self.ghosttyVersion = ghosttyVersion
+        self.cliInstall = cliInstall
+        self.desktopPath = desktopPath
     }
 }
 
