@@ -226,6 +226,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Source-scoped queue for adapters that have bounded native observations. The legacy
     /// Codex presentation queue remains the display path until its UI migration slice.
     @Published var agentQueue = AgentAttentionQueue(snapshot: Companion.launchSnapshot)
+    /// Settings › Notifications › Phone and the idle phone alert at arrival (#352).
+    let phoneAlerts = PhoneAlerts()
     /// Claude names are presentation metadata only; source scope keeps identical session IDs apart.
     @Published private(set) var claudeSessionNames: [AgentSessionIdentity: String] = [:]
     /// Each Claude session's working directory from its inventory, for the row's "project @ branch".
@@ -1583,6 +1585,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             freshAgentCompletionIDs.formUnion(freshAgentOutcomes.map { .outcome($0.id) })
             freshAgentRequestIDs.formUnion(freshAgentRequests.map(\.id))
             freshAgentQuestionIDs.formUnion(freshAgentQuestions.map { .question($0.id) })
+            notePhoneAlertArrivals(newAgentItems, launchedAt: Companion.launchedAt)
             if !freshAgentOutcomes.isEmpty { completionPresentation.enqueue() }
             else if newAgentOutcomes.contains(where: { !$0.uncertain }), !completionPresentation.pending {
                 completionPresentation = Attention(restored: true)
