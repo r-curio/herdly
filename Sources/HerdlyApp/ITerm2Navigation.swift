@@ -38,18 +38,17 @@ enum ITerm2Navigation {
     }
 }
 
-/// Kernel and `ps` reads behind ADR 0013's tty rules for any tty-bound host. Read-only.
+/// Kernel reads behind ADR 0013's tty rules for any tty-bound host. Read-only.
 enum TerminalTTYReads {
-    /// `ps -o pid=,stat=,comm= -t <tty>` for each tty, parsed; a failed or malformed read is absent,
-    /// which the rules treat as unreadable. Bounded: two seconds and 64 KiB per read.
+    /// Each tty's processes from the kernel (#303), in `ps -o pid=,stat=,comm= -t <tty>` form and parsed;
+    /// a failed, malformed or over-64 KiB read is absent, which the rules treat as unreadable.
     static func processes(on ttys: Set<String>) -> [String: [TerminalProcess]] {
         var result: [String: [TerminalProcess]] = [:]
         for tty in ttys {
-            guard let normalized = GhosttyTTYMatch.normalizedTTY(tty),
-                  case .success(let output) = HerdrSubprocess.run(executable: "/bin/ps",
-                                                                  arguments: ["-o", "pid=,stat=,comm=", "-t",
-                                                                              String(normalized.dropFirst(5))],
-                                                                  timeout: 2, limit: 64 * 1024),
+            guard let normalized = GhosttyTTYMatch.normalizedTTY(tty) else { continue }
+            let name = String(normalized.dropFirst(5))
+            guard let records = KernelProcessTable.records(onTTY: name) else { continue }
+            guard let output = ProcessListing.pidStatComm(records, tty: name, limit: 64 * 1024),
                   let parsed = TerminalForegroundProcesses.parse(output) else { continue }
             result[normalized] = parsed
         }

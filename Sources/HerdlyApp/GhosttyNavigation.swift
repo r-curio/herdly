@@ -24,7 +24,7 @@ enum GhosttyNavigation {
 
     /// For the scheduled scans only: a snapshot whose read began no earlier than `notBefore` and at
     /// most `sharedAge` ago, with when its read began. The focus check and the shared tab read each
-    /// read Ghostty every two seconds, each through its own `osascript` (#306); callers that arrive
+    /// read Ghostty every two seconds, each through its own script request (#306); callers that arrive
     /// together wait for one read. `notBefore` is when the caller read the frontmost app (ADR 0016),
     /// so a snapshot never predates the frontmost reading it is combined with. Open, typed input and
     /// question keys call `snapshot()`, which always reads Ghostty.
@@ -194,33 +194,20 @@ enum GhosttySurfaces {
     /// Each surface TTY as `/dev/ttysNNN`, one entry per child holding a terminal; nil when Ghostty is
     /// not running or the process table could not be read.
     static func ttys() -> [String]? {
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-        var size = 0
-        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > 0 else { return nil }
-        // Room for processes started between the two calls.
-        size += 64 * MemoryLayout<kinfo_proc>.stride
-        var processes = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
-        guard sysctl(&mib, u_int(mib.count), &processes, &size, nil, 0) == 0 else { return nil }
-        let table = processes.prefix(size / MemoryLayout<kinfo_proc>.stride)
+        guard let table = KernelProcessTable.kinfo(), !table.isEmpty else { return nil }
         // The short process name narrows the path lookups; the bundle identifier decides.
-        let parents = Set(table.filter { commandName($0) == "ghostty" }.map(\.kp_proc.p_pid).filter(isGhostty))
+        let parents = Set(table.filter { KernelProcessTable.shortName($0) == "ghostty" }.map(\.kp_proc.p_pid).filter(isGhostty))
         guard !parents.isEmpty else { return nil }
         var result: [String] = []
         for process in table where parents.contains(process.kp_eproc.e_ppid) {
             let device = process.kp_eproc.e_tdev
-            guard device != -1 else { continue }
+            guard KernelProcessTable.isTerminal(device) else { continue }
             // `devname_r`: snapshots run from several tasks at once, and `devname` shares one buffer.
             var buffer = [CChar](repeating: 0, count: 64)
             guard devname_r(device, S_IFCHR, &buffer, Int32(buffer.count)) != nil else { return nil }
             result.append("/dev/" + String(cString: buffer))
         }
         return result
-    }
-
-    private static func commandName(_ process: kinfo_proc) -> String {
-        withUnsafeBytes(of: process.kp_proc.p_comm) { raw in
-            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
-        }
     }
 
     /// Whether `pid` runs the executable of an app bundle whose identifier is Ghostty's.

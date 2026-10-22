@@ -8,7 +8,7 @@
 // 'GTfT', `activate window` 'GhstAcWn', `select tab` 'GhstSlTb', `send key` 'GhstSKey' with `to` 'GKeT'.
 function run(argv) {
     const request = JSON.parse(argv[0]);
-    return AppleEvents.run(request.pid, {status: 'unavailable'}, app => {
+    return AppleEvents.run(request.pid, request.deadline, {status: 'unavailable'}, app => {
         const E = AppleEvents;
         const get = (spec, name) => app.get(E.property(spec, name));
         const windows = () => app.get(E.every(null, 'Gwnd'));

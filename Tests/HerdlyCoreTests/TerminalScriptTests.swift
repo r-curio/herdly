@@ -17,10 +17,11 @@ private func status(_ data: Data?) -> String? {
     return object["status"] as? String
 }
 
-@Test func requestArgumentCarriesTheProcessIDAlongsideTheRequest() throws {
-    let argument = try #require(TerminalScript.argument(["action": "select", "session": "w0t0p0"], pid: 4321))
+@Test func requestArgumentCarriesTheProcessIDAndDeadlineAlongsideTheRequest() throws {
+    let argument = try #require(TerminalScript.argument(["action": "select", "session": "w0t0p0"], pid: 4321, deadline: 812.5))
     let object = try #require(try JSONSerialization.jsonObject(with: Data(argument.utf8)) as? [String: Any])
     #expect(object["pid"] as? Int == 4321)
+    #expect(object["deadline"] as? Double == 812.5)
     #expect(object["action"] as? String == "select")
     #expect(object["session"] as? String == "w0t0p0")
 }
@@ -107,4 +108,138 @@ private func status(_ data: Data?) -> String? {
     // The script answers `not_running` only when no `do script` event reached Terminal.
     let reply = TerminalAppScriptResult.reply(Data(#"{"status":"not_running"}"#.utf8))
     #expect(TerminalAppInput.delivery(reply) == .notWritten)
+}
+
+// MARK: - In-process scripts (#303)
+
+private func uptime() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
+
+/// A script that counts its runs in a global, so a second run that sees the count proves the compiled
+/// script was kept and reused.
+private let counting = """
+    ObjC.import('Foundation');
+    let runs = 0;
+    function run(argv) {
+        runs += 1;
+        const request = JSON.parse(argv[0]);
+        if (request.sleep) $.NSThread.sleepForTimeInterval(request.sleep);
+        return JSON.stringify({runs: runs, echo: request.echo === undefined ? null : request.echo, argc: argv.length});
+    }
+    """
+
+private func reply(_ text: String?) -> [String: Any]? {
+    text.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+}
+
+@Suite(.serialized) struct InProcessScriptTests {
+    /// This suite's own runner: a script it keeps busy never delays another suite's requests.
+    let runner = AppleEventScripts()
+
+    @Test func aScriptRunsInProcessWithItsArgumentAndIsCompiledOnce() throws {
+        let key = "counting-\(UUID().uuidString)"
+        let first = try #require(reply(runner.run(key: key, source: { counting }, argument: #"{"echo":"a"}"#,
+                                                                    until: uptime() + 30)))
+        let second = try #require(reply(runner.run(key: key, source: { nil }, argument: #"{"echo":"b"}"#,
+                                                                     until: uptime() + 30)))
+        #expect(first["echo"] as? String == "a")
+        #expect(first["argc"] as? Int == 1)
+        #expect(first["runs"] as? Int == 1)
+        // No source the second time: the compiled script was reused, with its state.
+        #expect(second["echo"] as? String == "b")
+        #expect(second["runs"] as? Int == 2)
+    }
+
+    @Test func callersOnManyThreadsEachGetTheirOwnReply() async {
+        let key = "concurrent-\(UUID().uuidString)"
+        let echoes = await withTaskGroup(of: String?.self) { group in
+            for index in 0..<8 {
+                group.addTask {
+                    let text = runner.run(key: key, source: { counting }, argument: #"{"echo":"\#(index)"}"#,
+                                                            until: uptime() + 30)
+                    return reply(text)?["echo"] as? String
+                }
+            }
+            var all: [String] = []
+            for await echo in group { if let echo { all.append(echo) } }
+            return all
+        }
+        #expect(Set(echoes) == Set((0..<8).map(String.init)))
+    }
+
+    @Test func aScriptThatOutlivesItsDeadlineIsAbandonedAndAQueuedRequestPastItsDeadlineNeverStarts() throws {
+        let key = "late-\(UUID().uuidString)"
+        let started = uptime()
+        // Sleeps 1.8 s against a 0.3 s deadline: the caller gives up after the deadline and grace (0.8 s),
+        // the one wall-clock bound in this suite.
+        #expect(runner.run(key: key, source: { counting }, argument: #"{"sleep":1.8}"#, until: started + 0.3) == nil)
+        let waited = uptime() - started
+        #expect(waited >= 0.3 + AppleEventScripts.grace && waited < 1.8)
+        // Queued behind the sleeping script; its deadline passes before it could start.
+        #expect(runner.run(key: key, source: { counting }, argument: #"{"echo":"skipped"}"#,
+                                             until: uptime() + 0.2) == nil)
+        let next = try #require(reply(runner.run(key: key, source: { counting }, argument: #"{"echo":"next"}"#,
+                                                                   until: uptime() + 30)))
+        #expect(next["echo"] as? String == "next")
+        // The sleeping run and this one; the skipped request never ran.
+        #expect(next["runs"] as? Int == 2)
+    }
+
+    @Test func aScriptThatThrowsOrDoesNotCompileIsNil() {
+        let throwing = "function run(argv) { throw new Error('no'); }"
+        #expect(runner.run(key: "throws-\(UUID().uuidString)", source: { throwing }, argument: "{}",
+                                             until: uptime() + 30) == nil)
+        #expect(runner.run(key: "broken-\(UUID().uuidString)", source: { "function run(argv) {" },
+                                             argument: "{}", until: uptime() + 30) == nil)
+        #expect(runner.run(key: "missing-\(UUID().uuidString)", source: { nil }, argument: "{}",
+                                             until: uptime() + 30) == nil)
+    }
+
+    /// The Apple Event layer itself, against a process id nothing has: no event is sent once the deadline
+    /// has passed, and a request without a deadline fails instead of waiting unbounded.
+    @Test func theAppleEventLayerSendsNothingPastTheDeadlineAndRequiresOne() throws {
+        let layer = try String(contentsOf: resources.appendingPathComponent("AppleEvents.js"), encoding: .utf8)
+        let probe = layer + """
+
+            function run(argv) {
+                const request = JSON.parse(argv[0]);
+                return AppleEvents.run(request.pid, request.deadline, {status: 'gone'},
+                                       app => app.get(AppleEvents.property(null, 'pnam')));
+            }
+            """
+        let key = "layer-\(UUID().uuidString)"
+        func send(_ deadline: Double?) -> String? {
+            var request: [String: Any] = ["pid": Int(absentPID)]
+            if let deadline { request["deadline"] = deadline }
+            let argument = String(decoding: try! JSONSerialization.data(withJSONObject: request), as: UTF8.self)
+            return runner.run(key: key, source: { probe }, argument: argument, until: uptime() + 60)
+        }
+        // In time, the event reaches no process: gone.
+        #expect(status(send(uptime() + 30).map { Data($0.utf8) }) == "gone")
+        // Past the deadline the request fails; it is not reported as gone.
+        #expect(send(uptime() - 1) == nil)
+        #expect(send(nil) == nil)
+    }
+
+    @Test func aReplyOverTwoMebibytesIsAFailure() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-script-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try "const Layer = {};".write(to: directory.appendingPathComponent("AppleEvents.js"), atomically: true, encoding: .utf8)
+        try """
+            function run(argv) {
+                const request = JSON.parse(argv[0]);
+                if (request.size) return 'x'.repeat(request.size);
+                return JSON.stringify({status: 'ok', pid: request.pid, deadline: request.deadline});
+            }
+            """.write(to: directory.appendingPathComponent("Ghostty.js"), atomically: true, encoding: .utf8)
+        let before = uptime()
+        let echoed = try #require(reply(TerminalScript.ghostty.run(["action": "snapshot"], pid: 4321, resources: directory)
+            .map { String(decoding: $0, as: UTF8.self) }))
+        #expect(echoed["pid"] as? Int == 4321)
+        let deadline = try #require(echoed["deadline"] as? Double)
+        #expect(deadline >= before + 5 && deadline <= uptime() + 5)
+        #expect(TerminalScript.ghostty.run(["size": TerminalScript.maximumReply], pid: 4321, resources: directory)?.count
+                    == TerminalScript.maximumReply)
+        #expect(TerminalScript.ghostty.run(["size": TerminalScript.maximumReply + 1], pid: 4321, resources: directory) == nil)
+    }
 }

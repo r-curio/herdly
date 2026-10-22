@@ -68,15 +68,22 @@ enum ZellijRunner {
         ZellijReader.send(arguments, to: target, expecting: expected, effects: effects)
     }
 
-    /// The process table, each `zellij` process's arguments and each one's start time, from the kernel.
+    /// The process table, each of this user's `zellij` processes' arguments and each one's start time, from the kernel
+    /// (#303): the table in `ps -axo pid=,ppid=,uid=,tty=,comm=` form, so `ZellijProcessTable.parse` reads
+    /// it exactly as it read `ps`.
     static func processTable() -> ZellijProcessTable? {
-        guard case .succeeded(let output)? = bounded("/bin/ps", ["-axo", "pid=,ppid=,uid=,tty=,comm="],
-                                                     environment: ["PATH": "/usr/bin:/bin", "LANG": "en_US.UTF-8"]),
-              let parsed = ZellijProcessTable.parse(output, owner: getuid(), arguments: [:], startTimes: [:]) else { return nil }
+        // Every own process's vector, not only `zellij`'s: `comm` is argv[0], and Zellij targeting finds
+        // `codex` under a server by it, where `p_comm` can differ (the exec'd file's name, cut at 16 bytes).
+        // Other users' processes are never clients or servers (ADR 0014) and show the kernel's short name.
+        guard let records = KernelProcessTable.records(arguments: .owner(getuid())),
+              let table = ProcessListing.pidPPIDUIDTTYComm(records, limit: ZellijListing.maximumOutput),
+              let parsed = ZellijProcessTable.parse(table, owner: getuid(), arguments: [:], startTimes: [:]) else { return nil }
+        var vectors: [Int32: [String]] = [:]
+        for record in records { if let argv = record.arguments { vectors[record.pid] = argv } }
         var arguments: [Int32: [String]] = [:]
         var starts: [Int32: Double] = [:]
         for pid in parsed.zellijPIDs {
-            if let argv = processArguments(pid) { arguments[pid] = argv }
+            if let argv = vectors[pid] { arguments[pid] = argv }
             if let started = HerdrProcessTree.startTime(of: pid) { starts[pid] = started }
         }
         return ZellijProcessTable(processes: Array(parsed.processes.values), owner: parsed.owner, arguments: arguments,
@@ -158,30 +165,5 @@ enum ZellijRunner {
         default: kind = .other
         }
         return TmuxFileFacts(kind: kind, owner: info.st_uid, mode: UInt16(info.st_mode & 0o7777))
-    }
-
-    /// `pid`'s argument vector from the kernel (`KERN_PROCARGS2`), nil when it cannot be read.
-    static func processArguments(_ pid: Int32) -> [String]? {
-        guard pid > 0 else { return nil }
-        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
-        var size = 0
-        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size,
-              size <= 1024 * 1024 else { return nil }
-        var buffer = [UInt8](repeating: 0, count: size)
-        guard sysctl(&mib, u_int(mib.count), &buffer, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
-        let count = buffer.withUnsafeBytes { $0.load(as: Int32.self) }
-        guard count > 0, count <= 4096 else { return nil }
-        var index = MemoryLayout<Int32>.size
-        // The executable path, then padding NULs, then `count` NUL-terminated arguments.
-        while index < size, buffer[index] != 0 { index += 1 }
-        while index < size, buffer[index] == 0 { index += 1 }
-        var arguments: [String] = []
-        while arguments.count < Int(count), index < size {
-            let start = index
-            while index < size, buffer[index] != 0 { index += 1 }
-            arguments.append(String(decoding: buffer[start..<index], as: UTF8.self))
-            index += 1
-        }
-        return arguments.count == Int(count) ? arguments : nil
     }
 }

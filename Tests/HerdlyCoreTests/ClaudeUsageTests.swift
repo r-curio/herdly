@@ -106,7 +106,7 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     // The bounds are a fail-closed latency limit, not part of compatibility. A busy parallel run can
     // spawn a process more than a second late, so the passing case gets wide bounds; the
     // rejections below keep the defaults.
-    #expect(ClaudeStatusLineCompatibility.probe(command: "cat", timeout: 10, processListTimeout: 10))
+    #expect(ClaudeStatusLineCompatibility.probe(command: "cat", timeout: 10))
     #expect(!ClaudeStatusLineCompatibility.probe(command: "sleep 2", timeout: 0.05))
     #expect(!ClaudeStatusLineCompatibility.probe(command: "sleep 2 & exit 0"))
     #expect(!ClaudeStatusLineCompatibility.probe(command: "sleep 2 >/dev/null & exit 0"))

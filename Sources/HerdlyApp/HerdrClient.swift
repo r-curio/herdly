@@ -370,7 +370,7 @@ enum HerdrProcessTree {
             var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, current]
             guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { break }
             chain.append(HerdrProcessAncestor(pid: current, command: command(of: current, info: info),
-                                              tty: tty(info.kp_eproc.e_tdev)))
+                                              tty: KernelProcessTable.ttyName(info.kp_eproc.e_tdev)))
             let parent = info.kp_eproc.e_ppid
             guard parent != current else { break }
             current = parent
@@ -397,40 +397,6 @@ enum HerdrProcessTree {
             let bytes = path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
             return URL(fileURLWithPath: String(decoding: bytes, as: UTF8.self)).lastPathComponent
         }
-        var name = info.kp_proc.p_comm
-        return withUnsafeBytes(of: &name) { raw in
-            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
-        }
-    }
-
-    /// `devname` searches `/dev` and dominated scan CPU once every scan walked several process
-    /// chains (#301). A character device number names the same tty for as long as the system runs,
-    /// so found names are kept; a miss is looked up again next time.
-    private static func tty(_ device: dev_t) -> String? {
-        guard device != ~dev_t(0) else { return nil }
-        if let known = ttyNames.name(device) { return known }
-        guard let name = devname(device, S_IFCHR) else { return nil }
-        let value = String(cString: name)
-        guard !value.isEmpty, value != "??" else { return nil }
-        ttyNames.store(value, for: device)
-        return value
-    }
-
-    private static let ttyNames = TTYNames()
-
-    private final class TTYNames: @unchecked Sendable {
-        // Invariant for `@unchecked Sendable`: `names` is only touched while holding `lock`.
-        private let lock = NSLock()
-        private var names: [dev_t: String] = [:]
-
-        func name(_ device: dev_t) -> String? {
-            lock.lock(); defer { lock.unlock() }
-            return names[device]
-        }
-
-        func store(_ name: String, for device: dev_t) {
-            lock.lock(); defer { lock.unlock() }
-            names[device] = name
-        }
+        return KernelProcessTable.shortName(info)
     }
 }

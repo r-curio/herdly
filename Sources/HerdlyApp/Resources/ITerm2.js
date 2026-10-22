@@ -11,7 +11,7 @@
 // with `named` 'Namd', `select` 'Itrmslct'.
 function run(argv) {
     const request = JSON.parse(argv[0]);
-    return AppleEvents.run(request.pid, {status: 'not_running'}, app => {
+    return AppleEvents.run(request.pid, request.deadline, {status: 'not_running'}, app => {
         const E = AppleEvents;
         const get = (spec, name) => app.get(E.property(spec, name));
         const elements = (spec, elementClass) => list(app.get(E.every(spec, elementClass)));
