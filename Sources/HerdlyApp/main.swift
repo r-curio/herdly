@@ -377,6 +377,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var setupCapabilities = CodexCapabilities(cli: false, desktop: false, ghostty: false, supported: false)
     @Published var setupPlan: CodexSetupPlan?
     @Published var setupMessage = ""
+    /// Each version problem row's update and each agent's Restart required (#354).
+    @Published var agentUpdates = AgentUpdates()
+    /// Watches for Codex desktop relaunching while a row waits for it to update itself.
+    var codexLaunchObserver: NSObjectProtocol?
     let claude = ClaudeSetupModel()
     struct LiveClaudeQuestion {
         let request: ClaudeQuestionRequest
@@ -1536,6 +1540,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             acknowledgeCodexCompletions(Array(CodexReplyAcknowledgment.acknowledged(
                 queue.items.compactMap(\.completion), events: scan.cliEvents)))
             replyTurnStarts = ReplyTurnStarts.latest(cliEvents: scan.cliEvents, hookEvents: desktopEvents)
+            if agentUpdates.restartRequired(.codex) || agentUpdates.restartRequired(.claude) {
+                noteSessionStarts(codex: AgentUpdates.latestCodexSessionStart(cliEvents: scan.cliEvents,
+                                                                              desktopEvents: desktopEvents),
+                                  claude: claudeObservationScans.compactMap(\.latestSessionStartAt).max())
+            }
             applyDesktopReadState(readState, enabled: readStateURL != nil, desktopThreads: scan.desktopOriginatedSessions)
             for request in unverified where ApprovalReceipts.existing(for: request.id, in: events) != nil {
                 _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision,

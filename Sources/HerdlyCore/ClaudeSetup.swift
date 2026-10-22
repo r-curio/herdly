@@ -4,11 +4,14 @@ public struct ClaudeCapabilities: Equatable, Sendable {
     public let installed: Bool
     public let supported: Bool
     public let version: String?
+    /// The detected `claude` executable, which runs `claude update`.
+    public let executablePath: String?
 
-    public init(installed: Bool, supported: Bool, version: String? = nil) {
+    public init(installed: Bool, supported: Bool, version: String? = nil, executablePath: String? = nil) {
         self.installed = installed
         self.supported = supported
         self.version = version
+        self.executablePath = executablePath
     }
 }
 

@@ -47,7 +47,7 @@ enum ClaudeSetupDetection {
         let version = executable.flatMap(version(of:))
         let installed = executable != nil
         return ClaudeCapabilities(installed: installed, supported: installed && atLeast(version, ClaudeSetupRequirements.minimumCLIVersion),
-                                  version: version)
+                                  version: version, executablePath: executable?.path)
     }
 
     static func defaultRoot() -> URL {
@@ -403,13 +403,18 @@ final class ClaudeSetupModel: ObservableObject {
         refresh()
     }
 
-    func refresh() {
+    func refresh() { startRefresh() }
+
+    /// Starts a detection pass; awaiting the task waits until its result has landed (or been
+    /// superseded by a newer pass).
+    @discardableResult
+    func startRefresh() -> Task<Void, Never> {
         let paths = [defaultRoot.path] + alternatePaths.filter { $0 != defaultRoot.path }
         refreshToken += 1
         let token = refreshToken
         let support = applicationSupport
         let usagePaths = usageOptInPaths
-        Task { @MainActor in
+        return Task { @MainActor in
             let (snapshots, updatedHelpers) = await Task.detached(priority: .utility) {
                 let caps = ClaudeSetupDetection.capabilities()
                 var updated = 0

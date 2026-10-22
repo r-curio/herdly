@@ -17,6 +17,9 @@ enum BundledHelper {
 }
 
 enum CodexSetupDetection {
+    /// Codex desktop's bundle identifier.
+    static let desktopBundleIdentifier = "com.openai.codex"
+
     private enum DesktopSelection {
         case none
         case selected(URL)
@@ -30,13 +33,13 @@ enum CodexSetupDetection {
     }
 
     static func capabilities() -> CodexCapabilities {
-        let runningDesktopProcesses = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex")
+        let runningDesktopProcesses = NSRunningApplication.runningApplications(withBundleIdentifier: desktopBundleIdentifier)
         let runningDesktop = runningDesktopProcesses.compactMap(\.bundleURL)
         let installedDesktop = [
             "/Applications/Codex.app", "/Applications/ChatGPT.app",
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Codex.app").path,
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/ChatGPT.app").path,
-            NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex")?.path
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: desktopBundleIdentifier)?.path
         ].compactMap { $0 }.map(URL.init(fileURLWithPath:)).filter {
             FileManager.default.fileExists(atPath: $0.path)
         }.reduce(into: [URL]()) { result, url in
@@ -53,7 +56,7 @@ enum CodexSetupDetection {
         case .selected(let url): desktopURL = url
         case .none, .ambiguous: desktopURL = nil
         }
-        let desktopVersion = desktopURL.flatMap { Bundle(url: $0)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String }
+        let desktopVersion = desktopURL.flatMap(shortVersion(ofApp:))
         let desktopInstalled = desktopURL != nil || !runningDesktop.isEmpty || !installedDesktop.isEmpty
         let desktop = desktopSelectionIsSupported(desktopSelection, version: desktopVersion)
 
@@ -77,7 +80,20 @@ enum CodexSetupDetection {
                                  unsupportedReason: reasons.joined(separator: " "), cliVersion: cliVersion,
                                  desktopVersion: desktopVersion, ghosttyVersion: ghosttyVersion,
                                  cliInstalled: cliInstalled, desktopInstalled: desktopInstalled,
-                                 ghosttyInstalled: ghosttyInstalled)
+                                 ghosttyInstalled: ghosttyInstalled,
+                                 // A Homebrew cask links its binary from the Caskroom; resolving every
+                                 // link shows whether that is where this CLI lives.
+                                 cliInstall: CodexCLIInstall.classify(resolvedPath: cliPath?.resolvingSymlinksInPath().path),
+                                 desktopPath: desktopURL?.path)
+    }
+
+    /// Read from Info.plist on every detection: `Bundle(url:)` caches its info per path, so it would
+    /// keep reporting the old version after Codex desktop updates itself in place.
+    private static func shortVersion(ofApp app: URL) -> String? {
+        let plist = app.appendingPathComponent("Contents/Info.plist")
+        guard let data = boundedRegularData(at: plist, maximum: 1024 * 1024),
+              let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { return nil }
+        return info["CFBundleShortVersionString"] as? String
     }
 
     private static func desktopSelectionIsSupported(_ selection: DesktopSelection, version: String?) -> Bool {

@@ -942,3 +942,17 @@ private func claudeTurn(_ promptID: String, session: String = "session-1", scope
     #expect(CompletionPreview(lines, sourceShortened: true)?.extent == .cutAndCapped(full: lines))
     #expect(CompletionPreview(lines, sourceShortened: false) == CompletionPreview(lines))
 }
+
+@Test func claudeScanReportsWhenTheNewestSessionStarted() throws {
+    let root = try makeClaudeEvents([
+        claudeRecord("SessionStart", at: 3, session: "a"),
+        claudeRecord("SessionStart", at: 7, session: "b"),
+        claudeRecord("UserPromptSubmit", at: 9, promptID: "p1", prompt: "Inspect", session: "b")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    #expect(scanClaude(root).latestSessionStartAt == 7)
+
+    let quiet = try makeClaudeEvents([claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "Inspect")])
+    defer { try? FileManager.default.removeItem(at: quiet) }
+    #expect(scanClaude(quiet).latestSessionStartAt == nil)
+}
