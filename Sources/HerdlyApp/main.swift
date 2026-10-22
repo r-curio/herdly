@@ -676,7 +676,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published private(set) var spotlightContexts: [AttentionItemID: SpotlightRecordContext] = [:]
     @Published var reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     /// Natural height of the open panel's content, reported by the view after layout.
-    var contentHeight: CGFloat = 0
+    private(set) var contentHeight: CGFloat = 0
+    /// When the open panel began without a measured height (`NotchOpenHeight`); nil while collapsed or measured.
+    private var openHeightWaitingSince: Double?
     /// How the strip splits around the housing on the current display; the view lays out by it.
     @Published var stripLayout = StripLayout(leading: 140, gap: 0, trailing: 60, height: NotchPlacement.collapsedHeight)
     var hovering = false
@@ -1913,6 +1915,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             hovering = false
             targetFrame = .zero
             contentHeight = 0
+            openHeightWaitingSince = nil
             currentDisplayID = nil
             return
         }
@@ -1933,12 +1936,25 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if stripLayout != layout { stripLayout = layout }
         let singleCard = presentationMode.showsSingleCard
         let rows = presentationMode.showsAll ? orderedAgentAttentionItems.count : (singleCard ? 1 : 0)
-        var frame = contentHeight > 0
-            ? NotchPlacement.frame(on: display, expanded: expanded, contentHeight: contentHeight, wing: wing, centerLabel: center,
-                                   width: width)
-            : NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
-                                   extraRows: attention.pending && (presentationMode.showsAll || !singleCard),
-                                   wing: wing, centerLabel: center, width: width)
+        let openHeight: NotchOpenHeight
+        if expanded {
+            let since = contentHeight > 0 ? nil : (openHeightWaitingSince ?? now)
+            openHeightWaitingSince = since
+            openHeight = NotchOpenHeight.choose(measured: contentHeight, waitingSince: since ?? now, now: now)
+        } else {
+            openHeightWaitingSince = nil
+            openHeight = .estimate
+        }
+        var frame = switch openHeight {
+        case .measured(let height):
+            NotchPlacement.frame(on: display, expanded: expanded, contentHeight: height, wing: wing, centerLabel: center, width: width)
+        case .awaitingMeasurement:
+            NotchPlacement.frame(on: display, expanded: expanded, contentHeight: 0, wing: wing, centerLabel: center, width: width)
+        case .estimate:
+            NotchPlacement.frame(on: display, expanded: expanded, rows: rows,
+                                 extraRows: attention.pending && (presentationMode.showsAll || !singleCard),
+                                 wing: wing, centerLabel: center, width: width)
+        }
         // With no menu bar and no housing the strip rests above the screen edge and slides in for
         // the pointer at the top edge or an open panel, so it does not cover a full-screen app.
         if NotchTuck.isTucked(display: display, pointer: NSEvent.mouseLocation, interacting: interacting, open: expanded) {
@@ -2655,6 +2671,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             checkingGhostty = false
             refresh()
         }
+    }
+
+    /// Takes the open content's measured height and resizes the panel to it at once rather than on
+    /// the next refresh tick, so an opening panel grows straight to its height (`NotchOpenHeight`).
+    func reportContentHeight(_ height: CGFloat) {
+        guard abs(contentHeight - height) > 0.5 else { return }
+        contentHeight = height
+        guard expanded, height > 0 else { return }
+        // Reported during layout; resizing waits until the pass has finished.
+        DispatchQueue.main.async { [weak self] in self?.refresh() }
     }
 
     /// Opens the whole queue from the strip (a click or VoiceOver activation); it stays open while
