@@ -75,9 +75,23 @@ protocol PhoneAlertTopicStoring: Sendable {
     func loadOrCreate() -> NtfyTopic?
 }
 
-/// The phone topic, kept as a generic password in the login Keychain: it works like a password,
-/// so it never goes to UserDefaults or the snapshot.
-struct PhoneAlertTopicStore: PhoneAlertTopicStoring {
+/// One Keychain read, kept apart so "no item" never looks like "could not read".
+enum PhoneAlertKeychainRead: Equatable, Sendable {
+    case found(Data)
+    case notFound
+    /// Locked, denied, interaction not allowed, or any other error status.
+    case failed(OSStatus)
+}
+
+/// The one Keychain item the topic lives in; injected so tests never touch the user's Keychain.
+protocol PhoneAlertKeychainItem: Sendable {
+    func read() -> PhoneAlertKeychainRead
+    /// Adds the item; fails (never overwrites) when one already exists.
+    func add(_ data: Data) -> Bool
+}
+
+/// A generic password in the login Keychain, under a Herdly service name.
+struct SystemPhoneAlertKeychainItem: PhoneAlertKeychainItem {
     let service: String
     let account: String
 
@@ -92,33 +106,58 @@ struct PhoneAlertTopicStore: PhoneAlertTopicStoring {
          kSecAttrAccount as String: account]
     }
 
-    func read() -> NtfyTopic? {
+    func read() -> PhoneAlertKeychainRead {
         var lookup = query
         lookup[kSecReturnData as String] = true
         lookup[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        guard SecItemCopyMatching(lookup as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data, let name = String(data: data, encoding: .utf8) else { return nil }
-        return NtfyTopic(name)
+        let status = SecItemCopyMatching(lookup as CFDictionary, &result)
+        switch status {
+        case errSecSuccess:
+            guard let data = result as? Data else { return .failed(errSecDecode) }
+            return .found(data)
+        case errSecItemNotFound: return .notFound
+        default: return .failed(status)
+        }
     }
 
-    /// Replaces the stored topic. False when the Keychain refused it.
-    private func save(_ topic: NtfyTopic) -> Bool {
-        let data = Data(topic.name.utf8)
-        let update = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if update == errSecSuccess { return true }
-        guard update == errSecItemNotFound else { return false }
+    func add(_ data: Data) -> Bool {
         var item = query
         item[kSecValueData as String] = data
         item[kSecAttrLabel as String] = "Herdly phone alert topic"
+        // SecItemAdd returns errSecDuplicateItem rather than replacing an existing item.
         return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
     }
+}
 
+/// The phone topic, kept as a generic password in the login Keychain: it works like a password,
+/// so it never goes to UserDefaults or the snapshot. A topic the user may already have subscribed
+/// to is never replaced: a new one is made only when the Keychain says there is no item at all.
+struct PhoneAlertTopicStore: PhoneAlertTopicStoring {
+    let keychain: any PhoneAlertKeychainItem
+
+    init(keychain: any PhoneAlertKeychainItem = SystemPhoneAlertKeychainItem()) {
+        self.keychain = keychain
+    }
+
+    func read() -> NtfyTopic? {
+        guard case let .found(data) = keychain.read(), let name = String(data: data, encoding: .utf8) else { return nil }
+        return NtfyTopic(name)
+    }
+
+    /// The stored topic; a new random one only when no item exists. A read error, or an item that
+    /// is not a valid topic, returns nil and writes nothing.
     func loadOrCreate() -> NtfyTopic? {
-        if let topic = read() { return topic }
-        var generator = SystemRandomNumberGenerator()
-        let topic = NtfyTopic.random(using: &generator)
-        return save(topic) ? topic : nil
+        switch keychain.read() {
+        case let .found(data):
+            return String(data: data, encoding: .utf8).flatMap(NtfyTopic.init)
+        case .failed:
+            return nil
+        case .notFound:
+            var generator = SystemRandomNumberGenerator()
+            let topic = NtfyTopic.random(using: &generator)
+            return keychain.add(Data(topic.name.utf8)) ? topic : nil
+        }
     }
 }
 
@@ -254,8 +293,14 @@ final class PhoneAlerts: ObservableObject {
         let idle = enabled ? idleSeconds() : nil
         let messages = ledger.consider(candidates, idleSeconds: idle, setting: setting)
         guard !messages.isEmpty else { return .none }
-        guard let topic else {
-            Self.log.error("Phone alert skipped: the topic is not loaded")
+        let topic: NtfyTopic
+        switch topicState {
+        case let .ready(ready): topic = ready
+        case .unavailable:
+            Self.log.error("Phone alert skipped: the topic is unavailable from the Keychain")
+            return .none
+        case .notLoaded, .loading:
+            Self.log.error("Phone alert skipped: the topic is not loaded yet")
             return .none
         }
         let sender = makeSender(topic)
@@ -277,7 +322,13 @@ final class PhoneAlerts: ObservableObject {
     @discardableResult
     func sendTest() -> Task<Void, Never>? {
         guard enabled, !testInFlight else { return nil }
-        guard let topic else {
+        let topic: NtfyTopic
+        switch topicState {
+        case let .ready(ready): topic = ready
+        case .unavailable:
+            problem = "Herdly can't read the phone topic from the Keychain."
+            return nil
+        case .notLoaded, .loading:
             problem = "The phone topic isn't ready yet. Try again in a moment."
             return nil
         }

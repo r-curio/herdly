@@ -95,6 +95,16 @@ private func candidates(_ items: [AgentAttentionItem]) -> [PhoneAlertCandidate] 
     #expect(title(.unavailable, .claude) == "Claude ended a turn")
 }
 
+@Test func onlyASuccessfulTurnCarriesTheSuccessMark() {
+    let tags = { (status: AgentOutcomeStatus) in
+        PhoneAlertPolicy.text(kind: .completion(PhoneAlertCompletion(status)), source: .codex, project: nil).tags
+    }
+    #expect(tags(.finished) == ["white_check_mark"])
+    #expect(tags(.failed) == ["warning"])
+    #expect(tags(.stopped) == ["warning"])
+    #expect(tags(.unavailable) == ["bell"])
+}
+
 @Test func duplicateAndReorderedArrivalsSendOnce() {
     var ledger = PhoneAlertLedger()
     let all = candidates(rows())
@@ -350,4 +360,75 @@ private func controller(topic: NtfyTopic? = testTopic, switchStore: MemorySwitch
     let alerts = controller(switchStore: MemorySwitch(.on))
     #expect(alerts.sendTest() == nil)
     #expect(alerts.problem == "The phone topic isn't ready yet. Try again in a moment.")
+}
+
+@MainActor
+@Test func aTestWithAnUnavailableTopicSaysTheKeychainCannotBeRead() async {
+    let alerts = controller(topic: nil, switchStore: MemorySwitch(.on))
+    await alerts.start()?.value
+    #expect(alerts.topicState == .unavailable)
+    #expect(alerts.sendTest() == nil)
+    #expect(alerts.problem == "Herdly can't read the phone topic from the Keychain.")
+    // An arrival is still spent and sends nothing.
+    let dispatch = alerts.arrived(candidates(rows()))
+    #expect(dispatch.messages.isEmpty)
+    #expect(alerts.ledger.count == 3)
+}
+
+// MARK: Topic store (a fake Keychain item; the real login Keychain is never touched)
+
+private final class FakeKeychainItem: PhoneAlertKeychainItem, @unchecked Sendable {
+    // Unchecked: `stored` and `adds` are read and written only under `lock`.
+    private let lock = NSLock()
+    private var stored: PhoneAlertKeychainRead
+    private var addCount = 0
+
+    init(_ read: PhoneAlertKeychainRead) { stored = read }
+
+    var adds: Int { lock.withLock { addCount } }
+    var current: PhoneAlertKeychainRead { lock.withLock { stored } }
+
+    func read() -> PhoneAlertKeychainRead { lock.withLock { stored } }
+
+    func add(_ data: Data) -> Bool {
+        lock.withLock {
+            addCount += 1
+            guard stored == .notFound else { return false }
+            stored = .found(data)
+            return true
+        }
+    }
+}
+
+@Test func aNewTopicIsCreatedOnlyWhenNoItemExists() throws {
+    let empty = FakeKeychainItem(.notFound)
+    let created = try #require(PhoneAlertTopicStore(keychain: empty).loadOrCreate())
+    #expect(empty.adds == 1)
+    #expect(empty.current == .found(Data(created.name.utf8)))
+    #expect(PhoneAlertTopicStore(keychain: empty).loadOrCreate() == created)
+    #expect(empty.adds == 1)
+}
+
+@Test func aKeychainReadErrorNeverCreatesOrReplacesTheTopic() {
+    // errSecInteractionNotAllowed (locked), errSecAuthFailed (denied), errSecUserCanceled.
+    for status in [errSecInteractionNotAllowed, errSecAuthFailed, errSecUserCanceled] {
+        let item = FakeKeychainItem(.failed(status))
+        #expect(PhoneAlertTopicStore(keychain: item).loadOrCreate() == nil)
+        #expect(PhoneAlertTopicStore(keychain: item).read() == nil)
+        #expect(item.adds == 0)
+        #expect(item.current == .failed(status))
+    }
+}
+
+@Test func aStoredItemThatIsNotATopicIsLeftAlone() {
+    let item = FakeKeychainItem(.found(Data("not a topic!".utf8)))
+    #expect(PhoneAlertTopicStore(keychain: item).loadOrCreate() == nil)
+    #expect(item.adds == 0)
+    #expect(item.current == .found(Data("not a topic!".utf8)))
+}
+
+@Test func theExistingTopicIsReturnedAsStored() {
+    let item = FakeKeychainItem(.found(Data("herdly-existing".utf8)))
+    #expect(PhoneAlertTopicStore(keychain: item).loadOrCreate() == NtfyTopic("herdly-existing"))
+    #expect(item.adds == 0)
 }

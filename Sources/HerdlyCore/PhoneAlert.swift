@@ -149,7 +149,7 @@ public enum PhoneAlertPolicy {
             let (title, tag) = switch ending {
             case .finished: ("\(agent) finished", "white_check_mark")
             case .stopped: ("\(agent) stopped", "warning")
-            case .unknown: ("\(agent) ended a turn", "white_check_mark")
+            case .unknown: ("\(agent) ended a turn", "bell")
             }
             return PhoneAlertMessage(title: title, body: project ?? "The result is on your Mac",
                                      priority: .standard, tags: [tag])
