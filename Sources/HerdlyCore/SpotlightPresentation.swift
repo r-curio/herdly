@@ -302,9 +302,23 @@ public struct CompletionPreview: Equatable, Sendable {
         }
     }
 
-    public let text: String
-    public let extent: Extent
+    public private(set) var text: String
+    public private(set) var extent: Extent
     public var truncated: Bool { extent != .whole }
+
+    /// `sourceShortened`: the source kept only the start of the message (a Claude record, #341), so the
+    /// card always offers "Show all" and says the full message is in the agent.
+    public init?(_ source: String, sourceShortened: Bool) {
+        self.init(source)
+        guard sourceShortened else { return }
+        switch extent {
+        case let .cut(full), let .cutAndCapped(full):
+            extent = .cutAndCapped(full: full)
+        case .whole:
+            extent = .cutAndCapped(full: text)
+            text += "…"
+        }
+    }
 
     public init?(_ source: String) {
         let lines = source.split(omittingEmptySubsequences: false, whereSeparator: \Character.isNewline)

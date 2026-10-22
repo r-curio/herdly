@@ -5,11 +5,42 @@ public struct ClaudeObservationScan: Equatable, Sendable {
     public let sourceScope: String
     public let observations: [AgentObservation]
     public let available: Bool
+    /// What each turn's result card shows, keyed by the exact turn. Transient: never persisted.
+    public let results: [AgentTurnIdentity: ClaudeTurnResult]
 
-    public init(sourceScope: String, observations: [AgentObservation] = [], available: Bool = true) {
+    public init(sourceScope: String, observations: [AgentObservation] = [], available: Bool = true,
+                results: [AgentTurnIdentity: ClaudeTurnResult] = [:]) {
         self.sourceScope = sourceScope
         self.observations = observations
         self.available = available
+        self.results = results
+    }
+}
+
+/// One Claude turn's prompt and the last message its latest Stop carried, for the result card (#341).
+/// Deliberately not Codable, like `CompletionPreview`, so neither text enters the attention snapshot.
+public struct ClaudeTurnResult: Equatable, Sendable {
+    public let identity: AgentTurnIdentity
+    /// The bounded prompt fallback, already ending in "…" when shortened.
+    public let prompt: String?
+    /// Nil when the latest Stop carried none (older Claude Code, malformed field) or the turn went on after it.
+    public let message: String?
+    /// True when the helper kept only the start of the message; the rest stays in Claude.
+    public let messageShortened: Bool
+
+    public init(identity: AgentTurnIdentity, prompt: String?, message: String?, messageShortened: Bool = false) {
+        self.identity = identity
+        self.prompt = prompt
+        self.message = message
+        self.messageShortened = messageShortened
+    }
+
+    /// The result card's body, read the way a Codex result reads: the message clamped by
+    /// `CompletionPreview` and the prompt to fold. A missing message shows no message line at all.
+    public var details: SpotlightDetails {
+        let preview = message.flatMap { CompletionPreview($0, sourceShortened: messageShortened) }
+        return SpotlightDetails(request: nil, directory: nil, originalPrompt: prompt,
+                                response: preview.map { .available($0) })
     }
 }
 
@@ -43,6 +74,15 @@ public enum ClaudeObservationReader {
     public static let maximumPrompt = 240
     /// The record key the helper sets when it stored only the start of the prompt.
     public static let promptShortenedKey = "prompt_shortened"
+    /// Claude's Stop input field holding its last reply, kept under the same key in Herdly's record.
+    public static let lastMessageKey = "last_assistant_message"
+    /// The record key the helper sets when it stored only the start of the last message.
+    public static let lastMessageShortenedKey = "last_assistant_message_shortened"
+    /// The most of the last message kept: what the card's "Show all" can show.
+    public static let maximumLastMessage = CompletionPreview.maximumFullCharacters
+    /// A byte cap on the kept message, so even a message JSON doubles when escaping keeps its record
+    /// well under `maximumRecordSize`; otherwise the whole Stop record would be ignored.
+    public static let maximumLastMessageBytes = 32 * 1024
     public static let maximumToolFreshness: Double = 30
 
     // `@unchecked Sendable`: `toolInput` holds only the immutable Foundation property-list values
@@ -56,6 +96,8 @@ public enum ClaudeObservationReader {
         let promptID: String?
         let prompt: String?
         let promptShortened: Bool
+        /// A Stop's bounded last message and whether it was shortened.
+        let lastMessage: (text: String, shortened: Bool)?
         let toolName: String?
         let toolUseID: String?
         let helperRequestID: String?
@@ -79,6 +121,8 @@ public enum ClaudeObservationReader {
         let prompt: String
         var promptText: String?
         var promptShortened: Bool
+        /// The latest Stop's last message; cleared when the turn goes on after it.
+        var lastMessage: (text: String, shortened: Bool)?
         var startedAt: Double
         var updatedAt: Double
         var tool: Tool?
@@ -198,7 +242,7 @@ public enum ClaudeObservationReader {
                     turns[turnID] = Turn(session: record.session, prompt: promptID,
                                          promptText: prompt?.text,
                                          promptShortened: prompt.map { record.promptShortened || $0.shortened } ?? false,
-                                         startedAt: record.capturedAt,
+                                         lastMessage: nil, startedAt: record.capturedAt,
                                          updatedAt: record.capturedAt, tool: nil, tools: [:], question: nil,
                                          approval: nil, terminal: nil, provisionalStopAt: nil, closedAt: nil)
                 }
@@ -214,6 +258,7 @@ public enum ClaudeObservationReader {
                     turn.closedAt = nil
                     turn.terminal = nil
                     turn.provisionalStopAt = nil
+                    turn.lastMessage = nil
                 }
                 if let endedAt = sessionEndAt[record.session], record.capturedAt > endedAt {
                     endedSessions.remove(record.session)
@@ -309,6 +354,7 @@ public enum ClaudeObservationReader {
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                 turn.closedAt = max(turn.closedAt ?? record.capturedAt, record.capturedAt)
                 turn.provisionalStopAt = nil
+                turn.lastMessage = nil
                 turn.terminal = AgentOutcome(session: identity, turn: promptID, status: .failed,
                                              arrivedAt: record.capturedAt)
                 turns[turnID] = turn
@@ -327,6 +373,8 @@ public enum ClaudeObservationReader {
                     turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                     turn.closedAt = max(turn.closedAt ?? record.capturedAt, record.capturedAt)
                     turn.provisionalStopAt = record.capturedAt
+                    // The latest Stop decides: one without a message never keeps an earlier Stop's.
+                    turn.lastMessage = record.lastMessage
                     turns[turnID] = turn
                 }
             default:
@@ -370,7 +418,16 @@ public enum ClaudeObservationReader {
             }
             return result
         }
-        return (ClaudeObservationScan(sourceScope: scope, observations: observations), next)
+        var results: [AgentTurnIdentity: ClaudeTurnResult] = [:]
+        for turn in turns.values where turn.promptText != nil || turn.lastMessage != nil {
+            let identity = AgentTurnIdentity(session: AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                                           session: turn.session, surface: .cli),
+                                             turn: turn.prompt)
+            results[identity] = ClaudeTurnResult(identity: identity, prompt: turn.promptText,
+                                                 message: turn.lastMessage?.text,
+                                                 messageShortened: turn.lastMessage?.shortened ?? false)
+        }
+        return (ClaudeObservationScan(sourceScope: scope, observations: observations, results: results), next)
     }
 
     private static func record(at url: URL, installationID: String, observingSince: Double) -> Record? {
@@ -388,6 +445,10 @@ public enum ClaudeObservationReader {
         return Record(fileName: url.lastPathComponent, event: event, session: session, capturedAt: captured,
                       promptID: object["prompt_id"] as? String, prompt: object["prompt"] as? String,
                       promptShortened: object[promptShortenedKey] as? Bool ?? false,
+                      lastMessage: event == "Stop"
+                        ? lastMessage(object[lastMessageKey] as? String).map {
+                            ($0.text, $0.shortened || object[lastMessageShortenedKey] as? Bool == true)
+                        } : nil,
                       toolName: object["tool_name"] as? String, toolUseID: object["tool_use_id"] as? String,
                       helperRequestID: valid(object["helper_request_id"] as? String),
                       hookRequestID: valid(object["approval_request_id"] as? String),
@@ -446,6 +507,35 @@ public enum ClaudeObservationReader {
         guard let value, !value.contains(where: { $0 == "\u{1b}" || $0 == "\u{7}" || $0 == "\u{0}" }),
               let text = QuestionPrompt.display(value, limit: maximumPrompt) else { return nil }
         return (text, QuestionPrompt.displayIsTruncated(value, limit: maximumPrompt))
+    }
+
+    /// Claude's last message as the helper stores it and the reader re-reads it: line breaks kept
+    /// (CR and CRLF become LF), tabs kept, every other control character removed, trimmed, and past
+    /// `maximumLastMessage` characters or `maximumLastMessageBytes` UTF-8 bytes cut to its start, with no
+    /// ellipsis (the card adds one). Nil when nothing readable is left.
+    public static func lastMessage(_ value: String?) -> (text: String, shortened: Bool)? {
+        guard let value else { return nil }
+        let lines = value.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
+        var scalars = String.UnicodeScalarView()
+        for scalar in lines.unicodeScalars where scalar == "\n" || scalar == "\t"
+            || !(scalar.properties.generalCategory == .control) {
+            scalars.append(scalar)
+        }
+        let text = String(scalars).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        var kept = ""
+        var bytes = 0
+        var count = 0
+        for character in text {
+            let size = character.utf8.count
+            guard count < maximumLastMessage, bytes + size <= maximumLastMessageBytes else {
+                return (kept.trimmingCharacters(in: .whitespacesAndNewlines), true)
+            }
+            kept.append(character)
+            bytes += size
+            count += 1
+        }
+        return (kept, false)
     }
 
     private static func boundedText(_ value: String?, limit: Int = maximumIdentifier) -> String? {
