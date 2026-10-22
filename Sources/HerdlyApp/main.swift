@@ -1388,6 +1388,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let scan = result.0
             let desktopEvents = result.1
             let readState = result.2
+            let claudeObservationScans = result.8
             guard eventsPath.isEmpty || eventsPath == events.path else { scanning = false; refresh(); return }
             self.rolloutCache = scan.rolloutCache
             self.hookCache = result.13
@@ -1396,7 +1397,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let previousAgent = Set(agentQueue.items(at: Date().timeIntervalSince1970).map(\.id))
             let scanNow = Date().timeIntervalSince1970
             var approvalReceiptWork: [ClaudeApprovalReceiptWork] = []
-            for (root, claudeScan) in zip(claudeRoots, result.8) {
+            for (root, claudeScan) in zip(claudeRoots, claudeObservationScans) {
                 for approval in claudeScan.observations.compactMap({ observation -> AgentApproval? in
                     if case let .approval(value) = observation { return value }
                     return nil
@@ -1415,15 +1416,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 }
             }
             var scannedAgent = agentQueue
-            for claudeScan in result.8 {
+            for claudeScan in claudeObservationScans {
                 scannedAgent.apply(claudeScan, now: scanNow)
             }
             if scannedAgent != agentQueue { agentQueue = scannedAgent }
             // An unavailable root keeps its last results, as it keeps its queue state; a root no
             // longer connected drops them.
-            let connectedScopes = Set(result.8.map(\.sourceScope))
+            let connectedScopes = Set(claudeObservationScans.map(\.sourceScope))
             var turnResults = claudeTurnResults.filter { connectedScopes.contains($0.key.session.sourceScope) }
-            for claudeScan in result.8 where claudeScan.available {
+            for claudeScan in claudeObservationScans where claudeScan.available {
                 turnResults = turnResults.filter { $0.key.session.sourceScope != claudeScan.sourceScope }
                 turnResults.merge(claudeScan.results) { _, latest in latest }
             }
@@ -1467,7 +1468,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             }
             pruneClaudeQuestionState(now: scanNow, roots: currentClaudeQuestionRoots(),
                                      pendingIDs: pendingClaudeQuestionIDs,
-                                     observedIDs: observedClaudeQuestionIDs(result.8))
+                                     observedIDs: observedClaudeQuestionIDs(claudeObservationScans))
             // A root can contain many pending rendezvous files. Writes happen off the main actor;
             // the completion rechecks the scan generation, root identity, and request deadline.
             publishClaudeQuestionReceipts(receiptWork)
