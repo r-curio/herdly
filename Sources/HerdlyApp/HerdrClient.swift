@@ -397,9 +397,6 @@ enum HerdrProcessTree {
             let bytes = path.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
             return URL(fileURLWithPath: String(decoding: bytes, as: UTF8.self)).lastPathComponent
         }
-        var name = info.kp_proc.p_comm
-        return withUnsafeBytes(of: &name) { raw in
-            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
-        }
+        return KernelProcessTable.shortName(info)
     }
 }

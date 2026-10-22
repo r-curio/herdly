@@ -49,7 +49,13 @@ enum KernelProcessTable {
         return KernelProcessArguments.parse(Array(buffer.prefix(size)))
     }
 
-    /// The kernel's short command name (`p_comm`).
+    /// Whether `device` (`kp_eproc.e_tdev`) names a controlling terminal; the kernel reports none as
+    /// `NODEV`, all bits set.
+    static func isTerminal(_ device: dev_t) -> Bool {
+        device != ~dev_t(0)
+    }
+
+    /// The kernel's short command name (`p_comm`, at most 16 bytes).
     static func shortName(_ process: kinfo_proc) -> String {
         withUnsafeBytes(of: process.kp_proc.p_comm) { raw in
             String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
@@ -101,7 +107,7 @@ enum KernelProcessTable {
     /// A character device number names the same tty for as long as the system runs, so found names are
     /// kept (#301); a miss is looked up again next time.
     static func ttyName(_ device: dev_t) -> String? {
-        guard device != ~dev_t(0) else { return nil }
+        guard isTerminal(device) else { return nil }
         if let known = ttyNames.name(device) { return known }
         // `devname_r`: reads run from several tasks at once, and `devname` shares one buffer.
         var buffer = [CChar](repeating: 0, count: 64)

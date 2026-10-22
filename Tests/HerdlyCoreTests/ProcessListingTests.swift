@@ -91,7 +91,7 @@ private let table = [launchd, ghostty, login, loginShell, herdr, herdrServer, co
         97265     1   503 ??       \(codexHome)
 
         """
-    let formatted = ProcessListing.pidPPIDUIDTTYComm(table)
+    let formatted = try #require(ProcessListing.pidPPIDUIDTTYComm(table, limit: 1 << 20))
     // Root's rows carry the kernel's short name where `ps` shows the path; the basename is the same.
     let fixtureLines = fixture.split(separator: "\n"), formattedLines = formatted.split(separator: "\n")
     for (ps, ours) in zip(fixtureLines, formattedLines) where ps.contains("   503 ") {
@@ -127,8 +127,19 @@ private let table = [launchd, ghostty, login, loginShell, herdr, herdrServer, co
 }
 
 @Test func parentShapeMatchesPS() {
-    #expect(ProcessListing.pidPPID([launchd, login, loginShell, appServer])
+    #expect(ProcessListing.pidPPID([launchd, login, loginShell, appServer], limit: 1 << 20)
                 == "    1     0\n17717 17676\n17726 17717\n97265     1\n")
+}
+
+@Test func everyShapeStopsAtItsLimit() throws {
+    let parents = try #require(ProcessListing.pidPPID([sleeper], limit: 1 << 20))
+    #expect(ProcessListing.pidPPID([sleeper], limit: parents.utf8.count) == parents)
+    #expect(ProcessListing.pidPPID([sleeper], limit: parents.utf8.count - 1) == nil)
+    #expect(ProcessListing.pidPPID([sleeper, appServer], limit: parents.utf8.count) == nil)
+    let rows = try #require(ProcessListing.pidPPIDUIDTTYComm([sleeper], limit: 1 << 20))
+    #expect(ProcessListing.pidPPIDUIDTTYComm([sleeper], limit: rows.utf8.count) == rows)
+    #expect(ProcessListing.pidPPIDUIDTTYComm([sleeper], limit: rows.utf8.count - 1) == nil)
+    #expect(ProcessListing.pidPPIDUIDTTYComm([sleeper, appServer], limit: rows.utf8.count) == nil)
 }
 
 @Test func anEmptyFirstArgumentFallsBackToTheShortName() {

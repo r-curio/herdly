@@ -201,7 +201,7 @@ enum GhosttySurfaces {
         var result: [String] = []
         for process in table where parents.contains(process.kp_eproc.e_ppid) {
             let device = process.kp_eproc.e_tdev
-            guard device != -1 else { continue }
+            guard KernelProcessTable.isTerminal(device) else { continue }
             // `devname_r`: snapshots run from several tasks at once, and `devname` shares one buffer.
             var buffer = [CChar](repeating: 0, count: 64)
             guard devname_r(device, S_IFCHR, &buffer, Int32(buffer.count)) != nil else { return nil }

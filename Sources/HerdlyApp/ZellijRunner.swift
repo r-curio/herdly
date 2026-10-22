@@ -72,11 +72,12 @@ enum ZellijRunner {
     /// (#303): the table in `ps -axo pid=,ppid=,uid=,tty=,comm=` form, so `ZellijProcessTable.parse` reads
     /// it exactly as it read `ps`.
     static func processTable() -> ZellijProcessTable? {
-        // Only this user's processes can be Zellij clients or servers (ADR 0014), so only their vectors
-        // are read; the rest show the kernel's short name as `comm`.
+        // Every own process's vector, not only `zellij`'s: `comm` is argv[0], and Zellij targeting finds
+        // `codex` under a server by it, where `p_comm` can differ (the exec'd file's name, cut at 16 bytes).
+        // Other users' processes are never clients or servers (ADR 0014) and show the kernel's short name.
         guard let records = KernelProcessTable.records(arguments: .owner(getuid())),
-              let parsed = ZellijProcessTable.parse(ProcessListing.pidPPIDUIDTTYComm(records), owner: getuid(),
-                                                    arguments: [:], startTimes: [:]) else { return nil }
+              let table = ProcessListing.pidPPIDUIDTTYComm(records, limit: ZellijListing.maximumOutput),
+              let parsed = ZellijProcessTable.parse(table, owner: getuid(), arguments: [:], startTimes: [:]) else { return nil }
         var vectors: [Int32: [String]] = [:]
         for record in records { if let argv = record.arguments { vectors[record.pid] = argv } }
         var arguments: [Int32: [String]] = [:]

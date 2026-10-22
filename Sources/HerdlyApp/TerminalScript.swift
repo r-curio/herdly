@@ -211,7 +211,7 @@ enum TerminalAppProcess {
             .map { process in
                 Candidate(pid: process.kp_proc.p_pid,
                           bundleIdentifier: TerminalApps.appBundleIdentifier(of: process.kp_proc.p_pid),
-                          started: started(process), hasControllingTerminal: process.kp_eproc.e_tdev != -1)
+                          started: started(process), hasControllingTerminal: KernelProcessTable.isTerminal(process.kp_eproc.e_tdev))
             }
         return choose(candidates, bundleIdentifier: bundleIdentifier)
     }

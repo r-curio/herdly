@@ -64,27 +64,28 @@ public enum ProcessListing {
         rows(records.filter { $0.arguments?.isEmpty == false }, limit: limit) { "\(pid($0.pid)) \(args($0))" }
     }
 
-    /// `ps -axo pid=,ppid=,uid=,tty=,comm=`.
-    public static func pidPPIDUIDTTYComm(_ records: [KernelProcessRecord]) -> String {
-        rows(records) { record in
+    /// `ps -axo pid=,ppid=,uid=,tty=,comm=`; nil once the text would pass `limit` bytes.
+    public static func pidPPIDUIDTTYComm(_ records: [KernelProcessRecord], limit: Int) -> String? {
+        rows(records, limit: limit) { record in
             let tty = (record.tty ?? "??").padding(toLength: max(8, (record.tty ?? "??").count), withPad: " ", startingAt: 0)
             return "\(pid(record.pid)) \(pid(record.ppid)) \(column(String(record.uid))) \(tty) \(command(record))"
-        } ?? ""
+        }
     }
 
     /// `ps -o pid=,stat=,comm= -t <tty>`: only the processes whose controlling terminal is `tty` (`ttys003`);
     /// nil once the text would pass `limit` bytes. Of `stat`, only the `+` flag is sure to match `ps`; the
     /// state letter may differ (see `stat`).
     public static func pidStatComm(_ records: [KernelProcessRecord], tty: String, limit: Int) -> String? {
+        // A safety net: HerdlyApp already reads only this tty's processes (`KERN_PROC_TTY`).
         rows(records.filter { $0.tty == tty }, limit: limit) { record in
             let stat = stat(record)
             return "\(pid(record.pid)) \(stat.padding(toLength: max(4, stat.count), withPad: " ", startingAt: 0)) \(command(record))"
         }
     }
 
-    /// `ps -axo pid=,ppid=`.
-    public static func pidPPID(_ records: [KernelProcessRecord]) -> String {
-        rows(records) { "\(pid($0.pid)) \(pid($0.ppid))" } ?? ""
+    /// `ps -axo pid=,ppid=`; nil once the text would pass `limit` bytes.
+    public static func pidPPID(_ records: [KernelProcessRecord], limit: Int) -> String? {
+        rows(records, limit: limit) { "\(pid($0.pid)) \(pid($0.ppid))" }
     }
 
     /// `ps`'s `comm`: `argv[0]`, which a process may rewrite (`npm run dev`) and a login shell starts with
@@ -132,7 +133,7 @@ public enum ProcessListing {
     }
 
     /// The rows in pid order; nil as soon as they pass `limit` bytes, before the rest are built.
-    private static func rows(_ records: [KernelProcessRecord], limit: Int = .max,
+    private static func rows(_ records: [KernelProcessRecord], limit: Int,
                              _ row: (KernelProcessRecord) -> String) -> String? {
         var text = "", bytes = 0
         for record in records.sorted(by: { $0.pid < $1.pid }) {

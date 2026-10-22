@@ -146,8 +146,9 @@ enum ClaudeStatusLineCompatibility {
     /// The processes below `root`, from the kernel's table (#303) in `ps -axo pid=,ppid=` form; nil when
     /// the table is unreadable or too large.
     private static func descendants(of root: pid_t) -> [pid_t]? {
-        guard let records = KernelProcessTable.records(arguments: .none) else { return nil }
-        return parseProcessList(Data(ProcessListing.pidPPID(records).utf8), root: root)
+        guard let records = KernelProcessTable.records(arguments: .none),
+              let listing = ProcessListing.pidPPID(records, limit: maximumProcessListBytes) else { return nil }
+        return parseProcessList(Data(listing.utf8), root: root)
     }
 
     static func parseProcessList(_ data: Data, root: pid_t) -> [pid_t]? {
