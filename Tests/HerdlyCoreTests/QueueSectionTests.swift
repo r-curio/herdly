@@ -296,13 +296,14 @@ private func earlierQueue(approvals: Int = 0, fresh: Int = 0, earlier: Int = 0, 
     return queue.items(at: 1_001)
 }
 
-private func earlierSections(_ items: [AgentAttentionItem], opened: Bool, grouping: QueueGrouping = .none) -> QueueSections {
-    QueueSections.make(items, grouping: grouping, project: { _ in nil }, kindSections: true, earlierOpened: opened)
+private func earlierSections(_ items: [AgentAttentionItem], _ choice: EarlierFold.Choice = .automatic,
+                             grouping: QueueGrouping = .none) -> QueueSections {
+    QueueSections.make(items, grouping: grouping, project: { _ in nil }, kindSections: true, earlier: choice)
 }
 
 @Test func earlierFoldsWhileAnotherRowNeedsTheUser() {
     // A recent result needs checking: Earlier opens folded (A3).
-    let sections = earlierSections(earlierQueue(fresh: 1, earlier: 3), opened: false)
+    let sections = earlierSections(earlierQueue(fresh: 1, earlier: 3))
     #expect(sections.earlierFolded)
     let check = sections.attention[0]
     #expect(check.earlierFolded)
@@ -310,29 +311,36 @@ private func earlierSections(_ items: [AgentAttentionItem], opened: Bool, groupi
     #expect(check.shownItems.map(\.kind) == [.outcome])
     #expect(check.folded == 0)
     // An approval counts too, even with no recent result.
-    #expect(earlierSections(earlierQueue(approvals: 1, earlier: 2), opened: false).earlierFolded)
+    #expect(earlierSections(earlierQueue(approvals: 1, earlier: 2)).earlierFolded)
 }
 
 @Test func earlierShowsOpenWhenNothingElseNeedsTheUser() {
     // A5: Earlier results alone, or beside working rows, show open.
-    #expect(!earlierSections(earlierQueue(earlier: 3), opened: false).earlierFolded)
-    let withWork = earlierSections(earlierQueue(earlier: 3, running: 2), opened: false)
+    #expect(!earlierSections(earlierQueue(earlier: 3)).earlierFolded)
+    let withWork = earlierSections(earlierQueue(earlier: 3, running: 2))
     #expect(!withWork.earlierFolded)
     #expect(withWork.attention[0].shownItems.count == 3)
     // No Earlier rows: nothing to fold.
-    #expect(!earlierSections(earlierQueue(fresh: 2), opened: false).earlierFolded)
+    #expect(!earlierSections(earlierQueue(fresh: 2)).earlierFolded)
+}
+
+@Test func theUserCanFoldAnEarlierThatShowedOpen() {
+    // With nothing else to check Earlier shows open; a click on its heading folds it all the same.
+    let folded = earlierSections(earlierQueue(earlier: 3, running: 1), .folded)
+    #expect(folded.earlierFolded)
+    #expect(folded.selectableItems(workingOpen: true).allSatisfy { $0.kind != .earlierOutcome })
 }
 
 @Test func anEarlierFoldTheUserOpenedStaysOpen() {
     // A4: once opened it shows its rows whatever else needs the user.
-    let opened = earlierSections(earlierQueue(approvals: 1, fresh: 1, earlier: 3), opened: true)
+    let opened = earlierSections(earlierQueue(approvals: 1, fresh: 1, earlier: 3), .opened)
     #expect(!opened.earlierFolded)
     #expect(opened.attention[1].shownItems.map(\.kind) == [.outcome, .earlierOutcome, .earlierOutcome, .earlierOutcome])
 }
 
 @Test func theArrowsSkipTheRowsOfAFoldedEarlier() {
     let items = earlierQueue(fresh: 1, earlier: 3, running: 1)
-    let folded = earlierSections(items, opened: false)
+    let folded = earlierSections(items)
     let earlier = items.filter { $0.kind == .earlierOutcome }.map(\.id)
     let fresh = items.first { $0.kind == .outcome }!.id
     // The folded heading is one stop, held by its first Earlier result; the rows behind it are not.
@@ -344,14 +352,14 @@ private func earlierSections(_ items: [AgentAttentionItem], opened: Bool, groupi
     selection.reconcile(rows: rows)
     #expect(selection.selected == nil)
     // Opened, every Earlier row is a stop and the heading is not.
-    let opened = earlierSections(items, opened: true)
+    let opened = earlierSections(items, .opened)
     #expect(opened.selectableRows(workingOpen: false) == [fresh] + earlier)
     #expect(opened.earlierHeadingStops.isEmpty)
 }
 
 @Test func dismissAllCountsTheFoldedEarlierRows() {
     let items = earlierQueue(fresh: 1, earlier: 4)
-    let check = earlierSections(items, opened: false).attention[0]
+    let check = earlierSections(items).attention[0]
     #expect(check.earlierFolded)
     #expect(check.earlierIDs == items.filter { $0.kind == .earlierOutcome }.map(\.id))
     #expect(!check.earlierIDs.contains(items.first { $0.kind == .outcome }!.id))
@@ -361,7 +369,7 @@ private func earlierSections(_ items: [AgentAttentionItem], opened: Bool, groupi
     // 4 approvals and 9 recent results fold Check behind "+N more"; folded Earlier rows take no
     // budget and are not behind the pill, which counts only the hidden recent results.
     let items = earlierQueue(approvals: 4, fresh: 9, earlier: 5)
-    let check = earlierSections(items, opened: false).attention[1]
+    let check = earlierSections(items).attention[1]
     #expect(check.earlierFolded)
     let shownFresh = check.shownItems.filter { $0.kind == .outcome }.count
     #expect(check.folded == 9 - shownFresh)
@@ -371,7 +379,7 @@ private func earlierSections(_ items: [AgentAttentionItem], opened: Bool, groupi
 
 @Test func everyGroupingFoldsEarlier() {
     let items = earlierQueue(fresh: 1, earlier: 2)
-    let byState = earlierSections(items, opened: false, grouping: .state)
+    let byState = earlierSections(items, grouping: .state)
     #expect(byState.earlierFolded)
     #expect(byState.attention.allSatisfy { $0.earlierIDs.isEmpty || $0.earlierFolded })
     #expect(byState.selectableItems(workingOpen: false).allSatisfy { $0.kind != .earlierOutcome })

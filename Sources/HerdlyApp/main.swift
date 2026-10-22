@@ -148,6 +148,8 @@ final class NotchPanel: NSPanel {
     /// the key continues to AppKit.
     var onMoveSelection: ((QueueRowSelection.Direction) -> Bool)?
     var onReturn: (() -> Bool)?
+    /// → on the selected stop: opens a folded Earlier heading (D34); otherwise unhandled.
+    var onRight: (() -> Bool)?
     /// A digit 1 through 9 selects that option on a question card (#321); it never sends.
     var onDigit: ((Int) -> Bool)?
 
@@ -157,6 +159,7 @@ final class NotchPanel: NSPanel {
         static let keypadEnter: UInt16 = 76
         static let downArrow: UInt16 = 125
         static let upArrow: UInt16 = 126
+        static let rightArrow: UInt16 = 124
     }
     /// True once the user has clicked in the panel; launch or app activation can also make the
     /// panel key, and that must not count as the user interacting with it.
@@ -185,6 +188,7 @@ final class NotchPanel: NSPanel {
         switch (modifiers.isEmpty, event.keyCode) {
         case (true, KeyCode.downArrow): handled = onMoveSelection?(.down) ?? false
         case (true, KeyCode.upArrow): handled = onMoveSelection?(.up) ?? false
+        case (true, KeyCode.rightArrow): handled = onRight?() ?? false
         case (true, KeyCode.returnKey), (true, KeyCode.keypadEnter): handled = onReturn?() ?? false
         default:
             if modifiers.isEmpty, let characters = event.charactersIgnoringModifiers, characters.count == 1,
@@ -640,6 +644,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var workingFoldOpen = false {
         didSet { if workingFoldOpen != oldValue { reconcileSelection() } }
     }
+    /// The user's choice on the Earlier heading (D34); back to automatic whenever the panel collapses.
+    /// Automatic folds Earlier only while something else needs the user (`EarlierFold`).
+    @Published var earlierFold: EarlierFold.Choice = .automatic {
+        didSet { if earlierFold != oldValue { reconcileSelection() } }
+    }
     /// Kind sections whose "+N more" the user opened; closed again whenever the panel collapses.
     @Published var openQueueFolds: Set<QueueKindSection> = [] {
         didSet { if openQueueFolds != oldValue { reconcileSelection() } }
@@ -664,10 +673,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         let grouping = presentationMode.showsAll ? appearance.grouping : .none
         return QueueSections.make(items, grouping: grouping, project: projectFolder(for:),
-                                  kindSections: presentationMode.showsAll, openSections: openQueueFolds)
+                                  kindSections: presentationMode.showsAll, openSections: openQueueFolds,
+                                  earlier: presentationMode.showsAll ? earlierFold : .opened)
     }
     /// The open queue's rows in reading order as they are on screen: the arrows step through these,
-    /// skipping a closed working fold.
+    /// skipping a closed working fold and the rows of a folded Earlier, whose heading is one stop.
     var selectableRows: [AgentAttentionID] {
         presentationMode.showsAll ? visibleSections.selectableRows(workingOpen: workingFoldOpen) : []
     }
@@ -817,6 +827,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             guard let self else { return false }
             return self.pressQuestionCardKey(.primary) || self.activateSelectedRow()
         }
+        panel.onRight = { [weak self] in self?.openSelectedEarlierFold() ?? false }
         panel.onDigit = { [weak self] in self?.pressQuestionCardKey(.digit($0)) ?? false }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
@@ -1893,6 +1904,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             expanded = presentationMode.expanded
             if !expanded {
                 workingFoldOpen = false
+                earlierFold = .automatic
                 openQueueFolds = []
                 closeOpenRunningRow()
             }
@@ -2093,7 +2105,22 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func activateSelectedRow() -> Bool {
         reconcileSelection()
         guard let selected = queueSelection.selected else { return false }
-        return activateRow(selected)
+        return openSelectedEarlierFold() || activateRow(selected)
+    }
+
+    /// Return or → on a folded Earlier heading opens the fold (D34); the selection stays on its stop,
+    /// which is then the first Earlier row. False on any other stop, so the key goes on.
+    func openSelectedEarlierFold() -> Bool {
+        guard presentationMode.showsAll, let selected = queueSelection.selected,
+              visibleSections.earlierHeadingStops.contains(selected) else { return false }
+        setEarlierFold(.opened)
+        return true
+    }
+
+    /// Opens or folds Earlier from its heading or a key, as `NotchDisclosure` does: at once under
+    /// Reduce Motion, otherwise with the disclosure's short ease.
+    func setEarlierFold(_ choice: EarlierFold.Choice) {
+        if reduceMotion { earlierFold = choice } else { withAnimation(.easeOut(duration: 0.12)) { earlierFold = choice } }
     }
 
     /// Collapses the panel and hands keyboard input back to the app the user was using.

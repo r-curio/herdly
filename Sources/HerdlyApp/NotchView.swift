@@ -940,6 +940,83 @@ struct MoreRowsPill: View {
     }
 }
 
+/// A result row's quiet control (D34, #347): a 22pt square with a 10pt × in a 1.4pt dim stroke and no
+/// fill, in the fixed lane after the age. Hover or keyboard focus draws the gray well under an ink ×.
+/// The caller gives the spoken label ("Dismiss completion: …", "Remove: …") and any hint.
+struct RowGlyphButton: View {
+    static let lane: CGFloat = 22
+    let action: () -> Void
+    @FocusState private var focused: Bool
+    @State private var hovered = false
+    var body: some View {
+        let lit = hovered || focused
+        Button(action: action) {
+            Path { path in
+                path.move(to: CGPoint(x: 2, y: 2)); path.addLine(to: CGPoint(x: 8, y: 8))
+                path.move(to: CGPoint(x: 8, y: 2)); path.addLine(to: CGPoint(x: 2, y: 8))
+            }
+            .stroke(lit ? NotchStyle.ink : NotchStyle.dim, style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+            .frame(width: 10, height: 10)
+            .frame(width: Self.lane, height: Self.lane)
+            .background(lit ? NotchStyle.well : .clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .focused($focused)
+        .onHover { hovered = $0 }
+    }
+}
+
+/// The Earlier heading (D34, #347): a disclosure in the "N working" fold's manner, its chevron in the
+/// sprite slot, then "Earlier" in 10pt dim and its count in 10pt semibold text gray, like a kind
+/// section's heading. "Dismiss all" is dim 11pt text with no well at the trailing edge, over the ×
+/// lane, shown folded and open; it clears exactly the results the heading counts.
+struct EarlierHeading: View {
+    let count: Int
+    let open: Bool
+    /// The keyboard selection is on this heading (a folded Earlier is one arrow stop).
+    let selected: Bool
+    let toggle: () -> Void
+    let dismissAll: () -> Void
+    @FocusState private var focused: Bool
+    @FocusState private var dismissFocused: Bool
+    var body: some View {
+        let results = count == 1 ? "result" : "results"
+        HStack(alignment: .center, spacing: 8) {
+            Button(action: toggle) {
+                HStack(alignment: .center, spacing: Sprite.slotGap) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold)).foregroundStyle(NotchStyle.text)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                        .frame(width: Sprite.slotWidth, alignment: .leading)
+                    Text("Earlier").font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
+                    Text("\(count)").font(NotchStyle.mono(10, .semibold)).foregroundStyle(NotchStyle.text).monospacedDigit()
+                    Spacer(minLength: 0)
+                }
+                .frame(height: RowGlyphButton.lane)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focused($focused)
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(NotchStyle.ink.opacity(focused || selected ? 0.9 : 0), lineWidth: 1.5).padding(.horizontal, -6))
+            .accessibilityLabel("Earlier, \(count) \(results)")
+            .accessibilityValue(open ? "expanded" : "collapsed")
+            .accessibilityAddTraits(selected ? [.isHeader, .isSelected] : .isHeader)
+            Button(action: dismissAll) {
+                Text("Dismiss all").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                    .frame(height: RowGlyphButton.lane)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .focused($dismissFocused)
+            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .stroke(NotchStyle.ink.opacity(dismissFocused ? 0.9 : 0), lineWidth: 1.5).padding(.horizontal, -4))
+            .accessibilityLabel("Dismiss all \(count) earlier \(results)")
+        }
+    }
+}
+
 /// Reports the open panel's natural content height so the window can be exactly that tall.
 private struct ContentHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
@@ -1561,17 +1638,25 @@ struct Notch: View {
             .accessibilityHint(Self.resultOpenHint(item.session.source))
     }
 
-    /// A result row's one control, inline before the age lane (#322): Dismiss on a result, which
-    /// clears only that turn; Remove on a waiting or status-unknown Claude row once it looks stuck.
-    /// It is its own button in Tab order, a sibling of the row's button, never inside it.
+    /// A result row's one control, a quiet × in the fixed lane after the age (D34, #347): Dismiss on a
+    /// result, which clears only that turn; Remove on a waiting or status-unknown Claude row once it
+    /// looks stuck. A row with neither keeps the lane empty, so the ages line up. It is its own button
+    /// in Tab order, a sibling of the row's button, never inside it.
     @ViewBuilder
     private func resultRowControl(_ item: AgentAttentionItem, subject: String) -> some View {
-        if item.outcome != nil {
-            NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
-                .accessibilityLabel("Dismiss completion: \(subject)")
-        } else {
-            claudeRemoveControl(item, subject: subject)
+        Group {
+            if item.outcome != nil {
+                RowGlyphButton { model.dismissAgent(item.id) }
+                    .accessibilityLabel("Dismiss completion: \(subject)")
+            } else if model.canRemoveAgentRow(item) {
+                RowGlyphButton { model.removeAgentRow(item) }
+                    .accessibilityLabel("Remove: \(subject)")
+                    .accessibilityHint(Self.removeHint)
+            } else {
+                Color.clear.accessibilityHidden(true)
+            }
         }
+        .frame(width: RowGlyphButton.lane, height: RowGlyphButton.lane)
     }
 
     /// A result's Open (#323): beside a result row's "Not delivered · reply in …" note, where the user
@@ -2090,8 +2175,8 @@ struct Notch: View {
         // "Not delivered · answer in Claude" keeps its Open inline on the row line, before the age.
         let opensFromNote = inQueue && approvalRow && rowNote(item)?.offersOpen == true
         // #322: a result row in the open queue (Earlier included) is one line: the header opens the
-        // session, Dismiss (or Remove) sits before the age, and an unreachable row's reason line sits
-        // under the name. Its body, reply field and preview stay on the spotlight card.
+        // session, Dismiss (or Remove) is a × after the age (D34), and an unreachable row's reason
+        // line sits under the name. Its body, reply field and preview stay on the spotlight card.
         let resultRow = inQueue && !spotlit && item.kind.opensSession
         // Whether Approve and Deny are this card's to offer; one rule with the decide path.
         let decidable = spotlit && approvalRow && model.canDecide(item)
@@ -2122,17 +2207,20 @@ struct Notch: View {
                             headerLine(item, working: working, countdown: nil)
                         }
                     } else if resultRow, let reading = sessionReading {
-                        // The control sits outside the row's own button, so the two never nest.
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            sessionOpener(item, target: reading.target) {
-                                headerLine(item, working: working, countdown: nil, target: reading.target, showsAge: false)
-                            }
-                            if rowNote(item)?.offersOpen == true {
-                                // "Not delivered · reply in Codex": Open beside the note, as on an approval row.
-                                resultOpen(item, subject: subject, codexOpen: codexOpen, target: reading.target)
+                        // The control sits outside the row's own button, so the two never nest. It
+                        // follows the age in its own fixed lane (D34), centred on the text line.
+                        HStack(alignment: .center, spacing: 8) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                sessionOpener(item, target: reading.target) {
+                                    headerLine(item, working: working, countdown: nil, target: reading.target, showsAge: false)
+                                }
+                                if rowNote(item)?.offersOpen == true {
+                                    // "Not delivered · reply in Codex": Open beside the note, as on an approval row.
+                                    resultOpen(item, subject: subject, codexOpen: codexOpen, target: reading.target)
+                                }
+                                rowAge(item)
                             }
                             resultRowControl(item, subject: subject)
-                            rowAge(item)
                         }
                     } else if opensFromNote {
                         // Open sits outside the row's own button, so the two never nest.
@@ -2161,7 +2249,8 @@ struct Notch: View {
                         }
                     }
                 }
-                .frame(minHeight: inQueue || resultCard ? 26 : nil)
+                // A result row's line is 30pt (D34); other queue rows and the result card keep 26pt.
+                .frame(minHeight: resultRow ? 30 : inQueue || resultCard ? 26 : nil)
                 .modifier(CardRowHover(id: item.id, active: opensAsCard(item) || (resultRow && sessionReading?.target == .reachable),
                                        hovered: $hoveredCardRow,
                                        reduceMotion: model.reduceMotion))
@@ -2303,6 +2392,8 @@ struct Notch: View {
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .stroke(NotchStyle.ink.opacity(selected ? 0.9 : 0), lineWidth: 1.5).padding(.horizontal, -6).padding(.vertical, -4))
         .environment(\.questionCard, item.kind == .question)
+        // Result rows sit 4pt apart (D34): 2pt above and below each.
+        .padding(.vertical, resultRow ? 2 : 0)
     }
 
     /// The spoken heading (`QueueRowPresentation.spokenHeading`): name, place, any row note, the
@@ -2316,9 +2407,9 @@ struct Notch: View {
     /// then at most one word or a live approval's "Ns left", then the age lane. A single approval
     /// card's header (`card`, #320) says its kind instead ("Approve" while it can be decided here,
     /// "Handed back", or none), then the dim source ("CLI", "Claude"); queue rows keep D17 and name
-    /// neither. With `showsAge` false the caller draws the age lane, putting a row note's Open or a
-    /// result row's Dismiss before it. A result row whose session is unreachable (`target`, #322)
-    /// reads "Unreachable" in the word slot.
+    /// neither. With `showsAge` false the caller draws the age lane, putting a row note's Open before
+    /// it; a result row's × lane follows it (D34). A result row whose session is unreachable
+    /// (`target`, #322) reads "Unreachable" in the word slot.
     private func headerLine(_ item: AgentAttentionItem, working: Bool, countdown: ApprovalCountdown?,
                             card: ApprovalCardReading? = nil, target: ResultRowTarget = .reachable,
                             showsAge: Bool = true) -> some View {
@@ -2475,9 +2566,11 @@ struct Notch: View {
         if model.canRemoveAgentRow(item) {
             NotchButton(title: "Remove") { model.removeAgentRow(item) }
                 .accessibilityLabel("Remove: \(subject)")
-                .accessibilityHint("Removes this row from Herdly until the session shows new activity. Claude is not changed.")
+                .accessibilityHint(Self.removeHint)
         }
     }
+
+    private static let removeHint = "Removes this row from Herdly until the session shows new activity. Claude is not changed."
 
     private func claudeOpenButton(_ item: AgentAttentionItem, subject: String, emphasized: Bool,
                                   title: String = "Open Session", hint: String? = nil) -> some View {
@@ -2517,8 +2610,10 @@ struct Notch: View {
     }
 
     /// Rows under their optional group headings, with each run of Earlier rows under its count. Each
-    /// group is its own stack: heading 2pt above its first row, rows on their 26pt heading lines, a
-    /// kind section's "+N more" beneath, and 16pt between groups.
+    /// group is its own stack: heading 2pt above its first row, rows on their 26pt heading lines
+    /// (result rows 30pt, 4pt apart, D34), a kind section's "+N more" beneath, and 16pt between
+    /// groups. A folded Earlier (D34) draws its heading alone; its rows stay in the group, in place,
+    /// so the fold opens without moving anything above it.
     @ViewBuilder
     private func groupRows(_ groups: [QueueGroup]) -> some View {
         let rowTransition = QueueMotion.rowTransition(reduceMotion: model.reduceMotion)
@@ -2537,25 +2632,17 @@ struct Notch: View {
                             // The heading counts every Earlier result in the group, folded ones
                             // included, and Dismiss all clears exactly those.
                             let earlierIDs = group.earlierIDs
-                            let count = earlierIDs.count
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                    Text("Earlier").font(NotchStyle.mono(11, .semibold))
-                                    Text("\(count)").font(NotchStyle.mono(11)).monospacedDigit()
-                                }
-                                .foregroundStyle(NotchStyle.dim)
-                                .accessibilityElement(children: .ignore)
-                                .accessibilityLabel("Earlier, \(count) \(count == 1 ? "result" : "results")")
-                                .accessibilityAddTraits(.isHeader)
-                                Spacer(minLength: 8)
-                                NotchButton(title: "Dismiss all") { model.dismissAgents(earlierIDs) }
-                                    .accessibilityLabel("Dismiss all \(count) earlier \(count == 1 ? "result" : "results")")
-                            }
-                            .padding(.vertical, 4)
-                            .transition(rowTransition)
+                            EarlierHeading(count: earlierIDs.count, open: !group.earlierFolded,
+                                           selected: group.earlierFolded && model.queueSelection.selected == earlierIDs.first,
+                                           toggle: { model.setEarlierFold(group.earlierFolded ? .opened : .folded) },
+                                           dismissAll: { model.dismissAgents(earlierIDs) })
+                                .padding(.vertical, 2)
+                                .transition(rowTransition)
                         }
-                        attentionRow(item)
-                            .transition(rowTransition)
+                        if !(group.earlierFolded && item.kind == .earlierOutcome) {
+                            attentionRow(item)
+                                .transition(rowTransition)
+                        }
                     }
                     if let section = group.section, group.folded > 0 {
                         // Indented to the title, past the sprite slot.

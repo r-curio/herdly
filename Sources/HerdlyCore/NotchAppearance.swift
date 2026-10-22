@@ -217,14 +217,26 @@ public struct QueueGroup: Equatable, Sendable {
 }
 
 /// When the open queue folds its Earlier results behind their heading (D34, agreed 2026-10-22,
-/// #347): while any other row needs the user (a recent result, approval, question, handed-back
-/// request, Claude waiting or status-unknown row), unless the user opened the fold. With nothing
-/// else needing the user, Earlier shows open. Running rows do not count. Presentation only: the
-/// counts, the badge, and what "Dismiss all" clears do not change.
+/// #347). By default Earlier folds while any other row needs the user (a recent result, approval,
+/// question, handed-back request, Claude waiting or status-unknown row) and shows open when nothing
+/// else does; running rows do not count. Once the user opens or folds it from its heading, that
+/// choice holds until the panel collapses. Presentation only: the counts, the badge, and what
+/// "Dismiss all" clears do not change.
 public enum EarlierFold {
-    public static func isFolded(_ items: [AgentAttentionItem], userOpened: Bool) -> Bool {
-        guard !userOpened, items.contains(where: { $0.kind == .earlierOutcome }) else { return false }
-        return items.contains { $0.kind != .earlierOutcome && $0.kind != .running }
+    public enum Choice: Equatable, Sendable {
+        /// The user has not touched the heading since the panel opened: the default rule decides.
+        case automatic
+        case opened
+        case folded
+    }
+
+    public static func isFolded(_ items: [AgentAttentionItem], choice: Choice) -> Bool {
+        guard items.contains(where: { $0.kind == .earlierOutcome }) else { return false }
+        switch choice {
+        case .opened: return false
+        case .folded: return true
+        case .automatic: return items.contains { $0.kind != .earlierOutcome && $0.kind != .running }
+        }
     }
 }
 
@@ -382,16 +394,17 @@ public struct QueueSections: Equatable, Sendable {
     /// `openSections`. With nothing needing the user, the running rows sit unfolded under a "Working"
     /// heading with their count (#319, F1). A card passes no `kindSections` and stays one unheaded row.
     /// Folded working rows drop the State grouping's "Working" heading, since the fold already names
-    /// them; Agent and Project headings stay inside the fold. `earlierOpened` is whether the user
-    /// opened the Earlier fold; Earlier folds by `EarlierFold`'s rule otherwise (D34). Its default
-    /// leaves Earlier open, as a card shows it.
+    /// them; Agent and Project headings stay inside the fold. `earlier` is the user's choice on
+    /// the Earlier heading, read by `EarlierFold` (D34); its default leaves Earlier open, as a card
+    /// shows it.
     public static func make(_ items: [AgentAttentionItem], grouping: QueueGrouping,
                             project: (AgentAttentionItem) -> String?, kindSections: Bool = false,
-                            openSections: Set<QueueKindSection> = [], earlierOpened: Bool = true) -> QueueSections {
+                            openSections: Set<QueueKindSection> = [],
+                            earlier: EarlierFold.Choice = .opened) -> QueueSections {
         let needsUser = items.filter { $0.kind != .running }
         let running = items.filter { $0.kind == .running }
         let folds = !needsUser.isEmpty && !running.isEmpty
-        let earlierFolded = EarlierFold.isFolded(items, userOpened: earlierOpened)
+        let earlierFolded = EarlierFold.isFolded(items, choice: earlier)
         let attention = kindSections && grouping == .none
             ? sectionsByKind(needsUser, open: openSections, earlierFolded: earlierFolded)
             : QueueGroups.make(needsUser, grouping: grouping, project: project).map { $0.foldingEarlier(earlierFolded) }
