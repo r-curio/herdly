@@ -27,22 +27,24 @@ private func completion(_ turn: UUID, session: UUID = session, source: Attention
                               .turnStarted(session: session, turn: replyTurn, receivedAt: at(30))]
     // The latest prompt (at 30) acknowledges both earlier turns, not its own turn's completion,
     // another session's completion, or a desktop completion.
-    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events)
+    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events, cliSessions: [])
             == [completion(firstTurn, arrivedAt: 10).id, completion(secondTurn, arrivedAt: 20).id])
     // Events out of order still use the latest prompt.
-    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events.reversed()).count == 2)
+    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events.reversed(), cliSessions: []).count == 2)
 }
 
 @Test func codexReplyKeepsCompletionsArrivingAtOrAfterThePrompt() {
     let completions = [completion(firstTurn, arrivedAt: 30), completion(secondTurn, arrivedAt: 31)]
     let events: [CLIEvent] = [.turnStarted(session: session, turn: replyTurn, receivedAt: at(30))]
-    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events).isEmpty)
+    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events, cliSessions: []).isEmpty)
     // An unparsable prompt time or no prompt acknowledges nothing.
     #expect(CodexReplyAcknowledgment.acknowledged([completion(firstTurn, arrivedAt: 1)],
                                                   events: [.turnStarted(session: session, turn: replyTurn,
-                                                                        receivedAt: "not a time")]).isEmpty)
+                                                                        receivedAt: "not a time")],
+                                                  cliSessions: []).isEmpty)
     #expect(CodexReplyAcknowledgment.acknowledged([completion(firstTurn, arrivedAt: 1)],
-                                                  events: [.sessionStarted(session: session, receivedAt: at(5))]).isEmpty)
+                                                  events: [.sessionStarted(session: session, receivedAt: at(5))],
+                                                  cliSessions: []).isEmpty)
 }
 
 @Test func codexCompletionOutcomeIDMatchesTheMirroredOutcome() {
@@ -66,4 +68,18 @@ private func completion(_ turn: UUID, session: UUID = session, source: Attention
     // A late re-observation does not bring it back.
     queue.apply(CodexAttentionAdapter.observations(completions: [item]), now: item.arrivedAt + 1)
     #expect(queue.snapshot.outcomes.isEmpty)
+}
+
+// Issue #359: a completion queued as desktop while its session was not yet (or no longer) known as
+// CLI clears with that session's later prompt once the scan classifies it CLI again.
+@Test func codexReplyAcknowledgesADesktopLabelledCompletionOfACLISession() {
+    let completions = [completion(firstTurn, source: .desktop, arrivedAt: 10),
+                       completion(replyTurn, source: .desktop, arrivedAt: 20),
+                       completion(secondTurn, source: .desktop, arrivedAt: 40)]
+    let events: [CLIEvent] = [.turnStarted(session: session, turn: replyTurn, receivedAt: at(30))]
+    // Same timing rules as a CLI completion: strictly before the prompt, other turns only.
+    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events, cliSessions: [session])
+            == [completion(firstTurn, source: .desktop, arrivedAt: 10).id])
+    // Not classified CLI in this scan: nothing.
+    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events, cliSessions: [otherSession]).isEmpty)
 }
