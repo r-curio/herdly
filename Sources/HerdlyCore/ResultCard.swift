@@ -1,7 +1,7 @@
 import Foundation
 
 // The result card a finished turn pops (#323, Paper D33, 9NU, 9RW): the header line, the last
-// message, "Your prompt", the reply field where Herdly can reach the session, then Open and Dismiss.
+// message, the reply field where Herdly can reach the session, then Open and Dismiss.
 // These are the card's pure rules; the view and the sends live in HerdlyApp. Nothing here
 // acknowledges a result: seeing the card, unfolding it, or sending leaves it queued, and only the
 // turn the reply starts (`CodexReplyAcknowledgment`), a verified visit, or Dismiss clears it.
@@ -31,13 +31,76 @@ public enum ResultCardReply {
     }
 }
 
-/// Whether the card shows the whole last message or its first five lines with "Show all ›".
-/// Settings › Notifications › "Show the full response" sets how every card starts (on by default);
-/// Show all / Show less flips one card only and never changes the saved choice. A message the
-/// five-line cut left whole has nothing to fold. Neither way acknowledges anything.
+/// How much of the last message a result card starts with: Settings › Notifications › "Response
+/// length" (Paper F, agreed 2026-10-23). Brief is the default.
+public enum ResultResponseLength: String, CaseIterable, Sendable {
+    /// The whole message in its own scroll.
+    case full
+    /// The message's first five lines (`CompletionPreview.text`).
+    case brief
+    /// The message's first line only.
+    case glance
+
+    public static let standard = Self.brief
+
+    public var title: String {
+        switch self {
+        case .full: "Full"
+        case .brief: "Brief"
+        case .glance: "Glance"
+        }
+    }
+
+    /// The saved choice, migrating the old "Show the full response" switch: a readable saved length
+    /// wins; otherwise a saved `true` becomes Full and a saved `false` becomes Brief. No value, or an
+    /// unreadable one, is the Brief default.
+    public static func resolve(saved: String?, legacyShowsFullResponse: Bool?) -> Self {
+        if let saved = saved.flatMap(Self.init(rawValue:)) { return saved }
+        return legacyShowsFullResponse == true ? .full : .standard
+    }
+}
+
+/// What a result card shows of the last message. The saved length sets how every card starts;
+/// "Show all ›" / "Show less" flips one card only (whole from Brief or Glance, five lines from Full)
+/// and never changes the saved choice. A message the length would not shorten has nothing to fold.
+/// Neither way acknowledges anything.
 public enum ResultCardMessage {
-    public static func showsWhole(_ extent: CompletionPreview.Extent, showsFullResponse: Bool, flipped: Bool) -> Bool {
-        extent == .whole || showsFullResponse != flipped
+    public enum Shown: Equatable, Sendable {
+        /// The whole message, in its own scroll.
+        case whole
+        /// The first five lines (`CompletionPreview.text`).
+        case brief
+        /// One line: the message's first line, cut with "…" when it is longer than `maximumGlanceCharacters`.
+        case glance(String)
+    }
+
+    /// About one line of the card's 11pt mono at its default width; the view still cuts a narrower line.
+    public static let maximumGlanceCharacters = 56
+
+    public static func shown(_ preview: CompletionPreview, length: ResultResponseLength, flipped: Bool) -> Shown {
+        guard folds(preview, length: length) else { return .whole }
+        switch (length, flipped) {
+        case (.full, false), (.brief, true), (.glance, true): return .whole
+        case (.full, true), (.brief, false): return .brief
+        case (.glance, false): return .glance(glanceLine(preview))
+        }
+    }
+
+    /// Whether the card offers "Show all ›": only when its length shortened the message.
+    public static func folds(_ preview: CompletionPreview, length: ResultResponseLength) -> Bool {
+        switch length {
+        case .full, .brief: preview.truncated
+        case .glance: preview.truncated || glanceLine(preview) != preview.text
+        }
+    }
+
+    /// The first line that has words, skipping a code fence's opening line. A message with none
+    /// (only fences) keeps its first line.
+    static func glanceLine(_ preview: CompletionPreview) -> String {
+        let lines = preview.text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        let first = lines.first { !$0.isEmpty && !$0.hasPrefix("```") } ?? lines.first ?? ""
+        guard first.count > maximumGlanceCharacters else { return first }
+        return String(first.prefix(maximumGlanceCharacters - 1)).trimmingCharacters(in: .whitespaces) + "…"
     }
 }
 
