@@ -6,7 +6,59 @@ public enum ApprovalTiming {
     public static let scanInterval: TimeInterval = 2
     /// Covers one full scan interval plus scan time before the helper gives up on the companion.
     public static let connectionTimeout: TimeInterval = 5
-    public static let helperWaitBound: TimeInterval = 31
+    /// While the pointer is on the notch a live approval's countdown pauses (ADR 0020), but never
+    /// past this long after its receipt: the hold adds at most `maximumHold - handoffTimeout`.
+    public static let maximumHold: TimeInterval = 120
+    /// A hold starts only with at least this much of the window left, so the helper reads the
+    /// hold before its own deadline passes.
+    public static let holdMargin: TimeInterval = 1
+    public static let helperWaitBound: TimeInterval = maximumHold + 1
+
+    /// The deadline a hook helper keeps for a request whose receipt says `expiresAt`: the hold's
+    /// deadline when it is later, bounded by `maximumHold`. A missing or malformed hold leaves it.
+    public static func heldDeadline(expiresAt: Double, held: Double?) -> Double {
+        guard let held, held.isFinite else { return expiresAt }
+        return min(max(expiresAt, held), expiresAt + maximumHold - handoffTimeout)
+    }
+}
+
+/// The companion's request to keep one live approval open past its receipt deadline, written only
+/// while the user's pointer is on the notch. The hook helper reads it each poll and bounds it with
+/// `ApprovalTiming.heldDeadline`; it never decides anything.
+public struct ApprovalHoldRecord: Codable, Equatable, Sendable {
+    public let requestID: String
+    public let heldUntil: Double
+
+    public init(requestID: String, heldUntil: Double) {
+        self.requestID = requestID
+        self.heldUntil = heldUntil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case requestID = "request_id", heldUntil = "held_until"
+    }
+}
+
+public enum ApprovalHoldStore {
+    public static func codexURL(in directory: URL, id: UUID) -> URL { directory.appendingPathComponent(id.uuidString + ".hold") }
+    public static func claudeURL(in directory: URL, id: String) -> URL { directory.appendingPathComponent(id + ".claude.hold") }
+
+    /// Replaces the hold atomically; a hold only ever moves later while the request is live.
+    @discardableResult public static func publish(_ hold: ApprovalHoldRecord, to url: URL) -> Bool {
+        guard hold.heldUntil.isFinite, let data = try? JSONEncoder().encode(hold),
+              (try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)) != nil else {
+            return false
+        }
+        return (try? data.write(to: url, options: .atomic)) != nil
+    }
+
+    /// The held deadline for exactly `requestID`, or nil when there is no readable, matching hold.
+    public static func heldUntil(at url: URL, requestID: String) -> Double? {
+        guard let bytes = SafeFile.read(url, limit: 4096),
+              let value = try? JSONDecoder().decode(ApprovalHoldRecord.self, from: bytes),
+              value.requestID == requestID, value.heldUntil.isFinite else { return nil }
+        return value.heldUntil
+    }
 }
 
 public enum ApprovalDecision: String, Codable, Sendable {
@@ -99,11 +151,18 @@ public struct ApprovalReceiptRecord: Codable, Equatable, Sendable {
 /// A single serialized decision/deadline race for one helper invocation.
 public final class ApprovalCoordinator: @unchecked Sendable {
     public let requestID: UUID
-    public let expiresAt: Double
+    public private(set) var expiresAt: Double
     private let lock = NSLock()
     private var finished = false
 
     public init(requestID: UUID, expiresAt: Double) { self.requestID = requestID; self.expiresAt = expiresAt }
+
+    /// Moves the deadline later for a hold (ADR 0020); never earlier, and never once settled.
+    public func extend(to deadline: Double) {
+        lock.lock(); defer { lock.unlock() }
+        guard !finished, deadline.isFinite, deadline > expiresAt else { return }
+        expiresAt = deadline
+    }
 
     public func decide(requestID: UUID, decision: ApprovalDecision, at now: Double) -> ApprovalDecision? {
         lock.lock(); defer { lock.unlock() }

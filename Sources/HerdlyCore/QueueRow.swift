@@ -168,7 +168,9 @@ public struct ApprovalCountdown: Equatable, Sendable {
     public init?(arrivedAt: Double, expiresAt: Double, now: Double) {
         let remaining = expiresAt - now
         guard expiresAt.isFinite, now.isFinite, remaining > 0 else { return nil }
-        let window = expiresAt - arrivedAt
+        // A hover hold (ADR 0020) moves the deadline but pauses the time left, so the bar measures
+        // against the request's own window and stands still while held.
+        let window = min(expiresAt - arrivedAt, ApprovalTiming.handoffTimeout)
         let fraction = window.isFinite && window > 0 ? min(1, remaining / window) : 0
         self.init(seconds: Int(min(remaining.rounded(.up), Double(Int32.max))), fraction: fraction)
     }

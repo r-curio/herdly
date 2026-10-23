@@ -243,6 +243,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var verifiedClaudeApprovalReceipts: [String: ClaudeApprovalReceipt] = [:]
     private var verifiedClaudeApprovalRoots: [String: ClaudeApprovalRootKey] = [:]
     private var pendingClaudeApprovalReceipts: Set<String> = []
+    /// Hover holds on live approvals (ADR 0020), in process memory only.
+    private var approvalHover = ApprovalHoverHold<AgentCallIdentity>()
+    /// Each Claude request's held deadline, kept with its verified receipt so the decision recheck
+    /// still sees the hold after the request leaves the queue.
+    private var claudeApprovalHolds: [String: Double] = [:]
+    /// The deadline last written to each hold file, so a file is rewritten only as its lead runs out.
+    private var writtenApprovalHolds: [String: Double] = [:]
     private var pendingClaudeApprovalDecisions: Set<String> = []
     @Published var reminderPresentation = Attention()
     @Published var eventsPath = UserDefaults.standard.string(forKey: "approvalEventsPath") ?? ""
@@ -576,7 +583,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                            details: current.details, hookRequestID: result.requestID)
             agentQueue.apply(.approval(normalized), now: now)
         }
-        verifiedClaudeApprovalReceipts = verifiedClaudeApprovalReceipts.filter { $0.value.expiresAt > now }
+        verifiedClaudeApprovalReceipts = verifiedClaudeApprovalReceipts.filter { claudeDeadline(for: $0.value) > now }
+        claudeApprovalHolds = claudeApprovalHolds.filter { verifiedClaudeApprovalReceipts[$0.key] != nil }
         verifiedClaudeApprovalRoots = verifiedClaudeApprovalRoots.filter {
             verifiedClaudeApprovalReceipts[$0.key] != nil
         }
@@ -607,7 +615,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         guard currentClaudeApprovalRoots().contains(result.work.root),
               result.work.receipt == verifiedClaudeApprovalReceipts[result.work.requestID],
               result.work.root == verifiedClaudeApprovalRoots[result.work.requestID],
-              result.work.receipt.expiresAt > result.work.decidedAt,
+              claudeDeadline(for: result.work.receipt) > result.work.decidedAt,
               result.work.scanGeneration == claudeApprovalScanGeneration || current != nil else {
             // Receipt can no longer be verified against this root and scan; the note says what was written.
             updateRowNote(.claudeDecisionUnverified(published: result.published), for: .approval(result.work.approvalID))
@@ -1737,6 +1745,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         pruneEventRecords()
         // Published values are written back only when they change: each write re-renders the notch,
         // and an unchanged one on every tick and scan was most of Herdly's drawing cost (#306).
+        applyApprovalHolds(now: Date().timeIntervalSince1970)
         var expired = queue
         expired.expire(at: Date().timeIntervalSince1970)
         if expired != queue { queue = expired }
@@ -2327,8 +2336,65 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         guard approval.expiresAt > now, hasClaudeDecisionRoute(approval),
               let requestID = approval.hookRequestID,
               let receipt = verifiedClaudeApprovalReceipts[requestID],
-              receipt.expiresAt > now else { return false }
+              claudeDeadline(for: receipt) > now else { return false }
         return true
+    }
+
+    /// A Claude receipt's deadline with its hover hold, bounded as the helper bounds it.
+    private func claudeDeadline(for receipt: ClaudeApprovalReceipt) -> Double {
+        ApprovalTiming.heldDeadline(expiresAt: receipt.expiresAt, held: claudeApprovalHolds[receipt.requestID])
+    }
+
+    /// ADR 0020: while the pointer is on the notch, each live approval Herdly can decide keeps the
+    /// time it had left, up to `ApprovalTiming.maximumHold` after receipt. The hold is applied to
+    /// both queues and written for the hook helper ahead of the deadline the notch shows, so the
+    /// helper never hands back while the notch still offers Approve. Keyboard focus alone does not
+    /// hold: the user asked for the pointer.
+    private func applyApprovalHolds(now: Double) {
+        let live = agentQueue.liveApprovals.filter { approval in
+            switch approval.identity.session.source {
+            case .codex: codexCLIRequest(for: approval)?.state == .actionable
+            case .claude: hasClaudeDecisionRoute(approval)
+            }
+        }
+        approvalHover.update(hovering: hoverHeld && previewMode == nil,
+                             live: live.map { .init(key: $0.id, expiresAt: $0.expiresAt) }, now: now)
+        var nextAgent = agentQueue
+        nextAgent.hold(approvalHover.deadlines)
+        if nextAgent != agentQueue { agentQueue = nextAgent }
+        var nextQueue = queue
+        for approval in live {
+            guard let deadline = approvalHover.deadlines[approval.id] else { continue }
+            switch approval.identity.session.source {
+            case .codex:
+                guard let request = codexCLIRequest(for: approval), !eventsPath.isEmpty else { continue }
+                nextQueue.hold(request.identity, until: deadline)
+                writeApprovalHold(request.id.uuidString, deadline: deadline,
+                                  to: ApprovalHoldStore.codexURL(in: URL(fileURLWithPath: eventsPath), id: request.id))
+            case .claude:
+                guard let requestID = approval.hookRequestID,
+                      let root = claude.roots.first(where: { $0.url.standardizedFileURL.path == approval.identity.session.sourceScope }),
+                      !root.eventsPath.isEmpty else { continue }
+                claudeApprovalHolds[requestID] = max(claudeApprovalHolds[requestID] ?? 0, deadline)
+                writeApprovalHold(requestID, deadline: deadline,
+                                  to: ApprovalHoldStore.claudeURL(in: URL(fileURLWithPath: root.eventsPath, isDirectory: true),
+                                                                  id: requestID))
+            }
+        }
+        if nextQueue != queue { queue = nextQueue }
+        let held = Set(live.compactMap { $0.hookRequestID ?? (codexCLIRequest(for: $0)?.id.uuidString) })
+        writtenApprovalHolds = writtenApprovalHolds.filter { held.contains($0.key) }
+    }
+
+    /// Writes the helper's hold a second ahead of the notch's deadline, rewriting it only once less
+    /// than half that lead is left. A failed write leaves the helper on its last deadline, which the
+    /// notch's own deadline reaches first only by up to the lead.
+    private func writeApprovalHold(_ requestID: String, deadline: Double, to url: URL) {
+        let lead = 1.0
+        guard deadline + lead / 2 > writtenApprovalHolds[requestID] ?? 0 else { return }
+        if ApprovalHoldStore.publish(ApprovalHoldRecord(requestID: requestID, heldUntil: deadline + lead), to: url) {
+            writtenApprovalHolds[requestID] = deadline + lead
+        }
     }
 
     /// The deadline-free part of `canDecideAgent`: an actionable Claude CLI request whose helper is

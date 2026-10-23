@@ -69,13 +69,20 @@ public struct ClaudeApprovalDelivery: Codable, Equatable, Sendable {
 /// Serializes the one-winner race between an explicit notch decision and the deadline.
 public final class ClaudeApprovalCoordinator: @unchecked Sendable {
     public let requestID: String
-    public let expiresAt: Double
+    public private(set) var expiresAt: Double
     private let lock = NSLock()
     private var finished = false
 
     public init(requestID: String, expiresAt: Double) {
         self.requestID = requestID
         self.expiresAt = expiresAt
+    }
+
+    /// Moves the deadline later for a hold (ADR 0020); never earlier, and never once settled.
+    public func extend(to deadline: Double) {
+        lock.lock(); defer { lock.unlock() }
+        guard !finished, deadline.isFinite, deadline > expiresAt else { return }
+        expiresAt = deadline
     }
 
     public func decide(requestID: String, decision: ApprovalDecision, at now: Double) -> ApprovalDecision? {
@@ -267,8 +274,16 @@ public enum ClaudeApprovalHelper {
         let expiresAt = min(receipt.expiresAt, receipt.receivedAt + handoffTimeout)
         let coordinator = ClaudeApprovalCoordinator(requestID: requestID, expiresAt: expiresAt)
         let started = ProcessInfo.processInfo.systemUptime
-        let hardDeadline = min(started + handoffTimeout + 1, started + waitBound)
+        let holdURL = ApprovalHoldStore.claudeURL(in: directory, id: requestID)
+        var hardDeadline = min(started + handoffTimeout + 1, started + waitBound)
         while ProcessInfo.processInfo.systemUptime < hardDeadline {
+            // A hover hold moves the deadline later, never past the maximum hold (ADR 0020).
+            let held = ApprovalTiming.heldDeadline(expiresAt: expiresAt,
+                                                   held: ApprovalHoldStore.heldUntil(at: holdURL, requestID: requestID))
+            if held > coordinator.expiresAt {
+                coordinator.extend(to: held)
+                hardDeadline = min(started + handoffTimeout + 1 + (held - expiresAt), started + waitBound)
+            }
             if let liveness,
                !ClaudeApprovalStore.publish(ClaudeApprovalLiveness(requestID: requestID,
                                                                    publishedAt: liveness.publishedAt,
