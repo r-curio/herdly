@@ -287,11 +287,16 @@ private func claudeAllows(_ snapshot: GhosttySnapshot?, enabled: Bool = true) ->
     #expect(unbound)
 }
 
-// MARK: Your prompt
+// MARK: The full response setting
 
-@Test func theSettingSetsHowEveryPromptStartsAndAClickFlipsOnlyThatCard() {
-    #expect(!ResultCardPrompt.isOpen(showsFullPrompt: false, flipped: false))
-    #expect(ResultCardPrompt.isOpen(showsFullPrompt: false, flipped: true))
-    #expect(ResultCardPrompt.isOpen(showsFullPrompt: true, flipped: false))
-    #expect(!ResultCardPrompt.isOpen(showsFullPrompt: true, flipped: true))
+@Test func theSettingSetsHowEveryResponseStartsAndShowAllFlipsOnlyThatCard() {
+    let cut = CompletionPreview.Extent.cut(full: "1\n2\n3\n4\n5\n6")
+    #expect(ResultCardMessage.showsWhole(cut, showsFullResponse: true, flipped: false))
+    #expect(!ResultCardMessage.showsWhole(cut, showsFullResponse: true, flipped: true))
+    #expect(!ResultCardMessage.showsWhole(cut, showsFullResponse: false, flipped: false))
+    #expect(ResultCardMessage.showsWhole(cut, showsFullResponse: false, flipped: true))
+}
+
+@Test func aMessageTheCutLeftWholeHasNothingToFold() {
+    #expect(ResultCardMessage.showsWhole(.whole, showsFullResponse: false, flipped: false))
 }

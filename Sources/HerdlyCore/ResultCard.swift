@@ -31,12 +31,13 @@ public enum ResultCardReply {
     }
 }
 
-/// Whether the card's "Your prompt" is open. Settings › Notifications › "Show my full prompt" sets
-/// how every card's prompt starts; a click on one card's toggle flips that card only, and the saved
-/// choice never changes because of it. Unfolding acknowledges nothing.
-public enum ResultCardPrompt {
-    public static func isOpen(showsFullPrompt: Bool, flipped: Bool) -> Bool {
-        showsFullPrompt != flipped
+/// Whether the card shows the whole last message or its first five lines with "Show all ›".
+/// Settings › Notifications › "Show the full response" sets how every card starts (on by default);
+/// Show all / Show less flips one card only and never changes the saved choice. A message the
+/// five-line cut left whole has nothing to fold. Neither way acknowledges anything.
+public enum ResultCardMessage {
+    public static func showsWhole(_ extent: CompletionPreview.Extent, showsFullResponse: Bool, flipped: Bool) -> Bool {
+        extent == .whole || showsFullResponse != flipped
     }
 }
 
