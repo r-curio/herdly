@@ -242,8 +242,9 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     }
     #expect(queue.items.first?.kind == .handedBackRequest)
     #expect(queue.items.first?.request?.expiresAt == 130)
-    // Interaction ends after the original three seconds: the spotlight closes at once.
-    let after = spotlight.update(interacting: false, now: 136)
+    // The three seconds start over from the last interaction (135), not from presentation.
+    #expect(spotlight.update(interacting: false, now: 137.999) == .request(request.identity))
+    let after = spotlight.update(interacting: false, now: 138)
     #expect(after == nil)
     #expect(spotlight.item == nil)
 }

@@ -40,9 +40,18 @@ public enum ApprovalHelper {
                                      waitBound: TimeInterval = ApprovalTiming.helperWaitBound) -> ApprovalDecision {
         let coordinator = ApprovalCoordinator(requestID: request.id, expiresAt: request.expiresAt)
         let started = ProcessInfo.processInfo.systemUptime
-        let expiry = started + handoffTimeout
-        let hardDeadline = min(expiry + 1, started + waitBound)
+        let holdURL = ApprovalHoldStore.codexURL(in: directory, id: request.id)
+        var expiry = started + handoffTimeout
+        var hardDeadline = min(expiry + 1, started + waitBound)
         while ProcessInfo.processInfo.systemUptime < hardDeadline {
+            // A hover hold moves the deadline later, never past the maximum hold (ADR 0020).
+            let held = ApprovalTiming.heldDeadline(expiresAt: request.expiresAt,
+                                                   held: ApprovalHoldStore.heldUntil(at: holdURL, requestID: request.id.uuidString))
+            if held > coordinator.expiresAt {
+                coordinator.extend(to: held)
+                expiry = started + handoffTimeout + (held - request.expiresAt)
+                hardDeadline = min(expiry + 1, started + waitBound)
+            }
             let now = Date().timeIntervalSince1970
             if let bytes = SafeFile.read(ApprovalStore.decisionURL(in: directory, id: request.id), limit: 4096),
                let record = try? JSONDecoder().decode(ApprovalDecisionRecord.self, from: bytes),
@@ -50,10 +59,10 @@ public enum ApprovalHelper {
                let decision = coordinator.decide(requestID: record.requestID, decision: record.decision, at: record.decidedAt) {
                 return decision
             }
-            if ProcessInfo.processInfo.systemUptime >= expiry, let expired = coordinator.expire(at: request.expiresAt) { return expired }
+            if ProcessInfo.processInfo.systemUptime >= expiry, let expired = coordinator.expire(at: coordinator.expiresAt) { return expired }
             Thread.sleep(forTimeInterval: pollInterval)
         }
-        return coordinator.expire(at: request.expiresAt) ?? .noDecision
+        return coordinator.expire(at: coordinator.expiresAt) ?? .noDecision
     }
 
     /// Codex hook output for an explicit user decision; nothing for a handoff.

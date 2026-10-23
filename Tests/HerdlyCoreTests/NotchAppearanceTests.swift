@@ -304,8 +304,9 @@ func eachSpriteKindIsTwoSameSizedFramesWithinTheEighteenByTenPointBox(kind: Spri
     #expect(presentation.update(interacting: true, now: 1) == .agentSpotlight(id))
     #expect(presentation.update(interacting: false, draftInProgress: true, now: 10) == .agentSpotlight(id))
     #expect(presentation.update(interacting: true, draftInProgress: true, now: 11) == .agentSpotlight(id))
-    // Once the text is sent or cleared, it closes when interaction ends, as before.
-    #expect(presentation.update(interacting: false, now: 12) == .collapsed)
+    // Once the text is sent or cleared, its time starts over from the end of the hold.
+    #expect(presentation.update(interacting: false, now: 13.999) == .agentSpotlight(id))
+    #expect(presentation.update(interacting: false, now: 14) == .collapsed)
 }
 
 @Test func unsentTextBlocksAFreshSpotlightButOpensNothingByItself() {

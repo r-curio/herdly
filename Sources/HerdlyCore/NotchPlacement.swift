@@ -410,8 +410,8 @@ public struct HoverHold: Equatable, Sendable {
 }
 
 /// The one item a new completion or approval request opens the panel to show, for three seconds
-/// from presentation. Interaction holds it open; once interaction ends the original deadline
-/// applies, not a new one. It never extends an approval deadline and never acknowledges anything.
+/// from presentation. Interaction holds it open, and the three seconds start over once interaction
+/// ends. It never extends an approval deadline and never acknowledges anything.
 public struct Spotlight: Equatable, Sendable {
     public static let duration: Double = 3
     public private(set) var item: AttentionItemID?
@@ -428,6 +428,7 @@ public struct Spotlight: Equatable, Sendable {
     /// without interaction.
     public mutating func update(interacting: Bool, now: Double) -> AttentionItemID? {
         guard item != nil else { return nil }
+        if interacting { until = now + Spotlight.duration }
         if interacting || now < until { return item }
         clear()
         return nil

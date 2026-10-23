@@ -118,6 +118,11 @@ public struct AgentApproval: Identifiable, Equatable, Codable, Sendable {
         AgentApproval(session: identity.session, turn: identity.turn, call: identity.call, arrivedAt: arrivedAt,
                       expiresAt: expiresAt, state: state, details: details, hookRequestID: hookRequestID)
     }
+
+    func with(expiresAt: Double) -> AgentApproval {
+        AgentApproval(session: identity.session, turn: identity.turn, call: identity.call, arrivedAt: arrivedAt,
+                      expiresAt: expiresAt, state: state, details: details, hookRequestID: hookRequestID)
+    }
 }
 
 public struct AgentQuestion: Identifiable, Equatable, Sendable {
@@ -261,6 +266,9 @@ public struct AgentAttentionQueue: Equatable, Sendable {
     public static let staleRunningAfter: Double = 30 * 60
 
     private var approvals: [AgentCallIdentity: AgentApproval] = [:]
+    /// Hover holds (ADR 0020): later deadlines for live approvals, kept apart from the receipt
+    /// deadline so a rescan, which repeats the receipt, cannot undo them. Never persisted.
+    private var held: [AgentCallIdentity: Double] = [:]
     private var questions: [AgentCallIdentity: AgentQuestion] = [:]
     private var outcomes: [AgentTurnIdentity: AgentOutcome] = [:]
     private var running: [AgentSessionIdentity: AgentRunning] = [:]
@@ -338,7 +346,8 @@ public struct AgentAttentionQueue: Equatable, Sendable {
     /// and questions. Presentation only: Codex's execution order and every deadline are untouched.
     public func items(at now: Double, earlier: EarlierDelay = .fiveMinutes,
                       sort: QueueSort = .needsAttention) -> [AgentAttentionItem] {
-        let approvalItems = approvals.values.map { approval in
+        let approvalItems = approvals.values.map { stored in
+            let approval = heldApproval(stored)
             let expired = approval.state == .actionable && approval.expiresAt <= now
             let current = expired ? approval.with(state: .handedBack) : approval
             return AgentAttentionItem(id: .approval(approval.id),
@@ -618,9 +627,29 @@ public struct AgentAttentionQueue: Equatable, Sendable {
 
     public mutating func expire(at now: Double) {
         self.now = now
-        for id in approvals.keys where approvals[id]?.state == .actionable && approvals[id]!.expiresAt <= now {
+        for id in approvals.keys where approvals[id]?.state == .actionable && heldApproval(approvals[id]!).expiresAt <= now {
             approvals[id] = approvals[id]!.with(state: .handedBack)
         }
+        held = held.filter { approvals[$0.key]?.state == .actionable }
+    }
+
+    /// Live approvals with their receipt deadlines, for `ApprovalHoverHold`.
+    public var liveApprovals: [AgentApproval] {
+        approvals.values.filter { $0.state == .actionable }
+    }
+
+    /// Replaces the hover holds (ADR 0020). Only a live approval is held, and only to a deadline
+    /// later than its receipt's; the caller bounds it with `ApprovalTiming.heldDeadline`.
+    public mutating func hold(_ deadlines: [AgentCallIdentity: Double]) {
+        held = deadlines.filter { id, deadline in
+            guard let approval = approvals[id], approval.state == .actionable else { return false }
+            return deadline > approval.expiresAt
+        }
+    }
+
+    private func heldApproval(_ approval: AgentApproval) -> AgentApproval {
+        guard let deadline = held[approval.id], deadline > approval.expiresAt else { return approval }
+        return approval.with(expiresAt: deadline)
     }
 
     /// Drops the desktop copy of a finished Codex turn that also has a terminal outcome, for

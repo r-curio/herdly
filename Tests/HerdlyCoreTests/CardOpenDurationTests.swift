@@ -43,19 +43,26 @@ func aTimedCardStaysOpenUntilItsTimeAndClosesExactlyThen(duration: CardOpenDurat
     #expect(presentation.update(interacting: false, now: 3_700.1) == .collapsed)
 }
 
-@Test func interactionHoldsATimedCardAndItsOriginalTimeStillApplies() {
+@Test func aTimedCardCountsDownOnlyAfterTheUserLeavesIt() {
     var presentation = NotchPresentationController()
     presentation.present(done, now: 0, duration: .fiveSeconds)
 
-    // Held past its time while the user is on it, then closed as soon as they leave.
+    // Held past its time while the user is on it; its full time starts once they leave.
     #expect(presentation.update(interacting: true, now: 7) == .agentSpotlight(done))
-    #expect(presentation.update(interacting: false, now: 7.1) == .collapsed)
+    #expect(presentation.update(interacting: false, now: 11.999) == .agentSpotlight(done))
+    #expect(presentation.update(interacting: false, now: 12) == .collapsed)
 
-    // Interaction that ends before the time does not restart it.
-    presentation.present(done, now: 10, duration: .fiveSeconds)
-    #expect(presentation.update(interacting: true, now: 12) == .agentSpotlight(done))
-    #expect(presentation.update(interacting: false, now: 14.999) == .agentSpotlight(done))
-    #expect(presentation.update(interacting: false, now: 15) == .collapsed)
+    // Interaction that ends before the time restarts it from the last interaction.
+    presentation.present(done, now: 20, duration: .fiveSeconds)
+    #expect(presentation.update(interacting: true, now: 24) == .agentSpotlight(done))
+    #expect(presentation.update(interacting: false, now: 28.999) == .agentSpotlight(done))
+    #expect(presentation.update(interacting: false, now: 29) == .collapsed)
+
+    // A new card may not take the spotlight while the restarted time runs.
+    presentation.present(done, now: 40, duration: .threeSeconds)
+    #expect(presentation.update(interacting: true, now: 42) == .agentSpotlight(done))
+    #expect(!presentation.acceptsAgentSpotlight(interacting: false, draftInProgress: false, now: 44.999))
+    #expect(presentation.acceptsAgentSpotlight(interacting: false, draftInProgress: false, now: 45))
 }
 
 @Test func anApprovalHeldOpenUntilIActStillHandsBackAtExactlyThirtySeconds() {
