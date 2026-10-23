@@ -424,6 +424,16 @@ public struct AttentionQueue: Equatable, Sendable {
         }
     }
 
+    /// Moves a live request's deadline later for a hover hold (ADR 0020); never earlier, and never
+    /// for a handed-back request. The caller bounds it with `ApprovalTiming.heldDeadline`.
+    public mutating func hold(_ identity: RequestIdentity, until deadline: Double) {
+        guard let current = requests[identity], current.state == .actionable,
+              deadline.isFinite, deadline > current.expiresAt else { return }
+        requests[identity] = AttentionRequest(id: current.id, source: current.source, session: current.session,
+                                              turn: current.turn, arrivedAt: current.arrivedAt, expiresAt: deadline,
+                                              state: current.state, details: current.details)
+    }
+
     /// Drops the desktop copy of a finished turn that also has a terminal completion, for sessions
     /// known to be terminal ones. A daemon-run Codex TUI labels its rollout like the desktop app
     /// (`source: vscode`), so before Herdly knew it was a terminal session the same turn could be

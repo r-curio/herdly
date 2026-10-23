@@ -61,9 +61,11 @@ public struct ClaudeOwnedHook: Codable, Equatable, Sendable {
 public enum ClaudeSetupRequirements {
     public static let minimumCLIVersion = "2.1.273"
     public static let helperSource = "herdly-claude-hook-v1"
-    public static let previousHookTimeout = 10
-    /// Covers the companion connection wait, one 30-second decision window, and a small bound.
-    public static let hookTimeout = 38
+    /// Timeouts written by earlier Herdly builds; setup upgrades them in place.
+    public static let previousHookTimeouts = [10, 38]
+    /// Covers the companion connection wait, one decision window with its longest hover hold
+    /// (ADR 0020), and a small bound.
+    public static let hookTimeout = Int(ApprovalTiming.helperWaitBound + ApprovalTiming.connectionTimeout + 2)
     public static let titlePrefix = "Herdly Claude "
     public static let titleDisableEnvironmentKey = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"
     public static let titleDisableEnvironmentValue = "1"
@@ -604,7 +606,7 @@ public enum ClaudeSetupPlanner {
         Set(handler.keys) == ["type", "command", "timeout"]
             && handler["type"] as? String == "command"
             && handler["command"] as? String == command
-            && (handler["timeout"] as? NSNumber)?.intValue == ClaudeSetupRequirements.previousHookTimeout
+            && ClaudeSetupRequirements.previousHookTimeouts.contains((handler["timeout"] as? NSNumber)?.intValue ?? 0)
     }
 
     private static func handlerIsLegacy(_ source: [String: Any], event: String, matcher: String?, command: String) -> Bool {

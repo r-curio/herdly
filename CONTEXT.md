@@ -62,7 +62,7 @@ A question option's digit or a session reply that the companion types into the o
 _Avoid_: Keystrokes, injection
 
 **Clicked card**:
-An approval request or question request the user opened from the attention queue by clicking its row, shown alone in place of the queue with a way back to it. It has no timed close, never moves an approval's deadline, and ends on Escape, the way back, an action, the end of interaction, or its request leaving the queue; it never shows a different item.
+An approval request or question request the user opened from the attention queue by clicking its row, shown alone in place of the queue with a way back to it. It has no timed close, moves an approval's deadline only for the hover pause (ADR 0020), and ends on Escape, the way back, an action, the end of interaction, or its request leaving the queue; it never shows a different item.
 _Avoid_: Spotlight (that is the automatic card that closes after the card-open time, 3 seconds by default), detail view
 
 **Row note**:

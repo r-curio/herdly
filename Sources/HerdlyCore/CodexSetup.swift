@@ -59,7 +59,7 @@ public enum CodexSetupRequirements {
     public static let helperSource = "herdly-hook-v1"
     public static let hookTimeout = Int(ApprovalTiming.helperWaitBound + ApprovalTiming.connectionTimeout + 2)
     /// Timeouts written by earlier Herdly builds; setup upgrades them in place instead of adding a handler.
-    public static let legacyHookTimeouts = [2, 35]
+    public static let legacyHookTimeouts = [2, 35, 38]
     public static let minimumCLIVersion = "0.145.0"
     public static let minimumDesktopVersion = "26.901.51231"
     public static let minimumGhosttyVersion = "1.3.1"

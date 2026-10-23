@@ -66,7 +66,8 @@ public enum NotchEscape: Equatable, Sendable {
 }
 
 /// How long a fresh agent card stays open on its own (Settings › General › Keep new cards open).
-/// Interaction holds any card open past its time; Until I act holds it until the user interacts.
+/// Interaction holds any card open and its time starts over once the interaction ends; Until I act
+/// holds it until the user interacts.
 /// None of these touch an approval's 30-second handoff deadline.
 public enum CardOpenDuration: String, CaseIterable, Sendable {
     case threeSeconds = "3s"
@@ -118,7 +119,8 @@ public struct NotchPresentationController: Equatable, Sendable {
 
     public init() {}
     public mutating func present(_ item: AttentionItemID, now: Double) { spotlight.present(item, now: now) }
-    /// A timed card closes `duration.seconds` after it opens unless the user is interacting then.
+    /// A timed card closes `duration.seconds` after it opens, or after the user's last interaction
+    /// with it, whichever is later.
     /// Until I act keeps it open until the user interacts with it, then closes it once that
     /// interaction ends. Approval deadlines are separate and never move.
     public mutating func present(_ item: AgentAttentionID, now: Double, duration: CardOpenDuration = .standard) {
@@ -134,8 +136,9 @@ public struct NotchPresentationController: Equatable, Sendable {
     public func acceptsAgentSpotlight(interacting: Bool, draftInProgress: Bool, now: Double) -> Bool {
         clicked == nil && !draftInProgress && !agentSpotlight.isActive(interacting: interacting, now: now)
     }
-    /// The header's explicit open: the whole queue, leaving any clicked card.
-    public mutating func openQueue() { manualOpen = true; clicked = nil }
+    /// The header's explicit open: the whole queue, leaving any clicked card. It also ends the
+    /// spotlight, whose time would otherwise start over and show it again once the user leaves.
+    public mutating func openQueue() { manualOpen = true; clicked = nil; spotlight.clear(); agentSpotlight.clear() }
     /// Opens one approval or question as its own card in place of the queue. Other rows (results,
     /// running work) are not cards here and return false.
     @discardableResult
@@ -250,16 +253,20 @@ public struct QueueRowSelection: Equatable, Sendable {
 private struct AgentSpotlight: Equatable, Sendable {
     private var item: AgentAttentionID?
     private var until: Double = 0
+    /// The timed close, or nil for Until I act.
+    private var seconds: Double?
 
     mutating func present(_ item: AgentAttentionID, now: Double, duration: CardOpenDuration) {
         self.item = item
-        until = duration.seconds.map { now + $0 } ?? .infinity
+        seconds = duration.seconds
+        until = seconds.map { now + $0 } ?? .infinity
     }
 
     mutating func update(interacting: Bool, now: Double) -> AgentAttentionID? {
         guard let item else { return nil }
-        // A held card ends with the user's first interaction rather than at a time.
-        if interacting && until == .infinity { until = now }
+        // The countdown runs only while the user is away: each interacting moment restarts the full
+        // time, so it starts over once they leave. A held card ends with the interaction instead.
+        if interacting { until = seconds.map { now + $0 } ?? now }
         if interacting || now < until { return item }
         clear()
         return nil
@@ -273,6 +280,7 @@ private struct AgentSpotlight: Equatable, Sendable {
     mutating func clear() {
         item = nil
         until = 0
+        seconds = nil
     }
 }
 
