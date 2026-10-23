@@ -130,7 +130,7 @@ private func timestamp(_ seconds: Double) -> String { RolloutTimestamp.format(se
 @Test func onlyTheTurnTheReplyStartsAcknowledgesTheResult() {
     // The app's path: each scan acknowledges what `CodexReplyAcknowledgment` returns and dismisses it.
     func scan(_ queue: inout AttentionQueue, events: [CLIEvent]) {
-        for id in CodexReplyAcknowledgment.acknowledged(queue.items.compactMap(\.completion), events: events) {
+        for id in CodexReplyAcknowledgment.acknowledged(queue.items.compactMap(\.completion), events: events, cliSessions: []) {
             queue.dismiss(.completion(id))
         }
     }

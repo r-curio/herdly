@@ -15,7 +15,7 @@ public enum CodexReplyAcknowledgment {
     /// desktop-labelled completions count too: the scan's `acknowledgeableCLISessions`, which leaves
     /// out threads the desktop app originated.
     public static func acknowledged(_ completions: [AttentionCompletion], events: [CLIEvent],
-                                    cliSessions: Set<UUID> = []) -> Set<CompletionIdentity> {
+                                    cliSessions: Set<UUID>) -> Set<CompletionIdentity> {
         var latest: [UUID: (turn: UUID, at: Double)] = [:]
         for case let .turnStarted(session, turn, receivedAt) in events {
             guard let at = RolloutTimestamp.parse(receivedAt), at.isFinite else { continue }

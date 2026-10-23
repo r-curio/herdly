@@ -27,22 +27,24 @@ private func completion(_ turn: UUID, session: UUID = session, source: Attention
                               .turnStarted(session: session, turn: replyTurn, receivedAt: at(30))]
     // The latest prompt (at 30) acknowledges both earlier turns, not its own turn's completion,
     // another session's completion, or a desktop completion.
-    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events)
+    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events, cliSessions: [])
             == [completion(firstTurn, arrivedAt: 10).id, completion(secondTurn, arrivedAt: 20).id])
     // Events out of order still use the latest prompt.
-    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events.reversed()).count == 2)
+    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events.reversed(), cliSessions: []).count == 2)
 }
 
 @Test func codexReplyKeepsCompletionsArrivingAtOrAfterThePrompt() {
     let completions = [completion(firstTurn, arrivedAt: 30), completion(secondTurn, arrivedAt: 31)]
     let events: [CLIEvent] = [.turnStarted(session: session, turn: replyTurn, receivedAt: at(30))]
-    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events).isEmpty)
+    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events, cliSessions: []).isEmpty)
     // An unparsable prompt time or no prompt acknowledges nothing.
     #expect(CodexReplyAcknowledgment.acknowledged([completion(firstTurn, arrivedAt: 1)],
                                                   events: [.turnStarted(session: session, turn: replyTurn,
-                                                                        receivedAt: "not a time")]).isEmpty)
+                                                                        receivedAt: "not a time")],
+                                                  cliSessions: []).isEmpty)
     #expect(CodexReplyAcknowledgment.acknowledged([completion(firstTurn, arrivedAt: 1)],
-                                                  events: [.sessionStarted(session: session, receivedAt: at(5))]).isEmpty)
+                                                  events: [.sessionStarted(session: session, receivedAt: at(5))],
+                                                  cliSessions: []).isEmpty)
 }
 
 @Test func codexCompletionOutcomeIDMatchesTheMirroredOutcome() {

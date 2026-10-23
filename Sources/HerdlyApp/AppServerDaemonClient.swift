@@ -46,6 +46,9 @@ final class AppServerDaemonClient {
     /// True once a `thread/loaded/list` poll answered on the current connection, so `loadedThreads`
     /// is the daemon's list rather than an empty placeholder. False when not connected.
     private(set) var loadedThreadsKnown = false
+    /// `loadedThreads` when it is the daemon's own list (`loadedThreadsKnown`), so a thread missing
+    /// from it is not loaded; nil while disconnected or before the connection's first poll answers.
+    var authoritativeLoadedThreads: Set<UUID>? { loadedThreadsKnown ? loadedThreads : nil }
     /// Every notification and server request the daemon sends, in order; responses to Herdly's own
     /// requests are handled here and not forwarded.
     var onMessage: (([String: Any]) -> Void)?

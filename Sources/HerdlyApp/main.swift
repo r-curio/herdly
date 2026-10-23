@@ -1342,7 +1342,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let known = knownCLISessions
         let daemonThreads = daemonClient.loadedThreads
         let rememberedDaemon = rememberedDaemonCLISessions
-        let authoritativeLoaded = daemonClient.isConnected && daemonClient.loadedThreadsKnown ? daemonThreads : nil
+        let authoritativeLoaded = daemonClient.authoritativeLoadedThreads
         let herdrTitles = herdrPaneTitlesReader()
         // The other hosts' latest titles (#265). Whether each terminal app runs comes from macOS, and
         // which hosts a Codex TUI runs under from the process list and its ancestry: none contacts a host.
