@@ -1415,7 +1415,7 @@ private struct HerdrProblemLine: View {
     }
 }
 
-/// Settings › Notifications (#317): the sound switch and tiles, the read-state and full-response switches, and the test
+/// Settings › Notifications (#317): the sound switch and tiles, the read-state switch, the response length, and the test
 /// notification buttons. No footers.
 private struct NotificationControls: View {
     @ObservedObject var model: Companion
@@ -1464,12 +1464,12 @@ private struct NotificationControls: View {
                         .padding(.bottom, 10)
                 }
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Show the full response", detail: nil) {
-                    Toggle("Show the full response on result cards", isOn: $model.showsFullResultMessage)
-                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                        .accessibilityLabel("Show the full response on result cards")
+                SettingsRow(title: "Response length", detail: nil) {
+                    SlidingSegments(title: "Response length on result cards",
+                                    selection: $model.resultResponseLength.animation(SettingsMotion.curve(reduceMotion: model.reduceMotion)),
+                                    options: ResultResponseLength.allCases.map { ($0, $0.title) })
                 }
-                .help("Off shows the first five lines of the response, with Show all for the rest.")
+                .help("How much of the last message each result card shows: all of it, its first five lines, or its first line. Show all on a card opens the rest.")
             }
 
             PhoneSection(phone: model.phoneAlerts, reduceMotion: model.reduceMotion)

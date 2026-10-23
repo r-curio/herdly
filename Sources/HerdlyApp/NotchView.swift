@@ -505,20 +505,7 @@ struct QuestionStepRail: View {
     }
 }
 
-/// Result card text (#323): the last message and the prompt in 11pt mono text gray at a 16pt line
-/// height, wrapping in full and selectable.
-struct ResultText: View {
-    let text: String
-    var body: some View {
-        Text(text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
-            // SF Mono 11pt sets about 13pt of line; three more make the 16pt line height.
-            .lineSpacing(3).textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// The last message with its markdown read as formatting (`MessageMarkdown`), in `ResultText`'s face:
+/// The last message with its markdown read as formatting (`MessageMarkdown`), in 11pt mono text gray at a 16pt line height:
 /// bold and headings in ink, code on the `well`, tables as aligned columns. A message cut mid-table or
 /// mid-fence still draws; only web links stay links, so a message cannot open another app.
 struct ResultMarkdown: View {
@@ -723,8 +710,8 @@ struct ResultMessageScroll: View {
 /// A disclosure that keeps its content on the panel's left edge. SwiftUI's DisclosureGroup indents
 /// and centers what it reveals; here the revealed rows align with everything above them.
 /// The label names what pressing it does, so an open disclosure reads "Hide …" (or `expandedTitle`)
-/// rather than still offering to show what is already shown. The result card's toggles (#323, 9NU:
-/// "Show all ›", "Your prompt ›") use the trailing style: dim words, then "›" turning down when open.
+/// rather than still offering to show what is already shown. The result card's toggle (#323, 9NU:
+/// "Show all ›") uses the trailing style: dim words, then "›" turning down when open.
 struct NotchDisclosure<Content: View>: View {
     enum Chevron { case leading, trailing }
     let title: String
@@ -2084,11 +2071,11 @@ struct Notch: View {
     }
 
     /// The result card a finished turn pops (#323, Paper D33, 9NU, 9RW), inset to the title: the last
-    /// message whole in its own scroll or cut to five lines (Settings), or one dim line saying why it
-    /// cannot be read; the restored-result line; "Your prompt ›" folded to one line; the reply field
+    /// message whole in its own scroll, cut to five lines, or one line (Settings › Response length), or
+    /// one dim line saying why it cannot be read; the restored-result line; the reply field
     /// only where Herdly can reach the session; the line its result row would show when Open is not
     /// offered (`reading`, the same one its header click reads); then Open and Dismiss on the right.
-    /// Show all and the prompt toggle are view state only (`openDisclosures`); nothing on the card
+    /// Show all is view state only (`openDisclosures`); nothing on the card
     /// acknowledges the result: not seeing it, not unfolding it, not sending.
     @ViewBuilder
     private func resultCardBody(_ item: AgentAttentionItem, subject: String, reading: ResultRowReading,
@@ -2107,12 +2094,6 @@ struct Notch: View {
             if item.outcome?.uncertain == true {
                 Text("Queued before Herdly last started. You may already have seen this result; Herdly cannot verify it.")
                     .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text).fixedSize(horizontal: false, vertical: true)
-            }
-            if let prompt = details?.originalPrompt {
-                NotchDisclosure(title: "Your prompt", subject: subject, chevron: .trailing,
-                                expanded: disclosure("result-prompt:\(item.id)")) {
-                    ResultText(text: prompt)
-                }
             }
             if let outcome = item.outcome { resultReplyField(outcome, subject: subject) }
             resultRowLine(item, reading: reading)
@@ -2134,36 +2115,46 @@ struct Notch: View {
         "Opens this session in \(source.displayName). Opening it does not mark anything as checked."
     }
 
-    /// The last message: whole in its own bounded scroll, or its first five lines, as Settings ›
-    /// Notifications › "Show the full response" starts every card; "Show all ›" / "Show less" flips
-    /// one card (`ResultCardMessage`) and appears only when the five-line cut shortened it. A message
-    /// Herdly kept only the start of says so: the full message stays in the agent.
+    /// The last message: whole in its own bounded scroll, its first five lines, or its first line, as
+    /// Settings › Notifications › "Response length" starts every card; "Show all ›" / "Show less"
+    /// flips one card (`ResultCardMessage`) and appears only when the length shortened it. On a
+    /// Glance card it sits at the end of the one line. A message Herdly kept only the start of says
+    /// so: the full message stays in the agent.
     @ViewBuilder
     private func resultMessage(_ preview: CompletionPreview, item: AgentAttentionItem, subject: String) -> some View {
         let key = "result-message:\(item.id)"
-        if ResultCardMessage.showsWhole(preview.extent, showsFullResponse: model.showsFullResultMessage,
-                                        flipped: openDisclosures.contains(key)) {
+        let length = model.resultResponseLength
+        let shown = ResultCardMessage.shown(preview, length: length, flipped: openDisclosures.contains(key))
+        let showAll = NotchDisclosure(title: "Show all", expandedTitle: "Show less", subject: subject, chevron: .trailing,
+                                      expanded: resultMessageDisclosure(key, shown: shown)) { EmptyView() }
+        switch shown {
+        case .whole:
             ResultMessageScroll(text: preview.extent.full ?? preview.text)
             if case .cutAndCapped = preview.extent {
                 Text("Shortened; the full message is in \(item.session.source.displayName).")
                     .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        } else {
+            if ResultCardMessage.folds(preview, length: length) { showAll }
+        case .brief:
             ResultMarkdown(text: preview.text)
-        }
-        if preview.truncated {
-            NotchDisclosure(title: "Show all", expandedTitle: "Show less", subject: subject, chevron: .trailing,
-                            expanded: resultMessageDisclosure(key)) { EmptyView() }
+            showAll
+        case let .glance(line):
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                ResultMarkdown(text: line).lineLimit(1).truncationMode(.tail)
+                showAll.fixedSize()
+            }
         }
     }
 
     /// Show all reads open while the card shows the whole message; `openDisclosures` holds the cards
     /// clicked away from the Settings choice.
-    private func resultMessageDisclosure(_ key: String) -> Binding<Bool> {
-        Binding(get: { model.showsFullResultMessage != openDisclosures.contains(key) },
+    private func resultMessageDisclosure(_ key: String, shown: ResultCardMessage.Shown) -> Binding<Bool> {
+        Binding(get: { shown == .whole },
                 set: { open in
-                    if open != model.showsFullResultMessage { openDisclosures.insert(key) } else { openDisclosures.remove(key) }
+                    if open != (shown == .whole) {
+                        if openDisclosures.contains(key) { openDisclosures.remove(key) } else { openDisclosures.insert(key) }
+                    }
                 })
     }
 

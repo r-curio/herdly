@@ -75,7 +75,7 @@ No phase but `.ready` sends anything, no timer sends anything, and a failure is 
 
 ## Sending is not acknowledgment
 
-Sending leaves the completion exactly where it was: a send Codex never takes acknowledges nothing. Seeing the card, "Show all", unfolding "Your prompt" and the fold after a send acknowledge nothing either. Amended on 2026-10-08: once Codex records the turn the reply started (its `UserPromptSubmit`), that turn start acknowledges the session's earlier completions, as any prompt in a CLI session does ([product behavior](product.md)). The card then leaves the queue and the session shows as working.
+Sending leaves the completion exactly where it was: a send Codex never takes acknowledges nothing. Seeing the card, "Show all" and the fold after a send acknowledge nothing either. Amended on 2026-10-08: once Codex records the turn the reply started (its `UserPromptSubmit`), that turn start acknowledges the session's earlier completions, as any prompt in a CLI session does ([product behavior](product.md)). The card then leaves the queue and the session shows as working.
 
 ## Verification
 
@@ -87,7 +87,7 @@ Automated against the real binary: `scripts/daemon_lab.py` seeds a second, finis
 
 Live walkthrough, once a daemon is running (`codex app-server daemon start`):
 
-1. Finish a turn in a CLI session attached to the daemon and switch away. Expect: the result card with the message, "Your prompt ›", a live "› Reply to this session" field, and Open and Dismiss.
+1. Finish a turn in a CLI session attached to the daemon and switch away. Expect: the result card with the message, a live "› Reply to this session" field, and Open and Dismiss.
 2. Type "now add tests" and press Enter. Expect: the card folds at once; opening the queue shows the result row with "Sent, waiting for Codex", then the result leaving the queue and the session shown as working, and that prompt as the next turn in Codex — in that session and no other.
 3. If Codex never records the turn, the completion stays on the queue until it is dismissed or its tab is visited.
 4. Stop the daemon and finish another turn. Expect: the card with no reply field and no reason line, only Open and Dismiss.

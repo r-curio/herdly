@@ -294,10 +294,20 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Read the Codex desktop app's own unread flags to acknowledge desktop completions it has
     /// cleared. Private format; on by default, off with one switch when a desktop update breaks it.
     @Published var desktopReadStateEnabled = UserDefaults.standard.object(forKey: "desktopReadStateEnabled") as? Bool ?? true
-    /// Show each result card's whole last message (Settings › Notifications); off starts every card
-    /// at five lines with "Show all ›". A card's own Show all / Show less still flips it (`ResultCardMessage`).
-    @Published var showsFullResultMessage = UserDefaults.standard.object(forKey: "showsFullResultMessage") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(showsFullResultMessage, forKey: "showsFullResultMessage") }
+    /// How much of the last message every result card starts with (Settings › Notifications ›
+    /// "Response length"). A card's own Show all / Show less still flips it (`ResultCardMessage`).
+    @Published var resultResponseLength = Companion.loadResultResponseLength() {
+        didSet { UserDefaults.standard.set(resultResponseLength.rawValue, forKey: "resultResponseLength") }
+    }
+    /// Migrates the old "Show the full response" switch once, as `loadCardOpenDuration` does; the
+    /// old key is left in place and no longer written.
+    private static func loadResultResponseLength() -> ResultResponseLength {
+        let defaults = UserDefaults.standard
+        let saved = defaults.string(forKey: "resultResponseLength")
+        let length = ResultResponseLength.resolve(saved: saved,
+                                                  legacyShowsFullResponse: defaults.object(forKey: "showsFullResultMessage") as? Bool)
+        if saved != length.rawValue { defaults.set(length.rawValue, forKey: "resultResponseLength") }
+        return length
     }
     /// The latest read-state outcome; Settings shows a problem line only while it is `.unavailable`.
     @Published private(set) var desktopReadState = DesktopReadStateStatus.notChecked
