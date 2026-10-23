@@ -1415,7 +1415,7 @@ private struct HerdrProblemLine: View {
     }
 }
 
-/// Settings › Notifications (#317): the sound switch and tiles, the read-state and full-prompt switches, and the test
+/// Settings › Notifications (#317): the sound switch and tiles, the read-state and full-response switches, and the test
 /// notification buttons. No footers.
 private struct NotificationControls: View {
     @ObservedObject var model: Companion
@@ -1464,12 +1464,12 @@ private struct NotificationControls: View {
                         .padding(.bottom, 10)
                 }
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Show my full prompt", detail: nil) {
-                    Toggle("Show my full prompt on result cards", isOn: $model.showsFullResultPrompt)
+                SettingsRow(title: "Show the full response", detail: nil) {
+                    Toggle("Show the full response on result cards", isOn: $model.showsFullResultMessage)
                         .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                        .accessibilityLabel("Show my full prompt on result cards")
+                        .accessibilityLabel("Show the full response on result cards")
                 }
-                .help("Off folds the prompt to \"Your prompt ›\" on each result card.")
+                .help("Off shows the first five lines of the response, with Show all for the rest.")
             }
 
             PhoneSection(phone: model.phoneAlerts, reduceMotion: model.reduceMotion)

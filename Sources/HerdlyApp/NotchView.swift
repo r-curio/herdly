@@ -2084,11 +2084,11 @@ struct Notch: View {
     }
 
     /// The result card a finished turn pops (#323, Paper D33, 9NU, 9RW), inset to the title: the last
-    /// message whole in its own scroll, or one dim line saying why it
-    /// cannot be read; the restored-result line; "Your prompt ›" folded to one line unless Settings opens it; the reply field
+    /// message whole in its own scroll or cut to five lines (Settings), or one dim line saying why it
+    /// cannot be read; the restored-result line; "Your prompt ›" folded to one line; the reply field
     /// only where Herdly can reach the session; the line its result row would show when Open is not
     /// offered (`reading`, the same one its header click reads); then Open and Dismiss on the right.
-    /// The prompt toggle is view state only (`openDisclosures`); nothing on the card
+    /// Show all and the prompt toggle are view state only (`openDisclosures`); nothing on the card
     /// acknowledges the result: not seeing it, not unfolding it, not sending.
     @ViewBuilder
     private func resultCardBody(_ item: AgentAttentionItem, subject: String, reading: ResultRowReading,
@@ -2097,7 +2097,7 @@ struct Notch: View {
         VStack(alignment: .leading, spacing: 10) {
             switch details?.response {
             case let .available(preview)?:
-                resultMessage(preview, item: item)
+                resultMessage(preview, item: item, subject: subject)
             case let .unavailable(reason)?:
                 Text(reason).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
                     .fixedSize(horizontal: false, vertical: true)
@@ -2110,7 +2110,7 @@ struct Notch: View {
             }
             if let prompt = details?.originalPrompt {
                 NotchDisclosure(title: "Your prompt", subject: subject, chevron: .trailing,
-                                expanded: resultPromptDisclosure(item.id)) {
+                                expanded: disclosure("result-prompt:\(item.id)")) {
                     ResultText(text: prompt)
                 }
             }
@@ -2128,34 +2128,43 @@ struct Notch: View {
         .padding(.top, 2)
     }
 
-    /// "Your prompt" starts open or folded by the Settings choice; `openDisclosures` holds the cards
-    /// whose toggle was clicked away from it.
-    private func resultPromptDisclosure(_ id: AgentAttentionID) -> Binding<Bool> {
-        let key = "result-prompt:\(id)"
-        return Binding(get: { ResultCardPrompt.isOpen(showsFullPrompt: model.showsFullResultPrompt,
-                                                     flipped: openDisclosures.contains(key)) },
-                       set: { open in
-                           if open != model.showsFullResultPrompt { openDisclosures.insert(key) } else { openDisclosures.remove(key) }
-                       })
-    }
-
     /// Open on a result never marks it as checked; only a verified visit (ADR 0016), the Codex app's
     /// read state, a new prompt, or Dismiss does.
     private static func resultOpenHint(_ source: AgentSource) -> String {
         "Opens this session in \(source.displayName). Opening it does not mark anything as checked."
     }
 
-    /// The last message, whole, in its own bounded scroll (the five-line cut and "Show all ›" were
-    /// dropped at the user's request, 2026-10-22). A message Herdly kept only the start of says so:
-    /// the full message stays in the agent.
+    /// The last message: whole in its own bounded scroll, or its first five lines, as Settings ›
+    /// Notifications › "Show the full response" starts every card; "Show all ›" / "Show less" flips
+    /// one card (`ResultCardMessage`) and appears only when the five-line cut shortened it. A message
+    /// Herdly kept only the start of says so: the full message stays in the agent.
     @ViewBuilder
-    private func resultMessage(_ preview: CompletionPreview, item: AgentAttentionItem) -> some View {
-        ResultMessageScroll(text: preview.extent.full ?? preview.text)
-        if case .cutAndCapped = preview.extent {
-            Text("Shortened; the full message is in \(item.session.source.displayName).")
-                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                .fixedSize(horizontal: false, vertical: true)
+    private func resultMessage(_ preview: CompletionPreview, item: AgentAttentionItem, subject: String) -> some View {
+        let key = "result-message:\(item.id)"
+        if ResultCardMessage.showsWhole(preview.extent, showsFullResponse: model.showsFullResultMessage,
+                                        flipped: openDisclosures.contains(key)) {
+            ResultMessageScroll(text: preview.extent.full ?? preview.text)
+            if case .cutAndCapped = preview.extent {
+                Text("Shortened; the full message is in \(item.session.source.displayName).")
+                    .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            ResultMarkdown(text: preview.text)
         }
+        if preview.truncated {
+            NotchDisclosure(title: "Show all", expandedTitle: "Show less", subject: subject, chevron: .trailing,
+                            expanded: resultMessageDisclosure(key)) { EmptyView() }
+        }
+    }
+
+    /// Show all reads open while the card shows the whole message; `openDisclosures` holds the cards
+    /// clicked away from the Settings choice.
+    private func resultMessageDisclosure(_ key: String) -> Binding<Bool> {
+        Binding(get: { model.showsFullResultMessage != openDisclosures.contains(key) },
+                set: { open in
+                    if open != model.showsFullResultMessage { openDisclosures.insert(key) } else { openDisclosures.remove(key) }
+                })
     }
 
     /// One follow-up prompt for the finished session, sent to that session and no other, by its
