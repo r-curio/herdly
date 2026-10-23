@@ -67,3 +67,28 @@ private func completion(_ turn: UUID, session: UUID = session, source: Attention
     queue.apply(CodexAttentionAdapter.observations(completions: [item]), now: item.arrivedAt + 1)
     #expect(queue.snapshot.outcomes.isEmpty)
 }
+
+// Issue #359: a completion queued as desktop while its session was not yet (or no longer) known as
+// CLI clears with that session's later prompt once the scan classifies it CLI again.
+@Test func codexReplyAcknowledgesADesktopLabelledCompletionOfACLISession() {
+    let completions = [completion(firstTurn, source: .desktop, arrivedAt: 10),
+                       completion(replyTurn, source: .desktop, arrivedAt: 20),
+                       completion(secondTurn, source: .desktop, arrivedAt: 40)]
+    let events: [CLIEvent] = [.turnStarted(session: session, turn: replyTurn, receivedAt: at(30))]
+    // Same timing rules as a CLI completion: strictly before the prompt, other turns only.
+    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events, cliSessions: [session])
+            == [completion(firstTurn, source: .desktop, arrivedAt: 10).id])
+    // Not classified CLI in this scan: nothing.
+    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events, cliSessions: [otherSession]).isEmpty)
+}
+
+@Test func codexReplyLeavesDesktopOriginatedCompletionsAlone() {
+    let completions = [completion(firstTurn, source: .desktop, arrivedAt: 10),
+                       completion(firstTurn, session: otherSession, source: .desktop, arrivedAt: 10)]
+    let events: [CLIEvent] = [.turnStarted(session: session, turn: replyTurn, receivedAt: at(30)),
+                              .turnStarted(session: otherSession, turn: replyTurn, receivedAt: at(30))]
+    // A desktop-originated thread keeps its desktop read-state rule even if classified CLI.
+    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events, cliSessions: [session, otherSession],
+                                                  desktopOriginatedSessions: [otherSession])
+            == [completion(firstTurn, source: .desktop, arrivedAt: 10).id])
+}

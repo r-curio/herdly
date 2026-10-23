@@ -413,6 +413,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Sessions a Ghostty inventory proved CLI by their session-id title, this launch. They stay CLI
     /// after the tab closes, and that closing ends them (`ReminderReader.scan`). Memory only.
     private var knownCLISessions: Set<UUID> = []
+    /// Sessions the daemon proved CLI (loaded, not the desktop's), this launch. They stay CLI while a
+    /// reconnect empties its list; unlike `knownCLISessions`, they end no session (#359). Memory only.
+    private var daemonProvedCLISessions: Set<UUID> = []
     /// The newest titles each contactable host besides Ghostty and herdr showed, from inventories its
     /// own scans already read (`recordHostTitles`). The reminder scan ends no daemon session a tab
     /// here shows (#265). Memory only; a host Herdly may no longer contact is dropped.
@@ -1337,6 +1340,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }()
         let known = knownCLISessions
         let daemonThreads = daemonClient.loadedThreads
+        let daemonProved = daemonProvedCLISessions
         let herdrTitles = herdrPaneTitlesReader()
         // The other hosts' latest titles (#265). Whether each terminal app runs comes from macOS, and
         // which hosts a Codex TUI runs under from the process list and its ancestry: none contacts a host.
@@ -1378,6 +1382,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                             now: Date().timeIntervalSince1970)
                 let reminders = ReminderReader.scan(events: events, rollouts: rolloutRoot, ghostty: inventory,
                                                     knownCLISessions: known, daemonThreads: daemonThreads,
+                                                    daemonProvedCLISessions: daemonProved,
                                                     herdrTitles: herdrTitles(), otherHosts: otherHosts,
                                                     ghosttyOn: switches.isOn(.ghostty), lastSeenHosts: lastSeen,
                                                     rolloutCache: rolloutCache, hookCache: hookCache)
@@ -1533,6 +1538,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             liveCLI = scan.cliState.liveSessions.union(discoveredCLI)
             cliLivenessRead = true
             knownCLISessions.formUnion(scan.titledCLISessions)
+            daemonProvedCLISessions.formUnion(scan.daemonProvedCLISessions)
             lastSeenHosts.merge(scan.surfaceHosts) { _, latest in latest }
             codexSessionsAwaitingInventory = scan.awaitingHostInventories
             let previous = Set(queue.items.map(\.id))
@@ -1543,7 +1549,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             scannedQueue.apply(discovered: discovered)
             if scannedQueue != queue { queue = scannedQueue }
             acknowledgeCodexCompletions(Array(CodexReplyAcknowledgment.acknowledged(
-                queue.items.compactMap(\.completion), events: scan.cliEvents)))
+                queue.items.compactMap(\.completion), events: scan.cliEvents, cliSessions: scan.cliSessions,
+                desktopOriginatedSessions: scan.desktopOriginatedSessions)))
             replyTurnStarts = ReplyTurnStarts.latest(cliEvents: scan.cliEvents, hookEvents: desktopEvents)
             if agentUpdates.restartRequired(.codex) || agentUpdates.restartRequired(.claude) {
                 noteSessionStarts(codex: AgentUpdates.latestCodexSessionStart(cliEvents: scan.cliEvents,
