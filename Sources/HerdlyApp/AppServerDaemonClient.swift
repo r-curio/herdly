@@ -43,6 +43,12 @@ final class AppServerDaemonClient {
     private(set) var subscribed: Set<String> = []
     /// Thread ids the daemon reported loaded at the last poll, as UUIDs. Empty when not connected.
     private(set) var loadedThreads: Set<UUID> = []
+    /// True once a `thread/loaded/list` poll answered on the current connection, so `loadedThreads`
+    /// is the daemon's list rather than an empty placeholder. False when not connected.
+    private(set) var loadedThreadsKnown = false
+    /// `loadedThreads` when it is the daemon's own list (`loadedThreadsKnown`), so a thread missing
+    /// from it is not loaded; nil while disconnected or before the connection's first poll answers.
+    var authoritativeLoadedThreads: Set<UUID>? { loadedThreadsKnown ? loadedThreads : nil }
     /// Every notification and server request the daemon sends, in order; responses to Herdly's own
     /// requests are handled here and not forwarded.
     var onMessage: (([String: Any]) -> Void)?
@@ -240,6 +246,7 @@ final class AppServerDaemonClient {
         handlers = [:]
         subscribed = []
         loadedThreads = []
+        loadedThreadsKnown = false
         state = .failed(reason)
         nextRetry = ProcessInfo.processInfo.systemUptime + Self.retryInterval
         disconnecting = false
@@ -280,6 +287,7 @@ final class AppServerDaemonClient {
         request("thread/loaded/list", params: [:]) { [weak self] result, _ in
             guard let self, let loaded = result?["data"] as? [String] else { return }
             self.loadedThreads = Set(loaded.compactMap(UUID.init(uuidString:)))
+            self.loadedThreadsKnown = true
             for thread in loaded where !self.subscribed.contains(thread) {
                 self.request("thread/resume", params: ["threadId": thread]) { [weak self] result, _ in
                     if result != nil { self?.subscribed.insert(thread) }

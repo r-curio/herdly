@@ -78,6 +78,13 @@ public struct ReminderScan: Sendable {
     /// Sessions whose session-id title was in this scan's Ghostty inventory. The app remembers them
     /// across scans so a session stays CLI, and can end, after its tab is gone.
     public var titledCLISessions: Set<UUID> = []
+    /// Sessions this scan proved CLI through the daemon: loaded, with an originator other than the
+    /// desktop's. The app remembers them (`ReminderReader.rememberedDaemonCLISessions`) so a daemon
+    /// reconnect, which empties the loaded list, does not relabel them desktop (#359).
+    public var daemonProvedCLISessions: Set<UUID> = []
+    /// Sessions classified CLI whose desktop-labelled completions a prompt acknowledges: all but
+    /// threads the desktop app originated, which keep the desktop read-state rule (#359).
+    public var acknowledgeableCLISessions: Set<UUID> { cliSessions.subtracting(desktopOriginatedSessions) }
     /// The host whose inventory showed each session's title in this scan (Ghostty first, then
     /// `TerminalHostTitles.hosts` order). The app keeps the latest per session as `lastSeenHosts`.
     public var surfaceHosts: [UUID: TerminalHost] = [:]
@@ -403,6 +410,16 @@ public enum ReminderReader {
         return parent
     }
 
+    /// The daemon-proved sessions to remember after a scan: `remembered` plus `provedNow`, except
+    /// that an `authoritativeLoaded` list (a connected daemon client's list, polled at least once on
+    /// that connection) drops every remembered session it lacks: the daemon unloaded it. Nil while
+    /// disconnected or not yet polled, when an empty list says nothing and the memory is kept (#359).
+    public static func rememberedDaemonCLISessions(_ remembered: Set<UUID>, provedNow: Set<UUID>,
+                                                   authoritativeLoaded: Set<UUID>?) -> Set<UUID> {
+        let kept = authoritativeLoaded.map { remembered.intersection($0) } ?? remembered
+        return kept.union(provedNow)
+    }
+
     /// How long after its SessionStart a daemon-loaded terminal session may go without a tab title
     /// in a Ghostty inventory before `scan` ends it, so a new tab can be inventoried first.
     public static let surfaceGrace: Double = 15
@@ -432,6 +449,11 @@ public enum ReminderReader {
     /// Ghostty shows its title. Such a session with no tab title in an inventory taken at least
     /// `surfaceGrace` seconds after its SessionStart has no surface, and ends.
     ///
+    /// `rememberedDaemonCLISessions` are the sessions earlier scans proved that way. They stay CLI while
+    /// the daemon's list is empty or lacks them (it is emptied on every disconnect), but only for
+    /// classification: not a title proof, so none is ended for lacking a tab unless the daemon still
+    /// holds it (#359).
+    ///
     /// `herdrTitles` says what herdr's panes show (ADR 0012, `HerdrPaneTitles`). A Codex TUI titles
     /// its terminal with its shortened session ID, so that title on a herdr pane proves a CLI
     /// session with a live surface, exactly as a Ghostty tab title does; such a session is not
@@ -457,6 +479,7 @@ public enum ReminderReader {
     /// Approval request files are always read fresh.
     public static func scan(events: URL, rollouts: URL, ghostty: GhosttyInventory? = nil,
                             knownCLISessions: Set<UUID> = [], daemonThreads: Set<UUID> = [],
+                            rememberedDaemonCLISessions: Set<UUID> = [],
                             herdrTitles: HerdrPaneTitles = .notInUse,
                             otherHosts: [TerminalHost: TerminalHostTitles] = [:], ghosttyOn: Bool = true,
                             lastSeenHosts: [UUID: TerminalHost] = [:],
@@ -629,14 +652,16 @@ public enum ReminderReader {
                 if let sessionProbes, let bytes = rollout.bytes {
                     result.resolvedRequests += ApprovalResolutionReader.resolutions(in: bytes, session: session, probes: sessionProbes)
                 }
-                if let meta = read.header, meta.id == session, meta.originator == desktopOriginator {
-                    result.desktopOriginatedSessions.insert(session)
-                }
-                guard let meta = read.header, meta.id == session,
-                      meta.source == "cli" || cliTitles.contains(GhosttyMatch.title(session))
+                guard let meta = read.header, meta.id == session else { continue }
+                let desktopOriginated = meta.originator == desktopOriginator
+                if desktopOriginated { result.desktopOriginatedSessions.insert(session) }
+                // Loaded by the daemon and not the desktop's: a terminal session on the daemon.
+                let provedByDaemonNow = !desktopOriginated && daemonThreads.contains(session)
+                if provedByDaemonNow { result.daemonProvedCLISessions.insert(session) }
+                guard meta.source == "cli" || cliTitles.contains(GhosttyMatch.title(session))
                         || shownElsewhere.contains(GhosttyMatch.title(session))
-                        || knownCLISessions.contains(session)
-                        || (daemonThreads.contains(session) && meta.originator != desktopOriginator) else { continue }
+                        || knownCLISessions.contains(session) || provedByDaemonNow
+                        || (!desktopOriginated && rememberedDaemonCLISessions.contains(session)) else { continue }
                 result.cliSessions.insert(session)
                 let sessionHooks = hooks.filter { $0.session_id == session }.sorted { $0.received_at < $1.received_at }
                 let title = GhosttyMatch.title(session)
