@@ -81,14 +81,3 @@ private func completion(_ turn: UUID, session: UUID = session, source: Attention
     // Not classified CLI in this scan: nothing.
     #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events, cliSessions: [otherSession]).isEmpty)
 }
-
-@Test func codexReplyLeavesDesktopOriginatedCompletionsAlone() {
-    let completions = [completion(firstTurn, source: .desktop, arrivedAt: 10),
-                       completion(firstTurn, session: otherSession, source: .desktop, arrivedAt: 10)]
-    let events: [CLIEvent] = [.turnStarted(session: session, turn: replyTurn, receivedAt: at(30)),
-                              .turnStarted(session: otherSession, turn: replyTurn, receivedAt: at(30))]
-    // A desktop-originated thread keeps its desktop read-state rule even if classified CLI.
-    #expect(CodexReplyAcknowledgment.acknowledged(completions, events: events, cliSessions: [session, otherSession],
-                                                  desktopOriginatedSessions: [otherSession])
-            == [completion(firstTurn, source: .desktop, arrivedAt: 10).id])
-}

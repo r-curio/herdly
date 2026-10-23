@@ -43,9 +43,9 @@ private struct DaemonGapFixture {
     /// A Ghostty inventory well past the grace that shows neither session's title.
     var tabless: GhosttyInventory { GhosttyInventory(titles: ["zsh"], takenAt: started + 100) }
 
-    func scan(daemonThreads: Set<UUID>, proved: Set<UUID> = []) -> ReminderScan {
+    func scan(daemonThreads: Set<UUID>, remembered: Set<UUID> = []) -> ReminderScan {
         ReminderReader.scan(events: events, rollouts: rollouts, ghostty: tabless,
-                            daemonThreads: daemonThreads, daemonProvedCLISessions: proved)
+                            daemonThreads: daemonThreads, rememberedDaemonCLISessions: remembered)
     }
 
     func queue(after scan: ReminderScan) -> AttentionQueue {
@@ -72,7 +72,7 @@ private struct DaemonGapFixture {
     #expect(forgotten.items.compactMap(\.completion).contains { $0.session == fixture.session && $0.source == .desktop })
 
     // With it, the session stays CLI and no desktop completion is produced for it.
-    let gap = fixture.scan(daemonThreads: [], proved: loaded.daemonProvedCLISessions)
+    let gap = fixture.scan(daemonThreads: [], remembered: loaded.daemonProvedCLISessions)
     #expect(gap.cliSessions == [fixture.session])
     #expect(gap.daemonProvedCLISessions.isEmpty)
     #expect(gap.titledCLISessions.isEmpty)
@@ -85,16 +85,54 @@ private struct DaemonGapFixture {
 @Test func aRememberedDaemonSessionIsNotEndedForLackingATabWhileTheDaemonListIsEmpty() throws {
     let fixture = try DaemonGapFixture()
     defer { fixture.remove() }
-    let gap = fixture.scan(daemonThreads: [], proved: [fixture.session])
+    let gap = fixture.scan(daemonThreads: [], remembered: [fixture.session])
     #expect(gap.sessionEnds.isEmpty && gap.endedSessions.isEmpty)
     #expect(gap.awaitingHostInventories.isEmpty)
     #expect(gap.cliState.liveSessions == [fixture.session])
     // Another host's inventory without its title ends nothing either.
     let hosts = ReminderReader.scan(events: fixture.events, rollouts: fixture.rollouts, ghostty: fixture.tabless,
-                                    daemonProvedCLISessions: [fixture.session],
+                                    rememberedDaemonCLISessions: [fixture.session],
                                     otherHosts: [.iTerm2: .known(["zsh"], takenAt: fixture.started + 100)])
     #expect(hosts.sessionEnds.isEmpty && hosts.awaitingHostInventories.isEmpty)
     // Still loaded, it ends as before once no tab shows it past the grace.
-    let loaded = fixture.scan(daemonThreads: [fixture.session], proved: [fixture.session])
+    let loaded = fixture.scan(daemonThreads: [fixture.session], remembered: [fixture.session])
     #expect(loaded.endedSessions == [fixture.session])
+}
+
+@Test func theDaemonMemoryLastsThroughADisconnectAndExpiresOnAnAuthoritativeList() {
+    let kept = UUID(), unloaded = UUID(), new = UUID()
+    let remembered: Set<UUID> = [kept, unloaded]
+    // Disconnected, or connected but not yet polled: the empty list says nothing, keep everything.
+    #expect(ReminderReader.rememberedDaemonCLISessions(remembered, provedNow: [new], authoritativeLoaded: nil)
+            == [kept, unloaded, new])
+    // A polled list on a live connection is authoritative: a session it lacks was unloaded.
+    #expect(ReminderReader.rememberedDaemonCLISessions(remembered, provedNow: [new], authoritativeLoaded: [kept, new])
+            == [kept, new])
+    #expect(ReminderReader.rememberedDaemonCLISessions(remembered, provedNow: [], authoritativeLoaded: []).isEmpty)
+}
+
+// The app's path: the scan's classification decides which desktop-labelled completions a prompt clears.
+@Test func aPromptInADaemonCLISessionClearsItsDesktopLabelledCompletion() throws {
+    let fixture = try DaemonGapFixture()
+    defer { fixture.remove() }
+    // Queued in the reconnect gap before the memory existed: labelled desktop.
+    let forgotten = fixture.queue(after: fixture.scan(daemonThreads: [])).items.compactMap(\.completion)
+    #expect(Set(forgotten.map(\.source)) == [.desktop])
+    let reply = UUID()
+    try fixture.hook(fixture.session, "UserPromptSubmit", reply, at: 30)
+    try fixture.hook(fixture.desktop, "UserPromptSubmit", reply, at: 30)
+    let scan = fixture.scan(daemonThreads: [fixture.session, fixture.desktop])
+    let cleared = CodexReplyAcknowledgment.acknowledged(forgotten, events: scan.cliEvents,
+                                                       cliSessions: scan.acknowledgeableCLISessions)
+    #expect(cleared == Set(forgotten.filter { $0.session == fixture.session }.map(\.id)))
+    #expect(!cleared.isEmpty)
+}
+
+// A desktop-originated thread keeps the desktop read-state rule even when something classifies it CLI.
+@Test func desktopOriginatedSessionsAreNeverAcknowledgeableByAPrompt() {
+    let cli = UUID(), desktop = UUID()
+    var scan = ReminderScan()
+    scan.cliSessions = [cli, desktop]
+    scan.desktopOriginatedSessions = [desktop]
+    #expect(scan.acknowledgeableCLISessions == [cli])
 }
