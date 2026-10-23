@@ -287,16 +287,47 @@ private func claudeAllows(_ snapshot: GhosttySnapshot?, enabled: Bool = true) ->
     #expect(unbound)
 }
 
-// MARK: The full response setting
+// MARK: Response length
 
-@Test func theSettingSetsHowEveryResponseStartsAndShowAllFlipsOnlyThatCard() {
-    let cut = CompletionPreview.Extent.cut(full: "1\n2\n3\n4\n5\n6")
-    #expect(ResultCardMessage.showsWhole(cut, showsFullResponse: true, flipped: false))
-    #expect(!ResultCardMessage.showsWhole(cut, showsFullResponse: true, flipped: true))
-    #expect(!ResultCardMessage.showsWhole(cut, showsFullResponse: false, flipped: false))
-    #expect(ResultCardMessage.showsWhole(cut, showsFullResponse: false, flipped: true))
+private func message(_ text: String) -> CompletionPreview { CompletionPreview(text)! }
+
+@Test func theLengthSetsHowEveryResponseStartsAndShowAllFlipsOnlyThatCard() {
+    let long = message("Finished the retry work.\n2\n3\n4\n5\n6")
+    #expect(ResultCardMessage.shown(long, length: .full, flipped: false) == .whole)
+    #expect(ResultCardMessage.shown(long, length: .full, flipped: true) == .brief)
+    #expect(ResultCardMessage.shown(long, length: .brief, flipped: false) == .brief)
+    #expect(ResultCardMessage.shown(long, length: .brief, flipped: true) == .whole)
+    #expect(ResultCardMessage.shown(long, length: .glance, flipped: false) == .glance("Finished the retry work."))
+    #expect(ResultCardMessage.shown(long, length: .glance, flipped: true) == .whole)
 }
 
-@Test func aMessageTheCutLeftWholeHasNothingToFold() {
-    #expect(ResultCardMessage.showsWhole(.whole, showsFullResponse: false, flipped: false))
+@Test func aMessageTheLengthLeavesWholeHasNothingToFold() {
+    let short = message("Removed 31 unused imports.")
+    for length in ResultResponseLength.allCases {
+        #expect(!ResultCardMessage.folds(short, length: length))
+        #expect(ResultCardMessage.shown(short, length: length, flipped: false) == .whole)
+        #expect(ResultCardMessage.shown(short, length: length, flipped: true) == .whole)
+    }
+    // Three lines fit Brief but not Glance.
+    let three = message("One.\n\nTwo.")
+    #expect(!ResultCardMessage.folds(three, length: .brief))
+    #expect(ResultCardMessage.folds(three, length: .glance))
+}
+
+@Test func glanceShowsTheFirstLineWithWordsCutToOneLine() {
+    #expect(ResultCardMessage.shown(message("\n```swift\nlet x = 1\n```"), length: .glance, flipped: false) == .glance("let x = 1"))
+    let longLine = String(repeating: "word ", count: 30)
+    guard case let .glance(line) = ResultCardMessage.shown(message(longLine), length: .glance, flipped: false) else {
+        Issue.record("expected one line"); return
+    }
+    #expect(line.count <= ResultCardMessage.maximumGlanceCharacters)
+    #expect(line.hasSuffix("…"))
+}
+
+@Test func theLengthDefaultsToBriefAndMigratesTheOldSwitch() {
+    #expect(ResultResponseLength.resolve(saved: nil, legacyShowsFullResponse: nil) == .brief)
+    #expect(ResultResponseLength.resolve(saved: nil, legacyShowsFullResponse: true) == .full)
+    #expect(ResultResponseLength.resolve(saved: nil, legacyShowsFullResponse: false) == .brief)
+    #expect(ResultResponseLength.resolve(saved: "glance", legacyShowsFullResponse: true) == .glance)
+    #expect(ResultResponseLength.resolve(saved: "huge", legacyShowsFullResponse: nil) == .brief)
 }
