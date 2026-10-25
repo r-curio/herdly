@@ -20,9 +20,9 @@ extension TerminalHost {
     /// Whether a Codex question's digit may be typed here. Ghostty (ADR 0006) and herdr (ADR 0010) have
     /// their own relays. Terminal.app never: `do script`'s forced newline could answer the next
     /// question. iTerm2 never. WezTerm's relay (#240) is on since its live digit proof (#245,
-    /// `WezTermInput.questionDigitsProvenLive`) and tmux's (#241) since its own (#246,
-    /// `TmuxInput.questionDigitsProvenLive`); Zellij's (#242) stays behind `ZellijInput.questionDigitsProvenLive`
-    /// until its proof.
+    /// `WezTermInput.questionDigitsProvenLive`), tmux's (#241) since its own (#246,
+    /// `TmuxInput.questionDigitsProvenLive`) and Zellij's (#242) since its own (#247,
+    /// `ZellijInput.questionDigitsProvenLive`).
     public var typesQuestionDigits: Bool {
         switch self {
         case .ghostty, .herdr: true

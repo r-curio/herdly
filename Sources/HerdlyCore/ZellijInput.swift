@@ -57,11 +57,11 @@ public enum ZellijInput {
 // MARK: - Question digits
 
 extension ZellijInput {
-    /// Whether Zellij may carry a Codex question's digit (ADR 0017, "Live proof per host"). The relay is
-    /// built through the shared `TerminalQuestionKeys` route and tested, but no Zellij key is offered while
-    /// this is false: a Zellij question card says "Answer this in Codex." Zellij's acceptance (#247) flips
-    /// it once a live run shows the digit alone selects and submits a Codex option in a Zellij pane.
-    public static let questionDigitsProvenLive = false
+    /// Whether Zellij may carry a Codex question's digit (ADR 0017, "Live proof per host"). On since Zellij's
+    /// acceptance (#247): a lone `write-chars --pane-id terminal_<n> -- 3`, with no carriage return, made Codex
+    /// record its third option. While false, no Zellij key is offered and a Zellij question card says
+    /// "Answer this in Codex."
+    public static let questionDigitsProvenLive = true
 
     /// One digit with `write-chars`, never followed by a carriage return. nil for a pane that is not a
     /// Zellij pane handle.
@@ -78,8 +78,7 @@ public struct ZellijSettingsRow: Equatable, Sendable {
     public let problems: [String]
 }
 
-/// The Zellij card in Settings › Terminals. Hidden until acceptance (#247): `TerminalHost.showsCard`
-/// stays false.
+/// The Zellij card in Settings › Terminals, shown since Zellij's acceptance (#247, `TerminalHost.showsCard`).
 public enum ZellijPresentation {
     public static let noTerminalLine = "Turn on the terminal you run Zellij in."
     /// product.md, "Problem lines": "Zellij: older than 0.44.1".
