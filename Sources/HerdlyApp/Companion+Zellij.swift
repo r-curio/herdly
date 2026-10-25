@@ -2,9 +2,9 @@ import AppKit
 import HerdlyCore
 
 // Zellij (#242): the two-second binding and visit scan, ADR 0014's two-layer Open with ADR 0015's
-// fallback, replies typed into the bound pane (ADR 0017), and the question-digit relay, built but off
-// until its live proof (`ZellijInput.questionDigitsProvenLive`). Everything runs only while Zellij may
-// be contacted (its switch and a terminal on); the switch and card stay hidden until acceptance (#247).
+// fallback, replies typed into the bound pane (ADR 0017), and the question-digit relay, on since its
+// live proof (`ZellijInput.questionDigitsProvenLive`, #247). Everything runs only while Zellij may
+// be contacted (its switch and a terminal on); the card is shown since Zellij's acceptance (#247).
 // Rules are HerdlyCore's (`Zellij.swift`, `ZellijTargeting.swift`, `ZellijInput.swift`,
 // `MultiplexerHostTab.swift`); this file reads, sends and schedules. Commands go through `ZellijRunner`.
 
@@ -344,9 +344,9 @@ extension Companion {
         }
     }
 
-    // MARK: - Question digits (ADR 0017; off until the live proof)
+    // MARK: - Question digits (ADR 0017)
 
-    /// The bound Zellij pane a Codex question's digit may be typed into, from the latest scan; nil while
+    /// The bound Zellij pane a Codex question's digit may be typed into, from the latest scan; nil if
     /// Zellij's digit is not proven live (`ZellijInput.questionDigitsProvenLive`), so the shared route offers
     /// no key and the card says "Answer this in Codex."
     func zellijQuestionKeyPane(for session: UUID) -> TypedInputPane? {
