@@ -30,3 +30,29 @@ public enum SharedReading {
         takenAt.isFinite && takenAt >= notBefore && now - takenAt < maxAge
     }
 }
+
+/// When the scan may re-check Claude roots waiting for a new session (#364). Each check decodes every
+/// listed hook record, so one starts at most every `interval` after the last finished, never two at once.
+public struct RestartRecheckGate: Equatable, Sendable {
+    public static let interval: Double = 5
+
+    private enum State: Equatable, Sendable {
+        case idle(due: Double)
+        case running
+    }
+
+    private var state = State.idle(due: -.infinity)
+
+    public init() {}
+
+    /// Starts a check and returns true when a root is waiting, none is running, and one is due.
+    public mutating func start(now: Double, anyWaiting: Bool) -> Bool {
+        guard anyWaiting, case .idle(let due) = state, now >= due else { return false }
+        state = .running
+        return true
+    }
+
+    public mutating func finish(now: Double) {
+        state = .idle(due: now + Self.interval)
+    }
+}

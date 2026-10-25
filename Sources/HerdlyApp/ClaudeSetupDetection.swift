@@ -387,10 +387,7 @@ final class ClaudeSetupModel: ObservableObject {
     private var alternatePaths: [String]
     private var usageOptInPaths: Set<String>
     private var refreshToken = 0
-    /// When a root awaiting restart may next be re-checked; nil while a re-check is running (#364).
-    private var nextRestartRecheck: Date? = .distantPast
-    /// A waiting root's check decodes every listed hook record, so scans re-run it at most this often.
-    private static let restartRecheckInterval: TimeInterval = 5
+    private var restartRecheck = RestartRecheckGate()
 
     init(home: URL = FileManager.default.homeDirectoryForCurrentUser) {
         defaultRoot = home.appendingPathComponent(".claude", isDirectory: true)
@@ -454,21 +451,20 @@ final class ClaudeSetupModel: ObservableObject {
 
     /// Re-checks only the roots waiting for a new Claude session, which nothing else would notice
     /// landing (#364). A root that stopped waiting gets a full refresh; connected roots cost nothing.
-    func recheckAwaitingRestart(now: Date = Date()) {
+    func recheckAwaitingRestart() {
         let waiting = roots.filter { $0.status.isAwaitingRestart }
-        guard !waiting.isEmpty, let due = nextRestartRecheck, now >= due else { return }
-        nextRestartRecheck = nil
+        guard restartRecheck.start(now: Date().timeIntervalSince1970, anyWaiting: !waiting.isEmpty) else { return }
         let support = applicationSupport
         Task { @MainActor in
-            let settled = await Task.detached(priority: .utility) {
+            let anyStoppedWaiting = await Task.detached(priority: .utility) {
                 waiting.contains { root in
                     !ClaudeSetupInstaller().status(
                         roots: ClaudeSetupDetection.setupRoots(configDirectory: root.url, applicationSupport: support),
                         capabilities: root.capabilities).isAwaitingRestart
                 }
             }.value
-            nextRestartRecheck = Date().addingTimeInterval(Self.restartRecheckInterval)
-            if settled { refresh() }
+            restartRecheck.finish(now: Date().timeIntervalSince1970)
+            if anyStoppedWaiting { refresh() }
         }
     }
 
