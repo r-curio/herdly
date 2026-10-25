@@ -51,11 +51,10 @@ public enum TmuxInput {
 // MARK: - Question digits
 
 extension TmuxInput {
-    /// Whether tmux may carry a Codex question's digit (ADR 0017, "Live proof per host"). The relay is
-    /// built through the shared `TerminalQuestionKeys` route and tested, but no tmux key is offered while
-    /// this is false: a tmux question card says "Answer this in Codex." tmux's acceptance (#246) flips it
-    /// once a live run shows the digit alone selects and submits a Codex option in a tmux pane.
-    public static let questionDigitsProvenLive = false
+    /// Whether tmux may carry a Codex question's digit (ADR 0017, "Live proof per host"). On since tmux's
+    /// acceptance (#246): a lone `send-keys -l -- 3`, with no Enter, made Codex record its third option.
+    /// While false, no tmux key is offered and a tmux question card says "Answer this in Codex."
+    public static let questionDigitsProvenLive = true
 
     /// One digit, typed literally, never followed by Enter.
     public static func digitArguments(_ key: String, into pane: TypedInputPane) -> [String] {
@@ -106,8 +105,7 @@ public struct TmuxSettingsRow: Equatable, Sendable {
     public let problems: [String]
 }
 
-/// The tmux card in Settings › Terminals. Hidden until acceptance (#246): `TerminalHost.showsCard`
-/// stays false.
+/// The tmux card in Settings › Terminals, shown since tmux's acceptance (#246, `TerminalHost.showsCard`).
 public enum TmuxPresentation {
     public static let noTerminalLine = "Turn on the terminal you run tmux in."
     /// The not-found pattern WezTerm's card uses, naming tmux's fixed locations.

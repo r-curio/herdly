@@ -135,7 +135,9 @@ enum ZellijRunner {
         guard process.terminationStatus == 0 else {
             return .failed(stderr: String(decoding: box.errors ?? Data(), as: UTF8.self))
         }
-        guard let bytes = box.bytes, bytes.count <= ZellijListing.maximumOutput else { return .failed(stderr: "") }
+        // `read(upToCount:)` is nil at end of file, so a command that prints nothing read empty (#246).
+        let bytes = box.bytes ?? Data()
+        guard bytes.count <= ZellijListing.maximumOutput else { return .failed(stderr: "") }
         return .succeeded(String(decoding: bytes, as: UTF8.self))
     }
 
