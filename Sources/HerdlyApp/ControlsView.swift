@@ -1279,7 +1279,8 @@ private struct TmuxHostRow: View {
     }
 }
 
-/// Zellij (#242). Shown only once its acceptance (#247) turns on `TerminalHost.zellij.showsCard`.
+/// The Zellij card (product.md, "Agreed terminal host presentation"; #242). Shown since Zellij's acceptance
+/// run passed (#247, `TerminalHost.showsCard`). Zellij has no Permission row.
 private struct ZellijHostRow: View {
     @ObservedObject var model: Companion
     @ObservedObject var state: ZellijState

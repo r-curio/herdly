@@ -693,16 +693,17 @@ private let inputPane = TypedInputPane(host: .zellij, paneID: "lab/terminal_1", 
     #expect(TerminalReplyRoute.from(.unavailable(.ttyUnknown(.zellij))) == nil)
 }
 
-// MARK: - Question digits (ADR 0017 "Codex questions"): built, off until a live proof
+// MARK: - Question digits (ADR 0017 "Codex questions"): on since the live proof (#247)
 
-@Test func zellijQuestionDigitsStayOffUntilTheLiveProofFlipsTheirGate() throws {
-    #expect(ZellijInput.questionDigitsProvenLive == false)
+@Test func zellijQuestionDigitsFollowTheirLiveProofGate() throws {
+    // Proven live in Zellij's acceptance run (#247): the digit alone commits Codex's answer.
+    #expect(ZellijInput.questionDigitsProvenLive)
     #expect(TerminalHost.zellij.typesQuestionDigits == ZellijInput.questionDigitsProvenLive)
     let question = AttentionQuestion(source: .cli, session: codexSession, turn: UUID(uuidString: "01A129C9-0000-7000-8000-000000000001")!,
                                      callID: "call_1", arrivedAt: 10)
     #expect(QuestionRelayRouting.route(for: question, book: AppServerQuestionBook(), daemonConnected: false,
                                        ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
-                                       terminalHost: .zellij) == .relayUnavailable(.noQuestionKeys(.zellij)))
+                                       terminalHost: .zellij, typesDigits: { _ in false }) == .relayUnavailable(.noQuestionKeys(.zellij)))
     #expect(HerdrQuestionRelayUnavailable.noQuestionKeys(.zellij).message == "Answer this in Codex.")
     #expect(QuestionRelayRouting.route(for: question, book: AppServerQuestionBook(), daemonConnected: false,
                                        ledger: QuestionRelayLedger(), progress: nil, herdr: .notInHerdr,
@@ -771,7 +772,7 @@ private let inputPane = TypedInputPane(host: .zellij, paneID: "lab/terminal_1", 
     #expect(ready.badge == .ready && ready.problems.isEmpty)
     #expect(ZellijPresentation.settingsRow(on: true, anyTerminalOn: true, read: .notRunning, sessionsSeen: false).badge == .notInUse)
     #expect(!ZellijPresentation.howOpenWorks.contains("Codex questions"))
-    #expect(TerminalHost.zellij.showsCard == false)
+    #expect(TerminalHost.zellij.showsCard)
 }
 
 @Test func zellijClientJoinsAnyEnabledHostsTabByItsTTY() {
