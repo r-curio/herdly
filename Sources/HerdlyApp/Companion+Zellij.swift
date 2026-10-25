@@ -321,12 +321,15 @@ extension Companion {
                                                wezTerm: reads.wezTerm, wezTermClients: reads.wezTermClients)
                 return ZellijOpen.verifyPane(plan, read: fresh, binding: rebind(rebound))
             },
+            // nil is a step that passed; see `runTmuxOpen`.
             raise: { [weak self] plan in
-                await self?.raiseHostTab(plan.host, clientTTY: plan.client.tty, record: record,
-                                         requiredTitlePrefix: ZellijOpen.titlePrefix(plan.pane.session)) ?? .unavailable(.sessionEnded)
+                guard let self else { return .unavailable(.sessionEnded) }
+                return await self.raiseHostTab(plan.host, clientTTY: plan.client.tty, record: record,
+                                               requiredTitlePrefix: ZellijOpen.titlePrefix(plan.pane.session))
             },
             verifyHost: { [weak self] plan in
-                await self?.verifyHostTab(plan.host, clientTTY: plan.client.tty, record: record) ?? .unavailable(.sessionEnded)
+                guard let self else { return .unavailable(.sessionEnded) }
+                return await self.verifyHostTab(plan.host, clientTTY: plan.client.tty, record: record)
             })
         switch run {
         case .opened(_, let preOpenAt):

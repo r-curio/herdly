@@ -371,11 +371,15 @@ extension Companion {
                                                zellij: reads.zellij, ghostty: reads.ghostty, iTerm2: reads.iTerm2)
                 return TmuxOpen.verifyPane(plan, read: fresh, binding: rebind(rebound))
             },
+            // nil is a step that passed, so a released companion is checked apart from it: `self?.step ?? miss`
+            // would read every passed step as the session ending.
             raise: { [weak self] plan in
-                await self?.raiseHostTab(plan.host, clientTTY: plan.client.tty, record: record) ?? .unavailable(.sessionEnded)
+                guard let self else { return .unavailable(.sessionEnded) }
+                return await self.raiseHostTab(plan.host, clientTTY: plan.client.tty, record: record)
             },
             verifyHost: { [weak self] plan in
-                await self?.verifyHostTab(plan.host, clientTTY: plan.client.tty, record: record) ?? .unavailable(.sessionEnded)
+                guard let self else { return .unavailable(.sessionEnded) }
+                return await self.verifyHostTab(plan.host, clientTTY: plan.client.tty, record: record)
             })
         switch run {
         case .opened(_, let preOpenAt):
