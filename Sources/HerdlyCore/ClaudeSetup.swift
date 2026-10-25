@@ -261,7 +261,10 @@ public enum ClaudeSetupPlanner {
                 return empty(.conflict("Duplicate Herdly-owned Claude hooks were found; review settings.json before reconnecting."), settings: settings, settingsExisted: settingsExisted)
             }
             if exact.isEmpty {
+                // Several definitions share one command under different matchers (PermissionRequest),
+                // so an upgrade must match the matcher too or those siblings read as duplicates.
                 let legacy = groups.enumerated().filter { _, group in
+                    groupMatcher(group) == definition.matcher &&
                     (group["hooks"] as? [[String: Any]])?.contains(where: { handlerIsLegacy($0, command: owned.command) }) == true
                 }
                 if legacy.count > 1 {

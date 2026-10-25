@@ -533,6 +533,28 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     #expect(NSDictionary(dictionary: permissionGroups[0]).isEqual(to: bash[0]))
 }
 
+@Test func claudeSetupUpgradesOlderTimeoutsOnHooksThatShareACommandAcrossMatchers() throws {
+    let helper = URL(fileURLWithPath: "/tmp/HerdlyHook"), events = URL(fileURLWithPath: "/tmp/events")
+    let fresh = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: Data("{}".utf8), helperPath: helper, eventsPath: events)
+    // An earlier release wrote every handler with a 38-second timeout. The three PermissionRequest
+    // entries share one command and differ only by matcher; each upgrades in place, none is a duplicate.
+    let older = try #require(String(data: fresh.settingsChange, encoding: .utf8))
+        .replacingOccurrences(of: "\"timeout\" : \(ClaudeSetupRequirements.hookTimeout)", with: "\"timeout\" : 38")
+    #expect(older.contains("\"timeout\" : 38"))
+    let upgrade = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: Data(older.utf8), helperPath: helper, eventsPath: events)
+    #expect(upgrade.status == .ready)
+    #expect(upgrade.addsHooks == false)
+    #expect(upgrade.requiresConfigure)
+    let upgraded = try #require(try settingsObject(upgrade.settingsChange)["hooks"] as? [String: Any])
+    let permissionGroups = try #require(upgraded["PermissionRequest"] as? [[String: Any]])
+    #expect(permissionGroups.compactMap { $0["matcher"] as? String }
+            == ["Bash", ClaudeDirectApproval.fileMatcher, ClaudeDirectApproval.webMatcher])
+    for group in permissionGroups {
+        let handlers = try #require(group["hooks"] as? [[String: Any]])
+        #expect(handlers.map { ($0["timeout"] as? NSNumber)?.intValue } == [ClaudeSetupRequirements.hookTimeout])
+    }
+}
+
 @Test func configureIsOfferedOnlyWhenItWouldChangeSomething() {
     let awaiting = ClaudeConnectionStatus.configuredAwaitingRestart("Configured")
     #expect(awaiting.isAwaitingRestart)
