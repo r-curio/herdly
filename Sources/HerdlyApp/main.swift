@@ -1656,6 +1656,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             scanHerdr()
             scanning = false
             claude.refreshUsage()
+            claude.recheckAwaitingRestart()
             completedAScan = true
             refresh()
             writeRestartReportAndQuitIfRequested(unverified: unverified)

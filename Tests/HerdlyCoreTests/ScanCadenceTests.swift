@@ -170,3 +170,20 @@ private func listingDirectory() throws -> URL {
     #expect(!SharedReading.reusable(takenAt: 100, notBefore: 100, now: 101.5, maxAge: 1.5))
     #expect(!SharedReading.reusable(takenAt: .nan, notBefore: 100, now: 100, maxAge: 1.5))
 }
+
+@Test func restartRecheckRunsOnlyWhileARootWaitsAndAtMostEveryFiveSeconds() {
+    let start = 1_000.0
+    var gate = RestartRecheckGate()
+    var started = gate.start(now: start, anyWaiting: false)
+    #expect(!started)
+    started = gate.start(now: start, anyWaiting: true)
+    #expect(started)
+    // Never two at once, however long the running check takes.
+    started = gate.start(now: start + 60, anyWaiting: true)
+    #expect(!started)
+    gate.finish(now: start + 1)
+    started = gate.start(now: start + 5.999, anyWaiting: true)
+    #expect(!started)
+    started = gate.start(now: start + 6, anyWaiting: true)
+    #expect(started)
+}
