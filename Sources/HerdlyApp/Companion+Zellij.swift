@@ -4,7 +4,7 @@ import HerdlyCore
 // Zellij (#242): the two-second binding and visit scan, ADR 0014's two-layer Open with ADR 0015's
 // fallback, replies typed into the bound pane (ADR 0017), and the question-digit relay, built but off
 // until its live proof (`ZellijInput.questionDigitsProvenLive`). Everything runs only while Zellij may
-// be contacted (its switch and a terminal on); the switch and card stay hidden until acceptance (#247).
+// be contacted (its switch and a terminal on); the card is shown since Zellij's acceptance (#247).
 // Rules are HerdlyCore's (`Zellij.swift`, `ZellijTargeting.swift`, `ZellijInput.swift`,
 // `MultiplexerHostTab.swift`); this file reads, sends and schedules. Commands go through `ZellijRunner`.
 

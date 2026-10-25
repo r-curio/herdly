@@ -771,7 +771,7 @@ private let inputPane = TypedInputPane(host: .zellij, paneID: "lab/terminal_1", 
     #expect(ready.badge == .ready && ready.problems.isEmpty)
     #expect(ZellijPresentation.settingsRow(on: true, anyTerminalOn: true, read: .notRunning, sessionsSeen: false).badge == .notInUse)
     #expect(!ZellijPresentation.howOpenWorks.contains("Codex questions"))
-    #expect(TerminalHost.zellij.showsCard == false)
+    #expect(TerminalHost.zellij.showsCard)
 }
 
 @Test func zellijClientJoinsAnyEnabledHostsTabByItsTTY() {
