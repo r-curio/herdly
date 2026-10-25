@@ -109,12 +109,13 @@ Terminal.app had windows for the tmux client (`/dev/ttys048`), the decoy, and a 
 
 ## Decisions
 
-None taken by the operator yet. Open for the operator:
+Taken by the operator on 2026-10-25, each as recommended:
 
-- **H7 with no client:** with the host app quit, a tmux pane has no client and reads "can't tell which terminal" rather than "<app> isn't running." Accept this as tmux's expected line, or remember each session's last host.
-- **H8 Claude:** ancestry stops at the tmux server, so a Claude session in tmux can't be raised silently with the host switch off. Accept, or resolve the host from the client as Open does.
-- **iTerm2 fallback:** iTerm2's reparented server hides it from ADR 0015's walk, so H5 reads unreachable instead of raising iTerm2.
-- **Digit gate:** turned on from the CLI-level proof, as ADR 0017 requires. Turn `TmuxInput.questionDigitsProvenLive` back off if a Herdly-driven digit run is required first.
+- **H7 with no client:** accepted. With the host app quit or the client detached, a tmux pane has no client and reads "Herdly can't tell which terminal this session is in." This is tmux's expected line, not "<app> isn't running."
+- **H8 Claude:** accepted for now. Ancestry stops at the tmux server, so a Claude session in tmux can't be raised silently with the host switch off.
+- **iTerm2 fallback:** accepted. iTerm2's reparented server hides it from ADR 0015's walk, so H5 reads unreachable instead of raising iTerm2.
+- **Closed pane without `SessionEnd`:** tracked with [#285](https://github.com/r-curio/herdly/issues/285).
+- **Digit gate:** stays on from the CLI-level proof, as ADR 0017 allows.
 
 Follow-ups to file:
 - A pending Keychain prompt stops all event intake.
