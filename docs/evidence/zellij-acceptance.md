@@ -110,11 +110,11 @@ Terminal.app had windows for the Zellij client (`/dev/ttys050`) and the decoy (`
 
 ## Decisions
 
-Open for the operator, each with a recommendation:
+Taken by the operator on 2026-10-25, each as recommended:
 
-- **H7 with no client:** accept, as for tmux. With the host app quit, the pane has no client and reads "Herdly can't tell which terminal this session is in."
-- **Title veto (Finding 1):** accept for now; follow-up [#369](https://github.com/r-curio/herdly/issues/369). Open falls back safely; the follow-up should find a way to meet ADR 0014's title check without the user printing a title.
-- **H8 focus move (Finding 2):** accept for now; follow-up [#370](https://github.com/r-curio/herdly/issues/370). The join should not answer Ghostty for a client tty that belongs to a switched-off host's app.
-- **Short visits in iTerm2 (Finding 3):** accept. Same pattern as tmux's iTerm2 run.
+- **H7 with no client:** accepted, as for tmux. With the host app quit, the pane has no client and reads "Herdly can't tell which terminal this session is in."
+- **Title veto (Finding 1):** accepted for now; follow-up [#369](https://github.com/r-curio/herdly/issues/369). Open falls back safely; the follow-up should find a way to meet ADR 0014's title check without the user printing a title.
+- **H8 focus move (Finding 2):** accepted for now; follow-up [#370](https://github.com/r-curio/herdly/issues/370). The join should not answer Ghostty for a client tty that belongs to a switched-off host's app.
+- **Short visits in iTerm2 (Finding 3):** accepted. Same pattern as tmux's iTerm2 run.
 - **Closed pane without `SessionEnd`:** tracked with [#285](https://github.com/r-curio/herdly/issues/285).
 - **Digit gate:** on, from the CLI-level proof and Herdly's own route (H9).
