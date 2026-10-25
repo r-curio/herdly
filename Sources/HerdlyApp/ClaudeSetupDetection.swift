@@ -387,6 +387,7 @@ final class ClaudeSetupModel: ObservableObject {
     private var alternatePaths: [String]
     private var usageOptInPaths: Set<String>
     private var refreshToken = 0
+    private var restartRecheck = RestartRecheckGate()
 
     init(home: URL = FileManager.default.homeDirectoryForCurrentUser) {
         defaultRoot = home.appendingPathComponent(".claude", isDirectory: true)
@@ -445,6 +446,25 @@ final class ClaudeSetupModel: ObservableObject {
             // Unchanged roots are not written back: the notch observes this model (#306).
             if next != roots { roots = next }
             checked = true
+        }
+    }
+
+    /// Re-checks only the roots waiting for a new Claude session, which nothing else would notice
+    /// landing (#364). A root that stopped waiting gets a full refresh; connected roots cost nothing.
+    func recheckAwaitingRestart() {
+        let waiting = roots.filter { $0.status.isAwaitingRestart }
+        guard restartRecheck.start(now: ProcessInfo.processInfo.systemUptime, anyWaiting: !waiting.isEmpty) else { return }
+        let support = applicationSupport
+        Task { @MainActor in
+            let anyStoppedWaiting = await Task.detached(priority: .utility) {
+                waiting.contains { root in
+                    !ClaudeSetupInstaller().status(
+                        roots: ClaudeSetupDetection.setupRoots(configDirectory: root.url, applicationSupport: support),
+                        capabilities: root.capabilities).isAwaitingRestart
+                }
+            }.value
+            restartRecheck.finish(now: ProcessInfo.processInfo.systemUptime)
+            if anyStoppedWaiting { refresh() }
         }
     }
 
