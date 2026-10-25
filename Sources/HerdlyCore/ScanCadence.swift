@@ -33,8 +33,9 @@ public enum SharedReading {
 
 /// When the scan may re-check Claude roots waiting for a new session (#364). Each check decodes every
 /// listed hook record, so one starts at most every `interval` after the last finished, never two at once.
-public struct RestartRecheckGate: Equatable, Sendable {
-    public static let interval: Double = 5
+/// Times are monotonic seconds (system uptime), so a wall-clock change cannot stall it.
+public struct RestartRecheckGate: Sendable {
+    private static let interval: Double = 5
 
     private enum State: Equatable, Sendable {
         case idle(due: Double)

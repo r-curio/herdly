@@ -453,7 +453,7 @@ final class ClaudeSetupModel: ObservableObject {
     /// landing (#364). A root that stopped waiting gets a full refresh; connected roots cost nothing.
     func recheckAwaitingRestart() {
         let waiting = roots.filter { $0.status.isAwaitingRestart }
-        guard restartRecheck.start(now: Date().timeIntervalSince1970, anyWaiting: !waiting.isEmpty) else { return }
+        guard restartRecheck.start(now: ProcessInfo.processInfo.systemUptime, anyWaiting: !waiting.isEmpty) else { return }
         let support = applicationSupport
         Task { @MainActor in
             let anyStoppedWaiting = await Task.detached(priority: .utility) {
@@ -463,7 +463,7 @@ final class ClaudeSetupModel: ObservableObject {
                         capabilities: root.capabilities).isAwaitingRestart
                 }
             }.value
-            restartRecheck.finish(now: Date().timeIntervalSince1970)
+            restartRecheck.finish(now: ProcessInfo.processInfo.systemUptime)
             if anyStoppedWaiting { refresh() }
         }
     }
