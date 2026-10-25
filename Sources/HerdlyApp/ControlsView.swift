@@ -1261,7 +1261,8 @@ private struct WezTermHostRow: View {
     }
 }
 
-/// tmux (#241). Shown only once its acceptance (#246) turns on `TerminalHost.tmux.showsCard`.
+/// The tmux card (product.md, "Agreed terminal host presentation"; #241). Shown since tmux's acceptance
+/// run passed (#246, `TerminalHost.showsCard`). tmux has no Permission row.
 private struct TmuxHostRow: View {
     @ObservedObject var model: Companion
     @ObservedObject var state: TmuxState
