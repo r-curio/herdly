@@ -465,7 +465,7 @@ extension Companion {
                     let reads = await Task.detached { TerminalTabReads.take(others: others, claudeTTYs: [], second: false) }.value
                     record.reads = reads
                     return HerdrHostOpen.plan(binding: fresh.binding, outcome: fresh.outcome, join: {
-                        MultiplexerHostTab.join(clientTTY: $0, switches: switches, inventories: reads.inventories)
+                        reads.hostJoin(clientTTY: $0, switches: switches)
                     })
                 },
                 focusPane: { plan in
