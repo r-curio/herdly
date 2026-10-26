@@ -291,6 +291,21 @@ private let joinSwitches = TerminalHostSwitches(enabled: [.iTerm2, .terminalApp,
             == .tab(TerminalTabTarget(host: .terminalApp, tabID: "9882", tty: hostTTY)))
 }
 
+@Test func multiplexerClientJoinAnswersGhosttyOnlyWhenGhosttysOwnJoinMatched() {
+    // #370: the client runs in a switched-off host's app, so Ghostty's own join finds it nowhere. The
+    // join misses as the Ghostty raise would, before the multiplexer moves.
+    let ghostty: TerminalHostInventory = .tabs([TerminalTab(tabID: "w1/t1/s1", tty: nil, title: "zsh", paneCount: 1)])
+    let switches = TerminalHostSwitches(enabled: [.ghostty, .tmux, .zellij])
+    let join = { (ghosttyJoin: GhosttyTTYJoin) in
+        MultiplexerHostTab.join(clientTTY: hostTTY, switches: switches, inventories: [.ghostty: ghostty], ghostty: ghosttyJoin)
+    }
+    #expect(join(.matched(GhosttyTarget(window_id: "w1", tab_id: "t1", terminal_id: "s1"))) == .ghostty)
+    #expect(join(.ttyUnsupported) == .miss(.fallBack(.noUniqueTarget, candidates: 1)))
+    #expect(join(.noMatch) == .miss(.fallBack(.noUniqueTarget, candidates: 1)))
+    #expect(join(.otherWindow) == .miss(.fallBack(.unsupportedLayout, candidates: 1)))
+    #expect(join(.inventoryUnavailable) == .miss(.unavailable(.hostUnreadable(.ghostty))))
+}
+
 // MARK: - Two-layer Open (ADR 0014 "Open sequence", ADR 0015, ADR 0016)
 
 private let paneTarget = TerminalTabTarget(host: .tmux, tabID: "%0", tty: "/dev/ttys017")

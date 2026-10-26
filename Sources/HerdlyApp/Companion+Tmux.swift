@@ -352,7 +352,7 @@ extension Companion {
                     return .failure(TerminalTabOpen.miss(binding.unavailableReason ?? .hostUnreadable(.tmux)))
                 }
                 return TmuxOpen.plan(binding, snapshot: snapshot, join: {
-                    MultiplexerHostTab.join(clientTTY: $0, switches: switches, inventories: reads.inventories)
+                    reads.hostJoin(clientTTY: $0, switches: switches)
                 })
             },
             focus: { plan in

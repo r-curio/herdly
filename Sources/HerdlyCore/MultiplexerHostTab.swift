@@ -75,8 +75,12 @@ public enum MultiplexerHostTab {
     /// Joins `clientTTY` to the one tab across the enabled terminal inventories. Hosts switched off are
     /// never read; an enabled host whose inventory is unreadable or missing cannot be ruled out, so the
     /// join is unavailable. Several matches, or none, fall back; a split host tab falls back.
+    /// `ghostty` is Ghostty's own join over the same fresh read. When given, the join answers `.ghostty`
+    /// only if it matched, and otherwise misses as the Ghostty raise would, so an Open never moves the
+    /// multiplexer for a client Ghostty cannot show, such as one in a switched-off host's app (#370).
     public static func join(clientTTY: String, switches: TerminalHostSwitches,
-                            inventories: [TerminalHost: TerminalHostInventory]) -> MultiplexerHostJoin {
+                            inventories: [TerminalHost: TerminalHostInventory],
+                            ghostty: GhosttyTTYJoin? = nil) -> MultiplexerHostJoin {
         guard let client = GhosttyTTYMatch.normalizedTTY(clientTTY) else {
             return .miss(.fallBack(.noUniqueTarget, candidates: 0))
         }
@@ -100,6 +104,12 @@ public enum MultiplexerHostTab {
         if let match = matches.first {
             return match.panes == 1 ? .tab(match.target) : .miss(.fallBack(.unsupportedLayout, candidates: 1))
         }
-        return ttylessGhostty ? .ghostty : .miss(.fallBack(.noUniqueTarget, candidates: 0))
+        guard ttylessGhostty else { return .miss(.fallBack(.noUniqueTarget, candidates: 0)) }
+        switch ghostty {
+        case nil, .matched?: return .ghostty
+        case let join?:
+            return .miss(HerdrOpenFallback.reason(for: join).map { .fallBack($0, candidates: 1) }
+                ?? .unavailable(.hostUnreadable(.ghostty)))
+        }
     }
 }

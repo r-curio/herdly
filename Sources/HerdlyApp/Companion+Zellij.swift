@@ -299,7 +299,7 @@ extension Companion {
                     return .failure(.unavailable(.hostUnreadable(.zellij)))
                 }
                 return ZellijOpen.plan(binding, snapshot: snapshot, join: {
-                    MultiplexerHostTab.join(clientTTY: $0, switches: switches, inventories: reads.inventories)
+                    reads.hostJoin(clientTTY: $0, switches: switches)
                 }, hostTitle: { tab in
                     guard case .tabs(let tabs)? = reads.inventories[tab.host] else { return nil }
                     return tabs.first { $0.tabID == tab.tabID }?.title

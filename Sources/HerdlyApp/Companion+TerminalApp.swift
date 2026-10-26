@@ -88,6 +88,9 @@ struct TerminalTabReads: Sendable {
     var iTerm2: ITerm2Snapshot?
     var wezTerm: WezTermSnapshot?
     var wezTermClients: WezTermClients?
+    /// Whether the Ghostty read above could list `tty`, read beside it; nil when Ghostty was not read
+    /// or for the shared scheduled read, which never joins a multiplexer client.
+    var ghosttyTTYSupport: GhosttyTTYSupport?
 
     /// Reads Terminal.app (while on) and the other enabled hosts, then `ps` for every tab or pane of a
     /// tty-listing host (Terminal.app, iTerm2, WezTerm, tmux) whose title is a shortened Codex identifier
@@ -145,7 +148,18 @@ struct TerminalTabReads: Sendable {
         }
         return TerminalTabReads(terminalApp: terminal, inventories: inventories, processes: processes,
                                 secondRead: secondRead, tmux: tmux, zellij: zellij, ghostty: ghostty, iTerm2: iTerm2,
-                                wezTerm: wezTerm, wezTermClients: wezTermClients)
+                                wezTerm: wezTerm, wezTermClients: wezTermClients,
+                                ghosttyTTYSupport: ghostty == nil || scheduledSince != nil ? nil : GhosttyScriptingSupport.ttySupport())
+    }
+
+    /// ADR 0014's host-tab join for a multiplexer Open over these reads, with Ghostty's own join settled
+    /// before the multiplexer moves rather than at the raise (#370).
+    func hostJoin(clientTTY: String, switches: TerminalHostSwitches) -> MultiplexerHostJoin {
+        let ghosttyJoin = ghostty.flatMap { snapshot in
+            ghosttyTTYSupport.map { GhosttyTTYMatch.join(clientTTY: clientTTY, support: $0, snapshot: snapshot) }
+        }
+        return MultiplexerHostTab.join(clientTTY: clientTTY, switches: switches, inventories: inventories,
+                                       ghostty: ghosttyJoin)
     }
 
     /// The ttys of tmux's attached clients and of Zellij's client processes in the first read: host tabs
