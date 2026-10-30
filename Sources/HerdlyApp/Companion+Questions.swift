@@ -32,7 +32,7 @@ extension Companion {
         let retained = liveClaudeQuestions.filter { requestID, live in
             let root = claudeQuestionRootKey(sourceScope: live.sourceScope, events: live.events,
                                              installationID: live.request.installationID)
-            return live.request.expiresAt > now && roots.contains(root)
+            return claudeQuestionDeadline(live.request) > now && roots.contains(root)
                 && (pendingIDs.contains(requestID) || observedIDs.contains(requestID))
         }
         let retainedIDs = Set(retained.keys)
@@ -40,6 +40,44 @@ extension Companion {
         availableClaudeQuestionTokens = availableClaudeQuestionTokens.filter { retainedIDs.contains($0) }
         spentClaudeQuestionTokens = spentClaudeQuestionTokens.filter { retainedIDs.contains($0) }
         pendingClaudeQuestionReceipts = pendingClaudeQuestionReceipts.filter { retainedIDs.contains($0) }
+        claudeQuestionHolds = claudeQuestionHolds.filter { retainedIDs.contains($0.key) }
+    }
+
+    /// A live Claude question's deadline with its hover hold, bounded as the helper bounds it.
+    func claudeQuestionDeadline(_ request: ClaudeQuestionRequest) -> Double {
+        ClaudeQuestionTiming.heldDeadline(publishedAt: request.publishedAt, expiresAt: request.expiresAt,
+                                          held: claudeQuestionHolds[request.requestID])
+    }
+
+    /// ADR 0020, amended 2026-10-30 (#374): while the pointer is on the notch, each live Claude
+    /// question Herdly can answer keeps the time it had left, never past two minutes from publish.
+    /// The hold is written for the helper a second ahead of the deadline the notch shows, so the
+    /// helper never hands back while the notch still offers the answer. Holding answers nothing.
+    func applyClaudeQuestionHolds(now: Double, hovering: Bool) {
+        let live = liveClaudeQuestions.values.filter {
+            availableClaudeQuestionTokens.contains($0.request.requestID) && claudeQuestionDeadline($0.request) > now
+        }
+        questionHover.update(hovering: hovering,
+                             live: live.map { .init(key: $0.request.requestID, expiresAt: $0.request.expiresAt) },
+                             now: now)
+        for question in live {
+            let requestID = question.request.requestID
+            guard let deadline = questionHover.deadlines[requestID] else { continue }
+            claudeQuestionHolds[requestID] = max(claudeQuestionHolds[requestID] ?? 0, deadline)
+            writeHold(requestID, deadline: claudeQuestionDeadline(question.request),
+                      to: ClaudeQuestionStore.holdURL(in: question.events, id: requestID),
+                      written: &writtenQuestionHolds)
+        }
+        let liveIDs = Set(live.map(\.request.requestID))
+        writtenQuestionHolds = writtenQuestionHolds.filter { liveIDs.contains($0.key) }
+    }
+
+    /// "Ns left" for a Claude question Herdly can answer now, from its held deadline; nil for a
+    /// Codex question or one Herdly cannot answer. Display only: it never moves the deadline.
+    func claudeQuestionCountdown(_ question: AgentQuestion, now: Double) -> ApprovalCountdown? {
+        guard previewMode == nil, let live = liveClaudeQuestion(for: question) else { return nil }
+        return ApprovalCountdown(arrivedAt: live.request.publishedAt, expiresAt: claudeQuestionDeadline(live.request),
+                                 now: now)
     }
 
     func publishClaudeQuestionReceipts(_ works: [ClaudeQuestionReceiptWork]) {
@@ -125,10 +163,11 @@ extension Companion {
               live.request.sessionID == question.identity.session.session,
               live.request.promptID == question.identity.turn,
               live.request.toolUseID == question.identity.call,
-              live.request.expiresAt > now,
+              claudeQuestionDeadline(live.request) > now,
               live.request.prompts == question.prompts,
               let liveness = ClaudeQuestionStore.liveness(for: requestID, in: live.events),
-              claudeQuestionLivenessIsCurrent(liveness, request: live.request, now: now) else { return nil }
+              claudeQuestionLivenessIsCurrent(liveness, request: live.request, now: now,
+                                              deadline: claudeQuestionDeadline(live.request)) else { return nil }
         return live
     }
 
@@ -156,7 +195,8 @@ extension Companion {
         }
         let now = Date().timeIntervalSince1970
         guard let liveness = ClaudeQuestionStore.liveness(for: live.request.requestID, in: live.events),
-              claudeQuestionLivenessIsCurrent(liveness, request: live.request, now: now) else {
+              claudeQuestionLivenessIsCurrent(liveness, request: live.request, now: now,
+                                              deadline: claudeQuestionDeadline(live.request)) else {
             refresh()
             return
         }

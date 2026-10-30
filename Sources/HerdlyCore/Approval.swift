@@ -12,6 +12,9 @@ public enum ApprovalTiming {
     /// A hold starts only with at least this much of the window left, so the helper reads the
     /// hold before its own deadline passes.
     public static let holdMargin: TimeInterval = 1
+    /// The app writes each hold file this far ahead of the deadline the notch shows, so a helper
+    /// never hands back while the notch still offers the choice. Questions' helper cap keeps it too.
+    public static let holdLead: TimeInterval = 1
     public static let helperWaitBound: TimeInterval = maximumHold + 1
 
     /// The deadline a hook helper keeps for a request whose receipt says `expiresAt`: the hold's

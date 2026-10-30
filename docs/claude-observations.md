@@ -24,7 +24,9 @@ An `AskUserQuestion` record retains bounded question text and option labels so t
 show the same choices Claude is showing. The separate live request carries the helper invocation
 identity, the normalized Claude configuration root, and the separate normalized event directory; its
 helper-owned liveness marker is refreshed only while the hook waits, and a delivery acknowledgment
-is written only after Claude's response is emitted. A restart cannot turn its saved request record
+is written only after Claude's response is emitted. The helper waits 30 seconds from its publish,
+longer only by a hover hold in `<request>.question-hold` that it re-reads every poll and bounds to 2
+minutes from publish (ADR 0020); expiry emits nothing. A restart cannot turn its saved request record
 into an answer capability.
 
 The reader recognizes session, prompt, tool, question, approval, and outcome events. Tool text is
