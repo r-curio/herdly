@@ -1333,10 +1333,13 @@ struct Notch: View {
                         Text("The exact Claude tab cannot be opened until Herdly can verify it; continue in Claude.")
                             .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
                     }
-                    // Display only: the countdown reads the held deadline and never moves it.
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        if let countdown = model.claudeQuestionCountdown(question, now: context.date.timeIntervalSince1970) {
-                            ApprovalCountdownRow(countdown: countdown)
+                    // Display only: the countdown reads the held deadline and never moves it. Only a
+                    // question Herdly can answer gets the per-second timer.
+                    if model.canAnswerAgentQuestion(question) {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            if let countdown = model.claudeQuestionCountdown(question, now: context.date.timeIntervalSince1970) {
+                                ApprovalCountdownRow(countdown: countdown)
+                            }
                         }
                     }
                     claudeQuestionFooter(question, item: item, subject: subject)
@@ -2296,9 +2299,10 @@ struct Notch: View {
                                        card: ApprovalCardReading(item, decidable: decidable,
                                                                  now: context.date.timeIntervalSince1970))
                         }
-                    } else if inQueue, let question = item.question, question.identity.session.source == .claude {
+                    } else if inQueue, let question = item.question, question.identity.session.source == .claude,
+                              model.canAnswerAgentQuestion(question) {
                         // A Claude question Herdly can answer steps its "Ns left" once a second, as
-                        // a live approval does; one it cannot answer reads as before.
+                        // a live approval does; one it cannot answer takes the plain row, with no timer.
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             let countdown = model.claudeQuestionCountdown(question, now: context.date.timeIntervalSince1970)
                             cardOpener(item, countdown: countdown) {
