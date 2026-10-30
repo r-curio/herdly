@@ -191,3 +191,31 @@ private func answer(_ request: ClaudeQuestionRequest, at decidedAt: Double) -> C
     #expect(ApprovalCountdown(arrivedAt: 0, expiresAt: 70, now: 50)?.fraction
                 == ApprovalCountdown(arrivedAt: 0, expiresAt: 30, now: 10)?.fraction)
 }
+
+@Test func theQuestionHelperStopsAtTheCapEvenWithAHoldFarInTheFuture() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-question-hold-cap-wait-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    // Published 119.7 s ago with a window ending 0.2 s from now, so the helper's cap (publish +
+    // 2 min + the 1 s lead) is 1.3 s away. The hold asks for far longer; no answer is sent.
+    let now = Date().timeIntervalSince1970
+    let request = ClaudeQuestionRequest(requestID: "cap-wait", installationID: "install-1", sourceScope: "/root",
+                                        eventDirectory: directory.standardizedFileURL.path,
+                                        sessionID: "session-1", promptID: "prompt-1", toolUseID: "tool-1",
+                                        publishedAt: now - 119.7, expiresAt: now + 0.2,
+                                        prompts: [QuestionPrompt(header: nil, question: "Which?", options: ["Red", "Blue"])])
+    #expect(ClaudeQuestionStore.publish(request, in: directory))
+    #expect(ClaudeQuestionStore.publish(ClaudeQuestionReceipt(requestID: "cap-wait", installationID: request.installationID,
+                                                              sourceScope: request.sourceScope,
+                                                              eventDirectory: request.eventDirectory,
+                                                              receivedAt: now - 119.6, expiresAt: request.expiresAt),
+                                        in: directory))
+    #expect(ApprovalHoldStore.publish(ApprovalHoldRecord(requestID: "cap-wait", heldUntil: now + 10_000),
+                                      to: ClaudeQuestionStore.holdURL(in: directory, id: "cap-wait")))
+    let started = Date()
+    #expect(ClaudeQuestionHelper.awaitAnswer(for: request, in: directory,
+                                             connectionTimeout: 0.2, answerTimeout: 10) == nil)
+    let waited = Date().timeIntervalSince(started)
+    #expect(waited > 1)
+    #expect(waited < 2)
+}
