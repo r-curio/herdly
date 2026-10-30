@@ -11,7 +11,7 @@ public enum ClaudeQuestionTiming {
 
     /// The app writes a hold this far ahead of the deadline the notch shows, and the helper's own
     /// cap keeps the same lead, so the helper never stops before the notch's last offer.
-    public static let holdLead: TimeInterval = 1
+    public static let holdLead: TimeInterval = ApprovalTiming.holdLead
 
     /// The deadline the notch shows for a question whose window ends at `expiresAt`: a hover hold's
     /// deadline when it is later, never past `ApprovalTiming.maximumHold` after publish. A missing

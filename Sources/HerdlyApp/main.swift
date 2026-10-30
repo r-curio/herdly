@@ -2402,7 +2402,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// than half that lead is left. A failed write leaves the helper on its last deadline, which the
     /// notch's own deadline reaches first only by up to the lead.
     func writeHold(_ requestID: String, deadline: Double, to url: URL, written: inout [String: Double]) {
-        let lead = 1.0
+        let lead = ApprovalTiming.holdLead
         guard deadline + lead / 2 > written[requestID] ?? 0 else { return }
         if ApprovalHoldStore.publish(ApprovalHoldRecord(requestID: requestID, heldUntil: deadline + lead), to: url) {
             written[requestID] = deadline + lead
