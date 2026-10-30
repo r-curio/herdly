@@ -82,11 +82,11 @@ func claudeQuestionReceiptDisposition(_ result: ClaudeQuestionReceiptResult,
     return result.scanGeneration == currentGeneration ? .accept : .staleAccept
 }
 
-/// `deadline` is the question's deadline with its hover hold (ADR 0020); it defaults to the
-/// request's own window.
+/// `deadline` is the question's deadline with its hover hold (ADR 0020). It is required so no
+/// caller falls back to the unheld window by omission.
 func claudeQuestionLivenessIsCurrent(_ liveness: ClaudeQuestionLiveness,
                                      request: ClaudeQuestionRequest, now: Double,
-                                     deadline: Double? = nil,
+                                     deadline: Double,
                                      maximumAge: TimeInterval = ClaudeQuestionTiming.livenessTimeout) -> Bool {
     guard now.isFinite, liveness.requestID == request.requestID,
           liveness.installationID == request.installationID,
@@ -99,7 +99,7 @@ func claudeQuestionLivenessIsCurrent(_ liveness: ClaudeQuestionLiveness,
           liveness.heartbeatAt >= request.publishedAt,
           liveness.heartbeatAt <= now,
           now - liveness.heartbeatAt <= maximumAge,
-          (deadline ?? request.expiresAt) > now else { return false }
+          deadline > now else { return false }
     return true
 }
 

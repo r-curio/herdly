@@ -9,12 +9,30 @@ public enum ClaudeQuestionTiming {
     public static let livenessTimeout: TimeInterval = 0.25
     public static let deliveryAckTimeout: TimeInterval = 0.5
 
-    /// The deadline kept for a question whose window ends at `expiresAt`: a hover hold's deadline
-    /// when it is later, never past `ApprovalTiming.maximumHold` after publish. A missing or
-    /// malformed hold leaves `expiresAt`. Holding answers nothing.
+    /// The app writes a hold this far ahead of the deadline the notch shows, and the helper's own
+    /// cap keeps the same lead, so the helper never stops before the notch's last offer.
+    public static let holdLead: TimeInterval = 1
+
+    /// The deadline the notch shows for a question whose window ends at `expiresAt`: a hover hold's
+    /// deadline when it is later, never past `ApprovalTiming.maximumHold` after publish. A missing
+    /// or malformed hold leaves `expiresAt`. Holding answers nothing.
+    ///
+    /// It measures the cap from publish, not from `expiresAt` as `ApprovalTiming.heldDeadline`
+    /// does: a question has no separate receipt deadline, and its window starts at the helper's
+    /// publish, so publish + 2 min holds even for a receipt issued late or a shortened window.
     public static func heldDeadline(publishedAt: Double, expiresAt: Double, held: Double?) -> Double {
+        heldDeadline(publishedAt: publishedAt, expiresAt: expiresAt, held: held, lead: 0)
+    }
+
+    /// The helper's deadline for the same question: as `heldDeadline`, with `holdLead` past the cap.
+    public static func helperDeadline(publishedAt: Double, expiresAt: Double, held: Double?) -> Double {
+        heldDeadline(publishedAt: publishedAt, expiresAt: expiresAt, held: held, lead: holdLead)
+    }
+
+    private static func heldDeadline(publishedAt: Double, expiresAt: Double, held: Double?,
+                                     lead: TimeInterval) -> Double {
         guard let held, held.isFinite, publishedAt.isFinite else { return expiresAt }
-        return min(max(expiresAt, held), max(expiresAt, publishedAt + ApprovalTiming.maximumHold))
+        return min(max(expiresAt, held), max(expiresAt, publishedAt + ApprovalTiming.maximumHold + lead))
     }
 }
 
@@ -200,13 +218,13 @@ public enum ClaudeQuestionStore {
         rendezvousDirectory(in: directory).appendingPathComponent(id + ".question-hold")
     }
 
-    /// The question's deadline with any readable, matching hold, bounded by
-    /// `ClaudeQuestionTiming.heldDeadline`; `expiresAt` defaults to the request's own.
+    /// The helper's deadline for the question with any readable, matching hold, bounded by
+    /// `ClaudeQuestionTiming.helperDeadline`; `expiresAt` defaults to the request's own.
     public static func heldDeadline(for request: ClaudeQuestionRequest, expiresAt: Double? = nil,
                                     in directory: URL) -> Double {
         let base = expiresAt ?? request.expiresAt
         guard validID(request.requestID) else { return base }
-        return ClaudeQuestionTiming.heldDeadline(
+        return ClaudeQuestionTiming.helperDeadline(
             publishedAt: request.publishedAt, expiresAt: base,
             held: ApprovalHoldStore.heldUntil(at: holdURL(in: directory, id: request.requestID),
                                               requestID: request.requestID))
@@ -427,7 +445,8 @@ public enum ClaudeQuestionHelper {
                                started + max(0, receipt.expiresAt - Date().timeIntervalSince1970))
         // A hover hold moves the deadline later by what it adds to the receipt's, re-read on every
         // poll and never past two minutes from publish (ADR 0020). Expiry answers nothing.
-        var heldUntil = receipt.expiresAt
+        var heldUntil = max(receipt.expiresAt, ClaudeQuestionStore.heldDeadline(for: request, expiresAt: receipt.expiresAt,
+                                                                                in: directory))
         while ProcessInfo.processInfo.systemUptime
                 < min(baseDeadline + (heldUntil - receipt.expiresAt), started + ApprovalTiming.helperWaitBound) {
             guard refreshLiveness() else { return nil }

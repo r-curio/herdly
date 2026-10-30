@@ -92,19 +92,53 @@ private func answer(_ request: ClaudeQuestionRequest, at decidedAt: Double) -> C
     let capped = liveQuestion("capped", in: directory, window: 0.2)
     #expect(ApprovalHoldStore.publish(ApprovalHoldRecord(requestID: "capped", heldUntil: capped.publishedAt + 10_000),
                                       to: ClaudeQuestionStore.holdURL(in: directory, id: "capped")))
-    #expect(ClaudeQuestionStore.heldDeadline(for: capped, in: directory) == capped.publishedAt + ApprovalTiming.maximumHold)
+    #expect(ClaudeQuestionStore.heldDeadline(for: capped, in: directory)
+                == capped.publishedAt + ApprovalTiming.maximumHold + ClaudeQuestionTiming.holdLead)
 }
 
 @Test func anAnswerDecidedAfterTheHeldDeadlineIsRefused() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-question-hold-late-" + UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    let request = liveQuestion("late", in: directory, window: 0.2)
-    #expect(ApprovalHoldStore.publish(ApprovalHoldRecord(requestID: "late", heldUntil: request.publishedAt + 0.5),
+    // Published 3 s ago with a 1 s window, held to 1.5 s ago. The answer was decided 1 s ago: in the
+    // past, so the clock check passes, but after the held deadline, so only the held bound refuses it.
+    let now = Date().timeIntervalSince1970
+    let request = ClaudeQuestionRequest(requestID: "late", installationID: "install-1", sourceScope: "/root",
+                                        eventDirectory: directory.standardizedFileURL.path,
+                                        sessionID: "session-1", promptID: "prompt-1", toolUseID: "tool-1",
+                                        publishedAt: now - 3, expiresAt: now - 2,
+                                        prompts: [QuestionPrompt(header: nil, question: "Which?", options: ["Red", "Blue"])])
+    #expect(ClaudeQuestionStore.publish(request, in: directory))
+    #expect(ClaudeQuestionStore.publish(ClaudeQuestionReceipt(requestID: "late", installationID: request.installationID,
+                                                              sourceScope: request.sourceScope,
+                                                              eventDirectory: request.eventDirectory,
+                                                              receivedAt: now - 3, expiresAt: now - 2), in: directory))
+    #expect(ApprovalHoldStore.publish(ApprovalHoldRecord(requestID: "late", heldUntil: now - 1.5),
                                       to: ClaudeQuestionStore.holdURL(in: directory, id: "late")))
-    #expect(ClaudeQuestionStore.publish(answer(request, at: request.publishedAt + 0.9), in: directory))
+    #expect(ClaudeQuestionStore.publish(answer(request, at: now - 1), in: directory))
     #expect(ClaudeQuestionHelper.awaitAnswer(for: request, in: directory,
                                              connectionTimeout: 0.1, answerTimeout: 0.2) == nil)
+}
+
+@Test func theQuestionHelperPicksUpAHoldWrittenMidWait() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-question-hold-mid-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let request = liveQuestion("mid", in: directory, window: 0.3)
+    // No hold when the helper starts; the app writes one 0.1 s in, and the answer lands at 0.6 s,
+    // after the 0.3 s base window and inside the hold.
+    let writer = Thread {
+        Thread.sleep(forTimeInterval: 0.1)
+        _ = ApprovalHoldStore.publish(ApprovalHoldRecord(requestID: "mid", heldUntil: request.publishedAt + 1.2),
+                                      to: ClaudeQuestionStore.holdURL(in: directory, id: "mid"))
+        Thread.sleep(forTimeInterval: 0.5)
+        _ = ClaudeQuestionStore.publish(answer(request, at: Date().timeIntervalSince1970), in: directory)
+    }
+    writer.start()
+    let started = Date()
+    #expect(ClaudeQuestionHelper.awaitAnswer(for: request, in: directory,
+                                             connectionTimeout: 0.2, answerTimeout: 0.3)?.answer == "Blue")
+    #expect(Date().timeIntervalSince(started) < 1.2)
 }
 
 @Test func pendingKeepsAHeldQuestionPastItsBaseWindowAndCleansItsHoldOnExpiry() throws {
@@ -122,6 +156,24 @@ private func answer(_ request: ClaudeQuestionRequest, at decidedAt: Double) -> C
     #expect(!FileManager.default.fileExists(atPath: holdURL.path))
 }
 
+@Test func aHoldFarPastTheCapKeepsTheHelperOneSecondPastTheNotchsLastOffer() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-question-hold-cap-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let request = liveQuestion("cap", in: directory, window: 30)
+    let cap = request.publishedAt + ApprovalTiming.maximumHold
+    // The notch stops offering the answer at publish + 2 min; the helper keeps the 1 s lead.
+    #expect(ClaudeQuestionTiming.heldDeadline(publishedAt: request.publishedAt, expiresAt: request.expiresAt,
+                                              held: request.publishedAt + 10_000) == cap)
+    #expect(ApprovalHoldStore.publish(ApprovalHoldRecord(requestID: "cap", heldUntil: request.publishedAt + 10_000),
+                                      to: ClaudeQuestionStore.holdURL(in: directory, id: "cap")))
+    #expect(ClaudeQuestionStore.heldDeadline(for: request, in: directory) == cap + ClaudeQuestionTiming.holdLead)
+    #expect(ClaudeQuestionStore.pending(in: directory, installationID: "install-1", observingSince: 0,
+                                        now: cap + ClaudeQuestionTiming.holdLead - 0.1).map(\.requestID) == ["cap"])
+    #expect(ClaudeQuestionStore.pending(in: directory, installationID: "install-1", observingSince: 0,
+                                        now: cap + ClaudeQuestionTiming.holdLead + 0.1).isEmpty)
+}
+
 @Test func theAppKeepsAHeldQuestionAnswerableOnlyUntilItsHeldDeadline() {
     let request = ClaudeQuestionRequest(requestID: "app", installationID: "install-1", sourceScope: "/root",
                                         eventDirectory: "/events", sessionID: "session-1", promptID: "prompt-1",
@@ -130,7 +182,7 @@ private func answer(_ request: ClaudeQuestionRequest, at decidedAt: Double) -> C
     let liveness = ClaudeQuestionLiveness(requestID: "app", installationID: "install-1", sourceScope: "/root",
                                           eventDirectory: "/events", sessionID: "session-1", promptID: "prompt-1",
                                           toolUseID: "tool-1", heartbeatAt: 40)
-    #expect(!claudeQuestionLivenessIsCurrent(liveness, request: request, now: 40.1))
+    #expect(!claudeQuestionLivenessIsCurrent(liveness, request: request, now: 40.1, deadline: request.expiresAt))
     #expect(claudeQuestionLivenessIsCurrent(liveness, request: request, now: 40.1, deadline: 45))
     #expect(!claudeQuestionLivenessIsCurrent(liveness, request: request, now: 40.1, deadline: 40))
     // The countdown stands still while held: 20 s left at 10, still 20 s left at 50 with the hold.
