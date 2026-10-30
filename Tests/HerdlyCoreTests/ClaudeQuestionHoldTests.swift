@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import HerdlyCore
+@testable import HerdlyApp
 
 // ADR 0020, amended 2026-10-30 (#374): a live Claude question pauses like a live approval.
 
@@ -119,4 +120,22 @@ private func answer(_ request: ClaudeQuestionRequest, at decidedAt: Double) -> C
     #expect(ClaudeQuestionStore.pending(in: directory, installationID: "install-1", observingSince: 0,
                                         now: request.publishedAt + 6).isEmpty)
     #expect(!FileManager.default.fileExists(atPath: holdURL.path))
+}
+
+@Test func theAppKeepsAHeldQuestionAnswerableOnlyUntilItsHeldDeadline() {
+    let request = ClaudeQuestionRequest(requestID: "app", installationID: "install-1", sourceScope: "/root",
+                                        eventDirectory: "/events", sessionID: "session-1", promptID: "prompt-1",
+                                        toolUseID: "tool-1", publishedAt: 0, expiresAt: 30,
+                                        prompts: [QuestionPrompt(header: nil, question: "Which?", options: ["Red"])])
+    let liveness = ClaudeQuestionLiveness(requestID: "app", installationID: "install-1", sourceScope: "/root",
+                                          eventDirectory: "/events", sessionID: "session-1", promptID: "prompt-1",
+                                          toolUseID: "tool-1", heartbeatAt: 40)
+    #expect(!claudeQuestionLivenessIsCurrent(liveness, request: request, now: 40.1))
+    #expect(claudeQuestionLivenessIsCurrent(liveness, request: request, now: 40.1, deadline: 45))
+    #expect(!claudeQuestionLivenessIsCurrent(liveness, request: request, now: 40.1, deadline: 40))
+    // The countdown stands still while held: 20 s left at 10, still 20 s left at 50 with the hold.
+    #expect(ApprovalCountdown(arrivedAt: 0, expiresAt: 30, now: 10)?.label == "20s left")
+    #expect(ApprovalCountdown(arrivedAt: 0, expiresAt: 70, now: 50)?.label == "20s left")
+    #expect(ApprovalCountdown(arrivedAt: 0, expiresAt: 70, now: 50)?.fraction
+                == ApprovalCountdown(arrivedAt: 0, expiresAt: 30, now: 10)?.fraction)
 }

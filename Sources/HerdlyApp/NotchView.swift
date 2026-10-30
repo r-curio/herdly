@@ -1318,7 +1318,8 @@ struct Notch: View {
 
     /// One question card body for the spotlight and the clicked card, inset to the title: the steps,
     /// the viewed question, its options, the typed field on the daemon path, one status line, then
-    /// Next or Send on the left and Open and Dismiss on the right. No countdown: questions never expire.
+    /// Next or Send on the left and Open and Dismiss on the right. A Codex question has no countdown;
+    /// a Claude question Herdly can answer shows its "Ns left" row above Send (ADR 0020, #374).
     @ViewBuilder
     private func questionCardBody(_ item: AgentAttentionItem, subject: String, herdr: HerdrOpenAvailability,
                                   codexOpen: Bool) -> some View {
@@ -1331,6 +1332,12 @@ struct Notch: View {
                        !model.canAnswerAgentQuestion(question) {
                         Text("The exact Claude tab cannot be opened until Herdly can verify it; continue in Claude.")
                             .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
+                    }
+                    // Display only: the countdown reads the held deadline and never moves it.
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        if let countdown = model.claudeQuestionCountdown(question, now: context.date.timeIntervalSince1970) {
+                            ApprovalCountdownRow(countdown: countdown)
+                        }
                     }
                     claudeQuestionFooter(question, item: item, subject: subject)
                 } else {
@@ -2288,6 +2295,15 @@ struct Notch: View {
                             headerLine(item, working: working, countdown: nil,
                                        card: ApprovalCardReading(item, decidable: decidable,
                                                                  now: context.date.timeIntervalSince1970))
+                        }
+                    } else if inQueue, let question = item.question, question.identity.session.source == .claude {
+                        // A Claude question Herdly can answer steps its "Ns left" once a second, as
+                        // a live approval does; one it cannot answer reads as before.
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            let countdown = model.claudeQuestionCountdown(question, now: context.date.timeIntervalSince1970)
+                            cardOpener(item, countdown: countdown) {
+                                headerLine(item, working: working, countdown: countdown)
+                            }
                         }
                     } else {
                         cardOpener(item) {
