@@ -82,8 +82,11 @@ func claudeQuestionReceiptDisposition(_ result: ClaudeQuestionReceiptResult,
     return result.scanGeneration == currentGeneration ? .accept : .staleAccept
 }
 
+/// `deadline` is the question's deadline with its hover hold (ADR 0020). It is required so no
+/// caller falls back to the unheld window by omission.
 func claudeQuestionLivenessIsCurrent(_ liveness: ClaudeQuestionLiveness,
                                      request: ClaudeQuestionRequest, now: Double,
+                                     deadline: Double,
                                      maximumAge: TimeInterval = ClaudeQuestionTiming.livenessTimeout) -> Bool {
     guard now.isFinite, liveness.requestID == request.requestID,
           liveness.installationID == request.installationID,
@@ -96,7 +99,7 @@ func claudeQuestionLivenessIsCurrent(_ liveness: ClaudeQuestionLiveness,
           liveness.heartbeatAt >= request.publishedAt,
           liveness.heartbeatAt <= now,
           now - liveness.heartbeatAt <= maximumAge,
-          request.expiresAt > now else { return false }
+          deadline > now else { return false }
     return true
 }
 
@@ -414,6 +417,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     var spentClaudeQuestionTokens: Set<String> = []
     var pendingClaudeQuestionReceipts: Set<String> = []
     var claudeQuestionScanGeneration: UInt64 = 0
+    /// Hover holds on live Claude questions (ADR 0020, amended 2026-10-30), by helper request id.
+    /// Process memory only, like the answer capability.
+    var questionHover = ApprovalHoverHold<String>()
+    var claudeQuestionHolds: [String: Double] = [:]
+    var writtenQuestionHolds: [String: Double] = [:]
     private var claudeApprovalScanGeneration: UInt64 = 0
     @Published var launchAtLogin = LaunchAtLoginState()
     @Published var desktopForeground = false
@@ -1747,6 +1755,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // Published values are written back only when they change: each write re-renders the notch,
         // and an unchanged one on every tick and scan was most of Herdly's drawing cost (#306).
         applyApprovalHolds(now: Date().timeIntervalSince1970)
+        applyClaudeQuestionHolds(now: Date().timeIntervalSince1970, hovering: hoverHeld && previewMode == nil)
         var expired = queue
         expired.expire(at: Date().timeIntervalSince1970)
         if expired != queue { queue = expired }
@@ -2370,16 +2379,18 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             case .codex:
                 guard let request = codexCLIRequest(for: approval), !eventsPath.isEmpty else { continue }
                 nextQueue.hold(request.identity, until: deadline)
-                writeApprovalHold(request.id.uuidString, deadline: deadline,
-                                  to: ApprovalHoldStore.codexURL(in: URL(fileURLWithPath: eventsPath), id: request.id))
+                writeHold(request.id.uuidString, deadline: deadline,
+                          to: ApprovalHoldStore.codexURL(in: URL(fileURLWithPath: eventsPath), id: request.id),
+                          written: &writtenApprovalHolds)
             case .claude:
                 guard let requestID = approval.hookRequestID,
                       let root = claude.roots.first(where: { $0.url.standardizedFileURL.path == approval.identity.session.sourceScope }),
                       !root.eventsPath.isEmpty else { continue }
                 claudeApprovalHolds[requestID] = max(claudeApprovalHolds[requestID] ?? 0, deadline)
-                writeApprovalHold(requestID, deadline: deadline,
-                                  to: ApprovalHoldStore.claudeURL(in: URL(fileURLWithPath: root.eventsPath, isDirectory: true),
-                                                                  id: requestID))
+                writeHold(requestID, deadline: deadline,
+                          to: ApprovalHoldStore.claudeURL(in: URL(fileURLWithPath: root.eventsPath, isDirectory: true),
+                                                          id: requestID),
+                          written: &writtenApprovalHolds)
             }
         }
         if nextQueue != queue { queue = nextQueue }
@@ -2390,11 +2401,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Writes the helper's hold a second ahead of the notch's deadline, rewriting it only once less
     /// than half that lead is left. A failed write leaves the helper on its last deadline, which the
     /// notch's own deadline reaches first only by up to the lead.
-    private func writeApprovalHold(_ requestID: String, deadline: Double, to url: URL) {
-        let lead = 1.0
-        guard deadline + lead / 2 > writtenApprovalHolds[requestID] ?? 0 else { return }
+    func writeHold(_ requestID: String, deadline: Double, to url: URL, written: inout [String: Double]) {
+        let lead = ApprovalTiming.holdLead
+        guard deadline + lead / 2 > written[requestID] ?? 0 else { return }
         if ApprovalHoldStore.publish(ApprovalHoldRecord(requestID: requestID, heldUntil: deadline + lead), to: url) {
-            writtenApprovalHolds[requestID] = deadline + lead
+            written[requestID] = deadline + lead
         }
     }
 

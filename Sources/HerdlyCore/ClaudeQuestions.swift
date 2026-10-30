@@ -2,10 +2,38 @@ import Foundation
 
 public enum ClaudeQuestionTiming {
     public static let connectionTimeout: TimeInterval = 5
-    public static let answerTimeout: TimeInterval = 10
+    /// A Claude question's window from the helper's publish, matching a live approval's (ADR 0020,
+    /// amended 2026-10-30). On expiry the helper sends nothing and Claude's own question stays.
+    public static let answerTimeout: TimeInterval = ApprovalTiming.handoffTimeout
     public static let pollInterval: TimeInterval = 0.02
     public static let livenessTimeout: TimeInterval = 0.25
     public static let deliveryAckTimeout: TimeInterval = 0.5
+
+    /// The app writes a hold this far ahead of the deadline the notch shows, and the helper's own
+    /// cap keeps the same lead, so the helper never stops before the notch's last offer.
+    public static let holdLead: TimeInterval = ApprovalTiming.holdLead
+
+    /// The deadline the notch shows for a question whose window ends at `expiresAt`: a hover hold's
+    /// deadline when it is later, never past `ApprovalTiming.maximumHold` after publish. A missing
+    /// or malformed hold leaves `expiresAt`. Holding answers nothing.
+    ///
+    /// It measures the cap from publish, not from `expiresAt` as `ApprovalTiming.heldDeadline`
+    /// does: a question has no separate receipt deadline, and its window starts at the helper's
+    /// publish, so publish + 2 min holds even for a receipt issued late or a shortened window.
+    public static func heldDeadline(publishedAt: Double, expiresAt: Double, held: Double?) -> Double {
+        heldDeadline(publishedAt: publishedAt, expiresAt: expiresAt, held: held, lead: 0)
+    }
+
+    /// The helper's deadline for the same question: as `heldDeadline`, with `holdLead` past the cap.
+    public static func helperDeadline(publishedAt: Double, expiresAt: Double, held: Double?) -> Double {
+        heldDeadline(publishedAt: publishedAt, expiresAt: expiresAt, held: held, lead: holdLead)
+    }
+
+    private static func heldDeadline(publishedAt: Double, expiresAt: Double, held: Double?,
+                                     lead: TimeInterval) -> Double {
+        guard let held, held.isFinite, publishedAt.isFinite else { return expiresAt }
+        return min(max(expiresAt, held), max(expiresAt, publishedAt + ApprovalTiming.maximumHold + lead))
+    }
 }
 
 /// A live AskUserQuestion helper invocation. This is a transport record, not saved attention state.
@@ -184,6 +212,24 @@ public enum ClaudeQuestionStore {
         rendezvousDirectory(in: directory).appendingPathComponent(id + ".question-delivery")
     }
 
+    /// The app's hover hold for a live question (ADR 0020), an `ApprovalHoldRecord` written only
+    /// while the pointer is on the notch.
+    public static func holdURL(in directory: URL, id: String) -> URL {
+        rendezvousDirectory(in: directory).appendingPathComponent(id + ".question-hold")
+    }
+
+    /// The helper's deadline for the question with any readable, matching hold, bounded by
+    /// `ClaudeQuestionTiming.helperDeadline`; `expiresAt` defaults to the request's own.
+    public static func heldDeadline(for request: ClaudeQuestionRequest, expiresAt: Double? = nil,
+                                    in directory: URL) -> Double {
+        let base = expiresAt ?? request.expiresAt
+        guard validID(request.requestID) else { return base }
+        return ClaudeQuestionTiming.helperDeadline(
+            publishedAt: request.publishedAt, expiresAt: base,
+            held: ApprovalHoldStore.heldUntil(at: holdURL(in: directory, id: request.requestID),
+                                              requestID: request.requestID))
+    }
+
     @discardableResult
     public static func publish(_ request: ClaudeQuestionRequest, in directory: URL) -> Bool {
         guard validID(request.requestID) else { return false }
@@ -270,7 +316,7 @@ public enum ClaudeQuestionStore {
                   request.prompts.first?.question?.isEmpty == false,
                   request.publishedAt.isFinite, request.expiresAt.isFinite,
                   request.expiresAt >= request.publishedAt else { continue }
-            if request.expiresAt < now {
+            if heldDeadline(for: request, in: directory) < now {
                 guard url.lastPathComponent == request.requestID + ".question" else { continue }
                 removeTriplet(for: request.requestID, in: directory)
                 continue
@@ -306,7 +352,7 @@ public enum ClaudeQuestionStore {
         let manager = FileManager.default
         for url in [requestURL(in: directory, id: id), receiptURL(in: directory, id: id),
                     answerURL(in: directory, id: id), livenessURL(in: directory, id: id),
-                    deliveryURL(in: directory, id: id)] {
+                    deliveryURL(in: directory, id: id), holdURL(in: directory, id: id)] {
             try? manager.removeItem(at: url)
         }
     }
@@ -394,10 +440,18 @@ public enum ClaudeQuestionHelper {
         } while ProcessInfo.processInfo.systemUptime < connectionDeadline
         guard let receipt else { return nil }
 
-        let deadline = min(ProcessInfo.processInfo.systemUptime + answerTimeout,
-                           ProcessInfo.processInfo.systemUptime + max(0, receipt.expiresAt - Date().timeIntervalSince1970))
-        while ProcessInfo.processInfo.systemUptime < deadline {
+        let started = ProcessInfo.processInfo.systemUptime
+        let baseDeadline = min(started + answerTimeout,
+                               started + max(0, receipt.expiresAt - Date().timeIntervalSince1970))
+        // A hover hold moves the deadline later by what it adds to the receipt's, re-read on every
+        // poll and never past two minutes from publish (ADR 0020). Expiry answers nothing.
+        var heldUntil = max(receipt.expiresAt, ClaudeQuestionStore.heldDeadline(for: request, expiresAt: receipt.expiresAt,
+                                                                                in: directory))
+        while ProcessInfo.processInfo.systemUptime
+                < min(baseDeadline + (heldUntil - receipt.expiresAt), started + ApprovalTiming.helperWaitBound) {
             guard refreshLiveness() else { return nil }
+            heldUntil = max(heldUntil, ClaudeQuestionStore.heldDeadline(for: request, expiresAt: receipt.expiresAt,
+                                                                         in: directory))
             if let answer = ClaudeQuestionStore.answer(for: request.requestID, in: directory),
                answer.requestID == request.requestID,
                answer.installationID == request.installationID,
@@ -409,7 +463,7 @@ public enum ClaudeQuestionHelper {
                answer.toolUseID == request.toolUseID,
                answer.decidedAt.isFinite,
                answer.decidedAt >= receipt.receivedAt,
-               answer.decidedAt <= receipt.expiresAt,
+               answer.decidedAt <= heldUntil,
                answer.decidedAt <= Date().timeIntervalSince1970,
                ClaudeQuestionAnswerPolicy.accepts(request: request, answer: answer) {
                 return answer
@@ -439,7 +493,7 @@ public enum ClaudeQuestionHelper {
                delivery.deliveredAt.isFinite,
                delivery.deliveredAt >= answer.decidedAt,
                delivery.deliveredAt <= now,
-               delivery.deliveredAt <= request.expiresAt {
+               delivery.deliveredAt <= ClaudeQuestionStore.heldDeadline(for: request, in: directory) {
                 return true
             }
             Thread.sleep(forTimeInterval: ClaudeQuestionTiming.pollInterval)

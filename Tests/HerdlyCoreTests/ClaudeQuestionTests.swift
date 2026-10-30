@@ -193,14 +193,14 @@ private func claudeQuestionLiveness(for request: ClaudeQuestionRequest,
     #expect(ClaudeQuestionStore.publish(request, in: directory))
     #expect(ClaudeQuestionStore.publish(receipt, in: directory))
     #expect(ClaudeQuestionStore.publish(liveness, in: directory))
-    #expect(claudeQuestionLivenessIsCurrent(liveness, request: request, now: 11,
+    #expect(claudeQuestionLivenessIsCurrent(liveness, request: request, now: 11, deadline: request.expiresAt,
                                             maximumAge: 0.25))
 
     // The helper exits abruptly after the receipt but before the user clicks. Its last marker is
     // still present but stale, so the app's final pre-write check refuses to create an answer and
     // no delivery ack can exist.
     #expect(ClaudeQuestionStore.liveness(for: request.requestID, in: directory) == liveness)
-    #expect(!claudeQuestionLivenessIsCurrent(liveness, request: request, now: 11.3,
+    #expect(!claudeQuestionLivenessIsCurrent(liveness, request: request, now: 11.3, deadline: request.expiresAt,
                                             maximumAge: 0.25))
     #expect(ClaudeQuestionStore.publish(answer, in: directory))
     #expect(!claudeQuestionAwaitDeliveryAndCleanUp(request, answer: answer, in: directory,

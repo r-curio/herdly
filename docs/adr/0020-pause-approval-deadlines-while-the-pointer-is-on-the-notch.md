@@ -12,6 +12,18 @@ Accepted on 2026-10-23, at the user's request. Before this, an approval's 30-sec
 - **Hook timeouts.** The helper's wait bound becomes 121 seconds, and the Codex and Claude hook timeouts become 128 seconds. Setup upgrades the earlier 38-second entries in place. Until a session runs with the new timeout, its agent may stop the helper at 38 seconds and show its own prompt; nothing is approved in that case.
 - **Countdown.** "Ns left" stands still while held. The bar measures against the request's own 30-second window, so it stands still too.
 
+## Amendment 2026-10-30: Claude questions (#374)
+
+Agreed with the user. A Claude question on the notch was handed back to Claude after a fixed 10 seconds, with no countdown and no pause, so the card could vanish mid-choice. A live Claude question now follows this ADR as a live approval does. Codex questions have no deadline and are unaffected.
+
+- **Window.** 30 seconds from the helper's publish (`ClaudeQuestionTiming.answerTimeout`, equal to `ApprovalTiming.handoffTimeout`).
+- **What pauses.** The same signal as approvals: the pointer on the notch, never keyboard focus alone, and only for a Claude question Herdly can answer (a receipt issued by this running companion). The same rule, `ApprovalHoverHold`, keyed by the helper request id, applies the same `holdMargin`.
+- **Bound.** No question stays open past 2 minutes after publish (`ClaudeQuestionTiming.heldDeadline`, which caps at `publishedAt + maximumHold`).
+- **Transport.** The app writes `<request>.question-hold` in the question rendezvous directory, the same `{request_id, held_until}` record, 1 second ahead of the deadline the notch shows. The helper re-reads it every 20 ms poll and keeps only a later, bounded deadline; an answer decided after the held deadline is refused. The helper's own cap keeps that 1-second lead (`ClaudeQuestionTiming.helperDeadline`, publish + 2 min + 1 s), so at the cap it still waits past the notch's last offer. A missing, malformed or mismatched hold leaves the 30-second window. A failed hold write is retried on the next refresh; until one lands the helper keeps its last deadline and may hand back while the notch still shows time left, after which the stale liveness marker makes the card unanswerable and nothing is sent. This gap matches approvals. The app's own liveness checks, its pruning of expired rendezvous files and the delivery acknowledgment use the held deadline, so neither side gives up while the other still waits. Holds stay in process memory and are never persisted.
+- **Hook timeout.** The question hook uses the same 128-second timeout, which covers the 5-second connection wait and the 2-minute bound.
+- **Countdown.** The Claude question card and its queue row show "Ns left", standing still while held, with the approval countdown's styling and spoken label. Expiry sends nothing and leaves Claude's native question authoritative; nothing is ever answered on a timer.
+- **Considered.** A separate question hold rule and store were rejected as duplicates of the approval ones; keeping the 10-second window with no countdown was the status quo the user asked to change.
+
 ## Considered options
 
 - **Keep the fixed 30 seconds.** This was the default recommendation, and the user chose the hold instead.
@@ -22,3 +34,4 @@ Accepted on 2026-10-23, at the user's request. Before this, an approval's 30-sec
 
 - A Codex CLI and a Claude CLI request held past 30 seconds and then approved from the notch, after setup has upgraded the hook timeouts.
 - That Codex and Claude accept a 128-second hook timeout without a cap of their own.
+- A Claude question held past 30 seconds by hover, then answered from the notch.
