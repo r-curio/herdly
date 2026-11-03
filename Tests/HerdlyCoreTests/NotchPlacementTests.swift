@@ -205,10 +205,20 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     #expect(NotchPlacement.frame(on: builtIn, expanded: true, contentHeight: 10).height == 56)
 }
 
-@Test func pointerOrKeyboardFocusCountsAsInteraction() {
+@Test func thePointerCountsAsInteractionAndAClickAloneDoesNotHoldThePanel() {
     #expect(!NotchInteraction.isActive(pointerInside: false, keyboardFocus: false))
     #expect(NotchInteraction.isActive(pointerInside: true, keyboardFocus: false))
-    #expect(NotchInteraction.isActive(pointerInside: false, keyboardFocus: true))
+    #expect(NotchInteraction.isActive(pointerInside: true, keyboardFocus: true))
+    // A click's focus alone lets the panel fold once the pointer leaves (#376).
+    #expect(!NotchInteraction.isActive(pointerInside: false, keyboardFocus: true))
+}
+
+@Test func focusHoldsThePanelOnlyForADraftOrVoiceOver() {
+    #expect(NotchInteraction.isActive(pointerInside: false, keyboardFocus: true, draftInProgress: true))
+    #expect(NotchInteraction.isActive(pointerInside: false, keyboardFocus: true, voiceOverRunning: true))
+    // Neither holds without focus: a draft left behind by a click elsewhere, or VoiceOver elsewhere.
+    #expect(!NotchInteraction.isActive(pointerInside: false, keyboardFocus: false, draftInProgress: true))
+    #expect(!NotchInteraction.isActive(pointerInside: false, keyboardFocus: false, voiceOverRunning: true))
 }
 
 @Test func hoverHoldsThroughAShortGraceAfterThePointerLeaves() {

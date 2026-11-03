@@ -1797,7 +1797,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let pointerInside = pointerInsidePanel
         if !pointerInside { hoverSuppressed = false }
         hoverHeld = hoverHold.update(pointerInside: pointerInside && !hoverSuppressed, now: now)
-        let interacting = NotchInteraction.isActive(pointerInside: hoverHeld, keyboardFocus: panel.hasDeliberateKeyboardFocus)
+        let interacting = NotchInteraction.isActive(pointerInside: hoverHeld, keyboardFocus: panel.hasDeliberateKeyboardFocus,
+                                                    draftInProgress: notchDraftInProgress,
+                                                    voiceOverRunning: NSWorkspace.shared.isVoiceOverEnabled)
         var next = attention
         let firstPresentation = next.update(codexForeground: codexForeground, hovering: interacting,
                                             now: ProcessInfo.processInfo.systemUptime)
@@ -1964,6 +1966,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 earlierFold = .automatic
                 openQueueFolds = []
                 closeOpenRunningRow()
+                // A clicked panel that folds because the pointer left still holds key status;
+                // ordering it out drops it and hands typing back to the user's app, as Escape does.
+                // The strip is ordered front again below, without becoming key.
+                if panel.isKeyWindow {
+                    panel.orderOut(nil)
+                    NSWorkspace.shared.frontmostApplication?.activate()
+                }
             }
         }
         reconcileSelection()

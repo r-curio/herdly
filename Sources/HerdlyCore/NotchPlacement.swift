@@ -376,9 +376,14 @@ public struct StripLayout: Equatable, Sendable {
 }
 
 /// Interaction freezes placement and keeps a spotlight open; it never touches approval deadlines.
+/// The pointer on the panel is interaction. A click's keyboard focus alone is not, so a clicked
+/// panel folds once the pointer leaves (#376); focus still counts while unsent text is in a field
+/// on screen, so a draft is never folded away, and while VoiceOver runs, since its user does not
+/// move the pointer.
 public enum NotchInteraction {
-    public static func isActive(pointerInside: Bool, keyboardFocus: Bool) -> Bool {
-        pointerInside || keyboardFocus
+    public static func isActive(pointerInside: Bool, keyboardFocus: Bool, draftInProgress: Bool = false,
+                                voiceOverRunning: Bool = false) -> Bool {
+        pointerInside || (keyboardFocus && (draftInProgress || voiceOverRunning))
     }
 }
 
