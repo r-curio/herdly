@@ -71,7 +71,7 @@ public enum ResultCardMessage {
         /// The first five lines (`CompletionPreview.text`).
         case brief
         /// One line: the message's first line, cut with "…" when it is longer than `maximumGlanceCharacters`.
-        case glance(String)
+        case glance(AttributedString)
     }
 
     /// About one line of the card's 11pt mono at its default width; the view still cuts a narrower line.
@@ -82,7 +82,7 @@ public enum ResultCardMessage {
         switch (length, flipped) {
         case (.full, false), (.brief, true), (.glance, true): return .whole
         case (.full, true), (.brief, false): return .brief
-        case (.glance, false): return .glance(glanceLine(preview))
+        case (.glance, false): return .glance(glance(preview).line)
         }
     }
 
@@ -90,17 +90,14 @@ public enum ResultCardMessage {
     public static func folds(_ preview: CompletionPreview, length: ResultResponseLength) -> Bool {
         switch length {
         case .full, .brief: preview.truncated
-        case .glance: preview.truncated || glanceLine(preview) != preview.text
+        case .glance: preview.truncated || !glance(preview).isWhole
         }
     }
 
-    /// The first line that has words, skipping a code fence's opening line. A message with none
-    /// (only fences) keeps its first line.
-    static func glanceLine(_ preview: CompletionPreview) -> String {
-        let lines = preview.text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-        let first = lines.first { !$0.isEmpty && !$0.hasPrefix("```") } ?? lines.first ?? ""
-        guard first.count > maximumGlanceCharacters else { return first }
-        return String(first.prefix(maximumGlanceCharacters - 1)).trimmingCharacters(in: .whitespaces) + "…"
+    /// The first line that has words, read through the markdown, so a code fence's opening line is
+    /// skipped and a cut cannot strand a `**`. A message with none keeps its first line.
+    static func glance(_ preview: CompletionPreview) -> (line: AttributedString, isWhole: Bool) {
+        MessageMarkdown.firstLine(preview.text, limit: maximumGlanceCharacters)
     }
 }
 

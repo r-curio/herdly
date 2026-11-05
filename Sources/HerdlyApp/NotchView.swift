@@ -505,73 +505,65 @@ struct QuestionStepRail: View {
     }
 }
 
-/// The last message with its markdown read as formatting (`MessageMarkdown`), in 11pt mono text gray at a 16pt line height:
+/// An agent's message with its markdown read as formatting (`MessageMarkdown`). `.result` is the
+/// result card's 11pt mono text gray at a 16pt line height; `.question` is the question card's 12pt ink:
 /// bold and headings in ink, code on the `well`, tables as aligned columns. A message cut mid-table or
 /// mid-fence still draws; only web links stay links, so a message cannot open another app.
 struct ResultMarkdown: View {
-    let blocks: [MessageMarkdownBlock]
+    enum Style {
+        case result, question
 
-    init(text: String) {
-        blocks = MessageMarkdown.blocks(text)
+        func font(_ size: CGFloat? = nil, _ weight: Font.Weight = .regular) -> Font {
+            switch self {
+            case .result: NotchStyle.mono(size ?? 11, weight)
+            case .question: QuestionCardStyle.font(size ?? 12, weight)
+            }
+        }
+        var color: Color { self == .result ? NotchStyle.text : NotchStyle.ink }
+        /// Each font sets a little under its line height; this makes up the rest.
+        var lineSpacing: CGFloat { self == .result ? 3 : 2 }
+    }
+
+    let text: String
+    var style: Style = .result
+
+    /// A big message takes milliseconds to parse and the panel redraws often, so the last few stay
+    /// parsed. Like the messages themselves, this lives only in process memory.
+    @MainActor private static let parsed: NSCache<NSString, ParsedBlocks> = {
+        let cache = NSCache<NSString, ParsedBlocks>()
+        cache.countLimit = 16
+        return cache
+    }()
+    private final class ParsedBlocks {
+        let blocks: [MessageMarkdownBlock]
+        init(_ blocks: [MessageMarkdownBlock]) { self.blocks = blocks }
+    }
+
+    private var blocks: [MessageMarkdownBlock] {
+        if let hit = Self.parsed.object(forKey: text as NSString) { return hit.blocks }
+        let blocks = MessageMarkdown.blocks(text)
+        Self.parsed.setObject(ParsedBlocks(blocks), forKey: text as NSString)
+        return blocks
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                blockView(block)
-            }
-        }
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private func blockView(_ block: MessageMarkdownBlock) -> some View {
-        switch block {
-        case let .paragraph(text):
-            Self.line(text)
-        case let .heading(level, text):
-            Self.line(text, size: level <= 2 ? 12 : 11, weight: .semibold, color: NotchStyle.ink)
-                .accessibilityAddTraits(.isHeader)
-        case let .listItem(marker, depth, text):
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(marker).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                Self.line(text)
-            }
-            .padding(.leading, CGFloat(depth) * 14)
-            .accessibilityElement(children: .combine)
-        case let .quote(text):
-            Self.line(text)
-                .padding(.leading, 10)
-                .overlay(alignment: .leading) { Rectangle().fill(NotchStyle.well).frame(width: 2) }
-        case let .code(text):
-            Text(verbatim: text).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.ink)
-                .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 8).padding(.vertical, 6)
-                .background(NotchStyle.typedField, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(NotchStyle.well, lineWidth: 1))
-        case let .table(header, rows):
-            ResultTable(header: header, rows: rows)
-        case .rule:
-            Rectangle().fill(NotchStyle.well).frame(height: 1)
-        }
-    }
-
-    static func line(_ text: String, size: CGFloat = 11, weight: Font.Weight = .regular,
-                     color: Color = NotchStyle.text) -> some View {
-        Text(inline(text)).font(NotchStyle.mono(size, weight)).foregroundStyle(color)
-            // SF Mono 11pt sets about 13pt of line; three more make the 16pt line height.
-            .lineSpacing(3)
-            .fixedSize(horizontal: false, vertical: true)
+        MarkdownBlocks(blocks: blocks, style: style)
+            .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Emphasis, code spans, and links within one block. Unparseable syntax stays as typed.
-    static func inline(_ source: String) -> AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace, failurePolicy: .returnPartiallyParsedIfPossible)
-        var value = (try? AttributedString(markdown: source, options: options)) ?? AttributedString(source)
+    static func line(_ text: AttributedString, style: Style = .result, size: CGFloat? = nil, weight: Font.Weight = .regular,
+                     color: Color? = nil, alignment: TextAlignment = .leading) -> some View {
+        Text(styled(text)).font(style.font(size, weight)).foregroundStyle(color ?? style.color)
+            .lineSpacing(style.lineSpacing)
+            .multilineTextAlignment(alignment)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: alignment == .trailing ? .trailing : alignment == .center ? .center : .leading)
+    }
+
+    /// Colors for the inline marks Foundation parsed. Only web links stay links.
+    static func styled(_ text: AttributedString) -> AttributedString {
+        var value = text
         for (intent, range) in value.runs[\.inlinePresentationIntent].reversed() {
             guard let intent else { continue }
             if intent.contains(.code) {
@@ -579,6 +571,9 @@ struct ResultMarkdown: View {
                 value[range].backgroundColor = NotchStyle.well
             } else if intent.contains(.stronglyEmphasized) {
                 value[range].foregroundColor = NotchStyle.ink
+            }
+            if intent.contains(.strikethrough) {
+                value[range].strikethroughStyle = .single
             }
         }
         for (link, range) in value.runs[\.link].reversed() {
@@ -594,15 +589,93 @@ struct ResultMarkdown: View {
     }
 }
 
+/// A run of blocks, recursive through lists and quotes. `listDepth` is how many lists enclose these;
+/// a nested list steps in 14pt, up to three levels, so deep nesting cannot squeeze the text away.
+private struct MarkdownBlocks: View {
+    let blocks: [MessageMarkdownBlock]
+    let style: ResultMarkdown.Style
+    var listDepth = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                blockView(block)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: MessageMarkdownBlock) -> some View {
+        switch block {
+        case let .paragraph(text):
+            ResultMarkdown.line(text, style: style)
+        case let .heading(level, text):
+            ResultMarkdown.line(text, style: style, size: style == .result && level <= 2 ? 12 : nil, weight: .semibold, color: NotchStyle.ink)
+                .accessibilityAddTraits(.isHeader)
+        case let .list(items):
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    MarkdownListItem(item: item, style: style, listDepth: listDepth)
+                }
+            }
+            .padding(.leading, (1...3).contains(listDepth) ? 14 : 0)
+        case let .quote(blocks):
+            MarkdownBlocks(blocks: blocks, style: style, listDepth: listDepth)
+                .padding(.leading, 10)
+                .overlay(alignment: .leading) { Rectangle().fill(NotchStyle.well).frame(width: 2) }
+        case let .code(text):
+            Text(verbatim: text).font(style.font(11)).foregroundStyle(NotchStyle.ink)
+                .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(NotchStyle.typedField, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(NotchStyle.well, lineWidth: 1))
+        case let .table(alignments, header, rows):
+            ResultTable(alignments: alignments, header: header, rows: rows, style: style)
+        case .rule:
+            Rectangle().fill(NotchStyle.well).frame(height: 1)
+        }
+    }
+}
+
+/// The marker beside the item's text and whatever else belongs in that text column; a nested list
+/// and anything after it sit below, stepped in from the marker.
+private struct MarkdownListItem: View {
+    let item: MessageMarkdownListItem
+    let style: ResultMarkdown.Style
+    let listDepth: Int
+
+    private static func isList(_ block: MessageMarkdownBlock) -> Bool {
+        if case .list = block { true } else { false }
+    }
+
+    var body: some View {
+        let beside = item.blocks.prefix { !Self.isList($0) }
+        let below = item.blocks.dropFirst(beside.count)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(item.marker).font(style.font(11)).foregroundStyle(NotchStyle.dim)
+                MarkdownBlocks(blocks: Array(beside.isEmpty ? below : beside), style: style, listDepth: listDepth + 1)
+            }
+            .accessibilityElement(children: .combine)
+            if !beside.isEmpty, !below.isEmpty {
+                MarkdownBlocks(blocks: Array(below), style: style, listDepth: listDepth + 1)
+            }
+        }
+    }
+}
+
 /// A markdown table in the card's width: each column's share follows its longest cell, within
 /// bounds, so a short "Priority" column does not take a third of the row; cells wrap.
 private struct ResultTable: View {
-    let header: [String]
-    let rows: [[String]]
+    let alignments: [PresentationIntent.TableColumn.Alignment]
+    let header: [AttributedString]
+    let rows: [[AttributedString]]
+    let style: ResultMarkdown.Style
 
     private var weights: [CGFloat] {
         header.indices.map { column in
-            let longest = ([header] + rows).map { $0[column].count }.max() ?? 0
+            let longest = ([header] + rows).map { $0[column].characters.count }.max() ?? 0
             return CGFloat(min(max(longest, 6), 40))
         }
     }
@@ -618,11 +691,20 @@ private struct ResultTable: View {
         .overlay(alignment: .top) { Rectangle().fill(NotchStyle.well).frame(height: 1).offset(y: -1) }
     }
 
-    private func row(_ cells: [String], header: Bool) -> some View {
+    private func alignment(_ column: Int) -> TextAlignment {
+        guard alignments.indices.contains(column) else { return .leading }
+        switch alignments[column] {
+        case .center: return .center
+        case .right: return .trailing
+        default: return .leading
+        }
+    }
+
+    private func row(_ cells: [AttributedString], header: Bool) -> some View {
         WeightedColumns(weights: weights, spacing: 10) {
-            ForEach(Array(cells.enumerated()), id: \.offset) { _, cell in
-                ResultMarkdown.line(cell, weight: header ? .semibold : .regular,
-                                    color: header ? NotchStyle.ink : NotchStyle.text)
+            ForEach(Array(cells.enumerated()), id: \.offset) { column, cell in
+                ResultMarkdown.line(cell, style: style, weight: header ? .semibold : .regular,
+                                    color: header ? NotchStyle.ink : nil, alignment: alignment(column))
             }
         }
         .padding(.vertical, 5)
@@ -1591,8 +1673,7 @@ struct Notch: View {
     }
 
     private func questionText(_ text: String) -> some View {
-        Text(text).font(QuestionCardStyle.font(12)).lineSpacing(2).foregroundStyle(NotchStyle.ink).textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
+        ResultMarkdown(text: text, style: .question)
     }
 
     private var showsTestRow: Bool {
@@ -2151,7 +2232,9 @@ struct Notch: View {
             showAll
         case let .glance(line):
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                ResultMarkdown(text: line).lineLimit(1).truncationMode(.tail)
+                Text(ResultMarkdown.styled(line)).font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.text)
+                    .lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 showAll.fixedSize()
             }
         }
