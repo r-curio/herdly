@@ -789,6 +789,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var pointerMonitors: [Any] = []
     private var pointerOnTopEdge = false
 
+    nonisolated static var previewMessage: String? {
+        argumentValue(for: "--preview-message").flatMap { try? String(contentsOfFile: $0, encoding: .utf8) }
+    }
+
     nonisolated static func argumentValue(for flag: String) -> String? {
         guard let index = CommandLine.arguments.firstIndex(of: flag), CommandLine.arguments.indices.contains(index + 1) else { return nil }
         return CommandLine.arguments[index + 1]
@@ -2966,7 +2970,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                             "| **3 — Infrastructure access** | Private registry GitHub token | Could enable malicious deploys. |",
                             "", "## Then", "1. Redeploy each service.", "2. Run:", "", "```", "make verify-secrets", "```",
                             "> Old tokens stay valid until revoked."].joined(separator: "\n")
-            if let preview = CompletionPreview(mode == "spotlight-result-markdown" ? markdown : message) { completionPreviews[result.id] = .available(preview) }
+            // `--preview-message <file>` shows that file's text instead, for checking other markdown.
+            let sample = Companion.previewMessage ?? (mode == "spotlight-result-markdown" ? markdown : message)
+            if let preview = CompletionPreview(sample) { completionPreviews[result.id] = .available(preview) }
             syncAgentQueueWithCodex(now: now)
             if mode == "row-note-reply" {
                 replyProgress[result.id] = SessionReplyProgress(completion: result.id)
@@ -2976,7 +2982,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         if mode == "spotlight-claude-multiselect" {
             let sample = AgentQuestion(session: claudeSession, turn: "preview-multi", call: "toolu_multi", arrivedAt: now,
-                                       prompts: [QuestionPrompt(header: "Checks", question: "Which checks should run before handing this back?",
+                                       prompts: [QuestionPrompt(header: "Checks", question: Companion.previewMessage ?? "Which checks should run before handing this back?",
                                                                 options: ["Core suite (Recommended)", "Package smoke check", "Visual review"], multiSelect: true)],
                                        helperRequestID: "preview-helper")
             agentQueue.apply(.question(sample), now: now)
