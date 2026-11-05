@@ -320,8 +320,8 @@ private func message(_ text: String) -> CompletionPreview { CompletionPreview(te
     guard case let .glance(line) = ResultCardMessage.shown(message(longLine), length: .glance, flipped: false) else {
         Issue.record("expected one line"); return
     }
-    #expect(line.count <= ResultCardMessage.maximumGlanceCharacters)
-    #expect(line.hasSuffix("…"))
+    #expect(line.characters.count <= ResultCardMessage.maximumGlanceCharacters)
+    #expect(line.characters.last == "…")
 }
 
 @Test func theLengthDefaultsToBriefAndMigratesTheOldSwitch() {
