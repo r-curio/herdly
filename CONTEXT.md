@@ -98,4 +98,4 @@ A particular completion cleared by explicit dismissal; for a supported CLI surfa
 A completion that arrived while the companion was not observing. The user may have viewed it unobserved, so it is retained without a sound and offered for opening or dismissal; it is never described as unread.
 
 **Resolution evidence**:
-A recorded sign that a handed-back approval request or a question request is no longer pending in Codex: Codex's recorded answer to that exact request or call, the end of that exact turn, or the end of its session. A prompt that merely disappeared is not evidence.
+A recorded sign that a handed-back approval request or a question request is no longer pending in Codex: Codex's recorded answer to that exact request or call, the end of that exact turn, or the end of its session. A prompt that merely disappeared is not evidence. For Claude, whose native No fires no hook, the session registry's status changing after the request arrived is also evidence: Claude shows one prompt per session and changes that status as soon as the prompt is answered.

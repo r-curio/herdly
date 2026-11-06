@@ -548,7 +548,7 @@ public struct AgentAttentionQueue: Equatable, Sendable {
             let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                 session: session.sessionID, surface: .cli)
             if session.kind == .interactive, let changedAt = session.statusUpdatedAt {
-                handBackAnsweredClaudeApprovals(in: identity, statusChangedAt: changedAt)
+                removeAnsweredClaudeApprovals(in: identity, statusChangedAt: changedAt)
                 if changedAt.isFinite { claudeStatusChangedAt[identity] = max(claudeStatusChangedAt[identity] ?? changedAt, changedAt) }
             }
             if session.lifecycle.isIdleInteractive {
@@ -600,14 +600,14 @@ public struct AgentAttentionQueue: Equatable, Sendable {
     /// `waiting` before the PermissionRequest hook record is captured, then changes it as soon as the
     /// prompt is answered, by Claude's native dialog or by a hook. A native "No" fires no hook at all,
     /// so a status change after the request arrived is the only prompt evidence that it is closed.
-    /// It says nothing about the outcome, so the request is handed back (Open in Claude only), never
-    /// resolved. If Claude ever rewrote the status without closing the prompt, direct controls would
+    /// The request needs nothing more from the user, live or handed back, so it leaves the queue and
+    /// the session's running row takes over. This claims no outcome: the change does not say which
+    /// answer was given. If Claude ever rewrote the status without closing the prompt, the row would
     /// only disappear early while Claude's own prompt stays available.
-    private mutating func handBackAnsweredClaudeApprovals(in session: AgentSessionIdentity, statusChangedAt: Double) {
+    private mutating func removeAnsweredClaudeApprovals(in session: AgentSessionIdentity, statusChangedAt: Double) {
         guard statusChangedAt.isFinite else { return }
-        for (id, approval) in approvals where id.session == session && approval.state == .actionable
-            && approval.arrivedAt < statusChangedAt {
-            approvals[id] = approval.with(state: .handedBack)
+        for (id, approval) in approvals where id.session == session && approval.arrivedAt < statusChangedAt {
+            dismiss(.approval(id))
         }
     }
 
