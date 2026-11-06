@@ -6,8 +6,6 @@ import Foundation
 public enum RowNote: Equatable, Sendable {
     /// Herdly is sending the decision or answer.
     case sending
-    /// Claude's helper confirmed it received this one-time approval.
-    case approvalReceived
     /// Herdly wrote it, or it may have been written, but no confirmation came back.
     case sentUnconfirmed
     /// Claude could not receive it; the user answers in Claude, so the row offers Open.
@@ -25,7 +23,6 @@ public enum RowNote: Equatable, Sendable {
     public var text: String {
         switch self {
         case .sending: return "Sending…"
-        case .approvalReceived: return "Claude got your approval"
         case .sentUnconfirmed: return "Sent, not confirmed"
         case .notDelivered: return "Not delivered · answer in Claude"
         case .awaitingCodex: return "Sent, waiting for Codex"
@@ -48,6 +45,8 @@ public enum RowNoteUpdate: Equatable, Sendable {
     case record(RowNote)
     /// Matching resolution evidence: the note clears and never returns.
     case resolve
+    /// Resolution evidence that also ends the row: the note clears and the request leaves the queue.
+    case leaveQueue
     /// Nothing was sent: the note goes, and a later send may note again.
     case withdraw
     case unchanged
@@ -55,13 +54,15 @@ public enum RowNoteUpdate: Equatable, Sendable {
 
 extension RowNoteUpdate {
     /// A Claude approval decision's delivery settled. Delivery counts only when the decision was
-    /// published and the helper confirmed it. A confirmed denial is resolution evidence for the call
-    /// (there is no agreed note for it), so its note clears; a no-decision release changes nothing.
+    /// published and the helper confirmed it. A confirmed one-time approval leaves the queue: nothing
+    /// more is needed from the user, and the session reads as working while the tool runs. A confirmed
+    /// denial is resolution evidence for the call (there is no agreed note for it), so its note clears;
+    /// a no-decision release changes nothing.
     public static func claudeDecision(_ decision: ApprovalDecision, published: Bool, delivered: Bool) -> Self {
         guard decision.isUserDecision else { return .unchanged }
         guard published else { return .record(.notDelivered) }
         guard delivered else { return .record(.sentUnconfirmed) }
-        return decision == .allowOnce ? .record(.approvalReceived) : .resolve
+        return decision == .allowOnce ? .leaveQueue : .resolve
     }
 
     /// A Claude question answer's delivery settled. The helper's confirmation is resolution evidence
@@ -125,11 +126,10 @@ public struct RowNotes: Equatable, Sendable {
     public func note(for id: AgentAttentionID) -> RowNote? { notes[id] }
 
     /// Records `note` for `id` when `id` is an approval or question in `pending` that has not
-    /// already cleared. A receipt note is accepted only for an approval.
+    /// already cleared.
     @discardableResult
     public mutating func record(_ note: RowNote, for id: AgentAttentionID, pending: Set<AgentAttentionID>) -> Bool {
         guard id.isRequest, pending.contains(id), !cleared.contains(id) else { return false }
-        if note == .approvalReceived, case .question = id { return false }
         if case .keySent = note, case .approval = id { return false }
         if case .replyNotDelivered = note { return false }
         notes[id] = note
@@ -141,7 +141,7 @@ public struct RowNotes: Equatable, Sendable {
     public mutating func apply(_ update: RowNoteUpdate, for id: AgentAttentionID, pending: Set<AgentAttentionID>) -> Bool {
         switch update {
         case let .record(note): return record(note, for: id, pending: pending)
-        case .resolve: resolve(id)
+        case .resolve, .leaveQueue: resolve(id)
         case .withdraw: withdraw(id)
         case .unchanged: break
         }

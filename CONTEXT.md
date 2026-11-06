@@ -66,7 +66,7 @@ An approval request or question request the user opened from the attention queue
 _Avoid_: Spotlight (that is the automatic card that closes after the card-open time, 3 seconds by default), detail view
 
 **Row note**:
-The short delivery line a queue row carries after the user approved, denied, or answered it in the notch: sending, confirmed received, sent but unconfirmed, not delivered, or waiting for Codex. It belongs to one exact request, says only what Herdly observed about delivery, and clears with that request's resolution evidence, never returning afterwards.
+The short delivery line a queue row carries after the user approved, denied, or answered it in the notch: sending, sent but unconfirmed, not delivered, or waiting for Codex. It belongs to one exact request, says only what Herdly observed about delivery, and clears with that request's resolution evidence, never returning afterwards. A one-time approval Claude's helper confirms has no note: its row leaves the queue.
 _Avoid_: Status message, toast, navigation message
 
 **Open in Codex**:

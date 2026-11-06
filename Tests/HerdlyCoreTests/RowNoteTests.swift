@@ -12,8 +12,8 @@ private let otherSource = AgentAttentionID.approval(AgentCallIdentity(session: c
 private let question = AgentAttentionID.question(AgentCallIdentity(session: codex, turn: "t2", call: "call_1"))
 
 @Test func rowNotesReadExactlyTheAgreedStrings() {
-    let fixed: [RowNote] = [.sending, .approvalReceived, .sentUnconfirmed, .notDelivered, .awaitingCodex]
-    #expect(fixed.map(\.text) == ["Sending…", "Claude got your approval", "Sent, not confirmed",
+    let fixed: [RowNote] = [.sending, .sentUnconfirmed, .notDelivered, .awaitingCodex]
+    #expect(fixed.map(\.text) == ["Sending…", "Sent, not confirmed",
                                   "Not delivered · answer in Claude", "Sent, waiting for Codex"])
     // An earlier question's key (#321): "Sent k of n, on question k+1".
     #expect(RowNote.keySent(question: 0, of: 3).text == "Sent 1 of 3, on question 2")
@@ -58,7 +58,7 @@ private let question = AgentAttentionID.question(AgentCallIdentity(session: code
     notes.reconcile(pending: [])
     // A delivery result arriving after the request cleared, even with the request reappearing in a
     // stale scan, does not bring the note back.
-    do { let result = notes.record(.approvalReceived, for: approval, pending: [approval]); #expect(!result) }
+    do { let result = notes.record(.sentUnconfirmed, for: approval, pending: [approval]); #expect(!result) }
     #expect(notes.note(for: approval) == nil)
 
     notes.record(.awaitingCodex, for: question, pending: [question])
@@ -83,20 +83,17 @@ private let question = AgentAttentionID.question(AgentCallIdentity(session: code
     // Delivery without publication is contradictory: treat it as not delivered.
     #expect(RowNoteUpdate.claudeDecision(.allowOnce, published: false, delivered: true) == .record(.notDelivered))
     #expect(RowNoteUpdate.claudeDecision(.allowOnce, published: true, delivered: false) == .record(.sentUnconfirmed))
-    #expect(RowNoteUpdate.claudeDecision(.allowOnce, published: true, delivered: true) == .record(.approvalReceived))
+    #expect(RowNoteUpdate.claudeDecision(.allowOnce, published: true, delivered: true) == .leaveQueue)
     // A no-decision release is never the user's decision and changes no note.
     #expect(RowNoteUpdate.claudeDecision(.noDecision, published: true, delivered: true) == .unchanged)
 
     var notes = RowNotes()
     // Not a request at all.
     let outcome = AgentAttentionID.outcome(AgentTurnIdentity(session: claude, turn: "t1"))
-    do { let recorded = notes.record(.approvalReceived, for: outcome, pending: [outcome]); #expect(!recorded) }
+    do { let recorded = notes.record(.sentUnconfirmed, for: outcome, pending: [outcome]); #expect(!recorded) }
     // A request the queue does not hold.
-    do { let recorded = notes.record(.approvalReceived, for: approval, pending: []); #expect(!recorded) }
+    do { let recorded = notes.record(.sentUnconfirmed, for: approval, pending: []); #expect(!recorded) }
     #expect(notes.note(for: approval) == nil)
-    // A receipt names only an approval; a question never gets one.
-    do { let recorded = notes.record(.approvalReceived, for: question, pending: [question]); #expect(!recorded) }
-    #expect(notes.note(for: question) == nil)
 }
 
 @Test func aConfirmedDenyIsResolutionEvidenceAndClearsTheNote() {
@@ -172,4 +169,52 @@ private let question = AgentAttentionID.question(AgentCallIdentity(session: code
     #expect(notes.note(for: approval) == .sentUnconfirmed)
     notes.apply(RowNoteUpdate.claudeDecisionUnverified(published: false), for: approval, pending: [approval])
     #expect(notes.note(for: approval) == nil)
+}
+
+@Test func aConfirmedApprovalClearsItsNoteForGoodAndLeavesOthersAlone() {
+    var notes = RowNotes()
+    let pending: Set<AgentAttentionID> = [approval, sibling]
+    notes.record(.sending, for: approval, pending: pending)
+    notes.record(.sending, for: sibling, pending: pending)
+
+    let recorded = notes.apply(.claudeDecision(.allowOnce, published: true, delivered: true), for: approval, pending: pending)
+
+    #expect(!recorded)
+    #expect(notes.note(for: approval) == nil)
+    #expect(notes.note(for: sibling) == .sending)
+    // A late result cannot bring it back.
+    do { let late = notes.record(.sentUnconfirmed, for: approval, pending: pending); #expect(!late) }
+}
+
+@Test func onlyAConfirmedApprovalLeavesTheQueue() {
+    #expect(RowNoteUpdate.claudeDecision(.allowOnce, published: true, delivered: true) == .leaveQueue)
+    #expect(RowNoteUpdate.claudeDecision(.allowOnce, published: true, delivered: false) != .leaveQueue)
+    #expect(RowNoteUpdate.claudeDecision(.allowOnce, published: false, delivered: false) != .leaveQueue)
+    #expect(RowNoteUpdate.claudeDecision(.deny, published: true, delivered: true) != .leaveQueue)
+    #expect(RowNoteUpdate.claudeDecision(.noDecision, published: true, delivered: true) != .leaveQueue)
+    #expect(RowNoteUpdate.claudeDecisionUnverified(published: true) != .leaveQueue)
+}
+
+@Test func aConfirmedApprovalsRowGivesWayToTheSessionsWorkingRowAndStaysGone() {
+    let call = AgentCallIdentity(session: claude, turn: "t1", call: "toolu_1")
+    let siblingCall = AgentCallIdentity(session: claude, turn: "t1", call: "toolu_2")
+    let request = AgentApproval(session: claude, turn: "t1", call: "toolu_1", arrivedAt: 10)
+    let other = AgentApproval(session: claude, turn: "t1", call: "toolu_2", arrivedAt: 11)
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: claude, turn: "t1", arrivedAt: 1)), now: 12)
+    queue.apply(.approval(request.with(state: .handedBack)), now: 12)
+    #expect(queue.toCheckCount == 1)
+    #expect(queue.items(at: 12).map(\.kind) == [.handedBackApproval])
+
+    queue.dismiss(.approval(call))
+
+    #expect(queue.toCheckCount == 0)
+    #expect(queue.workingCount == 1)
+    #expect(queue.items(at: 12).map(\.kind) == [.running])
+    // The hook records stay on disk until the tool finishes, so every scan repeats the request.
+    queue.apply(.approval(request), now: 14)
+    #expect(queue.items(at: 14).map(\.kind) == [.running])
+    // Another call in the same turn still asks.
+    queue.apply(.approval(other), now: 15)
+    #expect(queue.items(at: 15).first?.approval?.id == siblingCall)
 }
