@@ -632,8 +632,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         verifiedClaudeApprovalReceipts.removeValue(forKey: result.work.requestID)
         verifiedClaudeApprovalRoots.removeValue(forKey: result.work.requestID)
-        updateRowNote(RowNoteUpdate.claudeDecision(result.work.decision, published: result.published, delivered: result.delivered),
-                      for: .approval(result.work.approvalID))
+        let update = RowNoteUpdate.claudeDecision(result.work.decision, published: result.published, delivered: result.delivered)
+        updateRowNote(update, for: .approval(result.work.approvalID))
+        if update == .leaveQueue {
+            agentQueue.dismiss(.approval(result.work.approvalID))
+            // The session's running row replaces the request; read its current status now, not in 2 s.
+            nextScan = 0
+        }
         refresh()
     }
 
