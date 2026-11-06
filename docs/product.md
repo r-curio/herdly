@@ -145,7 +145,7 @@ Herdly never offers Claude's session-wide or saved choices, such as accepting ed
 or "don't ask again" for a domain. Plan approval (`ExitPlanMode`) and MCP tools stay native: Claude
 ignores a hook allow for plan approval, and an MCP call's consequence cannot be shown
 ([plan](evidence/claude-plan-approval.md), [MCP](evidence/claude-mcp-approval.md)). Ambiguous, expired, disconnected, interrupted,
-handed-back, unproven shapes, and other permission families keep only Claude's native controls. Interactive inventory status can add Working or Waiting rows;
+handed-back, unproven shapes, and other permission families keep only Claude's native controls. Agreed with the user on 2026-11-06: when Claude's session registry shows the session's status changed after a request arrived, Claude's prompt for it has closed, so the row leaves the queue, live or handed back, and the session reads as working or idle. The change does not say which answer was given, so Herdly claims none. `claude agents --json` reports no change time, so without the registry a handed-back row stays until the tool's result or the end of its turn or session. Interactive inventory status can add Working or Waiting rows;
 background inventory alone does not create a queue row. A background done, failed, or stopped state
 never creates a user-facing outcome without matching hook evidence. Per-root inventory reconciliation
 is issue #82; mixed source presentation and counts in the existing notch are issue #83.

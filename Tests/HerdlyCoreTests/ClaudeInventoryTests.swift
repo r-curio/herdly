@@ -887,25 +887,52 @@ private func approvalStates(_ queue: AgentAttentionQueue) -> [String: AgentAppro
 }
 
 @Test(arguments: ["idle", "busy"])
-func claudeApprovalAnsweredInClaudeLosesDirectControls(status: String) {
+func claudeApprovalAnsweredInClaudeLeavesTheQueue(status: String) {
     // A native No fires no hook (idle); a native Yes runs the tool (busy) before any post-tool scan.
     var queue = AgentAttentionQueue()
     queue.apply(.approval(claudeApproval("write", arrivedAt: 10)))
     queue.apply(inventory(status, at: 11, statusChangedAt: 10.4))
-    #expect(approvalStates(queue) == ["write": .handedBack])
+    #expect(approvalStates(queue).isEmpty)
 
-    // The next hook scan still carries the same request; it cannot make it decidable again.
+    // The next hook scan still carries the same request until the tool ends; it cannot bring it back.
     queue.apply(.approval(claudeApproval("write", arrivedAt: 10)))
+    #expect(approvalStates(queue).isEmpty)
+}
+
+@Test(arguments: ["idle", "busy"])
+func handedBackClaudeApprovalLeavesOnceItsPromptIsAnswered(status: String) {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(claudeApproval("write", arrivedAt: 10).with(state: .handedBack)))
+    #expect(approvalStates(queue) == ["write": .handedBack])
+    queue.apply(inventory(status, at: 50, statusChangedAt: 48))
+    #expect(approvalStates(queue).isEmpty)
+}
+
+@Test func handedBackClaudeApprovalStaysWhileItsPromptIsOpen() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(claudeApproval("write", arrivedAt: 10).with(state: .handedBack)))
+    // Past the deadline, Claude's prompt is still waiting from before the request was captured.
+    queue.apply(inventory("waiting", at: 50, statusChangedAt: 9.93))
     #expect(approvalStates(queue) == ["write": .handedBack])
 }
 
-@Test func nextPromptInTheSameSessionHandsBackOnlyTheEarlierRequest() {
+@Test func answeredClaudeApprovalGivesWayToTheSessionsRunningRow() {
+    let session = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: interactiveID, surface: .cli)
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: session, turn: "prompt", arrivedAt: 5, updatedAt: 10)))
+    queue.apply(.approval(claudeApproval("write", arrivedAt: 10).with(state: .handedBack)))
+    #expect(queue.items(at: 12).map(\.kind) == [.handedBackApproval])
+    queue.apply(inventory("busy", at: 11, statusChangedAt: 10.4))
+    #expect(queue.items(at: 12).map(\.kind) == [.running])
+}
+
+@Test func nextPromptInTheSameSessionRemovesOnlyTheEarlierRequest() {
     var queue = AgentAttentionQueue()
     queue.apply(.approval(claudeApproval("first", arrivedAt: 10)))
     queue.apply(.approval(claudeApproval("second", arrivedAt: 10.6)))
     // waiting again for the second prompt, set before the second request arrived
     queue.apply(inventory("waiting", at: 11, statusChangedAt: 10.5))
-    #expect(approvalStates(queue) == ["first": .handedBack, "second": .actionable])
+    #expect(approvalStates(queue) == ["second": .actionable])
 }
 
 @Test func statusWithoutAChangeTimeKeepsTodaysApprovalBehavior() {
@@ -914,6 +941,11 @@ func claudeApprovalAnsweredInClaudeLosesDirectControls(status: String) {
     // `claude agents --json` reports no change time.
     queue.apply(inventory("idle", at: 11, statusChangedAt: nil))
     #expect(approvalStates(queue) == ["write": .actionable])
+
+    var handedBack = AgentAttentionQueue()
+    handedBack.apply(.approval(claudeApproval("write", arrivedAt: 10).with(state: .handedBack)))
+    handedBack.apply(inventory("idle", at: 11, statusChangedAt: nil))
+    #expect(approvalStates(handedBack) == ["write": .handedBack])
 }
 
 @Test func statusChangeLeavesOtherSessionsAndRootsDecidable() {

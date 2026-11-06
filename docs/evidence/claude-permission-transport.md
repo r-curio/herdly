@@ -72,7 +72,8 @@ Recorded 2026-10-11 against Claude Code 2.1.296. Raw timeline: [claude-permissio
   30-second deadline. Steer now hands back an actionable Claude approval when the registry shows the
   same session's `statusUpdatedAt` later than the request's arrival
   ([Claude observations](../claude-observations.md)). The `claude agents --json` fallback has no such
-  timestamp and keeps the deadline.
+  timestamp and keeps the deadline. Since 2026-11-06 the same evidence removes the row instead,
+  including a row already handed back, so it no longer waits for a long tool to finish.
 - The helper could apply the same check to stop waiting without emitting, so a late click is reported
   as unconfirmed rather than received.
 - A human-clicked rerun through the real notch is still needed if the operator wants #71's original
