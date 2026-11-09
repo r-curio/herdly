@@ -956,6 +956,52 @@ func handedBackClaudeApprovalLeavesOnceItsPromptIsAnswered(status: String) {
     #expect(approvalStates(queue) == ["other-session": .actionable, "other-root": .actionable])
 }
 
+private func claudeQuestion(_ call: String, arrivedAt: Double, session: String = interactiveID) -> AgentQuestion {
+    AgentQuestion(session: AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: session, surface: .cli),
+                  turn: "prompt", call: call, arrivedAt: arrivedAt)
+}
+
+private func questionCalls(_ queue: AgentAttentionQueue) -> [String] {
+    queue.items(at: 60).compactMap(\.question).map(\.identity.call).sorted()
+}
+
+@Test func declinedClaudeQuestionLeavesTheQueueOnceTheSessionIsIdle() {
+    // Declining fires no post-tool or Stop hook; Claude only reports the session idle.
+    var queue = AgentAttentionQueue()
+    queue.apply(.question(claudeQuestion("ask", arrivedAt: 10)))
+    queue.apply(inventory("idle", at: 50, statusChangedAt: 44))
+    #expect(questionCalls(queue).isEmpty)
+
+    // The hook record still carries the question; the next scan cannot bring it back.
+    queue.apply(.question(claudeQuestion("ask", arrivedAt: 10)))
+    #expect(questionCalls(queue).isEmpty)
+}
+
+@Test(arguments: ["waiting", "busy"])
+func openClaudeQuestionStaysWhileTheSessionIsNotIdle(status: String) {
+    // The helper waits while busy; a handed-back question is asked natively while waiting.
+    var queue = AgentAttentionQueue()
+    queue.apply(.question(claudeQuestion("ask", arrivedAt: 10)))
+    queue.apply(inventory(status, at: 50, statusChangedAt: 44))
+    #expect(questionCalls(queue) == ["ask"])
+}
+
+@Test func claudeQuestionStaysWhenIdleIsOlderOrUntimed() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.question(claudeQuestion("ask", arrivedAt: 10)))
+    queue.apply(inventory("idle", at: 11, statusChangedAt: 9))
+    queue.apply(inventory("idle", at: 12, statusChangedAt: nil))
+    #expect(questionCalls(queue) == ["ask"])
+}
+
+@Test func idleSessionLeavesOtherSessionsQuestions() {
+    var queue = AgentAttentionQueue()
+    queue.apply(.question(claudeQuestion("mine", arrivedAt: 10)))
+    queue.apply(.question(claudeQuestion("other", arrivedAt: 10, session: backgroundID)))
+    queue.apply(inventory("idle", at: 50, statusChangedAt: 44))
+    #expect(questionCalls(queue) == ["other"])
+}
+
 @Test func claudeSessionRegistryKeepsTheStatusChangeTime() throws {
     let scan = decodeRegistry([entry(20, try registryRow(pid: 20, sessionID: interactiveID, status: "waiting",
                                                          extra: ["statusUpdatedAt": 1_791_650_747_057]))])

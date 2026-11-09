@@ -27,7 +27,13 @@ helper-owned liveness marker is refreshed only while the hook waits, and a deliv
 is written only after Claude's response is emitted. The helper waits 30 seconds from its publish,
 longer only by a hover hold in `<request>.question-hold` that it re-reads every poll and bounds to 2
 minutes from publish (ADR 0020); expiry emits nothing. A restart cannot turn its saved request record
-into an answer capability.
+into an answer capability. Declining Claude's question, or pressing Esc on it, ends the turn without a
+`PostToolUse`, `PostToolUseFailure`, or `Stop` hook, so the hook record alone keeps the question open
+(observed 2026-11-09: only `PreToolUse` and `Notification` were recorded). When the session registry
+reads `idle` with a `statusUpdatedAt` later than the question's arrival, its prompt has closed and the
+question leaves the queue; no answer is claimed or relayed. Only `idle` counts: the session stays
+`busy` while the helper waits, and handing the question back to Claude's prompt changes the status to
+`waiting` after arrival.
 
 The reader recognizes session, prompt, tool, question, approval, and outcome events. Tool text is
 kept only while a matching `PostToolUse`, `PostToolUseFailure`, or `PostToolBatch` has not cleared

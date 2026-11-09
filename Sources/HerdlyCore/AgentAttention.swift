@@ -549,6 +549,9 @@ public struct AgentAttentionQueue: Equatable, Sendable {
                                                 session: session.sessionID, surface: .cli)
             if session.kind == .interactive, let changedAt = session.statusUpdatedAt {
                 removeAnsweredClaudeApprovals(in: identity, statusChangedAt: changedAt)
+                if session.lifecycle.isIdleInteractive {
+                    removeClosedClaudeQuestions(in: identity, idleSince: changedAt)
+                }
                 if changedAt.isFinite { claudeStatusChangedAt[identity] = max(claudeStatusChangedAt[identity] ?? changedAt, changedAt) }
             }
             if session.lifecycle.isIdleInteractive {
@@ -608,6 +611,19 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         guard statusChangedAt.isFinite else { return }
         for (id, approval) in approvals where id.session == session && approval.arrivedAt < statusChangedAt {
             dismiss(.approval(id))
+        }
+    }
+
+    /// Declining Claude's question prompt, or pressing Esc on it, ends the turn without a PostToolUse,
+    /// failure, or Stop hook, so the hook record keeps the question open. Claude's registry reading
+    /// `idle` from a change after the question arrived is the evidence its prompt is closed: an open
+    /// question keeps the session `busy` while the helper waits and `waiting` while Claude asks
+    /// natively. Only `idle` counts, because handing a question back to Claude's prompt changes the
+    /// status to `waiting` after arrival. No answer is claimed or relayed.
+    private mutating func removeClosedClaudeQuestions(in session: AgentSessionIdentity, idleSince: Double) {
+        guard idleSince.isFinite else { return }
+        for (id, question) in questions where id.session == session && question.arrivedAt < idleSince {
+            dismiss(.question(id))
         }
     }
 
