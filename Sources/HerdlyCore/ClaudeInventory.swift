@@ -7,12 +7,19 @@ public enum ClaudeInventoryKind: String, Equatable, Sendable {
 
 public enum ClaudeInventoryLifecycle: Equatable, Sendable {
     case interactive(status: String)
+    /// `claude agents --json`'s background state: working, blocked, done, failed, or stopped.
     case background(state: String)
+    /// A session registry `bg` entry's status, in the interactive vocabulary (`busy`, `waiting`,
+    /// `idle`; `shell` reads `idle`), nil when Claude wrote none or one Herdly does not know. It says
+    /// only that the job's process is live and what it last reported; it is never a turn result, so
+    /// an idle job confirms no Stop and a busy one adds no Working row.
+    case backgroundJob(status: String?)
 
     public var isActive: Bool {
         switch self {
         case let .interactive(status): return status == "busy" || status == "waiting"
         case let .background(state): return state == "working" || state == "blocked"
+        case let .backgroundJob(status): return status == "busy" || status == "waiting"
         }
     }
 
@@ -20,6 +27,7 @@ public enum ClaudeInventoryLifecycle: Equatable, Sendable {
         switch self {
         case .interactive: return true
         case let .background(state): return state == "working" || state == "blocked"
+        case .backgroundJob: return isActive
         }
     }
 
@@ -75,13 +83,19 @@ public struct ClaudeInventoryScan: Equatable, Sendable {
     public let failure: String?
     public let ambiguousSessionIDs: Set<String>
     /// Sessions known to run in the background without a lifecycle row: the session registry names
-    /// a live background holder but carries no background state. Never includes a session that also
-    /// has a row.
+    /// a live background holder it could not list as one row (two holders, or an entry without a
+    /// readable directory, start time, or name). Never includes a session that also has a row.
     public let backgroundSessionIDs: Set<String>
     /// The process holding each background session whose job a live interactive process parked and
     /// now displays: the registry links the background entry's `jobId` to that process's
     /// `parkedJobId`. `.ambiguous` when the link is not one-to-one. Empty when unavailable.
     public let parkedJobProcesses: [String: ClaudeSessionProcess]
+
+    /// Every session a live Claude process holds in this scan: its rows, interactive or background,
+    /// and background holders without a row. Empty when unavailable, where absence proves nothing.
+    public var listedSessionIDs: Set<String> {
+        available ? Set(sessions.map(\.sessionID)).union(backgroundSessionIDs) : []
+    }
 
     public func isBackgroundSession(_ sessionID: String) -> Bool {
         available && (backgroundSessionIDs.contains(sessionID)
@@ -184,19 +198,19 @@ public enum ClaudeInventoryDecoder {
         return ClaudeInventoryScan(sourceScope: sourceScope, observedAt: observedAt, sessions: sessions)
     }
 
-    private static func canonicalSessionID(_ value: Any?) -> String? {
+    static func canonicalSessionID(_ value: Any?) -> String? {
         guard let value = value as? String, value.utf8.count == 36,
               let uuid = UUID(uuidString: value) else { return nil }
         return uuid.uuidString.lowercased()
     }
 
-    private static func nonempty(_ value: String?) -> String? {
+    static func nonempty(_ value: String?) -> String? {
         guard let value, !value.isEmpty, value.utf8.count <= 4 * 1024,
               !value.contains(where: { $0.isNewline || $0 == "\u{1b}" || $0 == "\u{7}" }) else { return nil }
         return value
     }
 
-    private static func timestamp(_ value: Any?) -> Double? {
+    static func timestamp(_ value: Any?) -> Double? {
         let number: Double?
         if let value = value as? NSNumber {
             guard CFGetTypeID(value as CFTypeRef) != CFBooleanGetTypeID() else { return nil }

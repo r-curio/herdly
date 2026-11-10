@@ -681,7 +681,9 @@ private func decodeRegistry(_ entries: [ClaudeSessionRegistry.Entry],
     let scan = decodeRegistry([entry(20, try registryRow(pid: 20, sessionID: interactiveID)),
                                entry(21, try registryRow(pid: 21, sessionID: backgroundID.uppercased(), kind: "bg"))])
     #expect(scan.available)
-    #expect(scan.sessions.map(\.sessionID) == [interactiveID])
+    // #393: the running background holder lists its session too, as background.
+    #expect(scan.sessions.map(\.sessionID) == [interactiveID, backgroundID])
+    #expect(scan.sessions.map(\.kind) == [.interactive, .background])
     #expect(scan.isBackgroundSession(backgroundID))
     #expect(!scan.isBackgroundSession(interactiveID))
 
@@ -697,7 +699,8 @@ private func decodeRegistry(_ entries: [ClaudeSessionRegistry.Entry],
     let job = entry(30, try registryRow(pid: 30, sessionID: backgroundID.uppercased(), kind: "bg", extra: ["jobId": "j1"]))
     let scan = decodeRegistry([parked, job])
     #expect(scan.available)
-    #expect(scan.sessions.isEmpty)
+    // The parking entry is still skipped; the job's own session is listed as background (#393).
+    #expect(scan.sessions.map(\.sessionID) == [backgroundID])
     #expect(scan.isBackgroundSession(backgroundID))
     #expect(scan.parkedJobProcesses == [backgroundID: .identified(pid: 20)])
 
@@ -718,6 +721,160 @@ private func decodeRegistry(_ entries: [ClaudeSessionRegistry.Entry],
         == [backgroundID: .ambiguous, otherBackgroundID: .ambiguous])
     // An unavailable scan carries no link.
     #expect(decodeRegistry([parked, job, entry(40, Data("{".utf8))]).parkedJobProcesses.isEmpty)
+}
+
+// MARK: - Background jobs listed live (#393)
+
+private let jobSessionID = "8684e967-1a3e-4c08-9149-de467b6c2582"
+private let parkingSessionID = "9d37c1d4-0000-4000-8000-000000000001"
+private let jobProcStart = "Mon Nov  9 04:57:11 2026"
+
+/// The live shape from Claude Code 2.1.319 (#393): `9417.json` continues job `8684e967` as a `bg`
+/// entry with its own status and name.
+private func jobRow(status: String? = "busy", extra: [String: Any] = [:]) throws -> Data {
+    var row: [String: Any] = ["pid": 9417, "sessionId": jobSessionID, "cwd": "/Users/example/landbase",
+                              "startedAt": 1_794_200_233_963, "procStart": jobProcStart, "kind": "bg",
+                              "jobId": "8684e967", "name": "design-system-plan-landbase",
+                              "statusUpdatedAt": 1_794_289_914_321]
+    if let status { row["status"] = status }
+    row.merge(extra) { $1 }
+    return try JSONSerialization.data(withJSONObject: row)
+}
+
+/// `4966.json`: the interactive process that parked the job and still displays it.
+private func parkingRow() throws -> Data {
+    try registryRow(pid: 4966, sessionID: parkingSessionID, procStart: "Mon Nov  9 04:50:00 2026",
+                    extra: ["parkedJobId": "8684e967", "name": "design-system-plan-landbase"])
+}
+
+@Test func claudeSessionRegistryListsARunningBackgroundJobLiveWithItsName() throws {
+    let scan = decodeRegistry([entry(9417, try jobRow())])
+    #expect(scan.available)
+    #expect(scan.sessions.count == 1)
+    let job = try #require(scan.sessions.first)
+    #expect(job.sessionID == jobSessionID)
+    #expect(job.kind == .background)
+    #expect(job.name == "design-system-plan-landbase")
+    #expect(job.directory == "/Users/example/landbase")
+    #expect(job.startedAt == 1_794_200_233.963)
+    #expect(job.statusUpdatedAt == 1_794_289_914.321)
+    #expect(job.lifecycle == .backgroundJob(status: "busy"))
+    // The job's process runs under Claude's pty host, not a tab, so it is not offered for targeting.
+    #expect(job.pid == nil)
+    #expect(scan.isBackgroundSession(jobSessionID))
+    #expect(scan.listedSessionIDs == [jobSessionID])
+    #expect(scan.backgroundSessionIDs.isEmpty)
+
+    // Registry statuses keep their meaning; `shell` reads idle, and an unknown or missing one is kept unknown.
+    #expect(decodeRegistry([entry(9417, try jobRow(status: "idle"))]).sessions.map(\.lifecycle) == [.backgroundJob(status: "idle")])
+    #expect(decodeRegistry([entry(9417, try jobRow(status: "shell"))]).sessions.map(\.lifecycle) == [.backgroundJob(status: "idle")])
+    #expect(decodeRegistry([entry(9417, try jobRow(status: "waiting"))]).sessions.map(\.lifecycle) == [.backgroundJob(status: "waiting")])
+    let unknown = decodeRegistry([entry(9417, try jobRow(status: "thinking"))])
+    #expect(unknown.available)
+    #expect(unknown.sessions.map(\.lifecycle) == [.backgroundJob(status: nil)])
+    #expect(decodeRegistry([entry(9417, try jobRow(status: nil))]).sessions.map(\.lifecycle) == [.backgroundJob(status: nil)])
+}
+
+@Test func claudeSessionRegistryListsAParkedJobWithoutChangingItsBinding() throws {
+    let scan = decodeRegistry([entry(4966, try parkingRow()), entry(9417, try jobRow())])
+    #expect(scan.available)
+    // The parking entry stays skipped; only the job's session is listed, once, with its name.
+    #expect(scan.sessions.map(\.sessionID) == [jobSessionID])
+    #expect(scan.sessions.first?.name == "design-system-plan-landbase")
+    #expect(scan.ambiguousSessionIDs.isEmpty)
+    // #254: the parking process still displays the job, and a background row is never an interactive holder.
+    #expect(scan.parkedJobProcesses == [jobSessionID: .identified(pid: 4966)])
+    #expect(ClaudeSessionProcess(sessionID: jobSessionID, inventories: [scan]) == .identified(pid: 4966))
+    #expect(ClaudeSessionProcess(sessionID: parkingSessionID, inventories: [scan]) == .unidentified)
+}
+
+@Test func claudeSessionRegistryDropsABackgroundJobOnceItsProcessExits() throws {
+    let entries = [entry(4966, try parkingRow()), entry(9417, try jobRow())]
+    let exited = decodeRegistry(entries) { $0.pid != 9417 }
+    #expect(exited.available)
+    #expect(exited.sessions.isEmpty)
+    #expect(exited.listedSessionIDs.isEmpty)
+    #expect(!exited.isBackgroundSession(jobSessionID))
+    #expect(exited.parkedJobProcesses.isEmpty)
+
+    // A reused PID: the name's PID runs, but not the process Claude registered.
+    let reused = decodeRegistry(entries) { $0.pid != 9417 || $0.procStart == nil }
+    #expect(reused.available)
+    #expect(reused.sessions.isEmpty)
+    #expect(reused.listedSessionIDs.isEmpty)
+    #expect(!reused.isBackgroundSession(jobSessionID))
+}
+
+@Test func claudeSessionRegistryKeepsOneRowWhenAnInteractiveAndABackgroundHolderShareASession() throws {
+    let interactive = entry(20, try registryRow(pid: 20, sessionID: jobSessionID, status: "idle"))
+    let scan = decodeRegistry([interactive, entry(9417, try jobRow())])
+    #expect(scan.available)
+    #expect(scan.ambiguousSessionIDs.isEmpty)
+    #expect(scan.sessions.map(\.kind) == [.interactive])
+    #expect(scan.sessions.first?.pid == 20)
+    #expect(!scan.isBackgroundSession(jobSessionID))
+    #expect(ClaudeSessionProcess(sessionID: jobSessionID, inventories: [scan]) == .identified(pid: 20))
+    // Either order.
+    #expect(decodeRegistry([entry(9417, try jobRow()), interactive]).sessions.map(\.kind) == [.interactive])
+}
+
+@Test func claudeSessionRegistryKeepsAnUnlistableBackgroundHolderAsLiveOnly() throws {
+    // Two background holders, or one without a readable directory, start time or name, cannot give
+    // one row, but the session is still held by a live process.
+    let second = entry(9418, try jobRow(extra: ["pid": 9418, "name": "other"]))
+    let unlistable: [[ClaudeSessionRegistry.Entry]] = [
+        [entry(9417, try jobRow()), second],
+        [entry(9417, try jobRow(extra: ["cwd": ""]))],
+        [entry(9417, try jobRow(extra: ["startedAt": "soon"]))],
+        [entry(9417, try jobRow(extra: ["name": 7]))]
+    ]
+    for entries in unlistable {
+        let scan = decodeRegistry(entries)
+        #expect(scan.available)
+        #expect(scan.sessions.isEmpty)
+        #expect(scan.listedSessionIDs == [jobSessionID])
+        #expect(scan.isBackgroundSession(jobSessionID))
+    }
+    // Without a name, the row shows the shortened session ID, as for an interactive session.
+    var row = try JSONSerialization.jsonObject(with: jobRow()) as! [String: Any]
+    row.removeValue(forKey: "name")
+    let unnamed = decodeRegistry([entry(9417, try JSONSerialization.data(withJSONObject: row))])
+    #expect(unnamed.sessions.map(\.name) == [""])
+}
+
+@Test func aListedBackgroundJobAloneCreatesNoQueueRow() throws {
+    var queue = AgentAttentionQueue()
+    for (index, status) in ["busy", "waiting", "idle", "thinking"].enumerated() {
+        let scan = ClaudeSessionRegistry.decode([entry(4966, try parkingRow()), entry(9417, try jobRow(status: status))],
+                                                sourceScope: "/tmp/root", observedAt: Double(10 + index), isRunning: { _ in true })
+        queue.apply(scan, now: Double(10 + index))
+        #expect(queue.items.isEmpty)
+        #expect(queue.workingCount == 0)
+        #expect(queue.toCheckCount == 0)
+    }
+}
+
+@Test func aListedBackgroundJobReadsLiveNotEnded() throws {
+    let scope = "/tmp/root"
+    let listed = decodeRegistry([entry(4966, try parkingRow()), entry(9417, try jobRow())]).listedSessionIDs
+    let gone = decodeRegistry([entry(4966, try parkingRow()), entry(9417, try jobRow())]) { $0.pid != 9417 }.listedSessionIDs
+    func presence(_ sessions: Set<String>) -> ClaudeInventoryPresence {
+        ClaudeInventoryPresence.of(session: jobSessionID, scope: scope, listedByScope: [scope: sessions],
+                                   inventoryAvailable: [scope: true], configuredScopes: [scope])
+    }
+    #expect(presence(listed) == .live)
+    #expect(presence(gone) == .absent)
+    // So the card keeps its own route instead of "This session has ended." (H7, #280).
+    #expect(ClaudeLastSeenHost.openLine(lastSeen: .ghostty, presence: presence(listed), isRunning: { _ in true }) == nil)
+    #expect(ClaudeLastSeenHost.openLine(lastSeen: .ghostty, presence: presence(gone), isRunning: { _ in true }) == .sessionEnded)
+    // The gate: an incomplete or unconfigured set proves nothing, and two roots listing it are not one.
+    #expect(ClaudeInventoryPresence.of(session: jobSessionID, scope: scope, listedByScope: [scope: listed],
+                                       inventoryAvailable: [scope: false], configuredScopes: [scope]) == .unknown)
+    #expect(ClaudeInventoryPresence.of(session: jobSessionID, scope: scope, listedByScope: [scope: listed],
+                                       inventoryAvailable: [scope: true], configuredScopes: nil) == .unknown)
+    #expect(ClaudeInventoryPresence.of(session: jobSessionID, scope: scope, listedByScope: [scope: listed, "/tmp/b": listed],
+                                       inventoryAvailable: [scope: true, "/tmp/b": true],
+                                       configuredScopes: [scope, "/tmp/b"]) == .unknown)
 }
 
 @Test func claudeSessionRegistryKindDefaultsToInteractiveAndUnknownKindIsUnavailable() throws {

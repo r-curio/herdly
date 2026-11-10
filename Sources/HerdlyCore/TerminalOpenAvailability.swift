@@ -474,6 +474,24 @@ public enum ClaudeInventoryPresence: Equatable, Sendable {
     case absent
     /// Inventories are incomplete, or the session is listed more than once.
     case unknown
+
+    /// The session's presence across every configured root's latest inventory.
+    ///
+    /// - Parameters:
+    ///   - listedByScope: each root's `ClaudeInventoryScan.listedSessionIDs`, so a session a running
+    ///     background job holds (#393) is live, not ended.
+    ///   - inventoryAvailable: whether each root's latest scan was complete.
+    ///   - configuredScopes: the roots navigation includes, nil when there are none.
+    /// - Returns: `.unknown` unless both maps cover exactly the configured roots and every scan is complete.
+    public static func of(session: String, scope: String, listedByScope: [String: Set<String>],
+                          inventoryAvailable: [String: Bool], configuredScopes: Set<String>?) -> Self {
+        guard let configuredScopes, Set(listedByScope.keys) == configuredScopes,
+              Set(inventoryAvailable.keys) == configuredScopes,
+              inventoryAvailable.values.allSatisfy({ $0 }) else { return .unknown }
+        let everywhere = listedByScope.values.filter { $0.contains(session) }.count
+        if everywhere == 0 { return .absent }
+        return everywhere == 1 && listedByScope[scope]?.contains(session) == true ? .live : .unknown
+    }
 }
 
 /// H7 for a Claude CLI card that is no longer live (#280). A Claude process ends with the terminal app it
