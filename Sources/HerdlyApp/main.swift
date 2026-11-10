@@ -1749,6 +1749,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 .filter { $0.state == .actionable && ApprovalHandoff.releasesOnReceipt(source: $0.source) }
                 .forEach(handBackApproval)
         }
+        // A card that opened by itself closes with the panel once its item leaves the queue, as Escape
+        // does: the pointer still resting on the notch does not reopen it as the queue. `collapse()`
+        // refreshes again, by then with nothing on screen to check.
+        if previewMode == nil, presentationMode.spotlightItemLeft(queued: Set(orderedAgentAttentionItems.map(\.id))) {
+            presentationMode = .collapsed
+            collapse()
+            return
+        }
         let now = ProcessInfo.processInfo.systemUptime
         let pointerInside = pointerInsidePanel
         if !pointerInside { hoverSuppressed = false }

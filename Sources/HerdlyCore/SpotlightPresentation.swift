@@ -28,6 +28,13 @@ public enum NotchPresentationMode: Equatable, Sendable {
         }
     }
     public var showsSingleCard: Bool { singleCard != nil }
+    /// True when the notch shows a card that opened by itself and its item has left the queue (a
+    /// question just answered on it, an approval decided). The panel then closes outright, even under
+    /// the pointer, rather than falling back to the queue. A clicked card returns to the queue (D10).
+    public func spotlightItemLeft(queued: Set<AgentAttentionID>) -> Bool {
+        guard case let .agentSpotlight(id) = self else { return false }
+        return !queued.contains(id)
+    }
     public var clickedCard: AgentAttentionID? {
         if case let .clickedCard(id) = self { return id }
         return nil
