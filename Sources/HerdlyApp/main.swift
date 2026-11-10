@@ -411,7 +411,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// this is not empty, even with nothing of theirs to show (#265).
     private(set) var codexSessionsAwaitingInventory: Set<UUID> = []
     /// Complete root inventories used to prove which canonical Claude sessions are live. Memory only.
+    /// Interactive sessions only: Open, visits, pops and pane binding target these, never a background job.
     var liveClaudeSessions: [String: [String]] = [:]
+    /// Every session a live Claude process holds, per root (`ClaudeInventoryScan.listedSessionIDs`):
+    /// interactive sessions and running background jobs (#393). Empty for an unavailable root; memory
+    /// only. Used for liveness alone: the ended and last-seen lines, the reply route's ended check, and
+    /// which sessions herdr binds. herdr does target a job's pane through it, but only through the
+    /// parked-job binding (ADR 0008), whose visits acknowledge nothing; Ghostty, iTerm2, Terminal.app,
+    /// WezTerm, tmux and Zellij targeting, and `canOpenClaude`, keep `liveClaudeSessions`.
+    var listedClaudeSessions: [String: Set<String>] = [:]
     /// herdr monitor, hook pane records and latest scan (Companion+Herdr.swift).
     let herdr = HerdrSessionBindings()
     /// Terminal.app permission, scan, visits and Claude replies (Companion+TerminalApp.swift).
@@ -1465,6 +1473,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                     ? scan.sessions.filter { $0.kind == .interactive }.map(\.sessionID)
                     : [])
             })
+            listedClaudeSessions = Dictionary(uniqueKeysWithValues: result.7.filter {
+                configuredClaudeScopes.contains($0.sourceScope)
+            }.map { ($0.sourceScope, $0.listedSessionIDs) })
             claudeInventoryAvailable = Dictionary(uniqueKeysWithValues: result.7.filter {
                 configuredClaudeScopes.contains($0.sourceScope)
             }.map { ($0.sourceScope, $0.available) })

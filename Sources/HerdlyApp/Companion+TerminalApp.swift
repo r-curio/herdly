@@ -715,7 +715,7 @@ extension Companion {
         guard terminalAppActive || wezTermSwitchedOn || tmuxContactAllowed || zellijContactAllowed, outcome.session.source == .claude,
               outcome.session.surface == .cli else { return nil }
         let items = orderedAgentAttentionItems.filter { $0.session == outcome.session }
-        let ended = liveClaudeSessions[outcome.session.sourceScope].map { !$0.contains(outcome.session.session) } ?? false
+        let ended = listedClaudeSessions[outcome.session.sourceScope].map { !$0.contains(outcome.session.session) } ?? false
         let inTurn = items.contains { $0.running != nil || $0.question != nil || ($0.approval != nil) }
         // No entry (bound in Ghostty, or not scanned yet) offers no field, as for Codex.
         let route = TerminalReplyRoute.merging(

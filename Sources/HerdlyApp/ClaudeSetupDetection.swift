@@ -146,8 +146,8 @@ enum ClaudeSetupDetection {
         guard inventory.available else {
             return .unavailable(inventory.failure ?? activeSessionInventoryUnavailable)
         }
-        return .available(restartCount: restartCount(in: inventory, installedAt: installedAt,
-                                                     deliveredSessionIDs: deliveredSessionIDs))
+        return .available(restartCount: inventory.restartCount(installedAt: installedAt,
+                                                               deliveredSessionIDs: deliveredSessionIDs))
     }
 
     static func activeSessionInventory(root: URL, capabilities: ClaudeCapabilities,
@@ -182,23 +182,8 @@ enum ClaudeSetupDetection {
         guard inventory.available else {
             return .unavailable(inventory.failure ?? "Unavailable: Claude returned an invalid agents inventory.")
         }
-        return .available(restartCount: restartCount(in: inventory, installedAt: installedAt,
-                                                     deliveredSessionIDs: deliveredSessionIDs))
-    }
-
-    private static func restartCount(in inventory: ClaudeInventoryScan, installedAt: TimeInterval?,
-                                     deliveredSessionIDs: Set<String>) -> Int {
-        var count = 0
-        for session in inventory.sessions where session.lifecycle.needsRestart {
-            let needsRestart: Bool
-            if let installedAt {
-                needsRestart = session.startedAt < installedAt && !deliveredSessionIDs.contains(session.sessionID)
-            } else {
-                needsRestart = true
-            }
-            if needsRestart { count += 1 }
-        }
-        return count
+        return .available(restartCount: inventory.restartCount(installedAt: installedAt,
+                                                               deliveredSessionIDs: deliveredSessionIDs))
     }
 
     static func policy(for root: URL, projectDirectory: URL? = nil) -> ClaudeSetupPolicy {

@@ -214,12 +214,13 @@ extension Companion {
 
     // MARK: - Inputs
 
-    /// Codex CLI sessions Herdly considers live, and Claude sessions in a complete inventory.
+    /// Codex CLI sessions Herdly considers live, and Claude sessions in a complete inventory, running
+    /// background jobs included: a parked job's pane binds to its parking process (#254, #393).
     private func herdrLiveSessions() -> Set<HerdrSessionKey> {
         let codex = liveCLI.subtracting(endedSessions).map {
             HerdrSessionKey(agent: .codex, sessionID: $0.uuidString)
         }
-        let claude = liveClaudeSessions.values.flatMap { $0 }.map {
+        let claude = listedClaudeSessions.values.flatMap { $0 }.map {
             HerdrSessionKey(agent: .claude, sessionID: $0)
         }
         return Set(codex).union(claude)

@@ -12,18 +12,24 @@ import Foundation
 /// - Entries outlive their process. An entry counts only while its PID runs and, when Claude
 ///   recorded `procStart`, that process started at the recorded UTC time, so a reused PID never
 ///   revives a session.
-/// - Only `interactive` entries (or entries with no `kind`, which Claude treats as interactive)
-///   become inventory rows. Other holders of a session are not duplicates: a `bg` entry only marks
-///   its session as background, and `daemon`, `daemon-worker`, and parked-job entries are skipped.
+/// - `interactive` entries (or entries with no `kind`, which Claude treats as interactive) become
+///   interactive rows. A `bg` entry holds a session continued as a background job: it becomes a
+///   `.background` row with its name, directory, start time and `.backgroundJob` status (#393), so
+///   a running job is listed live rather than ended. It is not a duplicate of an interactive row:
+///   a session with an interactive row keeps that row alone, and a session two `bg` entries hold, or
+///   one whose entry lacks a readable directory, start time or name, is kept only in
+///   `backgroundSessionIDs`. A background row names no PID: its process runs under Claude's pty
+///   host, not in a terminal tab. `daemon`, `daemon-worker`, and parked-job entries are skipped.
 ///   A parked interactive entry still identifies the process that displays its job: its
 ///   `parkedJobId` names the `jobId` of the `bg` entry now holding the session.
 ///   An unknown kind makes the scan unavailable. Claude writes the `shell` status when the prompt is
 ///   idle while a background Bash task (a dev server, say) is still running, so it is reported as
 ///   `idle`: the turn has ended.
 ///
-/// Remaining rows are validated by `ClaudeInventoryDecoder`, so an unknown status, a malformed
+/// Interactive rows are validated by `ClaudeInventoryDecoder`, so an unknown status, a malformed
 /// identity, or two live interactive entries for one session make the scan unavailable rather than
-/// silently shrinking it.
+/// silently shrinking it. A `bg` entry only needs a valid session ID; its other fields decide whether
+/// it is listed as a row, never whether the scan is available.
 public enum ClaudeSessionRegistry {
     public static let directoryName = "sessions"
     public static let maximumEntries = 256
@@ -98,6 +104,8 @@ public enum ClaudeSessionRegistry {
         var rows: [[String: Any]] = []
         var pids: [String: Process] = [:]
         var background: Set<String> = []
+        var backgroundEntries: [String: [[String: Any]]] = [:]
+        var backgroundOrder: [String] = []
         var jobSessions: [String: Set<String>] = [:]
         var parkedHolders: [String: Set<Int32>] = [:]
         for entry in entries {
@@ -120,20 +128,23 @@ public enum ClaudeSessionRegistry {
                 // Claude treats a missing kind as interactive.
                 var normalized = row
                 normalized["kind"] = "interactive"
-                if row["status"] as? String == "shell" { normalized["status"] = "idle" }
+                // A known status is normalized; an unknown one is left for the decoder to reject.
+                if let status = status(row["status"]) { normalized["status"] = status }
                 rows.append(normalized)
                 // A duplicate session ID makes the decoder reject the scan, so this pid is never misattributed.
-                if let sessionID = (row["sessionId"] as? String).flatMap(UUID.init(uuidString:)) {
-                    pids[sessionID.uuidString.lowercased()] = process
+                if let sessionID = ClaudeInventoryDecoder.canonicalSessionID(row["sessionId"]) {
+                    pids[sessionID] = process
                 }
             case "bg" as String:
-                // A background holder has no `state`; it only marks the session as background.
-                guard let sessionID = (row["sessionId"] as? String).flatMap(UUID.init(uuidString:)) else {
+                // A background job's holder: listed as a background row once every entry is read.
+                guard let session = ClaudeInventoryDecoder.canonicalSessionID(row["sessionId"]) else {
                     return unavailable(ClaudeInventoryDecoder.incompleteMessage)
                 }
-                background.insert(sessionID.uuidString.lowercased())
+                background.insert(session)
+                if backgroundEntries[session] == nil { backgroundOrder.append(session) }
+                backgroundEntries[session, default: []].append(row)
                 if let job = row["jobId"].flatMap(jobID) {
-                    jobSessions[job, default: []].insert(sessionID.uuidString.lowercased())
+                    jobSessions[job, default: []].insert(session)
                 }
             case "daemon" as String, "daemon-worker" as String:
                 continue
@@ -143,14 +154,41 @@ public enum ClaudeSessionRegistry {
         }
         let scan = ClaudeInventoryDecoder.decode(rows: rows, sourceScope: sourceScope, observedAt: observedAt)
         guard scan.available else { return scan }
-        let sessions = scan.sessions.map {
+        let interactive = scan.sessions.map {
             ClaudeInventorySession(sessionID: $0.sessionID, name: $0.name, kind: $0.kind, startedAt: $0.startedAt,
                                    lifecycle: $0.lifecycle, pid: pids[$0.sessionID]?.pid, directory: $0.directory,
                                    statusUpdatedAt: $0.statusUpdatedAt, procStart: pids[$0.sessionID]?.procStart)
         }
+        let held = Set(interactive.map(\.sessionID))
+        let jobs = backgroundOrder.compactMap { session -> ClaudeInventorySession? in
+            guard !held.contains(session), let rows = backgroundEntries[session], rows.count == 1 else { return nil }
+            return backgroundRow(rows[0], sessionID: session)
+        }
+        let sessions = interactive + jobs
         return ClaudeInventoryScan(sourceScope: sourceScope, observedAt: observedAt, sessions: sessions,
                                    backgroundSessionIDs: background,
                                    parkedJobProcesses: parkedJobProcesses(jobSessions: jobSessions, holders: parkedHolders))
+    }
+
+    /// A `bg` entry as a background row, nil when its directory, start time or name is unreadable.
+    /// Its status uses the interactive vocabulary; an unknown or missing one stays unknown (nil).
+    private static func backgroundRow(_ row: [String: Any], sessionID: String) -> ClaudeInventorySession? {
+        guard let shared = ClaudeInventoryDecoder.SharedFields(row) else { return nil }
+        return ClaudeInventorySession(sessionID: sessionID, name: shared.name, kind: .background,
+                                      startedAt: shared.startedAt, lifecycle: .backgroundJob(status: status(row["status"])),
+                                      directory: shared.directory,
+                                      statusUpdatedAt: ClaudeInventoryDecoder.timestamp(row["statusUpdatedAt"]))
+    }
+
+    /// A registry status in the interactive vocabulary: `busy`, `waiting`, or `idle`, with `shell`
+    /// (the prompt idle while a background Bash task runs) read as `idle`. nil for anything else.
+    private static func status(_ value: Any?) -> String? {
+        switch value as? String {
+        case "busy": "busy"
+        case "waiting": "waiting"
+        case "idle", "shell": "idle"
+        default: nil
+        }
     }
 
     /// Links each background session to the interactive process that parked its job. Only a job held
@@ -273,8 +311,18 @@ public enum ClaudeSessionProcess: Equatable, Hashable, Sendable {
     /// Several available inventories list the session as interactive, or an inventory reports it
     /// held by two interactive processes, whether from a registry or `claude agents --json`; or the
     /// session has both an interactive holder and a parked-job link, or a link that is not
-    /// one-to-one. No one process can be required, so the binding fails closed.
+    /// one-to-one; or the session is a listed background job that no live process parked (#393).
+    /// No one process can be required, so the binding fails closed.
     case ambiguous
+
+    /// Whether a herdr visit, dwell, or Open of the pane bound to `sessionID` may acknowledge its
+    /// outcomes (ADR 0016). False for a session any available inventory lists as background (#393):
+    /// its binding goes through the process that parked the job (ADR 0008), whose place in the pane's
+    /// foreground does not show the pane is displaying the job, so it is not exact evidence. Open of
+    /// that pane is still offered; it only revalidates and raises it.
+    public static func paneEvidenceAcknowledges(sessionID: String, inventories: [ClaudeInventoryScan]) -> Bool {
+        !inventories.contains { $0.isBackgroundSession(sessionID) || $0.parkedJobProcesses[sessionID] != nil }
+    }
 
     /// Selects the session's process from every configured root's latest inventory.
     ///
@@ -293,7 +341,8 @@ public enum ClaudeSessionProcess: Equatable, Hashable, Sendable {
         // A background session continued from a parked one is held by the parking process instead.
         let parked = available.compactMap { $0.parkedJobProcesses[sessionID] }
         switch (holders.count, parked.count) {
-        case (0, 0): self = .unidentified
+        // A listed background job no process parked is displayed by none, so no name rule stands in (#393).
+        case (0, 0): self = available.contains { $0.isBackgroundSession(sessionID) } ? .ambiguous : .unidentified
         case (1, 0): self = holders[0].pid.map { .identified(pid: $0) } ?? .unidentified
         case (0, 1): self = parked[0]
         default: self = .ambiguous

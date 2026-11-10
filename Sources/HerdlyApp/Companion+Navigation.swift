@@ -38,16 +38,12 @@ extension Companion {
             && liveClaudeSessions.values.flatMap({ $0 }).filter({ $0 == identity.session }).count == 1
     }
 
-    /// Whether complete inventories list a Claude CLI session as live, under `canOpenClaude`'s inventory gate.
+    /// Whether complete inventories list a Claude CLI session as live, under `canOpenClaude`'s inventory
+    /// gate. A running background job counts as live (#393), though it is never offered Open here.
     func claudeInventoryPresence(_ identity: AgentSessionIdentity) -> ClaudeInventoryPresence {
-        guard let configuredScopes = configuredClaudeNavigationScopes(),
-              Set(liveClaudeSessions.keys) == configuredScopes,
-              Set(claudeInventoryAvailable.keys) == configuredScopes,
-              claudeInventoryAvailable.values.allSatisfy({ $0 }) else { return .unknown }
-        let everywhere = liveClaudeSessions.values.flatMap({ $0 }).filter({ $0 == identity.session }).count
-        if everywhere == 0 { return .absent }
-        let own = liveClaudeSessions[identity.sourceScope]?.filter({ $0 == identity.session }).count
-        return own == 1 && everywhere == 1 ? .live : .unknown
+        ClaudeInventoryPresence.of(session: identity.session, scope: identity.sourceScope,
+                                   listedByScope: listedClaudeSessions, inventoryAvailable: claudeInventoryAvailable,
+                                   configuredScopes: configuredClaudeNavigationScopes())
     }
 
     /// H7 for a Claude CLI card not offered Open (#280): "<app> isn't running." for the terminal app its
@@ -623,12 +619,17 @@ extension Companion {
         return codex + claude
     }
 
+    /// The completions a herdr visit, dwell, or Open of `subject`'s pane may acknowledge. None for a
+    /// Claude background job (#393): its pane binds through the parking process, which is not exact
+    /// evidence the pane shows the job, so Open still raises it but acknowledges nothing.
     private func herdrCompletions(_ subject: HerdrOpenSubject) -> [TerminalCompletionCandidate<String>] {
         switch subject {
         case .codex(let session):
             return cliItems.filter { $0.session == session }
                 .map { TerminalCompletionCandidate(id: $0.turn.uuidString, arrivedAt: $0.arrivedAt) }
         case .claude(let identity):
+            guard ClaudeSessionProcess.paneEvidenceAcknowledges(sessionID: identity.session,
+                                                                inventories: Array(claudeInventories.values)) else { return [] }
             return agentQueue.snapshot.outcomes.filter { $0.session == identity }
                 .map { TerminalCompletionCandidate(id: $0.turn, arrivedAt: $0.arrivedAt) }
         }

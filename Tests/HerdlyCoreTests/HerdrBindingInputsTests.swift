@@ -457,3 +457,50 @@ private func parkedInventory(_ root: String, _ links: [String: ClaudeSessionProc
     // A session whose newest hook event carried no pane is still not in herdr, so the Ghostty rules apply.
     #expect(bind(twoRoots, records: [record(pane: nil)]) == .notInHerdr)
 }
+
+// MARK: - Parked background jobs listed live (#393)
+
+/// The registry's own shape: interactive 83378 parked job `j1`, which a `bg` process holds as `session`.
+private func parkedJobRegistry(parkingRunning: Bool = true) throws -> ClaudeInventoryScan {
+    let parking = try JSONSerialization.data(withJSONObject: [
+        "pid": 83378, "sessionId": otherSession, "cwd": "/tmp/one", "startedAt": 1, "kind": "interactive",
+        "status": "busy", "parkedJobId": "j1"])
+    let job = try JSONSerialization.data(withJSONObject: [
+        "pid": 9417, "sessionId": session, "cwd": "/tmp/one", "startedAt": 2, "kind": "bg", "jobId": "j1",
+        "status": "busy", "name": "job"])
+    return ClaudeSessionRegistry.decode([.init(pid: 83378, data: parking), .init(pid: 9417, data: job)],
+                                        sourceScope: "/tmp/one", observedAt: 10,
+                                        isRunning: { parkingRunning || $0.pid != 83378 })
+}
+
+@Test func aListedParkedJobStillOffersHerdrOpenButItsPaneAcknowledgesNothing() throws {
+    let inventories = [try parkedJobRegistry()]
+    let outcome = scan(processInfo: ["w1:p1": foreground("w1:p1", ["2.1.319", "node"])])
+    let binding = HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: [record()], herdrEnabled: true,
+                                             ghosttyControlsEnabled: true, gateOpen: true, outcome: outcome,
+                                             defaultSocketPath: socket, codex: .none,
+                                             claudeProcess: ClaudeSessionProcess(sessionID: session, inventories: inventories))
+    // Open stays offered: it revalidates this binding and only raises the pane.
+    #expect(binding == .bound(target))
+    #expect(HerdrPresentation.openAvailability(binding: binding, ttySupport: .supported) == .available)
+    // The parking process in the foreground does not show the pane displays the job, so neither a visit,
+    // a dwell, nor an Open of that pane acknowledges the job's outcomes (fail closed).
+    #expect(!ClaudeSessionProcess.paneEvidenceAcknowledges(sessionID: session, inventories: inventories))
+    // A session the pane's own interactive process holds keeps ADR 0016's visit rule.
+    #expect(ClaudeSessionProcess.paneEvidenceAcknowledges(sessionID: session,
+                                                          inventories: [inventory("/tmp/one", [(session, 83378)])]))
+    #expect(ClaudeSessionProcess.paneEvidenceAcknowledges(sessionID: session, inventories: []))
+}
+
+@Test func aListedBackgroundJobWithoutAParkingProcessNeverBindsByName() throws {
+    // The job is listed live, but no process displays it, so the name rule cannot stand in for one.
+    let inventories = [try parkedJobRegistry(parkingRunning: false)]
+    #expect(inventories[0].listedSessionIDs.contains(session))
+    #expect(ClaudeSessionProcess(sessionID: session, inventories: inventories) == .ambiguous)
+    let outcome = scan(processInfo: ["w1:p1": foreground("w1:p1", ["claude"])])
+    #expect(HerdrBindingInputs.binding(for: claudeKey, liveness: .live, hookRecords: [record()], herdrEnabled: true,
+                                       ghosttyControlsEnabled: true, gateOpen: true, outcome: outcome,
+                                       defaultSocketPath: socket, codex: .none,
+                                       claudeProcess: ClaudeSessionProcess(sessionID: session, inventories: inventories))
+        == .unavailable(.binding(.agentProcessAmbiguous(.claude))))
+}
