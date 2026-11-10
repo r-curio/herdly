@@ -276,16 +276,22 @@ public enum HookEventListing {
     }
 }
 
-/// Deletes expired hook records from one of Herdly's event directories. Tool records only label the
-/// current tool and subagent records only list a session's running subagents, so both expire after
-/// `toolRecordAge`; every other record after `recordAge`.
+/// Deletes expired hook records from one of Herdly's event directories. Tool records label the current
+/// tool, and subagent records list a session's running subagents and end their calls, so both expire
+/// after `toolRecordAge`; every other record after `recordAge`.
 ///
-/// What is kept regardless of age: tool calls with no completion, turn end or session end (a
-/// waiting question lives in one), the start of a subagent with no stop of its own, no later
-/// `Stop`/`StopFailure` in its session and no later session end (it is still listed), lifecycle records of sessions that still have an approval
-/// unresolved request file (a handed-back reminder resolves from their session end), and anything Herdly
-/// cannot identify as its own record: request, receipt and decision files, malformed or foreign
-/// JSON, symlinks and directories. Age is the file's creation date.
+/// What is kept regardless of age:
+/// - a tool call with no completion, turn end or session end (a waiting question or a request lives in
+///   one); a call inside a subagent instead stays exactly while the subagent's run that holds it is open
+///   (`ClaudeSubagentLifetimes`, the reader's rule), and keeps the general rule when no run holds it;
+/// - the start of a subagent the Claude reader still lists, and a subagent's start and stop while one
+///   of its calls is kept, so the reader never sees the call without what ended it;
+/// - lifecycle records of sessions that still have an unresolved approval request file (a handed-back
+///   reminder resolves from their session end);
+/// - anything Herdly cannot identify as its own record: request, receipt and decision files, malformed
+///   or foreign JSON, symlinks and directories.
+///
+/// Age is the file's creation date.
 public enum HookEventRetention {
     public static let toolRecordAge: TimeInterval = 60 * 60
     public static let recordAge: TimeInterval = 7 * 24 * 60 * 60
@@ -314,6 +320,8 @@ public enum HookEventRetention {
         let tool: String?
         /// Claude's `agent_id` for subagent records, when the reader would accept it.
         let agent: String?
+        /// Claude's raw `prompt_id`; `ClaudeSubagentLifetimes` bounds it as the reader does.
+        let prompt: String?
         let closes: [String]
         let capturedAt: Double
     }
@@ -344,19 +352,19 @@ public enum HookEventRetention {
         }
 
         var closedTools = Set<String>()
-        var stoppedAgents = Set<String>()
-        var subagentsEndedAt: [String: Double] = [:]
-        for record in records where ClaudeObservationReader.subagentsEndingEvents.contains(record.event) {
-            subagentsEndedAt[record.session] = max(subagentsEndedAt[record.session] ?? -.infinity, record.capturedAt)
+        // When each subagent runs, as the Claude reader decides it.
+        var lifetimes = ClaudeSubagentLifetimes()
+        for record in records {
+            lifetimes.note(event: record.event, session: record.session, agent: record.agent, prompt: record.prompt,
+                           at: record.capturedAt)
         }
+        let nowSeconds = now.timeIntervalSince1970
         var endedTurns: [String: Double] = [:]
         var endedSessions: [String: Double] = [:]
         for record in records {
             switch record.event {
             case let event where toolEvents.contains(event) && event != "PreToolUse":
                 closedTools.formUnion(record.closes.map { toolKey(record.session, $0) })
-            case "SubagentStop":
-                if let agent = record.agent { stoppedAgents.insert(agentKey(record.session, agent)) }
             case "Stop", "StopFailure":
                 if let turn = record.turn {
                     endedTurns[turnKey(record.session, turn)] = max(endedTurns[turnKey(record.session, turn)] ?? -.infinity,
@@ -371,43 +379,56 @@ public enum HookEventRetention {
         func isOpen(_ record: Record) -> Bool {
             guard record.event == "PreToolUse", let tool = record.tool else { return false }
             if closedTools.contains(toolKey(record.session, tool)) { return false }
+            // A subagent's call ends with the run that holds it, and only then, as the reader ends it. A call
+            // no run holds keeps the rules below.
+            if let agent = record.agent {
+                switch lifetimes.call(session: record.session, agent: agent, at: record.capturedAt, now: nowSeconds) {
+                case .ended: return false
+                case .running: return true
+                case .unknown: break
+                }
+            }
             if let turn = record.turn, let ended = endedTurns[turnKey(record.session, turn)], ended >= record.capturedAt {
                 return false
             }
             if let ended = endedSessions[record.session], ended >= record.capturedAt { return false }
             return true
         }
-        // The reader lists a subagent from its start until its own stop or a later
-        // `ClaudeObservationReader.subagentsEndingEvents` record in its session.
+        // The reader lists a subagent while its run is open (`ClaudeSubagentLifetimes`).
         func isRunning(_ record: Record) -> Bool {
-            guard record.event == "SubagentStart", let agent = record.agent,
-                  !stoppedAgents.contains(agentKey(record.session, agent)) else { return false }
-            if let ended = subagentsEndedAt[record.session], ended >= record.capturedAt { return false }
-            return true
+            guard record.event == "SubagentStart", let agent = record.agent else { return false }
+            return lifetimes.call(session: record.session, agent: agent, at: record.capturedAt, now: nowSeconds) == .running
         }
 
         var keptToolStarts = Set<String>()
+        var keptAgentCalls = Set<String>()
+        func keep(call record: Record) {
+            if let tool = record.tool { keptToolStarts.insert(toolKey(record.session, tool)) }
+            if let agent = record.agent { keptAgentCalls.insert(agentKey(record.session, agent)) }
+        }
         var completions: [Record] = []
+        var oldSubagentRecords: [Record] = []
         for record in records {
             let isTool = toolEvents.contains(record.event)
             let isSubagent = subagentEvents.contains(record.event)
             if record.age >= recordAge {
                 if isTool || isSubagent || !protectedSessions.contains(record.session) { expired.append(record.url) }
             } else if isSubagent, record.age >= toolRecordAge {
-                if !isRunning(record) { expired.append(record.url) }
+                oldSubagentRecords.append(record)
             } else if isTool, record.age >= toolRecordAge {
                 if record.event == "PreToolUse" {
-                    if isOpen(record) {
-                        if let tool = record.tool { keptToolStarts.insert(toolKey(record.session, tool)) }
-                    } else {
-                        expired.append(record.url)
-                    }
+                    if isOpen(record) { keep(call: record) } else { expired.append(record.url) }
                 } else {
                     completions.append(record)
                 }
-            } else if record.event == "PreToolUse", let tool = record.tool {
-                keptToolStarts.insert(toolKey(record.session, tool))
+            } else if record.event == "PreToolUse" {
+                keep(call: record)
             }
+        }
+        // A subagent's start and stop stay while it runs or while one of its calls is still on disk.
+        for record in oldSubagentRecords where !isRunning(record) {
+            if let agent = record.agent, keptAgentCalls.contains(agentKey(record.session, agent)) { continue }
+            expired.append(record.url)
         }
         // A completion stays while the call it completes is still on disk, so a reader never sees
         // a kept start without its end.
@@ -449,7 +470,8 @@ public enum HookEventRetention {
             ?? (input["tool_uses"] as? [[String: Any]] ?? []).compactMap { $0["tool_use_id"] as? String }
         return Record(url: url, age: age, event: event, session: sessionKey(session),
                       turn: object["turn_id"] as? String ?? object["prompt_id"] as? String,
-                      tool: tool, agent: ClaudeObservationReader.subagentID(in: object), closes: event == "PostToolBatch" ? batch : tool.map { [$0] } ?? [],
+                      tool: tool, agent: ClaudeObservationReader.subagentID(in: object),
+                      prompt: object["prompt_id"] as? String, closes: event == "PostToolBatch" ? batch : tool.map { [$0] } ?? [],
                       capturedAt: (object["captured_at"] as? NSNumber)?.doubleValue
                         ?? (object["received_at"] as? String).flatMap(RolloutTimestamp.parse) ?? -.infinity)
     }

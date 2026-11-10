@@ -62,8 +62,9 @@ public struct ClaudeTurnResult: Equatable, Sendable {
 /// When the directory does change, two more things are reused until that same full check. A record
 /// already read is not looked at again while the directory still lists its name under the inode it
 /// was read under (a replaced file has a new inode). And each session's part of the result is kept:
-/// sessions share no state, so only a session whose records changed, or whose tool call can still
-/// be fresh, is built again.
+/// sessions share no state, so only a session whose records changed, whose tool call can still be
+/// fresh, or whose listed subagent has reached `ClaudeObservationReader.maximumSubagentAge` (#404), is
+/// built again.
 public struct ClaudeRecordCache: Sendable {
     fileprivate struct Entry: Sendable {
         let stamp: FileStamp
@@ -86,6 +87,8 @@ public struct ClaudeRecordCache: Sendable {
     fileprivate var latestToolAt: Double = -.infinity
     /// Each session's part of `result`, by session id.
     fileprivate var sessions: [String: ClaudeObservationReader.SessionPart] = [:]
+    /// The earliest `now` at which a subagent the result lists (the earliest of its sessions' parts) reaches `maximumSubagentAge`.
+    fileprivate var subagentExpiresAt: Double = .infinity
 
     public init() {}
 
@@ -116,13 +119,51 @@ public enum ClaudeObservationReader {
     /// How long a scan may trust an unchanged directory stamp before it checks every record file
     /// again (`ClaudeRecordCache`). Bounds how late a record rewritten in place is noticed.
     public static let maximumUncheckedAge: Double = 30
-    /// Session-wide events that end every running subagent of their session: the turn's end or the
-    /// session's. A subagent also ends on its own `SubagentStop`. Retention keeps a start by the same rule.
-    static let subagentsEndingEvents: Set<String> = ["Stop", "StopFailure", "SessionEnd"]
+    /// Session-wide events that end every running subagent of their session: only the session's end.
+    /// A subagent otherwise ends on its own `SubagentStop`. A turn's end does not end it, because a
+    /// background subagent (`run_in_background`) keeps running after its parent's `Stop` and sends its
+    /// own stop later (#404). Retention keeps a start by the same rule (`ClaudeSubagentLifetimes`).
+    static let subagentsEndingEvents: Set<String> = ["SessionEnd"]
+    /// Turn ends in a session. A subagent that started before one of them, or before a submit of another
+    /// prompt, has outlived its parent's turn, so without its own stop it is listed only until
+    /// `maximumSubagentAge` (`ClaudeSubagentLifetimes`).
+    static let turnEndingEvents: Set<String> = ["Stop", "StopFailure"]
+    /// How long after its `SubagentStart` a subagent that outlived a turn end is still listed with no
+    /// `SubagentStop` of its own (owner decision 2026-11-10, #404), so a lost stop cannot leave it
+    /// running forever. A subagent inside a live turn has no age bound: a foreground one may run longer.
+    public static let maximumSubagentAge: Double = 30 * 60
+
+    /// Whether a subagent that started at `startedAt`, with no `SubagentStop` of its own and no
+    /// `subagentsEndingEvents` record since, is still running at `now`. `latestTurnEndAt` is the latest end
+    /// of its parent turn (`ClaudeSubagentLifetimes` decides it), nil when there is none.
+    static func subagentIsListed(startedAt: Double, latestTurnEndAt: Double?, now: Double) -> Bool {
+        guard let expiresAt = subagentExpiresAt(startedAt: startedAt, latestTurnEndAt: latestTurnEndAt) else { return true }
+        return now < expiresAt
+    }
+
+    /// When such a subagent stops being listed: `maximumSubagentAge` after its start once a turn end at or
+    /// after its start bounds it, nil while it has none (it then runs until its own stop or session end).
+    static func subagentExpiresAt(startedAt: Double, latestTurnEndAt: Double?) -> Double? {
+        guard let ended = latestTurnEndAt, ended >= startedAt else { return nil }
+        return startedAt + maximumSubagentAge
+    }
+
+    /// Folds one record into each session's latest `turnEndingEvents` capture time, the
+    /// `latestTurnEndAt` that `subagentIsListed` takes. The reader and retention build it the same way.
+    static func noteTurnEnd(event: String, session: String, at capturedAt: Double, in ends: inout [String: Double]) {
+        guard turnEndingEvents.contains(event) else { return }
+        ends[session] = max(ends[session] ?? capturedAt, capturedAt)
+    }
 
     /// A record's `agent_id` when it is one the reader accepts: a bounded identifier, else nil.
     static func subagentID(in object: [String: Any]) -> String? {
         Agent(object["agent_id"]).id
+    }
+
+    /// A record's `prompt_id` when the reader accepts it (a bounded identifier), else nil. The reader and
+    /// retention judge a subagent's parent turn by it (`ClaudeSubagentLifetimes`).
+    static func promptID(_ value: String?) -> String? {
+        valid(value)
     }
 
     // `@unchecked Sendable`: `toolInput` holds only the immutable Foundation property-list values
@@ -185,8 +226,12 @@ public enum ClaudeObservationReader {
         /// A Bash call's exact command as the helper recorded it, unshortened, so a permission request
         /// can be matched to its own call while parallel subagents run other Bash calls in the same turn.
         var command: String? = nil
+        /// The subagent the call ran inside (`agent_id`), `.none` for the session's own call. Its
+        /// `SubagentStop`, or its drop at `maximumSubagentAge`, resolves the call's request.
+        var agent: Agent = .none
+
         /// The call ran inside a subagent, so it is never the session's own "now".
-        var inSubagent = false
+        var inSubagent: Bool { agent.isSubagent }
 
         /// The latest call: the newest capture, then the greater id.
         static func latest(_ tools: some Sequence<Tool>) -> Tool? {
@@ -210,6 +255,14 @@ public enum ClaudeObservationReader {
         var terminal: AgentOutcome?
         var provisionalStopAt: Double?
         var closedAt: Double?
+
+        /// Whether `calls` all ran inside subagents after this turn closed: a subagent outliving its
+        /// parent's turn (a background one, #404). Such activity never reopens or updates the turn, so it
+        /// keeps its pending Stop, result message, outcome and update time.
+        func isLateSubagentActivity(_ calls: [Tool]) -> Bool {
+            closedAt != nil && !calls.isEmpty && calls.allSatisfy(\.inSubagent)
+        }
+
     }
 
     public static func scan(events: URL, sourceScope: String, installationID: String,
@@ -237,9 +290,10 @@ public enum ClaudeObservationReader {
         // Unchanged directory, checked recently: the same records, with no file looked at.
         if reusable, let stamp = directoryStamp, cache.directoryStamp == stamp, let checkedAt = cache.checkedAt,
            now.isFinite, now >= checkedAt, now - checkedAt < maximumUncheckedAge {
-            // No tool call was fresh when the result was built, and none can become fresh later.
+            // No tool call was fresh when the result was built, none can become fresh later, and no
+            // listed subagent has reached its age bound since.
             if let result = cache.result, result.sourceScope == scope, now >= cache.resultNow,
-               cache.resultNow - cache.latestToolAt > maximumToolFreshness {
+               cache.resultNow - cache.latestToolAt > maximumToolFreshness, now < cache.subagentExpiresAt {
                 return (result, cache)
             }
             var next = cache
@@ -248,6 +302,7 @@ public enum ClaudeObservationReader {
             next.resultNow = now
             next.latestToolAt = built.latestToolAt
             next.sessions = built.sessions
+            next.subagentExpiresAt = built.subagentExpiresAt
             return (built.scan, next)
         }
         // The directory changed, but the last full check is recent: a record already read is trusted
@@ -294,6 +349,7 @@ public enum ClaudeObservationReader {
         next.resultNow = now
         next.latestToolAt = built.latestToolAt
         next.sessions = built.sessions
+        next.subagentExpiresAt = built.subagentExpiresAt
         return (built.scan, next)
     }
 
@@ -336,6 +392,9 @@ public enum ClaudeObservationReader {
         /// the part was built for: `now` changes a part only through those calls' freshness.
         let latestToolAt: Double
         let builtNow: Double
+        /// The earliest `now` at which a subagent the part lists reaches `maximumSubagentAge`: with no new
+        /// record, that changes the part's switcher list, held row and requests (#404).
+        let subagentExpiresAt: Double
     }
 
     /// One turn's observations with what orders turns across sessions.
@@ -349,10 +408,13 @@ public enum ClaudeObservationReader {
     /// The scan `records` (in scan order) give at `now`, with the latest finite capture time among the
     /// uncompleted tool calls left open, and each session's part for the next scan. A part in
     /// `previous` is reused when its session has exactly the same record files, none of them read in
-    /// this scan (`changed`), and no tool call of its could have been fresh since it was built.
+    /// this scan (`changed`), no tool call of its could have been fresh since it was built, and none of
+    /// its listed subagents has reached its age bound since (that changes a part with no new record).
+    /// Also returns the earliest such bound among the parts, for the whole-result reuse.
     private static func build(_ records: [Record], scope: String, now: Double, previous: [String: SessionPart],
                               changed: Set<String>)
-        -> (scan: ClaudeObservationScan, latestToolAt: Double, sessions: [String: SessionPart]) {
+        -> (scan: ClaudeObservationScan, latestToolAt: Double, sessions: [String: SessionPart],
+            subagentExpiresAt: Double) {
         var order: [String] = []
         var grouped: [String: [Record]] = [:]
         for record in records {
@@ -364,7 +426,7 @@ public enum ClaudeObservationReader {
         for session in order {
             let own = grouped[session] ?? []
             if let part = previous[session], !changed.contains(session), now.isFinite, now >= part.builtNow,
-               part.builtNow - part.latestToolAt > maximumToolFreshness,
+               part.builtNow - part.latestToolAt > maximumToolFreshness, now < part.subagentExpiresAt,
                part.fileNames.count == own.count, part.fileNames.elementsEqual(own.lazy.map(\.fileName)) {
                 sessions[session] = part
             } else {
@@ -382,8 +444,9 @@ public enum ClaudeObservationReader {
         for part in parts { results.merge(part.results) { _, latest in latest } }
         let latestSessionStartAt = parts.compactMap(\.latestSessionStartAt).max()
         let latestToolAt = parts.map(\.latestToolAt).max() ?? -.infinity
+        let subagentExpiresAt = parts.map(\.subagentExpiresAt).min() ?? .infinity
         return (ClaudeObservationScan(sourceScope: scope, observations: observations, results: results,
-                                      latestSessionStartAt: latestSessionStartAt), latestToolAt, sessions)
+                                      latestSessionStartAt: latestSessionStartAt), latestToolAt, sessions, subagentExpiresAt)
     }
 
     /// One session's part at `now`, from that session's records alone, in scan order.
@@ -397,6 +460,26 @@ public enum ClaudeObservationReader {
         var latestSessionStartAt: Double?
         // Each session's running subagents by agent id, listed flat however deeply they nest.
         var subagents: [String: [String: Subagent]] = [:]
+        // When each subagent runs, shared with retention: decides whether a subagent's call has ended.
+        var lifetimes = ClaudeSubagentLifetimes()
+        for record in records {
+            lifetimes.note(event: record.event, session: record.session, agent: record.agent.id,
+                           prompt: record.promptID, at: record.capturedAt)
+        }
+        /// Ends a turn's own activity at its Stop, StopFailure or a newer prompt. A call of a subagent Herdly saw
+        /// start, and that subagent's request, stay: the subagent can outlive its parent's turn (#404) and
+        /// ends them itself (`ClaudeSubagentLifetimes`). The session's own calls and request end here.
+        func endOwnActivity(_ turn: inout Turn) {
+            let session = turn.session
+            turn.tool = nil
+            turn.tools = turn.tools.filter { _, tool in
+                tool.agent.id.map { lifetimes.run(session: session, agent: $0, holding: tool.at) != nil } ?? false
+            }
+            turn.question = nil
+            if let approval = turn.approval, approval.subagentID == nil || turn.tools[approval.identity.call] == nil {
+                turn.approval = nil
+            }
+        }
         func finishSubagentCalls(_ ids: [String], of record: Record) {
             guard var running = subagents[record.session] else { return }
             for (agent, var subagent) in running {
@@ -422,6 +505,16 @@ public enum ClaudeObservationReader {
             case "SubagentStop":
                 guard let agent = record.agent.id else { continue }
                 subagents[record.session]?.removeValue(forKey: agent)
+                // A stopped subagent has no call left to run: its uncompleted calls end, and a request for
+                // one is resolved, even with no completion (a native "No" fires no hook). Other subagents'
+                // calls and the session's own are untouched.
+                for (id, var turn) in turns where turn.session == record.session {
+                    let ended = turn.tools.values.filter { $0.agent.id == agent && $0.at <= record.capturedAt }.map(\.id)
+                    guard !ended.isEmpty else { continue }
+                    for call in ended { turn.tools.removeValue(forKey: call) }
+                    if let approval = turn.approval, ended.contains(approval.identity.call) { turn.approval = nil }
+                    turns[id] = turn
+                }
             case "SessionEnd":
                 endedSessions.insert(record.session)
                 sessionEndAt[record.session] = max(sessionEndAt[record.session] ?? -.infinity,
@@ -451,10 +544,7 @@ public enum ClaudeObservationReader {
                                                         session: record.session, surface: .cli)
                     let previousID = AgentTurnIdentity(session: identity, turn: previousPrompt)
                     if var previous = turns[previousID] {
-                        previous.tool = nil
-                        previous.tools.removeAll()
-                        previous.question = nil
-                        previous.approval = nil
+                        endOwnActivity(&previous)
                         previous.updatedAt = max(previous.updatedAt, record.capturedAt)
                         previous.closedAt = max(previous.closedAt ?? record.capturedAt, record.capturedAt)
                         turns[previousID] = previous
@@ -493,11 +583,18 @@ public enum ClaudeObservationReader {
                 let tool = Tool(id: toolID, name: name, input: input, at: record.capturedAt,
                                 target: ClaudeDirectApproval.target(toolName: name, toolInput: record.toolInput),
                                 command: name == "Bash" ? record.toolInput["command"] as? String : nil,
-                                inSubagent: record.agent.isSubagent)
+                                agent: record.agent)
                 if let agent = record.agent.id { subagents[record.session]?[agent]?.tools[toolID] = tool }
                 guard var turn = turns[turnID] else { continue }
                 if let closedAt = turn.closedAt {
                     guard record.capturedAt > closedAt else { continue }
+                    if turn.isLateSubagentActivity([tool]) {
+                        // It keeps the turn's prompt id, but an older turn never becomes a second working row.
+                        // The call stays matchable for a permission request.
+                        turn.tools[toolID] = tool
+                        turns[turnID] = turn
+                        continue
+                    }
                     turn.closedAt = nil
                     turn.terminal = nil
                     turn.provisionalStopAt = nil
@@ -532,8 +629,10 @@ public enum ClaudeObservationReader {
                 turn.tool = sessionTool(turn.tools)
                 if turn.question?.identity.call == toolID { turn.question = nil }
                 if turn.approval?.identity.call == toolID { turn.approval = nil }
-                turn.updatedAt = max(turn.updatedAt, record.capturedAt)
-                turn.provisionalStopAt = nil
+                if !turn.isLateSubagentActivity([tool]) {
+                    turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                    turn.provisionalStopAt = nil
+                }
                 turns[turnID] = turn
             case "PostToolBatch":
                 guard let promptID = valid(record.promptID) else { continue }
@@ -555,7 +654,9 @@ public enum ClaudeObservationReader {
                 if let approval = turn.approval, matching.contains(where: { $0.id == approval.identity.call }) {
                     turn.approval = nil
                 }
-                turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                if !turn.isLateSubagentActivity(matching) {
+                    turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                }
                 turns[turnID] = turn
             case "PermissionRequest":
                 guard let promptID = valid(record.promptID), let name = bounded(record.toolName),
@@ -582,7 +683,12 @@ public enum ClaudeObservationReader {
                 let details = fileDetails ?? ApprovalDetails(action: "Bash", command: command)
                 turn.approval = AgentApproval(session: identity, turn: promptID, call: tool.id,
                                               arrivedAt: record.capturedAt, details: details,
-                                              hookRequestID: record.hookRequestID)
+                                              hookRequestID: record.hookRequestID,
+                                              // Only a run Herdly saw start can end with its own stop or the
+                                              // bound; a call no run holds is treated as not running (no shield).
+                                              subagentID: tool.agent.id.flatMap {
+                                                  lifetimes.run(session: record.session, agent: $0, holding: tool.at) == nil ? nil : $0
+                                              })
                 turns[turnID] = turn
             case "StopFailure":
                 guard let promptID = valid(record.promptID) else { continue }
@@ -590,10 +696,7 @@ public enum ClaudeObservationReader {
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
                 guard var turn = turns[turnID] else { continue }
-                turn.tool = nil
-                turn.tools.removeAll()
-                turn.question = nil
-                turn.approval = nil
+                endOwnActivity(&turn)
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                 turn.closedAt = max(turn.closedAt ?? record.capturedAt, record.capturedAt)
                 turn.provisionalStopAt = nil
@@ -609,10 +712,7 @@ public enum ClaudeObservationReader {
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
                 if var turn = turns[turnID] {
-                    turn.tool = nil
-                    turn.tools.removeAll()
-                    turn.question = nil
-                    turn.approval = nil
+                    endOwnActivity(&turn)
                     turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                     turn.closedAt = max(turn.closedAt ?? record.capturedAt, record.capturedAt)
                     turn.provisionalStopAt = record.capturedAt
@@ -625,6 +725,21 @@ public enum ClaudeObservationReader {
             }
         }
 
+        // Subagents still running at `now`, by the run rule retention shares (`ClaudeSubagentLifetimes`).
+        var listed: [String: [String: Subagent]] = [:]
+        for (session, running) in subagents {
+            listed[session] = running.filter { agent, subagent in
+                lifetimes.call(session: session, agent: agent, at: subagent.startedAt, now: now) == .running
+            }
+        }
+        /// The turn's request still pending at `now`: nil once its subagent's run has ended (its own stop,
+        /// the session's end, or the age bound), which resolves the request.
+        func pendingApproval(_ turn: Turn) -> AgentApproval? {
+            guard let approval = turn.approval else { return nil }
+            if let agent = approval.subagentID, let call = turn.tools[approval.identity.call],
+               lifetimes.call(session: turn.session, agent: agent, at: call.at, now: now) == .ended { return nil }
+            return approval
+        }
         let turnParts = turns.values.map { turn -> TurnPart in
             let observations: [AgentObservation] = {
             let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
@@ -634,13 +749,23 @@ public enum ClaudeObservationReader {
                                                    submittedAt: turn.startedAt)
             let isCurrentPrompt = sessionPrompts[turn.session] == turn.prompt
             guard ((!endedSessions.contains(turn.session) && (turn.closedAt == nil || isCurrentPrompt))
-                   || turn.terminal != nil) else { return [replied] }
+                   || turn.terminal != nil) else {
+                // A background subagent's request in an older, closed turn still reaches the queue.
+                guard !endedSessions.contains(turn.session), let approval = pendingApproval(turn),
+                      turn.tools[approval.identity.call]?.inSubagent == true else { return [replied] }
+                return [replied, .approval(approval)]
+            }
             var result: [AgentObservation] = [replied]
             if let terminal = turn.terminal {
                 result.append(.outcome(terminal))
+                // A known subagent's request after its parent's failure still reaches the queue. One with no
+                // usable or known agent id is not shielded, so the failure would resolve it: it is left out.
+                if !endedSessions.contains(turn.session), let approval = pendingApproval(turn), approval.subagentID != nil {
+                    result.append(.approval(approval))
+                }
             } else {
                 let freshTool = turn.tool.flatMap { fresh($0, now: now) }
-                let activity = isCurrentPrompt ? subagentActivity(subagents[turn.session] ?? [:], now: now) : []
+                let activity = isCurrentPrompt ? subagentActivity(listed[turn.session] ?? [:], now: now) : []
                 result.append(.running(AgentRunning(session: identity, turn: turn.prompt, arrivedAt: turn.startedAt,
                                                     updatedAt: turn.updatedAt,
                                                     prompt: turn.promptText, promptShortened: turn.promptShortened,
@@ -648,7 +773,7 @@ public enum ClaudeObservationReader {
                                                     toolInput: freshTool?.input ?? [:],
                                                     subagents: activity)))
                 if let question = turn.question { result.append(.question(question)) }
-                if let approval = turn.approval { result.append(.approval(approval)) }
+                if let approval = pendingApproval(turn) { result.append(.approval(approval)) }
             }
             if let stopAt = turn.provisionalStopAt {
                 result.append(.provisionalStop(AgentProvisionalStop(identity: AgentTurnIdentity(session: identity,
@@ -671,8 +796,12 @@ public enum ClaudeObservationReader {
         let openTools = turns.values.flatMap { $0.tools.values + ($0.tool.map { [$0] } ?? []) }
             + subagents.values.flatMap { $0.values.flatMap(\.tools.values) }
         let latestToolAt = openTools.map(\.at).filter(\.isFinite).max() ?? -.infinity
+        let firstSubagentExpiry = listed.flatMap { session, running in
+            running.compactMap { agent, subagent in lifetimes.expiresAt(session: session, agent: agent, at: subagent.startedAt) }
+        }.min() ?? .infinity
         return SessionPart(fileNames: records.map(\.fileName), turns: turnParts, results: results,
-                           latestSessionStartAt: latestSessionStartAt, latestToolAt: latestToolAt, builtNow: now)
+                           latestSessionStartAt: latestSessionStartAt, latestToolAt: latestToolAt, builtNow: now,
+                           subagentExpiresAt: firstSubagentExpiry)
     }
 
     /// The session's own latest uncompleted call; a subagent's call never is.
