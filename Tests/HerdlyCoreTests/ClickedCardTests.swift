@@ -249,3 +249,17 @@ private let otherApprovalID = AgentAttentionID.approval(AgentCallIdentity(sessio
     do { let left = controller.leaveCard(after: otherApprovalID); #expect(!left) }
     do { let mode = controller.update(interacting: true, now: 2, queued: [approvalID, otherApprovalID]); #expect(mode == .clickedCard(approvalID)) }
 }
+
+@Test func onlyAMultiQuestionCardGetsAStepperAndOnlyTheSpotlightGivesItItsOwnRow() {
+    // #384: the spotlight card has no "‹ Queue" bar, so its stepper takes a row of its own.
+    #expect(QuestionStepperPlacement.resolve(mode: .agentSpotlight(questionID), card: questionID, questionCount: 3) == .ownRow)
+    #expect(QuestionStepperPlacement.resolve(mode: .clickedCard(questionID), card: questionID, questionCount: 3) == .queueBar)
+    // Single-question cards and approvals never show one.
+    #expect(QuestionStepperPlacement.resolve(mode: .agentSpotlight(questionID), card: questionID, questionCount: 1) == .none)
+    #expect(QuestionStepperPlacement.resolve(mode: .clickedCard(questionID), card: questionID, questionCount: 1) == .none)
+    #expect(QuestionStepperPlacement.resolve(mode: .agentSpotlight(approvalID), card: approvalID, questionCount: 3) == .none)
+    // Another card's spotlight, the queue and the collapsed strip show none for this card.
+    #expect(QuestionStepperPlacement.resolve(mode: .agentSpotlight(otherApprovalID), card: questionID, questionCount: 3) == .none)
+    #expect(QuestionStepperPlacement.resolve(mode: .queue, card: questionID, questionCount: 3) == .none)
+    #expect(QuestionStepperPlacement.resolve(mode: .collapsed, card: questionID, questionCount: 3) == .none)
+}
