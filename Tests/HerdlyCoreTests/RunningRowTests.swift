@@ -329,3 +329,33 @@ private func claudeRow(subagents: [SubagentActivity]) -> AgentAttentionItem {
     #expect(details.asked?.full == task + "\nmore")
     #expect(details.asked?.disclosureTitle == "Show full task")
 }
+
+// MARK: Keyboard focus when a switcher well's subagent finishes (#397, review round 1)
+
+@Test func focusOnAFinishedSubagentsWellMovesToSessionWhileWellsRemain() {
+    let next = OpenRunningRow.focusAfterSubagentsChange(lastFocused: .subagent("agent-a"), running: ["agent-b"])
+    #expect(next == .well(.session))
+}
+
+@Test func focusOnTheLastSubagentsWellMovesToOpenWhenTheSwitcherLeaves() {
+    let next = OpenRunningRow.focusAfterSubagentsChange(lastFocused: .subagent("agent-a"), running: [])
+    #expect(next == .open)
+}
+
+@Test func focusOnSessionOrAStillRunningSubagentOrNowhereIsLeftAlone() {
+    #expect(OpenRunningRow.focusAfterSubagentsChange(lastFocused: .subagent("agent-b"), running: ["agent-b"]) == nil)
+    #expect(OpenRunningRow.focusAfterSubagentsChange(lastFocused: .session, running: []) == nil)
+    #expect(OpenRunningRow.focusAfterSubagentsChange(lastFocused: nil, running: []) == nil)
+}
+
+@Test func aWellLosingFocusBecauseItsSubagentLeftIsStillRemembered() {
+    // SwiftUI may clear the focus binding before the subagent list change is seen.
+    #expect(OpenRunningRow.rememberedFocus(previous: .subagent("agent-a"), now: nil, running: ["agent-b"]) == .subagent("agent-a"))
+}
+
+@Test func focusTheUserMovedElsewhereIsForgotten() {
+    // Its subagent still runs, so the well lost focus because the user moved it.
+    #expect(OpenRunningRow.rememberedFocus(previous: .subagent("agent-a"), now: nil, running: ["agent-a"]) == nil)
+    #expect(OpenRunningRow.rememberedFocus(previous: .session, now: nil, running: []) == nil)
+    #expect(OpenRunningRow.rememberedFocus(previous: .session, now: .subagent("agent-a"), running: ["agent-a"]) == .subagent("agent-a"))
+}

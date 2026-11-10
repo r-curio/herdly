@@ -64,6 +64,30 @@ public struct OpenRunningRow: Equatable, Sendable {
         return true
     }
 
+    /// Where keyboard focus goes inside an opened row once its subagents change (#397).
+    public enum Focus: Hashable, Sendable {
+        case well(Shown)
+        /// The row's Open control, once the switcher itself has left.
+        case open
+    }
+
+    /// Keyboard focus to move to when the running subagents become `running`, given the switcher well
+    /// that last held focus: a finished subagent's well hands focus to "Session" while any well
+    /// remains, or to Open when the last subagent finished and the switcher left, so focus stays in
+    /// the row. Nil leaves focus where it is.
+    public static func focusAfterSubagentsChange(lastFocused: Shown?, running: [String]) -> Focus? {
+        guard case let .subagent(id)? = lastFocused, !running.contains(id) else { return nil }
+        return running.isEmpty ? .open : .well(.session)
+    }
+
+    /// The switcher well to remember as last focused when its focus becomes `now`. A well that lost
+    /// focus because its subagent finished stays remembered (SwiftUI can clear focus before the new
+    /// subagent list arrives); one the user moved focus away from is forgotten.
+    public static func rememberedFocus(previous: Shown?, now: Shown?, running: [String]) -> Shown? {
+        if now == nil, case let .subagent(id)? = previous, !running.contains(id) { return previous }
+        return now
+    }
+
     public mutating func close() {
         open = nil
         shown = .session
@@ -156,7 +180,7 @@ public struct RunningRowDetails: Equatable, Sendable {
     /// The "now" line for one tool call, or nil without a tool name. A subagent's latest action
     /// (`SubagentActivity`) uses the same line.
     public static func now(toolName: String?, toolInput: [String: String]) -> Now? {
-        guard let name = toolName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        guard let name = nonBlank(toolName) else { return nil }
         let action = toolName.flatMap { ToolAction(name: $0, input: toolInput) }
         if let action, action.isCommand {
             let line = shortened(action.fullText)
@@ -170,7 +194,7 @@ public struct RunningRowDetails: Equatable, Sendable {
     }
 
     private static func prompt(_ running: AgentRunning) -> You? {
-        guard let prompt = running.prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty else { return nil }
+        guard let prompt = nonBlank(running.prompt) else { return nil }
         let line = shortened(prompt)
         let kept = running.promptShortened
         // Herdly's copy is only the prompt's start, so even an unshortened line is not all of it.
@@ -213,17 +237,19 @@ public struct SubagentDetails: Equatable, Sendable {
     public static func make(_ subagent: SubagentActivity, now: Double) -> SubagentDetails {
         let action = subagent.latestAction
             ?? RunningRowDetails.Now(text: "Unknown", full: nil, disclosureTitle: nil, isUnknown: true)
-        let asked = present(subagent.asked).map { task -> Asked in
+        let asked = nonBlank(subagent.asked).map { task -> Asked in
             let line = RunningRowDetails.shortened(task)
             return Asked(text: line.text, full: line.shortened ? task : nil,
                          disclosureTitle: line.shortened ? "Show full task" : nil)
         }
-        return SubagentDetails(now: action, asked: asked, role: present(subagent.role),
+        return SubagentDetails(now: action, asked: asked, role: nonBlank(subagent.role),
                                age: QueueRowPresentation.age(since: subagent.startedAt, now: now))
     }
+}
 
-    private static func present(_ text: String?) -> String? {
-        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
-        return trimmed
-    }
+/// `text` trimmed of surrounding whitespace, or nil when nothing is left: a detail line with nothing
+/// to show is left out.
+private func nonBlank(_ text: String?) -> String? {
+    guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+    return trimmed
 }
