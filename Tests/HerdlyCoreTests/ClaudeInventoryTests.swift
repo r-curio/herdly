@@ -854,6 +854,26 @@ private func parkingRow() throws -> Data {
     }
 }
 
+@Test func aListedBackgroundJobDoesNotChangeTheRestartCount() throws {
+    // Setup's "needs restart" counts interactive sessions only, as before #393.
+    let interactive = entry(20, try registryRow(pid: 20, sessionID: interactiveID, status: "busy"))
+    let alone = decodeRegistry([interactive])
+    #expect(alone.restartCount(installedAt: nil, deliveredSessionIDs: []) == 1)
+    for status in ["busy", "waiting", "idle", "thinking"] {
+        let scan = decodeRegistry([interactive, entry(9417, try jobRow(status: status))])
+        #expect(scan.sessions.count == 2)
+        #expect(scan.restartCount(installedAt: nil, deliveredSessionIDs: []) == 1)
+        #expect(scan.restartCount(installedAt: 2_000_000_000, deliveredSessionIDs: []) == 1)
+        #expect(scan.restartCount(installedAt: 2_000_000_000, deliveredSessionIDs: [interactiveID]) == 0)
+    }
+    #expect(ClaudeInventoryLifecycle.backgroundJob(status: "busy").needsRestart == false)
+    // `claude agents --json`'s active background agents still count.
+    let cli = ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 1, sessions: [
+        ClaudeInventorySession(sessionID: backgroundID, kind: .background, startedAt: 1, lifecycle: .background(state: "working"))
+    ])
+    #expect(cli.restartCount(installedAt: nil, deliveredSessionIDs: []) == 1)
+}
+
 @Test func aListedBackgroundJobReadsLiveNotEnded() throws {
     let scope = "/tmp/root"
     let listed = decodeRegistry([entry(4966, try parkingRow()), entry(9417, try jobRow())]).listedSessionIDs
