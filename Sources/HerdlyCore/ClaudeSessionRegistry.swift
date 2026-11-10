@@ -61,8 +61,14 @@ public enum ClaudeSessionRegistry {
     /// The registry under `root` as an inventory, or nil when `root` has no registry directory (a
     /// Claude version without one). Entries are opened without following symlinks; a non-regular
     /// or unreadable entry makes the scan unavailable.
+    ///
+    /// With `memo`, an entry whose file stamp is unchanged since a read that parsed is not opened
+    /// again: Claude rewrites an entry in place, which changes its stamp. A torn or unparseable read
+    /// is never kept. Whether each process still runs is asked every time. Only a scheduled scan may
+    /// pass one; a read made to choose a target reads every file.
     public static func read(root: URL, observedAt: Double, isRunning: (Process) -> Bool = isRunning,
-                            retryDelay: TimeInterval = 0.02) -> ClaudeInventoryScan? {
+                            retryDelay: TimeInterval = 0.02,
+                            memo: StampedFileMemo<Data>? = nil) -> ClaudeInventoryScan? {
         let directory = root.standardizedFileURL.appendingPathComponent(directoryName, isDirectory: true)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory),
@@ -77,7 +83,14 @@ public enum ClaudeSessionRegistry {
         guard files.count <= maximumEntries else { return unavailable }
         var entries: [Entry] = []
         for (name, pid) in files {
-            let path = directory.appendingPathComponent(name).path
+            let url = directory.appendingPathComponent(name)
+            let path = url.path
+            // The stamp is taken before the read, so a rewrite during it shows as a new stamp next time.
+            let kept = memo?.kept(url)
+            if let value = kept?.value {
+                entries.append(Entry(pid: pid, data: value))
+                continue
+            }
             var data: Data?
             for attempt in 0..<tornReadAttempts {
                 guard case let .read(value) = readEntry(path) else { return unavailable }
@@ -87,6 +100,7 @@ public enum ClaudeSessionRegistry {
                 guard isRunning(Process(pid: pid, procStart: nil)) else { break }
                 Thread.sleep(forTimeInterval: retryDelay)
             }
+            if let memo, let stamp = kept?.stamp, let data, parse(data) != nil { memo.keep(data, for: url, stamp: stamp) }
             entries.append(Entry(pid: pid, data: data))
         }
         return decode(entries, sourceScope: root.path, observedAt: observedAt, isRunning: isRunning)

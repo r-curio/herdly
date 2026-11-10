@@ -78,11 +78,14 @@ public enum ClaudeUsageReader {
                                                                     fiveHour: nil, sevenDay: nil, observedAt: observedAt)
     }
 
+    private static let memo = StampedFileMemo<Data?>()
+
     public static func latest(root: URL, sourceScope: String? = nil, now: Double = Date().timeIntervalSince1970) -> ClaudeUsageReading? {
         // The bridge owns one fixed snapshot. Reading that path directly keeps lookup bounded
         // even when a user places unrelated files or directories beside it.
         let record = root.appendingPathComponent(latestRecordName)
-        guard let data = SafeFile.read(record, limit: maximumRecordBytes) else { return nil }
+        // The bridge replaces the snapshot when it reports, so an unchanged stamp is not opened again.
+        guard let data = memo.value(of: record, read: { SafeFile.read($0, limit: maximumRecordBytes) }) else { return nil }
         // The newest bridge record is authoritative for that root. A malformed or missing
         // window report must not resurrect an older session's reading.
         return parse(data, sourceScope: sourceScope ?? root.path, now: now)

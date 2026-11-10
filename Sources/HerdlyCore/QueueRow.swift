@@ -233,7 +233,15 @@ public enum GitBranchReader {
             : workTree.appendingPathComponent(path, isDirectory: true).standardizedFileURL
     }
 
+    /// Rows ask for their branch on every scan. Git replaces HEAD when the branch changes, so its
+    /// stamp changes and the file is read again; until then it is not opened.
+    private static let memo = StampedFileMemo<String?>()
+
     static func read(_ url: URL) -> String? {
+        memo.value(of: url, read: readFile)
+    }
+
+    private static func readFile(_ url: URL) -> String? {
         guard let (file, size) = CodexUsageReader.regularFile(url) else { return nil }
         defer { try? file.close() }
         guard size <= maximumBytes, let data = try? file.read(upToCount: maximumBytes) else { return nil }

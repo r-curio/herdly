@@ -206,3 +206,53 @@ private func listingDirectory() throws -> URL {
     #expect(HerdrScanCadence.isDue(lastStartedAt: 100, now: 103, interval: HerdrScanCadence.near))
     #expect(!HerdrScanCadence.isDue(lastStartedAt: 100, now: 101.9, interval: HerdrScanCadence.near))
 }
+
+@Test func aReaderKeepsOnlyWhatItChoosesUnderTheStampItTook() throws {
+    let root = try listingDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("entry.json")
+    try Data("one".utf8).write(to: file)
+    let memo = StampedFileMemo<String>()
+    let before = memo.kept(file)
+    #expect(before.stamp != nil && before.value == nil)
+    memo.keep("one", for: file, stamp: try #require(before.stamp))
+    #expect(memo.kept(file).value == "one")
+    // Rewritten after the stamp was taken: what was kept under the old stamp is not served.
+    try Data("three".utf8).write(to: file)
+    #expect(memo.kept(file).value == nil)
+    // A link or a missing file has no stamp to keep under.
+    let link = root.appendingPathComponent("link")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)
+    #expect(memo.kept(link).stamp == nil)
+    #expect(memo.kept(root.appendingPathComponent("missing")).stamp == nil)
+}
+
+@Test func theBranchAndUsageReadersSeeAChangeOnTheNextRead() throws {
+    let root = try listingDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let git = root.appendingPathComponent(".git")
+    try FileManager.default.createDirectory(at: git, withIntermediateDirectories: true)
+    let head = git.appendingPathComponent("HEAD")
+    try Data("ref: refs/heads/main\n".utf8).write(to: head)
+    #expect(GitBranchReader.branch(forDirectory: root.path) == "main")
+    #expect(GitBranchReader.branch(forDirectory: root.path) == "main")
+    // Git replaces HEAD on a checkout.
+    try Data("ref: refs/heads/fix/idle\n".utf8).write(to: head, options: .atomic)
+    #expect(GitBranchReader.branch(forDirectory: root.path) == "fix/idle")
+    try FileManager.default.removeItem(at: head)
+    #expect(GitBranchReader.branch(forDirectory: root.path) == nil)
+
+    let usage = root.appendingPathComponent(ClaudeUsageReader.latestRecordName)
+    func record(_ used: Double) throws -> Data {
+        try #require(ClaudeUsageReader.sanitizedRecord(try JSONSerialization.data(withJSONObject: [
+            "session_id": "00000000-0000-4000-8000-000000000001",
+            "rate_limits": ["five_hour": ["used_percentage": used, "resets_at": 5_000]]] as [String: Any]), observedAt: 100))
+    }
+    try record(10).write(to: usage, options: .atomic)
+    #expect(ClaudeUsageReader.latest(root: root, now: 200)?.fiveHour?.usedPercentage == 10)
+    #expect(ClaudeUsageReader.latest(root: root, now: 200)?.fiveHour?.usedPercentage == 10)
+    try record(40).write(to: usage, options: .atomic)
+    #expect(ClaudeUsageReader.latest(root: root, now: 200)?.fiveHour?.usedPercentage == 40)
+    // The window's expiry still follows the clock passed in, kept record or not.
+    #expect(ClaudeUsageReader.latest(root: root, now: 6_000)?.fiveHour == nil)
+}
