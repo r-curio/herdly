@@ -92,36 +92,51 @@ public struct AgentApproval: Identifiable, Equatable, Codable, Sendable {
     public let expiresAt: Double
     public let state: AgentApprovalState
     public let details: ApprovalDetails?
+    /// The Claude subagent (`agent_id`) whose call made the request, when the reader saw that subagent
+    /// start; nil for the session's own request, a missing or malformed agent id, or a subagent whose start
+    /// was never seen (#404). A subagent can outlive its parent's turn, so the turn's result does not
+    /// resolve a named subagent's request; that subagent's own end does. A request without
+    /// one is not shielded: it clears by the same evidence as any request (its call's completion, a registry
+    /// status change after it arrived, `SessionEnd`, or its turn's result whenever that is applied, whatever
+    /// the request's arrival). Live observation only: left out of `Codable`.
+    public private(set) var subagentID: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case identity, hookRequestID, arrivedAt, expiresAt, state, details
+    }
 
     public var id: AgentCallIdentity { identity }
 
     public init(session: AgentSessionIdentity, turn: String = "", call: String, arrivedAt: Double,
                 handoffAfter: Double = 30, state: AgentApprovalState = .actionable,
-                details: ApprovalDetails? = nil, hookRequestID: String? = nil) {
+                details: ApprovalDetails? = nil, hookRequestID: String? = nil, subagentID: String? = nil) {
         self.init(session: session, turn: turn, call: call, arrivedAt: arrivedAt,
                   expiresAt: arrivedAt + handoffAfter, state: state, details: details,
-                  hookRequestID: hookRequestID)
+                  hookRequestID: hookRequestID, subagentID: subagentID)
     }
 
     public init(session: AgentSessionIdentity, turn: String = "", call: String, arrivedAt: Double, expiresAt: Double,
                 state: AgentApprovalState = .actionable, details: ApprovalDetails? = nil,
-                hookRequestID: String? = nil) {
+                hookRequestID: String? = nil, subagentID: String? = nil) {
         self.identity = AgentCallIdentity(session: session, turn: turn, call: call)
         self.hookRequestID = hookRequestID
         self.arrivedAt = arrivedAt
         self.expiresAt = expiresAt
         self.state = state
         self.details = details
+        self.subagentID = subagentID
     }
 
     public func with(state: AgentApprovalState) -> AgentApproval {
         AgentApproval(session: identity.session, turn: identity.turn, call: identity.call, arrivedAt: arrivedAt,
-                      expiresAt: expiresAt, state: state, details: details, hookRequestID: hookRequestID)
+                      expiresAt: expiresAt, state: state, details: details, hookRequestID: hookRequestID,
+                      subagentID: subagentID)
     }
 
     func with(expiresAt: Double) -> AgentApproval {
         AgentApproval(session: identity.session, turn: identity.turn, call: identity.call, arrivedAt: arrivedAt,
-                      expiresAt: expiresAt, state: state, details: details, hookRequestID: hookRequestID)
+                      expiresAt: expiresAt, state: state, details: details, hookRequestID: hookRequestID,
+                      subagentID: subagentID)
     }
 }
 
@@ -428,7 +443,8 @@ public struct AgentAttentionQueue: Equatable, Sendable {
                                                        arrivedAt: min(current.arrivedAt, approval.arrivedAt),
                                                        expiresAt: min(current.expiresAt, approval.expiresAt), state: state,
                                                        details: current.details ?? approval.details,
-                                                       hookRequestID: current.hookRequestID ?? approval.hookRequestID)
+                                                       hookRequestID: current.hookRequestID ?? approval.hookRequestID,
+                                                       subagentID: current.subagentID ?? approval.subagentID)
             } else {
                 approvals[approval.id] = approval
             }
@@ -460,8 +476,11 @@ public struct AgentAttentionQueue: Equatable, Sendable {
             }
             outcomes[outcome.id] = outcome
             let turn = outcome.id
-            for identity in approvals.keys where identity.session == turn.session
+            for (identity, approval) in approvals where identity.session == turn.session
                 && (identity.turn.isEmpty || identity.turn == turn.turn) {
+                // A named subagent's request (#404) is not answered by its parent turn's result: the subagent
+                // can outlive the turn, and its own end resolves the request.
+                if approval.subagentID != nil { continue }
                 resolved.insert(.approval(identity))
             }
             approvals = approvals.filter { !resolved.contains(.approval($0.key)) }
@@ -521,6 +540,7 @@ public struct AgentAttentionQueue: Equatable, Sendable {
     /// Applies a valid root inventory as weaker lifecycle evidence. It can add a generic running
     /// row or confirm a previously observed Stop. It clears hook evidence only by ending a running
     /// row whose session reads idle after `idleRunningGrace` without hooks; it never creates an outcome.
+    /// Neither an idle confirmation nor that fallback applies while the row lists running subagents.
     public mutating func apply(_ scan: ClaudeInventoryScan, now: Double? = nil) {
         guard scan.observedAt.isFinite else { return }
         let scope = scan.sourceScope
@@ -564,14 +584,19 @@ public struct AgentAttentionQueue: Equatable, Sendable {
                 if changedAt.isFinite { claudeStatusChangedAt[identity] = max(claudeStatusChangedAt[identity] ?? changedAt, changedAt) }
             }
             if session.lifecycle.isIdleInteractive {
-                if let stop = provisionalStops[identity], scan.observedAt > stop.arrivedAt {
+                // While the session's working row lists running subagents, a background subagent is still
+                // working after its parent's turn ended (#404): idle describes only the parent's prompt, so
+                // the row stays working. Once none is listed (its own stop, session end, or
+                // `ClaudeObservationReader.maximumSubagentAge`), the next idle reading applies both rules below.
+                let listsRunningSubagents = running[identity]?.subagents.isEmpty == false
+                if !listsRunningSubagents, let stop = provisionalStops[identity], scan.observedAt > stop.arrivedAt {
                     provisionalStops.removeValue(forKey: identity)
                     apply(.outcome(AgentOutcome(session: identity, turn: stop.identity.turn,
                                                 status: .finished, arrivedAt: scan.observedAt)), now: now)
                 }
                 // Fallback when no Stop can end the row (missed, pruned, or never sent): Claude reports
                 // the session idle and its hooks have been quiet past the grace. No outcome is created.
-                if let active = running[identity], scan.observedAt - active.updatedAt >= Self.idleRunningGrace {
+                if !listsRunningSubagents, let active = running[identity], scan.observedAt - active.updatedAt >= Self.idleRunningGrace {
                     endedTurns[active.id] = max(endedTurns[active.id] ?? -.infinity, active.updatedAt)
                     running.removeValue(forKey: identity)
                 }
