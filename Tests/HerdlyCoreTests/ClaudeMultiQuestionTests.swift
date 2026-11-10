@@ -100,12 +100,19 @@ private func updatedAnswers(_ data: Data?) throws -> (answers: [String: String],
                                                   answer: multiAnswer(for: request, completeSet)) == nil)
 }
 
-@Test func repeatedQuestionTextsEmitNothingSinceOneKeyCannotCarryTwoAnswers() throws {
+@Test func repeatedQuestionTextsLeaveTheCallToClaudeSinceOneKeyCannotCarryTwoAnswers() throws {
     let twin = ["question": "Which one?", "options": [["label": "A"], ["label": "B"]]] as [String: Any]
     let input: [String: Any] = ["questions": [twin, twin]]
-    let request = try multiRequest(input: input)
+    // The helper does not publish it, so the card is read-only rather than offering a Send that fails.
+    #expect(ClaudeQuestionAnswerPolicy.answerablePrompts(toolInput: input) == nil)
+    let prompts = try #require(QuestionPrompt.parseCall(toolInput: input)?.prompts)
+    #expect(!ClaudeQuestionAnswerPolicy.answerable(prompts))
+    let request = ClaudeQuestionRequest(requestID: "twin", installationID: "install-1", sourceScope: "/root",
+                                        eventDirectory: "/events", sessionID: "session-1", promptID: "prompt-1",
+                                        toolUseID: "tool-1", publishedAt: 10, expiresAt: 40, prompts: prompts)
     let answer = multiAnswer(for: request, [ClaudeQuestionAnswerEntry(kind: .option, answer: "A"),
                                             ClaudeQuestionAnswerEntry(kind: .option, answer: "B")])
+    #expect(!ClaudeQuestionAnswerPolicy.accepts(request: request, answer: answer))
     #expect(ClaudeQuestionAnswerPolicy.hookOutput(toolInput: input, request: request, answer: answer) == nil)
 }
 
@@ -198,6 +205,8 @@ private let cardPrompts = [
     #expect(card.current == 1)
     #expect(card.selection(at: 0).options == [1])
     #expect(card.railAnswer(at: 0, labels: cardPrompts[0].options) == .option(1))
+    // The rail summarizes only answers kept with Next, never the question being answered.
+    #expect(card.toggling(0, at: 1).railAnswer(at: 1, labels: cardPrompts[1].options) == nil)
 }
 
 @Test func laterStepsReadOnlyEarlierStepsRevisableUntilSend() {
@@ -214,8 +223,8 @@ private let cardPrompts = [
     #expect(card.selection(at: 0).options == [1])
     // Choose-several ticks as today.
     card = card.toggling(0, at: 1).toggling(1, at: 1)
-    #expect(card.railAnswer(at: 1, labels: cardPrompts[1].options) == .text("Codex CLI, Claude"))
     card = card.advancing(from: 1)
+    #expect(card.railAnswer(at: 1, labels: cardPrompts[1].options) == .text("Codex CLI, Claude"))
     #expect(card.primary(viewed: 2) == .send(enabled: false))
     card = card.typing("Only on failure", at: 2)
     #expect(card.primary(viewed: 2) == .send(enabled: true))

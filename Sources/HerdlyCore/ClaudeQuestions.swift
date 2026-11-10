@@ -582,13 +582,17 @@ public enum ClaudeQuestionHelper {
 
 public enum ClaudeQuestionAnswerPolicy {
     public static let maximumText = 4000
-    /// Claude's AskUserQuestion asks one to four questions per call.
-    public static let maximumQuestions = 4
+    /// Claude's AskUserQuestion asks one to four questions per call. Separate from the parse cap,
+    /// `QuestionPrompt.maximumQuestions`, which bounds what a card can show for reference.
+    public static let maximumAnswerableQuestions = 4
 
-    /// Whether Herdly may answer a call with these questions: one to four, each with readable text
-    /// and none secret. One question Herdly cannot answer leaves the whole call to Claude.
+    /// Whether Herdly may answer a call with these questions: one to four, each with readable text,
+    /// none secret, and no two with the same text, since Claude's answers are keyed by question text
+    /// (`hookOutput`). One question Herdly cannot answer leaves the whole call to Claude.
     public static func answerable(_ prompts: [QuestionPrompt]) -> Bool {
-        (1...maximumQuestions).contains(prompts.count)
+        let texts = prompts.compactMap(\.question)
+        return (1...maximumAnswerableQuestions).contains(prompts.count)
+            && texts.count == prompts.count && Set(texts).count == texts.count
             && prompts.allSatisfy { $0.question?.isEmpty == false && !$0.isSecret }
     }
 

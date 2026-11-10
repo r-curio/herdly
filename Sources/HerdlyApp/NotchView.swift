@@ -1233,12 +1233,12 @@ struct Notch: View {
         switch primary {
         case let .step(to): showQuestion(to, of: question)
         case .next:
-            guard primary.enabled else { return }
+            guard primary.enabled, !model.answering else { return }
             let next = call.advancing(from: claudeViewed(question))
             claudeSelections[key] = next
             viewedQuestions[key] = next.current
         case .send:
-            guard primary.enabled, let answers = call.answers(prompts: question.prompts) else { return }
+            guard primary.enabled, !model.answering, let answers = call.answers(prompts: question.prompts) else { return }
             model.answerClaudeQuestion(question, answers: answers)
             claudeSelections[key] = nil
         }
@@ -1379,8 +1379,24 @@ struct Notch: View {
     }
 
     /// The question card's header line (6AD): sprite, name, dim "· repo @ branch", the "Answer" pill,
-    /// the dim source ("CLI", "App", "Claude"), then the age. Queue rows keep D17 and name neither.
+    /// the dim source ("CLI", "App", "Claude"), then the age, or, for a Claude question Herdly can
+    /// answer, its "Ns left" pill in the age's place, as its queue row shows it (ADR 0020, #374;
+    /// Paper "G · Claude: answer several questions", #382). Queue rows keep D17 and name neither.
+    @ViewBuilder
     private func questionCardHeader(_ item: AgentAttentionItem) -> some View {
+        if let question = item.question, question.identity.session.source == .claude,
+           model.canAnswerAgentQuestion(question) {
+            // Display only: the countdown reads the held deadline and never moves it.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                questionCardHeader(item, countdown: model.claudeQuestionCountdown(question,
+                                                                                  now: context.date.timeIntervalSince1970))
+            }
+        } else {
+            questionCardHeader(item, countdown: nil)
+        }
+    }
+
+    private func questionCardHeader(_ item: AgentAttentionItem, countdown: ApprovalCountdown?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
                 spriteSlot(working: false, color: spriteColor(for: item.session))
@@ -1403,11 +1419,15 @@ struct Notch: View {
                 .fixedSize()
             Text(Self.questionSource(item.session)).font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.dim)
                 .lineLimit(1).fixedSize()
-            rowAge(item)
+            if let countdown {
+                SecondsLeftPill(countdown: countdown)
+            } else {
+                rowAge(item)
+            }
         }
         .frame(minHeight: 26)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(rowHeading(item)), \(item.session.sourceLabel)")
+        .accessibilityLabel("\(rowHeading(item, countdown: countdown)), \(item.session.sourceLabel)")
         .accessibilityAddTraits(.isHeader)
     }
 
@@ -1418,8 +1438,9 @@ struct Notch: View {
 
     /// One question card body for the spotlight and the clicked card, inset to the title: the steps,
     /// the viewed question, its options, the typed field on the daemon path, one status line, then
-    /// Open on the left and Dismiss then Next or Send on the right (#382). A Codex question has no countdown;
-    /// a Claude question Herdly can answer shows its "Ns left" row above Send (ADR 0020, #374).
+    /// Open on the left and Dismiss then Next or Send on the right (#382). A Codex question has no
+    /// countdown; a Claude question Herdly can answer shows "Ns left" in its header
+    /// (`questionCardHeader`; ADR 0020, #374, #382).
     @ViewBuilder
     private func questionCardBody(_ item: AgentAttentionItem, subject: String, herdr: HerdrOpenAvailability,
                                   codexOpen: Bool) -> some View {
@@ -1432,15 +1453,6 @@ struct Notch: View {
                        !model.canAnswerAgentQuestion(question) {
                         Text("The exact Claude tab cannot be opened until Herdly can verify it; continue in Claude.")
                             .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-                    }
-                    // Display only: the countdown reads the held deadline and never moves it. Only a
-                    // question Herdly can answer gets the per-second timer.
-                    if model.canAnswerAgentQuestion(question) {
-                        TimelineView(.periodic(from: .now, by: 1)) { context in
-                            if let countdown = model.claudeQuestionCountdown(question, now: context.date.timeIntervalSince1970) {
-                                ApprovalCountdownRow(countdown: countdown)
-                            }
-                        }
                     }
                     claudeQuestionFooter(question, item: item, subject: subject)
                 } else {
@@ -1555,9 +1567,22 @@ struct Notch: View {
     /// The Codex card's bottom row (#382): Open alone on the left; Dismiss, then Next or Send (or a step
     /// on), on the right. The Codex app without the daemon offers only "Open in Codex" (left,
     /// emphasized) and Dismiss.
+    /// What a Codex card's bottom row offers besides Dismiss.
+    private enum CodexFooterMode {
+        /// The Codex app without the daemon: "Open in Codex" only.
+        case desktopReadOnly
+        /// A CLI session with every terminal host off: "Set up Ghostty" only.
+        case setUpTerminal
+        /// Open, and the card's Next or Send where its route answers.
+        case answer
+    }
+
     private func codexQuestionFooter(_ card: CodexCard?, item: AgentAttentionItem, subject: String, codexOpen: Bool) -> some View {
-        HStack(spacing: 6) {
-            if card?.route == .desktopReadOnly {
+        let mode: CodexFooterMode = card?.route == .desktopReadOnly ? .desktopReadOnly
+            : (item.session.surface == .cli && !model.cliTerminalHostOn ? .setUpTerminal : .answer)
+        return HStack(spacing: 6) {
+            switch mode {
+            case .desktopReadOnly:
                 if codexOpen {
                     NotchButton(title: "Open in Codex", emphasized: true) { model.openAgent(item.session) }
                         .disabled(model.openingTask)
@@ -1565,12 +1590,12 @@ struct Notch: View {
                         .accessibilityHint("Answer the question in the Codex app.")
                 }
                 Spacer(minLength: 6)
-            } else if item.session.surface == .cli && !model.cliTerminalHostOn {
+            case .setUpTerminal:
                 NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
                     .accessibilityLabel("Set up Ghostty: \(subject)")
                     .accessibilityHint("Opens Herdly controls to enable Ghostty controls.")
                 Spacer(minLength: 6)
-            } else {
+            case .answer:
                 if codexOpen {
                     NotchButton(title: "Open") { model.openAgent(item.session) }
                         .disabled(model.openingTask)
@@ -1583,8 +1608,7 @@ struct Notch: View {
             NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
                 .accessibilityLabel("Dismiss question: \(subject)")
             // The answering button is always the far-right one (#382).
-            if card?.route != .desktopReadOnly, !(item.session.surface == .cli && !model.cliTerminalHostOn),
-               let card, let primary = primary(card) {
+            if mode == .answer, let card, let primary = primary(card) {
                 primaryButton(primary, card: card, subject: subject)
             }
         }
@@ -1655,9 +1679,8 @@ struct Notch: View {
             let viewed = claudeViewed(question)
             let prompt = question.prompts[viewed]
             let canSelect = call.canSelect(question: viewed)
-            // The rail summarizes only answers kept with Next, as a daemon card's drafts.
             questionHead(question.prompts, question: question, current: call.current, viewed: viewed) { index in
-                index < call.current ? call.railAnswer(at: index, labels: question.prompts[index].options) : nil
+                call.railAnswer(at: index, labels: question.prompts[index].options)
             }
             if let text = prompt.question { questionText(text) }
             let selection = call.selection(at: viewed)
@@ -1699,6 +1722,7 @@ struct Notch: View {
                                   : "Sends the selected option, the ticked options, or the typed answer to Claude once.") {
                     performClaude(primary, question)
                 }
+                .disabled(model.answering)
             }
         }
         .padding(.top, 2)

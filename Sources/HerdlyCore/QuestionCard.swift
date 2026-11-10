@@ -196,9 +196,11 @@ public struct ClaudeQuestionCallSelection: Equatable, Sendable {
         return entries
     }
 
-    /// What the step rail shows for question `index`: its option, its ticked labels, or its text.
-    /// Display only.
+    /// What the step rail shows for question `index`: its option, its ticked labels, or its text,
+    /// only once Next kept it (as a daemon card's drafts); nil for the question being answered and
+    /// later ones. Display only.
     public func railAnswer(at index: Int, labels: [String]) -> ChosenAnswer? {
+        guard index < current else { return nil }
         let selection = selection(at: index)
         guard let answer = selection.answer(labels: labels) else { return nil }
         switch answer.kind {
