@@ -186,3 +186,18 @@ import Testing
         + "{\"type\":\"event_msg\",\"payload\":{\"type\":\"task_complete\",\"turn_id\":\"\(turn)\",\"last_agent_message\":\"wrong\"}}\n"
     #expect(ReminderReader.evidence(in: Data(mismatch.utf8), session: session).completionPreviews.isEmpty)
 }
+
+/// One parent rule for every child-rollout reader: the first of `parent_thread_id`, the spawn's
+/// `parent_thread_id` and `forked_from_id`, and none when two of them disagree.
+@Test func aChildRolloutHeaderNamesItsParentOnlyWhenItsParentFieldsAgree() {
+    let child = UUID(), parent = UUID(), other = UUID()
+    func payload(_ fields: [String: Any]) -> [String: Any] { fields.merging(["id": child.uuidString]) { a, _ in a } }
+    #expect(CodexRolloutHeader.parent(in: payload(["parent_thread_id": parent.uuidString])) == parent)
+    #expect(CodexRolloutHeader.parent(in: payload(["forked_from_id": parent.uuidString])) == parent)
+    #expect(CodexRolloutHeader.parent(in: payload(["parent_thread_id": parent.uuidString,
+                                                   "source": ["subagent": ["thread_spawn": ["parent_thread_id": parent.uuidString]]],
+                                                   "forked_from_id": parent.uuidString])) == parent)
+    #expect(CodexRolloutHeader.parent(in: payload(["parent_thread_id": parent.uuidString, "forked_from_id": other.uuidString])) == nil)
+    #expect(CodexRolloutHeader.parent(in: payload(["parent_thread_id": child.uuidString])) == nil)
+    #expect(CodexRolloutHeader.parent(in: payload([:])) == nil)
+}
