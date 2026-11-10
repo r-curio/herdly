@@ -7,20 +7,35 @@ public enum ClaudeInventoryKind: String, Equatable, Sendable {
 
 public enum ClaudeInventoryLifecycle: Equatable, Sendable {
     case interactive(status: String)
+    /// `claude agents --json`'s background state: working, blocked, done, failed, or stopped.
     case background(state: String)
+    /// A session registry `bg` entry's status, in the interactive vocabulary (`busy`, `waiting`,
+    /// `idle`; `shell` reads `idle`), nil when Claude wrote none or one Herdly does not know. It says
+    /// only that the job's process is live and what it last reported; it is never a turn result, so
+    /// an idle job confirms no Stop and a busy one adds no Working row.
+    case backgroundJob(status: String?)
 
     public var isActive: Bool {
         switch self {
-        case let .interactive(status): return status == "busy" || status == "waiting"
+        case let .interactive(status): return Self.isActiveStatus(status)
         case let .background(state): return state == "working" || state == "blocked"
+        case let .backgroundJob(status): return Self.isActiveStatus(status)
         }
     }
 
+    /// Whether Setup counts the session as needing a restart once it is old enough. A registry
+    /// background job never does (#393): Setup's count is unchanged by listing jobs.
     public var needsRestart: Bool {
         switch self {
         case .interactive: return true
         case let .background(state): return state == "working" || state == "blocked"
+        case .backgroundJob: return false
         }
+    }
+
+    /// The interactive vocabulary's active statuses, shared by interactive sessions and registry jobs.
+    private static func isActiveStatus(_ status: String?) -> Bool {
+        status == "busy" || status == "waiting"
     }
 
     public var isIdleInteractive: Bool {
@@ -75,13 +90,30 @@ public struct ClaudeInventoryScan: Equatable, Sendable {
     public let failure: String?
     public let ambiguousSessionIDs: Set<String>
     /// Sessions known to run in the background without a lifecycle row: the session registry names
-    /// a live background holder but carries no background state. Never includes a session that also
-    /// has a row.
+    /// a live background holder it could not list as one row (two holders, or an entry without a
+    /// readable directory, start time, or name). Never includes a session that also has a row.
     public let backgroundSessionIDs: Set<String>
     /// The process holding each background session whose job a live interactive process parked and
     /// now displays: the registry links the background entry's `jobId` to that process's
     /// `parkedJobId`. `.ambiguous` when the link is not one-to-one. Empty when unavailable.
     public let parkedJobProcesses: [String: ClaudeSessionProcess]
+
+    /// Every session a live Claude process holds in this scan: its rows, interactive or background,
+    /// and background holders without a row. Empty when unavailable, where absence proves nothing.
+    public var listedSessionIDs: Set<String> {
+        available ? Set(sessions.map(\.sessionID)).union(backgroundSessionIDs) : []
+    }
+
+    /// Setup's count of active sessions that need a restart to load Herdly's hooks: those whose
+    /// lifecycle needs one and, when `installedAt` is known, started before it without a delivered
+    /// startup hook. Every one counts while the installation time is unknown.
+    public func restartCount(installedAt: Double?, deliveredSessionIDs: Set<String>) -> Int {
+        sessions.filter { session in
+            guard session.lifecycle.needsRestart else { return false }
+            guard let installedAt else { return true }
+            return session.startedAt < installedAt && !deliveredSessionIDs.contains(session.sessionID)
+        }.count
+    }
 
     public func isBackgroundSession(_ sessionID: String) -> Bool {
         available && (backgroundSessionIDs.contains(sessionID)
@@ -131,20 +163,10 @@ public enum ClaudeInventoryDecoder {
         var seenKinds: [String: ClaudeInventoryKind] = [:]
         var sessions: [ClaudeInventorySession] = []
         for row in rows {
-            guard let sessionID = canonicalSessionID(row["sessionId"]),
-                  let directory = nonempty(row["cwd"] as? String),
-                  let startedAt = timestamp(row["startedAt"]) else {
+            guard let sessionID = canonicalSessionID(row["sessionId"]), let shared = SharedFields(row) else {
                 return .unavailable(sourceScope: sourceScope, observedAt: observedAt, reason: incompleteMessage)
             }
-            let name: String
-            if let rawName = row["name"] {
-                guard let validated = nonempty(rawName as? String) else {
-                    return .unavailable(sourceScope: sourceScope, observedAt: observedAt, reason: incompleteMessage)
-                }
-                name = validated
-            } else {
-                name = ""
-            }
+            let (directory, startedAt, name) = (shared.directory, shared.startedAt, shared.name)
 
             let kind: ClaudeInventoryKind
             switch row["kind"] as? String {
@@ -184,7 +206,26 @@ public enum ClaudeInventoryDecoder {
         return ClaudeInventoryScan(sourceScope: sourceScope, observedAt: observedAt, sessions: sessions)
     }
 
-    private static func canonicalSessionID(_ value: Any?) -> String? {
+    /// The fields every row needs besides its session ID: a nonempty `cwd`, a `startedAt` time, and
+    /// an optional nonempty `name` ("" when absent). nil when any is missing or malformed.
+    struct SharedFields {
+        let directory: String
+        let startedAt: Double
+        let name: String
+
+        init?(_ row: [String: Any]) {
+            guard let directory = ClaudeInventoryDecoder.nonempty(row["cwd"] as? String),
+                  let startedAt = ClaudeInventoryDecoder.timestamp(row["startedAt"]) else { return nil }
+            var name = ""
+            if let rawName = row["name"] {
+                guard let validated = ClaudeInventoryDecoder.nonempty(rawName as? String) else { return nil }
+                name = validated
+            }
+            (self.directory, self.startedAt, self.name) = (directory, startedAt, name)
+        }
+    }
+
+    static func canonicalSessionID(_ value: Any?) -> String? {
         guard let value = value as? String, value.utf8.count == 36,
               let uuid = UUID(uuidString: value) else { return nil }
         return uuid.uuidString.lowercased()
@@ -196,7 +237,7 @@ public enum ClaudeInventoryDecoder {
         return value
     }
 
-    private static func timestamp(_ value: Any?) -> Double? {
+    static func timestamp(_ value: Any?) -> Double? {
         let number: Double?
         if let value = value as? NSNumber {
             guard CFGetTypeID(value as CFTypeRef) != CFBooleanGetTypeID() else { return nil }
