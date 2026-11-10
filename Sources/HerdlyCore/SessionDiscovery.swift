@@ -191,13 +191,19 @@ public enum SessionDiscovery {
 
     /// The bounded head and tail of a regular file. A file shorter than both is read once.
     static func read(_ url: URL) -> (head: Data, tail: Data)? {
+        read(url, header: { $0 }).map { (head: $0.header, tail: $0.tail) }
+    }
+
+    /// `read(_:)`, where `header` decodes the head bytes first: nil from it skips the file without
+    /// reading its tail (`CodexSubagentReader` reads tails of subagent rollouts only).
+    static func read<Header>(_ url: URL, header: (Data) -> Header?) -> (header: Header, tail: Data)? {
         guard let (file, size) = CodexUsageReader.regularFile(url) else { return nil }
         defer { try? file.close() }
-        guard let head = try? file.read(upToCount: min(size, headBytes)) else { return nil }
-        if size <= headBytes { return (head, head.dropFirst(head.firstIndex(of: UInt8(ascii: "\n")).map { $0 + 1 } ?? head.count)) }
+        guard let head = try? file.read(upToCount: min(size, headBytes)), let decoded = header(head) else { return nil }
+        if size <= headBytes { return (decoded, head.dropFirst(head.firstIndex(of: UInt8(ascii: "\n")).map { $0 + 1 } ?? head.count)) }
         try? file.seek(toOffset: UInt64(max(size - tailBytes, 0)))
         guard let tail = try? file.read(upToCount: tailBytes) else { return nil }
-        return (head, tail)
+        return (decoded, tail)
     }
 
     /// The open turn in one rollout, or nil when its last turn ended, it is not a user session, or
@@ -224,11 +230,17 @@ public enum SessionDiscovery {
               let meta = event["payload"] as? [String: Any],
               let session = (meta["id"] as? String).flatMap(UUID.init(uuidString:)),
               let source = (meta["source"] as? String).flatMap({ sources[$0] }) else { return nil }
-        var current: DiscoveredTurn?
+        let events = lines.compactMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        return openTurn(in: events).map { DiscoveredTurn(session: session, source: source, turn: $0.turn, startedAt: $0.startedAt) }
+    }
+
+    /// The open turn among decoded rollout lines, by the rule `open(meta:lines:)` documents; shared
+    /// with `CodexSubagentReader`, so a subagent counts as running exactly when a session would.
+    static func openTurn(in events: [[String: Any]]) -> (turn: UUID, startedAt: String)? {
+        var current: (turn: UUID, startedAt: String)?
         var ended: Set<UUID> = []
-        for line in lines {
-            guard let event = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-                  let payload = event["payload"] as? [String: Any],
+        for event in events {
+            guard let payload = event["payload"] as? [String: Any],
                   let turn = turnID(in: payload) else { continue }
             let kind = event["type"] as? String == "event_msg" ? payload["type"] as? String : nil
             if kind == "task_complete" || kind == "turn_aborted" {
@@ -239,7 +251,7 @@ public enum SessionDiscovery {
             // A line written after an end seen here (a trailing token count) does not reopen the turn.
             guard let at = event["timestamp"] as? String, !ended.contains(turn) else { continue }
             if current?.turn != turn || kind == "task_started" {
-                current = DiscoveredTurn(session: session, source: source, turn: turn, startedAt: at)
+                current = (turn, at)
             }
         }
         return current

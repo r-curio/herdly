@@ -212,15 +212,15 @@ public enum ReminderReader {
 
     /// The session id and, for a sub-agent thread, its parent's id from a rollout's `session_meta`.
     /// Codex desktop records spawned agents and guardian reviews as their own rollouts whose
-    /// `parent_thread_id` (or `forked_from_id`) names the thread that owns them.
+    /// `parent_thread_id` (or `forked_from_id`) names the thread that owns them. The parent follows
+    /// `CodexRolloutHeader.parent(in:)`, the rule `CodexSubagentReader` uses too.
     static func rolloutParent(_ url: URL) -> (session: UUID, parent: UUID?)? {
         guard let line = firstLine(url, limit: 64 * 1024),
               let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
               event["type"] as? String == "session_meta",
               let payload = event["payload"] as? [String: Any],
               let session = (payload["id"] as? String).flatMap(UUID.init(uuidString:)) else { return nil }
-        let parent = ((payload["parent_thread_id"] as? String) ?? (payload["forked_from_id"] as? String)).flatMap(UUID.init(uuidString:))
-        return (session, parent)
+        return (session, CodexRolloutHeader.parent(in: payload))
     }
 
     /// At most this many rollout heads are read per scan when looking for sub-agent threads.
