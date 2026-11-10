@@ -409,3 +409,158 @@ func aScanBuiltSessionBySessionEqualsOneReplayOfEveryRecord(seed: UInt64) throws
     #expect(runningPrompts(scan(now: 100 + age + 1, cache: checked.cache).scan)
             == ["a": "Again", "b": "Replaced", "c": "Third"])
 }
+
+/// A wall-clock time by which anything written so far has settled.
+private var settledNow: Double { Date().timeIntervalSince1970 + 10 }
+
+private func listed(_ directory: URL) -> [String]? {
+    HookEventListing.detailedListing(in: directory, now: settledNow).map { $0.entries.map(\.lastPathComponent) }
+}
+
+/// The listing a watcher's reports produce must be the one a full read of the directory gives.
+private func expectListingMatchesAFullRead(_ directory: URL, _ comment: Comment) {
+    let watched = HookEventListing.detailedListing(in: directory, now: settledNow), full = HookEventListing.fullListing(in: directory)
+    #expect(watched?.entries == full?.entries, comment)
+    #expect(watched.map { Array($0.records) } == full.map { Array($0.records) }, comment)
+    #expect(watched?.recordInodes == full?.recordInodes, comment)
+}
+
+@Test func aWatchedDirectoryIsListedFromReportedNamesAndMatchesAFullRead() throws {
+    let root = try temporaryDirectory()
+    defer { HookEventListing.changes.stopWatching(root); try? FileManager.default.removeItem(at: root) }
+    func write(_ name: String, _ text: String = "{}") throws {
+        try Data(text.utf8).write(to: root.appendingPathComponent(name), options: .atomic)
+    }
+    try write("a.json")
+    HookEventListing.changes.startWatching(root)
+    expectListingMatchesAFullRead(root, "first listing after watching starts")
+
+    // An addition, reported: the directory is not read in full again.
+    let fullReads = HookEventListing.fullReadCount(in: root)
+    try write("b.json")
+    HookEventListing.changes.report(["b.json"], in: root)
+    expectListingMatchesAFullRead(root, "addition")
+    // A removal and a replacement under the same name, reported with a name that changed nothing.
+    try FileManager.default.removeItem(at: root.appendingPathComponent("a.json"))
+    try write("b.json", "{\"again\":true}")
+    HookEventListing.changes.report(["a.json", "b.json", "never-existed.json"], in: root)
+    expectListingMatchesAFullRead(root, "removal and replacement")
+    // A subdirectory and a file that is not a record.
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("sub"), withIntermediateDirectories: false)
+    try write("note.txt")
+    HookEventListing.changes.report(["sub", "note.txt"], in: root)
+    expectListingMatchesAFullRead(root, "subdirectory and other file")
+    #expect(HookEventListing.fullReadCount(in: root) == fullReads)
+
+    // A change too recent for its report to be relied on is read in full.
+    try write("recent.json")
+    HookEventListing.changes.report(["recent.json"], in: root)
+    let modifiedAt = try #require(FileStamp(root, followingLinks: true)).modifiedAt
+    let recent = HookEventListing.detailedListing(in: root, now: modifiedAt + HookDirectoryChangeLog.settleTime / 2)
+    #expect(recent?.entries.map(\.lastPathComponent).contains("recent.json") == true)
+    #expect(HookEventListing.fullReadCount(in: root) == fullReads + 1)
+    #expect(HookDirectoryChangeLog.settled(modifiedAt: 0, now: HookDirectoryChangeLog.settleTime))
+    #expect(!HookDirectoryChangeLog.settled(modifiedAt: 0, now: HookDirectoryChangeLog.settleTime / 2))
+    #expect(!HookDirectoryChangeLog.settled(modifiedAt: 100, now: 99))
+    #expect(!HookDirectoryChangeLog.settled(modifiedAt: 100, now: .nan))
+
+    // An addition the watcher has not reported yet: the entry count does not match, so it is still listed.
+    try write("c.json")
+    try write("d.json")
+    HookEventListing.changes.report(["c.json"], in: root)
+    #expect(listed(root)?.contains("d.json") == true)
+    expectListingMatchesAFullRead(root, "unreported addition")
+    // Nothing reported at all, or something the watcher cannot name.
+    try write("e.json")
+    #expect(listed(root)?.contains("e.json") == true)
+    try write("f.json")
+    HookEventListing.changes.reportUnknown(in: root)
+    #expect(listed(root)?.contains("f.json") == true)
+    // A late report of something already listed changes nothing.
+    HookEventListing.changes.report(["e.json", "f.json"], in: root)
+    expectListingMatchesAFullRead(root, "late report")
+    // A name that is not a top-level name is never looked at.
+    try write("g.json")
+    HookEventListing.changes.report(["../g.json", "sub/x"], in: root)
+    expectListingMatchesAFullRead(root, "names outside the directory")
+}
+
+@Test func reportsAreKeptOnlyForWatchedDirectoriesAndGiveWayWhenTooMany() throws {
+    let log = HookDirectoryChangeLog()
+    let directory = URL(fileURLWithPath: "/tmp/herdly-watch-\(UUID().uuidString)", isDirectory: true)
+    let key = directory.standardizedFileURL.path
+    // Not watched: nothing is kept, and the listing is told so.
+    log.report(["a.json"], in: directory)
+    log.reportUnknown(in: directory)
+    #expect(log.take(key) == nil)
+    // Watching starts unknown, so the first listing reads the directory in full.
+    log.startWatching(directory)
+    #expect(log.take(key) == .unknown)
+    #expect(log.take(key) == .names([]))
+    log.report(["a.json"], in: directory)
+    log.report(["b.json"], in: directory)
+    #expect(log.take(key) == .names(["a.json", "b.json"]))
+    // Unknown stays unknown whatever is reported after it.
+    log.reportUnknown(in: directory)
+    log.report(["c.json"], in: directory)
+    #expect(log.take(key) == .unknown)
+    log.report(Set((0...HookDirectoryChangeLog.maximumNames).map { "r\($0).json" }), in: directory)
+    #expect(log.take(key) == .unknown)
+    log.stopWatching(directory)
+    #expect(log.take(key) == nil)
+}
+
+/// Reports a watcher is still holding, handed over when the listing asks for them.
+private final class HeldReports: @unchecked Sendable {
+    // Invariant for `@unchecked Sendable`: `names` is only touched while holding `lock`.
+    private let lock = NSLock()
+    private var names: Set<String> = []
+
+    func hold(_ more: Set<String>) { lock.lock(); names.formUnion(more); lock.unlock() }
+    func release() -> Set<String> { lock.lock(); defer { names = []; lock.unlock() }; return names }
+}
+
+/// Random additions, removals and replacements, each reported at once, in part, as unknown, or held
+/// until the listing asks: the listing must equal a full read of the directory after every step.
+@Test(arguments: [11, 12, 13] as [UInt64])
+func aWatchedListingEqualsAFullReadWhateverIsReported(seed: UInt64) throws {
+    let root = try temporaryDirectory()
+    defer { HookEventListing.changes.stopWatching(root); try? FileManager.default.removeItem(at: root) }
+    var random = SeededGenerator(state: seed)
+    var files: [String] = []
+    let held = HeldReports()
+    HookEventListing.changes.startWatching(root) { HookEventListing.changes.report(held.release(), in: root) }
+    for step in 0..<220 {
+        var touched: Set<String> = []
+        for _ in 0..<Int.random(in: 1...3, using: &random) {
+            switch Int.random(in: 0..<10, using: &random) {
+            case 0 where !files.isEmpty:
+                let name = files.remove(at: Int.random(in: 0..<files.count, using: &random))
+                try FileManager.default.removeItem(at: root.appendingPathComponent(name))
+                touched.insert(name)
+            case 1 where !files.isEmpty:
+                let name = files.randomElement(using: &random) ?? files[0]
+                try Data("{\"step\":\(step)}".utf8).write(to: root.appendingPathComponent(name), options: .atomic)
+                touched.insert(name)
+            default:
+                let name = "r\(step)-\(Int.random(in: 0..<1_000_000, using: &random))" + (Int.random(in: 0..<6, using: &random) == 0 ? ".tmp" : ".json")
+                try Data("{}".utf8).write(to: root.appendingPathComponent(name), options: .atomic)
+                files.append(name)
+                touched.insert(name)
+            }
+        }
+        switch Int.random(in: 0..<10, using: &random) {
+        case 0, 1, 2:
+            held.hold(touched)                                   // still on its way
+        case 3:
+            let first = Set(touched.prefix(1))                   // some delivered, the rest on their way
+            HookEventListing.changes.report(first, in: root)
+            held.hold(touched.subtracting(first))
+        case 4:
+            HookEventListing.changes.reportUnknown(in: root)
+        default:
+            HookEventListing.changes.report(touched, in: root)
+        }
+        expectListingMatchesAFullRead(root, "step \(step), seed \(seed)")
+    }
+}

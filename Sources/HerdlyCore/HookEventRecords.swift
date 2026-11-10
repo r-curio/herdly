@@ -18,6 +18,10 @@ public enum HookEventListing {
     /// creation date is looked up only for an entry not seen before under the same inode: a file's
     /// creation date never changes, and a name replaced by another file has a new inode. The stamp is
     /// taken before listing, so a change during the listing shows up as a new stamp next call.
+    ///
+    /// A directory that changes often is not read in full each time when something watches it and
+    /// reports the changed names to `changes`: the listing is then brought up to date from those
+    /// names alone, and read in full only when they do not account for the directory's entry count.
     public static func entries(in directory: URL, limit: Int = maximumEntries) -> [URL]? {
         listing(in: directory, limit: limit)?.entries
     }
@@ -31,14 +35,48 @@ public enum HookEventListing {
     /// `listing(in:)` with the inode the directory itself gives for each of `records`, in the same
     /// order. A name replaced by another file has a new inode, so a reader can tell a record it has
     /// already read from a replacement without looking at the file.
-    static func detailedListing(in directory: URL, limit: Int = maximumEntries)
+    ///
+    /// `now` is the wall clock, compared with the directory's modification time (`settleTime`).
+    static func detailedListing(in directory: URL, limit: Int = maximumEntries, now: Double = Date().timeIntervalSince1970)
         -> (entries: [URL], records: ArraySlice<URL>, recordInodes: [UInt64])? {
         let stamp = FileStamp(directory, followingLinks: true)
         let key = directory.standardizedFileURL.path
         let previous = listings.entry(key)
-        if let stamp, let previous, previous.stamp == stamp {
+        // What a watcher saw change since the last call; nil when nothing watches this directory.
+        // The directory changed: first have the watcher hand over everything it has not reported
+        // yet, so the names cover every change made before the stamp was taken.
+        if stamp == nil || previous?.stamp != stamp { changes.flush(key) }
+        let reported = changes.take(key)
+        if let stamp, let previous, previous.stamp == stamp, reported ?? .names([]) == .names([]) {
             return previous.urls.count <= limit ? (previous.urls, previous.records, previous.recordInodes) : nil
         }
+        if let stamp, let previous, case .names(let names)? = reported, !names.isEmpty,
+           HookDirectoryChangeLog.settled(modifiedAt: stamp.modifiedAt, now: now),
+           let entry = updated(previous, with: names, in: directory, stamp: stamp), entry.urls.count <= limit {
+            listings.store(entry, for: key)
+            return (entry.urls, entry.records, entry.recordInodes)
+        }
+        listings.countFullRead(key)
+        guard let entry = relisted(directory, previous: previous, stamp: stamp, limit: limit) else { return nil }
+        if stamp != nil { listings.store(entry, for: key) }
+        return (entry.urls, entry.records, entry.recordInodes)
+    }
+
+    /// How many times this directory was read in full, for tests.
+    static func fullReadCount(in directory: URL) -> Int {
+        listings.fullReads(directory.standardizedFileURL.path)
+    }
+
+    /// The listing read from the directory itself, with nothing reused: what every other route to a
+    /// listing must equal. Tests only.
+    static func fullListing(in directory: URL) -> (entries: [URL], records: ArraySlice<URL>, recordInodes: [UInt64])? {
+        relisted(directory, previous: nil, stamp: nil, limit: maximumEntries).map { ($0.urls, $0.records, $0.recordInodes) }
+    }
+
+    /// Reads every name in `directory`, reusing `previous` only for the creation dates of entries
+    /// still listed under the same inode. Nil when it is unreadable or holds more than `limit` entries.
+    private static func relisted(_ directory: URL, previous: ListingCache.Entry?, stamp: FileStamp?,
+                                 limit: Int) -> ListingCache.Entry? {
         guard let names = names(in: directory), names.count <= limit else { return nil }
         var dates: [String: Dated] = [:]
         dates.reserveCapacity(names.count)
@@ -59,6 +97,72 @@ public enum HookEventListing {
             guard let entry = dates[name] else { return false }
             return previous?.dates[name]?.inode == entry.inode
         } ?? []
+        return entry(stamp: stamp, kept: kept, added: added, dates: dates)
+    }
+
+    /// `previous` brought up to date from the `names` a watcher reported, without reading the
+    /// directory: each name is looked at once, and is an addition, a replacement (another inode), a
+    /// removal (no longer there) or unchanged. Nil, for a full read instead, when a name cannot be
+    /// looked at or the result does not hold exactly as many entries as the directory says it has:
+    /// a change the watcher has not reported yet. `stamp` must have been taken before this call.
+    private static func updated(_ previous: ListingCache.Entry, with names: Set<String>, in directory: URL,
+                                stamp: FileStamp) -> ListingCache.Entry? {
+        guard let count = entryCount(directory) else { return nil }
+        var dates = previous.dates
+        var added: [Dated] = []
+        var removedAny = false
+        for name in names {
+            guard !name.isEmpty, name != ".", name != "..", !name.contains("/") else { return nil }
+            var info = stat()
+            let status = directory.appendingPathComponent(name).withUnsafeFileSystemRepresentation { path -> Int32 in
+                guard let path else { return -1 }
+                return lstat(path, &info) == 0 ? 0 : (errno == ENOENT ? 1 : -1)
+            }
+            switch status {
+            case 0:
+                let inode = UInt64(info.st_ino)
+                if let known = previous.dates[name] {
+                    if known.inode == inode { continue }
+                    removedAny = true
+                }
+                let url = directory.appendingPathComponent(name, isDirectory: info.st_mode & S_IFMT == S_IFDIR)
+                let entry = Dated(name: name, url: url, inode: inode, created: Self.created(url))
+                dates[name] = entry
+                added.append(entry)
+            case 1:
+                if dates.removeValue(forKey: name) != nil { removedAny = true }
+            default:
+                return nil
+            }
+        }
+        guard dates.count == count else { return nil }
+        if added.isEmpty, !removedAny {
+            return ListingCache.Entry(stamp: stamp, urls: previous.urls, records: previous.records,
+                                      recordInodes: previous.recordInodes, order: previous.order, dates: previous.dates)
+        }
+        guard removedAny else {
+            // Only additions. When all are newer than the newest entry, the listing just grows at its end.
+            let sorted = added.sorted(by: Dated.older)
+            if let newest = previous.order.last.flatMap({ dates[$0]?.created }), sorted.allSatisfy({ $0.created > newest }) {
+                let newRecords = sorted.filter { isRecordName($0.name) }
+                return ListingCache.Entry(
+                    stamp: stamp, urls: previous.urls + sorted.map(\.url),
+                    records: ArraySlice(Array((previous.records + newRecords.map(\.url)).suffix(maximumRecords))),
+                    recordInodes: Array((previous.recordInodes + newRecords.map(\.inode)).suffix(maximumRecords)),
+                    order: previous.order + sorted.map(\.name), dates: dates)
+            }
+            return entry(stamp: stamp, kept: previous.order, added: added, dates: dates)
+        }
+        let kept = previous.order.filter { name in
+            guard let entry = dates[name] else { return false }
+            return previous.dates[name]?.inode == entry.inode
+        }
+        return entry(stamp: stamp, kept: kept, added: added, dates: dates)
+    }
+
+    /// The listing of `dates`: `kept` are the entries still in their earlier order, `added` the rest.
+    private static func entry(stamp: FileStamp?, kept: [String], added: [Dated],
+                              dates: [String: Dated]) -> ListingCache.Entry {
         let order: [String]
         if let newest = kept.last.flatMap({ dates[$0]?.created }), added.allSatisfy({ $0.created > newest }) {
             order = kept + added.sorted(by: Dated.older).map(\.name)
@@ -67,13 +171,22 @@ public enum HookEventListing {
         }
         let ordered = order.compactMap { dates[$0]?.url }
         let newest = order.filter(isRecordName).compactMap { dates[$0] }.suffix(maximumRecords)
-        let records = ArraySlice(newest.map(\.url)), recordInodes = newest.map(\.inode)
-        if let stamp {
-            listings.store(ListingCache.Entry(stamp: stamp, urls: ordered, records: records, recordInodes: recordInodes,
-                                              order: order, dates: dates), for: key)
-        }
-        return (ordered, records, recordInodes)
+        return ListingCache.Entry(stamp: stamp, urls: ordered, records: ArraySlice(newest.map(\.url)),
+                                  recordInodes: newest.map(\.inode), order: order, dates: dates)
     }
+
+    /// How many entries the directory says it holds. APFS counts each entry as a link beside the
+    /// directory's own two; on a file system that counts otherwise the number never matches a
+    /// listing, and every change is simply read in full.
+    private static func entryCount(_ directory: URL) -> Int? {
+        var info = stat()
+        let status = directory.withUnsafeFileSystemRepresentation { path in path.map { stat($0, &info) } ?? -1 }
+        guard status == 0, info.st_nlink >= 2 else { return nil }
+        return Int(info.st_nlink) - 2
+    }
+
+    /// What watchers report about the directories they watch (`HookDirectoryChangeLog`).
+    public static let changes = HookDirectoryChangeLog()
 
     /// A `.json` record by name alone: `pathExtension` parses each URL, and listings hold thousands.
     private static func isRecordName(_ name: String) -> Bool {
@@ -114,7 +227,9 @@ public enum HookEventListing {
     /// inode and creation date. Unreadable and oversized results are never kept.
     private final class ListingCache: @unchecked Sendable {
         struct Entry {
-            let stamp: FileStamp
+            /// The directory's stamp, taken before it was listed; nil when it could not be stamped,
+            /// and such a listing is never kept.
+            let stamp: FileStamp?
             let urls: [URL]
             let records: ArraySlice<URL>
             /// Each of `records`' inodes as the directory listed it, in the same order.
@@ -136,6 +251,18 @@ public enum HookEventListing {
         func store(_ entry: Entry, for key: String) {
             lock.lock(); defer { lock.unlock() }
             entries[key] = entry
+        }
+
+        private var reads: [String: Int] = [:]
+
+        func countFullRead(_ key: String) {
+            lock.lock(); defer { lock.unlock() }
+            reads[key, default: 0] += 1
+        }
+
+        func fullReads(_ key: String) -> Int {
+            lock.lock(); defer { lock.unlock() }
+            return reads[key] ?? 0
         }
     }
 
@@ -564,4 +691,96 @@ public struct HookFileCache: Sendable {
         defer { try? file.close() }
         return try? file.read(upToCount: maximumBytes + 1)
     }
+}
+
+/// What a watcher saw change in a directory since `HookEventListing` last asked.
+public enum HookDirectoryChanges: Equatable, Sendable {
+    /// These top-level names were added, replaced, rewritten or removed; possibly none.
+    case names(Set<String>)
+    /// Something changed that the watcher cannot name: the directory must be read in full.
+    case unknown
+}
+
+/// Changed names reported by whatever watches a hook event directory (HerdlyApp, through macOS
+/// file-system events), held until `HookEventListing` next lists that directory.
+///
+/// A report is a hint about where to look, never a fact about the directory: the listing looks at
+/// every reported name itself and checks the directory's own entry count, so a wrong or missing
+/// report costs a full read and cannot invent a record.
+///
+/// macOS reports a change some milliseconds after it happens, and nothing makes it report sooner
+/// (measured: 4 to 10 ms; a flush only hands over what has already reached the event service). So
+/// names are relied on only once the directory's last change is `settleTime` old, after asking the
+/// watcher for what it holds; a younger change is read in full. What remains is a change later than
+/// that whose report is later still, in a directory whose entry count happens to match: an addition
+/// and a removal together. Its report arrives within moments, is never dropped, and corrects the
+/// listing on the next call. Reports for a directory
+/// nobody watches are dropped. Watching starts as `unknown`, so the first listing is a full read
+/// taken after the watcher was already running.
+public final class HookDirectoryChangeLog: @unchecked Sendable {
+    /// Past this many pending names a full read is cheaper than looking at each.
+    public static let maximumNames = 512
+    /// How old a directory's last change must be before reported names are relied on for it.
+    public static let settleTime: Double = 0.1
+
+    /// Whether a directory last changed at `modifiedAt` (wall clock) has settled by `now`. A change
+    /// dated in the future, or a clock that is not a number, has not.
+    public static func settled(modifiedAt: Double, now: Double) -> Bool {
+        now.isFinite && modifiedAt.isFinite && now - modifiedAt >= settleTime
+    }
+
+    // Invariant for `@unchecked Sendable`: `pending` is only touched while holding `lock`.
+    private let lock = NSLock()
+    private var pending: [String: HookDirectoryChanges] = [:]
+    private var flushes: [String: @Sendable () -> Void] = [:]
+
+    public init() {}
+
+    /// - Parameter flush: makes the watcher report, before it returns, every change that had
+    ///   already happened when it was called (macOS delivers file-system events a moment late).
+    ///   It may call `report` and `reportUnknown`; it is called from whichever thread lists.
+    public func startWatching(_ directory: URL, flush: @escaping @Sendable () -> Void = {}) {
+        lock.lock(); defer { lock.unlock() }
+        pending[Self.key(directory)] = .unknown
+        flushes[Self.key(directory)] = flush
+    }
+
+    public func stopWatching(_ directory: URL) {
+        lock.lock(); defer { lock.unlock() }
+        pending.removeValue(forKey: Self.key(directory))
+        flushes.removeValue(forKey: Self.key(directory))
+    }
+
+    /// Asks the directory's watcher, if any, to report what it has not reported yet.
+    func flush(_ key: String) {
+        lock.lock()
+        let flush = flushes[key]
+        lock.unlock()
+        flush?()
+    }
+
+    public func report(_ names: Set<String>, in directory: URL) {
+        lock.lock(); defer { lock.unlock() }
+        let key = Self.key(directory)
+        guard case .names(let known)? = pending[key] else { return }
+        let all = known.union(names)
+        pending[key] = all.count > Self.maximumNames ? .unknown : .names(all)
+    }
+
+    public func reportUnknown(in directory: URL) {
+        lock.lock(); defer { lock.unlock() }
+        let key = Self.key(directory)
+        if pending[key] != nil { pending[key] = .unknown }
+    }
+
+    /// What was reported for the directory with this listing key since the last call, which then
+    /// starts again from nothing; nil when the directory is not watched.
+    func take(_ key: String) -> HookDirectoryChanges? {
+        lock.lock(); defer { lock.unlock() }
+        guard let value = pending[key] else { return nil }
+        pending[key] = .names([])
+        return value
+    }
+
+    private static func key(_ directory: URL) -> String { directory.standardizedFileURL.path }
 }
