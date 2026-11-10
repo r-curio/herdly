@@ -619,12 +619,17 @@ extension Companion {
         return codex + claude
     }
 
+    /// The completions a herdr visit, dwell, or Open of `subject`'s pane may acknowledge. None for a
+    /// Claude background job (#393): its pane binds through the parking process, which is not exact
+    /// evidence the pane shows the job, so Open still raises it but acknowledges nothing.
     private func herdrCompletions(_ subject: HerdrOpenSubject) -> [TerminalCompletionCandidate<String>] {
         switch subject {
         case .codex(let session):
             return cliItems.filter { $0.session == session }
                 .map { TerminalCompletionCandidate(id: $0.turn.uuidString, arrivedAt: $0.arrivedAt) }
         case .claude(let identity):
+            guard ClaudeSessionProcess.paneEvidenceAcknowledges(sessionID: identity.session,
+                                                                inventories: Array(claudeInventories.values)) else { return [] }
             return agentQueue.snapshot.outcomes.filter { $0.session == identity }
                 .map { TerminalCompletionCandidate(id: $0.turn, arrivedAt: $0.arrivedAt) }
         }
