@@ -85,7 +85,9 @@ so it keeps the 30-second deadline. A root that cannot be read is unavailable fo
 root's attention. The root-scoped inventory (Claude's session registry,
 `<CLAUDE_CONFIG_DIR>/sessions/<pid>.json`, read first, with `claude agents --json` as the
 fallback; see [Claude setup](claude-setup.md)) is a weaker source: a valid interactive `busy`/`waiting` row may add only a generic running row; background
-lifecycle rows alone do not create queue items. Idle and background terminal states remove
+lifecycle rows alone do not create queue items. A registry `bg` row (a running background job, #393) only
+makes its session live and supplies its name and directory: its status never adds a running row, confirms a Stop,
+or closes an approval or question, and a background done, failed, or stopped state never creates an outcome. Idle and background terminal states remove
 inventory-derived rows. As a fallback for a Stop that never ends the row (missed, pruned, or not
 sent), an interactive `idle` reading also ends a hook-derived running row once that turn's hooks have
 been quiet for two minutes; it creates no outcome, and only newer hook evidence reopens the row. A
