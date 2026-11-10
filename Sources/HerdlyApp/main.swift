@@ -403,6 +403,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The host whose inventory last showed each Codex session's title (`ReminderScan.surfaceHosts`),
     /// so a session is not ended while that app is not running (H7). Memory only.
     private(set) var lastSeenHosts: [UUID: TerminalHost] = [:]
+    /// Each Codex session's running subagents from the latest scan (`CodexSubagentReader`, #396).
+    /// Live only: re-read every scan, never persisted.
+    private var codexSubagents: [UUID: [SubagentActivity]] = [:]
     /// The terminal app each Claude CLI card's registry process last walked to, keyed by its Open line
     /// key (`ClaudeLastSeenHost`, #280), so a card no longer live says that app isn't running. Memory only.
     var lastSeenClaudeHosts: [String: TerminalHost] = [:]
@@ -1259,7 +1262,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let completions = items.compactMap { $0.completion }
         let running = items.compactMap { $0.running }
         next.apply(CodexAttentionAdapter.observations(requests: requests, questions: questions,
-                                                      completions: completions, running: running), now: now)
+                                                      completions: completions, running: running,
+                                                      subagents: codexSubagents), now: now)
         next.expire(at: now)
         if next != agentQueue { agentQueue = next }
     }
@@ -1413,7 +1417,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                      result[directory] = GitBranchReader.branch(forDirectory: directory)
                  },
                  claudeScans.map(\.cache),
-                 reminders.hookCache.merging(desktop.cache))
+                 reminders.hookCache.merging(desktop.cache),
+                 CodexSubagentReader.activity(root: rolloutRoot, now: Date().timeIntervalSince1970))
             }.value
             let scan = result.0
             let desktopEvents = result.1
@@ -1422,6 +1427,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             guard eventsPath.isEmpty || eventsPath == events.path else { scanning = false; refresh(); return }
             self.rolloutCache = scan.rolloutCache
             self.hookCache = result.13
+            codexSubagents = result.14
             // Roots no longer connected drop out with their caches.
             self.claudeRecordCaches = Dictionary(zip(claudeRoots.map(\.events.path), result.12)) { _, latest in latest }
             let previousAgent = Set(agentQueue.items(at: Date().timeIntervalSince1970).map(\.id))
