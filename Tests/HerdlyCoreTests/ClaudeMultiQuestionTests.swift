@@ -196,35 +196,30 @@ private let cardPrompts = [
     #expect(card.current == 0)
     #expect(card.primary(viewed: 0) == .next(enabled: false))
     #expect(card.answers(prompts: cardPrompts) == nil)
-    // Next with nothing chosen is refused.
-    #expect(card.advancing(from: 0) == card)
     card = card.toggling(1, at: 0)
     #expect(card.primary(viewed: 0) == .next(enabled: true))
     #expect(card.answers(prompts: cardPrompts) == nil)
     card = card.advancing(from: 0)
+    // Next only moves the card's default view on; the selection stays and nothing is sent.
     #expect(card.current == 1)
     #expect(card.selection(at: 0).options == [1])
-    #expect(card.railAnswer(at: 0, labels: cardPrompts[0].options) == .option(1))
-    // The rail summarizes only answers kept with Next, never the question being answered.
-    #expect(card.toggling(0, at: 1).railAnswer(at: 1, labels: cardPrompts[1].options) == nil)
+    #expect(card.answers(prompts: cardPrompts) == nil)
+    // Next from the last question has nowhere to go.
+    #expect(card.advancing(from: 2) == card)
 }
 
-@Test func laterStepsReadOnlyEarlierStepsRevisableUntilSend() {
-    var card = ClaudeQuestionCallSelection(prompts: cardPrompts).toggling(0, at: 0).advancing(from: 0)
-    // A later question can be read but not answered out of order.
-    #expect(!card.canSelect(question: 2))
-    #expect(card.toggling(0, at: 2) == card)
-    #expect(card.typing("Yes please", at: 2) == card)
-    #expect(card.primary(viewed: 2) == .send(enabled: false))
-    // An earlier question is revisable; its button steps on without changing anything.
-    #expect(card.canSelect(question: 0))
-    #expect(card.primary(viewed: 0) == .step(to: 1))
+// #388: a Claude card is answered in any order, however the user reached each question.
+@Test func everyQuestionIsAnswerableInAnyOrderWithoutNext() {
+    var card = ClaudeQuestionCallSelection(prompts: cardPrompts)
+    #expect((0..<3).allSatisfy(card.canSelect(question:)))
+    #expect(!card.canSelect(question: 3) && !card.canSelect(question: -1))
+    // Select Q1, view Q2 by the arrow (no Next), and tick Q2's options.
     card = card.toggling(1, at: 0)
-    #expect(card.selection(at: 0).options == [1])
-    // Choose-several ticks as today.
     card = card.toggling(0, at: 1).toggling(1, at: 1)
-    card = card.advancing(from: 1)
-    #expect(card.railAnswer(at: 1, labels: cardPrompts[1].options) == .text("Codex CLI, Claude"))
+    #expect(card.current == 0)
+    #expect(card.selection(at: 1).options == [0, 1])
+    // A question beyond the call changes nothing.
+    #expect(card.toggling(0, at: 3) == card)
     #expect(card.primary(viewed: 2) == .send(enabled: false))
     card = card.typing("Only on failure", at: 2)
     #expect(card.primary(viewed: 2) == .send(enabled: true))
@@ -233,14 +228,72 @@ private let cardPrompts = [
         ClaudeQuestionAnswerEntry(kind: .multiSelect, answer: "Codex CLI, Claude"),
         ClaudeQuestionAnswerEntry(kind: .text, answer: "Only on failure")
     ])
+}
+
+@Test func answeringBackwardsStillSendsInQuestionOrder() {
+    let card = ClaudeQuestionCallSelection(prompts: cardPrompts)
+        .toggling(1, at: 2).typing("All of them", at: 1).toggling(0, at: 0)
+    #expect(card.answers(prompts: cardPrompts) == [
+        ClaudeQuestionAnswerEntry(kind: .option, answer: "CSV"),
+        ClaudeQuestionAnswerEntry(kind: .text, answer: "All of them"),
+        ClaudeQuestionAnswerEntry(kind: .option, answer: "No")
+    ])
+}
+
+@Test func sendStaysDisabledWhileAnyQuestionIsUnanswered() {
+    let empty = ClaudeQuestionCallSelection(prompts: cardPrompts)
+    let partials = [
+        empty.toggling(0, at: 1).toggling(0, at: 2),             // Q1 missing
+        empty.toggling(0, at: 0).toggling(0, at: 2),             // Q2 missing
+        empty.toggling(0, at: 0).toggling(0, at: 1),             // Q3 missing
+        empty.toggling(0, at: 0).typing("   ", at: 1).toggling(0, at: 2) // blank text is no answer
+    ]
+    for partial in partials {
+        #expect(partial.primary(viewed: 2) == .send(enabled: false))
+        #expect(partial.answers(prompts: cardPrompts) == nil)
+    }
+    // Send is only ever the last question's button; earlier ones offer Next, never Send.
+    let complete = empty.toggling(0, at: 0).toggling(0, at: 1).toggling(0, at: 2)
+    #expect(complete.primary(viewed: 0) == .next(enabled: true))
+    #expect(complete.primary(viewed: 1) == .next(enabled: true))
+    #expect(complete.primary(viewed: 2) == .send(enabled: true))
+    // Next is enabled only while the viewed question has an answer; an unanswered one can still be
+    // left by the arrows or the rail.
+    #expect(empty.toggling(0, at: 2).primary(viewed: 0) == .next(enabled: false))
+}
+
+@Test func changingAnEarlierAnswerAfterLaterOnesKeepsTheRest() {
+    var card = ClaudeQuestionCallSelection(prompts: cardPrompts)
+        .toggling(0, at: 0).toggling(2, at: 1).toggling(0, at: 2)
+    card = card.toggling(1, at: 0)
+    #expect(card.answers(prompts: cardPrompts) == [
+        ClaudeQuestionAnswerEntry(kind: .option, answer: "JSON lines (Recommended)"),
+        ClaudeQuestionAnswerEntry(kind: .multiSelect, answer: "Codex app"),
+        ClaudeQuestionAnswerEntry(kind: .option, answer: "Yes")
+    ])
     // Emptying an earlier answer leaves a partial set, which is never sent.
-    let emptied = card.toggling(0, at: 1).toggling(1, at: 1)
+    let emptied = card.toggling(2, at: 1)
     #expect(emptied.primary(viewed: 2) == .send(enabled: false))
     #expect(emptied.answers(prompts: cardPrompts) == nil)
     // A typed answer replaces options and vice versa, per question.
     let typed = card.typing("All of them", at: 1)
     #expect(typed.selection(at: 1).options.isEmpty)
     #expect(typed.answers(prompts: cardPrompts)?[1] == ClaudeQuestionAnswerEntry(kind: .text, answer: "All of them"))
+}
+
+@Test func theRailShowsEachQuestionsCurrentAnswer() {
+    let card = ClaudeQuestionCallSelection(prompts: cardPrompts)
+        .toggling(0, at: 1).toggling(1, at: 1).typing("Only on failure", at: 2)
+    // No Next was pressed: the rail still shows what each question holds, and nothing for Q1.
+    #expect(card.railAnswer(at: 0, labels: cardPrompts[0].options) == nil)
+    #expect(card.railAnswer(at: 1, labels: cardPrompts[1].options) == .text("Codex CLI, Claude"))
+    #expect(card.railAnswer(at: 2, labels: cardPrompts[2].options) == .text("Only on failure"))
+    #expect(card.toggling(1, at: 0).railAnswer(at: 0, labels: cardPrompts[0].options) == .option(1))
+    // A step that holds an answer is marked answered on the rail, whatever its position.
+    let steps = QuestionSteps.make(cardPrompts, current: card.current, viewed: 2, currentStatus: nil,
+                                   answeredWhenHeld: true) { card.railAnswer(at: $0, labels: cardPrompts[$0].options) }
+    #expect(steps.steps.map(\.state) == [.upcoming, .answered, .current])
+    #expect(steps.steps.map(\.summary) == [nil, "Codex CLI, Claude", "Only on failure"])
 }
 
 @Test func aSingleQuestionCallSendsAsBefore() {
