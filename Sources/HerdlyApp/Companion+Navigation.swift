@@ -38,16 +38,12 @@ extension Companion {
             && liveClaudeSessions.values.flatMap({ $0 }).filter({ $0 == identity.session }).count == 1
     }
 
-    /// Whether complete inventories list a Claude CLI session as live, under `canOpenClaude`'s inventory gate.
+    /// Whether complete inventories list a Claude CLI session as live, under `canOpenClaude`'s inventory
+    /// gate. A running background job counts as live (#393), though it is never offered Open here.
     func claudeInventoryPresence(_ identity: AgentSessionIdentity) -> ClaudeInventoryPresence {
-        guard let configuredScopes = configuredClaudeNavigationScopes(),
-              Set(liveClaudeSessions.keys) == configuredScopes,
-              Set(claudeInventoryAvailable.keys) == configuredScopes,
-              claudeInventoryAvailable.values.allSatisfy({ $0 }) else { return .unknown }
-        let everywhere = liveClaudeSessions.values.flatMap({ $0 }).filter({ $0 == identity.session }).count
-        if everywhere == 0 { return .absent }
-        let own = liveClaudeSessions[identity.sourceScope]?.filter({ $0 == identity.session }).count
-        return own == 1 && everywhere == 1 ? .live : .unknown
+        ClaudeInventoryPresence.of(session: identity.session, scope: identity.sourceScope,
+                                   listedByScope: listedClaudeSessions, inventoryAvailable: claudeInventoryAvailable,
+                                   configuredScopes: configuredClaudeNavigationScopes())
     }
 
     /// H7 for a Claude CLI card not offered Open (#280): "<app> isn't running." for the terminal app its

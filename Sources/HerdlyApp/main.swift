@@ -411,7 +411,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// this is not empty, even with nothing of theirs to show (#265).
     private(set) var codexSessionsAwaitingInventory: Set<UUID> = []
     /// Complete root inventories used to prove which canonical Claude sessions are live. Memory only.
+    /// Interactive sessions only: Open, visits, pops and pane binding target these, never a background job.
     var liveClaudeSessions: [String: [String]] = [:]
+    /// Every session a live Claude process holds, per root (`ClaudeInventoryScan.listedSessionIDs`):
+    /// interactive sessions and running background jobs (#393). Liveness only, for the ended line and
+    /// herdr's binding; never a target. Empty for an unavailable root. Memory only.
+    var listedClaudeSessions: [String: Set<String>] = [:]
     /// herdr monitor, hook pane records and latest scan (Companion+Herdr.swift).
     let herdr = HerdrSessionBindings()
     /// Terminal.app permission, scan, visits and Claude replies (Companion+TerminalApp.swift).
@@ -1465,6 +1470,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                     ? scan.sessions.filter { $0.kind == .interactive }.map(\.sessionID)
                     : [])
             })
+            listedClaudeSessions = Dictionary(uniqueKeysWithValues: result.7.filter {
+                configuredClaudeScopes.contains($0.sourceScope)
+            }.map { ($0.sourceScope, $0.listedSessionIDs) })
             claudeInventoryAvailable = Dictionary(uniqueKeysWithValues: result.7.filter {
                 configuredClaudeScopes.contains($0.sourceScope)
             }.map { ($0.sourceScope, $0.available) })
