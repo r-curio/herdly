@@ -264,3 +264,148 @@ private func runningPrompts(_ scan: ClaudeObservationScan) -> [String: String] {
     #expect(replay.events.count == 2)
     #expect(next.hookCache.merging(replay.cache).count == 2)
 }
+
+/// A fixed sequence, so a failure repeats.
+private struct SeededGenerator: RandomNumberGenerator {
+    var state: UInt64
+    mutating func next() -> UInt64 {
+        state = state &* 6364136223846793005 &+ 1442695040888963407
+        var value = state
+        value ^= value >> 33
+        value = value &* 0xff51afd7ed558ccd
+        value ^= value >> 33
+        return value
+    }
+}
+
+/// Sessions are built apart and kept between scans. Whatever arrives, leaves or is replaced, in any
+/// order and at any time, a scan carrying its cache must equal one from nothing and one that replays
+/// every record in a single pass.
+@Test(arguments: [1, 2, 3, 4] as [UInt64])
+func aScanBuiltSessionBySessionEqualsOneReplayOfEveryRecord(seed: UInt64) throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    var random = SeededGenerator(state: seed)
+    let sessions = ["s1", "s2", "s3", "s4"]
+    var prompts: [String: Int] = [:], tools: [String: [String]] = [:], agents: [String: [String]] = [:]
+    var files: [String] = []
+    var clock = 1_000.0, written = 0, cache = ClaudeRecordCache()
+
+    func record(_ session: String) -> [String: Any] {
+        // Mostly forward in time; now and then a record captured before ones already written.
+        let at = Int.random(in: 0..<8, using: &random) == 0 ? clock - Double.random(in: 1...40, using: &random) : clock
+        var record: [String: Any] = ["session_id": session, "captured_at": at]
+        let prompt = "p\(prompts[session] ?? 0)"
+        record["prompt_id"] = prompt
+        let open = tools[session] ?? [], running = agents[session] ?? []
+        switch Int.random(in: 0..<20, using: &random) {
+        case 0:
+            record["hook_event_name"] = "SessionStart"
+        case 1:
+            record["hook_event_name"] = "SessionEnd"
+        case 2, 3, 4:
+            prompts[session, default: 0] += 1
+            record["hook_event_name"] = "UserPromptSubmit"
+            record["prompt_id"] = "p\(prompts[session] ?? 0)"
+            record["prompt"] = "Prompt \(written)"
+        case 5, 6, 7, 8, 9:
+            let id = "t\(written)", name = ["Bash", "Read", "Edit"].randomElement(using: &random) ?? "Bash"
+            tools[session, default: []].append(id)
+            record["hook_event_name"] = "PreToolUse"
+            record["tool_use_id"] = id
+            record["tool_name"] = name
+            record["tool_input"] = name == "Bash" ? ["command": "run \(Int.random(in: 0..<3, using: &random))"] : ["file_path": "/tmp/f\(written)"]
+            if let agent = running.randomElement(using: &random), Bool.random(using: &random) { record["agent_id"] = agent }
+        case 10, 11, 12:
+            record["hook_event_name"] = Bool.random(using: &random) ? "PostToolUse" : "PostToolUseFailure"
+            record["tool_use_id"] = open.randomElement(using: &random) ?? "t-none"
+        case 13:
+            record["hook_event_name"] = "PostToolBatch"
+            record["tool_input"] = ["tool_use_ids": Array(open.suffix(2))]
+        case 14, 15:
+            record["hook_event_name"] = "PermissionRequest"
+            record["tool_name"] = "Bash"
+            record["tool_input"] = ["command": "run \(Int.random(in: 0..<3, using: &random))"]
+            record["approval_request_id"] = "a\(written)"
+        case 16:
+            record["hook_event_name"] = Bool.random(using: &random) ? "Stop" : "StopFailure"
+            record["last_assistant_message"] = "Done \(written)"
+        case 17, 18:
+            let agent = "g\(written)"
+            agents[session, default: []].append(agent)
+            record["hook_event_name"] = "SubagentStart"
+            record["agent_id"] = agent
+            record["agent_type"] = "Explore"
+        default:
+            record["hook_event_name"] = "SubagentStop"
+            record["agent_id"] = running.randomElement(using: &random) ?? "g-none"
+        }
+        return record
+    }
+
+    for step in 0..<200 {
+        // Sometimes seconds apart, sometimes past the freshness and full-check bounds.
+        clock += [0.5, 2, 2, 5, 12, 45].randomElement(using: &random) ?? 2
+        let session = sessions.randomElement(using: &random) ?? "s1"
+        switch Int.random(in: 0..<20, using: &random) {
+        case 0 where !files.isEmpty:
+            let index = Int.random(in: 0..<files.count, using: &random)
+            try FileManager.default.removeItem(at: root.appendingPathComponent(files.remove(at: index)))
+        case 1 where !files.isEmpty:
+            // Another record under a name already read: an atomic write gives it a new inode.
+            try writeClaudeRecord(record(session), named: files.randomElement(using: &random) ?? files[0], in: root)
+        case 2:
+            break   // Only time passes.
+        default:
+            let name = String(format: "r%04d.json", written)
+            try writeClaudeRecord(record(session), named: name, in: root)
+            files.append(name)
+        }
+        written += 1
+        let now = clock + Double.random(in: 0...3, using: &random)
+        let carried = ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install",
+                                                   now: now, cache: cache)
+        let reference = ClaudeObservationReader.referenceScan(events: root, sourceScope: root.path,
+                                                              installationID: "install", now: now)
+        #expect(carried.scan == reference, "step \(step), seed \(seed)")
+        #expect(carried.scan == ClaudeObservationReader.scan(events: root, sourceScope: root.path,
+                                                             installationID: "install", now: now),
+                "step \(step), seed \(seed)")
+        cache = carried.cache
+    }
+}
+
+@Test func aRecordAlreadyReadIsNotLookedAtAgainWhileItsNameKeepsItsInode() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try writeClaudeRecord(["hook_event_name": "UserPromptSubmit", "session_id": "a", "captured_at": 1,
+                           "prompt_id": "p1", "prompt": "First"], named: "a.json", in: root)
+    func scan(now: Double, cache: ClaudeRecordCache) -> (scan: ClaudeObservationScan, cache: ClaudeRecordCache) {
+        ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install", now: now, cache: cache)
+    }
+    let first = scan(now: 100, cache: ClaudeRecordCache())
+
+    // Rewritten in place, then another session's record arrives: the directory changed, but a.json
+    // keeps its inode, so until the next full check it is not looked at and "First" stands.
+    let path = root.appendingPathComponent("a.json")
+    let text = try String(contentsOf: path, encoding: .utf8).replacingOccurrences(of: "First", with: "Again")
+    let handle = try FileHandle(forWritingTo: path)
+    try handle.write(contentsOf: Data(text.utf8))
+    try handle.close()
+    try writeClaudeRecord(["hook_event_name": "UserPromptSubmit", "session_id": "b", "captured_at": 2,
+                           "prompt_id": "p1", "prompt": "Second"], named: "b.json", in: root)
+    let age = ClaudeObservationReader.maximumUncheckedAge
+    let trusted = scan(now: 100 + age - 1, cache: first.cache)
+    #expect(runningPrompts(trusted.scan) == ["a": "First", "b": "Second"])
+    // A third record does not push the full check back: it is due by the first scan's time.
+    try writeClaudeRecord(["hook_event_name": "UserPromptSubmit", "session_id": "c", "captured_at": 3,
+                           "prompt_id": "p1", "prompt": "Third"], named: "c.json", in: root)
+    let checked = scan(now: 100 + age, cache: trusted.cache)
+    #expect(runningPrompts(checked.scan) == ["a": "Again", "b": "Second", "c": "Third"])
+
+    // A replaced file has a new inode: read at once, with no wait for the full check.
+    try writeClaudeRecord(["hook_event_name": "UserPromptSubmit", "session_id": "b", "captured_at": 2,
+                           "prompt_id": "p1", "prompt": "Replaced"], named: "b.json", in: root)
+    #expect(runningPrompts(scan(now: 100 + age + 1, cache: checked.cache).scan)
+            == ["a": "Again", "b": "Replaced", "c": "Third"])
+}

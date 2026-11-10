@@ -25,11 +25,19 @@ public enum HookEventListing {
     /// `entries(in:)` with its `newestRecords`, worked out once per directory change rather than by
     /// every reader on every scan (#302).
     public static func listing(in directory: URL, limit: Int = maximumEntries) -> (entries: [URL], records: ArraySlice<URL>)? {
+        detailedListing(in: directory, limit: limit).map { ($0.entries, $0.records) }
+    }
+
+    /// `listing(in:)` with the inode the directory itself gives for each of `records`, in the same
+    /// order. A name replaced by another file has a new inode, so a reader can tell a record it has
+    /// already read from a replacement without looking at the file.
+    static func detailedListing(in directory: URL, limit: Int = maximumEntries)
+        -> (entries: [URL], records: ArraySlice<URL>, recordInodes: [UInt64])? {
         let stamp = FileStamp(directory, followingLinks: true)
         let key = directory.standardizedFileURL.path
         let previous = listings.entry(key)
         if let stamp, let previous, previous.stamp == stamp {
-            return previous.urls.count <= limit ? (previous.urls, previous.records) : nil
+            return previous.urls.count <= limit ? (previous.urls, previous.records, previous.recordInodes) : nil
         }
         guard let names = names(in: directory), names.count <= limit else { return nil }
         var dates: [String: Dated] = [:]
@@ -58,11 +66,13 @@ public enum HookEventListing {
             order = dates.values.sorted(by: Dated.older).map(\.name)
         }
         let ordered = order.compactMap { dates[$0]?.url }
-        let records = order.filter(isRecordName).compactMap { dates[$0]?.url }.suffix(maximumRecords)
+        let newest = order.filter(isRecordName).compactMap { dates[$0] }.suffix(maximumRecords)
+        let records = ArraySlice(newest.map(\.url)), recordInodes = newest.map(\.inode)
         if let stamp {
-            listings.store(ListingCache.Entry(stamp: stamp, urls: ordered, records: records, order: order, dates: dates), for: key)
+            listings.store(ListingCache.Entry(stamp: stamp, urls: ordered, records: records, recordInodes: recordInodes,
+                                              order: order, dates: dates), for: key)
         }
-        return (ordered, records)
+        return (ordered, records, recordInodes)
     }
 
     /// A `.json` record by name alone: `pathExtension` parses each URL, and listings hold thousands.
@@ -107,6 +117,8 @@ public enum HookEventListing {
             let stamp: FileStamp
             let urls: [URL]
             let records: ArraySlice<URL>
+            /// Each of `records`' inodes as the directory listed it, in the same order.
+            let recordInodes: [UInt64]
             /// `urls`' names, in the same order.
             let order: [String]
             let dates: [String: Dated]
