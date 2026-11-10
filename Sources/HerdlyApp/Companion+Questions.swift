@@ -142,10 +142,11 @@ extension Companion {
     }
 
     func canAnswerAgentQuestion(_ question: AgentQuestion) -> Bool {
-        if previewMode == "spotlight-claude-multiselect", question.helperRequestID == "preview-helper" { return true }
+        if previewMode == "spotlight-claude-multiselect" || previewMode == "spotlight-claude-steps",
+           question.helperRequestID == "preview-helper" { return true }
         if question.identity.session.source == .claude {
-            return liveClaudeQuestion(for: question) != nil && question.prompts.count == 1
-                && question.prompts.first?.question != nil
+            // One to four readable questions, answered as one set (#382).
+            return liveClaudeQuestion(for: question) != nil && ClaudeQuestionAnswerPolicy.answerable(question.prompts)
         }
         guard let current = codexQuestion(for: question) else { return false }
         return showsOptionControls(for: current)
@@ -171,7 +172,9 @@ extension Companion {
         return live
     }
 
-    func answerClaudeQuestion(_ question: AgentQuestion, kind: ClaudeQuestionAnswerKind, answer: String) {
+    /// Send on a Claude card: the call's whole answer set, one entry per question in order (#382).
+    /// The helper's policy refuses a partial or mismatched set, so nothing is written for one.
+    func answerClaudeQuestion(_ question: AgentQuestion, answers: [ClaudeQuestionAnswerEntry]) {
         if previewMode != nil {
             refresh()
             return
@@ -187,7 +190,7 @@ extension Companion {
                                           sessionID: live.request.sessionID,
                                           promptID: live.request.promptID,
                                           toolUseID: live.request.toolUseID,
-                                          kind: kind, answer: answer,
+                                          answers: answers,
                                           decidedAt: Date().timeIntervalSince1970)
         guard ClaudeQuestionAnswerPolicy.accepts(request: live.request, answer: record) else {
             refresh()

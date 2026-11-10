@@ -174,3 +174,74 @@ private func updatedAnswers(_ data: Data?) throws -> (answers: [String: String],
     #expect(ClaudeQuestionStore.publish(multiAnswer(for: late, completeSet, decidedAt: now + 5), in: lateDirectory))
     #expect(ClaudeQuestionHelper.awaitAnswer(for: late, in: lateDirectory, connectionTimeout: 0.2, answerTimeout: 0.2) == nil)
 }
+
+// MARK: The card's step-through selection (`ClaudeQuestionCallSelection`)
+
+private let cardPrompts = [
+    QuestionPrompt(header: "Format", question: "Which format?", options: ["CSV", "JSON lines (Recommended)"]),
+    QuestionPrompt(header: "Scope", question: "Which sessions?", options: ["Codex CLI", "Claude", "Codex app"],
+                   multiSelect: true),
+    QuestionPrompt(header: "Notify", question: "Notify you?", options: ["Yes", "No"])
+]
+
+@Test func pickingOnlySelectsAndNextKeepsTheAnswerWithoutSendingIt() {
+    var card = ClaudeQuestionCallSelection(prompts: cardPrompts)
+    #expect(card.current == 0)
+    #expect(card.primary(viewed: 0) == .next(enabled: false))
+    #expect(card.answers(prompts: cardPrompts) == nil)
+    // Next with nothing chosen is refused.
+    #expect(card.advancing(from: 0) == card)
+    card = card.toggling(1, at: 0)
+    #expect(card.primary(viewed: 0) == .next(enabled: true))
+    #expect(card.answers(prompts: cardPrompts) == nil)
+    card = card.advancing(from: 0)
+    #expect(card.current == 1)
+    #expect(card.selection(at: 0).options == [1])
+    #expect(card.railAnswer(at: 0, labels: cardPrompts[0].options) == .option(1))
+}
+
+@Test func laterStepsReadOnlyEarlierStepsRevisableUntilSend() {
+    var card = ClaudeQuestionCallSelection(prompts: cardPrompts).toggling(0, at: 0).advancing(from: 0)
+    // A later question can be read but not answered out of order.
+    #expect(!card.canSelect(question: 2))
+    #expect(card.toggling(0, at: 2) == card)
+    #expect(card.typing("Yes please", at: 2) == card)
+    #expect(card.primary(viewed: 2) == .send(enabled: false))
+    // An earlier question is revisable; its button steps on without changing anything.
+    #expect(card.canSelect(question: 0))
+    #expect(card.primary(viewed: 0) == .step(to: 1))
+    card = card.toggling(1, at: 0)
+    #expect(card.selection(at: 0).options == [1])
+    // Choose-several ticks as today.
+    card = card.toggling(0, at: 1).toggling(1, at: 1)
+    #expect(card.railAnswer(at: 1, labels: cardPrompts[1].options) == .text("Codex CLI, Claude"))
+    card = card.advancing(from: 1)
+    #expect(card.primary(viewed: 2) == .send(enabled: false))
+    card = card.typing("Only on failure", at: 2)
+    #expect(card.primary(viewed: 2) == .send(enabled: true))
+    #expect(card.answers(prompts: cardPrompts) == [
+        ClaudeQuestionAnswerEntry(kind: .option, answer: "JSON lines (Recommended)"),
+        ClaudeQuestionAnswerEntry(kind: .multiSelect, answer: "Codex CLI, Claude"),
+        ClaudeQuestionAnswerEntry(kind: .text, answer: "Only on failure")
+    ])
+    // Emptying an earlier answer leaves a partial set, which is never sent.
+    let emptied = card.toggling(0, at: 1).toggling(1, at: 1)
+    #expect(emptied.primary(viewed: 2) == .send(enabled: false))
+    #expect(emptied.answers(prompts: cardPrompts) == nil)
+    // A typed answer replaces options and vice versa, per question.
+    let typed = card.typing("All of them", at: 1)
+    #expect(typed.selection(at: 1).options.isEmpty)
+    #expect(typed.answers(prompts: cardPrompts)?[1] == ClaudeQuestionAnswerEntry(kind: .text, answer: "All of them"))
+}
+
+@Test func aSingleQuestionCallSendsAsBefore() {
+    let prompt = [QuestionPrompt(header: nil, question: "Ship?", options: ["Yes", "No"])]
+    let card = ClaudeQuestionCallSelection(prompts: prompt)
+    #expect(card.primary(viewed: 0) == .send(enabled: false))
+    let picked = card.toggling(0, at: 0)
+    #expect(picked.primary(viewed: 0) == .send(enabled: true))
+    #expect(picked.advancing(from: 0) == picked)
+    #expect(picked.answers(prompts: prompt) == [ClaudeQuestionAnswerEntry(kind: .option, answer: "Yes")])
+    // Answers checked against a different call's questions are refused.
+    #expect(picked.answers(prompts: cardPrompts) == nil)
+}
