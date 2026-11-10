@@ -11,6 +11,28 @@ public enum RefreshCadence {
     }
 }
 
+/// How often the scheduled herdr scan runs while its gate holds (ADR 0009). Every two seconds while
+/// its result can matter within seconds: a terminal app is frontmost (a pane can be visited, ADR 0016),
+/// Herdly is in use (a row may be opened), or something waits for the user (a visit may acknowledge
+/// it). Otherwise every ten: nobody is looking at a pane or a row. The rule is asked again each time
+/// the two-second hook scan completes, so once any of the three turns true the next of those scans
+/// herdr if two seconds have passed since the last. An Open or relay never waits for this: it revalidates with its own fresh read.
+public enum HerdrScanCadence {
+    public static let near: Double = 2
+    public static let away: Double = 10
+
+    public static func interval(terminalFrontmost: Bool, herdlyInUse: Bool, needsUser: Bool) -> Double {
+        terminalFrontmost || herdlyInUse || needsUser ? near : away
+    }
+
+    /// Whether a scan is due at the monotonic `now`: none has started since the gate opened, or the
+    /// last one started `interval` ago.
+    public static func isDue(lastStartedAt: Double?, now: Double, interval: Double) -> Bool {
+        guard let lastStartedAt else { return true }
+        return now - lastStartedAt >= interval
+    }
+}
+
 /// Which hosts one shared scheduled tab read serves (#301). Every scheduled read already reads
 /// every enabled host, so when any eligible host is due, all eligible hosts take the same read and
 /// move to one clock. A host that is scanning, gated off, or has nothing to bind is not eligible.

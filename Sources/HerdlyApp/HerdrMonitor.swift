@@ -1,7 +1,8 @@
 import Foundation
 import HerdlyCore
 
-/// Polls herdr on the 2-second scan, and only while the gate in ADR 0009 holds: herdr's switch
+/// Polls herdr on the scheduled scan at `HerdrScanCadence`'s interval (two seconds, ten while nothing
+/// can use the result sooner), and only while the gate in ADR 0009 holds: herdr's switch
 /// allows contact (`TerminalHostSwitches.mayContact(.herdr)`) and either a live Claude Code session's newest Herdly hook event recorded
 /// a `HERDR_PANE_ID` or a live or daemon-loaded Codex terminal session exists beside a known Ghostty inventory while herdr's
 /// default socket is trusted (ADR 0012). Outside the gate Herdly does not contact herdr and the
@@ -13,8 +14,6 @@ import HerdlyCore
 /// immediately before any focus or key rather than trusting `latest`.
 @MainActor
 final class HerdrMonitor {
-    static let scanInterval: Double = 2
-
     /// The most recent scan's outcome while the gate holds; nil before the first scan and whenever
     /// the gate is closed.
     private(set) var latest: HerdrScanOutcome?
@@ -24,7 +23,8 @@ final class HerdrMonitor {
     var onScan: ((HerdrScanOutcome) -> Void)?
 
     private let scanner: @Sendable (HerdrScanRequest) -> HerdrScanOutcome
-    private var nextScan: Double = 0
+    /// When the last scheduled scan started (monotonic); nil since the gate last opened.
+    private var lastStartedAt: Double?
     private var inFlight = false
     /// Bumped whenever the gate closes, so a scan that finishes afterwards is discarded.
     private var generation = 0
@@ -39,11 +39,13 @@ final class HerdrMonitor {
     }
 
     /// Called on every refresh with the monotonic `now` in seconds. Starts a scan reading `request`
-    /// when the gate is open, none is in flight, and the interval has passed, and returns its task
-    /// so callers and tests can await completion; otherwise nil.
+    /// when the gate is open, none is in flight, and `interval` has passed since the last one
+    /// started, and returns its task so callers and tests can await completion; otherwise nil.
+    /// `interval` is read on every call, so a shorter one takes effect on the next call.
     @discardableResult
     func tick(now: Double, herdrEnabled: Bool, herdrPaneIDs: Set<String>, codexGate: Bool = false,
-              request: HerdrScanRequest = HerdrScanRequest()) -> Task<Void, Never>? {
+              request: HerdrScanRequest = HerdrScanRequest(),
+              interval: Double = HerdrScanCadence.near) -> Task<Void, Never>? {
         let gate = HerdrBindingInputs.allowsContact(herdrEnabled: herdrEnabled, paneIDs: herdrPaneIDs,
                                                     codexGate: codexGate)
         guard gate else {
@@ -51,15 +53,15 @@ final class HerdrMonitor {
                 generation += 1
                 latest = nil
                 latestStartedAt = nil
-                nextScan = 0
+                lastStartedAt = nil
             }
             isGateOpen = false
             return nil
         }
         isGateOpen = true
-        guard !inFlight, now >= nextScan else { return nil }
+        guard !inFlight, HerdrScanCadence.isDue(lastStartedAt: lastStartedAt, now: now, interval: interval) else { return nil }
         inFlight = true
-        nextScan = now + Self.scanInterval
+        lastStartedAt = now
         let generation = generation, scanner = scanner
         return Task { [weak self] in
             let outcome = await Task.detached(priority: .utility) { scanner(request) }.value

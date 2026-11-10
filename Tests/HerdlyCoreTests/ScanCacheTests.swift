@@ -137,6 +137,72 @@ private func runningPrompts(_ scan: ClaudeObservationScan) -> [String: String] {
     #expect(pruned.cache.count == 1)
 }
 
+@Test func anUnchangedClaudeDirectoryIsNotRecheckedUntilTheLastCheckIsOld() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try writeClaudeRecord(["hook_event_name": "UserPromptSubmit", "session_id": "a", "captured_at": 1,
+                           "prompt_id": "p1", "prompt": "First"], named: "a.json", in: root)
+    func scan(now: Double, cache: ClaudeRecordCache) -> (scan: ClaudeObservationScan, cache: ClaudeRecordCache) {
+        ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install",
+                                     now: now, cache: cache)
+    }
+    let first = scan(now: 100, cache: ClaudeRecordCache())
+    #expect(runningPrompts(first.scan) == ["a": "First"])
+
+    // Rewritten in place: the file's stamp changes, the directory's does not.
+    let directory = try #require(FileStamp(root, followingLinks: true))
+    let path = root.appendingPathComponent("a.json")
+    let text = try String(contentsOf: path, encoding: .utf8).replacingOccurrences(of: "First", with: "Again")
+    let handle = try FileHandle(forWritingTo: path)
+    try handle.write(contentsOf: Data(text.utf8))
+    try handle.close()
+    #expect(FileStamp(root, followingLinks: true) == directory)
+
+    let age = ClaudeObservationReader.maximumUncheckedAge
+    let unchecked = scan(now: 100 + age - 1, cache: first.cache)
+    #expect(unchecked.scan == first.scan)
+    // The bound: once the last full check is that old, every file is checked again.
+    let checked = scan(now: 100 + age, cache: unchecked.cache)
+    #expect(runningPrompts(checked.scan) == ["a": "Again"])
+    // A clock that went back is not trusted either.
+    let rewound = scan(now: 50, cache: first.cache)
+    #expect(runningPrompts(rewound.scan) == ["a": "Again"])
+
+    // A new record changes the directory's stamp, so it is read on the very next scan.
+    try writeClaudeRecord(["hook_event_name": "UserPromptSubmit", "session_id": "b", "captured_at": 2,
+                           "prompt_id": "p1", "prompt": "Second"], named: "b.json", in: root)
+    let added = scan(now: 100 + age + 1, cache: checked.cache)
+    #expect(runningPrompts(added.scan) == ["a": "Again", "b": "Second"])
+}
+
+@Test func aCachedClaudeScanStillAgesItsToolCalls() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try writeClaudeRecord(["hook_event_name": "UserPromptSubmit", "session_id": "a", "captured_at": 100,
+                           "prompt_id": "p1", "prompt": "Build"], named: "a.json", in: root)
+    try writeClaudeRecord(["hook_event_name": "PreToolUse", "session_id": "a", "captured_at": 105,
+                           "prompt_id": "p1", "tool_name": "Bash", "tool_use_id": "t1",
+                           "tool_input": ["command": "swift test"]], named: "b.json", in: root)
+    func toolName(_ scan: ClaudeObservationScan) -> String? {
+        scan.observations.compactMap { observation -> String? in
+            guard case let .running(value) = observation else { return nil }
+            return value.toolName
+        }.first
+    }
+    let fresh = ClaudeObservationReader.maximumToolFreshness
+    var cache = ClaudeRecordCache()
+    // Before the call, while it is fresh, at the boundary, just past it, and long after: the cached
+    // scan of the unchanged directory always equals a scan from nothing at the same time.
+    for now in [104, 106, 105 + fresh, 105 + fresh + 0.5, 105 + fresh + 1, 105 + fresh + 20] {
+        let cached = ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install",
+                                                  now: now, cache: cache)
+        #expect(cached.scan == ClaudeObservationReader.scan(events: root, sourceScope: root.path,
+                                                            installationID: "install", now: now))
+        #expect((toolName(cached.scan) == "Bash") == (now >= 105 && now <= 105 + fresh))
+        cache = cached.cache
+    }
+}
+
 @Test func claudeRecordCacheResetsForAnotherInstallationAndNeverFollowsLinks() throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import HerdlyCore
 
@@ -151,7 +152,7 @@ extension Companion {
     /// Called once per completed hook scan. Reads the newest hook records and checks herdr's
     /// default socket off the main actor, then ticks the monitor with herdr's switch, the pane IDs
     /// of live Claude sessions' newest events, and the Codex half of the gate (ADR 0012). The monitor
-    /// contacts herdr only when the gate holds.
+    /// contacts herdr only when the gate holds, and no more often than `HerdrScanCadence` allows.
     func scanHerdr() {
         guard previewMode == nil, !CommandLine.arguments.contains("--smoke-test"), !herdr.reading else { return }
         let live = herdrLiveSessions()
@@ -200,7 +201,11 @@ extension Companion {
         monitor.tick(now: ProcessInfo.processInfo.systemUptime, herdrEnabled: herdrContactAllowed,
                      herdrPaneIDs: paneIDs, codexGate: codexGate,
                      request: HerdrBindingInputs.scanRequest(paneIDs: paneIDs, codex: codex,
-                                                             clientHostCommands: herdrClientHostCommands))
+                                                             clientHostCommands: herdrClientHostCommands),
+                     interval: HerdrScanCadence.interval(
+                        terminalFrontmost: TerminalApps.frontmostHost() != nil,
+                        herdlyInUse: presentationMode != .collapsed || NSApp.isActive,
+                        needsUser: toCheckCount > 0))
         publishHerdrScan(monitor.latest)
     }
 
