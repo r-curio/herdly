@@ -109,6 +109,34 @@ public enum ClaudeObservationReader {
         let toolInput: [String: Any]
         /// What the helper validated and bounded for a decidable non-Bash request (ClaudeDirectApproval).
         let approvalDetails: ApprovalDetails?
+        /// Which subagent the event belongs to (`agent_id`), if any.
+        let agent: Agent
+        /// The subagent's `agent_type`, nil when missing or malformed.
+        let agentType: String?
+    }
+
+    /// A record's `agent_id`: absent for the session's own events; `invalid` when present but malformed
+    /// or oversized, so the event is still kept off the session's own "now" without naming a subagent.
+    fileprivate enum Agent: Equatable, Sendable {
+        case none
+        case invalid
+        case id(String)
+
+        init(_ value: Any?) {
+            guard let value else { self = .none; return }
+            guard let text = ClaudeObservationReader.valid(value as? String) else { self = .invalid; return }
+            self = .id(text)
+        }
+
+        var isSubagent: Bool { self != .none }
+        var id: String? { if case let .id(value) = self { return value }; return nil }
+    }
+
+    private struct Subagent {
+        let id: String
+        let type: String?
+        let startedAt: Double
+        var tools: [String: Tool]
     }
 
     private struct Tool {
@@ -121,6 +149,8 @@ public enum ClaudeObservationReader {
         /// A Bash call's exact command as the helper recorded it, unshortened, so a permission request
         /// can be matched to its own call while parallel subagents run other Bash calls in the same turn.
         var command: String? = nil
+        /// The call ran inside a subagent, so it is never the session's own "now".
+        var inSubagent = false
     }
 
     private struct Turn {
@@ -187,6 +217,18 @@ public enum ClaudeObservationReader {
         var seenApprovals = Set<AgentCallIdentity>()
         var seenQuestions = Set<AgentCallIdentity>()
         var latestSessionStartAt: Double?
+        // Each session's running subagents by agent id, listed flat however deeply they nest.
+        var subagents: [String: [String: Subagent]] = [:]
+        func finishSubagentCalls(_ ids: [String], of record: Record) {
+            guard var running = subagents[record.session] else { return }
+            for (agent, var subagent) in running {
+                for id in ids where (subagent.tools[id]?.at ?? .infinity) <= record.capturedAt {
+                    subagent.tools.removeValue(forKey: id)
+                }
+                running[agent] = subagent
+            }
+            subagents[record.session] = running
+        }
 
         for record in records {
             switch record.event {
@@ -194,7 +236,15 @@ public enum ClaudeObservationReader {
                 latestSessionStartAt = max(latestSessionStartAt ?? record.capturedAt, record.capturedAt)
                 endedSessions.remove(record.session)
                 sessionEndAt.removeValue(forKey: record.session)
+            case "SubagentStart":
+                guard let agent = record.agent.id, subagents[record.session]?[agent] == nil else { continue }
+                subagents[record.session, default: [:]][agent] = Subagent(id: agent, type: record.agentType,
+                                                                          startedAt: record.capturedAt, tools: [:])
+            case "SubagentStop":
+                guard let agent = record.agent.id else { continue }
+                subagents[record.session]?.removeValue(forKey: agent)
             case "SessionEnd":
+                subagents.removeValue(forKey: record.session)
                 endedSessions.insert(record.session)
                 sessionEndAt[record.session] = max(sessionEndAt[record.session] ?? -.infinity,
                                                    record.capturedAt)
@@ -261,6 +311,12 @@ public enum ClaudeObservationReader {
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
+                let input = stringInput(record.toolInput)
+                let tool = Tool(id: toolID, name: name, input: input, at: record.capturedAt,
+                                target: ClaudeDirectApproval.target(toolName: name, toolInput: record.toolInput),
+                                command: name == "Bash" ? record.toolInput["command"] as? String : nil,
+                                inSubagent: record.agent.isSubagent)
+                if let agent = record.agent.id { subagents[record.session]?[agent]?.tools[toolID] = tool }
                 guard var turn = turns[turnID] else { continue }
                 if let closedAt = turn.closedAt {
                     guard record.capturedAt > closedAt else { continue }
@@ -273,12 +329,9 @@ public enum ClaudeObservationReader {
                     endedSessions.remove(record.session)
                     sessionEndAt.removeValue(forKey: record.session)
                 }
-                let input = stringInput(record.toolInput)
-                let tool = Tool(id: toolID, name: name, input: input, at: record.capturedAt,
-                                target: ClaudeDirectApproval.target(toolName: name, toolInput: record.toolInput),
-                                command: name == "Bash" ? record.toolInput["command"] as? String : nil)
+                // Every call stays matchable for approvals; only the session's own call is its "now".
                 turn.tools[toolID] = tool
-                turn.tool = tool
+                if !tool.inSubagent { turn.tool = tool }
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
                 if name == "AskUserQuestion", let question = question(from: record, identity: identity,
                                                                          turn: promptID, at: record.capturedAt) {
@@ -291,15 +344,14 @@ public enum ClaudeObservationReader {
                 turns[turnID] = turn
             case "PostToolUse", "PostToolUseFailure":
                 guard let promptID = valid(record.promptID), let toolID = valid(record.toolUseID) else { continue }
+                finishSubagentCalls([toolID], of: record)
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
                 guard var turn = turns[turnID], let tool = turn.tools[toolID],
                       tool.at <= record.capturedAt else { continue }
                 turn.tools.removeValue(forKey: toolID)
-                turn.tool = turn.tools.values.max { lhs, rhs in
-                    lhs.at == rhs.at ? lhs.id < rhs.id : lhs.at < rhs.at
-                }
+                turn.tool = sessionTool(turn.tools)
                 if turn.question?.identity.call == toolID { turn.question = nil }
                 if turn.approval?.identity.call == toolID { turn.approval = nil }
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
@@ -310,6 +362,7 @@ public enum ClaudeObservationReader {
                 let ids = record.toolInput["tool_use_ids"] as? [String]
                     ?? (record.toolInput["tool_uses"] as? [[String: Any]] ?? []).compactMap { $0["tool_use_id"] as? String }
                 guard !ids.isEmpty else { continue }
+                finishSubagentCalls(ids, of: record)
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
@@ -317,9 +370,7 @@ public enum ClaudeObservationReader {
                 let matching = turn.tools.values.filter { ids.contains($0.id) && $0.at <= record.capturedAt }
                 guard !matching.isEmpty else { continue }
                 for tool in matching { turn.tools.removeValue(forKey: tool.id) }
-                turn.tool = turn.tools.values.max { lhs, rhs in
-                    lhs.at == rhs.at ? lhs.id < rhs.id : lhs.at < rhs.at
-                }
+                turn.tool = sessionTool(turn.tools)
                 if let question = turn.question, matching.contains(where: { $0.id == question.identity.call }) {
                     turn.question = nil
                 }
@@ -356,6 +407,7 @@ public enum ClaudeObservationReader {
                                               hookRequestID: record.hookRequestID)
                 turns[turnID] = turn
             case "StopFailure":
+                subagents.removeValue(forKey: record.session)
                 guard let promptID = valid(record.promptID) else { continue }
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
@@ -374,7 +426,9 @@ public enum ClaudeObservationReader {
                 turns[turnID] = turn
             case "Stop":
                 // Stop can continue into another prompt. It clears a stale tool label but never
-                // becomes Finished without the later inventory confirmation slice.
+                // becomes Finished without the later inventory confirmation slice. A turn's end ends
+                // its session's subagents.
+                subagents.removeValue(forKey: record.session)
                 guard let promptID = valid(record.promptID) else { continue }
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
@@ -412,16 +466,14 @@ public enum ClaudeObservationReader {
             if let terminal = turn.terminal {
                 result.append(.outcome(terminal))
             } else {
-                let freshTool = turn.tool.flatMap { tool -> Tool? in
-                    guard now.isFinite, tool.at.isFinite, tool.at <= now,
-                          now - tool.at <= maximumToolFreshness else { return nil }
-                    return tool
-                }
+                let freshTool = turn.tool.flatMap { fresh($0, now: now) }
+                let activity = isCurrentPrompt ? subagentActivity(subagents[turn.session] ?? [:], now: now) : []
                 result.append(.running(AgentRunning(session: identity, turn: turn.prompt, arrivedAt: turn.startedAt,
                                                     updatedAt: turn.updatedAt,
                                                     prompt: turn.promptText, promptShortened: turn.promptShortened,
                                                     toolName: freshTool?.name,
-                                                    toolInput: freshTool?.input ?? [:])))
+                                                    toolInput: freshTool?.input ?? [:],
+                                                    subagents: activity)))
                 if let question = turn.question { result.append(.question(question)) }
                 if let approval = turn.approval { result.append(.approval(approval)) }
             }
@@ -443,6 +495,34 @@ public enum ClaudeObservationReader {
         }
         return (ClaudeObservationScan(sourceScope: scope, observations: observations, results: results,
                                       latestSessionStartAt: latestSessionStartAt), next)
+    }
+
+    /// The session's own latest uncompleted call; a subagent's call never is.
+    private static func sessionTool(_ tools: [String: Tool]) -> Tool? {
+        tools.values.filter { !$0.inSubagent }.max { lhs, rhs in
+            lhs.at == rhs.at ? lhs.id < rhs.id : lhs.at < rhs.at
+        }
+    }
+
+    /// `tool` while it is within `maximumToolFreshness` of `now`.
+    private static func fresh(_ tool: Tool, now: Double) -> Tool? {
+        guard now.isFinite, tool.at.isFinite, tool.at <= now, now - tool.at <= maximumToolFreshness else { return nil }
+        return tool
+    }
+
+    /// One session's running subagents, oldest first, named by type in start order, each with its
+    /// latest fresh uncompleted call as the "now" line.
+    private static func subagentActivity(_ running: [String: Subagent], now: Double) -> [SubagentActivity] {
+        let ordered = running.values.sorted { $0.startedAt == $1.startedAt ? $0.id < $1.id : $0.startedAt < $1.startedAt }
+        let names = SubagentActivity.names(ordered.map { (id: $0.id, base: $0.type) })
+        return ordered.map { subagent in
+            let latest = subagent.tools.values.max { lhs, rhs in
+                lhs.at == rhs.at ? lhs.id < rhs.id : lhs.at < rhs.at
+            }.flatMap { fresh($0, now: now) }
+            return SubagentActivity(id: subagent.id, name: names[subagent.id] ?? SubagentActivity.unnamed,
+                                    startedAt: subagent.startedAt,
+                                    latestAction: latest.flatMap { RunningRowDetails.now(toolName: $0.name, toolInput: $0.input) })
+        }
     }
 
     private static func record(at url: URL, installationID: String, observingSince: Double) -> Record? {
@@ -468,7 +548,8 @@ public enum ClaudeObservationReader {
                       helperRequestID: valid(object["helper_request_id"] as? String),
                       hookRequestID: valid(object["approval_request_id"] as? String),
                       toolInput: object["tool_input"] as? [String: Any] ?? [:],
-                      approvalDetails: approvalDetails(object["approval_details"]))
+                      approvalDetails: approvalDetails(object["approval_details"]),
+                      agent: Agent(object["agent_id"]), agentType: bounded(object["agent_type"] as? String))
     }
 
     /// The helper's display details for a decidable file or web request, re-bounded: an action, an absolute
@@ -504,7 +585,7 @@ public enum ClaudeObservationReader {
         }
     }
 
-    private static func valid(_ value: String?) -> String? {
+    fileprivate static func valid(_ value: String?) -> String? {
         guard let value = bounded(value), !value.isEmpty else { return nil }
         return value
     }
