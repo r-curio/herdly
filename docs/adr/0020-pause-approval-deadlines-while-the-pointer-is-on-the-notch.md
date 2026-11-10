@@ -24,6 +24,16 @@ Agreed with the user. A Claude question on the notch was handed back to Claude a
 - **Countdown.** The Claude question card and its queue row show "Ns left", standing still while held, with the approval countdown's styling and spoken label. Expiry sends nothing and leaves Claude's native question authoritative; nothing is ever answered on a timer.
 - **Considered.** A separate question hold rule and store were rejected as duplicates of the approval ones; keeping the 10-second window with no countdown was the status quo the user asked to change.
 
+## Amendment 2026-11-10: a missed scan keeps the receipt and the hold (#385)
+
+A live Claude question could stay read-only for its whole window. One scan that did not list it dropped its answer token. On the rescan, a fresh receipt could not replace this companion's own receipt on disk, so the token was never issued again. Fixed by keeping this running companion's own record across a missed scan:
+
+- **Receipts.** `ClaudeQuestionReceiptLedger`, in process memory only, records each receipt this companion issued. On a rescan, the exact same receipt on disk is re-adopted. A receipt from a previous launch or another process, or any mismatch in installation, root, event directory or window, is never adopted. "A receipt issued by this running companion" still holds.
+- **Holds.** A question's hover hold survives a missed scan until its own deadline. It is still never past 2 minutes from publish. Re-adoption and the receipt result use the held deadline, so a question pruned after its 30 seconds while held becomes answerable again on the rescan. Only the seconds of the scan gap count down.
+- **Spent tokens.** Spent marks keep their own timestamp and last the helper's wait bound (121 s) from the spend, so re-adoption never re-grants an answered call.
+- **Rule.** `ClaudeQuestionCapabilities` (HerdlyCore) owns listing, pruning, receipts, holds and spend as one pure value. The app applies it.
+- **Considered.** Keeping a question through one missed scan was rejected because it needs scan timestamps and changes the drop rules. Re-adoption alone would have left a held question stuck after 30 seconds.
+
 ## Considered options
 
 - **Keep the fixed 30 seconds.** This was the default recommendation, and the user chose the hold instead.
