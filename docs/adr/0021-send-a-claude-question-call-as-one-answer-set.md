@@ -15,3 +15,7 @@ Accepted on 2026-11-10, with the user's agreement on the design (Paper artboard 
 - **Always write the old fields.** Rejected: an older helper would read the first answer of a multi-question set and could send a partial answer.
 - **Send each question as it is answered.** Rejected: Claude's hook output takes the whole call at once, and the product rule is that a partial set is never sent.
 - **Reuse the Codex daemon's progress model.** Rejected for the selection state: it cannot hold a choose-several answer, and widening it would touch every Codex answer path. The Claude card reuses Codex's step rail and Next/Send rule (`QuestionCardPrimary`) instead.
+
+## Amendment, 2026-11-10 (#388)
+
+Agreed with the user after a live report: a Claude card is answered in any order (Paper "G · Claude: answer several questions", step 2 and the "One send" rule). Every question is selectable at any time, however the card reached it; Next only moves on. "One set, one send" is unchanged: Send on the last question is enabled only for a complete set and writes it once, in question order, and the helper's in-order check still applies to the record. The Claude card therefore no longer follows Codex's answering-position rule (`QuestionCardPrimary.make`); `ClaudeQuestionCallSelection.primary` gives Next or Send directly, and Codex cards are unchanged because key routes must type digits in order.

@@ -1208,7 +1208,7 @@ struct Notch: View {
         claudeSelections[questionViewStateKey(question, 0)] ?? ClaudeQuestionCallSelection(prompts: question.prompts)
     }
 
-    /// The Claude card's viewed question: the one being answered unless the user stepped elsewhere.
+    /// The Claude card's viewed question: where Next last moved on to unless the user stepped elsewhere.
     private func claudeViewed(_ question: AgentQuestion) -> Int {
         viewedQuestion(question, current: claudeCall(question).current, count: question.prompts.count)
     }
@@ -1224,9 +1224,10 @@ struct Notch: View {
                 set: { claudeSelections[questionViewStateKey(question, 0)] = claudeCall(question).typing($0, at: index) })
     }
 
-    /// The Claude card's answering button (#382): Next keeps the answer here and shows the next
-    /// question; Send hands the whole set to the live helper's own checks (`answerClaudeQuestion`);
-    /// a step on only changes the view. Nothing is sent before Send, and never a partial set.
+    /// The Claude card's answering button (#382, #388): Next shows the next question, keeping every
+    /// selection; Send hands the whole set to the live helper's own checks (`answerClaudeQuestion`).
+    /// Any question is answerable in any order, so Next never unlocks one. Nothing is sent before
+    /// Send, and never a partial set.
     private func performClaude(_ primary: QuestionCardPrimary, _ question: AgentQuestion) {
         let key = questionViewStateKey(question, 0)
         let call = claudeCall(question)
@@ -1665,8 +1666,9 @@ struct Notch: View {
     }
 
     /// A Claude card: the call answered through the live helper on the same step-through card as a
-    /// Codex daemon call (#382): select (ticks for multi-select) or type, Next keeps the answer here,
-    /// Send on the last question sends the whole set. Otherwise read-only references.
+    /// Codex daemon call (#382): select (ticks for multi-select) or type on any question, in any order
+    /// (#388); Next moves on, Send on the last question sends the whole set once every question has an
+    /// answer. Otherwise read-only references.
     @ViewBuilder
     private func claudeQuestionCard(_ question: AgentQuestion, subject: String) -> some View {
         let tone = spriteColor(for: question.identity.session)
@@ -1679,7 +1681,8 @@ struct Notch: View {
             let viewed = claudeViewed(question)
             let prompt = question.prompts[viewed]
             let canSelect = call.canSelect(question: viewed)
-            questionHead(question.prompts, question: question, current: call.current, viewed: viewed) { index in
+            questionHead(question.prompts, question: question, current: call.current, viewed: viewed,
+                         answeredWhenHeld: true) { index in
                 call.railAnswer(at: index, labels: question.prompts[index].options)
             }
             if let text = prompt.question { questionText(text) }
@@ -1693,7 +1696,7 @@ struct Notch: View {
                     }
                     .disabled(!canSelect)
                     .accessibilityLabel("\(prompt.multiSelect ? "Tick" : "Select") \(option + 1): \(label), for \(subject)")
-                    .accessibilityHint(canSelect ? "Nothing is sent until Send." : "Reference only until earlier questions are answered.")
+                    .accessibilityHint("Nothing is sent until Send.")
                 }
             }
             QuestionTypedField(placeholder: prompt.options.isEmpty ? "Type your answer" : "Or type an answer",
@@ -1730,10 +1733,11 @@ struct Notch: View {
 
     @ViewBuilder
     private func questionHead(_ prompts: [QuestionPrompt], question: AgentQuestion, current: Int, viewed: Int,
-                              sentKeys: Bool = false, answer: (Int) -> ChosenAnswer?) -> some View {
+                              sentKeys: Bool = false, answeredWhenHeld: Bool = false,
+                              answer: (Int) -> ChosenAnswer?) -> some View {
         if prompts.count > 1 {
             let steps = QuestionSteps.make(prompts, current: current, viewed: viewed, currentStatus: nil,
-                                           sentKeys: sentKeys, answer: answer)
+                                           sentKeys: sentKeys, answeredWhenHeld: answeredWhenHeld, answer: answer)
             QuestionStepRail(steps: steps.steps) { showQuestion($0, of: question) }
         } else if let only = prompts.first, only.header?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
             Text(QuestionSteps.label(only, index: 0)).font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.dim)

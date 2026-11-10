@@ -116,16 +116,20 @@ public struct ClaudeQuestionSelection: Equatable, Sendable {
     private func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 }
 
-/// A Claude call's answers as the user composes them on the step-through card (#382): one
-/// `ClaudeQuestionSelection` per question and the question being answered. Picking or typing only
-/// selects; Next keeps the answer here and moves on; Send on the last question hands the whole set
-/// to the helper at once, and only a complete set. Earlier questions stay revisable until Send;
-/// later ones can be read but not answered out of order. A one-question call is the same card with
-/// Send at once. View state only; never persisted, and the helper's own policy still judges the set.
+/// A Claude call's answers as the user composes them on the step-through card (#382, #388): one
+/// `ClaudeQuestionSelection` per question. Every question can be selected or typed at any time, in
+/// any order, however the card reached it (arrows, step names or Next); picking or typing only
+/// selects. Next only moves the card on to the next question. Send on the last question hands the
+/// whole set to the helper at once, in question order, and only a complete set. A one-question call
+/// is the same card with Send at once. View state only; never persisted, and the helper's own policy
+/// still judges the set. Unlike a Codex card this has no answering position: Codex key routes type
+/// digits in order, a Claude call is one hook output (ADR 0021, amended by #388).
 public struct ClaudeQuestionCallSelection: Equatable, Sendable {
     private let optionCounts: [Int]
     private var selections: [ClaudeQuestionSelection]
-    /// The question being answered (zero-based); earlier ones hold kept answers.
+    /// The question the card shows unless the user stepped elsewhere (zero-based): the first, then
+    /// wherever Next last moved on to. It gates nothing; any question is answerable (#388). It is not
+    /// "the first unanswered question", because that would move the view while the user selects.
     public private(set) var current: Int = 0
 
     public init(prompts: [QuestionPrompt]) {
@@ -140,9 +144,9 @@ public struct ClaudeQuestionCallSelection: Equatable, Sendable {
         selections.indices.contains(index) ? selections[index] : ClaudeQuestionSelection(multiSelect: false)
     }
 
-    /// The question being answered or an earlier, kept one.
+    /// Any question of the call, in any order (#388); never one beyond it.
     public func canSelect(question index: Int) -> Bool {
-        index >= 0 && index <= current && index < count
+        selections.indices.contains(index)
     }
 
     /// A click on option `option` of question `index` (`ClaudeQuestionSelection.toggling`).
@@ -161,26 +165,26 @@ public struct ClaudeQuestionCallSelection: Equatable, Sendable {
         return next
     }
 
-    /// Next: keeps the answering question's selection and moves on. Sends nothing; refused on the
-    /// last question, from any other question, or while nothing is selected.
+    /// Next from question `index`: moves the card on to the following question, keeping every
+    /// selection. Sends nothing and unlocks nothing; refused on the last question.
     public func advancing(from index: Int) -> ClaudeQuestionCallSelection {
-        guard index == current, index + 1 < count, selections[index].canSend else { return self }
+        guard index >= 0, index + 1 < count else { return self }
         var next = self
         next.current = index + 1
         return next
     }
 
-    /// The card's answering button for the viewed question, as on a Codex daemon card: Next before
-    /// the last question, Send on it (enabled only for a complete set), a step on while reviewing.
+    /// The card's answering button for the viewed question (#388): Next before the last question,
+    /// enabled while the viewed question has an answer (an unanswered one is left by the arrows or the
+    /// rail); Send on the last question, enabled only when every question has an answer. Never a step
+    /// on: no question is ever only for review. Codex cards keep `QuestionCardPrimary.make`.
     public func primary(viewed: Int) -> QuestionCardPrimary {
-        let primary = QuestionCardPrimary.make(daemon: true, viewed: viewed, current: current, count: count,
-                                               selected: selection(at: viewed).canSend, ready: true)
-        if case .send(true) = primary, answersAreComplete == false { return .send(enabled: false) }
-        return primary
+        viewed >= count - 1 ? .send(enabled: answersAreComplete)
+                            : .next(enabled: selection(at: viewed).canSend)
     }
 
     private var answersAreComplete: Bool {
-        count > 0 && current == count - 1 && selections.allSatisfy(\.canSend)
+        count > 0 && selections.allSatisfy(\.canSend)
     }
 
     /// The whole set Send carries, in question order, or nil unless every question has an answer and
@@ -196,11 +200,10 @@ public struct ClaudeQuestionCallSelection: Equatable, Sendable {
         return entries
     }
 
-    /// What the step rail shows for question `index`: its option, its ticked labels, or its text,
-    /// only once Next kept it (as a daemon card's drafts); nil for the question being answered and
-    /// later ones. Display only.
+    /// What the step rail shows for question `index`: its option, its ticked labels, or its text, as
+    /// it stands now, whatever the question's position (#388); nil while it holds no answer. Display
+    /// only.
     public func railAnswer(at index: Int, labels: [String]) -> ChosenAnswer? {
-        guard index < current else { return nil }
         let selection = selection(at: index)
         guard let answer = selection.answer(labels: labels) else { return nil }
         switch answer.kind {
