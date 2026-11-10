@@ -138,11 +138,12 @@ public enum HookEventListing {
 }
 
 /// Deletes expired hook records from one of Herdly's event directories. Tool records only label the
-/// current tool and no reader uses subagent records by name, so both expire after `toolRecordAge`;
-/// every other record after `recordAge`.
+/// current tool and subagent records only list a session's running subagents, so both expire after
+/// `toolRecordAge`; every other record after `recordAge`.
 ///
 /// What is kept regardless of age: tool calls with no completion, turn end or session end (a
-/// waiting question lives in one), lifecycle records of sessions that still have an approval
+/// waiting question lives in one), the start of a subagent with no stop of its own, no later
+/// `Stop`/`StopFailure` in its session and no later session end (it is still listed), lifecycle records of sessions that still have an approval
 /// unresolved request file (a handed-back reminder resolves from their session end), and anything Herdly
 /// cannot identify as its own record: request, receipt and decision files, malformed or foreign
 /// JSON, symlinks and directories. Age is the file's creation date.
@@ -172,6 +173,8 @@ public enum HookEventRetention {
         let session: String
         let turn: String?
         let tool: String?
+        /// Claude's `agent_id`, for subagent records.
+        let agent: String?
         let closes: [String]
         let capturedAt: Double
     }
@@ -202,13 +205,18 @@ public enum HookEventRetention {
         }
 
         var closedTools = Set<String>()
+        var stoppedAgents = Set<String>()
+        var sessionStops: [String: Double] = [:]
         var endedTurns: [String: Double] = [:]
         var endedSessions: [String: Double] = [:]
         for record in records {
             switch record.event {
             case let event where toolEvents.contains(event) && event != "PreToolUse":
                 closedTools.formUnion(record.closes.map { toolKey(record.session, $0) })
+            case "SubagentStop":
+                if let agent = record.agent { stoppedAgents.insert(toolKey(record.session, agent)) }
             case "Stop", "StopFailure":
+                sessionStops[record.session] = max(sessionStops[record.session] ?? -.infinity, record.capturedAt)
                 if let turn = record.turn {
                     endedTurns[turnKey(record.session, turn)] = max(endedTurns[turnKey(record.session, turn)] ?? -.infinity,
                                                                     record.capturedAt)
@@ -228,6 +236,14 @@ public enum HookEventRetention {
             if let ended = endedSessions[record.session], ended >= record.capturedAt { return false }
             return true
         }
+        // The reader lists a subagent from its start until its stop, or any Stop or end of its session.
+        func isRunning(_ record: Record) -> Bool {
+            guard record.event == "SubagentStart", let agent = record.agent,
+                  !stoppedAgents.contains(toolKey(record.session, agent)) else { return false }
+            if let stopped = sessionStops[record.session], stopped >= record.capturedAt { return false }
+            if let ended = endedSessions[record.session], ended >= record.capturedAt { return false }
+            return true
+        }
 
         var keptToolStarts = Set<String>()
         var completions: [Record] = []
@@ -237,7 +253,7 @@ public enum HookEventRetention {
             if record.age >= recordAge {
                 if isTool || isSubagent || !protectedSessions.contains(record.session) { expired.append(record.url) }
             } else if isSubagent, record.age >= toolRecordAge {
-                expired.append(record.url)
+                if !isRunning(record) { expired.append(record.url) }
             } else if isTool, record.age >= toolRecordAge {
                 if record.event == "PreToolUse" {
                     if isOpen(record) {
@@ -292,7 +308,7 @@ public enum HookEventRetention {
             ?? (input["tool_uses"] as? [[String: Any]] ?? []).compactMap { $0["tool_use_id"] as? String }
         return Record(url: url, age: age, event: event, session: sessionKey(session),
                       turn: object["turn_id"] as? String ?? object["prompt_id"] as? String,
-                      tool: tool, closes: event == "PostToolBatch" ? batch : tool.map { [$0] } ?? [],
+                      tool: tool, agent: object["agent_id"] as? String, closes: event == "PostToolBatch" ? batch : tool.map { [$0] } ?? [],
                       capturedAt: (object["captured_at"] as? NSNumber)?.doubleValue
                         ?? (object["received_at"] as? String).flatMap(RolloutTimestamp.parse) ?? -.infinity)
     }
