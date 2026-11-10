@@ -59,7 +59,8 @@ func writeClaudeEvent(_ object: [String: Any], to directory: URL, installationID
     if let helperRequestID = boundedClaudeString(helperRequestID, limit: 256) {
         record["helper_request_id"] = helperRequestID
     }
-    for key in ["prompt_id", "tool_name", "tool_use_id"] {
+    // `agent_id`/`agent_type` name the subagent a SubagentStart/Stop or tool event belongs to (#395).
+    for key in ["prompt_id", "tool_name", "tool_use_id", "agent_id", "agent_type"] {
         if let value = boundedClaudeString(object[key], limit: 256) { record[key] = value }
     }
     // A long prompt keeps its start, marked shortened, so the working row still has its text.
@@ -491,6 +492,26 @@ func selfTest() -> Int32 {
                                                                  ClaudeObservationReader.lastMessageKey: String(repeating: "a", count: maximumClaudeStopInput)])
     guard claudeHookInput(bigStop) != nil, claudeHookInput(bigTool) == nil, claudeHookInput(hugeStop) == nil,
           claudeHookInput(Data("not json".utf8)) == nil else { return 1 }
+    // A subagent's records keep its bounded id and type; an oversized or multi-line one is dropped alone.
+    let agentDirectory = directory.appendingPathComponent("claude-subagent", isDirectory: true)
+    func agentRecord(_ id: Any, _ type: Any, in folder: String) -> [String: Any]? {
+        let target = agentDirectory.appendingPathComponent(folder, isDirectory: true)
+        guard writeClaudeEvent(["hook_event_name": "PreToolUse", "session_id": session.uuidString, "prompt_id": "prompt-3",
+                                "tool_name": "Bash", "tool_use_id": "sub-tool", "agent_id": id, "agent_type": type,
+                                "tool_input": ["command": "ls"]],
+                               to: target, installationID: UUID().uuidString),
+              let url = (try? FileManager.default.contentsOfDirectory(at: target, includingPropertiesForKeys: nil))?.first,
+              let data = try? Data(contentsOf: url) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+    guard let agent = agentRecord("agent-1", "Explore", in: "kept"),
+          agent["agent_id"] as? String == "agent-1", agent["agent_type"] as? String == "Explore",
+          let exact = agentRecord(String(repeating: "a", count: 256), "Plan", in: "exact"),
+          exact["agent_id"] as? String == String(repeating: "a", count: 256),
+          let long = agentRecord(String(repeating: "a", count: 257), "x\ny", in: "dropped"),
+          long["agent_id"] == nil, long["agent_type"] == nil, long["tool_use_id"] as? String == "sub-tool",
+          let number = agentRecord(7, ["Explore"], in: "typed"), number["agent_id"] == nil, number["agent_type"] == nil
+    else { return 1 }
     return 0
 }
 

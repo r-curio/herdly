@@ -114,8 +114,14 @@ public struct RunningRowDetails: Equatable, Sendable {
     }
 
     private static func action(_ running: AgentRunning) -> Now? {
-        guard let name = running.toolName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
-        let action = running.action
+        now(toolName: running.toolName, toolInput: running.toolInput)
+    }
+
+    /// The "now" line for one tool call, or nil without a tool name. A subagent's latest action
+    /// (`SubagentActivity`) uses the same line.
+    public static func now(toolName: String?, toolInput: [String: String]) -> Now? {
+        guard let name = toolName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        let action = toolName.flatMap { ToolAction(name: $0, input: toolInput) }
         if let action, action.isCommand {
             let line = shortened(action.fullText)
             return Now(text: "$ " + line.text, full: line.shortened ? action.fullText : nil,

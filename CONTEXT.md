@@ -48,6 +48,10 @@ Claude's own five-hour or seven-day subscription window from a status-line paylo
 **Discovered session**:
 A Codex session the companion shows as working before it has observed any of that session's own activity, because Codex's own record shows an unfinished turn and its surface is still alive. Discovery adds only a working indication; it never creates a completion, request, question, or sound.
 
+**Subagent activity**:
+One subagent a working session started and has not finished, as its working row lists it: its name (its type, numbered "Explore 2" in start order when two would read the same), when it started, and its latest action. It is presentation only: it never orders the queue, counts as work, or acknowledges anything, and a subagent's action is never the session's own "now". Claude reports no task for a subagent, so a Claude subagent has no "asked" text.
+_Avoid_: Child session, worker
+
 **Approval request**:
 A request from Codex for the user's permission to perform an action. Before handoff, the user can approve it once, deny it, or return to Codex for more context.
 
