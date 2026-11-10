@@ -1418,7 +1418,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                  },
                  claudeScans.map(\.cache),
                  reminders.hookCache.merging(desktop.cache),
-                 CodexSubagentReader.activity(root: rolloutRoot, now: Date().timeIntervalSince1970))
+                 CodexSubagentReader.activity(root: rolloutRoot, now: observationNow))
             }.value
             let scan = result.0
             let desktopEvents = result.1
