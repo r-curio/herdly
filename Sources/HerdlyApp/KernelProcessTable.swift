@@ -27,6 +27,40 @@ enum KernelProcessTable {
         kinfo().map { records($0, arguments: arguments) }
     }
 
+    /// `records(arguments: .owner(uid))` for the scheduled scan only: argument vectors read in the last
+    /// `ProcessArgumentMemo.maximumAge` seconds are reused for the same process, so most scans ask the
+    /// kernel only for new processes' vectors. Never for choosing a target, which reads the kernel directly.
+    static func scheduledRecords(owner uid: uid_t) -> [KernelProcessRecord]? {
+        guard let table = kinfo() else { return nil }
+        let now = ProcessInfo.processInfo.systemUptime
+        let listed = table.filter { $0.kp_proc.p_pid > 0 }
+        return scheduledArguments.withLock { memo in
+            let records = listed.map { process -> KernelProcessRecord in
+                guard process.kp_eproc.e_ucred.cr_uid == uid else { return record(process, arguments: nil) }
+                let pid = process.kp_proc.p_pid, started = process.kp_proc.p_un.__p_starttime
+                let identity = ProcessArgumentMemo.Identity(pid: pid, startedSeconds: Int(started.tv_sec),
+                                                            startedMicroseconds: Int(started.tv_usec),
+                                                            shortName: shortName(process))
+                return record(process, arguments: memo.arguments(of: identity, now: now) { arguments(of: pid) })
+            }
+            memo.keep(Set(listed.map(\.kp_proc.p_pid)))
+            return records
+        }
+    }
+
+    private static let scheduledArguments = ScheduledArguments()
+
+    private final class ScheduledArguments: @unchecked Sendable {
+        // Invariant for `@unchecked Sendable`: `memo` is only touched while holding `lock`.
+        private let lock = NSLock()
+        private var memo = ProcessArgumentMemo()
+
+        func withLock<T>(_ body: (inout ProcessArgumentMemo) -> T) -> T {
+            lock.lock(); defer { lock.unlock() }
+            return body(&memo)
+        }
+    }
+
     /// The processes whose controlling terminal is `/dev/<tty>`, with every argument vector the kernel
     /// gives; nil when the device or the table could not be read.
     static func records(onTTY tty: String) -> [KernelProcessRecord]? {
@@ -84,9 +118,12 @@ enum KernelProcessTable {
     }
 
     private static func record(_ process: kinfo_proc, readArguments: Bool) -> KernelProcessRecord {
+        record(process, arguments: readArguments ? arguments(of: process.kp_proc.p_pid) : nil)
+    }
+
+    private static func record(_ process: kinfo_proc, arguments vector: [String]?) -> KernelProcessRecord {
         let pid = process.kp_proc.p_pid, eproc = process.kp_eproc
         let controlled = process.kp_proc.p_flag & P_CONTROLT != 0
-        let vector = readArguments ? arguments(of: pid) : nil
         return KernelProcessRecord(pid: pid, ppid: eproc.e_ppid, uid: eproc.e_ucred.cr_uid,
                                    tty: ttyName(eproc.e_tdev), state: state(process.kp_proc.p_stat),
                                    sessionLeader: Int32(eproc.e_flag) & EPROC_SLEADER != 0,

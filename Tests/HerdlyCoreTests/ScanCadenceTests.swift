@@ -187,3 +187,22 @@ private func listingDirectory() throws -> URL {
     started = gate.start(now: start + 6, anyWaiting: true)
     #expect(started)
 }
+
+@Test func theHerdrScanSlowsOnlyWhileNobodyCanUseItsResult() {
+    #expect(HerdrScanCadence.interval(terminalFrontmost: false, herdlyInUse: false, needsUser: false) == HerdrScanCadence.away)
+    // A pane can be visited, a row can be opened, or a visit can acknowledge something: two seconds.
+    #expect(HerdrScanCadence.interval(terminalFrontmost: true, herdlyInUse: false, needsUser: false) == HerdrScanCadence.near)
+    #expect(HerdrScanCadence.interval(terminalFrontmost: false, herdlyInUse: true, needsUser: false) == HerdrScanCadence.near)
+    #expect(HerdrScanCadence.interval(terminalFrontmost: false, herdlyInUse: false, needsUser: true) == HerdrScanCadence.near)
+    #expect(HerdrScanCadence.near < HerdrScanCadence.away)
+}
+
+@Test func aHerdrScanIsDueByTheIntervalInForceNow() {
+    // The first scan after the gate opens never waits.
+    #expect(HerdrScanCadence.isDue(lastStartedAt: nil, now: 0, interval: HerdrScanCadence.away))
+    #expect(!HerdrScanCadence.isDue(lastStartedAt: 100, now: 109.9, interval: HerdrScanCadence.away))
+    #expect(HerdrScanCadence.isDue(lastStartedAt: 100, now: 110, interval: HerdrScanCadence.away))
+    // Three seconds into an away wait, the terminal comes forward: due at once, not seven seconds later.
+    #expect(HerdrScanCadence.isDue(lastStartedAt: 100, now: 103, interval: HerdrScanCadence.near))
+    #expect(!HerdrScanCadence.isDue(lastStartedAt: 100, now: 101.9, interval: HerdrScanCadence.near))
+}

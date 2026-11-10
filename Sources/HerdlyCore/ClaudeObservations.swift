@@ -52,6 +52,12 @@ public struct ClaudeTurnResult: Equatable, Sendable {
 /// `FileStamp` is unchanged. The helper writes each record once, atomically, under a new name, so
 /// normally only new records are opened. A scan carries forward only the files it listed, and the
 /// whole cache resets when the installation or observation start differs.
+///
+/// It also holds the last scan's result with the directory's own stamp. Every record arrives as a
+/// new name, which changes that stamp, so while it is unchanged a scan checks no record file and,
+/// when no tool call can still be fresh, rebuilds nothing. A record rewritten in place leaves the
+/// directory's stamp alone, so every file is checked again once the last full check is
+/// `ClaudeObservationReader.maximumUncheckedAge` old.
 public struct ClaudeRecordCache: Sendable {
     fileprivate struct Entry: Sendable {
         let stamp: FileStamp
@@ -61,6 +67,17 @@ public struct ClaudeRecordCache: Sendable {
     fileprivate var installationID: String?
     fileprivate var observingSince: Double?
     fileprivate var entries: [String: Entry] = [:]
+    /// The directory's stamp, taken before the last full check listed it; nil when it had none.
+    fileprivate var directoryStamp: FileStamp?
+    /// The `now` of the last scan that checked every record file.
+    fileprivate var checkedAt: Double?
+    /// That check's records, in scan order.
+    fileprivate var records: [ClaudeObservationReader.Record] = []
+    /// The last result built from `records`, the `now` it was built for, and the latest capture time
+    /// among the uncompleted tool calls it read: only their freshness makes a result depend on `now`.
+    fileprivate var result: ClaudeObservationScan?
+    fileprivate var resultNow: Double = -.infinity
+    fileprivate var latestToolAt: Double = -.infinity
 
     public init() {}
 
@@ -88,6 +105,9 @@ public enum ClaudeObservationReader {
     /// well under `maximumRecordSize`; otherwise the whole Stop record would be ignored.
     public static let maximumLastMessageBytes = 32 * 1024
     public static let maximumToolFreshness: Double = 30
+    /// How long a scan may trust an unchanged directory stamp before it checks every record file
+    /// again (`ClaudeRecordCache`). Bounds how late a record rewritten in place is noticed.
+    public static let maximumUncheckedAge: Double = 30
     /// Session-wide events that end every running subagent of their session: the turn's end or the
     /// session's. A subagent also ends on its own `SubagentStop`. Retention keeps a start by the same rule.
     static let subagentsEndingEvents: Set<String> = ["Stop", "StopFailure", "SessionEnd"]
@@ -197,14 +217,33 @@ public enum ClaudeObservationReader {
                             observingSince: Double = -.infinity, now: Double = Date().timeIntervalSince1970,
                             cache: ClaudeRecordCache) -> (scan: ClaudeObservationScan, cache: ClaudeRecordCache) {
         let scope = normalizedScope(sourceScope)
+        // Taken before the directory is listed, so a change during the scan shows as a new stamp next time.
+        let directoryStamp = FileStamp(events, followingLinks: true)
         guard isDirectory(events),
               let listing = HookEventListing.listing(in: events) else {
             return (ClaudeObservationScan(sourceScope: scope, available: false), cache)
         }
         let reusable = cache.installationID == installationID && cache.observingSince == observingSince
+        // Unchanged directory, checked recently: the same records, with no file looked at.
+        if reusable, let stamp = directoryStamp, cache.directoryStamp == stamp, let checkedAt = cache.checkedAt,
+           now.isFinite, now >= checkedAt, now - checkedAt < maximumUncheckedAge {
+            // No tool call was fresh when the result was built, and none can become fresh later.
+            if let result = cache.result, result.sourceScope == scope, now >= cache.resultNow,
+               cache.resultNow - cache.latestToolAt > maximumToolFreshness {
+                return (result, cache)
+            }
+            var next = cache
+            let built = build(cache.records, scope: scope, now: now)
+            next.result = built.scan
+            next.resultNow = now
+            next.latestToolAt = built.latestToolAt
+            return (built.scan, next)
+        }
         var next = ClaudeRecordCache()
         next.installationID = installationID
         next.observingSince = observingSince
+        next.directoryStamp = directoryStamp
+        next.checkedAt = now.isFinite ? now : nil
         let records = listing.records
             .compactMap { url -> Record? in
                 // A link or a path that cannot be stat'ed is never a record, as `record(at:)` decides.
@@ -222,7 +261,18 @@ public enum ClaudeObservationReader {
                 if $0.session != $1.session { return $0.session < $1.session }
                 return $0.fileName < $1.fileName
             }
+        let built = build(records, scope: scope, now: now)
+        next.records = records
+        next.result = built.scan
+        next.resultNow = now
+        next.latestToolAt = built.latestToolAt
+        return (built.scan, next)
+    }
 
+    /// The scan `records` (in scan order) give at `now`, with the latest finite capture time among the
+    /// uncompleted tool calls left open: `now` changes the result only through their freshness.
+    private static func build(_ records: [Record], scope: String,
+                              now: Double) -> (scan: ClaudeObservationScan, latestToolAt: Double) {
         var turns: [AgentTurnIdentity: Turn] = [:]
         var sessionPrompts: [String: String] = [:]
         var endedSessions = Set<String>()
@@ -503,8 +553,11 @@ public enum ClaudeObservationReader {
                                                  message: turn.lastMessage?.text,
                                                  messageShortened: turn.lastMessage?.shortened ?? false)
         }
+        let openTools = turns.values.flatMap { $0.tools.values + ($0.tool.map { [$0] } ?? []) }
+            + subagents.values.flatMap { $0.values.flatMap(\.tools.values) }
+        let latestToolAt = openTools.map(\.at).filter(\.isFinite).max() ?? -.infinity
         return (ClaudeObservationScan(sourceScope: scope, observations: observations, results: results,
-                                      latestSessionStartAt: latestSessionStartAt), next)
+                                      latestSessionStartAt: latestSessionStartAt), latestToolAt)
     }
 
     /// The session's own latest uncompleted call; a subagent's call never is.
