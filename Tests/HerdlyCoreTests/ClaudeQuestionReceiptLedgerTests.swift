@@ -13,13 +13,13 @@ import Testing
 
     // First scan: the companion issues the receipt and records it.
     let first = try #require(ClaudeQuestionStore.issueReceipt(for: request, in: directory,
-                                                               issued: ledger.adoptable(for: request), now: 101.4))
+                                                               issued: ledger.adoptable(for: request), held: nil, now: 101.4))
     ledger.record(first)
     // A prune drops the token, and the rescan queues receipt work again. The receipt file is
     // still there, so a plain publish fails; this was the stuck state.
     #expect(!ClaudeQuestionStore.publish(first, in: directory))
     let again = ClaudeQuestionStore.issueReceipt(for: request, in: directory,
-                                                 issued: ledger.adoptable(for: request), now: 103.4)
+                                                 issued: ledger.adoptable(for: request), held: nil, now: 103.4)
     #expect(again == first)
 }
 
@@ -34,7 +34,7 @@ import Testing
     #expect(ClaudeQuestionStore.publish(previous, in: directory))
     let ledger = ClaudeQuestionReceiptLedger()
     #expect(ClaudeQuestionStore.issueReceipt(for: request, in: directory,
-                                             issued: ledger.adoptable(for: request), now: 102) == nil)
+                                             issued: ledger.adoptable(for: request), held: nil, now: 102) == nil)
 
     // This companion issued a receipt, but another one is what is on disk.
     var own = ClaudeQuestionReceiptLedger()
@@ -42,7 +42,7 @@ import Testing
                                      sourceScope: request.sourceScope, eventDirectory: request.eventDirectory,
                                      receivedAt: 101.5, expiresAt: request.expiresAt))
     #expect(ClaudeQuestionStore.issueReceipt(for: request, in: directory,
-                                             issued: own.adoptable(for: request), now: 102) == nil)
+                                             issued: own.adoptable(for: request), held: nil, now: 102) == nil)
 }
 
 @Test func claudeQuestionReceiptReadoptionStillDiscardsMismatchedExpiredAndSpentRequests() throws {
@@ -51,7 +51,7 @@ import Testing
     let request = receiptTestRequest(in: directory, publishedAt: 100)
     var ledger = ClaudeQuestionReceiptLedger()
     let receipt = try #require(ClaudeQuestionStore.issueReceipt(for: request, in: directory,
-                                                                 issued: nil, now: 101))
+                                                                 issued: nil, held: nil, now: 101))
     ledger.record(receipt)
 
     // A request with the same id but another identity or window is not the one receipted.
@@ -76,16 +76,16 @@ import Testing
     ]
     for variant in variants {
         #expect(ClaudeQuestionStore.issueReceipt(for: variant, in: directory,
-                                                 issued: ledger.adoptable(for: variant), now: 102) == nil)
+                                                 issued: ledger.adoptable(for: variant), held: nil, now: 102) == nil)
     }
     // Expired: nothing is issued, even this companion's own receipt.
     #expect(ClaudeQuestionStore.issueReceipt(for: request, in: directory,
-                                             issued: ledger.adoptable(for: request), now: request.expiresAt) == nil)
+                                             issued: ledger.adoptable(for: request), held: nil, now: request.expiresAt) == nil)
     // Spent: the token is spent once; re-adoption never grants it again.
-    ledger.spend(request.requestID)
+    ledger.spend(request.requestID, now: 105)
     #expect(ledger.adoptable(for: request) == nil)
     #expect(ClaudeQuestionStore.issueReceipt(for: request, in: directory,
-                                             issued: ledger.adoptable(for: request), now: 102) == nil)
+                                             issued: ledger.adoptable(for: request), held: nil, now: 102) == nil)
 }
 
 @Test func claudeQuestionReceiptLedgerKeepsReceiptsAndSpentMarksUntilNoHelperCanStillWait() {
@@ -104,14 +104,41 @@ import Testing
     ledger.prune(now: 222)
     #expect(ledger.adoptable(for: request) == nil)
 
+    // A spent mark keeps its own time: it outlives the receipt and needs no recorded receipt.
     var spent = ClaudeQuestionReceiptLedger()
     spent.record(receipt)
-    spent.spend("request-1")
+    spent.spend("request-1", now: 105)
+    spent.spend("unrecorded", now: 105)
     spent.prune(now: 150)
     #expect(spent.isSpent("request-1"))
+    #expect(spent.isSpent("unrecorded"))
     #expect(spent.adoptable(for: request) == nil)
-    spent.prune(now: 222)
+    spent.prune(now: 225.9)
+    #expect(spent.isSpent("request-1"))
+    #expect(spent.isSpent("unrecorded"))
+    spent.prune(now: 226)
     #expect(!spent.isSpent("request-1"))
+    #expect(!spent.isSpent("unrecorded"))
+}
+
+@Test func reAdoptionHonorsTheHoverHoldButNeverPastTwoMinutesFromPublish() throws {
+    let directory = try receiptTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let request = receiptTestRequest(in: directory, publishedAt: 100)
+    var ledger = ClaudeQuestionReceiptLedger()
+    let receipt = try #require(ClaudeQuestionStore.issueReceipt(for: request, in: directory,
+                                                                 issued: nil, held: nil, now: 101))
+    ledger.record(receipt)
+    // Past the 30-second window: re-adopted inside the hold, not without one or past the cap.
+    #expect(ClaudeQuestionStore.issueReceipt(for: request, in: directory, issued: ledger.adoptable(for: request),
+                                             held: 160, now: 140) == receipt)
+    #expect(ClaudeQuestionStore.issueReceipt(for: request, in: directory, issued: ledger.adoptable(for: request),
+                                             held: nil, now: 140) == nil)
+    #expect(ClaudeQuestionStore.issueReceipt(for: request, in: directory, issued: ledger.adoptable(for: request),
+                                             held: 900, now: 220) == nil)
+    // A hold never lets a fresh receipt be written after the window.
+    let other = receiptTestRequest(in: directory, requestID: "request-2", publishedAt: 100)
+    #expect(ClaudeQuestionStore.issueReceipt(for: other, in: directory, issued: nil, held: 160, now: 140) == nil)
 }
 
 private func receiptTestDirectory() throws -> URL {

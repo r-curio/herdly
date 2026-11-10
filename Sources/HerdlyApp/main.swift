@@ -3,43 +3,6 @@ import QuartzCore
 import SwiftUI
 import HerdlyCore
 
-struct ClaudeQuestionRootKey: Hashable, Sendable {
-    let sourceScope: String
-    let eventsPath: String
-    let installationID: String
-}
-
-struct ClaudeQuestionReceiptWork: Sendable {
-    let request: ClaudeQuestionRequest
-    let eventsPath: String
-    let root: ClaudeQuestionRootKey
-    let scanGeneration: UInt64
-    /// The receipt this running companion already issued for the request, from its ledger when
-    /// the work was queued (#385); nil when it issued none or the token was spent.
-    let issued: ClaudeQuestionReceipt?
-}
-
-struct ClaudeQuestionReceiptResult: Sendable {
-    let request: ClaudeQuestionRequest
-    let requestID: String
-    let root: ClaudeQuestionRootKey
-    let scanGeneration: UInt64
-    /// The receipt this companion wrote, or re-adopted as its own, for the request; nil otherwise.
-    let receipt: ClaudeQuestionReceipt?
-
-    var written: Bool { receipt != nil }
-}
-
-/// Receipt work off the main actor: writes this companion's receipt, or re-adopts the identical
-/// one it already issued (#385). A receipt on disk this companion did not issue yields nil.
-func claudeQuestionIssueReceipt(_ work: ClaudeQuestionReceiptWork, now: Double) -> ClaudeQuestionReceiptResult {
-    let receipt = ClaudeQuestionStore.issueReceipt(for: work.request,
-                                                   in: URL(fileURLWithPath: work.eventsPath, isDirectory: true),
-                                                   issued: work.issued, now: now)
-    return ClaudeQuestionReceiptResult(request: work.request, requestID: work.request.requestID, root: work.root,
-                                       scanGeneration: work.scanGeneration, receipt: receipt)
-}
-
 struct ClaudeApprovalRootKey: Hashable, Sendable {
     let sourceScope: String
     let eventsPath: String
@@ -79,24 +42,6 @@ struct ClaudeApprovalDecisionResult: Sendable {
     let work: ClaudeApprovalDecisionWork
     let published: Bool
     let delivered: Bool
-}
-
-enum ClaudeQuestionReceiptDisposition: Equatable {
-    case accept
-    case staleAccept
-    case discard
-}
-
-func claudeQuestionReceiptDisposition(_ result: ClaudeQuestionReceiptResult,
-                                      currentGeneration: UInt64,
-                                      liveRequest: ClaudeQuestionRequest?, rootIsCurrent: Bool,
-                                      spent: Bool, now: Double) -> ClaudeQuestionReceiptDisposition {
-    // A spent token is never granted again, even by a worker that landed after the spend.
-    guard result.written, !spent, rootIsCurrent, let liveRequest,
-          liveRequest == result.request, result.request.expiresAt > now else { return .discard }
-    // A worker may finish after a newer scan. Exact request/root identity makes that immutable
-    // receipt safe to use; a different live request or root remains fail-closed.
-    return result.scanGeneration == currentGeneration ? .accept : .staleAccept
 }
 
 /// `deadline` is the question's deadline with its hover hold (ADR 0020). It is required so no
@@ -424,21 +369,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Watches for Codex desktop relaunching while a row waits for it to update itself.
     var codexLaunchObserver: NSObjectProtocol?
     let claude = ClaudeSetupModel()
-    struct LiveClaudeQuestion {
-        let request: ClaudeQuestionRequest
-        let events: URL
-        let sourceScope: String
-    }
-    var liveClaudeQuestions: [String: LiveClaudeQuestion] = [:]
-    var availableClaudeQuestionTokens: Set<String> = []
-    /// Receipts this running companion issued and the tokens it spent (#385). Process memory only.
-    var claudeQuestionReceipts = ClaudeQuestionReceiptLedger()
-    var pendingClaudeQuestionReceipts: Set<String> = []
+    /// Live Claude questions, their answer tokens, hover holds (ADR 0020, amended 2026-10-30) and
+    /// the receipts and spends behind them (#385). Process memory only.
+    var claudeQuestions = ClaudeQuestionCapabilities()
     var claudeQuestionScanGeneration: UInt64 = 0
-    /// Hover holds on live Claude questions (ADR 0020, amended 2026-10-30), by helper request id.
-    /// Process memory only, like the answer capability.
+    /// The hover rule for live Claude questions, by helper request id. Process memory only.
     var questionHover = ApprovalHoverHold<String>()
-    var claudeQuestionHolds: [String: Double] = [:]
     var writtenQuestionHolds: [String: Double] = [:]
     private var claudeApprovalScanGeneration: UInt64 = 0
     @Published var launchAtLogin = LaunchAtLoginState()
@@ -1535,27 +1471,18 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             var pendingClaudeQuestionIDs = Set<String>()
             var receiptWork: [ClaudeQuestionReceiptWork] = []
             for requests in result.9 {
-                for live in requests {
-                    guard live.request.sourceScope == live.sourceScope,
-                          live.request.eventDirectory == live.events.standardizedFileURL.path else { continue }
+                for listed in requests {
+                    let live = LiveClaudeQuestion(request: listed.request, events: listed.events,
+                                                  sourceScope: listed.sourceScope)
+                    guard live.isConsistent else { continue }
                     pendingClaudeQuestionIDs.insert(live.request.requestID)
-                    liveClaudeQuestions[live.request.requestID] = LiveClaudeQuestion(request: live.request,
-                                                                                       events: live.events,
-                                                                                       sourceScope: live.sourceScope)
-                    guard !claudeQuestionReceipts.isSpent(live.request.requestID),
-                          !availableClaudeQuestionTokens.contains(live.request.requestID),
-                          pendingClaudeQuestionReceipts.insert(live.request.requestID).inserted else { continue }
-                    receiptWork.append(ClaudeQuestionReceiptWork(
-                        request: live.request, eventsPath: live.events.standardizedFileURL.path,
-                        root: claudeQuestionRootKey(sourceScope: live.sourceScope, events: live.events,
-                                                    installationID: live.request.installationID),
-                        scanGeneration: questionScanGeneration,
-                        issued: claudeQuestionReceipts.adoptable(for: live.request)))
+                    if let work = claudeQuestions.observe(live, scanGeneration: questionScanGeneration) {
+                        receiptWork.append(work)
+                    }
                 }
             }
-            pruneClaudeQuestionState(now: scanNow, roots: currentClaudeQuestionRoots(),
-                                     pendingIDs: pendingClaudeQuestionIDs,
-                                     observedIDs: observedClaudeQuestionIDs(claudeObservationScans))
+            claudeQuestions.prune(now: scanNow, roots: currentClaudeQuestionRoots(),
+                                  listedIDs: pendingClaudeQuestionIDs.union(observedClaudeQuestionIDs(claudeObservationScans)))
             // A root can contain many pending rendezvous files. Writes happen off the main actor;
             // the completion rechecks the scan generation, root identity, and request deadline.
             publishClaudeQuestionReceipts(receiptWork)

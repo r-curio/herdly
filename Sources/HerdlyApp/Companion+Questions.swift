@@ -2,17 +2,11 @@ import AppKit
 import HerdlyCore
 
 extension Companion {
-    func claudeQuestionRootKey(sourceScope: String, events: URL, installationID: String) -> ClaudeQuestionRootKey {
-        ClaudeQuestionRootKey(sourceScope: sourceScope,
-                              eventsPath: events.standardizedFileURL.path,
-                              installationID: installationID)
-    }
-
     func currentClaudeQuestionRoots() -> Set<ClaudeQuestionRootKey> {
         Set(claude.roots.compactMap { root in
             guard root.status == .connected, !root.eventsPath.isEmpty,
                   let installationID = root.plan?.installationID, !installationID.isEmpty else { return nil }
-            return claudeQuestionRootKey(sourceScope: root.url.standardizedFileURL.path,
+            return ClaudeQuestionRootKey(sourceScope: root.url.standardizedFileURL.path,
                                          events: URL(fileURLWithPath: root.eventsPath, isDirectory: true),
                                          installationID: installationID)
         })
@@ -27,28 +21,9 @@ extension Companion {
         })
     }
 
-    func pruneClaudeQuestionState(now: Double, roots: Set<ClaudeQuestionRootKey>,
-                                          pendingIDs: Set<String>, observedIDs: Set<String>) {
-        let retained = liveClaudeQuestions.filter { requestID, live in
-            let root = claudeQuestionRootKey(sourceScope: live.sourceScope, events: live.events,
-                                             installationID: live.request.installationID)
-            return claudeQuestionDeadline(live.request) > now && roots.contains(root)
-                && (pendingIDs.contains(requestID) || observedIDs.contains(requestID))
-        }
-        let retainedIDs = Set(retained.keys)
-        liveClaudeQuestions = retained
-        availableClaudeQuestionTokens = availableClaudeQuestionTokens.filter { retainedIDs.contains($0) }
-        // Issued receipts and spent marks outlive the live question until no helper can still
-        // wait on them, so a rescan re-adopts the receipt but never a spent token (#385).
-        claudeQuestionReceipts.prune(now: now)
-        pendingClaudeQuestionReceipts = pendingClaudeQuestionReceipts.filter { retainedIDs.contains($0) }
-        claudeQuestionHolds = claudeQuestionHolds.filter { retainedIDs.contains($0.key) }
-    }
-
     /// A live Claude question's deadline with its hover hold, bounded as the helper bounds it.
     func claudeQuestionDeadline(_ request: ClaudeQuestionRequest) -> Double {
-        ClaudeQuestionTiming.heldDeadline(publishedAt: request.publishedAt, expiresAt: request.expiresAt,
-                                          held: claudeQuestionHolds[request.requestID])
+        claudeQuestions.deadline(for: request)
     }
 
     /// ADR 0020, amended 2026-10-30 (#374): while the pointer is on the notch, each live Claude
@@ -56,16 +31,19 @@ extension Companion {
     /// The hold is written for the helper a second ahead of the deadline the notch shows, so the
     /// helper never hands back while the notch still offers the answer. Holding answers nothing.
     func applyClaudeQuestionHolds(now: Double, hovering: Bool) {
-        let live = liveClaudeQuestions.values.filter {
-            availableClaudeQuestionTokens.contains($0.request.requestID) && claudeQuestionDeadline($0.request) > now
+        let live = claudeQuestions.live.values.filter {
+            claudeQuestions.canAnswer($0.request.requestID) && claudeQuestionDeadline($0.request) > now
         }
+        // The rule starts from the held deadline, so a hold kept across a missed scan (#385) resumes
+        // with the time it has left instead of falling back to the 30-second window.
         questionHover.update(hovering: hovering,
-                             live: live.map { .init(key: $0.request.requestID, expiresAt: $0.request.expiresAt) },
+                             live: live.map { .init(key: $0.request.requestID,
+                                                    expiresAt: claudeQuestionDeadline($0.request)) },
                              now: now)
         for question in live {
             let requestID = question.request.requestID
             guard let deadline = questionHover.deadlines[requestID] else { continue }
-            claudeQuestionHolds[requestID] = max(claudeQuestionHolds[requestID] ?? 0, deadline)
+            claudeQuestions.hold(question.request, until: deadline)
             writeHold(requestID, deadline: claudeQuestionDeadline(question.request),
                       to: ClaudeQuestionStore.holdURL(in: question.events, id: requestID),
                       written: &writtenQuestionHolds)
@@ -96,26 +74,7 @@ extension Companion {
         let now = Date().timeIntervalSince1970
         let roots = currentClaudeQuestionRoots()
         for result in results {
-            let live = liveClaudeQuestions[result.requestID]
-            let rootIsCurrent = roots.contains(result.root)
-                && live.map {
-                    claudeQuestionRootKey(sourceScope: $0.sourceScope, events: $0.events,
-                                          installationID: $0.request.installationID) == result.root
-                        && $0.request.sourceScope == $0.sourceScope
-                        && $0.request.eventDirectory == $0.events.standardizedFileURL.path
-                } == true
-            // Recorded even when discarded, so the rescan of a pruned question re-adopts it (#385).
-            if let receipt = result.receipt { claudeQuestionReceipts.record(receipt) }
-            let disposition = claudeQuestionReceiptDisposition(
-                result, currentGeneration: claudeQuestionScanGeneration, liveRequest: live?.request,
-                rootIsCurrent: rootIsCurrent, spent: claudeQuestionReceipts.isSpent(result.requestID), now: now)
-            pendingClaudeQuestionReceipts.remove(result.requestID)
-            switch disposition {
-            case .accept, .staleAccept:
-                availableClaudeQuestionTokens.insert(result.requestID)
-            case .discard:
-                continue
-            }
+            claudeQuestions.reconcile(result, currentGeneration: claudeQuestionScanGeneration, roots: roots, now: now)
         }
     }
 
@@ -143,8 +102,8 @@ extension Companion {
         let now = Date().timeIntervalSince1970
         guard question.identity.session.source == .claude,
               let requestID = question.helperRequestID,
-              availableClaudeQuestionTokens.contains(requestID),
-              let live = liveClaudeQuestions[requestID],
+              claudeQuestions.canAnswer(requestID),
+              let live = claudeQuestions.live[requestID],
               live.sourceScope == question.identity.session.sourceScope,
               live.request.sourceScope == live.sourceScope,
               live.request.eventDirectory == live.events.standardizedFileURL.path,
@@ -191,8 +150,7 @@ extension Companion {
             return
         }
         // Spend the memory-only capability before writing. A failed write is never retried.
-        availableClaudeQuestionTokens.remove(live.request.requestID)
-        claudeQuestionReceipts.spend(live.request.requestID)
+        claudeQuestions.spend(live.request.requestID, now: now)
         let noteID = AgentAttentionID.question(question.id)
         guard ClaudeQuestionStore.publish(record, in: live.events) else {
             updateRowNote(RowNoteUpdate.claudeAnswer(published: false, delivered: false), for: noteID, userAction: true)

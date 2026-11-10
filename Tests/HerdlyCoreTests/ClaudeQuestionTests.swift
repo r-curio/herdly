@@ -36,27 +36,27 @@ import Testing
                                              scanGeneration: 1,
                                              receipt: claudeQuestionReceipt(for: request, receivedAt: 10.5))
     #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
-                                             liveRequest: request, rootIsCurrent: true, spent: false,
+                                             liveRequest: request, rootIsCurrent: true, spent: false, held: nil,
                                              now: 11) == .staleAccept)
     #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 1,
-                                             liveRequest: request, rootIsCurrent: true, spent: false,
+                                             liveRequest: request, rootIsCurrent: true, spent: false, held: nil,
                                              now: 11) == .accept)
     #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
-                                             liveRequest: nil, rootIsCurrent: true, spent: false,
+                                             liveRequest: nil, rootIsCurrent: true, spent: false, held: nil,
                                              now: 11) == .discard)
     #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
                                              liveRequest: claudeQuestionRequest(requestID: "other"),
-                                             rootIsCurrent: true, spent: false, now: 11) == .discard)
+                                             rootIsCurrent: true, spent: false, held: nil, now: 11) == .discard)
     #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
-                                             liveRequest: request, rootIsCurrent: false, spent: false,
+                                             liveRequest: request, rootIsCurrent: false, spent: false, held: nil,
                                              now: 11) == .discard)
     #expect(claudeQuestionReceiptDisposition(
         ClaudeQuestionReceiptResult(request: request, requestID: request.requestID, root: root,
                                     scanGeneration: 1, receipt: nil),
-        currentGeneration: 2, liveRequest: request, rootIsCurrent: true, spent: false, now: 11) == .discard)
+        currentGeneration: 2, liveRequest: request, rootIsCurrent: true, spent: false, held: nil, now: 11) == .discard)
     // A worker that lands after the token was spent never grants it again (#385).
     #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 1,
-                                             liveRequest: request, rootIsCurrent: true, spent: true,
+                                             liveRequest: request, rootIsCurrent: true, spent: true, held: nil,
                                              now: 11) == .discard)
 }
 
@@ -75,26 +75,26 @@ import Testing
 
     let first = claudeQuestionIssueReceipt(ClaudeQuestionReceiptWork(
         request: request, eventsPath: events, root: root, scanGeneration: 1,
-        issued: ledger.adoptable(for: request)), now: 101.4)
+        issued: ledger.adoptable(for: request), held: nil), now: 101.4)
     // The live question was pruned before the result landed: discarded, but still recorded.
     #expect(claudeQuestionReceiptDisposition(first, currentGeneration: 2, liveRequest: nil, rootIsCurrent: true,
-                                             spent: false, now: 101.5) == .discard)
+                                             spent: false, held: nil, now: 101.5) == .discard)
     ledger.record(try #require(first.receipt))
 
     let rescan = claudeQuestionIssueReceipt(ClaudeQuestionReceiptWork(
         request: request, eventsPath: events, root: root, scanGeneration: 3,
-        issued: ledger.adoptable(for: request)), now: 103.4)
+        issued: ledger.adoptable(for: request), held: nil), now: 103.4)
     #expect(rescan.receipt == first.receipt)
     #expect(claudeQuestionReceiptDisposition(rescan, currentGeneration: 3, liveRequest: request, rootIsCurrent: true,
-                                             spent: false, now: 103.5) == .accept)
+                                             spent: false, held: nil, now: 103.5) == .accept)
 
     // A new launch has an empty ledger: the same receipt on disk grants nothing.
     let restarted = claudeQuestionIssueReceipt(ClaudeQuestionReceiptWork(
         request: request, eventsPath: events, root: root, scanGeneration: 1,
-        issued: ClaudeQuestionReceiptLedger().adoptable(for: request)), now: 104)
+        issued: ClaudeQuestionReceiptLedger().adoptable(for: request), held: nil), now: 104)
     #expect(restarted.receipt == nil)
     #expect(claudeQuestionReceiptDisposition(restarted, currentGeneration: 1, liveRequest: request,
-                                             rootIsCurrent: true, spent: false, now: 104) == .discard)
+                                             rootIsCurrent: true, spent: false, held: nil, now: 104) == .discard)
 }
 
 private func claudeQuestionRequest(requestID: String = "request-1", installationID: String = "install-1",

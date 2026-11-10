@@ -91,52 +91,6 @@ public struct ClaudeQuestionReceipt: Codable, Equatable, Sendable {
     }
 }
 
-/// The question receipts this running companion issued (ADR 0020, amended 2026-10-30: Herdly can
-/// answer only a question with "a receipt issued by this running companion"). Process memory
-/// only, never persisted, so a receipt left on disk by a previous launch or another process is
-/// never adopted. It outlives a pruned answer token (#385) so a rescan can re-adopt the same
-/// receipt, and it remembers which tokens were spent so re-adoption never re-grants an answer.
-public struct ClaudeQuestionReceiptLedger: Equatable, Sendable {
-    private var issued: [String: ClaudeQuestionReceipt] = [:]
-    private var spent: Set<String> = []
-
-    public init() {}
-
-    /// Records a receipt this companion wrote, or re-adopted, for its request.
-    public mutating func record(_ receipt: ClaudeQuestionReceipt) {
-        issued[receipt.requestID] = receipt
-    }
-
-    /// Marks the request's answer token spent. A spent request is never re-adopted.
-    public mutating func spend(_ requestID: String) {
-        spent.insert(requestID)
-    }
-
-    public func isSpent(_ requestID: String) -> Bool { spent.contains(requestID) }
-
-    /// The receipt this companion issued for exactly `request`, for receipt work to re-adopt; nil
-    /// when it issued none, the token was spent, or the receipt was issued for a request with the
-    /// same id but another installation, root, event directory, publish time or window.
-    public func adoptable(for request: ClaudeQuestionRequest) -> ClaudeQuestionReceipt? {
-        guard !spent.contains(request.requestID), let receipt = issued[request.requestID],
-              receipt.requestID == request.requestID,
-              receipt.installationID == request.installationID,
-              receipt.sourceScope == request.sourceScope,
-              receipt.eventDirectory == request.eventDirectory,
-              receipt.expiresAt == request.expiresAt,
-              receipt.receivedAt >= request.publishedAt else { return nil }
-        return receipt
-    }
-
-    /// Forgets receipts, and spent marks, once no helper can still wait on them: past the
-    /// helper's hard cap of `ApprovalTiming.helperWaitBound` from publish, measured from the
-    /// later receipt time. Until then a spent mark survives every prune of the live question.
-    public mutating func prune(now: Double) {
-        issued = issued.filter { now < $0.value.receivedAt + ApprovalTiming.helperWaitBound }
-        spent = spent.filter { issued[$0] != nil }
-    }
-}
-
 public struct ClaudeQuestionLiveness: Codable, Equatable, Sendable {
     public let requestID: String
     public let installationID: String
@@ -370,14 +324,20 @@ public enum ClaudeQuestionStore {
     /// Issues this companion's receipt for `request` at `now` and returns it, or nil when it
     /// cannot. `issued` is the receipt this running companion already issued for the request
     /// (`ClaudeQuestionReceiptLedger.adoptable(for:)`): when that exact receipt is the one on disk
-    /// it is returned again, because receipts are never replaced (#385). Any other receipt on disk
-    /// (a previous launch's, another process's, or a different one) makes this return nil.
+    /// it is returned again, because receipts are never replaced (#385), while the question's
+    /// deadline with its hover hold `held` (ADR 0020, capped at publish + 2 min) has not passed. A
+    /// fresh receipt is written only inside the request's own window. Any other receipt on disk (a
+    /// previous launch's, another process's, or a different one) makes this return nil.
     public static func issueReceipt(for request: ClaudeQuestionRequest, in directory: URL,
-                                    issued: ClaudeQuestionReceipt?, now: Double) -> ClaudeQuestionReceipt? {
-        guard request.expiresAt > now else { return nil }
+                                    issued: ClaudeQuestionReceipt?, held: Double?,
+                                    now: Double) -> ClaudeQuestionReceipt? {
+        let deadline = ClaudeQuestionTiming.heldDeadline(publishedAt: request.publishedAt,
+                                                         expiresAt: request.expiresAt, held: held)
+        guard deadline > now else { return nil }
         if let issued, receipt(for: request.requestID, in: directory) == issued {
             return issued
         }
+        guard request.expiresAt > now else { return nil }
         let fresh = ClaudeQuestionReceipt(requestID: request.requestID, installationID: request.installationID,
                                           sourceScope: request.sourceScope,
                                           eventDirectory: request.eventDirectory,
