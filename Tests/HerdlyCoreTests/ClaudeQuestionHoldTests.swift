@@ -65,7 +65,7 @@ private func answer(_ request: ClaudeQuestionRequest, at decidedAt: Double) -> C
     }
     writer.start()
     #expect(ClaudeQuestionHelper.awaitAnswer(for: request, in: directory,
-                                             connectionTimeout: 0.2, answerTimeout: 0.3)?.answer == "Blue")
+                                             connectionTimeout: 0.2, answerTimeout: 0.3)?.answers.first?.answer == "Blue")
 }
 
 @Test func aMalformedOrMismatchedQuestionHoldLeavesTheBaseDeadlineAndExpiryAnswersNothing() throws {
@@ -137,7 +137,7 @@ private func answer(_ request: ClaudeQuestionRequest, at decidedAt: Double) -> C
     writer.start()
     let started = Date()
     #expect(ClaudeQuestionHelper.awaitAnswer(for: request, in: directory,
-                                             connectionTimeout: 0.2, answerTimeout: 0.3)?.answer == "Blue")
+                                             connectionTimeout: 0.2, answerTimeout: 0.3)?.answers.first?.answer == "Blue")
     #expect(Date().timeIntervalSince(started) < 1.2)
 }
 

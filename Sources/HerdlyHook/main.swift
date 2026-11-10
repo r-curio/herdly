@@ -528,7 +528,7 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
        let promptID = boundedClaudeString(object["prompt_id"], limit: 256),
        let toolUseID = boundedClaudeString(object["tool_use_id"], limit: 256),
        let toolInput = object["tool_input"] as? [String: Any],
-       let parsed = QuestionPrompt.parseCall(toolInput: toolInput), parsed.count == 1,
+       let prompts = ClaudeQuestionAnswerPolicy.answerablePrompts(toolInput: toolInput),
        let sourceScope,
        let questionRequestID {
         let publishedAt = Date().timeIntervalSince1970
@@ -538,7 +538,7 @@ if let agentIndex = arguments.firstIndex(of: "--agent"), arguments.indices.conta
                                              sessionID: session, promptID: promptID, toolUseID: toolUseID,
                                              publishedAt: publishedAt,
                                              expiresAt: publishedAt + ClaudeQuestionTiming.answerTimeout,
-                                             prompts: parsed.prompts)
+                                             prompts: prompts)
         if ClaudeQuestionStore.publish(question, in: directory),
            let answer = ClaudeQuestionHelper.awaitAnswer(for: question, in: directory),
            let output = ClaudeQuestionAnswerPolicy.hookOutput(toolInput: toolInput, request: question, answer: answer) {

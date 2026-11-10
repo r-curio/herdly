@@ -137,7 +137,7 @@ private func claudeQuestionLiveness(for request: ClaudeQuestionRequest,
                                      eventDirectory: request.eventDirectory,
                                      sessionID: "other-session", promptID: request.promptID,
                                      toolUseID: request.toolUseID, kind: .multiSelect,
-                                     answer: multi.answer, decidedAt: 11)
+                                     answer: "Development, Production", decidedAt: 11)
     #expect(!ClaudeQuestionAnswerPolicy.accepts(request: request, answer: wrong))
 }
 
@@ -158,7 +158,7 @@ private func claudeQuestionLiveness(for request: ClaudeQuestionRequest,
     #expect(ClaudeQuestionStore.publish(claudeQuestionAnswer(for: request, decidedAt: now - 0.01), in: directory))
     let answer = ClaudeQuestionHelper.awaitAnswer(for: request, in: directory,
                                                   connectionTimeout: 0.2, answerTimeout: 0.2)
-    #expect(answer?.answer == "Blue")
+    #expect(answer?.answers.first?.answer == "Blue")
     #expect(!ClaudeQuestionStore.publish(claudeQuestionAnswer(for: request, answer: "Red", decidedAt: now + 0.03),
                                         in: directory))
 }
