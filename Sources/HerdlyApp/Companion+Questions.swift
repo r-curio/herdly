@@ -38,7 +38,9 @@ extension Companion {
         let retainedIDs = Set(retained.keys)
         liveClaudeQuestions = retained
         availableClaudeQuestionTokens = availableClaudeQuestionTokens.filter { retainedIDs.contains($0) }
-        spentClaudeQuestionTokens = spentClaudeQuestionTokens.filter { retainedIDs.contains($0) }
+        // Issued receipts and spent marks outlive the live question until no helper can still
+        // wait on them, so a rescan re-adopts the receipt but never a spent token (#385).
+        claudeQuestionReceipts.prune(now: now)
         pendingClaudeQuestionReceipts = pendingClaudeQuestionReceipts.filter { retainedIDs.contains($0) }
         claudeQuestionHolds = claudeQuestionHolds.filter { retainedIDs.contains($0.key) }
     }
@@ -84,24 +86,7 @@ extension Companion {
         guard !works.isEmpty else { return }
         Task { @MainActor [weak self] in
             let results = await Task.detached(priority: .utility) {
-                works.map { work -> ClaudeQuestionReceiptResult in
-                    let now = Date().timeIntervalSince1970
-                    guard work.request.expiresAt > now else {
-                        return ClaudeQuestionReceiptResult(request: work.request, requestID: work.request.requestID,
-                                                          root: work.root,
-                                                          scanGeneration: work.scanGeneration, written: false)
-                    }
-                    let receipt = ClaudeQuestionReceipt(requestID: work.request.requestID,
-                                                        installationID: work.request.installationID,
-                                                        sourceScope: work.request.sourceScope,
-                                                        eventDirectory: work.request.eventDirectory,
-                                                        receivedAt: now, expiresAt: work.request.expiresAt)
-                    let written = ClaudeQuestionStore.publish(
-                        receipt, in: URL(fileURLWithPath: work.eventsPath, isDirectory: true))
-                    return ClaudeQuestionReceiptResult(request: work.request, requestID: work.request.requestID,
-                                                      root: work.root,
-                                                      scanGeneration: work.scanGeneration, written: written)
-                }
+                works.map { claudeQuestionIssueReceipt($0, now: Date().timeIntervalSince1970) }
             }.value
             self?.reconcileClaudeQuestionReceipts(results)
         }
@@ -119,9 +104,11 @@ extension Companion {
                         && $0.request.sourceScope == $0.sourceScope
                         && $0.request.eventDirectory == $0.events.standardizedFileURL.path
                 } == true
+            // Recorded even when discarded, so the rescan of a pruned question re-adopts it (#385).
+            if let receipt = result.receipt { claudeQuestionReceipts.record(receipt) }
             let disposition = claudeQuestionReceiptDisposition(
                 result, currentGeneration: claudeQuestionScanGeneration, liveRequest: live?.request,
-                rootIsCurrent: rootIsCurrent, now: now)
+                rootIsCurrent: rootIsCurrent, spent: claudeQuestionReceipts.isSpent(result.requestID), now: now)
             pendingClaudeQuestionReceipts.remove(result.requestID)
             switch disposition {
             case .accept, .staleAccept:
@@ -205,7 +192,7 @@ extension Companion {
         }
         // Spend the memory-only capability before writing. A failed write is never retried.
         availableClaudeQuestionTokens.remove(live.request.requestID)
-        spentClaudeQuestionTokens.insert(live.request.requestID)
+        claudeQuestionReceipts.spend(live.request.requestID)
         let noteID = AgentAttentionID.question(question.id)
         guard ClaudeQuestionStore.publish(record, in: live.events) else {
             updateRowNote(RowNoteUpdate.claudeAnswer(published: false, delivered: false), for: noteID, userAction: true)

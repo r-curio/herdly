@@ -33,22 +33,68 @@ import Testing
                                         eventDirectory: "/events-a", publishedAt: 10, expiresAt: 20)
     let root = ClaudeQuestionRootKey(sourceScope: "/root-a", eventsPath: "/events-a", installationID: "install-1")
     let result = ClaudeQuestionReceiptResult(request: request, requestID: request.requestID, root: root,
-                                             scanGeneration: 1, written: true)
+                                             scanGeneration: 1,
+                                             receipt: claudeQuestionReceipt(for: request, receivedAt: 10.5))
     #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
-                                             liveRequest: request, rootIsCurrent: true, now: 11) == .staleAccept)
+                                             liveRequest: request, rootIsCurrent: true, spent: false,
+                                             now: 11) == .staleAccept)
     #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 1,
-                                             liveRequest: request, rootIsCurrent: true, now: 11) == .accept)
+                                             liveRequest: request, rootIsCurrent: true, spent: false,
+                                             now: 11) == .accept)
     #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
-                                             liveRequest: nil, rootIsCurrent: true, now: 11) == .discard)
+                                             liveRequest: nil, rootIsCurrent: true, spent: false,
+                                             now: 11) == .discard)
     #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
                                              liveRequest: claudeQuestionRequest(requestID: "other"),
-                                             rootIsCurrent: true, now: 11) == .discard)
+                                             rootIsCurrent: true, spent: false, now: 11) == .discard)
     #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 2,
-                                             liveRequest: request, rootIsCurrent: false, now: 11) == .discard)
+                                             liveRequest: request, rootIsCurrent: false, spent: false,
+                                             now: 11) == .discard)
     #expect(claudeQuestionReceiptDisposition(
         ClaudeQuestionReceiptResult(request: request, requestID: request.requestID, root: root,
-                                    scanGeneration: 1, written: false),
-        currentGeneration: 2, liveRequest: request, rootIsCurrent: true, now: 11) == .discard)
+                                    scanGeneration: 1, receipt: nil),
+        currentGeneration: 2, liveRequest: request, rootIsCurrent: true, spent: false, now: 11) == .discard)
+    // A worker that lands after the token was spent never grants it again (#385).
+    #expect(claudeQuestionReceiptDisposition(result, currentGeneration: 1,
+                                             liveRequest: request, rootIsCurrent: true, spent: true,
+                                             now: 11) == .discard)
+}
+
+/// #385: one receipt result is discarded (its live question was pruned before it landed), then the
+/// rescan's receipt work finds the receipt already on disk. Before the fix that work could never
+/// write, so the question stayed read-only for its whole window.
+@Test func claudeQuestionReceiptWorkReadoptsThisCompanionsReceiptAfterADiscardedResult() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("herdly-claude-question-readopt-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let events = directory.standardizedFileURL.path
+    let request = claudeQuestionRequest(eventDirectory: events, publishedAt: 100, expiresAt: 130)
+    let root = ClaudeQuestionRootKey(sourceScope: "/root", eventsPath: events, installationID: "install-1")
+    var ledger = ClaudeQuestionReceiptLedger()
+
+    let first = claudeQuestionIssueReceipt(ClaudeQuestionReceiptWork(
+        request: request, eventsPath: events, root: root, scanGeneration: 1,
+        issued: ledger.adoptable(for: request)), now: 101.4)
+    // The live question was pruned before the result landed: discarded, but still recorded.
+    #expect(claudeQuestionReceiptDisposition(first, currentGeneration: 2, liveRequest: nil, rootIsCurrent: true,
+                                             spent: false, now: 101.5) == .discard)
+    ledger.record(try #require(first.receipt))
+
+    let rescan = claudeQuestionIssueReceipt(ClaudeQuestionReceiptWork(
+        request: request, eventsPath: events, root: root, scanGeneration: 3,
+        issued: ledger.adoptable(for: request)), now: 103.4)
+    #expect(rescan.receipt == first.receipt)
+    #expect(claudeQuestionReceiptDisposition(rescan, currentGeneration: 3, liveRequest: request, rootIsCurrent: true,
+                                             spent: false, now: 103.5) == .accept)
+
+    // A new launch has an empty ledger: the same receipt on disk grants nothing.
+    let restarted = claudeQuestionIssueReceipt(ClaudeQuestionReceiptWork(
+        request: request, eventsPath: events, root: root, scanGeneration: 1,
+        issued: ClaudeQuestionReceiptLedger().adoptable(for: request)), now: 104)
+    #expect(restarted.receipt == nil)
+    #expect(claudeQuestionReceiptDisposition(restarted, currentGeneration: 1, liveRequest: request,
+                                             rootIsCurrent: true, spent: false, now: 104) == .discard)
 }
 
 private func claudeQuestionRequest(requestID: String = "request-1", installationID: String = "install-1",

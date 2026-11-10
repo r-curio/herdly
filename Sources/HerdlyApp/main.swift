@@ -14,6 +14,9 @@ struct ClaudeQuestionReceiptWork: Sendable {
     let eventsPath: String
     let root: ClaudeQuestionRootKey
     let scanGeneration: UInt64
+    /// The receipt this running companion already issued for the request, from its ledger when
+    /// the work was queued (#385); nil when it issued none or the token was spent.
+    let issued: ClaudeQuestionReceipt?
 }
 
 struct ClaudeQuestionReceiptResult: Sendable {
@@ -21,7 +24,20 @@ struct ClaudeQuestionReceiptResult: Sendable {
     let requestID: String
     let root: ClaudeQuestionRootKey
     let scanGeneration: UInt64
-    let written: Bool
+    /// The receipt this companion wrote, or re-adopted as its own, for the request; nil otherwise.
+    let receipt: ClaudeQuestionReceipt?
+
+    var written: Bool { receipt != nil }
+}
+
+/// Receipt work off the main actor: writes this companion's receipt, or re-adopts the identical
+/// one it already issued (#385). A receipt on disk this companion did not issue yields nil.
+func claudeQuestionIssueReceipt(_ work: ClaudeQuestionReceiptWork, now: Double) -> ClaudeQuestionReceiptResult {
+    let receipt = ClaudeQuestionStore.issueReceipt(for: work.request,
+                                                   in: URL(fileURLWithPath: work.eventsPath, isDirectory: true),
+                                                   issued: work.issued, now: now)
+    return ClaudeQuestionReceiptResult(request: work.request, requestID: work.request.requestID, root: work.root,
+                                       scanGeneration: work.scanGeneration, receipt: receipt)
 }
 
 struct ClaudeApprovalRootKey: Hashable, Sendable {
@@ -74,8 +90,9 @@ enum ClaudeQuestionReceiptDisposition: Equatable {
 func claudeQuestionReceiptDisposition(_ result: ClaudeQuestionReceiptResult,
                                       currentGeneration: UInt64,
                                       liveRequest: ClaudeQuestionRequest?, rootIsCurrent: Bool,
-                                      now: Double) -> ClaudeQuestionReceiptDisposition {
-    guard result.written, rootIsCurrent, let liveRequest,
+                                      spent: Bool, now: Double) -> ClaudeQuestionReceiptDisposition {
+    // A spent token is never granted again, even by a worker that landed after the spend.
+    guard result.written, !spent, rootIsCurrent, let liveRequest,
           liveRequest == result.request, result.request.expiresAt > now else { return .discard }
     // A worker may finish after a newer scan. Exact request/root identity makes that immutable
     // receipt safe to use; a different live request or root remains fail-closed.
@@ -414,7 +431,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     var liveClaudeQuestions: [String: LiveClaudeQuestion] = [:]
     var availableClaudeQuestionTokens: Set<String> = []
-    var spentClaudeQuestionTokens: Set<String> = []
+    /// Receipts this running companion issued and the tokens it spent (#385). Process memory only.
+    var claudeQuestionReceipts = ClaudeQuestionReceiptLedger()
     var pendingClaudeQuestionReceipts: Set<String> = []
     var claudeQuestionScanGeneration: UInt64 = 0
     /// Hover holds on live Claude questions (ADR 0020, amended 2026-10-30), by helper request id.
@@ -1524,14 +1542,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                     liveClaudeQuestions[live.request.requestID] = LiveClaudeQuestion(request: live.request,
                                                                                        events: live.events,
                                                                                        sourceScope: live.sourceScope)
-                    guard !spentClaudeQuestionTokens.contains(live.request.requestID),
+                    guard !claudeQuestionReceipts.isSpent(live.request.requestID),
                           !availableClaudeQuestionTokens.contains(live.request.requestID),
                           pendingClaudeQuestionReceipts.insert(live.request.requestID).inserted else { continue }
                     receiptWork.append(ClaudeQuestionReceiptWork(
                         request: live.request, eventsPath: live.events.standardizedFileURL.path,
                         root: claudeQuestionRootKey(sourceScope: live.sourceScope, events: live.events,
                                                     installationID: live.request.installationID),
-                        scanGeneration: questionScanGeneration))
+                        scanGeneration: questionScanGeneration,
+                        issued: claudeQuestionReceipts.adoptable(for: live.request)))
                 }
             }
             pruneClaudeQuestionState(now: scanNow, roots: currentClaudeQuestionRoots(),
