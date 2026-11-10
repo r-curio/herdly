@@ -13,6 +13,9 @@ public struct FileStamp: Hashable, Sendable {
     /// symbolic link is not).
     public let isRegularFile: Bool
 
+    /// The modification time as seconds since 1970.
+    var modifiedAt: Double { Double(modifiedSeconds) + Double(modifiedNanoseconds) / 1_000_000_000 }
+
     /// The stamp of `url`, following a final symbolic link when `followingLinks` is true; nil when
     /// the path cannot be stat'ed. Take it before reading, so a change during the read shows up as a
     /// different stamp on the next scan rather than being hidden by the cache.
