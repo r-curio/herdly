@@ -58,6 +58,12 @@ public struct ClaudeTurnResult: Equatable, Sendable {
 /// when no tool call can still be fresh, rebuilds nothing. A record rewritten in place leaves the
 /// directory's stamp alone, so every file is checked again once the last full check is
 /// `ClaudeObservationReader.maximumUncheckedAge` old.
+///
+/// When the directory does change, two more things are reused until that same full check. A record
+/// already read is not looked at again while the directory still lists its name under the inode it
+/// was read under (a replaced file has a new inode). And each session's part of the result is kept:
+/// sessions share no state, so only a session whose records changed, or whose tool call can still
+/// be fresh, is built again.
 public struct ClaudeRecordCache: Sendable {
     fileprivate struct Entry: Sendable {
         let stamp: FileStamp
@@ -78,6 +84,8 @@ public struct ClaudeRecordCache: Sendable {
     fileprivate var result: ClaudeObservationScan?
     fileprivate var resultNow: Double = -.infinity
     fileprivate var latestToolAt: Double = -.infinity
+    /// Each session's part of `result`, by session id.
+    fileprivate var sessions: [String: ClaudeObservationReader.SessionPart] = [:]
 
     public init() {}
 
@@ -220,10 +228,12 @@ public enum ClaudeObservationReader {
         // Taken before the directory is listed, so a change during the scan shows as a new stamp next time.
         let directoryStamp = FileStamp(events, followingLinks: true)
         guard isDirectory(events),
-              let listing = HookEventListing.listing(in: events) else {
+              let listing = HookEventListing.detailedListing(in: events) else {
             return (ClaudeObservationScan(sourceScope: scope, available: false), cache)
         }
         let reusable = cache.installationID == installationID && cache.observingSince == observingSince
+        // A session's part names its scope in every identity, so it serves only the same scope.
+        let sameScope = reusable && cache.result?.sourceScope == scope
         // Unchanged directory, checked recently: the same records, with no file looked at.
         if reusable, let stamp = directoryStamp, cache.directoryStamp == stamp, let checkedAt = cache.checkedAt,
            now.isFinite, now >= checkedAt, now - checkedAt < maximumUncheckedAge {
@@ -233,27 +243,44 @@ public enum ClaudeObservationReader {
                 return (result, cache)
             }
             var next = cache
-            let built = build(cache.records, scope: scope, now: now)
+            let built = build(cache.records, scope: scope, now: now, previous: sameScope ? cache.sessions : [:], changed: [])
             next.result = built.scan
             next.resultNow = now
             next.latestToolAt = built.latestToolAt
+            next.sessions = built.sessions
             return (built.scan, next)
+        }
+        // The directory changed, but the last full check is recent: a record already read is trusted
+        // while the directory lists it under the same inode, and only the others are looked at.
+        let recentlyChecked: Bool
+        if reusable, let checkedAt = cache.checkedAt, now.isFinite, now >= checkedAt, now - checkedAt < maximumUncheckedAge {
+            recentlyChecked = true
+        } else {
+            recentlyChecked = false
         }
         var next = ClaudeRecordCache()
         next.installationID = installationID
         next.observingSince = observingSince
         next.directoryStamp = directoryStamp
-        next.checkedAt = now.isFinite ? now : nil
-        let records = listing.records
-            .compactMap { url -> Record? in
+        next.checkedAt = recentlyChecked ? cache.checkedAt : (now.isFinite ? now : nil)
+        // Sessions with a record read from its file in this scan.
+        var changed = Set<String>()
+        let records = zip(listing.records, listing.recordInodes)
+            .compactMap { url, inode -> Record? in
+                let path = url.path
+                if recentlyChecked, let entry = cache.entries[path], entry.stamp.inode == inode, entry.stamp.isRegularFile {
+                    next.entries[path] = entry
+                    return entry.record
+                }
                 // A link or a path that cannot be stat'ed is never a record, as `record(at:)` decides.
                 guard let stamp = FileStamp(url, followingLinks: false) else { return nil }
-                if reusable, let entry = cache.entries[url.path], entry.stamp == stamp {
-                    next.entries[url.path] = entry
+                if reusable, let entry = cache.entries[path], entry.stamp == stamp {
+                    next.entries[path] = entry
                     return entry.record
                 }
                 let record = stamp.isRegularFile ? record(at: url, installationID: installationID, observingSince: observingSince) : nil
-                next.entries[url.path] = ClaudeRecordCache.Entry(stamp: stamp, record: record)
+                next.entries[path] = ClaudeRecordCache.Entry(stamp: stamp, record: record)
+                if let record { changed.insert(record.session) }
                 return record
             }
             .sorted {
@@ -261,18 +288,106 @@ public enum ClaudeObservationReader {
                 if $0.session != $1.session { return $0.session < $1.session }
                 return $0.fileName < $1.fileName
             }
-        let built = build(records, scope: scope, now: now)
+        let built = build(records, scope: scope, now: now, previous: sameScope ? cache.sessions : [:], changed: changed)
         next.records = records
         next.result = built.scan
         next.resultNow = now
         next.latestToolAt = built.latestToolAt
+        next.sessions = built.sessions
         return (built.scan, next)
     }
 
+    /// The scan with every record replayed in one pass and nothing kept between scans, as scans were
+    /// built before sessions were built apart. The reference the per-session build must equal; tests only.
+    static func referenceScan(events: URL, sourceScope: String, installationID: String,
+                              observingSince: Double = -.infinity, now: Double) -> ClaudeObservationScan {
+        let scope = normalizedScope(sourceScope)
+        guard isDirectory(events), let listing = HookEventListing.listing(in: events) else {
+            return ClaudeObservationScan(sourceScope: scope, available: false)
+        }
+        let records = listing.records
+            .compactMap { url -> Record? in
+                guard FileStamp(url, followingLinks: false)?.isRegularFile == true else { return nil }
+                return record(at: url, installationID: installationID, observingSince: observingSince)
+            }
+            .sorted {
+                if $0.capturedAt != $1.capturedAt { return $0.capturedAt < $1.capturedAt }
+                if $0.session != $1.session { return $0.session < $1.session }
+                return $0.fileName < $1.fileName
+            }
+        let all = buildSession(records, scope: scope, now: now)
+        let observations = all.turns.sorted {
+            if $0.startedAt != $1.startedAt { return $0.startedAt < $1.startedAt }
+            if $0.prompt != $1.prompt { return $0.prompt < $1.prompt }
+            return $0.session < $1.session
+        }.flatMap(\.observations)
+        return ClaudeObservationScan(sourceScope: scope, observations: observations, results: all.results,
+                                     latestSessionStartAt: all.latestSessionStartAt)
+    }
+
+    /// One session's part of a scan: sessions share no state, so each is built from its own records.
+    fileprivate struct SessionPart: Sendable {
+        /// The session's record files, in scan order: the part stands only for exactly these.
+        let fileNames: [String]
+        let turns: [TurnPart]
+        let results: [AgentTurnIdentity: ClaudeTurnResult]
+        let latestSessionStartAt: Double?
+        /// The latest finite capture time among the uncompleted tool calls left open, and the `now`
+        /// the part was built for: `now` changes a part only through those calls' freshness.
+        let latestToolAt: Double
+        let builtNow: Double
+    }
+
+    /// One turn's observations with what orders turns across sessions.
+    fileprivate struct TurnPart: Sendable {
+        let startedAt: Double
+        let prompt: String
+        let session: String
+        let observations: [AgentObservation]
+    }
+
     /// The scan `records` (in scan order) give at `now`, with the latest finite capture time among the
-    /// uncompleted tool calls left open: `now` changes the result only through their freshness.
-    private static func build(_ records: [Record], scope: String,
-                              now: Double) -> (scan: ClaudeObservationScan, latestToolAt: Double) {
+    /// uncompleted tool calls left open, and each session's part for the next scan. A part in
+    /// `previous` is reused when its session has exactly the same record files, none of them read in
+    /// this scan (`changed`), and no tool call of its could have been fresh since it was built.
+    private static func build(_ records: [Record], scope: String, now: Double, previous: [String: SessionPart],
+                              changed: Set<String>)
+        -> (scan: ClaudeObservationScan, latestToolAt: Double, sessions: [String: SessionPart]) {
+        var order: [String] = []
+        var grouped: [String: [Record]] = [:]
+        for record in records {
+            if grouped[record.session] == nil { order.append(record.session) }
+            grouped[record.session, default: []].append(record)
+        }
+        var sessions: [String: SessionPart] = [:]
+        sessions.reserveCapacity(order.count)
+        for session in order {
+            let own = grouped[session] ?? []
+            if let part = previous[session], !changed.contains(session), now.isFinite, now >= part.builtNow,
+               part.builtNow - part.latestToolAt > maximumToolFreshness,
+               part.fileNames.count == own.count, part.fileNames.elementsEqual(own.lazy.map(\.fileName)) {
+                sessions[session] = part
+            } else {
+                sessions[session] = buildSession(own, scope: scope, now: now)
+            }
+        }
+        let parts = order.compactMap { sessions[$0] }
+        // Oldest turn first, then prompt; the session only settles a tie the same way every time.
+        let observations = parts.flatMap(\.turns).sorted {
+            if $0.startedAt != $1.startedAt { return $0.startedAt < $1.startedAt }
+            if $0.prompt != $1.prompt { return $0.prompt < $1.prompt }
+            return $0.session < $1.session
+        }.flatMap(\.observations)
+        var results: [AgentTurnIdentity: ClaudeTurnResult] = [:]
+        for part in parts { results.merge(part.results) { _, latest in latest } }
+        let latestSessionStartAt = parts.compactMap(\.latestSessionStartAt).max()
+        let latestToolAt = parts.map(\.latestToolAt).max() ?? -.infinity
+        return (ClaudeObservationScan(sourceScope: scope, observations: observations, results: results,
+                                      latestSessionStartAt: latestSessionStartAt), latestToolAt, sessions)
+    }
+
+    /// One session's part at `now`, from that session's records alone, in scan order.
+    private static func buildSession(_ records: [Record], scope: String, now: Double) -> SessionPart {
         var turns: [AgentTurnIdentity: Turn] = [:]
         var sessionPrompts: [String: String] = [:]
         var endedSessions = Set<String>()
@@ -510,10 +625,8 @@ public enum ClaudeObservationReader {
             }
         }
 
-        let observations = turns.values.sorted {
-            if $0.startedAt != $1.startedAt { return $0.startedAt < $1.startedAt }
-            return $0.prompt < $1.prompt
-        }.flatMap { turn -> [AgentObservation] in
+        let turnParts = turns.values.map { turn -> TurnPart in
+            let observations: [AgentObservation] = {
             let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                 session: turn.session, surface: .cli)
             // Every submitted prompt is a reply, including one in a session that has since ended.
@@ -543,6 +656,8 @@ public enum ClaudeObservationReader {
                                                                      arrivedAt: stopAt)))
             }
             return result
+            }()
+            return TurnPart(startedAt: turn.startedAt, prompt: turn.prompt, session: turn.session, observations: observations)
         }
         var results: [AgentTurnIdentity: ClaudeTurnResult] = [:]
         for turn in turns.values where turn.promptText != nil || turn.lastMessage != nil {
@@ -556,8 +671,8 @@ public enum ClaudeObservationReader {
         let openTools = turns.values.flatMap { $0.tools.values + ($0.tool.map { [$0] } ?? []) }
             + subagents.values.flatMap { $0.values.flatMap(\.tools.values) }
         let latestToolAt = openTools.map(\.at).filter(\.isFinite).max() ?? -.infinity
-        return (ClaudeObservationScan(sourceScope: scope, observations: observations, results: results,
-                                      latestSessionStartAt: latestSessionStartAt), latestToolAt)
+        return SessionPart(fileNames: records.map(\.fileName), turns: turnParts, results: results,
+                           latestSessionStartAt: latestSessionStartAt, latestToolAt: latestToolAt, builtNow: now)
     }
 
     /// The session's own latest uncompleted call; a subagent's call never is.
