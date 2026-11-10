@@ -146,6 +146,25 @@ public enum ClaudeQuestionAnswerKind: String, Codable, Sendable {
     case text
 }
 
+/// One question's answer inside a call's answer set, in the call's own question order.
+public struct ClaudeQuestionAnswerEntry: Codable, Equatable, Sendable {
+    public let kind: ClaudeQuestionAnswerKind
+    public let answer: String
+
+    public init(kind: ClaudeQuestionAnswerKind, answer: String) {
+        self.kind = kind
+        self.answer = answer
+    }
+}
+
+/// The user's answers to one live call, one entry per question in order (#382). The helper accepts
+/// only a complete set; a partial set never reaches Claude.
+///
+/// Record format: `answers` holds the set. A one-answer set also writes the pre-#382 `kind` and
+/// `answer` fields, so a helper still running from an older build reads it as before; a larger set
+/// leaves them out, so an older helper cannot decode it and sends nothing. A record without
+/// `answers` (written by an older app) reads as a one-answer set. Legacy fields that disagree with
+/// `answers` make the record unreadable.
 public struct ClaudeQuestionAnswer: Codable, Equatable, Sendable {
     public let requestID: String
     public let installationID: String
@@ -155,13 +174,12 @@ public struct ClaudeQuestionAnswer: Codable, Equatable, Sendable {
     public let sessionID: String
     public let promptID: String
     public let toolUseID: String
-    public let kind: ClaudeQuestionAnswerKind
-    public let answer: String
+    public let answers: [ClaudeQuestionAnswerEntry]
     public let decidedAt: Double
 
     public init(requestID: String, installationID: String, sourceScope: String, eventDirectory: String,
-                sessionID: String, promptID: String,
-                toolUseID: String, kind: ClaudeQuestionAnswerKind, answer: String, decidedAt: Double) {
+                sessionID: String, promptID: String, toolUseID: String,
+                answers: [ClaudeQuestionAnswerEntry], decidedAt: Double) {
         self.requestID = requestID
         self.installationID = installationID
         self.sourceScope = sourceScope
@@ -169,9 +187,70 @@ public struct ClaudeQuestionAnswer: Codable, Equatable, Sendable {
         self.sessionID = sessionID
         self.promptID = promptID
         self.toolUseID = toolUseID
-        self.kind = kind
-        self.answer = answer
+        self.answers = answers
         self.decidedAt = decidedAt
+    }
+
+    /// A one-question call's answer.
+    public init(requestID: String, installationID: String, sourceScope: String, eventDirectory: String,
+                sessionID: String, promptID: String,
+                toolUseID: String, kind: ClaudeQuestionAnswerKind, answer: String, decidedAt: Double) {
+        self.init(requestID: requestID, installationID: installationID, sourceScope: sourceScope,
+                  eventDirectory: eventDirectory, sessionID: sessionID, promptID: promptID, toolUseID: toolUseID,
+                  answers: [ClaudeQuestionAnswerEntry(kind: kind, answer: answer)], decidedAt: decidedAt)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case requestID, installationID, sourceScope, eventDirectory, sessionID, promptID, toolUseID
+        case answers, kind, answer, decidedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        requestID = try container.decode(String.self, forKey: .requestID)
+        installationID = try container.decode(String.self, forKey: .installationID)
+        sourceScope = try container.decode(String.self, forKey: .sourceScope)
+        eventDirectory = try container.decode(String.self, forKey: .eventDirectory)
+        sessionID = try container.decode(String.self, forKey: .sessionID)
+        promptID = try container.decode(String.self, forKey: .promptID)
+        toolUseID = try container.decode(String.self, forKey: .toolUseID)
+        decidedAt = try container.decode(Double.self, forKey: .decidedAt)
+        let kind = try container.decodeIfPresent(ClaudeQuestionAnswerKind.self, forKey: .kind)
+        let answer = try container.decodeIfPresent(String.self, forKey: .answer)
+        let legacy = kind.flatMap { kind in answer.map { ClaudeQuestionAnswerEntry(kind: kind, answer: $0) } }
+        guard (kind == nil) == (answer == nil) else {
+            throw DecodingError.dataCorruptedError(forKey: .answer, in: container,
+                                                   debugDescription: "kind and answer go together")
+        }
+        if let answers = try container.decodeIfPresent([ClaudeQuestionAnswerEntry].self, forKey: .answers) {
+            guard legacy.map({ answers == [$0] }) ?? true else {
+                throw DecodingError.dataCorruptedError(forKey: .answers, in: container,
+                                                       debugDescription: "legacy answer disagrees with the set")
+            }
+            self.answers = answers
+        } else if let legacy {
+            answers = [legacy]
+        } else {
+            throw DecodingError.keyNotFound(CodingKeys.answers, .init(codingPath: decoder.codingPath,
+                                                                      debugDescription: "no answer"))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(requestID, forKey: .requestID)
+        try container.encode(installationID, forKey: .installationID)
+        try container.encode(sourceScope, forKey: .sourceScope)
+        try container.encode(eventDirectory, forKey: .eventDirectory)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(promptID, forKey: .promptID)
+        try container.encode(toolUseID, forKey: .toolUseID)
+        try container.encode(answers, forKey: .answers)
+        if answers.count == 1, let only = answers.first {
+            try container.encode(only.kind, forKey: .kind)
+            try container.encode(only.answer, forKey: .answer)
+        }
+        try container.encode(decidedAt, forKey: .decidedAt)
     }
 }
 
@@ -312,8 +391,7 @@ public enum ClaudeQuestionStore {
                   validID(request.requestID),
                   request.eventDirectory == eventDirectory,
                   request.toolName == "AskUserQuestion",
-                  request.prompts.count == 1,
-                  request.prompts.first?.question?.isEmpty == false,
+                  ClaudeQuestionAnswerPolicy.answerable(request.prompts),
                   request.publishedAt.isFinite, request.expiresAt.isFinite,
                   request.expiresAt >= request.publishedAt else { continue }
             if heldDeadline(for: request, in: directory) < now {
@@ -504,6 +582,27 @@ public enum ClaudeQuestionHelper {
 
 public enum ClaudeQuestionAnswerPolicy {
     public static let maximumText = 4000
+    /// Claude's AskUserQuestion asks one to four questions per call. Separate from the parse cap,
+    /// `QuestionPrompt.maximumQuestions`, which bounds what a card can show for reference.
+    public static let maximumAnswerableQuestions = 4
+
+    /// Whether Herdly may answer a call with these questions: one to four, each with readable text,
+    /// none secret, and no two with the same text, since Claude's answers are keyed by question text
+    /// (`hookOutput`). One question Herdly cannot answer leaves the whole call to Claude.
+    public static func answerable(_ prompts: [QuestionPrompt]) -> Bool {
+        let texts = prompts.compactMap(\.question)
+        return (1...maximumAnswerableQuestions).contains(prompts.count)
+            && texts.count == prompts.count && Set(texts).count == texts.count
+            && prompts.allSatisfy { $0.question?.isEmpty == false && !$0.isSecret }
+    }
+
+    /// The helper's prompts for a call it may publish: every question parsed (none past the parse
+    /// cap) and the call `answerable`. Nil leaves the call to Claude's own question UI.
+    public static func answerablePrompts(toolInput: [String: Any]) -> [QuestionPrompt]? {
+        guard let parsed = QuestionPrompt.parseCall(toolInput: toolInput), parsed.count == parsed.prompts.count,
+              answerable(parsed.prompts) else { return nil }
+        return parsed.prompts
+    }
 
     public static func accepts(request: ClaudeQuestionRequest, answer: ClaudeQuestionAnswer) -> Bool {
         guard answer.requestID == request.requestID,
@@ -514,12 +613,16 @@ public enum ClaudeQuestionAnswerPolicy {
               answer.promptID == request.promptID,
               answer.toolUseID == request.toolUseID,
               request.toolName == "AskUserQuestion",
-              request.prompts.count == 1,
-              let prompt = request.prompts.first,
-              prompt.question?.isEmpty == false else { return false }
-        let value = answer.answer.trimmingCharacters(in: .whitespacesAndNewlines)
+              answerable(request.prompts),
+              answer.answers.count == request.prompts.count else { return false }
+        return zip(request.prompts, answer.answers).allSatisfy(accepts)
+    }
+
+    /// One question's answer against that question's own options.
+    private static func accepts(_ prompt: QuestionPrompt, _ entry: ClaudeQuestionAnswerEntry) -> Bool {
+        let value = entry.answer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, value.count <= maximumText else { return false }
-        switch answer.kind {
+        switch entry.kind {
         case .option:
             return !prompt.multiSelect && prompt.optionsComplete && prompt.options.contains(value)
         case .multiSelect:
@@ -531,16 +634,21 @@ public enum ClaudeQuestionAnswerPolicy {
         }
     }
 
-    /// Builds Claude's documented PreToolUse response from the unchanged original input.
+    /// Builds Claude's documented PreToolUse response from the unchanged original input, with one
+    /// `answers` entry per question keyed by that question's own text. Two questions with the same
+    /// text cannot both be answered that way, so such a call emits nothing.
     public static func hookOutput(toolInput: [String: Any], request: ClaudeQuestionRequest,
                                   answer: ClaudeQuestionAnswer) -> Data? {
         guard accepts(request: request, answer: answer),
-              let questions = toolInput["questions"] as? [[String: Any]], questions.count == 1,
-              let parsed = QuestionPrompt.parseCall(toolInput: toolInput), parsed.count == 1,
-              parsed.prompts == request.prompts,
-              let question = questions[0]["question"] as? String, !question.isEmpty else { return nil }
+              let questions = toolInput["questions"] as? [[String: Any]], questions.count == request.prompts.count,
+              answerablePrompts(toolInput: toolInput) == request.prompts else { return nil }
+        var answers: [String: String] = [:]
+        for (entry, answerEntry) in zip(questions, answer.answers) {
+            guard let question = entry["question"] as? String, !question.isEmpty, answers[question] == nil else { return nil }
+            answers[question] = answerEntry.answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         var updatedInput = toolInput
-        updatedInput["answers"] = [question: answer.answer.trimmingCharacters(in: .whitespacesAndNewlines)]
+        updatedInput["answers"] = answers
         let output: [String: Any] = ["hookSpecificOutput": [
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",

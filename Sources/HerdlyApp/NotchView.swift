@@ -1141,8 +1141,8 @@ struct Notch: View {
     /// Text typed in a Codex daemon card's field, per card (`QuestionTypedDrafts`).
     @State private var questionDrafts: [ClaudeQuestionViewStateKey: QuestionTypedDrafts] = [:]
     @State private var viewedQuestions: [ClaudeQuestionViewStateKey: Int] = [:]
-    /// A Claude question's selection is kept in the view until the user presses Send (D16).
-    @State private var claudeSelections: [ClaudeQuestionViewStateKey: ClaudeQuestionSelection] = [:]
+    /// A Claude call's selections are kept in the view until the user presses Send (D16, #382).
+    @State private var claudeSelections: [ClaudeQuestionViewStateKey: ClaudeQuestionCallSelection] = [:]
     /// The queue row under the pointer that would open as a card; a highlight only (#320).
     @State private var hoveredCardRow: AgentAttentionID?
     /// Ghostty's `tty` support for herdr Open availability; refreshed off the main actor.
@@ -1203,28 +1203,45 @@ struct Notch: View {
         viewedQuestions[key] = index
     }
 
-    private func toggleClaudeSelection(_ question: AgentQuestion, prompt: QuestionPrompt, option: Int) {
+    /// What the user has chosen on a Claude call, by question; nothing until they select.
+    private func claudeCall(_ question: AgentQuestion) -> ClaudeQuestionCallSelection {
+        claudeSelections[questionViewStateKey(question, 0)] ?? ClaudeQuestionCallSelection(prompts: question.prompts)
+    }
+
+    /// The Claude card's viewed question: the one being answered unless the user stepped elsewhere.
+    private func claudeViewed(_ question: AgentQuestion) -> Int {
+        viewedQuestion(question, current: claudeCall(question).current, count: question.prompts.count)
+    }
+
+    private func toggleClaudeSelection(_ question: AgentQuestion, question index: Int, option: Int) {
+        claudeSelections[questionViewStateKey(question, 0)] = claudeCall(question).toggling(option, at: index)
+    }
+
+    /// The Claude field's text for question `index`; typing clears its selected options
+    /// (`ClaudeQuestionSelection.typing`).
+    private func claudeTypedText(_ question: AgentQuestion, question index: Int) -> Binding<String> {
+        Binding(get: { claudeCall(question).selection(at: index).text },
+                set: { claudeSelections[questionViewStateKey(question, 0)] = claudeCall(question).typing($0, at: index) })
+    }
+
+    /// The Claude card's answering button (#382): Next keeps the answer here and shows the next
+    /// question; Send hands the whole set to the live helper's own checks (`answerClaudeQuestion`);
+    /// a step on only changes the view. Nothing is sent before Send, and never a partial set.
+    private func performClaude(_ primary: QuestionCardPrimary, _ question: AgentQuestion) {
         let key = questionViewStateKey(question, 0)
-        claudeSelections[key] = claudeSelection(question, prompt: prompt).toggling(option, of: prompt.options.count)
-    }
-
-    /// What the user has ticked on a Claude question; nothing until they select.
-    private func claudeSelection(_ question: AgentQuestion, prompt: QuestionPrompt) -> ClaudeQuestionSelection {
-        claudeSelections[questionViewStateKey(question, 0)] ?? ClaudeQuestionSelection(multiSelect: prompt.multiSelect)
-    }
-
-    /// Send on a Claude card: the selected option, or the ticked options, through the live helper's
-    /// own checks (`answerClaudeQuestion`). Nothing is sent while nothing is selected.
-    private func sendClaudeSelection(_ question: AgentQuestion, prompt: QuestionPrompt) {
-        guard let answer = claudeSelection(question, prompt: prompt).answer(labels: prompt.options) else { return }
-        model.answerClaudeQuestion(question, kind: answer.kind, answer: answer.answer)
-        claudeSelections[questionViewStateKey(question, 0)] = nil
-    }
-
-    /// The Claude field's text; typing clears any selected option (`ClaudeQuestionSelection.typing`).
-    private func claudeTypedText(_ question: AgentQuestion, prompt: QuestionPrompt) -> Binding<String> {
-        Binding(get: { claudeSelection(question, prompt: prompt).text },
-                set: { claudeSelections[questionViewStateKey(question, 0)] = claudeSelection(question, prompt: prompt).typing($0) })
+        let call = claudeCall(question)
+        switch primary {
+        case let .step(to): showQuestion(to, of: question)
+        case .next:
+            guard primary.enabled, !model.answering else { return }
+            let next = call.advancing(from: claudeViewed(question))
+            claudeSelections[key] = next
+            viewedQuestions[key] = next.current
+        case .send:
+            guard primary.enabled, !model.answering, let answers = call.answers(prompts: question.prompts) else { return }
+            model.answerClaudeQuestion(question, answers: answers)
+            claudeSelections[key] = nil
+        }
     }
 
     private var sessionNames: [AgentSessionIdentity: String] {
@@ -1341,10 +1358,11 @@ struct Notch: View {
         guard let press, press.card == model.presentationMode.singleCard,
               let question = model.orderedAgentAttentionItems.first(where: { $0.id == press.card })?.question else { return }
         if question.identity.session.source == .claude {
-            guard model.canAnswerAgentQuestion(question), let prompt = question.prompts.first else { return }
+            guard model.canAnswerAgentQuestion(question) else { return }
+            let viewed = claudeViewed(question)
             switch press.key {
-            case let .digit(number): toggleClaudeSelection(question, prompt: prompt, option: number - 1)
-            case .primary: sendClaudeSelection(question, prompt: prompt)
+            case let .digit(number): toggleClaudeSelection(question, question: viewed, option: number - 1)
+            case .primary: performClaude(claudeCall(question).primary(viewed: viewed), question)
             }
             return
         }
@@ -1361,8 +1379,24 @@ struct Notch: View {
     }
 
     /// The question card's header line (6AD): sprite, name, dim "· repo @ branch", the "Answer" pill,
-    /// the dim source ("CLI", "App", "Claude"), then the age. Queue rows keep D17 and name neither.
+    /// the dim source ("CLI", "App", "Claude"), then the age, or, for a Claude question Herdly can
+    /// answer, its "Ns left" pill in the age's place, as its queue row shows it (ADR 0020, #374;
+    /// Paper "G · Claude: answer several questions", #382). Queue rows keep D17 and name neither.
+    @ViewBuilder
     private func questionCardHeader(_ item: AgentAttentionItem) -> some View {
+        if let question = item.question, question.identity.session.source == .claude,
+           model.canAnswerAgentQuestion(question) {
+            // Display only: the countdown reads the held deadline and never moves it.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                questionCardHeader(item, countdown: model.claudeQuestionCountdown(question,
+                                                                                  now: context.date.timeIntervalSince1970))
+            }
+        } else {
+            questionCardHeader(item, countdown: nil)
+        }
+    }
+
+    private func questionCardHeader(_ item: AgentAttentionItem, countdown: ApprovalCountdown?) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
                 spriteSlot(working: false, color: spriteColor(for: item.session))
@@ -1385,11 +1419,15 @@ struct Notch: View {
                 .fixedSize()
             Text(Self.questionSource(item.session)).font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.dim)
                 .lineLimit(1).fixedSize()
-            rowAge(item)
+            if let countdown {
+                SecondsLeftPill(countdown: countdown)
+            } else {
+                rowAge(item)
+            }
         }
         .frame(minHeight: 26)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(rowHeading(item)), \(item.session.sourceLabel)")
+        .accessibilityLabel("\(rowHeading(item, countdown: countdown)), \(item.session.sourceLabel)")
         .accessibilityAddTraits(.isHeader)
     }
 
@@ -1400,8 +1438,9 @@ struct Notch: View {
 
     /// One question card body for the spotlight and the clicked card, inset to the title: the steps,
     /// the viewed question, its options, the typed field on the daemon path, one status line, then
-    /// Next or Send on the left and Open and Dismiss on the right. A Codex question has no countdown;
-    /// a Claude question Herdly can answer shows its "Ns left" row above Send (ADR 0020, #374).
+    /// Open on the left and Dismiss then Next or Send on the right (#382). A Codex question has no
+    /// countdown; a Claude question Herdly can answer shows "Ns left" in its header
+    /// (`questionCardHeader`; ADR 0020, #374, #382).
     @ViewBuilder
     private func questionCardBody(_ item: AgentAttentionItem, subject: String, herdr: HerdrOpenAvailability,
                                   codexOpen: Bool) -> some View {
@@ -1414,15 +1453,6 @@ struct Notch: View {
                        !model.canAnswerAgentQuestion(question) {
                         Text("The exact Claude tab cannot be opened until Herdly can verify it; continue in Claude.")
                             .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim).fixedSize(horizontal: false, vertical: true)
-                    }
-                    // Display only: the countdown reads the held deadline and never moves it. Only a
-                    // question Herdly can answer gets the per-second timer.
-                    if model.canAnswerAgentQuestion(question) {
-                        TimelineView(.periodic(from: .now, by: 1)) { context in
-                            if let countdown = model.claudeQuestionCountdown(question, now: context.date.timeIntervalSince1970) {
-                                ApprovalCountdownRow(countdown: countdown)
-                            }
-                        }
                     }
                     claudeQuestionFooter(question, item: item, subject: subject)
                 } else {
@@ -1534,11 +1564,25 @@ struct Notch: View {
         }
     }
 
-    /// The Codex card's bottom row: Next or Send (or a step on) left, Open and Dismiss right. The Codex
-    /// app without the daemon offers only "Open in Codex" (left, emphasized) and Dismiss.
+    /// What a Codex card's bottom row offers besides Dismiss.
+    private enum CodexFooterMode {
+        /// The Codex app without the daemon: "Open in Codex" only.
+        case desktopReadOnly
+        /// A CLI session with every terminal host off: "Set up Ghostty" only.
+        case setUpTerminal
+        /// Open, and the card's Next or Send where its route answers.
+        case answer
+    }
+
+    /// The Codex card's bottom row (#382): Open alone on the left; Dismiss, then Next or Send (or a step
+    /// on), on the right. The Codex app without the daemon offers only "Open in Codex" (left,
+    /// emphasized) and Dismiss.
     private func codexQuestionFooter(_ card: CodexCard?, item: AgentAttentionItem, subject: String, codexOpen: Bool) -> some View {
-        HStack(spacing: 6) {
-            if card?.route == .desktopReadOnly {
+        let mode: CodexFooterMode = card?.route == .desktopReadOnly ? .desktopReadOnly
+            : (item.session.surface == .cli && !model.cliTerminalHostOn ? .setUpTerminal : .answer)
+        return HStack(spacing: 6) {
+            switch mode {
+            case .desktopReadOnly:
                 if codexOpen {
                     NotchButton(title: "Open in Codex", emphasized: true) { model.openAgent(item.session) }
                         .disabled(model.openingTask)
@@ -1546,31 +1590,43 @@ struct Notch: View {
                         .accessibilityHint("Answer the question in the Codex app.")
                 }
                 Spacer(minLength: 6)
-            } else if item.session.surface == .cli && !model.cliTerminalHostOn {
+            case .setUpTerminal:
                 NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
                     .accessibilityLabel("Set up Ghostty: \(subject)")
                     .accessibilityHint("Opens Herdly controls to enable Ghostty controls.")
                 Spacer(minLength: 6)
-            } else {
-                if let card, let primary = primary(card) {
-                    primaryButton(primary, card: card, subject: subject)
-                }
-                Spacer(minLength: 6)
+            case .answer:
                 if codexOpen {
                     NotchButton(title: "Open") { model.openAgent(item.session) }
                         .disabled(model.openingTask)
                         .accessibilityLabel("Open Session: \(subject)")
                         .accessibilityHint("Answer the question in Codex's own panel.")
                 }
+                Spacer(minLength: 6)
             }
             // Dismiss only clears the card; nothing is sent, so the agent's own question stays authoritative.
             NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
                 .accessibilityLabel("Dismiss question: \(subject)")
+            // The answering button is always the far-right one (#382).
+            if mode == .answer, let card, let primary = primary(card) {
+                primaryButton(primary, card: card, subject: subject)
+            }
         }
         .padding(.top, 2)
     }
 
     private func primaryButton(_ primary: QuestionCardPrimary, card: CodexCard, subject: String) -> some View {
+        primaryButton(primary, prompts: card.prompts, subject: subject,
+                      sendHint: card.keyRoute ? "Types this option's digit into the session for this question only."
+                                              : "Sends every answer on this card to Codex once.") {
+            perform(primary, card)
+        }
+        .disabled(model.answering)
+    }
+
+    /// A question card's answering button: Next, Send, or a step on while reviewing.
+    private func primaryButton(_ primary: QuestionCardPrimary, prompts: [QuestionPrompt], subject: String,
+                               sendHint: String, action: @escaping () -> Void) -> some View {
         let title: String
         let label: String
         let hint: String
@@ -1582,16 +1638,15 @@ struct Notch: View {
         case .send:
             title = "Send"
             label = "Send answer to \(subject)"
-            hint = card.keyRoute ? "Types this option's digit into the session for this question only."
-                                 : "Sends every answer on this card to Codex once."
+            hint = sendHint
         case let .step(to):
-            let next = QuestionSteps.label(card.prompts[to], index: to)
+            let next = QuestionSteps.label(prompts[to], index: to)
             title = "\(next) ›"
             label = "Next question: \(next)"
             hint = "Shows the next question. Changes nothing."
         }
-        return NotchButton(title: title, emphasized: true) { perform(primary, card) }
-            .disabled(!primary.enabled || model.answering)
+        return NotchButton(title: title, emphasized: true, action: action)
+            .disabled(!primary.enabled)
             .accessibilityLabel(label)
             .accessibilityHint(hint)
     }
@@ -1609,8 +1664,9 @@ struct Notch: View {
         }
     }
 
-    /// A Claude card: one question answered through the live helper (select, then Send; ticks for
-    /// multi-select), otherwise read-only references.
+    /// A Claude card: the call answered through the live helper on the same step-through card as a
+    /// Codex daemon call (#382): select (ticks for multi-select) or type, Next keeps the answer here,
+    /// Send on the last question sends the whole set. Otherwise read-only references.
     @ViewBuilder
     private func claudeQuestionCard(_ question: AgentQuestion, subject: String) -> some View {
         let tone = spriteColor(for: question.identity.session)
@@ -1618,43 +1674,56 @@ struct Notch: View {
             statusLine("Claude asked a question Herdly could not read; answer it in Claude.", tone: NotchStyle.text)
         } else if !model.canAnswerAgentQuestion(question) {
             readOnlyQuestions(question.prompts, agent: "Claude", question: question, subject: subject, tone: tone)
-        } else if let prompt = question.prompts.first {
-            // Claude's answer control takes exactly one question (`canAnswerAgentQuestion`).
-            questionHead([prompt], question: question, current: 0, viewed: 0) { _ in nil }
+        } else {
+            let call = claudeCall(question)
+            let viewed = claudeViewed(question)
+            let prompt = question.prompts[viewed]
+            let canSelect = call.canSelect(question: viewed)
+            questionHead(question.prompts, question: question, current: call.current, viewed: viewed) { index in
+                call.railAnswer(at: index, labels: question.prompts[index].options)
+            }
             if let text = prompt.question { questionText(text) }
-            let selection = claudeSelection(question, prompt: prompt)
+            let selection = call.selection(at: viewed)
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(prompt.options.enumerated()), id: \.offset) { option, label in
                     let ticked = selection.options.contains(option)
                     OptionButton(number: option + 1, label: label, tone: NotchStyle.spriteColor(tone), selected: ticked,
                                  checked: prompt.multiSelect ? ticked : nil) {
-                        toggleClaudeSelection(question, prompt: prompt, option: option)
+                        toggleClaudeSelection(question, question: viewed, option: option)
                     }
+                    .disabled(!canSelect)
                     .accessibilityLabel("\(prompt.multiSelect ? "Tick" : "Select") \(option + 1): \(label), for \(subject)")
-                    .accessibilityHint("Nothing is sent until Send.")
+                    .accessibilityHint(canSelect ? "Nothing is sent until Send." : "Reference only until earlier questions are answered.")
                 }
             }
             QuestionTypedField(placeholder: prompt.options.isEmpty ? "Type your answer" : "Or type an answer",
-                               text: claudeTypedText(question, prompt: prompt), fieldLabel: "Typed answer for \(subject)",
+                               text: claudeTypedText(question, question: viewed), fieldLabel: "Typed answer for \(subject)",
                                onEscape: model.escape) {
-                sendClaudeSelection(question, prompt: prompt)
+                performClaude(call.primary(viewed: viewed), question)
             }
+            .disabled(!canSelect)
             if prompt.truncated { statusLine("Shortened; the full question is in Claude.") }
         }
     }
 
+    /// The Claude card's bottom row (#382): Open alone on the left; Dismiss, then Next or Send (or a
+    /// step on), on the right.
     private func claudeQuestionFooter(_ question: AgentQuestion, item: AgentAttentionItem, subject: String) -> some View {
         HStack(spacing: 6) {
-            if model.canAnswerAgentQuestion(question), let prompt = question.prompts.first {
-                NotchButton(title: "Send", emphasized: true) { sendClaudeSelection(question, prompt: prompt) }
-                    .disabled(!claudeSelection(question, prompt: prompt).canSend)
-                    .accessibilityLabel("Send answer to \(subject)")
-                    .accessibilityHint("Sends the selected option, the ticked options, or the typed answer to Claude once.")
-            }
-            Spacer(minLength: 6)
             claudeReturnControl(item, subject: subject, openTitle: "Open")
+            Spacer(minLength: 6)
             NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
                 .accessibilityLabel("Dismiss question: \(subject)")
+            if model.canAnswerAgentQuestion(question) {
+                let primary = claudeCall(question).primary(viewed: claudeViewed(question))
+                primaryButton(primary, prompts: question.prompts, subject: subject,
+                              sendHint: question.prompts.count > 1
+                                  ? "Sends every answer on this card to Claude once."
+                                  : "Sends the selected option, the ticked options, or the typed answer to Claude once.") {
+                    performClaude(primary, question)
+                }
+                .disabled(model.answering)
+            }
         }
         .padding(.top, 2)
     }
@@ -1931,7 +2000,8 @@ struct Notch: View {
     private func questionStepper(_ question: AgentQuestion) -> some View {
         let prompts = questionPrompts(question)
         if prompts.count > 1 {
-            let current = model.codexQuestion(for: question).map { model.progress(for: $0).questionIndex } ?? 0
+            let current = model.codexQuestion(for: question).map { model.progress(for: $0).questionIndex }
+                ?? (model.canAnswerAgentQuestion(question) ? claudeCall(question).current : 0)
             let viewed = viewedQuestion(question, current: current, count: prompts.count)
             NotchButton(title: "‹") { showQuestion(viewed - 1, of: question) }
                 .disabled(viewed == 0)

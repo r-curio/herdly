@@ -757,6 +757,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     static let spotlightPreviewModes: Set<String> = ["spotlight", "spotlight-approval", "spotlight-handed-back",
                                                        "spotlight-question", "spotlight-question-edit", "spotlight-question-review",
                                                        "spotlight-question-long", "spotlight-question-unavailable", "spotlight-claude-question", "spotlight-claude-multiselect",
+                                                       "spotlight-claude-steps",
                                                        "spotlight-result", "spotlight-result-markdown"]
     private var targetFrame: CGRect = .zero
     /// The frame animation in flight, so a refresh mid-animation does not mistake it for drift.
@@ -2989,6 +2990,20 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let sample = AgentQuestion(session: claudeSession, turn: "preview-multi", call: "toolu_multi", arrivedAt: now,
                                        prompts: [QuestionPrompt(header: "Checks", question: Companion.previewMessage ?? "Which checks should run before handing this back?",
                                                                 options: ["Core suite (Recommended)", "Package smoke check", "Visual review"], multiSelect: true)],
+                                       helperRequestID: "preview-helper")
+            agentQueue.apply(.question(sample), now: now)
+            previewSpotlightAgent = .question(sample.id)
+        }
+        if mode == "spotlight-claude-steps" {
+            // #382: a Claude call with three questions, answerable on the step-through card.
+            let sample = AgentQuestion(session: claudeSession, turn: "preview-steps", call: "toolu_steps", arrivedAt: now,
+                                       prompts: [QuestionPrompt(header: "Format", question: "Which format should the export use?",
+                                                                options: ["CSV", "JSON lines (Recommended)", "Markdown table", "Plain text"]),
+                                                 QuestionPrompt(header: "Scope", question: "Which sessions should it include?",
+                                                                options: ["Codex CLI", "Claude", "Codex app", "Archived sessions"],
+                                                                multiSelect: true),
+                                                 QuestionPrompt(header: "Notify", question: "Notify you when the export finishes?",
+                                                                options: ["Yes, in the notch", "No"])],
                                        helperRequestID: "preview-helper")
             agentQueue.apply(.question(sample), now: now)
             previewSpotlightAgent = .question(sample.id)

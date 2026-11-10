@@ -116,6 +116,102 @@ public struct ClaudeQuestionSelection: Equatable, Sendable {
     private func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 }
 
+/// A Claude call's answers as the user composes them on the step-through card (#382): one
+/// `ClaudeQuestionSelection` per question and the question being answered. Picking or typing only
+/// selects; Next keeps the answer here and moves on; Send on the last question hands the whole set
+/// to the helper at once, and only a complete set. Earlier questions stay revisable until Send;
+/// later ones can be read but not answered out of order. A one-question call is the same card with
+/// Send at once. View state only; never persisted, and the helper's own policy still judges the set.
+public struct ClaudeQuestionCallSelection: Equatable, Sendable {
+    private let optionCounts: [Int]
+    private var selections: [ClaudeQuestionSelection]
+    /// The question being answered (zero-based); earlier ones hold kept answers.
+    public private(set) var current: Int = 0
+
+    public init(prompts: [QuestionPrompt]) {
+        optionCounts = prompts.map(\.options.count)
+        selections = prompts.map { ClaudeQuestionSelection(multiSelect: $0.multiSelect) }
+    }
+
+    public var count: Int { selections.count }
+
+    /// Question `index`'s selection; an empty one beyond the call.
+    public func selection(at index: Int) -> ClaudeQuestionSelection {
+        selections.indices.contains(index) ? selections[index] : ClaudeQuestionSelection(multiSelect: false)
+    }
+
+    /// The question being answered or an earlier, kept one.
+    public func canSelect(question index: Int) -> Bool {
+        index >= 0 && index <= current && index < count
+    }
+
+    /// A click on option `option` of question `index` (`ClaudeQuestionSelection.toggling`).
+    public func toggling(_ option: Int, at index: Int) -> ClaudeQuestionCallSelection {
+        guard canSelect(question: index) else { return self }
+        var next = self
+        next.selections[index] = selections[index].toggling(option, of: optionCounts[index])
+        return next
+    }
+
+    /// Question `index`'s typed answer changed (`ClaudeQuestionSelection.typing`).
+    public func typing(_ text: String, at index: Int) -> ClaudeQuestionCallSelection {
+        guard canSelect(question: index) else { return self }
+        var next = self
+        next.selections[index] = selections[index].typing(text)
+        return next
+    }
+
+    /// Next: keeps the answering question's selection and moves on. Sends nothing; refused on the
+    /// last question, from any other question, or while nothing is selected.
+    public func advancing(from index: Int) -> ClaudeQuestionCallSelection {
+        guard index == current, index + 1 < count, selections[index].canSend else { return self }
+        var next = self
+        next.current = index + 1
+        return next
+    }
+
+    /// The card's answering button for the viewed question, as on a Codex daemon card: Next before
+    /// the last question, Send on it (enabled only for a complete set), a step on while reviewing.
+    public func primary(viewed: Int) -> QuestionCardPrimary {
+        let primary = QuestionCardPrimary.make(daemon: true, viewed: viewed, current: current, count: count,
+                                               selected: selection(at: viewed).canSend, ready: true)
+        if case .send(true) = primary, answersAreComplete == false { return .send(enabled: false) }
+        return primary
+    }
+
+    private var answersAreComplete: Bool {
+        count > 0 && current == count - 1 && selections.allSatisfy(\.canSend)
+    }
+
+    /// The whole set Send carries, in question order, or nil unless every question has an answer and
+    /// `prompts` are the questions this selection was made for.
+    public func answers(prompts: [QuestionPrompt]) -> [ClaudeQuestionAnswerEntry]? {
+        guard answersAreComplete, prompts.map(\.options.count) == optionCounts,
+              prompts.map(\.multiSelect) == selections.map(\.multiSelect) else { return nil }
+        var entries: [ClaudeQuestionAnswerEntry] = []
+        for (prompt, selection) in zip(prompts, selections) {
+            guard let answer = selection.answer(labels: prompt.options) else { return nil }
+            entries.append(ClaudeQuestionAnswerEntry(kind: answer.kind, answer: answer.answer))
+        }
+        return entries
+    }
+
+    /// What the step rail shows for question `index`: its option, its ticked labels, or its text,
+    /// only once Next kept it (as a daemon card's drafts); nil for the question being answered and
+    /// later ones. Display only.
+    public func railAnswer(at index: Int, labels: [String]) -> ChosenAnswer? {
+        guard index < current else { return nil }
+        let selection = selection(at: index)
+        guard let answer = selection.answer(labels: labels) else { return nil }
+        switch answer.kind {
+        case .option: return selection.options.first.map(ChosenAnswer.option)
+        case .multiSelect: return .text(selection.options.sorted().map { QuestionOptionLabel(labels[$0]).text }
+            .joined(separator: ", "))
+        case .text: return .text(answer.answer)
+        }
+    }
+}
+
 extension QuestionAnswerRoute {
     /// The routes that type one option digit per Send (Ghostty, herdr, a terminal host's pane; ADR
     /// 0006, ADR 0017). They carry no typed answer and never revise a sent answer.
