@@ -159,15 +159,41 @@ public enum SessionDiscovery {
     public static func candidates(root: URL, now: Double) -> [DiscoveredTurn] {
         var found: [DiscoveredTurn] = []
         for entry in CodexUsageReader.newestRollouts(root: root, limit: maximumFiles) {
-            guard now - entry.modified.timeIntervalSince1970 <= maximumAge,
-                  let (head, tail) = read(entry.url) else { continue }
-            var lines = head.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)[...]
-            guard let first = lines.popFirst(),
-                  let open = open(meta: first, lines: tail.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)[...])
-            else { continue }
+            guard now - entry.modified.timeIntervalSince1970 <= maximumAge, let open = openTurn(at: entry.url) else { continue }
             found.append(open)
         }
         return found
+    }
+
+    /// What the last successful read of each rollout found. A rollout only grows, which changes its
+    /// stamp, so an unchanged one is not opened or parsed again. A read that failed is never kept.
+    private static let memo = StampedFileMemo<Read>()
+
+    private struct Read: Sendable {
+        let open: DiscoveredTurn?
+    }
+
+    /// The open turn in the rollout at `url`, from its first line and its bounded tail.
+    static func openTurn(at url: URL) -> DiscoveredTurn? {
+        // The stamp is taken before the read, so an append during it shows as a new stamp next time.
+        let kept = memo.kept(url)
+        if let value = kept.value { return value.open }
+        guard let (head, tail) = read(url) else { return nil }
+        var found: DiscoveredTurn?
+        if let first = firstLine(head) {
+            let lines = tail.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: true)[...]
+            found = Self.open(meta: Data(first), lines: lines)
+        }
+        if let stamp = kept.stamp { memo.keep(Read(open: found), for: url, stamp: stamp) }
+        return found
+    }
+
+    /// The first line that is not empty, without splitting the rest: the head holds up to
+    /// `headBytes` of lines and only this one is used.
+    static func firstLine(_ bytes: Data) -> Data.SubSequence? {
+        let newline = UInt8(ascii: "\n")
+        let start = bytes.drop { $0 == newline }
+        return start.isEmpty ? nil : start.prefix { $0 != newline }
     }
 
     /// The candidates that may be shown as working. A rollout alone never proves a session is

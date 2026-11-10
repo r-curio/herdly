@@ -197,3 +197,48 @@ private func toolCall(_ turn: UUID, at: String) -> String {
     // The cut first line of a tail read still needs the session_meta line to identify the session.
     #expect(SessionDiscovery.parse(Data(("ion_meta\",\"payload\":{}}\n" + started(turn) + "\n").utf8)) == nil)
 }
+
+@Test func discoveryReadsARolloutAgainOnlyWhenItChanges() throws {
+    let root = try sessionsTree()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let now = Date(timeIntervalSince1970: 1789353600)
+    let id = UUID(), next = UUID()
+    let url = try write([meta(id: id), started(turn)], as: "rollout-a-\(id.uuidString.lowercased()).jsonl", in: root, modified: now)
+    func found() -> [DiscoveredTurn] { SessionDiscovery.candidates(root: root, now: now.timeIntervalSince1970) }
+    func append(_ line: String) throws {
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((line + "\n").utf8))
+        try handle.close()
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: url.path)
+    }
+    #expect(found().map(\.turn) == [turn])
+
+    // Unchanged: not opened again. Made unreadable, it is still found; a rollout never read is not.
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+    #expect(found().map(\.turn) == [turn])
+    let unread = try write([meta(id: UUID()), started(UUID())], as: "rollout-b-unread.jsonl", in: root, modified: now)
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unread.path)
+    #expect(found().map(\.turn) == [turn])
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    try FileManager.default.removeItem(at: unread)
+
+    // Each append is seen on the next read: the turn ends, then another starts.
+    try append(ended(turn))
+    #expect(found().isEmpty)
+    try append(started(next))
+    #expect(found().map(\.turn) == [next])
+    #expect(found() == [try #require(SessionDiscovery.parse(try Data(contentsOf: url)))])
+}
+
+@Test func theFirstLineIsTakenWithoutSplittingTheRest() {
+    func first(_ text: String) -> String? { SessionDiscovery.firstLine(Data(text.utf8)).map { String(decoding: $0, as: UTF8.self) } }
+    #expect(first("one\ntwo\nthree\n") == "one")
+    #expect(first("\n\none\ntwo") == "one")
+    #expect(first("only") == "only")
+    #expect(first("") == nil)
+    #expect(first("\n\n") == nil)
+    // A slice that does not start at index 0, as a tail does.
+    let bytes = Data("skip\none\ntwo".utf8)
+    #expect(SessionDiscovery.firstLine(bytes.dropFirst(5)).map { String(decoding: $0, as: UTF8.self) } == "one")
+}
