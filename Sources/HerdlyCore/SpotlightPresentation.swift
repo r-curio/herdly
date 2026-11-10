@@ -179,7 +179,8 @@ public struct NotchPresentationController: Equatable, Sendable {
     /// interaction does, so a hover or focus gap cannot swap it for the queue mid-answer. It does
     /// not open anything by itself; Escape still ends the hold through `escape()`.
     /// `queued` is the queue's current identities: a clicked card whose item has left falls back to
-    /// the queue and never shows another item. Nil leaves the clicked card unchecked.
+    /// the queue and never shows another item, and a card that opened by itself ends. Nil leaves
+    /// both unchecked.
     public mutating func update(interacting: Bool, draftInProgress: Bool = false, now: Double,
                                 legacyPopup: Bool = false, queued: Set<AgentAttentionID>? = nil) -> NotchPresentationMode {
         if let card = clicked {
@@ -194,6 +195,9 @@ public struct NotchPresentationController: Equatable, Sendable {
             }
         }
         if !interacting { manualOpen = false }
+        // A card whose item has left the queue (a question just answered on it, an approval decided)
+        // has nothing to show: it ends at once rather than holding an empty panel open on its timer.
+        if let queued, let id = agentSpotlight.item, !queued.contains(id) { agentSpotlight.clear() }
         if let id = agentSpotlight.update(interacting: interacting || draftInProgress, now: now) {
             return manualOpen ? .queue : .agentSpotlight(id)
         }
@@ -251,7 +255,7 @@ public struct QueueRowSelection: Equatable, Sendable {
 }
 
 private struct AgentSpotlight: Equatable, Sendable {
-    private var item: AgentAttentionID?
+    private(set) var item: AgentAttentionID?
     private var until: Double = 0
     /// The timed close, or nil for Until I act.
     private var seconds: Double?

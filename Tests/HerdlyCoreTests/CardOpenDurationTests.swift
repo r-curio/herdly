@@ -103,3 +103,30 @@ func aTimedCardStaysOpenUntilItsTimeAndClosesExactlyThen(duration: CardOpenDurat
     #expect(AgentConnectionNotice.message(codexConnected: false, claudeConnected: nil) == "Codex isn't connected")
     #expect(AgentConnectionNotice.message(codexConnected: nil, claudeConnected: false) == "Claude Code isn't connected")
 }
+
+private let answered = AgentAttentionID.running(AgentTurnIdentity(session: session("asked"), turn: "t2"))
+
+@Test(arguments: [true, false])
+func aCardWhoseItemLeftTheQueueEndsAtOnce(interacting: Bool) {
+    var presentation = NotchPresentationController()
+    presentation.present(answered, now: 100, duration: .tenSeconds)
+    #expect(presentation.update(interacting: interacting, now: 101, queued: [answered, done]) == .agentSpotlight(answered))
+
+    // Answered on the card: its item leaves the queue while the pointer may still rest on the notch.
+    let next = presentation.update(interacting: interacting, now: 102, queued: [done])
+    #expect(next == (interacting ? .queue : .collapsed))
+    // It does not come back if the same identity reappears.
+    #expect(presentation.update(interacting: false, now: 103, queued: [answered, done]) == .collapsed)
+}
+
+@Test func anUntilIActCardWhoseItemLeftTheQueueEndsAtOnce() {
+    var presentation = NotchPresentationController()
+    presentation.present(answered, now: 100, duration: .untilIAct)
+    #expect(presentation.update(interacting: true, now: 101, queued: [done]) == .queue)
+}
+
+@Test func withoutAQueueTheCardIsLeftUnchecked() {
+    var presentation = NotchPresentationController()
+    presentation.present(answered, now: 100)
+    #expect(presentation.update(interacting: false, now: 101) == .agentSpotlight(answered))
+}
