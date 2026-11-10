@@ -364,3 +364,32 @@ import Testing
     #expect(!queue.items.contains { $0.session == session && $0.kind == .running })
     #expect(queue.workingCount == 0)
 }
+
+@Test func desktopReaderDecodesARecordAgainOnlyWhenItsFileChanges() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = UUID(), turn = UUID(), other = UUID()
+    func write(_ name: String, _ event: String, _ turn: UUID? = nil) throws {
+        var value: [String: Any] = ["hook_event_name": event, "session_id": session.uuidString, "received_at": name]
+        if let turn { value["turn_id"] = turn.uuidString }
+        try JSONSerialization.data(withJSONObject: value).write(to: root.appendingPathComponent(name + ".json"), options: .atomic)
+    }
+    try write("01", "SessionStart")
+    try write("02", "UserPromptSubmit", turn)
+    let first = DesktopEventReader.read(from: root, cache: HookFileCache())
+    #expect(first.events == [.sessionStarted(session: session, receivedAt: "01"),
+                             .promptSubmitted(session: session, turn: turn, prompt: nil, receivedAt: "02")])
+    // Carrying the cache or not, an unchanged directory replays the same events.
+    #expect(DesktopEventReader.read(from: root, cache: first.cache).events == first.events)
+    #expect(DesktopEventReader.read(from: root) == first.events)
+
+    // A record replaced under the same name, one that no longer decodes, and a new one.
+    try write("02", "UserPromptSubmit", other)
+    try Data("not json".utf8).write(to: root.appendingPathComponent("01.json"), options: .atomic)
+    try write("03", "Stop", other)
+    let second = DesktopEventReader.read(from: root, cache: first.cache)
+    #expect(second.events == [.promptSubmitted(session: session, turn: other, prompt: nil, receivedAt: "02"),
+                              .turnCompleted(session: session, turn: other, receivedAt: "03")])
+    #expect(DesktopEventReader.read(from: root) == second.events)
+}

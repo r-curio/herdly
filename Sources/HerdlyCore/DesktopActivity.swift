@@ -165,7 +165,7 @@ public enum DesktopEventReader {
     /// A hook input is capped at 64 KiB; normalized metadata and JSON escaping can make its record larger.
     public static let maximumRecordSize = 128 * 1024
 
-    private struct Record: Decodable {
+    private struct Record: Decodable, Sendable {
         let hook_event_name: String
         let session_id: UUID
         let turn_id: UUID?
@@ -175,6 +175,33 @@ public enum DesktopEventReader {
         let tool_name: String?
         let tool_use_id: String?
         let tool_input: [String: String]?
+    }
+
+    private static let decoded = DecodedRecords()
+
+    /// Each record as last decoded, with the bytes it was decoded from: the bytes of an unchanged
+    /// file are already kept (`HookFileCache`), and decoding them again every scan was most of this
+    /// reader's cost. A record is reused only for exactly the same bytes, so whatever a caller's
+    /// cache holds or lacks, it gets what decoding its own bytes would give. Bounded: past
+    /// `maximumEntries` files it starts over.
+    private final class DecodedRecords: @unchecked Sendable {
+        static let maximumEntries = 2 * HookEventListing.maximumRecords
+
+        // Invariant for `@unchecked Sendable`: `entries` is only touched while holding `lock`.
+        private let lock = NSLock()
+        private var entries: [String: (bytes: Data, record: Record?)] = [:]
+
+        func record(_ path: String, bytes: Data, decode: () -> Record?) -> Record? {
+            lock.lock()
+            let kept = entries[path]
+            lock.unlock()
+            if let kept, kept.bytes == bytes { return kept.record }
+            let record = decode()
+            lock.lock(); defer { lock.unlock() }
+            if entries[path] == nil, entries.count >= Self.maximumEntries { entries.removeAll() }
+            entries[path] = (bytes, record)
+            return record
+        }
     }
 
     /// Replays only the newest `HookEventListing.maximumRecords` records; an overgrown or
@@ -191,7 +218,9 @@ public enum DesktopEventReader {
         let events: [DesktopEvent] = listing.records
             .compactMap { url -> (Record, String)? in
                 guard let data = cache.bytes(url, limit: maximumRecordSize, next: &next),
-                      let record = try? JSONDecoder().decode(Record.self, from: data) else { return nil }
+                      let record = decoded.record(url.path, bytes: data, decode: {
+                          try? JSONDecoder().decode(Record.self, from: data)
+                      }) else { return nil }
                 return (record, url.lastPathComponent)
             }
             .sorted {
