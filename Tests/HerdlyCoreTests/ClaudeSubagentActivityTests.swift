@@ -29,7 +29,7 @@ private func record(_ event: String, at capturedAt: Double, prompt: String? = "p
     return value
 }
 
-private var prompt: [String: Any] { record("UserPromptSubmit", at: 1) }
+private var promptSubmit: [String: Any] { record("UserPromptSubmit", at: 1) }
 
 private func running(_ records: [[String: Any]], now: Double = 10) throws -> AgentRunning? {
     let root = try events(records)
@@ -42,7 +42,7 @@ private func running(_ records: [[String: Any]], now: Double = 10) throws -> Age
 }
 
 @Test func claudeSubagentShowsItsLatestActionUntilItStops() throws {
-    let started = [prompt,
+    let started = [promptSubmit,
                    record("SubagentStart", at: 2, agent: "a1", type: "Explore"),
                    record("PreToolUse", at: 3, agent: "a1", type: "Explore", tool: "Bash", call: "t1",
                           input: ["command": "rg subagent"])]
@@ -64,7 +64,7 @@ private func running(_ records: [[String: Any]], now: Double = 10) throws -> Age
 }
 
 @Test func claudeParallelSubagentsOfOneTypeAreNumberedByStartOrder() throws {
-    let records = [prompt,
+    let records = [promptSubmit,
                    // Written out of order on disk; the capture time decides the start order.
                    record("SubagentStart", at: 4, agent: "late", type: "Explore"),
                    record("SubagentStart", at: 2, agent: "early", type: "Explore"),
@@ -79,7 +79,7 @@ private func running(_ records: [[String: Any]], now: Double = 10) throws -> Age
 
 @Test func claudeNestedSubagentsAreListedFlatUnderTheSession() throws {
     // A subagent's own subagent fires the same hooks in the same session.
-    let records = [prompt,
+    let records = [promptSubmit,
                    record("SubagentStart", at: 2, agent: "outer", type: "general-purpose"),
                    record("PreToolUse", at: 3, agent: "outer", type: "general-purpose", tool: "Agent", call: "spawn"),
                    record("SubagentStart", at: 4, agent: "inner", type: "Explore"),
@@ -91,7 +91,7 @@ private func running(_ records: [[String: Any]], now: Double = 10) throws -> Age
 }
 
 @Test func claudeSubagentToolCallLeavesTheSessionsOwnNowUnchanged() throws {
-    let records = [prompt,
+    let records = [promptSubmit,
                    record("PreToolUse", at: 2, tool: "Bash", call: "own", input: ["command": "swift build"]),
                    record("SubagentStart", at: 3, agent: "a1", type: "Explore"),
                    record("PreToolUse", at: 4, agent: "a1", type: "Explore", tool: "Bash", call: "sub",
@@ -108,14 +108,14 @@ private func running(_ records: [[String: Any]], now: Double = 10) throws -> Age
     #expect(after.subagents.first?.latestAction?.text == "$ rg foo")
 
     // Without SubagentStart (pruned, or before Herdly started), the call is still kept off "now".
-    let unknown = [prompt, record("PreToolUse", at: 4, agent: "a9", tool: "Bash", call: "sub", input: ["command": "ls"])]
+    let unknown = [promptSubmit, record("PreToolUse", at: 4, agent: "a9", tool: "Bash", call: "sub", input: ["command": "ls"])]
     let unknownRow = try #require(try running(unknown))
     #expect(unknownRow.toolName == nil)
     #expect(unknownRow.subagents.isEmpty)
 }
 
 @Test func claudeSubagentCallsStillMatchTheirApproval() throws {
-    let records = [prompt,
+    let records = [promptSubmit,
                    record("SubagentStart", at: 2, agent: "a1", type: "Explore"),
                    record("PreToolUse", at: 3, agent: "a1", type: "Explore", tool: "Bash", call: "sub",
                           input: ["command": "touch marker"]),
@@ -132,7 +132,7 @@ private func running(_ records: [[String: Any]], now: Double = 10) throws -> Age
 }
 
 @Test func claudeTurnOrSessionEndClearsEverySubagent() throws {
-    let started = [prompt,
+    let started = [promptSubmit,
                    record("SubagentStart", at: 2, agent: "a1", type: "Explore"),
                    record("SubagentStart", at: 3, agent: "a2", type: "Plan"),
                    record("PreToolUse", at: 4, agent: "a1", type: "Explore", tool: "Bash", call: "t1",
@@ -147,7 +147,7 @@ private func running(_ records: [[String: Any]], now: Double = 10) throws -> Age
 
 @Test func claudeMalformedAgentIDIsIgnoredWithoutClearingOtherSubagents() throws {
     let oversized = String(repeating: "a", count: ClaudeObservationReader.maximumIdentifier + 1)
-    let records = [prompt,
+    let records = [promptSubmit,
                    record("SubagentStart", at: 2, agent: "a1", type: "Explore"),
                    record("PreToolUse", at: 3, agent: "a1", type: "Explore", tool: "Bash", call: "t1",
                           input: ["command": "ls"]),
@@ -167,7 +167,7 @@ private func running(_ records: [[String: Any]], now: Double = 10) throws -> Age
 }
 
 @Test func claudeRecordsWithoutAgentIDKeepTodaysNow() throws {
-    let records = [prompt,
+    let records = [promptSubmit,
                    record("PreToolUse", at: 2, tool: "Bash", call: "a", input: ["command": "first"]),
                    record("PreToolUse", at: 3, tool: "Read", call: "b", input: ["file_path": "/tmp/lab/b.txt"]),
                    record("PostToolUse", at: 4, call: "b")]
@@ -180,7 +180,7 @@ private func running(_ records: [[String: Any]], now: Double = 10) throws -> Age
 }
 
 @Test func claudeSubagentLatestActionFollowsTheSessionsFreshnessBound() throws {
-    let records = [prompt,
+    let records = [promptSubmit,
                    record("SubagentStart", at: 2, agent: "a1", type: "Explore"),
                    record("PreToolUse", at: 3, agent: "a1", type: "Explore", tool: "Bash", call: "t1",
                           input: ["command": "sleep 100"])]

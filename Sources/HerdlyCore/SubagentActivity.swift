@@ -30,6 +30,11 @@ public struct SubagentActivity: Identifiable, Equatable, Sendable {
         self.latestAction = latestAction
     }
 
+    /// Start order, oldest first: the earlier start, then the smaller id.
+    static func startsBefore(_ lhs: (startedAt: Double, id: String), _ rhs: (startedAt: Double, id: String)) -> Bool {
+        lhs.startedAt == rhs.startedAt ? lhs.id < rhs.id : lhs.startedAt < rhs.startedAt
+    }
+
     /// The name a subagent of an unknown or empty type reads as.
     public static let unnamed = "Subagent"
 

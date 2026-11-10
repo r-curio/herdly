@@ -181,7 +181,7 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
                 toolInput: [String: String] = [:], status: AgentRunningStatus = .working,
                 subagents: [SubagentActivity] = []) {
         self.identity = AgentTurnIdentity(session: session, turn: turn)
-        self.subagents = subagents.sorted { $0.startedAt == $1.startedAt ? $0.id < $1.id : $0.startedAt < $1.startedAt }
+        self.subagents = subagents.sorted { SubagentActivity.startsBefore(($0.startedAt, $0.id), ($1.startedAt, $1.id)) }
         self.arrivedAt = arrivedAt
         self.updatedAt = updatedAt ?? arrivedAt
         self.prompt = prompt

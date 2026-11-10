@@ -173,7 +173,7 @@ public enum HookEventRetention {
         let session: String
         let turn: String?
         let tool: String?
-        /// Claude's `agent_id`, for subagent records.
+        /// Claude's `agent_id` for subagent records, when the reader would accept it.
         let agent: String?
         let closes: [String]
         let capturedAt: Double
@@ -206,7 +206,10 @@ public enum HookEventRetention {
 
         var closedTools = Set<String>()
         var stoppedAgents = Set<String>()
-        var sessionStops: [String: Double] = [:]
+        var subagentsEndedAt: [String: Double] = [:]
+        for record in records where ClaudeObservationReader.subagentsEndingEvents.contains(record.event) {
+            subagentsEndedAt[record.session] = max(subagentsEndedAt[record.session] ?? -.infinity, record.capturedAt)
+        }
         var endedTurns: [String: Double] = [:]
         var endedSessions: [String: Double] = [:]
         for record in records {
@@ -214,9 +217,8 @@ public enum HookEventRetention {
             case let event where toolEvents.contains(event) && event != "PreToolUse":
                 closedTools.formUnion(record.closes.map { toolKey(record.session, $0) })
             case "SubagentStop":
-                if let agent = record.agent { stoppedAgents.insert(toolKey(record.session, agent)) }
+                if let agent = record.agent { stoppedAgents.insert(agentKey(record.session, agent)) }
             case "Stop", "StopFailure":
-                sessionStops[record.session] = max(sessionStops[record.session] ?? -.infinity, record.capturedAt)
                 if let turn = record.turn {
                     endedTurns[turnKey(record.session, turn)] = max(endedTurns[turnKey(record.session, turn)] ?? -.infinity,
                                                                     record.capturedAt)
@@ -236,12 +238,12 @@ public enum HookEventRetention {
             if let ended = endedSessions[record.session], ended >= record.capturedAt { return false }
             return true
         }
-        // The reader lists a subagent from its start until its stop, or any Stop or end of its session.
+        // The reader lists a subagent from its start until its own stop or a later
+        // `ClaudeObservationReader.subagentsEndingEvents` record in its session.
         func isRunning(_ record: Record) -> Bool {
             guard record.event == "SubagentStart", let agent = record.agent,
-                  !stoppedAgents.contains(toolKey(record.session, agent)) else { return false }
-            if let stopped = sessionStops[record.session], stopped >= record.capturedAt { return false }
-            if let ended = endedSessions[record.session], ended >= record.capturedAt { return false }
+                  !stoppedAgents.contains(agentKey(record.session, agent)) else { return false }
+            if let ended = subagentsEndedAt[record.session], ended >= record.capturedAt { return false }
             return true
         }
 
@@ -308,7 +310,7 @@ public enum HookEventRetention {
             ?? (input["tool_uses"] as? [[String: Any]] ?? []).compactMap { $0["tool_use_id"] as? String }
         return Record(url: url, age: age, event: event, session: sessionKey(session),
                       turn: object["turn_id"] as? String ?? object["prompt_id"] as? String,
-                      tool: tool, agent: object["agent_id"] as? String, closes: event == "PostToolBatch" ? batch : tool.map { [$0] } ?? [],
+                      tool: tool, agent: ClaudeObservationReader.subagentID(in: object), closes: event == "PostToolBatch" ? batch : tool.map { [$0] } ?? [],
                       capturedAt: (object["captured_at"] as? NSNumber)?.doubleValue
                         ?? (object["received_at"] as? String).flatMap(RolloutTimestamp.parse) ?? -.infinity)
     }
@@ -320,6 +322,7 @@ public enum HookEventRetention {
 
     private static func toolKey(_ session: String, _ tool: String) -> String { session + "\u{0}" + tool }
     private static func turnKey(_ session: String, _ turn: String) -> String { session + "\u{0}" + turn }
+    private static func agentKey(_ session: String, _ agent: String) -> String { session + "\u{0}" + agent }
 
     private static func isRegularFile(_ url: URL) -> Bool {
         guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else { return false }

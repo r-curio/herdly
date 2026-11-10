@@ -88,6 +88,14 @@ public enum ClaudeObservationReader {
     /// well under `maximumRecordSize`; otherwise the whole Stop record would be ignored.
     public static let maximumLastMessageBytes = 32 * 1024
     public static let maximumToolFreshness: Double = 30
+    /// Session-wide events that end every running subagent of their session: the turn's end or the
+    /// session's. A subagent also ends on its own `SubagentStop`. Retention keeps a start by the same rule.
+    public static let subagentsEndingEvents: Set<String> = ["Stop", "StopFailure", "SessionEnd"]
+
+    /// A record's `agent_id` when it is one the reader accepts: a bounded identifier, else nil.
+    static func subagentID(in object: [String: Any]) -> String? {
+        Agent(object["agent_id"]).id
+    }
 
     // `@unchecked Sendable`: `toolInput` holds only the immutable Foundation property-list values
     // `JSONSerialization` returned (read without mutable-container options), and a record is never
@@ -151,6 +159,11 @@ public enum ClaudeObservationReader {
         var command: String? = nil
         /// The call ran inside a subagent, so it is never the session's own "now".
         var inSubagent = false
+
+        /// The latest call: the newest capture, then the greater id.
+        static func latest(_ tools: some Sequence<Tool>) -> Tool? {
+            tools.max { lhs, rhs in lhs.at == rhs.at ? lhs.id < rhs.id : lhs.at < rhs.at }
+        }
     }
 
     private struct Turn {
@@ -231,6 +244,7 @@ public enum ClaudeObservationReader {
         }
 
         for record in records {
+            if subagentsEndingEvents.contains(record.event) { subagents.removeValue(forKey: record.session) }
             switch record.event {
             case "SessionStart":
                 latestSessionStartAt = max(latestSessionStartAt ?? record.capturedAt, record.capturedAt)
@@ -244,7 +258,6 @@ public enum ClaudeObservationReader {
                 guard let agent = record.agent.id else { continue }
                 subagents[record.session]?.removeValue(forKey: agent)
             case "SessionEnd":
-                subagents.removeValue(forKey: record.session)
                 endedSessions.insert(record.session)
                 sessionEndAt[record.session] = max(sessionEndAt[record.session] ?? -.infinity,
                                                    record.capturedAt)
@@ -407,7 +420,6 @@ public enum ClaudeObservationReader {
                                               hookRequestID: record.hookRequestID)
                 turns[turnID] = turn
             case "StopFailure":
-                subagents.removeValue(forKey: record.session)
                 guard let promptID = valid(record.promptID) else { continue }
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
@@ -426,9 +438,7 @@ public enum ClaudeObservationReader {
                 turns[turnID] = turn
             case "Stop":
                 // Stop can continue into another prompt. It clears a stale tool label but never
-                // becomes Finished without the later inventory confirmation slice. A turn's end ends
-                // its session's subagents.
-                subagents.removeValue(forKey: record.session)
+                // becomes Finished without the later inventory confirmation slice.
                 guard let promptID = valid(record.promptID) else { continue }
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
@@ -499,9 +509,7 @@ public enum ClaudeObservationReader {
 
     /// The session's own latest uncompleted call; a subagent's call never is.
     private static func sessionTool(_ tools: [String: Tool]) -> Tool? {
-        tools.values.filter { !$0.inSubagent }.max { lhs, rhs in
-            lhs.at == rhs.at ? lhs.id < rhs.id : lhs.at < rhs.at
-        }
+        Tool.latest(tools.values.filter { !$0.inSubagent })
     }
 
     /// `tool` while it is within `maximumToolFreshness` of `now`.
@@ -513,12 +521,10 @@ public enum ClaudeObservationReader {
     /// One session's running subagents, oldest first, named by type in start order, each with its
     /// latest fresh uncompleted call as the "now" line.
     private static func subagentActivity(_ running: [String: Subagent], now: Double) -> [SubagentActivity] {
-        let ordered = running.values.sorted { $0.startedAt == $1.startedAt ? $0.id < $1.id : $0.startedAt < $1.startedAt }
+        let ordered = running.values.sorted { SubagentActivity.startsBefore(($0.startedAt, $0.id), ($1.startedAt, $1.id)) }
         let names = SubagentActivity.names(ordered.map { (id: $0.id, base: $0.type) })
         return ordered.map { subagent in
-            let latest = subagent.tools.values.max { lhs, rhs in
-                lhs.at == rhs.at ? lhs.id < rhs.id : lhs.at < rhs.at
-            }.flatMap { fresh($0, now: now) }
+            let latest = Tool.latest(subagent.tools.values).flatMap { fresh($0, now: now) }
             return SubagentActivity(id: subagent.id, name: names[subagent.id] ?? SubagentActivity.unnamed,
                                     startedAt: subagent.startedAt,
                                     latestAction: latest.flatMap { RunningRowDetails.now(toolName: $0.name, toolInput: $0.input) })
@@ -585,7 +591,7 @@ public enum ClaudeObservationReader {
         }
     }
 
-    fileprivate static func valid(_ value: String?) -> String? {
+    private static func valid(_ value: String?) -> String? {
         guard let value = bounded(value), !value.isEmpty else { return nil }
         return value
     }
