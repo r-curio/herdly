@@ -90,7 +90,7 @@ public enum ClaudeObservationReader {
     public static let maximumToolFreshness: Double = 30
     /// Session-wide events that end every running subagent of their session: the turn's end or the
     /// session's. A subagent also ends on its own `SubagentStop`. Retention keeps a start by the same rule.
-    public static let subagentsEndingEvents: Set<String> = ["Stop", "StopFailure", "SessionEnd"]
+    static let subagentsEndingEvents: Set<String> = ["Stop", "StopFailure", "SessionEnd"]
 
     /// A record's `agent_id` when it is one the reader accepts: a bounded identifier, else nil.
     static func subagentID(in object: [String: Any]) -> String? {
