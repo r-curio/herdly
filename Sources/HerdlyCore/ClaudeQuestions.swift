@@ -321,6 +321,30 @@ public enum ClaudeQuestionStore {
         return write(try? JSONEncoder().encode(receipt), to: receiptURL(in: directory, id: receipt.requestID))
     }
 
+    /// Issues this companion's receipt for `request` at `now` and returns it, or nil when it
+    /// cannot. `issued` is the receipt this running companion already issued for the request
+    /// (`ClaudeQuestionReceiptLedger.adoptable(for:)`): when that exact receipt is the one on disk
+    /// it is returned again, because receipts are never replaced (#385), while the question's
+    /// deadline with its hover hold `held` (ADR 0020, capped at publish + 2 min) has not passed. A
+    /// fresh receipt is written only inside the request's own window. Any other receipt on disk (a
+    /// previous launch's, another process's, or a different one) makes this return nil.
+    public static func issueReceipt(for request: ClaudeQuestionRequest, in directory: URL,
+                                    issued: ClaudeQuestionReceipt?, held: Double?,
+                                    now: Double) -> ClaudeQuestionReceipt? {
+        let deadline = ClaudeQuestionTiming.heldDeadline(publishedAt: request.publishedAt,
+                                                         expiresAt: request.expiresAt, held: held)
+        guard deadline > now else { return nil }
+        if let issued, receipt(for: request.requestID, in: directory) == issued {
+            return issued
+        }
+        guard request.expiresAt > now else { return nil }
+        let fresh = ClaudeQuestionReceipt(requestID: request.requestID, installationID: request.installationID,
+                                          sourceScope: request.sourceScope,
+                                          eventDirectory: request.eventDirectory,
+                                          receivedAt: now, expiresAt: request.expiresAt)
+        return publish(fresh, in: directory) ? fresh : nil
+    }
+
     @discardableResult
     public static func publish(_ answer: ClaudeQuestionAnswer, in directory: URL) -> Bool {
         guard validID(answer.requestID) else { return false }
