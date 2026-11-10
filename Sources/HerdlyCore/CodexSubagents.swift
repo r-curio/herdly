@@ -13,6 +13,9 @@ import Foundation
 public enum CodexSubagentReader {
     /// Nested spawns are followed up to this many parents to reach the root session.
     static let maximumDepth = 8
+    /// Subagent rollouts whose tail is read per call, newest written first: as many as
+    /// `SessionDiscovery` reads per scan, so the two readers cost the same order of bytes.
+    static let maximumTails = SessionDiscovery.maximumFiles
 
     /// What one subagent rollout's first line says about it.
     struct Head: Equatable {
@@ -20,7 +23,11 @@ public enum CodexSubagentReader {
         let parent: UUID
         /// The tree's root thread (`session_id`), when the header names one.
         let root: UUID?
-        let base: String?
+        /// How deep the spawn is (`thread_spawn.depth`), when recorded.
+        let depth: Int?
+        /// The display name before `SubagentActivity.names` numbers it: `agent_nickname`, else the
+        /// last component of `agent_path`. Nil falls back to `SubagentActivity.unnamed`.
+        let nicknameOrPathName: String?
         let role: String?
         let startedAt: Double
         let startOrdinal: Int?
@@ -28,17 +35,24 @@ public enum CodexSubagentReader {
 
     /// The running subagents under each root session, oldest first, from the rollouts under `root`
     /// written within `SessionDiscovery.maximumAge` of `now`. Reads at most
-    /// `ReminderReader.maximumChildProbes` heads per call, newest first, and a bounded tail only of
-    /// subagent rollouts. A nested subagent is listed flat under the root its parents lead to. A
+    /// `ReminderReader.maximumChildProbes` heads per call, newest first, and the bounded tails of at
+    /// most `maximumTails` subagent rollouts; older subagent rollouts are not read. A nested subagent is listed flat under the root its parents lead to. A
     /// rollout that is a symlink, irregular, unreadable, partial, or malformed contributes nothing and
     /// never removes another; a subagent whose turn ended, or whose rollout is gone, is not listed.
     public static func activity(root: URL, now: Double) -> [UUID: [SubagentActivity]] {
         var heads: [UUID: Head] = [:]
         var duplicates: Set<UUID> = []
         var running: [UUID: (head: Head, activity: Activity)] = [:]
+        var tails = 0
         for entry in CodexUsageReader.newestRollouts(root: root, limit: ReminderReader.maximumChildProbes)
         where now - entry.modified.timeIntervalSince1970 <= SessionDiscovery.maximumAge {
-            guard let (head, activity) = read(entry.url) else { continue }
+            guard tails < maximumTails else { break }
+            guard let (head, tail) = SessionDiscovery.read(entry.url, header: { bytes in
+                bytes.firstIndex(of: UInt8(ascii: "\n")).flatMap { self.head(bytes[bytes.startIndex..<$0]) }
+            }) else { continue }
+            tails += 1
+            guard let lines = events(tail, head: head) else { continue }
+            let activity = activity(lines)
             if heads[head.id] != nil { duplicates.insert(head.id) }
             heads[head.id] = head
             if let activity { running[head.id] = (head, activity) }
@@ -57,7 +71,7 @@ public enum CodexSubagentReader {
             let ordered = children.sorted {
                 SubagentActivity.startsBefore(($0.head.startedAt, key($0.head.id)), ($1.head.startedAt, key($1.head.id)))
             }
-            let names = SubagentActivity.names(ordered.map { (id: key($0.head.id), base: $0.head.base) })
+            let names = SubagentActivity.names(ordered.map { (id: key($0.head.id), base: $0.head.nicknameOrPathName) })
             return ordered.map { child in
                 SubagentActivity(id: key(child.head.id), name: names[key(child.head.id)] ?? SubagentActivity.unnamed,
                                  role: child.head.role, asked: child.activity.asked, startedAt: child.head.startedAt,
@@ -70,13 +84,20 @@ public enum CodexSubagentReader {
 
     private static func key(_ id: UUID) -> String { id.uuidString.lowercased() }
 
-    /// The first ancestor that is not itself a subagent rollout read this call. Nil past
-    /// `maximumDepth` or through an ambiguous parent.
+    /// The first ancestor that is not itself a subagent rollout read this call. A nested subagent
+    /// whose walk stops at a parent that is not a root (a middle agent's rollout missing, stale, or
+    /// past the tail budget) falls back to the root its own header names (`session_id`); with no
+    /// such root it is left out. Nil past `maximumDepth` or through an ambiguous parent.
     private static func rootSession(of head: Head, heads: [UUID: Head], duplicates: Set<UUID>) -> UUID? {
         var parent = head.parent
+        var nested = (head.depth ?? 1) > 1
         for _ in 0..<maximumDepth {
             guard !duplicates.contains(parent) else { return nil }
-            guard let next = heads[parent] else { return parent }
+            guard let next = heads[parent] else {
+                guard nested, parent != head.root else { return parent }
+                return head.root
+            }
+            nested = (next.depth ?? 1) > 1
             parent = next.parent
         }
         return nil
@@ -92,43 +113,21 @@ public enum CodexSubagentReader {
         let latest: Call?
     }
 
-    /// One rollout: its head when it is a subagent's, with its activity while its own turn is open.
-    /// The tail is read only for a subagent rollout.
-    static func read(_ url: URL) -> (head: Head, activity: Activity?)? {
-        guard let (file, size) = CodexUsageReader.regularFile(url) else { return nil }
-        defer { try? file.close() }
-        guard let bytes = try? file.read(upToCount: min(size, SessionDiscovery.headBytes)),
-              let newline = bytes.firstIndex(of: UInt8(ascii: "\n")),
-              let head = head(bytes[bytes.startIndex..<newline]) else { return nil }
-        let tail: Data
-        if size <= SessionDiscovery.headBytes {
-            tail = bytes[(newline + 1)...]
-        } else {
-            try? file.seek(toOffset: UInt64(max(size - SessionDiscovery.tailBytes, 0)))
-            guard let read = try? file.read(upToCount: SessionDiscovery.tailBytes) else { return nil }
-            tail = read
-        }
-        guard let lines = events(tail, head: head) else { return nil }
-        return (head, activity(lines))
-    }
-
     /// The header of a spawned agent's rollout; nil for any other rollout or an unusable header.
     static func head(_ line: Data) -> Head? {
         guard let event = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               event["type"] as? String == "session_meta",
               let meta = event["payload"] as? [String: Any],
               let id = uuid(meta["id"]),
-              let spawn = ((meta["source"] as? [String: Any])?["subagent"] as? [String: Any])?["thread_spawn"] as? [String: Any]
-        else { return nil }
-        // The header names the parent in several fields; any two that disagree make it unusable.
-        let named = [meta["parent_thread_id"], spawn["parent_thread_id"], meta["forked_from_id"]].compactMap(uuid)
-        guard let parent = named.first, named.allSatisfy({ $0 == parent }), parent != id,
+              let spawn = ((meta["source"] as? [String: Any])?["subagent"] as? [String: Any])?["thread_spawn"] as? [String: Any],
+              let parent = CodexRolloutHeader.parent(in: meta),
               let startedAt = ((meta["timestamp"] ?? event["timestamp"]) as? String).flatMap(RolloutTimestamp.parse)
         else { return nil }
         let nickname = text(meta["agent_nickname"]) ?? text(spawn["agent_nickname"])
         let path = text(meta["agent_path"]) ?? text(spawn["agent_path"])
-        let base = nickname ?? path.flatMap { text($0.split(separator: "/").last.map(String.init)) }
-        return Head(id: id, parent: parent, root: uuid(meta["session_id"]), base: base,
+        let name = nickname ?? path.flatMap { text($0.split(separator: "/").last.map(String.init)) }
+        return Head(id: id, parent: parent, root: uuid(meta["session_id"]),
+                    depth: (spawn["depth"] as? NSNumber)?.intValue, nicknameOrPathName: name,
                     role: text(meta["agent_role"]) ?? text(spawn["agent_role"]), startedAt: startedAt,
                     startOrdinal: (meta["subagent_history_start_ordinal"] as? NSNumber)?.intValue)
     }
@@ -182,14 +181,14 @@ public enum CodexSubagentReader {
         guard let name = text(payload["name"]) else { return nil }
         if payload["type"] as? String == "custom_tool_call" {
             if name == "exec", let input = payload["input"] as? String,
-               let command = ApprovalResolutionReader.commands(inJavaScript: input).first {
+               let command = CodexToolCallText.commands(inJavaScript: input).first {
                 return Call(name: "exec_command", input: ["cmd": command])
             }
             return Call(name: name, input: [:])
         }
-        let arguments = (payload["arguments"] as? String).flatMap(ApprovalResolutionReader.jsonObject) ?? [:]
+        let arguments = (payload["arguments"] as? String).flatMap(CodexToolCallText.jsonObject) ?? [:]
         var input = arguments.compactMapValues { $0 as? String }
-        if let command = ApprovalResolutionReader.command(inArguments: arguments) { input["cmd"] = command }
+        if let command = CodexToolCallText.command(inArguments: arguments) { input["cmd"] = command }
         return Call(name: name, input: input)
     }
 

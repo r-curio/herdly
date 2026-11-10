@@ -191,13 +191,19 @@ public enum SessionDiscovery {
 
     /// The bounded head and tail of a regular file. A file shorter than both is read once.
     static func read(_ url: URL) -> (head: Data, tail: Data)? {
+        read(url, header: { $0 }).map { (head: $0.header, tail: $0.tail) }
+    }
+
+    /// `read(_:)`, where `header` decodes the head bytes first: nil from it skips the file without
+    /// reading its tail (`CodexSubagentReader` reads tails of subagent rollouts only).
+    static func read<Header>(_ url: URL, header: (Data) -> Header?) -> (header: Header, tail: Data)? {
         guard let (file, size) = CodexUsageReader.regularFile(url) else { return nil }
         defer { try? file.close() }
-        guard let head = try? file.read(upToCount: min(size, headBytes)) else { return nil }
-        if size <= headBytes { return (head, head.dropFirst(head.firstIndex(of: UInt8(ascii: "\n")).map { $0 + 1 } ?? head.count)) }
+        guard let head = try? file.read(upToCount: min(size, headBytes)), let decoded = header(head) else { return nil }
+        if size <= headBytes { return (decoded, head.dropFirst(head.firstIndex(of: UInt8(ascii: "\n")).map { $0 + 1 } ?? head.count)) }
         try? file.seek(toOffset: UInt64(max(size - tailBytes, 0)))
         guard let tail = try? file.read(upToCount: tailBytes) else { return nil }
-        return (head, tail)
+        return (decoded, tail)
     }
 
     /// The open turn in one rollout, or nil when its last turn ended, it is not a user session, or

@@ -9,8 +9,8 @@ import Testing
 // carries an `ordinal`.
 
 private let now = Date(timeIntervalSince1970: 1793847300)
-private let rootSession = UUID(uuidString: "01A1A9A0-A586-7870-AC3F-6DDC27751D3F")!
-private let rootTurn = UUID(uuidString: "01A1A9A1-135C-7202-A944-B9429F923C52")!
+private let rootSession = UUID(uuidString: "0B5E55E0-0000-7000-8000-00000000000A")!
+private let rootTurn = UUID(uuidString: "0B5E55E0-0000-7000-8000-00000000000B")!
 
 private func id(_ value: UUID) -> String { value.uuidString.lowercased() }
 
@@ -320,4 +320,36 @@ private func runningChild(_ child: UUID, turn: UUID = UUID(), parent: UUID = roo
               + [started(childTurn, ordinal: 4), execCall("ls", call: "c1", turn: childTurn, ordinal: 5)],
               session: child, time: "10-54-48", in: root)
     #expect(CodexSubagentReader.activity(root: root, now: now.timeIntervalSince1970)[rootSession]?.first?.latestAction?.text == "$ ls")
+}
+
+@Test func aNestedSubagentWhoseMiddleRolloutIsMissingFallsBackToTheRootItsHeaderNames() throws {
+    let root = try sessionsTree()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try writeRoot(in: root)
+    // The depth-1 agent's rollout is not on disk; its child still names the root as `session_id`.
+    let missingMiddle = UUID(), grandchild = UUID()
+    try write(runningChild(grandchild, parent: missingMiddle, depth: 2, nickname: "Hypatia"),
+              session: grandchild, time: "10-54-45", in: root)
+    let activity = CodexSubagentReader.activity(root: root, now: now.timeIntervalSince1970)
+    #expect(activity[rootSession]?.map(\.name) == ["Hypatia"])
+    #expect(activity[missingMiddle] == nil)
+}
+
+@Test func atMostTheNewestTailBudgetOfSubagentRolloutsAreReadPerScan() throws {
+    let root = try sessionsTree()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try writeRoot(in: root)
+    let budget = CodexSubagentReader.maximumTails
+    var children: [UUID] = []
+    for index in 0...budget {
+        let child = UUID()
+        children.append(child)
+        try write(runningChild(child, nickname: "Agent\(index)", startedAt: String(format: "2026-11-05T02:%02d:00.000Z", index)),
+                  session: child, time: String(format: "10-%02d-00", index), in: root,
+                  modified: now.addingTimeInterval(-Double(budget - index) - 1))
+    }
+    let listed = CodexSubagentReader.activity(root: root, now: now.timeIntervalSince1970)[rootSession] ?? []
+    // The least recently written one is past the budget.
+    #expect(listed.count == budget)
+    #expect(!listed.map(\.id).contains(id(children[0])))
 }
