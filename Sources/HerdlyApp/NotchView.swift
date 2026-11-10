@@ -161,9 +161,16 @@ struct Sprite: View {
     var reduceMotion: Bool
     var color: Int = 0
     var unlit = false
-    /// Points per cell: the notch's 2pt, or larger for a Settings preview so edges stay crisp.
+    /// Points per cell: the notch's 2pt, larger for a Settings preview so edges stay crisp, or
+    /// `subagentCell` in a subagent switcher well.
     var cellSize: CGFloat = Sprite.cell
+    /// One flat fill for every cell in place of the session's colours: black on an inverted
+    /// (selected or pressed) switcher well, as that well's label is.
+    var tint: Color? = nil
     static let cell: CGFloat = 2
+    /// Two-thirds of `cell`: the sprite before a subagent's name in the opened row's switcher (#397),
+    /// 9x6pt for the 6x4-cell kinds.
+    static let subagentCell: CGFloat = cell * 2 / 3
     /// The fixed leading slot of a queue row, 18x10pt: the widest and tallest kinds, so titles
     /// align whichever kind is chosen. The title follows 6pt after it.
     static let slotWidth = cell * CGFloat(SpriteKind.maximumColumns)
@@ -202,7 +209,8 @@ struct Sprite: View {
     /// held about 170 MB resident (#343).
     private func bitmap(_ rows: [String]) -> some View {
         // One tone when unlit: the highlight cells fill like the body and close into it.
-        let tone = unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color)
+        let tone = tint.map { (body: $0, light: $0) }
+            ?? (unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color))
         return ZStack(alignment: .topLeading) {
             cells(in: rows) { $0 != "." && $0 != "+" }.fill(tone.body)
             cells(in: rows) { $0 == "+" }.fill(tone.light)
@@ -1891,19 +1899,34 @@ struct Notch: View {
             let details = RunningRowDetails.make(running, host: model.lastSeenHost(for: item.session))
             let promptKey = "prompt:\(item.session.session)"
             let agent = item.session.source.displayName
+            // #397: with running subagents, a switcher above the lines picks whose they are. Every
+            // open starts on the session; a subagent that finishes hands them back at once.
+            let shownSubagent = model.openRunningRow.shownSubagent(in: item)
             VStack(alignment: .leading, spacing: 6) {
-                if let now = details.now {
-                    runningLine("now", now.text, tone: now.isUnknown ? NotchStyle.dim : NotchStyle.ink)
-                    if let full = now.full, let title = now.disclosureTitle {
-                        // D11: a shortened command stays marked and its full text is one click away.
-                        NotchDisclosure(title: title, subject: subject, expanded: disclosure("action:\(item.session.session)")) {
-                            fullText(full)
-                        }
-                        .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                if !running.subagents.isEmpty {
+                    SubagentSwitcher(subagents: running.subagents,
+                                     selected: shownSubagent.map { .subagent($0.id) } ?? .session,
+                                     sprite: model.appearance.sprite, color: spriteColor(for: item.session)) { choice in
+                        model.showInOpenRunningRow(choice, row: item.id)
                     }
+                    .padding(.bottom, 4)
                 }
-                if let you = details.you { runningLine("you", you.text, tone: NotchStyle.text) }
-                runningLine("where", details.place, tone: NotchStyle.text)
+                if let subagent = shownSubagent {
+                    subagentLines(subagent, item: item, subject: subject)
+                } else {
+                    if let now = details.now {
+                        runningLine("now", now.text, tone: now.isUnknown ? NotchStyle.dim : NotchStyle.ink)
+                        if let full = now.full, let title = now.disclosureTitle {
+                            // D11: a shortened command stays marked and its full text is one click away.
+                            NotchDisclosure(title: title, subject: subject, expanded: disclosure("action:\(item.session.session)")) {
+                                fullText(full)
+                            }
+                            .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                        }
+                    }
+                    if let you = details.you { runningLine("you", you.text, tone: NotchStyle.text) }
+                    runningLine("where", details.place, tone: NotchStyle.text)
+                }
                 if item.session.source == .codex, case let .unavailable(cause) = herdr {
                     herdrReasonLine(item, cause: cause)
                 } else if item.session.source == .codex, let reason = model.terminalOpenLine(item.session) {
@@ -1911,7 +1934,7 @@ struct Notch: View {
                 }
                 if item.session.source == .claude { claudeReturnMessage(item) }
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if let you = details.you, let title = you.disclosureTitle {
+                    if shownSubagent == nil, let you = details.you, let title = you.disclosureTitle {
                         // The toggle only; what it reveals goes below the whole line, not beside Open.
                         NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject,
                                         expanded: disclosure(promptKey)) { EmptyView() }
@@ -1927,7 +1950,7 @@ struct Notch: View {
                     claudeRemoveControl(item, subject: subject)
                 }
                 .padding(.top, 4)
-                if let you = details.you, you.disclosureTitle != nil, openDisclosures.contains(promptKey) {
+                if shownSubagent == nil, let you = details.you, you.disclosureTitle != nil, openDisclosures.contains(promptKey) {
                     VStack(alignment: .leading, spacing: 6) {
                         if let full = you.full { fullText(full) }
                         if you.keptOnlyStart {
@@ -1945,6 +1968,33 @@ struct Notch: View {
             // With the row's 3pt spacing below the header line, 4pt above the first detail line.
             .padding(.top, 1)
             .padding(.bottom, 8)
+        }
+    }
+
+    /// A running subagent's lines in the opened row (#397, `SubagentDetails`): "now", its latest action
+    /// ("Unknown" in dim while none is known); "asked" and "role" when the source reports them; and
+    /// "for", how long it has run. Open below still opens the session.
+    @ViewBuilder
+    private func subagentLines(_ subagent: SubagentActivity, item: AgentAttentionItem, subject: String) -> some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let details = SubagentDetails.make(subagent, now: context.date.timeIntervalSince1970)
+            let key = "subagent:\(item.session.session):\(subagent.id)"
+            VStack(alignment: .leading, spacing: 6) {
+                runningLine("now", details.now.text, tone: details.now.isUnknown ? NotchStyle.dim : NotchStyle.ink)
+                if let full = details.now.full, let title = details.now.disclosureTitle {
+                    NotchDisclosure(title: title, subject: subject, expanded: disclosure("action:" + key)) { fullText(full) }
+                        .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                }
+                if let asked = details.asked {
+                    runningLine("asked", asked.text, tone: NotchStyle.text)
+                    if let full = asked.full, let title = asked.disclosureTitle {
+                        NotchDisclosure(title: title, subject: subject, expanded: disclosure("asked:" + key)) { fullText(full) }
+                            .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                    }
+                }
+                if let role = details.role { runningLine("role", role, tone: NotchStyle.text) }
+                runningLine("for", details.age, tone: NotchStyle.text)
+            }
         }
     }
 
@@ -3035,7 +3085,8 @@ struct Notch: View {
                     }
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: QueueMotion.layoutKey(sections.attention + sections.working))
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: showsTestRow)
-                    .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: model.openRunningRow)
+                    // Keyed to which row is open only: switching whose lines it shows (#397) redraws at once.
+                    .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: model.openRunningRow.open)
                     .padding(.bottom, 14)
                     // Room inside the scroll view's clip for the selection ring and focus rings at
                     // the row edges; the outer negative padding keeps the column where it was.

@@ -20,11 +20,19 @@ extension Companion {
         return handled
     }
 
+    /// A switcher well in the opened row (#397): shows the session's lines or one running subagent's.
+    /// A choice for a row that is not open, or a subagent that has finished, changes nothing.
+    func showInOpenRunningRow(_ choice: OpenRunningRow.Shown, row id: AgentAttentionID) {
+        guard let row = selectableItems.first(where: { $0.id == id }) else { return }
+        updateOpenRunningRow { $0.select(choice, in: row) }
+    }
+
     func closeOpenRunningRow() {
         updateOpenRunningRow { $0.close() }
     }
 
-    /// Closes the open row once its turn leaves the queue, stops working, or a closed fold hides it.
+    /// Closes the open row once its turn leaves the queue, stops working, or a closed fold hides it,
+    /// and hands its details back to the session once a shown subagent finishes.
     func reconcileOpenRunningRow() {
         guard openRunningRow.open != nil else { return }
         let rows = selectableItems
