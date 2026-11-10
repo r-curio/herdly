@@ -122,6 +122,60 @@ import Testing
     #expect(approval.details?.command == "touch marker")
 }
 
+@Test func claudeBashApprovalMatchesItsOwnCommandWhileParallelSubagentsRunBash() throws {
+    // Observed 2026-11-10: a subagent's Bash request arrived while another subagent's Bash call in the
+    // same session and prompt was still running, and the name-only rule dropped it as ambiguous.
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Bash", toolUseID: "other",
+                     toolInput: ["command": "python3 - <<'EOF'\nprint(1)\nEOF"]),
+        claudeRecord("PreToolUse", at: 3, promptID: "p1", toolName: "Bash", toolUseID: "asking",
+                     toolInput: ["command": "sleep 20; curl -s http://127.0.0.1:8077/"]),
+        claudeRecord("PermissionRequest", at: 3.2, promptID: "p1", toolName: "Bash",
+                     toolInput: ["command": "sleep 20; curl -s http://127.0.0.1:8077/"],
+                     approvalRequestID: "request-1")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let found = approvals(root)
+    #expect(found.count == 1)
+    #expect(found.first?.identity.call == "asking")
+    #expect(found.first?.hookRequestID == "request-1")
+    #expect(found.first?.details?.command == "sleep 20; curl -s http://127.0.0.1:8077/")
+}
+
+@Test func claudeBashApprovalStaysNativeWhenItsCommandIsAmbiguousOrNotRunning() throws {
+    let same = "npm test"
+    let duplicate = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Bash", toolUseID: "a", toolInput: ["command": same]),
+        claudeRecord("PreToolUse", at: 3, promptID: "p1", toolName: "Bash", toolUseID: "b", toolInput: ["command": same]),
+        claudeRecord("PermissionRequest", at: 4, promptID: "p1", toolName: "Bash", toolInput: ["command": same])
+    ])
+    defer { try? FileManager.default.removeItem(at: duplicate) }
+    #expect(approvals(duplicate).isEmpty)
+
+    // The only running call has a different command, so the request cannot be pinned on it.
+    let unmatched = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Bash", toolUseID: "a", toolInput: ["command": "ls"]),
+        claudeRecord("PermissionRequest", at: 3, promptID: "p1", toolName: "Bash", toolInput: ["command": "rm -rf build"])
+    ])
+    defer { try? FileManager.default.removeItem(at: unmatched) }
+    #expect(approvals(unmatched).isEmpty)
+
+    // The asking call already finished; the other call's command differs.
+    let finished = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+        claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Bash", toolUseID: "a", toolInput: ["command": "ls"]),
+        claudeRecord("PreToolUse", at: 2.5, promptID: "p1", toolName: "Bash", toolUseID: "b", toolInput: ["command": "make"]),
+        claudeRecord("PostToolUse", at: 2.8, promptID: "p1", toolUseID: "b"),
+        claudeRecord("PermissionRequest", at: 3, promptID: "p1", toolName: "Bash", toolInput: ["command": "make"])
+    ])
+    defer { try? FileManager.default.removeItem(at: finished) }
+    #expect(approvals(finished).isEmpty)
+}
+
 @Test func claudePermissionBeforeItsPreToolCandidateCannotCreateApproval() throws {
     let root = try makeClaudeEvents([
         claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
