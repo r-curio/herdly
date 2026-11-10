@@ -118,6 +118,9 @@ public enum ClaudeObservationReader {
         let at: Double
         /// The absolute file or notebook path the call targets, kept apart from the display-bounded input.
         var target: String? = nil
+        /// A Bash call's exact command as the helper recorded it, unshortened, so a permission request
+        /// can be matched to its own call while parallel subagents run other Bash calls in the same turn.
+        var command: String? = nil
     }
 
     private struct Turn {
@@ -272,7 +275,8 @@ public enum ClaudeObservationReader {
                 }
                 let input = stringInput(record.toolInput)
                 let tool = Tool(id: toolID, name: name, input: input, at: record.capturedAt,
-                                target: ClaudeDirectApproval.target(toolName: name, toolInput: record.toolInput))
+                                target: ClaudeDirectApproval.target(toolName: name, toolInput: record.toolInput),
+                                command: name == "Bash" ? record.toolInput["command"] as? String : nil)
                 turn.tools[toolID] = tool
                 turn.tool = tool
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
@@ -328,15 +332,19 @@ public enum ClaudeObservationReader {
                 guard let promptID = valid(record.promptID), let name = bounded(record.toolName),
                       ClaudeDirectApproval.tools.contains(name) else { continue }
                 // A file request is shown only with the helper's validated details, and only for the one
-                // uncompleted call of that tool on the same path. Bash keeps its original rule.
+                // uncompleted call of that tool on the same path. A Bash request that carries its command
+                // matches only the uncompleted call with that exact command (parallel subagents share the
+                // session and prompt); one without it keeps the name-only rule.
                 let fileDetails = name == "Bash" ? nil : record.approvalDetails
                 guard name == "Bash" || fileDetails?.command != nil else { continue }
+                let requestedCommand = name == "Bash" ? record.toolInput["command"] as? String : nil
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
                 guard var turn = turns[turnID] else { continue }
                 let candidates = turn.tools.values.filter {
                     $0.name == name && $0.at <= record.capturedAt && (fileDetails == nil || $0.target == fileDetails?.command)
+                        && (requestedCommand == nil || $0.command == requestedCommand)
                 }
                 guard candidates.count == 1, let tool = candidates.first else { continue }
                 let call = AgentCallIdentity(session: identity, turn: promptID, call: tool.id)

@@ -59,7 +59,11 @@ that bound, the reader falls back to the general running prompt until newer evid
 current action.
 
 Permission observations require exactly one matching, uncompleted `PreToolUse` call in the same
-session, prompt, root, and tool name. `Bash` creates a direct approval observation as before. A file
+session, prompt, root, and tool name. `Bash` creates a direct approval observation; when the request
+records its command, only the uncompleted `Bash` call with that exact command counts, because parallel
+subagents share the session and prompt and run their own Bash calls (observed 2026-11-10: a subagent's
+request was dropped as ambiguous while another subagent's call was still running). Two uncompleted calls
+with the same command stay ambiguous, and a request without a recorded command keeps the name-only rule. A file
 request (`Edit`, `Write`, `NotebookEdit`, or `Read`) or web request (`WebFetch`, `WebSearch`) creates one
 only when the helper accepted its exact proven input shape and attached bounded display details
 (`ClaudeDirectApproval`), and only for the one uncompleted call of that tool on the same absolute path,
