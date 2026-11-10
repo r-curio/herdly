@@ -168,3 +168,35 @@ private func procargs(count: Int32, _ strings: [String], padding: Int = 3) -> [U
     #expect(KernelProcessArguments.parse(procargs(count: 5000, ["/bin/sh", "sh"])) == nil)
     #expect(KernelProcessArguments.parse([1, 0]) == nil)
 }
+
+@Test func scheduledArgumentVectorsAreReusedOnlyForTheSameRecentProcess() {
+    var memo = ProcessArgumentMemo()
+    var reads = 0
+    func read(_ vector: [String]?) -> () -> [String]? { { reads += 1; return vector } }
+    let codex = ProcessArgumentMemo.Identity(pid: 10, startedSeconds: 100, startedMicroseconds: 5, shortName: "codex")
+    #expect(memo.arguments(of: codex, now: 0, read: read(["codex"])) == ["codex"])
+    // The same process, younger than the bound: not read again.
+    #expect(memo.arguments(of: codex, now: ProcessArgumentMemo.maximumAge - 0.1, read: read(["other"])) == ["codex"])
+    #expect(reads == 1)
+    // At the bound it is read again, in case the process replaced its own image under the same name.
+    #expect(memo.arguments(of: codex, now: ProcessArgumentMemo.maximumAge, read: read(["codex", "resume"])) == ["codex", "resume"])
+    #expect(reads == 2)
+
+    // A reused pid, a later start, or another short name is another process: always read.
+    let later = ProcessArgumentMemo.Identity(pid: 10, startedSeconds: 101, startedMicroseconds: 5, shortName: "codex")
+    #expect(memo.arguments(of: later, now: 11, read: read(["codex", "new"])) == ["codex", "new"])
+    let renamed = ProcessArgumentMemo.Identity(pid: 10, startedSeconds: 101, startedMicroseconds: 5, shortName: "node")
+    #expect(memo.arguments(of: renamed, now: 11, read: read(["node"])) == ["node"])
+    #expect(reads == 4)
+
+    // A vector the kernel would not give is never kept, and drops the one held.
+    #expect(memo.arguments(of: later, now: 12, read: read(nil)) == nil)
+    #expect(memo.count == 0)
+    #expect(memo.arguments(of: later, now: 12, read: read(["codex"])) == ["codex"])
+    // A clock that went back is not trusted.
+    #expect(memo.arguments(of: later, now: 5, read: read(["codex", "again"])) == ["codex", "again"])
+
+    // Processes the table no longer lists are dropped.
+    memo.keep([99])
+    #expect(memo.count == 0)
+}
