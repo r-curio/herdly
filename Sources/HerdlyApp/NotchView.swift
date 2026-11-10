@@ -161,9 +161,16 @@ struct Sprite: View {
     var reduceMotion: Bool
     var color: Int = 0
     var unlit = false
-    /// Points per cell: the notch's 2pt, or larger for a Settings preview so edges stay crisp.
+    /// Points per cell: the notch's 2pt, larger for a Settings preview so edges stay crisp, or
+    /// `subagentCell` in a subagent switcher well.
     var cellSize: CGFloat = Sprite.cell
+    /// One flat fill for every cell in place of the session's colours: black on an inverted
+    /// (selected or pressed) switcher well, as that well's label is.
+    var tint: Color? = nil
     static let cell: CGFloat = 2
+    /// Two-thirds of `cell`: the sprite before a subagent's name in the opened row's switcher (#397),
+    /// 9x6pt for the 6x4-cell kinds.
+    static let subagentCell: CGFloat = cell * 2 / 3
     /// The fixed leading slot of a queue row, 18x10pt: the widest and tallest kinds, so titles
     /// align whichever kind is chosen. The title follows 6pt after it.
     static let slotWidth = cell * CGFloat(SpriteKind.maximumColumns)
@@ -202,7 +209,8 @@ struct Sprite: View {
     /// held about 170 MB resident (#343).
     private func bitmap(_ rows: [String]) -> some View {
         // One tone when unlit: the highlight cells fill like the body and close into it.
-        let tone = unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color)
+        let tone = tint.map { (body: $0, light: $0) }
+            ?? (unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color))
         return ZStack(alignment: .topLeading) {
             cells(in: rows) { $0 != "." && $0 != "+" }.fill(tone.body)
             cells(in: rows) { $0 == "+" }.fill(tone.light)
@@ -287,6 +295,8 @@ struct NotchButtonStyle: ButtonStyle {
     var emphasized = false
     /// A choice the user made here: drawn in the pressed look until Codex records the answer.
     var selected = false
+    /// 4pt for a button; 2pt for a subagent switcher well (#397). A question card keeps its own 5pt.
+    var verticalPadding: CGFloat = 4
     @Environment(\.questionCard) private var questionCard
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
@@ -294,7 +304,9 @@ struct NotchButtonStyle: ButtonStyle {
         configuration.label
             .font(questionCard ? QuestionCardStyle.font(11) : NotchStyle.mono(11, emphasized ? .semibold : .regular))
             .foregroundStyle(inverted ? Color.black : (enabled ? NotchStyle.ink : NotchStyle.dim))
-            .padding(.horizontal, questionCard ? 9 : 8).padding(.vertical, questionCard ? 5 : 4)
+            // Lets a mark inside the label, a switcher well's sprite, turn black with the text.
+            .environment(\.notchButtonInverted, inverted)
+            .padding(.horizontal, questionCard ? 9 : 8).padding(.vertical, questionCard ? 5 : verticalPadding)
             .background(inverted ? NotchStyle.ink : NotchStyle.well,
                         in: RoundedRectangle(cornerRadius: 5, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
@@ -306,15 +318,33 @@ struct NotchButton: View {
     let title: String
     var emphasized = false
     var selected = false
+    /// Focus owned by the caller, so it can move focus here (the opened row's Open, #397); by default
+    /// the button keeps its own.
+    var focus: FocusState<Bool>.Binding? = nil
     let action: () -> Void
     @FocusState private var focused: Bool
     var body: some View {
+        let binding = focus ?? $focused
         Button(title, action: action)
             .buttonStyle(NotchButtonStyle(emphasized: emphasized, selected: selected))
-            .focused($focused)
-            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .stroke(NotchStyle.ink.opacity(focused ? 0.9 : 0), lineWidth: 1.5).padding(-2))
+            .focused(binding)
+            .modifier(NotchFocusRing(focused: binding.wrappedValue))
     }
+}
+
+/// The keyboard focus ring every notch control shares: 1.5pt ink at 90%, 6pt continuous corners,
+/// 2pt outside the control.
+struct NotchFocusRing: ViewModifier {
+    let focused: Bool
+    func body(content: Content) -> some View {
+        content.overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .stroke(NotchStyle.ink.opacity(focused ? 0.9 : 0), lineWidth: 1.5).padding(-2))
+    }
+}
+
+extension EnvironmentValues {
+    /// True inside a `NotchButtonStyle` label while it is drawn pressed or selected (ink fill).
+    @Entry var notchButtonInverted = false
 }
 
 /// The result card's reply field (#323, 9NU): one line the user types and sends to a finished
@@ -1134,6 +1164,12 @@ struct Notch: View {
     /// Observed so the empty queue's reading follows Claude setup changes; read through `model`.
     @ObservedObject var claudeSetup: ClaudeSetupModel
     @FocusState private var headerFocused: Bool
+    /// The opened running row's focused switcher well and Open (#397), owned here so focus can move
+    /// between them after the switcher itself has left.
+    @FocusState private var switcherFocus: OpenRunningRow.Shown?
+    @FocusState private var runningOpenFocused: Bool
+    /// The switcher well that last held focus, kept past SwiftUI clearing it as its well leaves.
+    @State private var lastSwitcherFocus: OpenRunningRow.Shown?
     /// Disclosures the user opened, by the item they belong to; cleared when the item leaves.
     @State private var openDisclosures: Set<String> = []
     /// Typed answers being composed, by call id and question index; sent only on Return or Send.
@@ -1891,19 +1927,35 @@ struct Notch: View {
             let details = RunningRowDetails.make(running, host: model.lastSeenHost(for: item.session))
             let promptKey = "prompt:\(item.session.session)"
             let agent = item.session.source.displayName
+            // #397: with running subagents, a switcher above the lines picks whose they are. Every
+            // open starts on the session; a subagent that finishes hands them back at once.
+            let shownSubagent = model.openRunningRow.shownSubagent(in: item)
             VStack(alignment: .leading, spacing: 6) {
-                if let now = details.now {
-                    runningLine("now", now.text, tone: now.isUnknown ? NotchStyle.dim : NotchStyle.ink)
-                    if let full = now.full, let title = now.disclosureTitle {
-                        // D11: a shortened command stays marked and its full text is one click away.
-                        NotchDisclosure(title: title, subject: subject, expanded: disclosure("action:\(item.session.session)")) {
-                            fullText(full)
-                        }
-                        .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                if !running.subagents.isEmpty {
+                    SubagentSwitcher(subagents: running.subagents,
+                                     selected: shownSubagent.map { .subagent($0.id) } ?? .session,
+                                     sprite: model.appearance.sprite, color: spriteColor(for: item.session),
+                                     reduceMotion: model.reduceMotion, focus: $switcherFocus) { choice in
+                        model.showInOpenRunningRow(choice, row: item.id)
                     }
+                    .padding(.bottom, 4)
                 }
-                if let you = details.you { runningLine("you", you.text, tone: NotchStyle.text) }
-                runningLine("where", details.place, tone: NotchStyle.text)
+                if let subagent = shownSubagent {
+                    subagentLines(subagent, item: item, subject: subject)
+                } else {
+                    if let now = details.now {
+                        runningLine("now", now.text, tone: now.isUnknown ? NotchStyle.dim : NotchStyle.ink)
+                        if let full = now.full, let title = now.disclosureTitle {
+                            // D11: a shortened command stays marked and its full text is one click away.
+                            NotchDisclosure(title: title, subject: subject, expanded: disclosure("action:\(item.session.session)")) {
+                                fullText(full)
+                            }
+                            .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                        }
+                    }
+                    if let you = details.you { runningLine("you", you.text, tone: NotchStyle.text) }
+                    runningLine("where", details.place, tone: NotchStyle.text)
+                }
                 if item.session.source == .codex, case let .unavailable(cause) = herdr {
                     herdrReasonLine(item, cause: cause)
                 } else if item.session.source == .codex, let reason = model.terminalOpenLine(item.session) {
@@ -1911,23 +1963,26 @@ struct Notch: View {
                 }
                 if item.session.source == .claude { claudeReturnMessage(item) }
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if let you = details.you, let title = you.disclosureTitle {
+                    if shownSubagent == nil, let you = details.you, let title = you.disclosureTitle {
                         // The toggle only; what it reveals goes below the whole line, not beside Open.
                         NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject,
                                         expanded: disclosure(promptKey)) { EmptyView() }
                     }
                     Spacer(minLength: 6)
                     if item.session.source == .codex, codexOpen {
-                        NotchButton(title: Self.rowOpenTitle, emphasized: true) { model.openAgent(item.session) }
-                            .disabled(model.openingTask)
-                            .accessibilityLabel("Open Session: \(subject)")
-                            .accessibilityHint("Open this session in Codex.")
+                        NotchButton(title: Self.rowOpenTitle, emphasized: true, focus: $runningOpenFocused) {
+                            model.openAgent(item.session)
+                        }
+                        .disabled(model.openingTask)
+                        .accessibilityLabel("Open Session: \(subject)")
+                        .accessibilityHint("Open this session in Codex.")
                     }
-                    claudeReturnControl(item, subject: subject, emphasized: true, openTitle: Self.rowOpenTitle)
+                    claudeReturnControl(item, subject: subject, emphasized: true, openTitle: Self.rowOpenTitle,
+                                        openFocus: $runningOpenFocused)
                     claudeRemoveControl(item, subject: subject)
                 }
                 .padding(.top, 4)
-                if let you = details.you, you.disclosureTitle != nil, openDisclosures.contains(promptKey) {
+                if shownSubagent == nil, let you = details.you, you.disclosureTitle != nil, openDisclosures.contains(promptKey) {
                     VStack(alignment: .leading, spacing: 6) {
                         if let full = you.full { fullText(full) }
                         if you.keptOnlyStart {
@@ -1945,6 +2000,47 @@ struct Notch: View {
             // With the row's 3pt spacing below the header line, 4pt above the first detail line.
             .padding(.top, 1)
             .padding(.bottom, 8)
+            // #397: keyboard focus stays in the row when a focused well's subagent finishes: to
+            // "Session" while wells remain, to Open once the last one leaves with the switcher. Watched
+            // here, outside the switcher, which is gone by then.
+            .onChange(of: switcherFocus) { _, now in
+                lastSwitcherFocus = OpenRunningRow.rememberedFocus(previous: lastSwitcherFocus, now: now,
+                                                                   running: running.subagents.map(\.id))
+            }
+            .onChange(of: running.subagents.map(\.id)) { _, ids in
+                switch OpenRunningRow.focusAfterSubagentsChange(lastFocused: lastSwitcherFocus, running: ids) {
+                case .well(let well)?: switcherFocus = well; lastSwitcherFocus = well
+                case .open?: runningOpenFocused = true; lastSwitcherFocus = nil
+                case nil: break
+                }
+            }
+        }
+    }
+
+    /// A running subagent's lines in the opened row (#397, `SubagentDetails`): "now", its latest action
+    /// ("Unknown" in dim while none is known); "asked" and "role" when the source reports them; and
+    /// "for", how long it has run. Open below still opens the session.
+    @ViewBuilder
+    private func subagentLines(_ subagent: SubagentActivity, item: AgentAttentionItem, subject: String) -> some View {
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let details = SubagentDetails.make(subagent, now: context.date.timeIntervalSince1970)
+            let key = "subagent:\(item.session.session):\(subagent.id)"
+            VStack(alignment: .leading, spacing: 6) {
+                runningLine("now", details.now.text, tone: details.now.isUnknown ? NotchStyle.dim : NotchStyle.ink)
+                if let full = details.now.full, let title = details.now.disclosureTitle {
+                    NotchDisclosure(title: title, subject: subject, expanded: disclosure("action:" + key)) { fullText(full) }
+                        .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                }
+                if let asked = details.asked {
+                    runningLine("asked", asked.text, tone: NotchStyle.text)
+                    if let full = asked.full, let title = asked.disclosureTitle {
+                        NotchDisclosure(title: title, subject: subject, expanded: disclosure("asked:" + key)) { fullText(full) }
+                            .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                    }
+                }
+                if let role = details.role { runningLine("role", role, tone: NotchStyle.text) }
+                runningLine("for", details.age, tone: NotchStyle.text)
+            }
         }
     }
 
@@ -2787,13 +2883,15 @@ struct Notch: View {
 
     @ViewBuilder
     private func claudeReturnControl(_ item: AgentAttentionItem, subject: String, emphasized: Bool = false,
-                                     openTitle: String = "Open Session", openHint: String? = nil) -> some View {
+                                     openTitle: String = "Open Session", openHint: String? = nil,
+                                     openFocus: FocusState<Bool>.Binding? = nil) -> some View {
         if item.session.source == .claude {
             let herdr = herdrOpen(item.session)
             if herdr == .available || (herdr == .notInHerdr && model.canOpenClaude(item.session)) {
                 // The terminal scan's line replaces Open with no disabled button (#267).
                 if herdr == .available || model.offersTerminalOpen(item.session) {
-                    claudeOpenButton(item, subject: subject, emphasized: emphasized, title: openTitle, hint: openHint)
+                    claudeOpenButton(item, subject: subject, emphasized: emphasized, title: openTitle, hint: openHint,
+                                     focus: openFocus)
                 }
             } else if herdr == .notInHerdr, !model.ghosttyEnabled, model.claudeLastSeenLine(item.session) == nil {
                 NotchButton(title: "Set up Ghostty", emphasized: emphasized, action: model.showControls)
@@ -2822,8 +2920,9 @@ struct Notch: View {
     }
 
     private func claudeOpenButton(_ item: AgentAttentionItem, subject: String, emphasized: Bool,
-                                  title: String = "Open Session", hint: String? = nil) -> some View {
-        NotchButton(title: title, emphasized: emphasized) {
+                                  title: String = "Open Session", hint: String? = nil,
+                                  focus: FocusState<Bool>.Binding? = nil) -> some View {
+        NotchButton(title: title, emphasized: emphasized, focus: focus) {
             if let approval = item.approval {
                 model.openAgentApproval(approval)
             } else {
@@ -3035,7 +3134,11 @@ struct Notch: View {
                     }
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: QueueMotion.layoutKey(sections.attention + sections.working))
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: showsTestRow)
-                    .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: model.openRunningRow)
+                    // Keyed to which row is open only: switching whose lines it shows (#397) redraws at once.
+                    .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: model.openRunningRow.open)
+                    // #397: a remembered switcher well belongs to the row it was in; opening another
+                    // row or closing this one forgets it, so it never moves focus in a different row.
+                    .onChange(of: model.openRunningRow.open) { lastSwitcherFocus = nil }
                     .padding(.bottom, 14)
                     // Room inside the scroll view's clip for the selection ring and focus rings at
                     // the row edges; the outer negative padding keeps the column where it was.

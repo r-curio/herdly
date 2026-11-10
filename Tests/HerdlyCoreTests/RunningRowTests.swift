@@ -200,3 +200,162 @@ private func running(_ session: AgentSessionIdentity = codexCLI, prompt: String?
     #expect(AgentSource.codex.displayName == "Codex")
     #expect(AgentSource.claude.displayName == "Claude")
 }
+
+// MARK: Subagent switcher in the opened row (#397, Paper H2 "E · Switcher")
+
+private let explore = SubagentActivity(id: "agent-a", name: "Explore", startedAt: 10,
+                                       latestAction: RunningRowDetails.now(toolName: "Grep", toolInput: ["pattern": "closes #27"]))
+private let plan = SubagentActivity(id: "agent-b", name: "Plan", startedAt: 20)
+
+/// The Claude row from `rows()`, working with the given running subagents.
+private func claudeRow(subagents: [SubagentActivity]) -> AgentAttentionItem {
+    var queue = AgentAttentionQueue()
+    queue.apply(.running(AgentRunning(session: claude, turn: "t1", arrivedAt: 2, subagents: subagents)))
+    return queue.items(at: 6).first { $0.kind == .running }!
+}
+
+@Test func theSessionIsShownEachTimeARowOpens() {
+    let row = claudeRow(subagents: [explore, plan])
+    var open = OpenRunningRow()
+    open.toggle(row)
+    #expect(open.shown == .session)
+    #expect(open.shownSubagent(in: row) == nil)
+}
+
+@Test func selectingARunningSubagentShowsItsLines() {
+    let row = claudeRow(subagents: [explore, plan])
+    var open = OpenRunningRow()
+    open.toggle(row)
+    let r1 = open.select(.subagent("agent-b"), in: row)
+    #expect(r1)
+    #expect(open.shown == .subagent("agent-b"))
+    #expect(open.shownSubagent(in: row) == plan)
+    let r2 = open.select(.session, in: row)
+    #expect(r2)
+    #expect(open.shown == .session)
+}
+
+@Test func selectingAnUnknownSubagentOrInAClosedRowIsIgnored() {
+    let row = claudeRow(subagents: [explore])
+    var open = OpenRunningRow()
+    // Nothing open yet: no selection to make.
+    let r3 = open.select(.subagent("agent-a"), in: row)
+    #expect(!r3)
+    #expect(open.shown == .session)
+    open.toggle(row)
+    let r4 = open.select(.subagent("agent-z"), in: row)
+    #expect(!r4)
+    #expect(open.shown == .session)
+    // A row other than the open one does not take the selection.
+    let r5 = open.select(.subagent("agent-a"), in: rows().first { $0.session == codexCLI }!)
+    #expect(!r5)
+    #expect(open.shown == .session)
+}
+
+@Test func aShownSubagentThatEndsReturnsTheSelectionToTheSession() {
+    let row = claudeRow(subagents: [explore, plan])
+    var open = OpenRunningRow()
+    open.toggle(row)
+    open.select(.subagent("agent-a"), in: row)
+    let after = claudeRow(subagents: [plan])
+    // Read at once from the current subagents, before any reconcile runs.
+    #expect(open.shownSubagent(in: after) == nil)
+    open.reconcile(visible: [after])
+    #expect(open.open == row.id)
+    #expect(open.shown == .session)
+}
+
+@Test func anotherSubagentEndingKeepsTheSelection() {
+    let row = claudeRow(subagents: [explore, plan])
+    var open = OpenRunningRow()
+    open.toggle(row)
+    open.select(.subagent("agent-b"), in: row)
+    open.reconcile(visible: [claudeRow(subagents: [plan])])
+    #expect(open.shown == .subagent("agent-b"))
+}
+
+@Test func closingAndReopeningTheRowShowsTheSessionAgain() {
+    let row = claudeRow(subagents: [explore])
+    var open = OpenRunningRow()
+    open.toggle(row)
+    open.select(.subagent("agent-a"), in: row)
+    open.toggle(row)
+    open.toggle(row)
+    #expect(open.shown == .session)
+    open.select(.subagent("agent-a"), in: row)
+    let r6 = open.escape()
+    #expect(r6)
+    open.toggle(row)
+    #expect(open.shown == .session)
+    open.select(.subagent("agent-a"), in: row)
+    open.close()
+    #expect(open.shown == .session)
+}
+
+@Test func movingTheOpenStateToAnotherRowShowsItsSession() {
+    let row = claudeRow(subagents: [explore])
+    var open = OpenRunningRow()
+    open.toggle(row)
+    open.select(.subagent("agent-a"), in: row)
+    open.toggle(rows().first { $0.session == codexCLI }!)
+    #expect(open.shown == .session)
+}
+
+@Test func aSubagentsLinesAreNowAskedRoleAndFor() {
+    let codex = SubagentActivity(id: "c1", name: "Ptolemy", role: "explorer", asked: "Find every workflow that closes issues",
+                                 startedAt: 1_000, latestAction: RunningRowDetails.now(toolName: "Bash", toolInput: ["command": "ls"]))
+    let details = SubagentDetails.make(codex, now: 1_000 + 125)
+    #expect(details.now.text == "$ ls")
+    #expect(!details.now.isUnknown)
+    #expect(details.asked?.text == "Find every workflow that closes issues")
+    #expect(details.asked?.full == nil)
+    #expect(details.role == "explorer")
+    #expect(details.age == "2m")
+}
+
+@Test func aSubagentWithNothingKnownReadsUnknownAndLeavesTheRestOut() {
+    let details = SubagentDetails.make(SubagentActivity(id: "a", name: "Explore", role: " ", asked: "  ", startedAt: 50), now: 60)
+    #expect(details.now.text == "Unknown")
+    #expect(details.now.isUnknown)
+    #expect(details.asked == nil)
+    #expect(details.role == nil)
+    #expect(details.age == "<1m")
+}
+
+@Test func aLongTaskIsShortenedWithItsFullTextBehindADisclosure() {
+    let task = String(repeating: "a", count: RunningRowDetails.lineLimit + 5)
+    let details = SubagentDetails.make(SubagentActivity(id: "a", name: "x", asked: task + "\nmore", startedAt: 0), now: 0)
+    #expect(details.asked?.text == String(repeating: "a", count: RunningRowDetails.lineLimit) + "…")
+    #expect(details.asked?.full == task + "\nmore")
+    #expect(details.asked?.disclosureTitle == "Show full task")
+}
+
+// MARK: Keyboard focus when a switcher well's subagent finishes (#397, review round 1)
+
+@Test func focusOnAFinishedSubagentsWellMovesToSessionWhileWellsRemain() {
+    let next = OpenRunningRow.focusAfterSubagentsChange(lastFocused: .subagent("agent-a"), running: ["agent-b"])
+    #expect(next == .well(.session))
+}
+
+@Test func focusOnTheLastSubagentsWellMovesToOpenWhenTheSwitcherLeaves() {
+    let next = OpenRunningRow.focusAfterSubagentsChange(lastFocused: .subagent("agent-a"), running: [])
+    #expect(next == .open)
+}
+
+@Test func focusOnSessionOrAStillRunningSubagentOrNowhereIsLeftAlone() {
+    #expect(OpenRunningRow.focusAfterSubagentsChange(lastFocused: .subagent("agent-b"), running: ["agent-b"]) == nil)
+    #expect(OpenRunningRow.focusAfterSubagentsChange(lastFocused: .session, running: []) == nil)
+    #expect(OpenRunningRow.focusAfterSubagentsChange(lastFocused: nil, running: []) == nil)
+}
+
+@Test func aWellLosingFocusBecauseItsSubagentLeftIsStillRemembered() {
+    // SwiftUI may clear the focus binding before the subagent list change is seen.
+    #expect(OpenRunningRow.rememberedFocus(previous: .subagent("agent-a"), now: nil, running: ["agent-b"]) == .subagent("agent-a"))
+}
+
+@Test func focusTheUserMovedElsewhereIsForgotten() {
+    // Its subagent still runs, so the well lost focus because the user moved it.
+    #expect(OpenRunningRow.rememberedFocus(previous: .subagent("agent-a"), now: nil, running: ["agent-a"]) == nil)
+    #expect(OpenRunningRow.rememberedFocus(previous: .session, now: nil, running: []) == nil)
+    #expect(OpenRunningRow.rememberedFocus(previous: .session, now: .subagent("agent-a"), running: ["agent-a"]) == .subagent("agent-a"))
+}

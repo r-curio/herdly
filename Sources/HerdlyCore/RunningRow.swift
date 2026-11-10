@@ -17,12 +17,41 @@ extension AgentSessionIdentity {
 /// the user opens it; only one is open at a time, so opening another moves the open state to it and
 /// a second click on the open row closes it. Escape closes an open row before it collapses the panel.
 /// Presentation only: opening a row acknowledges nothing and selects no navigation target.
+///
+/// An opened row whose session has running subagents also carries the switcher's choice (#397, Paper
+/// H2 "E · Switcher"): whose lines the details show, the session's or one subagent's. Every open
+/// starts on the session, and closing the row forgets the choice.
 public struct OpenRunningRow: Equatable, Sendable {
+    /// Whose lines the opened row shows.
+    public enum Shown: Hashable, Sendable {
+        case session
+        /// A running subagent, by its `SubagentActivity.id`.
+        case subagent(String)
+    }
+
     public private(set) var open: AgentAttentionID?
+    public private(set) var shown: Shown = .session
 
     public init() {}
 
     public func isOpen(_ id: AgentAttentionID) -> Bool { open == id }
+
+    /// Shows `choice` in the open row `row` and returns true. Ignored, returning false, when `row` is
+    /// not the open row or the subagent is not one of its running subagents.
+    @discardableResult
+    public mutating func select(_ choice: Shown, in row: AgentAttentionItem) -> Bool {
+        guard open == row.id else { return false }
+        if case let .subagent(id) = choice, !(row.running?.subagents.contains { $0.id == id } ?? false) { return false }
+        shown = choice
+        return true
+    }
+
+    /// The subagent whose lines the open row shows, read from `row`'s current subagents; nil shows the
+    /// session. A shown subagent that has finished reads nil at once, before `reconcile` runs.
+    public func shownSubagent(in row: AgentAttentionItem) -> SubagentActivity? {
+        guard open == row.id, case let .subagent(id) = shown else { return nil }
+        return row.running?.subagents.first { $0.id == id }
+    }
 
     /// Opens `row`, or closes it when it is already open, and returns true. Only a working row
     /// (`.running`) opens in place: a request opens as its own card, and a waiting turn and the other
@@ -31,23 +60,54 @@ public struct OpenRunningRow: Equatable, Sendable {
     public mutating func toggle(_ row: AgentAttentionItem) -> Bool {
         guard row.kind == .running else { return false }
         open = open == row.id ? nil : row.id
+        shown = .session
         return true
     }
 
-    public mutating func close() { open = nil }
+    /// Where keyboard focus goes inside an opened row once its subagents change (#397).
+    public enum Focus: Hashable, Sendable {
+        case well(Shown)
+        /// The row's Open control, once the switcher itself has left.
+        case open
+    }
+
+    /// Keyboard focus to move to when the running subagents become `running`, given the switcher well
+    /// that last held focus: a finished subagent's well hands focus to "Session" while any well
+    /// remains, or to Open when the last subagent finished and the switcher left, so focus stays in
+    /// the row. Nil leaves focus where it is.
+    public static func focusAfterSubagentsChange(lastFocused: Shown?, running: [String]) -> Focus? {
+        guard case let .subagent(id)? = lastFocused, !running.contains(id) else { return nil }
+        return running.isEmpty ? .open : .well(.session)
+    }
+
+    /// The switcher well to remember as last focused when its focus becomes `now`. A well that lost
+    /// focus because its subagent finished stays remembered (SwiftUI can clear focus before the new
+    /// subagent list arrives); one the user moved focus away from is forgotten.
+    public static func rememberedFocus(previous: Shown?, now: Shown?, running: [String]) -> Shown? {
+        if now == nil, case let .subagent(id)? = previous, !running.contains(id) { return previous }
+        return now
+    }
+
+    public mutating func close() {
+        open = nil
+        shown = .session
+    }
 
     /// Closes the open row and returns true; returns false with nothing open, so Escape goes on to
     /// collapse the panel.
     public mutating func escape() -> Bool {
         guard open != nil else { return false }
-        open = nil
+        close()
         return true
     }
 
     /// Closes the open row once it is no longer an on-screen working row: its turn left the queue or
-    /// stopped working, or a closed "N working" fold hides it. It never reopens by itself.
+    /// stopped working, or a closed "N working" fold hides it. It never reopens by itself. A shown
+    /// subagent that is no longer running hands the details back to the session.
     public mutating func reconcile(visible rows: [AgentAttentionItem]) {
-        if let open, !rows.contains(where: { $0.id == open && $0.kind == .running }) { self.open = nil }
+        guard let open else { return }
+        guard let row = rows.first(where: { $0.id == open && $0.kind == .running }) else { return close() }
+        if case .subagent = shown, shownSubagent(in: row) == nil { shown = .session }
     }
 }
 
@@ -120,7 +180,7 @@ public struct RunningRowDetails: Equatable, Sendable {
     /// The "now" line for one tool call, or nil without a tool name. A subagent's latest action
     /// (`SubagentActivity`) uses the same line.
     public static func now(toolName: String?, toolInput: [String: String]) -> Now? {
-        guard let name = toolName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        guard let name = nonBlank(toolName) else { return nil }
         let action = toolName.flatMap { ToolAction(name: $0, input: toolInput) }
         if let action, action.isCommand {
             let line = shortened(action.fullText)
@@ -134,7 +194,7 @@ public struct RunningRowDetails: Equatable, Sendable {
     }
 
     private static func prompt(_ running: AgentRunning) -> You? {
-        guard let prompt = running.prompt?.trimmingCharacters(in: .whitespacesAndNewlines), !prompt.isEmpty else { return nil }
+        guard let prompt = nonBlank(running.prompt) else { return nil }
         let line = shortened(prompt)
         let kept = running.promptShortened
         // Herdly's copy is only the prompt's start, so even an unshortened line is not all of it.
@@ -145,7 +205,7 @@ public struct RunningRowDetails: Equatable, Sendable {
     }
 
     /// The first line of trimmed text, cut to `lineLimit` characters, with "…" when anything was left out.
-    private static func shortened(_ value: String) -> (text: String, shortened: Bool) {
+    static func shortened(_ value: String) -> (text: String, shortened: Bool) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         let lines = trimmed.split(whereSeparator: \.isNewline)
         let first = lines.first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? trimmed
@@ -153,4 +213,43 @@ public struct RunningRowDetails: Equatable, Sendable {
         let shortened = lines.count > 1 || first.count > lineLimit
         return (shortened ? cut + "…" : cut, shortened)
     }
+}
+
+/// What an opened running row shows for one of its running subagents (#397, Paper H2 "E · Switcher"),
+/// in the same label/value lines as the session's: "now", its latest action ("Unknown" in dim while
+/// none is known); "asked", the task it was given, when the source reports one; "role", when the source
+/// names one; and "for", how long it has run, in the rows' age format. Presentation only.
+public struct SubagentDetails: Equatable, Sendable {
+    public struct Asked: Equatable, Sendable {
+        public let text: String
+        /// The whole task when `text` shows less of it.
+        public let full: String?
+        /// "Show full task" while `full` is set.
+        public let disclosureTitle: String?
+    }
+
+    public let now: RunningRowDetails.Now
+    public let asked: Asked?
+    public let role: String?
+    /// Time since the subagent started: "<1m", "4m", "2h", "3d".
+    public let age: String
+
+    public static func make(_ subagent: SubagentActivity, now: Double) -> SubagentDetails {
+        let action = subagent.latestAction
+            ?? RunningRowDetails.Now(text: "Unknown", full: nil, disclosureTitle: nil, isUnknown: true)
+        let asked = nonBlank(subagent.asked).map { task -> Asked in
+            let line = RunningRowDetails.shortened(task)
+            return Asked(text: line.text, full: line.shortened ? task : nil,
+                         disclosureTitle: line.shortened ? "Show full task" : nil)
+        }
+        return SubagentDetails(now: action, asked: asked, role: nonBlank(subagent.role),
+                               age: QueueRowPresentation.age(since: subagent.startedAt, now: now))
+    }
+}
+
+/// `text` trimmed of surrounding whitespace, or nil when nothing is left: a detail line with nothing
+/// to show is left out.
+private func nonBlank(_ text: String?) -> String? {
+    guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+    return trimmed
 }
