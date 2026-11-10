@@ -1360,6 +1360,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                   let installationID = root.plan?.installationID, !installationID.isEmpty else { return nil }
             return (root.url.standardizedFileURL.path, URL(fileURLWithPath: root.eventsPath, isDirectory: true), installationID)
         }
+        // The directories this scan lists: macOS names what changes in them, so a new record does not
+        // cost a full read of a directory holding thousands (`HookDirectoryWatch`).
+        HookDirectoryWatch.shared.watch((eventsPath.isEmpty ? [] : [events]) + claudeRoots.map(\.events))
         let claudeInventoryRoots = claude.roots.compactMap { root -> (root: URL, capabilities: ClaudeCapabilities)? in
             guard root.capabilities.supported else { return nil }
             return (root.url.standardizedFileURL, root.capabilities)
