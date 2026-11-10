@@ -224,11 +224,17 @@ public enum SessionDiscovery {
               let meta = event["payload"] as? [String: Any],
               let session = (meta["id"] as? String).flatMap(UUID.init(uuidString:)),
               let source = (meta["source"] as? String).flatMap({ sources[$0] }) else { return nil }
-        var current: DiscoveredTurn?
+        let events = lines.compactMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        return openTurn(in: events).map { DiscoveredTurn(session: session, source: source, turn: $0.turn, startedAt: $0.startedAt) }
+    }
+
+    /// The open turn among decoded rollout lines, by the rule `open(meta:lines:)` documents; shared
+    /// with `CodexSubagentReader`, so a subagent counts as running exactly when a session would.
+    static func openTurn(in events: [[String: Any]]) -> (turn: UUID, startedAt: String)? {
+        var current: (turn: UUID, startedAt: String)?
         var ended: Set<UUID> = []
-        for line in lines {
-            guard let event = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-                  let payload = event["payload"] as? [String: Any],
+        for event in events {
+            guard let payload = event["payload"] as? [String: Any],
                   let turn = turnID(in: payload) else { continue }
             let kind = event["type"] as? String == "event_msg" ? payload["type"] as? String : nil
             if kind == "task_complete" || kind == "turn_aborted" {
@@ -239,7 +245,7 @@ public enum SessionDiscovery {
             // A line written after an end seen here (a trailing token count) does not reopen the turn.
             guard let at = event["timestamp"] as? String, !ended.contains(turn) else { continue }
             if current?.turn != turn || kind == "task_started" {
-                current = DiscoveredTurn(session: session, source: source, turn: turn, startedAt: at)
+                current = (turn, at)
             }
         }
         return current

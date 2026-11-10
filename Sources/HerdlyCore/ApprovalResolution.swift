@@ -176,7 +176,7 @@ public enum ApprovalResolutionReader {
         return texts.isEmpty ? nil : texts.joined()
     }
 
-    private static func jsonObject(_ text: String) -> [String: Any]? {
+    static func jsonObject(_ text: String) -> [String: Any]? {
         try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
     }
 
@@ -186,7 +186,7 @@ public enum ApprovalResolutionReader {
         return nil
     }
 
-    private static func command(inArguments arguments: [String: Any]) -> String? {
+    static func command(inArguments arguments: [String: Any]) -> String? {
         if let text = arguments["cmd"] as? String { return text }
         if let text = arguments["command"] as? String { return text }
         if let parts = arguments["command"] as? [String] { return parts.joined(separator: " ") }
@@ -194,7 +194,7 @@ public enum ApprovalResolutionReader {
     }
 
     /// Every `cmd:"..."` or `"cmd":"..."` inside the exec tool's JavaScript; each value is a JSON string literal.
-    private static func commands(inJavaScript input: String) -> [String] {
+    static func commands(inJavaScript input: String) -> [String] {
         guard let regex = try? NSRegularExpression(pattern: #"(?:^|[\s{,])"?cmd"?\s*:\s*("(?:[^"\\]|\\.)*")"#) else { return [] }
         return regex.matches(in: input, range: NSRange(input.startIndex..., in: input)).compactMap { match in
             guard let range = Range(match.range(at: 1), in: input) else { return nil }
