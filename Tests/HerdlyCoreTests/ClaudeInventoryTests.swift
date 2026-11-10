@@ -1192,3 +1192,58 @@ func openClaudeQuestionStaysWhileTheSessionIsNotIdle(status: String) {
     #expect(decodeRegistry([entry(20, try registryRow(pid: 20, sessionID: interactiveID))])
         .sessions.first?.statusUpdatedAt == nil)
 }
+
+@Test func aScheduledRegistryReadSkipsUnchangedEntriesAndMatchesAFullRead() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("registry-memo-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fm = FileManager.default
+    let sessions = root.appendingPathComponent("sessions")
+    try fm.createDirectory(at: sessions, withIntermediateDirectories: true)
+    let file = sessions.appendingPathComponent("20.json")
+    try registryRow(pid: 20, sessionID: interactiveID, status: "busy").write(to: file)
+    var running: Set<Int32> = [20, 21]
+    let memo = StampedFileMemo<Data>()
+    func scheduled() -> ClaudeInventoryScan? {
+        ClaudeSessionRegistry.read(root: root, observedAt: 1, isRunning: { running.contains($0.pid) }, retryDelay: 0, memo: memo)
+    }
+    func full() -> ClaudeInventoryScan? {
+        ClaudeSessionRegistry.read(root: root, observedAt: 1, isRunning: { running.contains($0.pid) }, retryDelay: 0)
+    }
+    let first = try #require(scheduled())
+    #expect(first.available && first == full())
+
+    // Unreadable but unchanged: a full read fails, the scheduled one does not open the file at all.
+    try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.path)
+    #expect(full()?.available == false)
+    #expect(scheduled() == first)
+    try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+
+    // Claude rewrites the entry in place: the new status is read on the next scan.
+    let handle = try FileHandle(forWritingTo: file)
+    try handle.truncate(atOffset: 0)
+    try handle.write(contentsOf: try registryRow(pid: 20, sessionID: interactiveID, status: "idle"))
+    try handle.close()
+    let rewritten = try #require(scheduled())
+    #expect(rewritten != first)
+    #expect(rewritten == full())
+
+    // A torn entry from a live process is never kept: still unavailable, and read again once whole.
+    let torn = sessions.appendingPathComponent("21.json")
+    try Data().write(to: torn)
+    #expect(scheduled()?.available == false)
+    try registryRow(pid: 21, sessionID: backgroundID).write(to: torn)
+    #expect(scheduled() == full())
+    #expect(scheduled()?.available == true)
+
+    // Whether the process runs is asked every time, kept entry or not.
+    running = [21]
+    #expect(scheduled() == full())
+    #expect(scheduled()?.sessions.contains { $0.sessionID == interactiveID } == false)
+
+    // A kept entry replaced by a link, or removed, is not served from the memo.
+    running = [20, 21]
+    try fm.removeItem(at: torn)
+    #expect(scheduled() == full())
+    try fm.createSymbolicLink(at: torn, withDestinationURL: file)
+    #expect(scheduled()?.available == false)
+}

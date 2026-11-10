@@ -150,8 +150,14 @@ enum ClaudeSetupDetection {
                                                                deliveredSessionIDs: deliveredSessionIDs))
     }
 
+    /// Registry entries kept between scheduled scans (`ClaudeSessionRegistry.read`'s `memo`).
+    private static let scheduledRegistryEntries = StampedFileMemo<Data>()
+
+    /// `scheduled` is true only for the two-second scans, which may skip registry entries whose files
+    /// are unchanged. Every read that chooses a target or answers a click leaves it false and reads all.
     static func activeSessionInventory(root: URL, capabilities: ClaudeCapabilities,
-                                       observedAt: TimeInterval = Date().timeIntervalSince1970) -> ClaudeInventoryScan {
+                                       observedAt: TimeInterval = Date().timeIntervalSince1970,
+                                       scheduled: Bool = false) -> ClaudeInventoryScan {
         guard capabilities.supported else {
             return .unavailable(sourceScope: root.path, observedAt: observedAt,
                                 reason: "Unavailable: Claude Code is below Herdly's tested inventory baseline.")
@@ -159,7 +165,8 @@ enum ClaudeSetupDetection {
         // Claude Code 2.1.292 removed `claude agents --json`; its session registry is read first.
         // The CLI remains the fallback for a version without a usable registry. When both fail, the
         // registry's own failure (and any ambiguous session IDs) is reported, not the CLI's.
-        let registry = ClaudeSessionRegistry.read(root: root, observedAt: observedAt)
+        let registry = ClaudeSessionRegistry.read(root: root, observedAt: observedAt,
+                                                  memo: scheduled ? scheduledRegistryEntries : nil)
         if let registry, registry.available { return registry }
         guard let executable = executable(named: "claude") else {
             return registry ?? .unavailable(sourceScope: root.path, observedAt: observedAt,

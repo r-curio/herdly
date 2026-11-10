@@ -75,10 +75,13 @@ public enum CodexUsageReader {
     /// and has no `token_count` yet falls through to the one before it.
     public static func latest(root: URL) -> CodexUsageReading? {
         for entry in newestRollouts(root: root) {
-            if let bytes = tail(entry.url), let reading = parse(bytes) { return reading }
+            // A rollout only grows, which changes its stamp: an unchanged one is not opened again.
+            if let reading = memo.value(of: entry.url, read: { tail($0).flatMap(parse) }) { return reading }
         }
         return nil
     }
+
+    private static let memo = StampedFileMemo<CodexUsageReading?>()
 
     /// Rollouts from the newest day directories, newest modification first, at most `limit`.
     static func newestRollouts(root: URL, limit: Int = maximumFiles) -> [(url: URL, modified: Date)] {

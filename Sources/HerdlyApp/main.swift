@@ -1400,7 +1400,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                  processList.map { CodexCLIProcesses.isRunning(processList: CodexCLIProcesses.arguments(processList: $0)) } ?? false,
                  claudeInventoryRoots.map { root in
                      ClaudeSetupDetection.activeSessionInventory(root: root.root, capabilities: root.capabilities,
-                                                                 observedAt: observationNow)
+                                                                 observedAt: observationNow, scheduled: true)
                  },
                  claudeScans.map(\.scan),
                  claudeRoots.map { root in
@@ -2747,7 +2747,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 let shared = GhosttyNavigation.scheduledSnapshot(notBefore: scanStart)
                 let inventories = configuredRoots.map { root in
                     ClaudeSetupDetection.activeSessionInventory(root: root.root, capabilities: root.capabilities,
-                                                                observedAt: observedAt)
+                                                                observedAt: observedAt, scheduled: true)
                 }
                 return (shared.snapshot, inventories, shared.takenAt)
             }.value
