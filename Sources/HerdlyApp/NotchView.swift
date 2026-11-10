@@ -3136,6 +3136,9 @@ struct Notch: View {
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: showsTestRow)
                     // Keyed to which row is open only: switching whose lines it shows (#397) redraws at once.
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: model.openRunningRow.open)
+                    // #397: a remembered switcher well belongs to the row it was in; opening another
+                    // row or closing this one forgets it, so it never moves focus in a different row.
+                    .onChange(of: model.openRunningRow.open) { lastSwitcherFocus = nil }
                     .padding(.bottom, 14)
                     // Room inside the scroll view's clip for the selection ring and focus rings at
                     // the row edges; the outer negative padding keeps the column where it was.
