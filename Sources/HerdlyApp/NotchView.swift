@@ -1564,9 +1564,6 @@ struct Notch: View {
         }
     }
 
-    /// The Codex card's bottom row (#382): Open alone on the left; Dismiss, then Next or Send (or a step
-    /// on), on the right. The Codex app without the daemon offers only "Open in Codex" (left,
-    /// emphasized) and Dismiss.
     /// What a Codex card's bottom row offers besides Dismiss.
     private enum CodexFooterMode {
         /// The Codex app without the daemon: "Open in Codex" only.
@@ -1577,6 +1574,9 @@ struct Notch: View {
         case answer
     }
 
+    /// The Codex card's bottom row (#382): Open alone on the left; Dismiss, then Next or Send (or a step
+    /// on), on the right. The Codex app without the daemon offers only "Open in Codex" (left,
+    /// emphasized) and Dismiss.
     private func codexQuestionFooter(_ card: CodexCard?, item: AgentAttentionItem, subject: String, codexOpen: Bool) -> some View {
         let mode: CodexFooterMode = card?.route == .desktopReadOnly ? .desktopReadOnly
             : (item.session.surface == .cli && !model.cliTerminalHostOn ? .setUpTerminal : .answer)
