@@ -49,7 +49,15 @@ records a failed outcome; `Stop` alone never records a terminal outcome.
 **Subagents (#395).** The reader lists a session's running subagents on its current prompt's running
 row (`AgentRunning.subagents`, `SubagentActivity`), oldest first and flat however deeply they nest. A
 subagent starts with its `SubagentStart` (start time and `agent_type`) and leaves the list at once on its
-own `SubagentStop`, any `Stop` or `StopFailure` in its session, or `SessionEnd`. Its name is its type;
+own `SubagentStop` or on `SessionEnd`; a session that has ended lists none. A turn's `Stop` or
+`StopFailure` does not remove it: a background subagent (`run_in_background`) keeps running after its
+parent's turn ends, and its tool events keep the parent turn's prompt id until its own `SubagentStop`
+(recorded 2026-11-10, #404). A subagent whose parent turn has ended (a `Stop` or `StopFailure` in its
+session, or a submit of another prompt, after its start; a repeated submit of its own prompt is not
+one; a start with no valid prompt id is bounded only by its parent's `Stop` or `StopFailure`, not by a
+newer prompt) leaves the list 30 minutes after its `SubagentStart` (`maximumSubagentAge`, owner decision 2026-11-10), so a
+lost stop cannot leave it listed forever. One inside a live turn has no age bound, since a
+foreground subagent may run longer. Retention keeps a start by the same rule. Its name is its type;
 two running subagents of one type are numbered by start order ("Explore", "Explore 2"), and a missing,
 empty, or malformed type reads "Subagent". Its latest action is its newest uncompleted tool call, kept
 until that call's `PostToolUse`, `PostToolUseFailure`, or `PostToolBatch` and bound by the same 30-second
@@ -62,6 +70,46 @@ malformed or oversized is still kept off the session's action but names no subag
 saw (before launch, or out of the record window) lists nothing. Records without `agent_id` behave as
 before. The list is live only: it is not written to the snapshot, and it never changes queue order,
 counts, acknowledgment, notifications, or deadlines.
+
+The list shows only in a working row, so a session holds that row while it lists running subagents
+(owner decision 2026-11-10, #404, option A). After the parent's `Stop`, an idle registry reading neither
+confirms the provisional Stop as Finished nor ends the row after `idleRunningGrace` while
+`AgentRunning.subagents` is non-empty. Once the list is empty (each subagent's own stop, `SessionEnd`, or
+`maximumSubagentAge`), the next idle reading confirms the Stop and the result card arrives. A subagent's tool
+event (`PreToolUse`, `PostToolUse`, `PostToolUseFailure`, an all-subagent `PostToolBatch`) in a turn that
+has already closed does not reopen it. The turn keeps its pending Stop, result message and outcome, its
+update time is unchanged (so a result card is never withdrawn by the subagent's activity), and an older
+turn never becomes a second working row after a new prompt. The call is still recorded for permission
+matching, and a closed turn, whether older or ended by `StopFailure`, still emits that subagent's
+approval (only one whose matched call ran inside a subagent; the session's own late call reopens its turn
+as before). Whether a subagent's call has ended is decided by `ClaudeSubagentLifetimes`, which the
+reader and retention share: a subagent's run starts at its `SubagentStart`, ends at its first
+`SubagentStop` at or after that start or at its session's end (a later start of the same agent id is a
+new run), and, once its parent turn has ended, also ends at `maximumSubagentAge`. The switcher list is
+the runs this rule finds open. A call belongs to
+the run whose span holds its capture time. A request from a call a run holds carries its `agent_id` as
+`AgentApproval.subagentID`. Its parent turn's own end (its `Stop`, `StopFailure`, or a newer prompt) ends
+only the session's own calls and request, never that one, and the queue does not let the turn's result
+resolve it, so the `StopFailure` repeated on each scan cannot clear it; its deadline runs from the
+request's own arrival. Its resolution evidence is its call's completion, or the end of its run: that
+subagent's own `SubagentStop` (a native "No" fires no hook, and a killed subagent sends no completion),
+the session's end, or the age bound, which also end its other uncompleted calls. Another subagent's stop
+and later prompts in the session leave it, and the session's own requests are untouched. A request whose `agent_id` is missing or malformed, or whose call no run
+holds (its subagent's start never seen: pruned, before launch, or outside the record window; or a call
+after its subagent's stop), has no `subagentID`: that subagent is treated as not running, and the
+request is not shielded. It clears by the same evidence as
+any request: its call's completion, a registry status change after its arrival, `SessionEnd`, or a turn
+result whenever it is applied, whatever the request's arrival (a `StopFailure` is re-applied on each scan;
+a confirmed `Stop` is applied once, so a request arriving after it is left to the other evidence). After a `StopFailure`, such a request is not
+emitted at all and stays in Claude's own prompt: Herdly cannot tie it to a subagent it knows is running,
+and Claude still asks (deliberate, review 2026-11-10). Retention keeps this evidence with the request: a
+subagent's call stays exactly while its run is open, and the subagent's start and stop stay on disk
+while one of its calls does (event-retention.md), so a relaunch cannot bring back a resolved request.
+`StopFailure` is never held: its Failed card shows at once while subagents run. When a background subagent finishes, Claude starts a short turn
+of its own right after the `SubagentStop`. That turn's result is the one carded; the held turn adds no
+second card. A session that ends during the hold has no working row and no card, as when a `Stop` is
+followed by `SessionEnd` before any idle reading. Codex is unaffected: its rows have no provisional Stop or
+idle registry reading.
 
 Each `UserPromptSubmit` also yields reply evidence for its exact session and root, timed at the
 prompt's earliest capture. The queue acknowledges that session's outcomes from other turns that
@@ -137,7 +185,15 @@ covers separate interactive/background lifecycle fields, duplicate and unavailab
 isolation, weaker inventory evidence, provisional `Stop` confirmation, and an acknowledged turn
 staying cleared across rescans unless newer activity reopens it. `ClaudeSubagentActivityTests`
 covers a subagent's start, latest action and stop, numbering by start order, nested subagents, the
-session's own action staying unchanged, approval matching inside a subagent, turn and session end,
+session's own action staying unchanged, approval matching inside a subagent, a background subagent
+outliving its parent's `Stop` until its own stop, session end, the 30-minute bound on both sides (also
+through the record cache), no bound inside a live turn, the held working row through an idle reading
+and past the idle grace with the card after the subagent's stop, one card for the finishing turn, no
+revived older turn, approvals of a closed turn's subagent, release at the bound, `SessionEnd` during the
+hold, sessions without subagents unchanged, `StopFailure` not held, a subagent's request after its
+parent's failure staying queued across rescans, that request resolved by its own subagent's stop (handed
+back, with no completion) or drop at the bound but not by another subagent's stop or later prompts, the session's own late request unchanged, and a session
+the registry no longer lists offered for removal while held,
 malformed agent ids, and records without one. The helper self-test also
 checks bounded Claude metadata, `agent_id`/`agent_type`, and tool input. `ClaudeQuestionTests` covers unchanged `updatedInput`,
 single-select, multi-select, typed answers, exact identity rejection, one-shot writes, and the
