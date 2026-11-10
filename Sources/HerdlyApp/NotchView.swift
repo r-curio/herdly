@@ -1994,6 +1994,25 @@ struct Notch: View {
         }
     }
 
+    /// The spotlight question card's stepper (#384, Paper "G · Claude: answer several questions",
+    /// panel 4): a card that opened by itself has no "‹ Queue" bar, so a request with two or more
+    /// questions gets a slim row above the title with the same right-aligned stepper.
+    private var spotlightStepperQuestion: AgentQuestion? {
+        guard case let .agentSpotlight(id) = model.presentationMode,
+              let question = model.orderedAgentAttentionItems.first(where: { $0.id == id })?.question,
+              QuestionStepperPlacement.resolve(mode: model.presentationMode, card: id,
+                                               questionCount: questionPrompts(question).count) == .ownRow
+        else { return nil }
+        return question
+    }
+
+    private func spotlightStepperRow(_ question: AgentQuestion) -> some View {
+        HStack(spacing: 6) {
+            Spacer(minLength: 0)
+            questionStepper(question)
+        }
+    }
+
     /// "‹ question N of M ›" (D19): steps the view through this request's questions only; the arrows
     /// are dim and cannot be pressed at either end. Viewing changes no answer.
     @ViewBuilder
@@ -2984,6 +3003,7 @@ struct Notch: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         if model.presentationMode.clickedCard != nil { clickedCardBar }
+                        if let question = spotlightStepperQuestion { spotlightStepperRow(question) }
                         // An empty stack would still take the column's spacing, so each part is drawn only with rows.
                         if !sections.attention.isEmpty { groupRows(sections.attention) }
                         if sections.foldsWorking {
