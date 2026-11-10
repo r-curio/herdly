@@ -835,16 +835,20 @@ public enum CodexAttentionAdapter {
                       prompts: question.prompts)
     }
 
-    public static func running(from running: AttentionRunning) -> AgentRunning {
+    /// `subagents` are the session's running subagents (`CodexSubagentReader`), live only.
+    public static func running(from running: AttentionRunning, subagents: [SubagentActivity] = []) -> AgentRunning {
         AgentRunning(session: session(running.session, surface: running.source == .cli ? .cli : .desktop),
-                     turn: running.turn.uuidString, arrivedAt: running.arrivedAt)
+                     turn: running.turn.uuidString, arrivedAt: running.arrivedAt, subagents: subagents)
     }
 
+    /// `subagents` maps a root session to its running subagents (`CodexSubagentReader.activity`); each
+    /// running row takes its session's current list, so one no longer listed leaves the row at once.
     public static func observations(requests: [AttentionRequest] = [], questions: [AttentionQuestion] = [],
-                                    completions: [AttentionCompletion] = [], running active: [AttentionRunning] = []) -> [AgentObservation] {
+                                    completions: [AttentionCompletion] = [], running active: [AttentionRunning] = [],
+                                    subagents: [UUID: [SubagentActivity]] = [:]) -> [AgentObservation] {
         requests.map { .approval(approval(from: $0)) }
             + questions.map { .question(question(from: $0)) }
             + completions.map { .outcome(outcome(from: $0)) }
-            + active.map { .running(running(from: $0)) }
+            + active.map { .running(running(from: $0, subagents: subagents[$0.session] ?? [])) }
     }
 }
