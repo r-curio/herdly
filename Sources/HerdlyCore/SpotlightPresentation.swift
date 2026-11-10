@@ -502,3 +502,22 @@ public struct SpotlightDetails: Equatable, Sendable {
         return Self(request: request, directory: directory, originalPrompt: context?.prompt, response: resolvedResponse)
     }
 }
+
+/// Where a question card's "‹ question N of M ›" stepper sits (D19; #384, Paper "G · Claude: answer
+/// several questions", panel 4). Only a request with two or more questions has one. The clicked card
+/// keeps it in its "‹ Queue" bar; the spotlight card, which has no bar, gives it a slim row of its own
+/// above the title. Approvals, the queue and the collapsed strip have none.
+public enum QuestionStepperPlacement: Equatable, Sendable {
+    case none
+    case queueBar
+    case ownRow
+
+    public static func resolve(mode: NotchPresentationMode, card: AgentAttentionID, questionCount: Int) -> Self {
+        guard case .question = card, questionCount > 1 else { return .none }
+        switch mode {
+        case let .clickedCard(id) where id == card: return .queueBar
+        case let .agentSpotlight(id) where id == card: return .ownRow
+        default: return .none
+        }
+    }
+}
