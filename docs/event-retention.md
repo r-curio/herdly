@@ -11,12 +11,13 @@ The app runs `HookEventRetention.prune` on the Codex events directory and on eve
 | Record | Kept for |
 | --- | --- |
 | Tool records: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch` | 1 hour. About 95% of the volume; readers use them only to label the current tool. |
-| Claude subagent records: `SubagentStart`, `SubagentStop` | 1 hour, even in a session a reminder protects. No reader uses them by name. One busy Claude root wrote about 8,500 a day, 75% of its records, which shrank the 4,096-record window to about 14 hours. |
+| Claude subagent records: `SubagentStart`, `SubagentStop` | 1 hour, even in a session a reminder protects. They only list a session's running subagents (#395). One busy Claude root wrote about 8,500 a day, 75% of its records, which shrank the 4,096-record window to about 14 hours. |
 | Every other Herdly record (session start/end, prompt, stop, permission request, …) | 7 days |
 
 Retention never removes:
 
 - **Open tool calls.** A `PreToolUse` with no completion for its tool id, no later `Stop`/`StopFailure` for its turn, and no later `SessionEnd` is kept for the full 7 days. A Claude question waits in such a record. A completion is kept while the call it completes is kept.
+- **Running subagents' starts.** A Claude `SubagentStart` with an `agent_id` the reader accepts (bounded to 256 bytes, no line breaks or terminal controls) that has no `SubagentStop` for that id, no later `Stop`/`StopFailure` in its session, and no later `SessionEnd` is kept for the full 7 days, so a subagent running past an hour keeps its start time and name (#395). Its open tool call is kept by the rule above.
 - **Records a handoff reminder depends on.** Approval request files (`.approval`), receipts and decisions are never deleted. A session with a request the reminder reader would still show keeps its non-tool records past 7 days, so the session end that resolves its reminder survives a restart. That covers `pending` or `no_decision` requests in either the current or the legacy reminder format, but not requests the user already decided.
 - **Anything it cannot identify as Herdly's own record.** Malformed or foreign JSON, oversized files, symlinks, directories (including `.herdly-claude-questions`), and Claude approval rendezvous files stay. Abandoned `.herdly-*` temporary writes older than 7 days are removed.
 
@@ -42,6 +43,7 @@ Local gate on this branch: `swift test`, `sh scripts/build-app.sh`, `sh scripts/
 
 - per-kind expiry
 - open tool calls and Claude questions kept, interrupted and batched calls pruned
+- a running subagent's start kept past the hour, until its own stop, a later Stop in its session, or the session's end, on the same ending events as the reader; a start with an id the reader ignores is not kept
 - lifecycle records of sessions with unresolved requests kept, including the legacy reminder format; decided requests protect nothing
 - malformed, foreign, symlinked and non-record entries left alone, and stale temporary writes removed
 - symlinked or missing directories refused

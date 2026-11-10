@@ -11,6 +11,10 @@ below), kept like every record until the record is pruned. A longer prompt keeps
 mark instead of being dropped, so its working row still shows it; the row's disclosure then says the
 text is shortened and the full prompt is in Claude. Helpers before 2026-10-08 dropped any prompt over
 240 bytes, so a working row started under one has no prompt text.
+Every record also keeps Claude's `agent_id` and `agent_type` when the hook supplies them
+(`SubagentStart`, `SubagentStop`, and tool events fired inside a subagent; #395), each bounded like the
+other identifiers (256 bytes, no line breaks or terminal controls); a longer or malformed value is
+dropped from the record alone. Installed hook configuration is unchanged.
 A `Stop` record also keeps Claude's `last_assistant_message` for the result card (#341): line breaks
 and tabs kept, every other control character removed, trimmed, and past 20,000 characters or 32 KiB
 cut to its start with a `last_assistant_message_shortened` mark. The reader re-applies the same bound,
@@ -41,6 +45,23 @@ the exact call, or while the bounded current tool state is still fresh. A mismat
 event cannot clear a newer call. If Claude denies or interrupts a call without a post event, a later
 `Stop` or `SessionEnd` clears the tool detail without inventing a finished outcome. `StopFailure`
 records a failed outcome; `Stop` alone never records a terminal outcome.
+
+**Subagents (#395).** The reader lists a session's running subagents on its current prompt's running
+row (`AgentRunning.subagents`, `SubagentActivity`), oldest first and flat however deeply they nest. A
+subagent starts with its `SubagentStart` (start time and `agent_type`) and leaves the list at once on its
+own `SubagentStop`, any `Stop` or `StopFailure` in its session, or `SessionEnd`. Its name is its type;
+two running subagents of one type are numbered by start order ("Explore", "Explore 2"), and a missing,
+empty, or malformed type reads "Subagent". Its latest action is its newest uncompleted tool call, kept
+until that call's `PostToolUse`, `PostToolUseFailure`, or `PostToolBatch` and bound by the same 30-second
+freshness as the session's own action, shaped like the opened row's "now" line. No hook carries the
+subagent's task, so it has no "asked" text. Attribution: a tool event carrying an `agent_id` belongs to
+that subagent and never becomes the session's own current action; it still counts as the
+turn's activity and stays a candidate for permission matching. A record whose `agent_id` is present but
+malformed or oversized is still kept off the session's action but names no subagent, and a malformed
+`SubagentStart` or `SubagentStop` changes nothing. A tool event for a subagent whose start Herdly never
+saw (before launch, or out of the record window) lists nothing. Records without `agent_id` behave as
+before. The list is live only: it is not written to the snapshot, and it never changes queue order,
+counts, acknowledgment, notifications, or deadlines.
 
 Each `UserPromptSubmit` also yields reply evidence for its exact session and root, timed at the
 prompt's earliest capture. The queue acknowledges that session's outcomes from other turns that
@@ -114,8 +135,11 @@ out-of-order empty snapshot cannot erase newer generic lifecycle state.
 session-end uncertainty, installation/root isolation, and late outcomes. `ClaudeInventoryTests`
 covers separate interactive/background lifecycle fields, duplicate and unavailable polls, root
 isolation, weaker inventory evidence, provisional `Stop` confirmation, and an acknowledged turn
-staying cleared across rescans unless newer activity reopens it. The helper self-test also
-checks bounded Claude metadata and tool input. `ClaudeQuestionTests` covers unchanged `updatedInput`,
+staying cleared across rescans unless newer activity reopens it. `ClaudeSubagentActivityTests`
+covers a subagent's start, latest action and stop, numbering by start order, nested subagents, the
+session's own action staying unchanged, approval matching inside a subagent, turn and session end,
+malformed agent ids, and records without one. The helper self-test also
+checks bounded Claude metadata, `agent_id`/`agent_type`, and tool input. `ClaudeQuestionTests` covers unchanged `updatedInput`,
 single-select, multi-select, typed answers, exact identity rejection, one-shot writes, and the
 receipt/answer rendezvous. `ClaudeApprovalTests` covers the one-winner deadline,
 atomic receipt/decision/delivery records, one-winner concurrency, helper crash handback, and Claude's exact allow/deny output shape. The app/helper build,

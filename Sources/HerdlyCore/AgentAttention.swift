@@ -159,6 +159,13 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     public let toolName: String?
     public let toolInput: [String: String]
     public let status: AgentRunningStatus
+    /// The session's running subagents, oldest first (#395). Live observation only: left out of
+    /// `Codable`, so a restored row starts with none until the next scan.
+    public private(set) var subagents: [SubagentActivity] = []
+
+    private enum CodingKeys: String, CodingKey {
+        case identity, arrivedAt, updatedAt, prompt, promptShortened, toolName, toolInput, status
+    }
 
     public var id: AgentTurnIdentity { identity }
     public var action: ToolAction? {
@@ -171,8 +178,10 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
 
     public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double, updatedAt: Double? = nil,
                 prompt: String? = nil, promptShortened: Bool = false, toolName: String? = nil,
-                toolInput: [String: String] = [:], status: AgentRunningStatus = .working) {
+                toolInput: [String: String] = [:], status: AgentRunningStatus = .working,
+                subagents: [SubagentActivity] = []) {
         self.identity = AgentTurnIdentity(session: session, turn: turn)
+        self.subagents = subagents.sorted { SubagentActivity.startsBefore(($0.startedAt, $0.id), ($1.startedAt, $1.id)) }
         self.arrivedAt = arrivedAt
         self.updatedAt = updatedAt ?? arrivedAt
         self.prompt = prompt

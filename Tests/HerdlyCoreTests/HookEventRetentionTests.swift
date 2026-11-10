@@ -91,6 +91,83 @@ private let day: TimeInterval = 86400
     #expect(!lab.exists(weekOldStop))
 }
 
+@Test func retentionKeepsARunningSubagentsStartUntilItOrItsSessionsTurnEnds() throws {
+    let lab = try EventLab()
+    defer { lab.remove() }
+    let claude = "herdly-claude-hook-v1"
+    let running = UUID().uuidString, stopped = UUID().uuidString, ended = UUID().uuidString, closed = UUID().uuidString
+    // A subagent running past the tool window keeps its start, so the row keeps its start time and name.
+    let longRunning = try lab.record("SubagentStart", session: running, age: 3 * hour, source: claude,
+                                     fields: ["prompt_id": "p1", "agent_id": "a1", "agent_type": "Explore"])
+    // Finished by its own stop, by a later Stop in the session, or by the session's end: prunable.
+    let finished = try lab.record("SubagentStart", session: stopped, age: 3 * hour, source: claude,
+                                  fields: ["prompt_id": "p1", "agent_id": "a2"])
+    let finishedStop = try lab.record("SubagentStop", session: stopped, age: 2 * hour, source: claude,
+                                      fields: ["prompt_id": "p1", "agent_id": "a2"])
+    let otherAgent = try lab.record("SubagentStart", session: stopped, age: 3 * hour, source: claude,
+                                    fields: ["prompt_id": "p1", "agent_id": "a3"])
+    let byTurn = try lab.record("SubagentStart", session: closed, age: 3 * hour, source: claude,
+                                fields: ["prompt_id": "p1", "agent_id": "a4"])
+    try lab.record("Stop", session: closed, age: 2 * hour, source: claude, fields: ["prompt_id": "p0"])
+    let bySession = try lab.record("SubagentStart", session: ended, age: 3 * hour, source: claude,
+                                   fields: ["prompt_id": "p1", "agent_id": "a5"])
+    try lab.record("SessionEnd", session: ended, age: 2 * hour, source: claude)
+    // An open start still expires with everything else after a week.
+    let weekOld = try lab.record("SubagentStart", session: running, age: 8 * day, source: claude,
+                                 fields: ["prompt_id": "p0", "agent_id": "a6"])
+
+    HookEventRetention.prune(lab.root, now: lab.now)
+
+    #expect(lab.exists(longRunning))
+    #expect(!lab.exists(finished) && !lab.exists(finishedStop))
+    // Another subagent's stop does not close this one.
+    #expect(lab.exists(otherAgent))
+    #expect(!lab.exists(byTurn) && !lab.exists(bySession))
+    #expect(!lab.exists(weekOld))
+}
+
+@Test func retentionExpiresASubagentStartWhoseAgentIDTheReaderWouldIgnore() throws {
+    let lab = try EventLab()
+    defer { lab.remove() }
+    let claude = "herdly-claude-hook-v1", session = UUID().uuidString
+    // The reader lists no subagent for these ids, so nothing is running to keep them for.
+    let ids: [Any] = ["", String(repeating: "a", count: ClaudeObservationReader.maximumIdentifier + 1), "bad\nid", 42]
+    let starts = try ids.map { id in
+        try lab.record("SubagentStart", session: session, age: 3 * hour, source: claude,
+                       fields: ["prompt_id": "p1", "agent_id": id])
+    }
+    let exact = try lab.record("SubagentStart", session: session, age: 3 * hour, source: claude,
+                               fields: ["prompt_id": "p1",
+                                        "agent_id": String(repeating: "a", count: ClaudeObservationReader.maximumIdentifier)])
+
+    HookEventRetention.prune(lab.root, now: lab.now)
+
+    #expect(starts.allSatisfy { !lab.exists($0) })
+    #expect(lab.exists(exact))
+}
+
+@Test func retentionAndReaderEndARunningSubagentOnTheSameEvents() throws {
+    // Each session-wide event that ends the reader's subagents also lets retention prune their start.
+    for event in ClaudeObservationReader.subagentsEndingEvents {
+        let lab = try EventLab()
+        defer { lab.remove() }
+        let claude = "herdly-claude-hook-v1", session = UUID().uuidString
+        let start = try lab.record("SubagentStart", session: session, age: 3 * hour, source: claude,
+                                   fields: ["prompt_id": "p1", "agent_id": "a1", "agent_type": "Explore"])
+        try lab.record("UserPromptSubmit", session: session, age: 3 * hour + 1, source: claude, fields: ["prompt_id": "p1"])
+        let before = ClaudeObservationReader.scan(events: lab.root, sourceScope: lab.root.path, installationID: "lab",
+                                                  now: lab.now.timeIntervalSince1970)
+        #expect(before.observations.contains { if case let .running(value) = $0 { return value.subagents.count == 1 }; return false })
+        try lab.record(event, session: session, age: 2 * hour, source: claude, fields: ["prompt_id": "p1"])
+        let after = ClaudeObservationReader.scan(events: lab.root, sourceScope: lab.root.path, installationID: "lab",
+                                                 now: lab.now.timeIntervalSince1970)
+        #expect(!after.observations.contains { if case let .running(value) = $0 { return !value.subagents.isEmpty }; return false },
+                "\(event) should end the reader's subagents")
+        HookEventRetention.prune(lab.root, now: lab.now)
+        #expect(!lab.exists(start), "\(event) should let retention prune the start")
+    }
+}
+
 @Test func retentionKeepsAnUnansweredToolCallUntilItsTurnOrSessionEnds() throws {
     let lab = try EventLab()
     defer { lab.remove() }
