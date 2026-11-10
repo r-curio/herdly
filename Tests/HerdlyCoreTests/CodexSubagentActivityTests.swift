@@ -353,3 +353,34 @@ private func runningChild(_ child: UUID, turn: UUID = UUID(), parent: UUID = roo
     #expect(listed.count == budget)
     #expect(!listed.map(\.id).contains(id(children[0])))
 }
+
+@Test func aSubagentRolloutIsReadAgainOnlyWhenItChanges() throws {
+    let root = try sessionsTree()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try writeRoot(in: root)
+    let child = UUID(), childTurn = UUID()
+    let url = try write(runningChild(child, turn: childTurn, nickname: "Raman"), session: child, time: "10-54-41", in: root)
+    func listed() -> [SubagentActivity] { CodexSubagentReader.activity(root: root, now: now.timeIntervalSince1970)[rootSession] ?? [] }
+    func append(_ line: String) throws {
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((line + "\n").utf8))
+        try handle.close()
+        try FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: url.path)
+    }
+    #expect(listed().map(\.id) == [id(child)])
+    #expect(listed().first?.latestAction == nil)
+
+    // Unchanged: not opened again, so it is still listed while unreadable.
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+    #expect(listed().map(\.id) == [id(child)])
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+
+    // A new call, then the turn's end, are each seen on the next read.
+    try append(execCall("rg -n beach notes.md", call: "c9", turn: childTurn, ordinal: 20))
+    #expect(listed().first?.latestAction != nil)
+    try append(ended(childTurn, ordinal: 21))
+    #expect(listed().isEmpty)
+    // The root's own rollout is not a subagent's, read or kept.
+    #expect(CodexSubagentReader.activity(root: root, now: now.timeIntervalSince1970).isEmpty)
+}

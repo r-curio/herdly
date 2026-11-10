@@ -18,7 +18,7 @@ public enum CodexSubagentReader {
     static let maximumTails = SessionDiscovery.maximumFiles
 
     /// What one subagent rollout's first line says about it.
-    struct Head: Equatable {
+    struct Head: Equatable, Sendable {
         let id: UUID
         let parent: UUID
         /// The tree's root thread (`session_id`), when the header names one.
@@ -47,12 +47,9 @@ public enum CodexSubagentReader {
         for entry in CodexUsageReader.newestRollouts(root: root, limit: ReminderReader.maximumChildProbes)
         where now - entry.modified.timeIntervalSince1970 <= SessionDiscovery.maximumAge {
             guard tails < maximumTails else { break }
-            guard let (head, tail) = SessionDiscovery.read(entry.url, header: { bytes in
-                bytes.firstIndex(of: UInt8(ascii: "\n")).flatMap { self.head(bytes[bytes.startIndex..<$0]) }
-            }) else { continue }
+            guard case let .subagent(head, usable, activity) = rollout(at: entry.url) else { continue }
             tails += 1
-            guard let lines = events(tail, head: head) else { continue }
-            let activity = activity(lines)
+            guard usable else { continue }
             if heads[head.id] != nil { duplicates.insert(head.id) }
             heads[head.id] = head
             if let activity { running[head.id] = (head, activity) }
@@ -82,6 +79,46 @@ public enum CodexSubagentReader {
         }
     }
 
+    /// What one rollout contributes, as last read.
+    enum Rollout: Sendable {
+        /// Its first line is not a subagent's header: any other session's rollout.
+        case other
+        /// A subagent's rollout: `usable` is false when its tail repeats a header that is not its own
+        /// (`events`), and `activity` is nil once its turn ended.
+        case subagent(Head, usable: Bool, activity: Activity?)
+    }
+
+    /// What the last successful read of each rollout found. A rollout only grows, which changes its
+    /// stamp, so an unchanged one is not opened or parsed again. A read that failed is never kept.
+    private static let memo = StampedFileMemo<Rollout>()
+
+    /// The rollout at `url`; nil when it could not be read.
+    static func rollout(at url: URL) -> Rollout? {
+        // The stamp is taken before the read, so an append during it shows as a new stamp next time.
+        let kept = memo.kept(url)
+        if let value = kept.value { return value }
+        // A rollout that is not a subagent's and one that could not be read both give nil below;
+        // these tell them apart, since only the first may be kept.
+        var headRead = false, isSubagent = false
+        let read = SessionDiscovery.read(url, header: { bytes -> Head? in
+            headRead = true
+            let head = bytes.firstIndex(of: UInt8(ascii: "\n")).flatMap { self.head(bytes[bytes.startIndex..<$0]) }
+            isSubagent = head != nil
+            return head
+        })
+        let rollout: Rollout
+        if let (head, tail) = read {
+            let lines = events(tail, head: head)
+            rollout = .subagent(head, usable: lines != nil, activity: lines.flatMap(activity))
+        } else if headRead, !isSubagent {
+            rollout = .other
+        } else {
+            return nil
+        }
+        if let stamp = kept.stamp { memo.keep(rollout, for: url, stamp: stamp) }
+        return rollout
+    }
+
     private static func key(_ id: UUID) -> String { id.uuidString.lowercased() }
 
     /// The first ancestor that is not itself a subagent rollout read this call. A nested subagent
@@ -103,12 +140,12 @@ public enum CodexSubagentReader {
         return nil
     }
 
-    struct Call: Equatable {
+    struct Call: Equatable, Sendable {
         let name: String
         let input: [String: String]
     }
 
-    struct Activity: Equatable {
+    struct Activity: Equatable, Sendable {
         let asked: String?
         let latest: Call?
     }
