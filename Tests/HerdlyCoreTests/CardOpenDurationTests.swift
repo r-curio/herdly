@@ -130,3 +130,12 @@ func aCardWhoseItemLeftTheQueueEndsAtOnce(interacting: Bool) {
     presentation.present(answered, now: 100)
     #expect(presentation.update(interacting: false, now: 101) == .agentSpotlight(answered))
 }
+
+@Test func onlyAPopUpCardWhoseItemLeftTheQueueClosesThePanel() {
+    #expect(NotchPresentationMode.agentSpotlight(answered).spotlightItemLeft(queued: [done]))
+    #expect(!NotchPresentationMode.agentSpotlight(answered).spotlightItemLeft(queued: [answered, done]))
+    // A clicked card goes back to the queue (D10); the queue and the strip have no card to lose.
+    #expect(!NotchPresentationMode.clickedCard(answered).spotlightItemLeft(queued: [done]))
+    #expect(!NotchPresentationMode.queue.spotlightItemLeft(queued: []))
+    #expect(!NotchPresentationMode.collapsed.spotlightItemLeft(queued: []))
+}
