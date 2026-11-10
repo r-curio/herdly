@@ -181,8 +181,13 @@ Agreed on 2026-11-10 (issue [#382](https://github.com/r-curio/herdly/issues/382)
 answer several questions", superseding "Claude · several questions at once" in D · Questions 3 of 5):
 a live Claude call with two to four questions is answered on the same step-through card as a Codex
 daemon call, one question at a time; Next keeps an answer in Herdly, and Send on the last question
-hands every answer to Claude's helper at once, never a partial set. Earlier steps stay revisable
-until Send; later ones can be read but not answered out of order. The call has one countdown. A
+hands every answer to Claude's helper at once, never a partial set. Amended 2026-11-10 (issue
+[#388](https://github.com/r-curio/herdly/issues/388), Paper "G · Claude: answer several questions",
+step 2 and "One send"): every question can be answered at any time and in any order, whether reached
+by the arrows, a step name or Next; Next only moves on and never unlocks a question; Send stays the
+far-right button on the last question, enabled only once every question has an answer, and sends
+the set once in question order; the rail shows each question's current answer. Codex cards keep their
+order (key routes type digits question by question). The call has one countdown. A
 secret or unreadable question, or two questions with the same text, makes the whole call read-only. Otherwise they show Waiting and explain that the answer belongs in Claude: one sentence ("Claude is
 asking 3 questions. Answer them in Claude."), with the questions behind a "Show questions" disclosure
 as a reference list, never as controls. Expiry, malformed or

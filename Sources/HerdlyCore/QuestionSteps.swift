@@ -32,10 +32,13 @@ public struct QuestionSteps: Equatable, Sendable {
     ///   - current: the question the card is on; clamped to the list.
     ///   - sentKeys: earlier answers went as typed keys (a key route): an answered step's summary
     ///     names the digit sent, "sent: 1 · JSON lines" (#321).
+    ///   - answeredWhenHeld: a card answered in any order (a Claude call, #388): a step other than the
+    ///     viewed one is answered exactly when `answer` holds one for it, whatever its position, and
+    ///     every held answer gets a line. Off, a step is answered when it is before `current`.
     ///   - answer: the answer Herdly holds for a question index, if any.
     public static func make(_ prompts: [QuestionPrompt], current: Int, viewed: Int? = nil,
                             editable: Bool = false, currentStatus: String? = "Answering now", sentKeys: Bool = false,
-                            answer: (Int) -> ChosenAnswer?) -> QuestionSteps {
+                            answeredWhenHeld: Bool = false, answer: (Int) -> ChosenAnswer?) -> QuestionSteps {
         guard !prompts.isEmpty else { return QuestionSteps(steps: [], answered: []) }
         let current = min(max(current, 0), prompts.count - 1)
         let viewed = min(max(viewed ?? current, 0), prompts.count - 1)
@@ -43,7 +46,8 @@ public struct QuestionSteps: Equatable, Sendable {
         var answered: [Answered] = []
         for (index, prompt) in prompts.enumerated() {
             let label = label(prompt, index: index)
-            let state: State = index == viewed ? .current : (index < current ? .answered : .upcoming)
+            let held = answeredWhenHeld ? answer(index) != nil : index < current
+            let state: State = index == viewed ? .current : (held ? .answered : .upcoming)
             let summary: String?
             switch answer(index) {
             case let .option(option):
@@ -54,7 +58,7 @@ public struct QuestionSteps: Equatable, Sendable {
             }
             steps.append(Step(id: index, label: label, state: state, summary: summary,
                               canEdit: editable && index < current && index != viewed && answer(index) != nil))
-            guard index < current, let chosen = answer(index) else { continue }
+            guard answeredWhenHeld || index < current, let chosen = answer(index) else { continue }
             switch chosen {
             case let .option(option):
                 let text = prompt.options.indices.contains(option) ? prompt.options[option] : "Option \(option + 1)"
