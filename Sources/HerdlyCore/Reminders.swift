@@ -752,14 +752,14 @@ public enum ReminderReader {
             }
         }
         if !result.execSessions.isEmpty {
-            let exec = result.execSessions
+            let execSessions = result.execSessions
             // No receipt for an exec run: its helper stops waiting after the connection timeout and
             // hands back with no decision, as when Herdly is closed. A request already receipted (by
             // an earlier launch) has a helper waiting on the user until its deadline, so it stays
             // visible; the queue then hands it back as it does any request this launch did not receipt.
-            result.awaitingReceipt.removeAll { exec.contains($0.sessionID) }
-            result.attentionRequests.removeAll { exec.contains($0.session) && $0.state != .actionable }
-            result.reminders.removeAll { exec.contains($0.session_id) }
+            result.awaitingReceipt.removeAll { execSessions.contains($0.sessionID) }
+            result.attentionRequests.removeAll { execSessions.contains($0.session) && $0.state != .actionable }
+            result.reminders.removeAll { execSessions.contains($0.session_id) }
         }
         result.cliEvents.sort { $0.receivedAt < $1.receivedAt }
         result.cliState = CLIState.replay(result.cliEvents)

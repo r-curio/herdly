@@ -80,12 +80,12 @@ private func turnEvent(_ kind: String, _ turn: UUID, at: String) -> String {
     "{\"timestamp\":\"\(at)\",\"type\":\"event_msg\",\"payload\":{\"type\":\"\(kind)\",\"turn_id\":\"\(turn.uuidString.lowercased())\"}}\n"
 }
 
-private func questionCall(_ turn: UUID, call: String) -> String {
+private func questionCall(_ turn: UUID, call: String) throws -> String {
     let arguments = "{\"questions\":[{\"id\":\"scope\",\"header\":\"Scope\",\"question\":\"Which pack?\",\"options\":[{\"label\":\"All\",\"description\":\"Every pack.\"}]}]}"
     let payload: [String: Any] = ["type": "function_call", "name": "request_user_input", "arguments": arguments, "id": "fc_1",
                                   "call_id": call,
                                   "internal_chat_message_metadata_passthrough": ["turn_id": turn.uuidString.lowercased()]]
-    let bytes = try! JSONSerialization.data(withJSONObject: ["timestamp": "2026-11-11T04:13:00.000Z", "type": "response_item",
+    let bytes = try JSONSerialization.data(withJSONObject: ["timestamp": "2026-11-11T04:13:00.000Z", "type": "response_item",
                                                              "payload": payload])
     return String(decoding: bytes, as: UTF8.self) + "\n"
 }
@@ -140,7 +140,7 @@ private func overwriteKeepingStamp(_ url: URL, with text: String) throws {
     let session = UUID(), turn = UUID()
     try lab.writeTurn(session, turn: turn, stopped: false)
     try lab.writeRollout(session, header: execHeader(session),
-                         lines: turnEvent("task_started", turn, at: "2026-11-11T04:12:15.000Z") + questionCall(turn, call: "call_1"))
+                         lines: turnEvent("task_started", turn, at: "2026-11-11T04:12:15.000Z") + (try questionCall(turn, call: "call_1")))
 
     let scan = lab.scan()
     #expect(scan.questions.isEmpty)
@@ -192,7 +192,8 @@ private func overwriteKeepingStamp(_ url: URL, with text: String) throws {
     try lab.writeTurn(session, turn: turn, stopped: false)
     try lab.writeRollout(session, header: execHeader(session))
     // Receipted by an earlier launch: its helper waits on the user until the deadline.
-    let now = Date().timeIntervalSince1970
+    // A receipted request is actionable by its receipt alone; the reader checks no clock for it.
+    let now = 1_794_370_800.0
     let live = ApprovalRequest(requestID: UUID(), sessionID: session, turnID: turn,
                                details: ApprovalDetails(command: "git push"), receivedAt: now, expiresAt: now + 30,
                                outcome: .pending)
