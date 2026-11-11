@@ -4,7 +4,9 @@ Herdly reads the metadata-only event records produced by the isolated desktop
 hook lab. It never writes Codex settings, emits hook output, or starts a second
 Codex runtime. `SessionStart`, `UserPromptSubmit`, `Stop`, and `SessionEnd` are
 replayed through `HerdlyCore.DesktopEventReader` and `DesktopState`; CLI sessions
-are excluded using their rollout source metadata. The recorded real desktop
+are excluded using their rollout source metadata, and a headless `codex exec`
+run (rollout `source: "exec"`) adds no row of any kind (#409, see
+[session discovery](session-discovery.md#headless-codex-exec-runs-through-the-hook-path--issue-409)). The recorded real desktop
 session evidence in `docs/desktop-approval-investigation.md` identifies
 session `01a08f51-a2fd-74c0-a9e9-d7e8a31c634c` as originator `Codex Desktop`,
 source `vscode`. Its hooks were enabled after SessionStart, so the captured
