@@ -345,8 +345,19 @@ public struct AttentionQueue: Equatable, Sendable {
     /// Applies current evidence. Completions that arrived before observation began enter as
     /// uncertain. Returns requests the reader found actionable on disk without a receipt from
     /// this process; they enter as handed back and the caller releases them to Codex.
+    ///
+    /// Hook events of a `codex exec` run (`scan.execSessions`, #409) are ignored, and rows already
+    /// held for one (restored, or queued before its rollout was readable) are dropped without being
+    /// acknowledged, except a live request, which keeps its deadline and hand-back.
     @discardableResult
-    public mutating func apply(scan: ReminderScan, desktopEvents: [DesktopEvent], now: Double) -> [AttentionRequest] {
+    public mutating func apply(scan: ReminderScan, desktopEvents allDesktopEvents: [DesktopEvent], now: Double) -> [AttentionRequest] {
+        let exec = scan.execSessions
+        let desktopEvents = exec.isEmpty ? allDesktopEvents : allDesktopEvents.filter { !exec.contains($0.session) }
+        if !exec.isEmpty {
+            requests = requests.filter { !exec.contains($0.value.session) || $0.value.state == .actionable }
+            questions = questions.filter { !exec.contains($0.value.session) }
+            completions = completions.filter { !exec.contains($0.value.session) }
+        }
         let cliCompletions = scan.cliCompletions.map {
             AttentionCompletion(source: .cli, session: $0.session, turn: $0.turn,
                                 arrivedAt: timestamp($0.receivedAt), uncertain: timestamp($0.receivedAt) < observingSince)

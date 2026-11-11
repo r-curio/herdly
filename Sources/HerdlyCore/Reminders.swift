@@ -69,6 +69,13 @@ public struct ReminderScan: Sendable {
     /// Sessions whose rollout header names the desktop app as originator (`desktopOriginator`). Only
     /// these threads carry the desktop app's unread flag, so only they can be read-acknowledged (#284).
     public var desktopOriginatedSessions: Set<UUID> = []
+    /// Sessions whose rollout header positively reads `source: "exec"` (a headless `codex exec` run,
+    /// #409). The global hook fires inside `codex exec` too, but such a run has no tab or thread to
+    /// return to, so none of its hook evidence becomes attention: the scan drops its requests,
+    /// reminders and questions, and `AttentionQueue.apply(scan:desktopEvents:now:)` its running rows
+    /// and completions. A missing, unreadable or malformed rollout is unknown, not exec, and the
+    /// session is treated as before. A receipted live approval is the one exception (see `scan`).
+    public var execSessions: Set<UUID> = []
     public var liveCLISessions: Set<UUID> = []
     public var cliState = CLIState()
     /// Sessions that ended and did not start again. `sessionEnds` keeps a session's latest end even
@@ -424,6 +431,9 @@ public enum ReminderReader {
     /// in a Ghostty inventory before `scan` ends it, so a new tab can be inventoried first.
     public static let surfaceGrace: Double = 15
     public static let desktopOriginator = "Codex Desktop"
+    /// The rollout `source` of a headless `codex exec` run, which Herdly never lists (#409), as
+    /// `SessionDiscovery` refuses it.
+    public static let execSource = "exec"
 
     /// True when the session's latest end is at or after its latest SessionStart: it is already
     /// ended. A resume after an end makes this false, so a closed tab can end it again.
@@ -604,10 +614,13 @@ public enum ReminderReader {
             result.sessionEnds[hook.session_id] = max(result.sessionEnds[hook.session_id] ?? 0, ended)
         }
         let sessions = Set(result.attentionRequests.map(\.session)).union(hooks.map(\.session_id))
-        guard !sessions.isEmpty, let tree = RolloutTree.index(rollouts), !tree.tooLarge else { return result }
+        // A request still waiting for its receipt is looked up too, only to learn whether it belongs to
+        // an `exec` run, which gets no receipt (#409).
+        let lookups = sessions.union(result.awaitingReceipt.map(\.sessionID))
+        guard !lookups.isEmpty, let tree = RolloutTree.index(rollouts), !tree.tooLarge else { return result }
         // A rollout belongs to the session its name ends with: one lookup per file instead of a
         // comparison per session (#306).
-        let suffixes = Dictionary(uniqueKeysWithValues: sessions.map { ($0.uuidString.lowercased() + ".jsonl", $0) })
+        let suffixes = Dictionary(uniqueKeysWithValues: lookups.map { ($0.uuidString.lowercased() + ".jsonl", $0) })
         let suffixLength = UUID().uuidString.count + ".jsonl".count
         var paths: [UUID: [URL]] = [:]
         let rolloutFiles = tree.files.map(\.url)
@@ -641,6 +654,12 @@ public enum ReminderReader {
             let rollout = cachedRollout(urls[0], session: session, keepBytes: sessionProbes != nil,
                                         cache: rolloutCache, next: &result.rolloutCache)
             if let read = rollout.read {
+                // The header read with the rest of the rollout, memoized by its stamp: no extra read.
+                if let meta = read.header, meta.id == session, meta.source == execSource {
+                    result.execSessions.insert(session)
+                    continue
+                }
+                guard sessions.contains(session) else { continue }
                 let terminal = read.evidence
                 let finished = terminal.completed
                 result.completed.formUnion(finished)
@@ -731,6 +750,16 @@ public enum ReminderReader {
                     }
                 }
             }
+        }
+        if !result.execSessions.isEmpty {
+            let exec = result.execSessions
+            // No receipt for an exec run: its helper stops waiting after the connection timeout and
+            // hands back with no decision, as when Herdly is closed. A request already receipted (by
+            // an earlier launch) has a helper waiting on the user until its deadline, so it stays
+            // visible; the queue then hands it back as it does any request this launch did not receipt.
+            result.awaitingReceipt.removeAll { exec.contains($0.sessionID) }
+            result.attentionRequests.removeAll { exec.contains($0.session) && $0.state != .actionable }
+            result.reminders.removeAll { exec.contains($0.session_id) }
         }
         result.cliEvents.sort { $0.receivedAt < $1.receivedAt }
         result.cliState = CLIState.replay(result.cliEvents)
