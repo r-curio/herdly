@@ -30,7 +30,10 @@ identity, the normalized Claude configuration root, and the separate normalized 
 helper-owned liveness marker is refreshed only while the hook waits, and a delivery acknowledgment
 is written only after Claude's response is emitted. The helper waits 30 seconds from its publish,
 longer only by a hover hold in `<request>.question-hold` that it re-reads every poll and bounds to 2
-minutes from publish (ADR 0020); expiry emits nothing. A restart cannot turn its saved request record
+minutes from publish (ADR 0020); expiry emits nothing. Open on the card ends the wait early (#411): the
+app writes `<request>.question-handback`, an exact-identity `ClaudeQuestionHandBack`, and the helper,
+which checks it after the answer on every poll, returns at once and emits nothing. An answer already
+written wins, and a mismatched or malformed record is ignored. A restart cannot turn its saved request record
 into an answer capability. Declining Claude's question, or pressing Esc on it, ends the turn without a
 `PostToolUse`, `PostToolUseFailure`, or `Stop` hook, so the hook record alone keeps the question open
 (observed 2026-11-09: only `PreToolUse` and `Notification` were recorded). When the session registry

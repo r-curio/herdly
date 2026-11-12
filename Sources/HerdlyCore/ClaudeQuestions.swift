@@ -140,6 +140,59 @@ public struct ClaudeQuestionDelivery: Codable, Equatable, Sendable {
     }
 }
 
+/// Open on a live Claude question hands the call back to Claude with no answer (#411), as an Open on
+/// an actionable approval does (ADR 0015). The helper stops waiting and emits nothing, so Claude shows
+/// its own question. It carries the call's exact identity; a mismatched or malformed record is
+/// ignored, and an answer already written wins.
+public struct ClaudeQuestionHandBack: Codable, Equatable, Sendable {
+    public let requestID: String
+    public let installationID: String
+    public let sourceScope: String
+    /// The event directory is separate from the source scope and is checked against the file path.
+    public let eventDirectory: String
+    public let sessionID: String
+    public let promptID: String
+    public let toolUseID: String
+    public let handedBackAt: Double
+
+    public init(requestID: String, installationID: String, sourceScope: String, eventDirectory: String,
+                sessionID: String, promptID: String, toolUseID: String, handedBackAt: Double) {
+        self.requestID = requestID
+        self.installationID = installationID
+        self.sourceScope = sourceScope
+        self.eventDirectory = eventDirectory
+        self.sessionID = sessionID
+        self.promptID = promptID
+        self.toolUseID = toolUseID
+        self.handedBackAt = handedBackAt
+    }
+
+    /// The hand-back for exactly `request`, at `handedBackAt`.
+    public init(for request: ClaudeQuestionRequest, handedBackAt: Double) {
+        self.init(requestID: request.requestID, installationID: request.installationID,
+                  sourceScope: request.sourceScope, eventDirectory: request.eventDirectory,
+                  sessionID: request.sessionID, promptID: request.promptID, toolUseID: request.toolUseID,
+                  handedBackAt: handedBackAt)
+    }
+
+    /// Whether this record hands back exactly `request`, read from `directory`'s rendezvous, at `now`:
+    /// every identity matches, the event directory is the one read, and the time is finite, no
+    /// earlier than the publish and not in the future.
+    public func handsBack(_ request: ClaudeQuestionRequest, in directory: URL, now: Double) -> Bool {
+        requestID == request.requestID
+            && installationID == request.installationID
+            && sourceScope == request.sourceScope
+            && eventDirectory == request.eventDirectory
+            && eventDirectory == directory.standardizedFileURL.path
+            && sessionID == request.sessionID
+            && promptID == request.promptID
+            && toolUseID == request.toolUseID
+            && handedBackAt.isFinite
+            && handedBackAt >= request.publishedAt
+            && handedBackAt <= now
+    }
+}
+
 public enum ClaudeQuestionAnswerKind: String, Codable, Sendable {
     case option
     case multiSelect = "multi_select"
@@ -291,6 +344,11 @@ public enum ClaudeQuestionStore {
         rendezvousDirectory(in: directory).appendingPathComponent(id + ".question-delivery")
     }
 
+    /// The app's hand-back of a live question to Claude (#411), a `ClaudeQuestionHandBack`.
+    public static func handBackURL(in directory: URL, id: String) -> URL {
+        rendezvousDirectory(in: directory).appendingPathComponent(id + ".question-handback")
+    }
+
     /// The app's hover hold for a live question (ADR 0020), an `ApprovalHoldRecord` written only
     /// while the pointer is on the notch.
     public static func holdURL(in directory: URL, id: String) -> URL {
@@ -351,6 +409,13 @@ public enum ClaudeQuestionStore {
         return write(try? JSONEncoder().encode(answer), to: answerURL(in: directory, id: answer.requestID))
     }
 
+    /// Written once by the app when Open hands the question back; never replaced.
+    @discardableResult
+    public static func publish(_ handBack: ClaudeQuestionHandBack, in directory: URL) -> Bool {
+        guard validID(handBack.requestID) else { return false }
+        return write(try? JSONEncoder().encode(handBack), to: handBackURL(in: directory, id: handBack.requestID))
+    }
+
     /// The helper replaces this marker while it is waiting for the user's answer. Its exact
     /// identity and freshness let the app fail closed when the helper has exited.
     @discardableResult
@@ -379,6 +444,11 @@ public enum ClaudeQuestionStore {
     public static func answer(for id: String, in directory: URL) -> ClaudeQuestionAnswer? {
         guard validID(id) else { return nil }
         return decode(answerURL(in: directory, id: id), as: ClaudeQuestionAnswer.self)
+    }
+
+    public static func handBack(for id: String, in directory: URL) -> ClaudeQuestionHandBack? {
+        guard validID(id) else { return nil }
+        return decode(handBackURL(in: directory, id: id), as: ClaudeQuestionHandBack.self)
     }
 
     public static func liveness(for id: String, in directory: URL) -> ClaudeQuestionLiveness? {
@@ -454,7 +524,8 @@ public enum ClaudeQuestionStore {
         let manager = FileManager.default
         for url in [requestURL(in: directory, id: id), receiptURL(in: directory, id: id),
                     answerURL(in: directory, id: id), livenessURL(in: directory, id: id),
-                    deliveryURL(in: directory, id: id), holdURL(in: directory, id: id)] {
+                    deliveryURL(in: directory, id: id), holdURL(in: directory, id: id),
+                    handBackURL(in: directory, id: id)] {
             try? manager.removeItem(at: url)
         }
     }
@@ -505,7 +576,8 @@ public enum ClaudeQuestionStore {
 }
 
 /// The helper waits for an app receipt and then accepts one exact answer. Any uncertainty falls
-/// through to Claude's own question UI by returning nil.
+/// through to Claude's own question UI by returning nil, and so does an exact hand-back (#411):
+/// Open on the card stops the wait at once instead of at the deadline.
 public enum ClaudeQuestionHelper {
     public static func awaitAnswer(for request: ClaudeQuestionRequest, in directory: URL,
                                    connectionTimeout: TimeInterval = ClaudeQuestionTiming.connectionTimeout,
@@ -569,6 +641,11 @@ public enum ClaudeQuestionHelper {
                answer.decidedAt <= Date().timeIntervalSince1970,
                ClaudeQuestionAnswerPolicy.accepts(request: request, answer: answer) {
                 return answer
+            }
+            // Checked after the answer, so an answer already written wins over a later hand-back.
+            if let handBack = ClaudeQuestionStore.handBack(for: request.requestID, in: directory),
+               handBack.handsBack(request, in: directory, now: Date().timeIntervalSince1970) {
+                return nil
             }
             Thread.sleep(forTimeInterval: ClaudeQuestionTiming.pollInterval)
         }

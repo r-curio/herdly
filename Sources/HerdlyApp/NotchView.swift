@@ -1749,7 +1749,9 @@ struct Notch: View {
     /// step on), on the right.
     private func claudeQuestionFooter(_ question: AgentQuestion, item: AgentAttentionItem, subject: String) -> some View {
         HStack(spacing: 6) {
-            claudeReturnControl(item, subject: subject, openTitle: "Open")
+            claudeReturnControl(item, subject: subject, openTitle: "Open",
+                                openHint: model.canAnswerAgentQuestion(question)
+                                    ? "Hands this question back to Claude's own prompt." : nil)
             Spacer(minLength: 6)
             NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
                 .accessibilityLabel("Dismiss question: \(subject)")
@@ -2925,6 +2927,8 @@ struct Notch: View {
         NotchButton(title: title, emphasized: emphasized, focus: focus) {
             if let approval = item.approval {
                 model.openAgentApproval(approval)
+            } else if let question = item.question {
+                model.openClaudeQuestion(question)
             } else {
                 model.openAgent(item.session)
             }

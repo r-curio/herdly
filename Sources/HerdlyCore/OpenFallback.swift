@@ -179,6 +179,14 @@ public enum TerminalOpenResult: Equatable, Sendable {
     /// Whether this Open acknowledges the session's completions (ADR 0016, "Acknowledgment").
     public var acknowledges: Bool { self == .opened }
 
+    /// Whether this Open hands its actionable request back with no decision or answer (ADR 0015,
+    /// #411): it reached the session or raised its app. An unavailable Open hands nothing back, so the
+    /// request stays where it was.
+    public var handsBackRequest: Bool {
+        if case .unavailable = self { return false }
+        return true
+    }
+
     /// The agreed line for an unavailable Open; nil otherwise. A fallback is silent (ADR 0015,
     /// "Presentation"), and a verified Open's host says what opened.
     public var unavailableLine: String? {
