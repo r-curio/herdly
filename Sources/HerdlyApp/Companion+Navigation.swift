@@ -212,11 +212,12 @@ extension Companion {
                 }
             }
             recordOpen(result, claude: identity)
+            // ADR 0015: an Open on an actionable request hands it back with no decision, fallback
+            // included; an unavailable one hands nothing back.
+            handBackClaudeRequest(request, after: result)
             switch result {
             case .opened, .fellBack:
-                // ADR 0015: an Open on an actionable request hands it back with no decision, fallback
-                // included. Only the verified Open acknowledges.
-                handBackClaudeRequest(request, after: result)
+                // Only the verified Open acknowledges.
                 let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }
                     .map(TerminalCompletionCandidate.init)
                 for id in TerminalVisitAcknowledgment.afterOpen(outcomes, result: result, preOpenAt: preOpenAt) {
@@ -232,8 +233,9 @@ extension Companion {
         }
     }
 
-    /// After a terminal route's Open: hands the request back only when the Open reached the session or
-    /// raised its app (`TerminalOpenResult.handsBackRequest`); an unavailable Open hands nothing back.
+    /// Called by every terminal route as soon as its Open result is known: hands the request back only
+    /// when the Open reached the session or raised its app (`TerminalOpenResult.handsBackRequest`, the
+    /// one rule); an unavailable Open hands nothing back.
     func handBackClaudeRequest(_ request: ClaudeOpenRequest?, after result: TerminalOpenResult) {
         guard result.handsBackRequest else { return }
         handBackClaudeRequest(request)

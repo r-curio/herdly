@@ -526,9 +526,10 @@ extension Companion {
                 return OpenFallback.processApp(walks: [walk], agent: .claude, switches: switches)
             }
             recordOpen(result, claude: identity)
+            // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included;
+            // an unavailable one hands nothing back.
+            handBackClaudeRequest(request, after: result)
             if case .unavailable = result {} else {
-                // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included.
-                handBackClaudeRequest(request, after: result)
                 let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }.map(TerminalCompletionCandidate.init)
                 for id in TerminalVisitAcknowledgment.afterOpen(outcomes, result: result, preOpenAt: preOpenAt) {
                     agentQueue.dismiss(.outcome(id))

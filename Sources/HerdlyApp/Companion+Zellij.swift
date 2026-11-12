@@ -262,9 +262,10 @@ extension Companion {
                 return self.zellijClaudeBinding(identity, process: process, read: reads.zellij)
             })
             recordOpen(result.open, claude: identity)
+            // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included;
+            // an unavailable one hands nothing back.
+            handBackClaudeRequest(request, after: result.open)
             if case .unavailable = result.open {} else {
-                // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included.
-                handBackClaudeRequest(request, after: result.open)
                 if case .opened(let preOpenAt) = result {
                     let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }.map(TerminalCompletionCandidate.init)
                     for id in TerminalVisitAcknowledgment.afterOpen(outcomes, result: .opened, preOpenAt: preOpenAt) {

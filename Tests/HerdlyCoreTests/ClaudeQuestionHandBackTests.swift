@@ -26,6 +26,20 @@ private func receipt(for request: ClaudeQuestionRequest) -> ClaudeQuestionReceip
                           receivedAt: request.publishedAt, expiresAt: request.expiresAt)
 }
 
+/// Writes a matching answer about 0.2 s from now on a thread of its own (not a shared pool a busy
+/// parallel test run can starve), well inside a 5-second wait.
+private func publishAnswerLater(_ value: String, for request: ClaudeQuestionRequest, in directory: URL) {
+    Thread.detachNewThread {
+        Thread.sleep(forTimeInterval: 0.2)
+        let answer = ClaudeQuestionAnswer(requestID: request.requestID, installationID: request.installationID,
+                                          sourceScope: request.sourceScope, eventDirectory: request.eventDirectory,
+                                          sessionID: request.sessionID, promptID: request.promptID,
+                                          toolUseID: request.toolUseID, kind: .option, answer: value,
+                                          decidedAt: Date().timeIntervalSince1970)
+        _ = ClaudeQuestionStore.publish(answer, in: directory)
+    }
+}
+
 @Test func claudeQuestionHandBackMatchesOnlyTheExactCall() throws {
     let directory = try handBackDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -55,18 +69,19 @@ private func receipt(for request: ClaudeQuestionRequest) -> ClaudeQuestionReceip
     #expect(ClaudeQuestionStore.publish(request, in: directory))
     #expect(ClaudeQuestionStore.publish(receipt(for: request), in: directory))
     #expect(ClaudeQuestionStore.publish(ClaudeQuestionHandBack(for: request, handedBackAt: now - 0.01), in: directory))
+    let answerTimeout = 5.0
     let started = ProcessInfo.processInfo.systemUptime
     #expect(ClaudeQuestionHelper.awaitAnswer(for: request, in: directory,
-                                             connectionTimeout: 0.5, answerTimeout: 3) == nil)
-    // Well before the 3-second window: the hand-back ended the wait, not the deadline.
-    #expect(ProcessInfo.processInfo.systemUptime - started < 1)
+                                             connectionTimeout: 1, answerTimeout: answerTimeout) == nil)
+    // Well before the 5-second window: the hand-back ended the wait, not the deadline.
+    #expect(ProcessInfo.processInfo.systemUptime - started < answerTimeout / 2)
 }
 
 @Test func claudeQuestionHelperIgnoresAMismatchedOrMalformedHandBack() throws {
     let directory = try handBackDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let now = Date().timeIntervalSince1970
-    let request = handBackRequest("mismatched", in: directory, publishedAt: now - 0.05)
+    let request = handBackRequest("mismatched", in: directory, publishedAt: now - 0.05, window: 30)
     #expect(ClaudeQuestionStore.publish(request, in: directory))
     #expect(ClaudeQuestionStore.publish(receipt(for: request), in: directory))
     let other = ClaudeQuestionHandBack(requestID: request.requestID, installationID: request.installationID,
@@ -74,27 +89,21 @@ private func receipt(for request: ClaudeQuestionRequest) -> ClaudeQuestionReceip
                                        sessionID: request.sessionID, promptID: request.promptID,
                                        toolUseID: "another-tool", handedBackAt: now - 0.01)
     #expect(ClaudeQuestionStore.publish(other, in: directory))
-    let answerTimeout = 0.3
-    let started = ProcessInfo.processInfo.systemUptime
+    // The answer lands only after the helper has polled the mismatched record for a while, so it is
+    // returned only if that record did not end the wait.
+    publishAnswerLater("Blue", for: request, in: directory)
     #expect(ClaudeQuestionHelper.awaitAnswer(for: request, in: directory,
-                                             connectionTimeout: 0.5, answerTimeout: answerTimeout) == nil)
-    // It waited out its window: the mismatched record did not stop it.
-    #expect(ProcessInfo.processInfo.systemUptime - started >= answerTimeout - 0.05)
+                                             connectionTimeout: 1, answerTimeout: 5)?.answers.first?.answer == "Blue")
 
-    let malformed = handBackRequest("malformed", in: directory, publishedAt: now - 0.05)
+    let malformed = handBackRequest("malformed", in: directory, publishedAt: now - 0.05, window: 30)
     #expect(ClaudeQuestionStore.publish(malformed, in: directory))
     #expect(ClaudeQuestionStore.publish(receipt(for: malformed), in: directory))
     try Data("{\"requestID\":\"malformed\"".utf8)
         .write(to: ClaudeQuestionStore.handBackURL(in: directory, id: malformed.requestID))
-    // A matching answer still arrives after the malformed record and is returned.
-    let answer = ClaudeQuestionAnswer(requestID: malformed.requestID, installationID: malformed.installationID,
-                                      sourceScope: malformed.sourceScope, eventDirectory: malformed.eventDirectory,
-                                      sessionID: malformed.sessionID, promptID: malformed.promptID,
-                                      toolUseID: malformed.toolUseID, kind: .option, answer: "Red",
-                                      decidedAt: Date().timeIntervalSince1970)
-    #expect(ClaudeQuestionStore.publish(answer, in: directory))
+    // Likewise a malformed record: the later answer is still returned.
+    publishAnswerLater("Red", for: malformed, in: directory)
     #expect(ClaudeQuestionHelper.awaitAnswer(for: malformed, in: directory,
-                                             connectionTimeout: 0.5, answerTimeout: 0.5)?.answers.first?.answer == "Red")
+                                             connectionTimeout: 1, answerTimeout: 5)?.answers.first?.answer == "Red")
 }
 
 @Test func claudeQuestionAnswerAlreadyWrittenWinsOverAHandBack() throws {
@@ -112,7 +121,7 @@ private func receipt(for request: ClaudeQuestionRequest) -> ClaudeQuestionReceip
     #expect(ClaudeQuestionStore.publish(answer, in: directory))
     #expect(ClaudeQuestionStore.publish(ClaudeQuestionHandBack(for: request, handedBackAt: now - 0.01), in: directory))
     #expect(ClaudeQuestionHelper.awaitAnswer(for: request, in: directory,
-                                             connectionTimeout: 0.5, answerTimeout: 0.5) == answer)
+                                             connectionTimeout: 1, answerTimeout: 5) == answer)
     // The record is written once and never replaced.
     #expect(!ClaudeQuestionStore.publish(ClaudeQuestionHandBack(for: request, handedBackAt: now), in: directory))
 }
@@ -135,4 +144,10 @@ private func receipt(for request: ClaudeQuestionRequest) -> ClaudeQuestionReceip
                                           .hostUnreadable(.ghostty), .activationFailed(.ghostty)] {
         #expect(!TerminalOpenResult.unavailable(reason).handsBackRequest, "\(reason)")
     }
+}
+
+@Test func aFailedHandBackWriteTellsTheUserToAnswerInClaude() {
+    // Nothing reached the helper, so Claude asks only after its timer: the row says to answer there.
+    #expect(RowNoteUpdate.claudeQuestionHandBack(published: false) == .record(.notDelivered))
+    #expect(RowNoteUpdate.claudeQuestionHandBack(published: true) == .unchanged)
 }
