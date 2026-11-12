@@ -72,6 +72,13 @@ extension RowNoteUpdate {
         return delivered ? .resolve : .record(.sentUnconfirmed)
     }
 
+    /// Open handed a live Claude question back (#411). A record that was not written leaves the helper
+    /// waiting, so Claude asks only after its timer: the row says to answer in Claude. A written one
+    /// changes nothing.
+    public static func claudeQuestionHandBack(published: Bool) -> Self {
+        published ? .unchanged : .record(.notDelivered)
+    }
+
     /// The daemon's one write of a whole Codex answer. Nothing written withdraws the note.
     public static func codexDaemonAnswer(sent: Bool) -> Self {
         sent ? .record(.awaitingCodex) : .withdraw

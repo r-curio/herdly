@@ -479,7 +479,7 @@ extension Companion {
 
     /// Open for a Claude CLI session while Terminal.app is on. A session whose tty no Terminal.app tab
     /// holds is left to Ghostty's own route when Ghostty is on.
-    func openClaudeWithTerminalApp(_ identity: AgentSessionIdentity, approval: AgentApproval?,
+    func openClaudeWithTerminalApp(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?,
                                    otherwise: @escaping @MainActor () -> Void) {
         guard !openingTask else { return }
         openingTask = true
@@ -526,12 +526,10 @@ extension Companion {
                 return OpenFallback.processApp(walks: [walk], agent: .claude, switches: switches)
             }
             recordOpen(result, claude: identity)
+            // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included;
+            // an unavailable one hands nothing back.
+            handBackClaudeRequest(request, after: result)
             if case .unavailable = result {} else {
-                // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included.
-                if let approval,
-                   let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: { $0.id == approval.id }) {
-                    handBackClaudeApproval(current)
-                }
                 let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }.map(TerminalCompletionCandidate.init)
                 for id in TerminalVisitAcknowledgment.afterOpen(outcomes, result: result, preOpenAt: preOpenAt) {
                     agentQueue.dismiss(.outcome(id))

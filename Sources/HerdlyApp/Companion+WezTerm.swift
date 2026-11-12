@@ -356,7 +356,7 @@ extension Companion {
 
     /// Open for a Claude CLI session while WezTerm is on. A session whose process tty no WezTerm pane holds
     /// is left to `otherwise` (Terminal.app, iTerm2, Ghostty's title route or the process walk).
-    func openClaudeWithWezTerm(_ identity: AgentSessionIdentity, approval: AgentApproval?,
+    func openClaudeWithWezTerm(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?,
                                otherwise: @escaping @MainActor () -> Void) {
         guard !openingTask else { return }
         openingTask = true
@@ -409,12 +409,10 @@ extension Companion {
             }
             wezTerm.lastOpen[identity.session] = Self.wezTermDiagnostic(run, result: result)
             recordOpen(result, claude: identity)
+            // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included;
+            // an unavailable one hands nothing back.
+            handBackClaudeRequest(request, after: result)
             if case .unavailable = result {} else {
-                // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included.
-                if let approval,
-                   let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: { $0.id == approval.id }) {
-                    handBackClaudeApproval(current)
-                }
                 let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }.map(TerminalCompletionCandidate.init)
                 for id in TerminalVisitAcknowledgment.afterOpen(outcomes, result: result, preOpenAt: preOpenAt) {
                     agentQueue.dismiss(.outcome(id))

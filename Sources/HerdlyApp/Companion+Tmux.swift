@@ -262,7 +262,7 @@ extension Companion {
 
     /// Open for a Claude CLI session while tmux may be contacted. A session whose process's tty is no
     /// pane of the default server is left to the other routes.
-    func openClaudeWithTmux(_ identity: AgentSessionIdentity, approval: AgentApproval?,
+    func openClaudeWithTmux(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?,
                             otherwise: @escaping @MainActor () -> Void) {
         guard !openingTask else { return }
         openingTask = true
@@ -304,12 +304,10 @@ extension Companion {
                 return self.claudeBinding(identity, process: process, reads: reads)
             })
             recordOpen(result.open, claude: identity)
+            // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included;
+            // an unavailable one hands nothing back.
+            handBackClaudeRequest(request, after: result.open)
             if case .unavailable = result.open {} else {
-                // ADR 0015: an Open on an actionable request hands it back with no decision, fallback included.
-                if let approval,
-                   let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: { $0.id == approval.id }) {
-                    handBackClaudeApproval(current)
-                }
                 if case .opened(let preOpenAt) = result {
                     let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }.map(TerminalCompletionCandidate.init)
                     for id in TerminalVisitAcknowledgment.afterOpen(outcomes, result: .opened, preOpenAt: preOpenAt) {
