@@ -36,7 +36,7 @@ An Open fallback is navigation only:
 
 - It never acknowledges a completion, starts or counts toward a dwell run, or clears a reminder, approval request, or question request.
 - It never makes a tab, pane, or app an input target. Typed question options and session replies still need the exact binding.
-- An Open on an actionable CLI approval request still hands it back first, with no decision.
+- An Open on an actionable CLI approval request still hands it back first, with no decision. An Open on a live Claude question likewise hands it back with no answer (#411, 2026-11-12), so Claude shows its own question; the question stays queued until its usual resolution evidence.
 - A later manual visit acknowledges under the usual visit rules only when the exact binding can verify that tab.
 
 ## Presentation

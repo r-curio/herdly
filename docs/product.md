@@ -207,7 +207,13 @@ mismatched records, helper loss, uncertainty, and a companion restart send nothi
 native question authoritative. The live window is 30 seconds from the helper's publish; while the
 pointer rests on the notch (keyboard focus alone does not hold) each answerable Claude question keeps
 the time it had left, never past 2 minutes from publish (ADR 0020, amended 2026-10-30). Nothing is
-ever answered on a timer. Generic Claude Waiting rows still count as to-check attention, while
+ever answered on a timer. Agreed on 2026-11-12 (issue [#411](https://github.com/r-curio/herdly/issues/411)):
+Open on a live Claude question hands it back to Claude with no answer, so Claude shows its own
+question, at the same moment an Open hands back a Claude approval (it reached the session or raised
+its app, or before an herdr open); the card then reads as one to answer in Claude. An answer already
+sent wins, and an unavailable Open hands nothing back. When Claude's inventory is incomplete at click
+time, or does not list the session exactly once, Open shows "Herdly can't tell which terminal this
+session is in." instead of doing nothing. Generic Claude Waiting rows still count as to-check attention, while
 their exact tab return is unavailable until targeting is verified. Automated checks and the isolated
 helper trace cover the response shape; integrated Herdly behavior for each answer
 kind and native fallback after timeout has not yet been observed in use. Claude completion
