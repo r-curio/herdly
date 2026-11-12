@@ -127,3 +127,12 @@ private func receipt(for request: ClaudeQuestionRequest) -> ClaudeQuestionReceip
     _ = ClaudeQuestionStore.pending(in: directory, installationID: "install-1", observingSince: now - 200, now: now)
     #expect(!FileManager.default.fileExists(atPath: ClaudeQuestionStore.handBackURL(in: directory, id: "expired").path))
 }
+
+@Test func onlyAnOpenThatReachedTheSessionOrRaisedItsAppHandsTheRequestBack() {
+    #expect(TerminalOpenResult.opened.handsBackRequest)
+    #expect(TerminalOpenResult.fellBack(.ghostty, .noUniqueTarget).handsBackRequest)
+    for reason: OpenUnavailableReason in [.appNotIdentified, .sessionEnded, .appNotRunning(.ghostty),
+                                          .hostUnreadable(.ghostty), .activationFailed(.ghostty)] {
+        #expect(!TerminalOpenResult.unavailable(reason).handsBackRequest, "\(reason)")
+    }
+}

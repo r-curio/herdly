@@ -171,6 +171,22 @@ extension Companion {
         }
     }
 
+    /// Open on a live Claude question (#411): hands the call back to Claude with no answer, so the
+    /// helper stops waiting and Claude shows its own question. The answer token is spent first, so
+    /// the card can no longer answer it and a rescan never re-grants it; the exact-identity record is
+    /// then written once. A question no longer live (answered, expired, helper gone) is left alone:
+    /// an answer already written wins. Nothing is ever answered on the user's behalf.
+    func handBackClaudeQuestion(_ question: AgentQuestion) {
+        guard previewMode == nil, let live = liveClaudeQuestion(for: question) else { return }
+        let now = Date().timeIntervalSince1970
+        guard claudeQuestions.spend(live.request.requestID, now: now) else { return }
+        let record = ClaudeQuestionHandBack(for: live.request, handedBackAt: now)
+        let events = live.events
+        Task.detached(priority: .utility) {
+            _ = ClaudeQuestionStore.publish(record, in: events)
+        }
+    }
+
     /// Dismissal is in memory only: a question still pending in the rollout returns after a restart.
     func dismissQuestion(_ question: AttentionQuestion) {
         queue.dismiss(.question(question.id)); refresh()

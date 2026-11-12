@@ -1,6 +1,13 @@
 import AppKit
 import HerdlyCore
 
+/// The actionable request a Claude Open hands back with no decision or answer once it reaches the
+/// session or raises its app (ADR 0015, #411): an approval, or a live question.
+enum ClaudeOpenRequest {
+    case approval(AgentApproval)
+    case question(AgentQuestion)
+}
+
 struct ClaudeNavigationRoot: Sendable {
     let root: URL
     let capabilities: ClaudeCapabilities
@@ -86,7 +93,7 @@ extension Companion {
         return "Open is unavailable until Herdly can verify this Claude session is live."
     }
 
-    private func openClaude(_ identity: AgentSessionIdentity, approval: AgentApproval? = nil) {
+    private func openClaude(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest? = nil) {
         guard !openingTask else { return }
         guard identity.surface == .cli else {
             refresh()
@@ -100,63 +107,61 @@ extension Companion {
         // can't tell which terminal this session is in." That is accurate: without contacting herdr
         // Herdly cannot find the client, and so the app, the session is shown in.
         if herdrRoute != .notInHerdr, herdrRoute != .unavailable(.ghosttyControlsOff) {
-            // ADR 0011: an actionable approval is handed back before the herdr pane is opened.
-            if let approval,
-               let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: { $0.id == approval.id }) {
-                handBackClaudeApproval(current)
-            }
+            // ADR 0011: an actionable approval, or a live question (#411), is handed back before the
+            // herdr pane is opened.
+            handBackClaudeRequest(request)
             openHerdr(herdrKey, subject: .claude(identity))
             return
         }
         // tmux (#241): a session whose process's tty is a pane of tmux's default server opens through
         // ADR 0014's two layers; anything else keeps the routes below.
         if tmuxContactAllowed {
-            openClaudeWithTmux(identity, approval: approval) { [weak self] in
-                self?.openClaudeOutsideTmux(identity, approval: approval)
+            openClaudeWithTmux(identity, request: request) { [weak self] in
+                self?.openClaudeOutsideTmux(identity, request: request)
             }
             return
         }
-        openClaudeOutsideTmux(identity, approval: approval)
+        openClaudeOutsideTmux(identity, request: request)
     }
 
     /// Zellij (#242): a session whose newest hook records and process put it in a Zellij pane opens through
     /// ADR 0014's two layers; anything else keeps the routes below.
-    private func openClaudeOutsideTmux(_ identity: AgentSessionIdentity, approval: AgentApproval?) {
+    private func openClaudeOutsideTmux(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?) {
         if zellijContactAllowed {
-            openClaudeWithZellij(identity, approval: approval) { [weak self] in
-                self?.openClaudeOutsideMultiplexers(identity, approval: approval)
+            openClaudeWithZellij(identity, request: request) { [weak self] in
+                self?.openClaudeOutsideMultiplexers(identity, request: request)
             }
             return
         }
-        openClaudeOutsideMultiplexers(identity, approval: approval)
+        openClaudeOutsideMultiplexers(identity, request: request)
     }
 
     /// WezTerm's, then Terminal.app's sequence while each is on, otherwise Ghostty's title route or the walk.
-    private func openClaudeOutsideMultiplexers(_ identity: AgentSessionIdentity, approval: AgentApproval?) {
+    private func openClaudeOutsideMultiplexers(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?) {
         // WezTerm on (#240): a pane there opens through its own sequence; anything else keeps the routes below.
         if wezTermSwitchedOn {
-            openClaudeWithWezTerm(identity, approval: approval) { [weak self] in
-                self?.openClaudeOutsideWezTerm(identity, approval: approval)
+            openClaudeWithWezTerm(identity, request: request) { [weak self] in
+                self?.openClaudeOutsideWezTerm(identity, request: request)
             }
             return
         }
-        openClaudeOutsideWezTerm(identity, approval: approval)
+        openClaudeOutsideWezTerm(identity, request: request)
     }
 
-    private func openClaudeOutsideWezTerm(_ identity: AgentSessionIdentity, approval: AgentApproval?) {
+    private func openClaudeOutsideWezTerm(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?) {
         // Terminal.app on (#239): a tab there opens through its own sequence; anything else keeps
         // Ghostty's title route below.
         if terminalAppSwitchedOn {
-            openClaudeWithTerminalApp(identity, approval: approval) { [weak self] in
-                self?.openClaudeByTitle(identity, approval: approval)
+            openClaudeWithTerminalApp(identity, request: request) { [weak self] in
+                self?.openClaudeByTitle(identity, request: request)
             }
             return
         }
-        openClaudeByTitle(identity, approval: approval)
+        openClaudeByTitle(identity, request: request)
     }
 
     /// Ghostty's title route for a Claude tab, or the fallback from its registry process (ADR 0015).
-    private func openClaudeByTitle(_ identity: AgentSessionIdentity, approval: AgentApproval?) {
+    private func openClaudeByTitle(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?) {
         openingTask = true
         let configuredRoots = configuredClaudeNavigationRoots()
         // ADR 0016: a verified Open acknowledges the session's completions that arrived before the pre-Open read.
@@ -177,13 +182,15 @@ extension Companion {
             }
             let own = inventories.first { $0.sourceScope == identity.sourceScope }?.sessions
                 .filter { $0.kind == .interactive && $0.sessionID == identity.session } ?? []
-            let result: TerminalOpenResult?
+            // An incomplete inventory, or the session not listed exactly once, cannot name the
+            // session's terminal: the card says so instead of the click doing nothing (#411).
+            let result: TerminalOpenResult
             if !complete {
-                result = nil
+                result = .unavailable(.appNotIdentified)
             } else if own.isEmpty, !live.contains(identity.session) {
                 result = .unavailable(.sessionEnded)
             } else if own.count != 1 || live.filter({ $0 == identity.session }).count != 1 {
-                result = nil
+                result = .unavailable(.appNotIdentified)
             } else {
                 // Ghostty off is never scanned: the session's own registry process names its app.
                 let pid = own[0].pid
@@ -204,29 +211,46 @@ extension Companion {
                     }
                 }
             }
-            if let result { recordOpen(result, claude: identity) }
+            recordOpen(result, claude: identity)
             switch result {
-            case .opened?, .fellBack?:
+            case .opened, .fellBack:
                 // ADR 0015: an Open on an actionable request hands it back with no decision, fallback
                 // included. Only the verified Open acknowledges.
-                if let approval,
-                   let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: { $0.id == approval.id }) {
-                    handBackClaudeApproval(current)
+                handBackClaudeRequest(request, after: result)
+                let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }
+                    .map(TerminalCompletionCandidate.init)
+                for id in TerminalVisitAcknowledgment.afterOpen(outcomes, result: result, preOpenAt: preOpenAt) {
+                    agentQueue.dismiss(.outcome(id))
                 }
-                if let result {
-                    let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }
-                        .map(TerminalCompletionCandidate.init)
-                    for id in TerminalVisitAcknowledgment.afterOpen(outcomes, result: result, preOpenAt: preOpenAt) {
-                        agentQueue.dismiss(.outcome(id))
-                    }
-                    saveCompletions()
-                }
-            case .unavailable?, nil:
+                saveCompletions()
+            case .unavailable:
                 break
             }
             endVisitIntervalsAfterOpen()
             openingTask = false
             refresh()
+        }
+    }
+
+    /// After a terminal route's Open: hands the request back only when the Open reached the session or
+    /// raised its app (`TerminalOpenResult.handsBackRequest`); an unavailable Open hands nothing back.
+    func handBackClaudeRequest(_ request: ClaudeOpenRequest?, after result: TerminalOpenResult) {
+        guard result.handsBackRequest else { return }
+        handBackClaudeRequest(request)
+    }
+
+    /// Hands the Open's request back: an approval still actionable in the queue gets no decision; a
+    /// question still live and answerable gets no answer (`handBackClaudeQuestion`).
+    func handBackClaudeRequest(_ request: ClaudeOpenRequest?) {
+        switch request {
+        case .approval(let approval)?:
+            if let current = orderedAgentAttentionItems.compactMap(\.approval).first(where: { $0.id == approval.id }) {
+                handBackClaudeApproval(current)
+            }
+        case .question(let question)?:
+            handBackClaudeQuestion(question)
+        case nil:
+            break
         }
     }
 
@@ -255,9 +279,20 @@ extension Companion {
                                             stillRunning: activated || TerminalApps.isRunning(host))
     }
 
+    /// Open on a Claude question card (#411): a live, answerable question is handed back to Claude
+    /// with no answer at the moment an approval would be (opened, fell back, or before an herdr
+    /// open), so Claude shows its own question. An unavailable Open hands nothing back.
+    func openClaudeQuestion(_ question: AgentQuestion) {
+        guard question.identity.session.source == .claude else {
+            openAgent(question.identity.session)
+            return
+        }
+        openClaude(question.identity.session, request: .question(question))
+    }
+
     func openAgentApproval(_ approval: AgentApproval) {
         if approval.identity.session.source == .claude {
-            openClaude(approval.identity.session, approval: approval)
+            openClaude(approval.identity.session, request: .approval(approval))
             return
         }
         guard approval.identity.session.source == .codex,
