@@ -190,6 +190,8 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     public var rowText: String? { action?.rowText ?? QuestionPrompt.display(prompt, limit: 160) }
     public var fullAction: String? { action?.fullText }
     public var fullPrompt: String? { prompt }
+    /// The latest start among the listed running subagents, nil when none is listed.
+    var latestSubagentStart: Double? { subagents.map(\.startedAt).max() }
 
     public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double, updatedAt: Double? = nil,
                 prompt: String? = nil, promptShortened: Bool = false, toolName: String? = nil,
@@ -496,12 +498,11 @@ public struct AgentAttentionQueue: Equatable, Sendable {
             inventoryRunning.removeValue(forKey: turn.session)
         case let .running(active):
             guard !resolved.contains(.running(active.id)) else { return }
-            if active.identity.session.source == .claude,
-               let endedAt = [endedTurns[active.id], outcomes[active.id]?.arrivedAt].compactMap({ $0 }).max(),
-               active.updatedAt <= endedAt {
+            if let endedAt = claudeTurnEnd(active.id), active.updatedAt <= endedAt {
                 applyAfterTurnEnded(active, endedAt: endedAt)
                 return
             }
+            // Other sources: evidence no newer than the turn's end never reopens it.
             if let endedAt = endedTurns[active.id], active.updatedAt <= endedAt { return }
             if active.identity.session.source == .claude, acknowledged.contains(active.id),
                endedTurns[active.id] != nil {
@@ -551,11 +552,19 @@ public struct AgentAttentionQueue: Equatable, Sendable {
     /// its result card, acknowledgment and ended time stay, so no new result follows. Once no subagent is
     /// listed (its own stop, session end, or `ClaudeObservationReader.maximumSubagentAge`), that row ends.
     /// A removed row stays removed until a subagent starts after the ones it listed.
+    /// When the queue ended this Claude turn (its result's arrival, or `endedTurns`), nil for another
+    /// source or a turn still open here. A Claude running observation no newer than it goes to
+    /// `applyAfterTurnEnded`; only a newer one reopens the turn.
+    private func claudeTurnEnd(_ id: AgentTurnIdentity) -> Double? {
+        guard id.session.source == .claude else { return nil }
+        return [endedTurns[id], outcomes[id]?.arrivedAt].compactMap { $0 }.max()
+    }
+
     private mutating func applyAfterTurnEnded(_ active: AgentRunning, endedAt: Double) {
         let session = active.identity.session
         let current = running[session]
         let currentIsAfterEnd = current.map { $0.id == active.id && $0.updatedAt <= endedAt } ?? false
-        guard let latestStart = active.subagents.map(\.startedAt).max(),
+        guard let latestStart = active.latestSubagentStart,
               latestStart > (removedSubagentRows[active.id] ?? -.infinity) else {
             if currentIsAfterEnd { running.removeValue(forKey: session) }
             return
@@ -811,8 +820,8 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         guard session.source == .claude else { return }
         if let active = running[session] {
             endedTurns[active.id] = max(endedTurns[active.id] ?? -.infinity, active.updatedAt)
-            if let latestStart = active.subagents.map(\.startedAt).max() {
-                removedSubagentRows[active.id] = max(removedSubagentRows[active.id] ?? latestStart, latestStart)
+            if let latestStart = active.latestSubagentStart {
+                removedSubagentRows[active.id] = max(removedSubagentRows[active.id] ?? -.infinity, latestStart)
             }
             running.removeValue(forKey: session)
         }

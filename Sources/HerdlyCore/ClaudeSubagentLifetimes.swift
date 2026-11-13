@@ -91,10 +91,10 @@ struct ClaudeSubagentLifetimes {
         let submit = start.prompt.flatMap { prompt in
             submits[session]?.filter { $0.at >= start.at && $0.prompt != prompt }.map(\.at).max()
         }
-        let startedAfterEnd = start.prompt.flatMap { prompt in
+        let endedBeforeStartAt = start.prompt.flatMap { prompt in
             promptEnds[session]?[prompt]?.contains { $0 < start.at } == true ? start.at : nil
         }
-        return [stop, submit, startedAfterEnd].compactMap { $0 }.max()
+        return [stop, submit, endedBeforeStartAt].compactMap { $0 }.max()
     }
 
     /// When the open run holding the call `agent` made at `at` reaches its age bound; nil when no open
