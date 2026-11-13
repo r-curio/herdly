@@ -361,3 +361,65 @@ private func foot(_ card: SpotlightCardFocus, count: Int = 1, last: Bool = true,
     #expect(SpotlightCardKeys.action(for: .digit(0), card: .keyboard(.readOnly)) == .none)
     #expect(SpotlightCardKeys.action(for: .digit(1), card: .withoutKeyboard(answerable: false)) == .none)
 }
+
+// MARK: - A clicked card with the keyboard takes the same keys (#438, Paper K "C · Answer keys")
+
+private func clicked(keyboard: Bool, answerable: Bool) -> SpotlightCardFocus {
+    SpotlightCardFocus(surface: .clicked(hasKeyboard: keyboard), answerable: answerable)
+}
+
+@Test func aClickedCardWithTheKeyboardTakesTheSpotlightCardsKeys() {
+    let card = clicked(keyboard: true, answerable: true)
+    #expect(card == .keyboard(.answering))
+    #expect(SpotlightCardKeys.action(for: .digit(2), card: card) == .select(2))
+    #expect(SpotlightCardKeys.action(for: .returnKey, card: card) == .primary)
+    #expect(SpotlightCardKeys.action(for: .open, card: card) == .open)
+    #expect(SpotlightCardKeys.action(for: .dismiss, card: card) == .dismiss)
+    #expect(SpotlightCardKeys.action(for: .previousQuestion, card: card) == .step(-1))
+    #expect(SpotlightCardKeys.action(for: .nextQuestion, card: card) == .step(1))
+}
+
+@Test func onAClickedCardOnlyReturnReachesSendAndOnlyWhileHerdlyCanAnswerIt() {
+    for keyboard in [true, false] {
+        for answerable in [true, false] {
+            for key in allKeys where SpotlightCardKeys.action(for: key, card: clicked(keyboard: keyboard, answerable: answerable)) == .primary {
+                #expect(key == .returnKey && answerable)
+            }
+        }
+    }
+}
+
+@Test func aClickedCardHerdlyCannotAnswerSwallowsDigitsAndReturnOpens() {
+    // The Codex app without the daemon, or a Claude question whose countdown ended: the card is left
+    // to read, with Open and Dismiss as its buttons. Return opens only where the card shows an Open;
+    // the view's Open (`questionOpen`) does nothing where it shows none.
+    let card = clicked(keyboard: true, answerable: false)
+    #expect(card == .keyboard(.readOnly))
+    #expect((1...9).allSatisfy { SpotlightCardKeys.action(for: .digit($0), card: card) == .consume })
+    #expect(SpotlightCardKeys.action(for: .returnKey, card: card) == .open)
+    #expect(SpotlightCardKeys.action(for: .open, card: card) == .open)
+    #expect(SpotlightCardKeys.action(for: .dismiss, card: card) == .dismiss)
+}
+
+@Test func aClickedCardWithoutTheKeyboardKeepsDigitsAndReturnOnly() {
+    #expect(clicked(keyboard: false, answerable: true) == .withoutKeyboard(answerable: true))
+    #expect(clicked(keyboard: false, answerable: false) == .withoutKeyboard(answerable: false))
+}
+
+@Test func aSpotlightCardReadsItsTrackedKeyboardPhase() {
+    // The spotlight keeps #428's own phases (hand-back, sent), which a clicked card never has: Send
+    // returns a clicked card to the queue at once (D10).
+    #expect(SpotlightCardFocus(surface: .spotlight(keyboard: .handedBack(askedAt: 3)), answerable: false)
+            == .keyboard(.handedBack(askedAt: 3)))
+    #expect(SpotlightCardFocus(surface: .spotlight(keyboard: nil), answerable: true) == .withoutKeyboard(answerable: true))
+}
+
+@Test func focusOnAClickedCardPausesNoCountdown() {
+    // ADR 0020 is unchanged by #438: holds read the pointer, and keyboard focus is not interaction.
+    var holds = ApprovalHoverHold<String>()
+    holds.update(hovering: NotchInteraction.isActive(pointerInside: false, keyboardFocus: true),
+                 live: [.init(key: "question", expiresAt: 130)], now: 110)
+    holds.update(hovering: NotchInteraction.isActive(pointerInside: false, keyboardFocus: true),
+                 live: [.init(key: "question", expiresAt: 130)], now: 125)
+    #expect(holds.deadline(for: "question", expiresAt: 130) == 130)
+}
