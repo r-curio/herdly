@@ -132,6 +132,50 @@ enum NotchStyle {
     }
 }
 
+/// A redraw schedule for the quiet rule (#419): the moment the view first draws, each moment in
+/// `changes` (when a working row turns quiet) still ahead, and, with `every`, that interval once one of
+/// them has passed. Without a change ahead and nothing quiet it never fires again, so a working row
+/// costs no timer until it can turn quiet.
+struct QuietSchedule: TimelineSchedule {
+    let changes: [Date]
+    var every: TimeInterval?
+
+    init(changes: [Double], every: TimeInterval? = nil) {
+        self.changes = changes.filter(\.isFinite).map { Date(timeIntervalSince1970: $0) }
+        self.every = every
+    }
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        var last: Date?
+        return AnyIterator {
+            guard let previous = last else {
+                last = startDate
+                return startDate
+            }
+            var candidates = changes.filter { $0 > previous }
+            if let every, changes.contains(where: { $0 <= previous }) { candidates.append(previous.addingTimeInterval(every)) }
+            guard let next = candidates.min() else { return nil }
+            last = next
+            return next
+        }
+    }
+
+    /// The time to read quiet at: the entry's date, or the current time when the view redraws for
+    /// another reason after its last entry, so a later redraw never reads an old moment.
+    static func now(_ entry: Date) -> Double {
+        max(entry, Date()).timeIntervalSince1970
+    }
+}
+
+/// Replaces an element's spoken label when `text` is set; otherwise leaves it as it is.
+private struct SpokenLabel: ViewModifier {
+    let text: String?
+
+    func body(content: Content) -> some View {
+        if let text { content.accessibilityLabel(text) } else { content }
+    }
+}
+
 /// The panel outline: a flat top that meets the menu bar, concave ears at both top corners so the
 /// body reads as one shape growing out of the housing, and deep rounded bottom corners.
 struct NotchShape: Shape {
@@ -1013,7 +1057,8 @@ struct ExceptionWord: View {
 }
 
 /// The place after a row's name as one line (`RowPlaceLine`, #418): dim "· ", a finished row's state
-/// words in their tone, then dim " · herdly#431" or the place. The state never truncates; the part
+/// words in their tone, then dim " · herdly#431" or the place; a quiet working row (#419) ends with
+/// dim " · " and "quiet" in amber. The state never truncates; the part
 /// after it takes what width is left and tail-truncates. A verdict change redraws the text in place
 /// with no motion of its own. Spoken through the row heading.
 struct RowPlaceLineText: View {
@@ -1031,6 +1076,12 @@ struct RowPlaceLineText: View {
             } else if let detail = line.detail {
                 Text("· \(detail)").foregroundStyle(NotchStyle.dim)
                     .lineLimit(1).truncationMode(.tail)
+            }
+            if line.quiet {
+                // #419: after the place, in amber; the place gives way first, the word never does.
+                let lead = line.label == nil && line.detail == nil ? "· " : " · "
+                Text("\(Text(lead).foregroundStyle(NotchStyle.dim))\(Text(RowPlaceLine.quietWord).foregroundStyle(NotchStyle.stateColor(RowPlaceLine.quietTone)))")
+                    .lineLimit(1).fixedSize()
             }
         }
         .font(NotchStyle.mono(11))
@@ -1442,10 +1493,14 @@ struct Notch: View {
         return names
     }
 
-    private var strip: AgentStripSummary {
+    private var strip: AgentStripSummary { strip(at: nil) }
+
+    /// The strip's summary; `now` marks which working sessions are quiet (#419), which only stops their
+    /// sprites. Nil reads none as quiet: the subject, counts and spoken label do not depend on it.
+    private func strip(at now: Double?) -> AgentStripSummary {
         AgentStripSummary.make(items: model.orderedAgentAttentionItems,
                                testPending: model.attention.pending && !model.desktopForeground,
-                               names: sessionNames)
+                               names: sessionNames, now: now)
     }
 
     /// The strip's center label, when the profile shows one and the layout has room for it.
@@ -2180,12 +2235,12 @@ struct Notch: View {
 
     /// Makes a working row's header line the click target that opens or closes it in place (#319).
     /// Like `cardOpener` it is left out of Tab order; the arrow selection and Return reach it.
-    private func runningOpener<Header: View>(_ item: AgentAttentionItem, open: Bool,
+    private func runningOpener<Header: View>(_ item: AgentAttentionItem, open: Bool, quiet: Bool,
                                              @ViewBuilder header: () -> Header) -> some View {
         Button { model.toggleRunningRow(item.id) } label: { header().contentShape(Rectangle()) }
             .buttonStyle(.plain)
             .focusable(false)
-            .accessibilityLabel("Open details: \(rowHeading(item))")
+            .accessibilityLabel("Open details: \(rowHeading(item, quiet: quiet))")
             .accessibilityValue(open ? "expanded" : "collapsed")
             .accessibilityHint(open ? "Hides this session's details. Escape also closes them."
                                     : "Shows what the session is doing, your last prompt, where it runs, and Open.")
@@ -2306,18 +2361,27 @@ struct Notch: View {
                 if let subagent = shownSubagent {
                     subagentLines(subagent, item: item, subject: subject)
                 } else {
-                    if let now = details.now {
-                        runningLine("now", now.text, tone: now.isUnknown ? NotchStyle.dim : NotchStyle.ink)
-                        if let full = now.full, let title = now.disclosureTitle {
-                            // D11: a shortened command stays marked and its full text is one click away.
-                            NotchDisclosure(title: title, subject: subject, expanded: disclosure("action:\(item.session.session)")) {
-                                fullText(full)
+                    // #419: the lines redraw when the row turns quiet, then every 30 s while it stays
+                    // quiet so the "quiet" line's minutes keep up; nothing ticks before then.
+                    TimelineView(QuietSchedule(changes: [item.quietAt].compactMap { $0 }, every: 30)) { context in
+                        VStack(alignment: .leading, spacing: 6) {
+                            if let now = details.now {
+                                runningLine("now", now.text, tone: now.isUnknown ? NotchStyle.dim : NotchStyle.ink)
+                                if let full = now.full, let title = now.disclosureTitle {
+                                    // D11: a shortened command stays marked and its full text is one click away.
+                                    NotchDisclosure(title: title, subject: subject, expanded: disclosure("action:\(item.session.session)")) {
+                                        fullText(full)
+                                    }
+                                    .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                                }
                             }
-                            .padding(.leading, Self.runningLabelWidth + Self.runningLabelGap)
+                            if let you = details.you { runningLine("you", you.text, tone: NotchStyle.text) }
+                            if let quiet = QuietLine.make(running, now: QuietSchedule.now(context.date)) {
+                                runningLine("quiet", quiet.text, tone: NotchStyle.text, spoken: "quiet, \(quiet.spoken)")
+                            }
+                            runningLine("where", details.place, tone: NotchStyle.text)
                         }
                     }
-                    if let you = details.you { runningLine("you", you.text, tone: NotchStyle.text) }
-                    runningLine("where", details.place, tone: NotchStyle.text)
                 }
                 if item.session.source == .codex, case let .unavailable(cause) = herdr {
                     herdrReasonLine(item, cause: cause)
@@ -2415,7 +2479,8 @@ struct Notch: View {
 
     /// One labelled detail line: an 11pt dim label in a 40pt column, then the 11pt mono value at a
     /// 16pt line height. Read by VoiceOver as one element, label first.
-    private func runningLine(_ label: String, _ value: String, tone: Color) -> some View {
+    /// `spoken` replaces what VoiceOver reads for the line, label included.
+    private func runningLine(_ label: String, _ value: String, tone: Color, spoken: String? = nil) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: Self.runningLabelGap) {
             Text(label).foregroundStyle(NotchStyle.dim).frame(width: Self.runningLabelWidth, alignment: .leading)
             Text(value).foregroundStyle(tone).lineSpacing(3).textSelection(.enabled)
@@ -2424,6 +2489,7 @@ struct Notch: View {
         }
         .font(NotchStyle.mono(11))
         .accessibilityElement(children: .combine)
+        .modifier(SpokenLabel(text: spoken))
     }
 
     private func fullText(_ text: String) -> some View {
@@ -2944,8 +3010,12 @@ struct Notch: View {
                             }
                         }
                     } else if runningRow {
-                        runningOpener(item, open: runningOpen) {
-                            headerLine(item, working: working, countdown: nil)
+                        // #419: redrawn once more when the row turns quiet, with no event; nothing ticks before.
+                        TimelineView(QuietSchedule(changes: [item.quietAt].compactMap { $0 })) { context in
+                            let quiet = item.isQuiet(at: QuietSchedule.now(context.date))
+                            runningOpener(item, open: runningOpen, quiet: quiet) {
+                                headerLine(item, working: working && !quiet, countdown: nil, quiet: quiet)
+                            }
                         }
                     } else if resultRow, let reading = sessionReading {
                         // The control sits outside the row's own button, so the two never nest. It
@@ -3155,11 +3225,11 @@ struct Notch: View {
     /// The spoken heading (`QueueRowPresentation.spokenHeading`): name, place (a finished row's work
     /// status in words first, #418), any row note, the full state the visual word shortens, and a live
     /// approval's seconds left.
-    private func rowHeading(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil) -> String {
+    private func rowHeading(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil, quiet: Bool = false) -> String {
         let note = rowNote(item)
         return QueueRowPresentation.spokenHeading(item, name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
-                                                  place: model.rowPlaceLine(for: item, note: note)?.spoken, note: note,
-                                                  countdown: countdown)
+                                                  place: model.rowPlaceLine(for: item, note: note, quiet: quiet)?.spoken,
+                                                  note: note, countdown: countdown)
     }
 
     /// A non-question row's heading line (D17): sprite, name, dim "· place" (it truncates first),
@@ -3171,11 +3241,11 @@ struct Notch: View {
     /// (`target`, #322) reads "Unreachable" in the word slot.
     private func headerLine(_ item: AgentAttentionItem, working: Bool, countdown: ApprovalCountdown?,
                             card: ApprovalCardReading? = nil, target: ResultRowTarget = .reachable,
-                            showsAge: Bool = true) -> some View {
+                            showsAge: Bool = true, quiet: Bool = false) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
                 spriteSlot(working: working, color: spriteColor(for: item.session))
-                rowHeader(item, countdown: countdown)
+                rowHeader(item, countdown: countdown, quiet: quiet)
             }
             if let countdown {
                 SecondsLeftPill(countdown: countdown)
@@ -3207,12 +3277,12 @@ struct Notch: View {
     /// and any word after it stay whole. A finished row's work status (#418) leads the place in its
     /// tone and never truncates; the pull request or place after it gives way. Presentation only;
     /// nothing here selects a target.
-    private func rowHeader(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil) -> some View {
+    private func rowHeader(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil, quiet: Bool = false) -> some View {
         let note = rowNote(item)
         return RowHeaderNamePlace(name: QueueRowPresentation.sessionName(item.session, names: sessionNames), note: note,
-                                  place: model.rowPlaceLine(for: item, note: note), help: model.rowDirectory(for: item))
+                                  place: model.rowPlaceLine(for: item, note: note, quiet: quiet), help: model.rowDirectory(for: item))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(rowHeading(item, countdown: countdown))
+        .accessibilityLabel(rowHeading(item, countdown: countdown, quiet: quiet))
         .accessibilityAddTraits(.isHeader)
     }
 
@@ -3441,7 +3511,6 @@ struct Notch: View {
     }
 
     var body: some View {
-        let summary = strip
         VStack(alignment: .leading, spacing: 0) {
             Button(action: model.expand) {
                 // The sprites and the to-check count sit together in the wing left of the housing
@@ -3453,20 +3522,25 @@ struct Notch: View {
                 // open queue and the accessibility label. The 8pt content inset on each side comes
                 // out of the wings. What each wing shows follows the active display profile.
                 let layout = model.stripLayout
-                let wing = StripWing.make(summary: summary, leftWing: model.appearance.leftWing, expanded: model.expanded)
                 HStack(spacing: 0) {
-                    HStack(spacing: 6) {
-                        ForEach(wing.sprites, id: \.identity) { sprite in
-                            switch sprite {
-                            case .unlit:
-                                Sprite(kind: model.appearance.sprite, working: false, reduceMotion: model.reduceMotion, unlit: true)
-                            case .session(let session):
-                                Sprite(kind: model.appearance.sprite, working: session.working, reduceMotion: model.reduceMotion,
-                                       color: session.color)
+                    // #419: a quiet session's sprite stands still, so the wing redraws once more at each
+                    // moment a working row turns quiet; nothing ticks for it in between.
+                    TimelineView(QuietSchedule(changes: model.orderedAgentAttentionItems.compactMap(\.quietAt))) { context in
+                        let wing = StripWing.make(summary: strip(at: QuietSchedule.now(context.date)),
+                                                  leftWing: model.appearance.leftWing, expanded: model.expanded)
+                        HStack(spacing: 6) {
+                            ForEach(wing.sprites, id: \.identity) { sprite in
+                                switch sprite {
+                                case .unlit:
+                                    Sprite(kind: model.appearance.sprite, working: false, reduceMotion: model.reduceMotion, unlit: true)
+                                case .session(let session):
+                                    Sprite(kind: model.appearance.sprite, working: session.stepping, reduceMotion: model.reduceMotion,
+                                           color: session.color)
+                                }
                             }
+                            if let badge = wing.badge { Badge(badge) }
+                            Spacer(minLength: 0)
                         }
-                        if let badge = wing.badge { Badge(badge) }
-                        Spacer(minLength: 0)
                     }
                     .padding(.leading, 4)
                     .frame(width: max(0, layout.leading - 8))

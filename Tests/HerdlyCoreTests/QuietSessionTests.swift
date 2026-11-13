@@ -1,5 +1,7 @@
 import Foundation
+import SwiftUI
 import Testing
+@testable import HerdlyApp
 @testable import HerdlyCore
 
 private let claude = AgentSessionIdentity(source: .claude, sourceScope: "/Users/u/.claude", session: "quiet-1", surface: .cli)
@@ -141,15 +143,18 @@ private func runningRow(_ queue: AgentAttentionQueue, _ session: AgentSessionIde
 }
 
 @Test func theNotchRedrawsOnlyAtTheMomentsARowBecomesQuiet() {
-    let rows = [
-        AgentAttentionItem.running(working(activityAt: t0)),
-        .running(working(codex, activityAt: t0 + 120)),
-        .running(working(AgentSessionIdentity(source: .claude, sourceScope: "/Users/u/.claude", session: "scan-only",
-                                              surface: .cli), activityAt: nil))
-    ]
-    #expect(rows.quietChanges(after: t0) == [t0 + 600, t0 + 720])
-    #expect(rows.quietChanges(after: t0 + 600) == [t0 + 720])
-    #expect(rows.quietChanges(after: t0 + 720).isEmpty)
+    let start = Date(timeIntervalSince1970: t0)
+    func dates(_ schedule: QuietSchedule, _ count: Int = 5) -> [Double] {
+        Array(schedule.entries(from: start, mode: .normal).prefix(count)).map(\.timeIntervalSince1970)
+    }
+    // The first draw, then each change still ahead; a change already passed, or no change, adds nothing.
+    #expect(dates(QuietSchedule(changes: [t0 + 720, t0 - 60, t0 + 600])) == [t0, t0 + 600, t0 + 720])
+    #expect(dates(QuietSchedule(changes: [])) == [t0])
+    #expect(dates(QuietSchedule(changes: [t0 - 60])) == [t0])
+    // The opened row's line: nothing until the row turns quiet, then every 30 s.
+    #expect(dates(QuietSchedule(changes: [t0 + 600], every: 30)) == [t0, t0 + 600, t0 + 630, t0 + 660, t0 + 690])
+    #expect(dates(QuietSchedule(changes: [t0 - 60], every: 30), 3) == [t0, t0 + 30, t0 + 60])
+    #expect(dates(QuietSchedule(changes: [], every: 30)) == [t0])
 }
 
 // MARK: The opened row's line

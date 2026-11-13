@@ -50,15 +50,6 @@ extension AgentAttentionItem {
     }
 }
 
-extension Array where Element == AgentAttentionItem {
-    /// The moments after `now` at which one of these rows becomes quiet, earliest first: when the
-    /// notch must redraw without a new event. Rows already quiet, and rows that cannot become quiet,
-    /// add none.
-    public func quietChanges(after now: Double) -> [Double] {
-        compactMap(\.quietAt).filter { $0 > now }.sorted()
-    }
-}
-
 /// The opened quiet row's "quiet" line (#419, Paper "Q3 · Opened quiet row"): how long the session has
 /// been quiet, in the rows' age format. While the "now" line shows a shell command whose start Herdly
 /// recorded, it counts from that start ("14m since this command started"); otherwise from the latest
