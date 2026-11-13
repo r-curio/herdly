@@ -48,6 +48,10 @@ Claude's own five-hour or seven-day subscription window from a status-line paylo
 **Discovered session**:
 A Codex session the companion shows as working before it has observed any of that session's own activity, because Codex's own record shows an unfinished turn and its surface is still alive. Discovery adds only a working indication; it never creates a completion, request, question, or sound.
 
+**Quiet session**:
+A working session with no activity for 10 minutes (#419): its row reads "quiet" after its place and its sprite stands still until the next activity. Activity is the source's own prompt and tool events (and a listed subagent's start and tool events), never a scan or a status refresh, so a session known only from a scan is never quiet. It is presentation only: a quiet session still counts as working, keeps its place in the queue, and becoming quiet sounds, spotlights and acknowledges nothing. Not the same as Remove's 30-minute "looks stuck" rule.
+_Avoid_: Stalled, stuck, idle
+
 **Subagent activity**:
 One subagent a working session started and has not finished, as its working row lists it: its name (its type, numbered "Explore 2" in start order when two would read the same), when it started, and its latest action. It is presentation only: it never orders the queue, counts as work, or acknowledges anything, and a subagent's action is never the session's own "now". One exception (#404): a Claude session whose turn has ended keeps its working row while it lists a running subagent, so that session counts as working rather than to check; this holds even when the subagent starts after Herdly finished the turn (#426), without reopening that turn's result or acknowledgment. Claude reports no task for a subagent, so a Claude subagent has no "asked" text. A Codex subagent is read from its own rollout and named by its nickname; its "asked" text is its first message when readable. The opened working row's switcher shows one subagent's lines when the user picks it; picking one never changes what Open targets, which is always the session.
 _Avoid_: Child session, worker
