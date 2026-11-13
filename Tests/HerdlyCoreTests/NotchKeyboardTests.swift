@@ -76,6 +76,16 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
     #expect(handBack.handBack(isRunning: { _ in true }, frontmost: "Ghostty", herdly: "Herdly") == .reactivateFrontmost)
 }
 
+@Test func theFootLineNamesTheSameAppTheHandBackReturnsToWithoutSpendingIt() {
+    var handBack = NotchKeyboardReturn<String>()
+    handBack.enter(frontmost: "Ghostty")
+    #expect(handBack.target(isRunning: { _ in true }, frontmost: "Ghostty", herdly: "Herdly") == .activate("Ghostty"))
+    #expect(handBack.target(isRunning: { _ in true }, frontmost: "Terminal", herdly: "Herdly") == .reactivateFrontmost)
+    #expect(handBack.target(isRunning: { _ in false }, frontmost: nil, herdly: "Herdly") == .leaveToSystem)
+    // Reading it spends nothing: the hand-back still returns to Ghostty.
+    #expect(handBack.handBack(isRunning: { _ in true }, frontmost: "Ghostty", herdly: "Herdly") == .activate("Ghostty"))
+}
+
 @Test func theHotkeyEntersWhenTheKeyboardIsElsewhereAndHandsBackWhenItIsInTheNotch() {
     #expect(NotchKeyboardEntry.press(keyboardInNotch: false) == .enter)
     #expect(NotchKeyboardEntry.press(keyboardInNotch: true) == .handBack)
@@ -117,14 +127,6 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
     controller.openQueue()
     do { let result = controller.update(interacting: true, keyboardFocus: true, now: 1); #expect(result == .queue) }
     do { let result = controller.update(interacting: false, keyboardFocus: true, now: 2); #expect(result == .collapsed) }
-}
-
-@Test func keyboardFocusDoesNotHoldASpotlightCardPastItsOpenTime() {
-    // Holding a focused spotlight is #428's rule, not this one.
-    var controller = NotchPresentationController()
-    controller.present(questionID, now: 0, duration: .threeSeconds)
-    do { let result = controller.update(interacting: false, keyboardFocus: true, now: 1, queued: [questionID]); #expect(result == .agentSpotlight(questionID)) }
-    do { let result = controller.update(interacting: false, keyboardFocus: true, now: 4, queued: [questionID]); #expect(result == .collapsed) }
 }
 
 @Test func aFreshCardDoesNotReplaceTheHotkeysQueue() {

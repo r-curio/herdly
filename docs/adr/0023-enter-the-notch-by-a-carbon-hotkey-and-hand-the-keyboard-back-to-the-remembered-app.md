@@ -11,7 +11,7 @@ Accepted on 2026-11-13 (#427). Before this, the only way to give the notch panel
   - nothing, when it has quit, so macOS chooses; Herdly never activates a terminal it guessed;
   - nothing, when a third app came forward meanwhile (for example an Open from the notch), so that app keeps the keyboard;
   - nothing later, once the panel lost key status to another app, because the remembered app is forgotten then.
-- **Hold and placement.** The queue the hotkey opened stays open while it holds the keyboard and does not move displays. Focus from a click still holds nothing (#376), and keyboard focus still pauses no countdown (ADR 0020).
+- **Hold and placement.** The queue the hotkey opened stays open while it holds the keyboard and does not move displays. Focus from a click still holds nothing (#376), and keyboard focus still pauses no countdown (ADR 0020). Amended for spotlight cards on 2026-11-13 (#428), below.
 
 ## Considered options
 
@@ -25,3 +25,26 @@ Accepted on 2026-11-13 (#427). Before this, the only way to give the notch panel
 - ⌃⌥Space from Ghostty mid-line, then again, with the next keystroke landing at the same cursor.
 - A shortcut held by another app reported as taken in Settings.
 - A shortcut claimed through System Settings, which Carbon cannot see; it may register without error and never fire (recorded under Boundaries in docs/notch-placement.md).
+
+## Amendment 2026-11-13: a focused spotlight card is held (#428)
+
+Agreed with the user on 2026-11-13 (Paper L "Spotlight question by keyboard", frames 1–8). #427 left a spotlight card that had the keyboard to close at its card-open time; a user picking an answer could lose the card mid-answer.
+
+- **Hold.** A spotlight card holds open while the panel has deliberate keyboard focus, from the hotkey or a click, however long the user takes, until it hands back, as hover does: `NotchPresentationController.update(keyboardFocus:)` treats focus like interaction for the spotlight only, and its card-open time starts over once focus leaves. A clicked queue still folds when the pointer leaves (#376 is narrowed only for spotlight cards), and `NotchInteraction.isActive` is unchanged, so placement and every other rule read focus as before.
+- **Countdown.** Focus pauses nothing. Approval and Claude question deadlines still read the pointer only (ADR 0020 unchanged). When a Claude question's countdown ends with its card focused, the card hands back with no answer (`SpotlightKeyboardCard`) and the keyboard hold ends (`update(keyboardHoldEnded:)`): from then on the card follows its normal spotlight open time, as if focus had just left. While it is still visible and focused, its digits stay inert and Return opens Claude; when it folds, the keyboard goes back through `Companion.handBackKeyboard()`. A half-made selection is never sent.
+- **Wait.** While a spotlight card has the keyboard, `acceptsAgentSpotlight(keyboardFocus:)` refuses a fresh card. A new approval or question waits behind it, named in one line (`SpotlightKeyboardWait`), and takes the spotlight after Send or Escape. Its own deadline keeps running.
+- **Keys.** One table, `SpotlightCardKeys`, maps every key for a question card with or without the keyboard (`SpotlightCardFocus`): only Return on a card Herdly can answer reaches its Next or Send, and only while enabled; O, X and ← → act as Open, Dismiss and ‹ › only on a card that has the keyboard, and O opens only where the card shows Open. The hotkey makes the panel itself first responder, so a digit selects rather than typing into "Or type an answer". Keys still reach the panel only once it is key, so typing in another app never reaches the card.
+- **Sent.** A send the route records (`RowNote.sending` or `.awaitingCodex` from the user's own action) shows "Sent to <agent>: <n> · <label>" for one second (`SpotlightKeyboardCard.sentHold`), then the panel folds through `Companion.handBackKeyboard()`. The card and its line stay for the whole second even if the question leaves the queue meanwhile (`keepsSentCard`). The timer only folds; nothing is sent on a timer.
+- **Return target and VoiceOver.** The foot line names the app `NotchKeyboardReturn.target` would return to, the same decision `handBack` spends, so the two cannot differ. VoiceOver announces the question on screen whenever a card takes the keyboard, by the hotkey or a click.
+
+### Considered options
+
+- **Hold only for hotkey focus, not a click.** Rejected by the user: a click gives the same keyboard, and a card that folds under a user who clicked into it to answer is the bug #428 fixes.
+- **Pause the Claude countdown while focused.** Rejected: ADR 0020 lets only the pointer pause a deadline, never past 2 minutes; a keyboard hold with no bound would let a forgotten card stall Claude.
+- **Let an arrival replace the focused card.** Rejected: the user's next digit would land on a card they had not read.
+
+### Not yet shown live
+
+- Ghostty frontmost, a Claude question arrives, then ⌃⌥Space, 2, Return: option 2 sent, the panel folds within about a second, and the next keystroke lands in Ghostty.
+- Digits and Return typed in Ghostty before the hotkey reach Ghostty only.
+- A countdown ending mid-pick, and an arrival waiting behind a focused card, on the running app.
