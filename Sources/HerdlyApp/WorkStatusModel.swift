@@ -104,7 +104,7 @@ final class WorkStatusModel: ObservableObject {
             guard item.kind != .outcome, item.kind != .earlierOutcome, let folder = directory(item) else { return nil }
             return WorkPresence(session: item.session, turn: item.turn, directory: folder)
         }
-        memory.observe(sightings, present: present)
+        memory.observe(sightings, present: present, at: now)
         let finished = items.compactMap { item -> AgentTurnIdentity? in
             guard item.kind == .outcome || item.kind == .earlierOutcome else { return nil }
             return item.outcome?.identity

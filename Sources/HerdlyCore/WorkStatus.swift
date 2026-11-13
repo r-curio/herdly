@@ -105,6 +105,11 @@ public struct WorkPresence: Equatable, Sendable {
         self.directory = directory
     }
 
+    /// A running turn's sighting as a presence in its folder.
+    public init(_ sighting: WorkBranchSighting) {
+        self.init(session: sighting.turn.session, turn: sighting.turn.turn, directory: sighting.directory)
+    }
+
     /// The turn this row is about, when it names one.
     public var turnIdentity: AgentTurnIdentity? {
         turn.map { AgentTurnIdentity(session: session, turn: $0) }
@@ -145,10 +150,10 @@ public struct WorkBranchMemory: Equatable, Sendable {
 
     public init() {}
 
-    /// Records one scan's sightings. A different live session seen in the same folder, or one inside
-    /// the other, in the same scan marks the turn shared, for good. `present` holds every live session
-    /// on that scan (running, waiting, approval, question or handed-back request).
-    public mutating func observe(_ sightings: [WorkBranchSighting], present: [WorkPresence] = []) {
+    /// Records one scan's sightings, made at `now`. A different live session seen in the same folder, or
+    /// one inside the other, in the same scan marks the turn shared, for good. `present` holds every live
+    /// session on that scan (running, waiting, approval, question or handed-back request).
+    public mutating func observe(_ sightings: [WorkBranchSighting], present: [WorkPresence] = [], at now: Double) {
         for sighting in sightings {
             let directory = Self.normalized(sighting.directory)
             guard !directory.isEmpty else { continue }
@@ -159,9 +164,7 @@ public struct WorkBranchMemory: Equatable, Sendable {
             entry.startedAt = min(entry.startedAt, sighting.startedAt)
             entries[sighting.turn] = entry
         }
-        let everyone = present + sightings.map {
-            WorkPresence(session: $0.turn.session, turn: $0.turn.turn, directory: $0.directory)
-        }
+        let everyone = present + sightings.map(WorkPresence.init)
         // Both sides of an overlap are marked, whether or not that turn was seen running: a turn that
         // sat in an approval or question while another session worked in its folder is shared too.
         for member in everyone {
@@ -170,9 +173,10 @@ public struct WorkBranchMemory: Equatable, Sendable {
             }) else { continue }
             if entries[turn] == nil {
                 let directory = Self.normalized(member.directory)
-                // No HEAD yet: the turn reads unknown until a sighting, and ambiguous after one.
+                // No HEAD yet: the turn reads unknown until a sighting, and ambiguous after one. It dates
+                // from when it was first seen, so the cap evicts it by age like any other turn.
                 entries[turn] = Entry(directories: directory.isEmpty ? [] : [directory], heads: [],
-                                      startedAt: .infinity, shared: true, repository: .unread)
+                                      startedAt: now, shared: true, repository: .unread)
             }
             entries[turn]?.shared = true
         }

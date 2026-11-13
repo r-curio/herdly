@@ -234,7 +234,7 @@ private func sighting(_ turn: AgentTurnIdentity, _ directory: String = "/w/repo"
 
 @Test func theBranchSeenWhileTheTurnRanIsRemembered() {
     var memory = WorkBranchMemory()
-    memory.observe([sighting(turnA)])
+    memory.observe([sighting(turnA)], at: 1_000)
     memory.record(.gitHub("o/repo"), for: turnA)
     #expect(memory.branch(for: turnA) == feature)
     #expect(memory.branch(for: turnB) == .unknown)
@@ -244,40 +244,40 @@ private func sighting(_ turn: AgentTurnIdentity, _ directory: String = "/w/repo"
     var forward = WorkBranchMemory(), backward = WorkBranchMemory()
     let scans = [[sighting(turnA, at: 1_005)], [sighting(turnA, at: 1_000)], [sighting(turnA, at: 1_000)],
                  [sighting(turnA, "/w/repo/", nil, at: 1_010)]]
-    for scan in scans { forward.observe(scan) }
-    for scan in scans.reversed() { backward.observe(scan) }
+    for scan in scans { forward.observe(scan, at: 1_000) }
+    for scan in scans.reversed() { backward.observe(scan, at: 1_000) }
     #expect(forward == backward)
     #expect(forward.branch(for: turnA) == .branch(name: "feat/x", directory: "/w/repo", startedAt: 1_000, repository: nil))
 }
 
 @Test func aBranchChangedMidTurnHasNoVerdict() {
     var memory = WorkBranchMemory()
-    memory.observe([sighting(turnA)])
-    memory.observe([sighting(turnA, "/w/repo", .branch("main"))])
+    memory.observe([sighting(turnA)], at: 1_000)
+    memory.observe([sighting(turnA, "/w/repo", .branch("main"))], at: 1_000)
     #expect(memory.branch(for: turnA) == .ambiguous)
     var moved = WorkBranchMemory()
-    moved.observe([sighting(turnA)])
-    moved.observe([sighting(turnA, "/w/other")])
+    moved.observe([sighting(turnA)], at: 1_000)
+    moved.observe([sighting(turnA, "/w/other")], at: 1_000)
     #expect(moved.branch(for: turnA) == .ambiguous)
 }
 
 @Test func twoSessionsInOneFolderDuringTheTurnHaveNoVerdict() {
     var memory = WorkBranchMemory()
-    memory.observe([sighting(turnA)])
-    memory.observe([sighting(turnA), sighting(turnB, "/w/repo/Sources")])
-    memory.observe([sighting(turnA)])
+    memory.observe([sighting(turnA)], at: 1_000)
+    memory.observe([sighting(turnA), sighting(turnB, "/w/repo/Sources")], at: 1_000)
+    memory.observe([sighting(turnA)], at: 1_000)
     #expect(memory.branch(for: turnA) == .ambiguous)
     #expect(memory.branch(for: turnB) == .ambiguous)
     #expect(memory.unreadRepositories.isEmpty)
     // Two folders that only share a name prefix are not the same folder.
     var apart = WorkBranchMemory()
-    apart.observe([sighting(turnA), sighting(turnB, "/w/repo-two")])
+    apart.observe([sighting(turnA), sighting(turnB, "/w/repo-two")], at: 1_000)
     #expect(apart.branch(for: turnA) != .ambiguous)
 }
 
 @Test func oneSessionsNextTurnIsNotASecondSession() {
     var memory = WorkBranchMemory()
-    memory.observe([sighting(turnA), sighting(turnA2)])
+    memory.observe([sighting(turnA), sighting(turnA2)], at: 1_000)
     #expect(memory.branch(for: turnA) != .ambiguous)
 }
 
@@ -292,20 +292,20 @@ private func sighting(_ turn: AgentTurnIdentity, _ directory: String = "/w/repo"
 
 @Test func aDetachedHeadIsRememberedWithoutABranch() {
     var memory = WorkBranchMemory()
-    memory.observe([sighting(turnA, "/w/repo", .detached("a6b1eae"))])
+    memory.observe([sighting(turnA, "/w/repo", .detached("a6b1eae"))], at: 1_000)
     #expect(memory.branch(for: turnA) == .detached(directory: "/w/repo"))
     #expect(memory.unreadRepositories.isEmpty)
 }
 
 @Test func memoryKeepsOnlyRowsStillShownAndIsBounded() {
     var memory = WorkBranchMemory()
-    memory.observe([sighting(turnA), sighting(turnB, "/w/b")])
+    memory.observe([sighting(turnA), sighting(turnB, "/w/b")], at: 1_000)
     memory.retain([turnB])
     #expect(memory.branch(for: turnA) == .unknown)
     var many = WorkBranchMemory()
     many.observe((0..<(WorkBranchMemory.maximumTurns + 10)).map { index in
         sighting(AgentTurnIdentity(session: sessionA, turn: "t\(index)"), "/w/\(index)", at: Double(index))
-    })
+    }, at: 1_000)
     #expect(many.entries.count == WorkBranchMemory.maximumTurns)
     #expect(many.branch(for: AgentTurnIdentity(session: sessionA, turn: "t0")) == .unknown)
 }
@@ -341,7 +341,7 @@ private func sighting(_ turn: AgentTurnIdentity, _ directory: String = "/w/repo"
 private func memory(_ sightings: [WorkBranchSighting], repositories: [AgentTurnIdentity: WorkRepository] = [:])
     -> WorkBranchMemory {
     var memory = WorkBranchMemory()
-    memory.observe(sightings)
+    memory.observe(sightings, at: 1_000)
     for (turn, repository) in repositories { memory.record(repository, for: turn) }
     return memory
 }
@@ -380,7 +380,7 @@ private func memory(_ sightings: [WorkBranchSighting], repositories: [AgentTurnI
     let turns = (0..<10).map { AgentTurnIdentity(session: AgentSessionIdentity(source: .claude, sourceScope: "s",
                                                                                session: "s\($0)", surface: .cli), turn: "t") }
     var many = WorkBranchMemory()
-    many.observe(turns.enumerated().map { sighting($1, "/w/\($0)") })
+    many.observe(turns.enumerated().map { sighting($1, "/w/\($0)") }, at: 1_000)
     for turn in turns.prefix(8) { many.record(.notOnGitHub, for: turn) }
     let batch = WorkStatusBatch.plan(finished: Array(turns.prefix(8)), present: [], memory: many, readings: [:], now: 0)
     #expect(batch.repositories.count == 2)
@@ -712,38 +712,60 @@ private extension WorkStatusReader {
                                                             arguments: [], environment: [:], timeout: 1)) == .notLaunched)
 }
 
-/// Sleeps are 5 s, longer than any bound asserted here but far below other tests' 20 s subprocess
-/// deadlines, so a child that outlives a run can never stall them.
-/// Runs `body` as a shell script whose background child writes its pid to `child.pid` and keeps the
-/// command's stdout open; the child is killed afterwards so no orphan outlives the test.
-private func runHoldingStdout(_ body: String, timeout: Double) throws -> (result: WorkStatusCommandResult, seconds: Double) {
+// The commands' own sleeps are 5 s: longer than any bound asserted here. The lock holder sleeps 30 s so
+// only a kill can free its lock early.
+
+/// Runs `body` as a shell script after starting a descendant that keeps the command's stdout open and
+/// holds an exclusive lock on a file until it dies. Nothing is killed by pid afterwards: the runner's
+/// group kill is what ends the descendant, and `released` reports whether the lock came free, which
+/// only the descendant's death can cause (a lock cannot be confused with a reused pid).
+/// `held` says the descendant had taken its lock before the run returned, so `released` means something.
+private func runHoldingStdout(_ body: String, timeout: Double) throws
+    -> (result: WorkStatusCommandResult, seconds: Double, held: Bool, released: Bool) {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-work-status-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    let pidFile = folder.appendingPathComponent("child.pid")
-    defer {
-        if let text = try? String(contentsOf: pidFile, encoding: .utf8),
-           let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) { kill(pid, SIGKILL) }
-        try? FileManager.default.removeItem(at: folder)
-    }
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let lock = folder.appendingPathComponent("lock").path, marker = folder.appendingPathComponent("locked").path
+    let holder = #"use Fcntl ":flock"; open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die; "#
+        + #"open(my $m, ">", $ARGV[1]) or die; close $m; sleep 30"#
     let script = folder.appendingPathComponent("holds")
-    try Data("#!/bin/sh\nsleep 5 &\necho $! > '\(pidFile.path)'\n\(body)\n".utf8).write(to: script)
+    try Data("""
+    #!/bin/sh
+    /usr/bin/perl -e '\(holder)' '\(lock)' '\(marker)' &
+    while [ ! -f '\(marker)' ]; do sleep 0.05; done
+    \(body)
+
+    """.utf8).write(to: script)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
     let started = Date()
     let result = ProcessWorkStatusRunner().run(WorkStatusCommand(executable: script.path, arguments: [],
                                                                  environment: [:], timeout: timeout))
-    return (result, Date().timeIntervalSince(started))
+    let seconds = Date().timeIntervalSince(started)
+    let held = FileManager.default.fileExists(atPath: marker)
+    // The kernel frees the lock as the holder exits. The holder sleeps 30 s, so a release within the
+    // 10 s allowed here (generous for a loaded test machine) can only come from the group kill.
+    let descriptor = open(lock, O_RDWR)
+    defer { if descriptor >= 0 { close(descriptor) } }
+    var released = false
+    for _ in 0..<500 where descriptor >= 0 {
+        if flock(descriptor, LOCK_EX | LOCK_NB) == 0 { released = true; break }
+        usleep(20_000)
+    }
+    return (result, seconds, held, released)
 }
 
-@Test func aChildHoldingStdoutCannotKeepARunWaiting() throws {
+@Test func aChildHoldingStdoutCannotKeepARunWaitingAndDiesWithTheGroup() throws {
+    // Deadlines leave the descendant time to take its lock first, even on a loaded machine. The time
+    // bound only shows the run did not wait for the holder's 30 s sleep to end its output.
     // The command itself is still running at its deadline.
-    let slow = try runHoldingStdout("sleep 5", timeout: 0.3)
-    #expect(slow.result == .timedOut && slow.seconds < 3.5)
+    let slow = try runHoldingStdout("sleep 5", timeout: 3)
+    #expect(slow.held && slow.result == .timedOut && slow.seconds < 10 && slow.released)
     // It ignores SIGTERM, so SIGKILL ends it.
-    let stubborn = try runHoldingStdout("trap '' TERM\nwhile :; do sleep 1; done", timeout: 0.3)
-    #expect(stubborn.result == .timedOut && stubborn.seconds < 4.5)
-    // It exited, but its output never ended: incomplete, not success.
-    let exited = try runHoldingStdout("echo partial\nexit 0", timeout: 0.3)
-    #expect(exited.result == .timedOut && exited.seconds < 3.5)
+    let stubborn = try runHoldingStdout("trap '' TERM\nwhile :; do sleep 1; done", timeout: 3)
+    #expect(stubborn.held && stubborn.result == .timedOut && stubborn.seconds < 10 && stubborn.released)
+    // It exited, but its output never ended: incomplete, and the descendant is killed with the group.
+    let exited = try runHoldingStdout("echo partial\nexit 0", timeout: 4)
+    #expect(exited.held && exited.result == .timedOut && exited.seconds < 10 && exited.released)
 }
 
 // MARK: - Pending readings, live sessions in a folder and the card gate
@@ -783,10 +805,10 @@ private func runHoldingStdout(_ body: String, timeout: Double) throws -> (result
 
 @Test func aSessionWaitingOnAnApprovalInTheFolderMakesItShared() {
     var memory = WorkBranchMemory()
-    memory.observe([sighting(turnA)], present: [presence(sessionB, "t9", "/w/repo")])
+    memory.observe([sighting(turnA)], present: [presence(sessionB, "t9", "/w/repo")], at: 1_000)
     #expect(memory.branch(for: turnA) == .ambiguous)
     var alone = WorkBranchMemory()
-    alone.observe([sighting(turnA)], present: [presence(sessionA, "t1", "/w/repo"), presence(sessionB, nil, "/w/other")])
+    alone.observe([sighting(turnA)], present: [presence(sessionA, "t1", "/w/repo"), presence(sessionB, nil, "/w/other")], at: 1_000)
     #expect(alone.branch(for: turnA) != .ambiguous)
 }
 
@@ -864,19 +886,19 @@ private func item(approval session: AgentSessionIdentity, turn: String) -> Agent
 @Test func aSessionInAnApprovalForAnothersWholeRunIsSharedToo() {
     // A never shows a running row while B runs; both are marked.
     var memory = WorkBranchMemory()
-    memory.observe([sighting(turnB)], present: [presence(sessionA, "t1", "/w/repo")])
-    memory.observe([sighting(turnA)])
+    memory.observe([sighting(turnB)], present: [presence(sessionA, "t1", "/w/repo")], at: 1_000)
+    memory.observe([sighting(turnA)], at: 1_000)
     #expect(memory.branch(for: turnA) == .ambiguous)
     #expect(memory.branch(for: turnB) == .ambiguous)
     // The other way round.
     var reversed = WorkBranchMemory()
-    reversed.observe([sighting(turnA)], present: [presence(sessionB, "t1", "/w/repo")])
-    reversed.observe([sighting(turnB)])
+    reversed.observe([sighting(turnA)], present: [presence(sessionB, "t1", "/w/repo")], at: 1_000)
+    reversed.observe([sighting(turnB)], at: 1_000)
     #expect(reversed.branch(for: turnA) == .ambiguous)
     #expect(reversed.branch(for: turnB) == .ambiguous)
     // A presence alone remembers no branch.
     var waitingOnly = WorkBranchMemory()
-    waitingOnly.observe([], present: [presence(sessionA, "t1", "/w/repo"), presence(sessionB, "t1", "/w/repo")])
+    waitingOnly.observe([], present: [presence(sessionA, "t1", "/w/repo"), presence(sessionB, "t1", "/w/repo")], at: 1_000)
     #expect(waitingOnly.branch(for: turnA) == .unknown)
 }
 
@@ -922,4 +944,20 @@ private func item(approval session: AgentSessionIdentity, turn: String) -> Agent
     #expect(direct.memory.branch(for: turnA) == feature)
     await scan(direct, [item(finished: turnA)], now: 1_020)
     #expect(direct.verdict(for: turnA) == .checksFailing)
+}
+
+@Test func aTurnSeenOnlyWaitingIsEvictedByWhenItWasFirstSeen() {
+    var memory = WorkBranchMemory()
+    // Seen only in requests, sharing a folder, at time 1: the oldest turns remembered.
+    memory.observe([], present: [presence(sessionA, "t1", "/w/repo"), presence(sessionB, "t1", "/w/repo")], at: 1)
+    #expect(memory.entries[turnA]?.startedAt == 1)
+    memory.observe((0..<WorkBranchMemory.maximumTurns).map { index in
+        sighting(AgentTurnIdentity(session: sessionA, turn: "n\(index)"), "/w/n\(index)", at: 100 + Double(index))
+    }, at: 400)
+    #expect(memory.entries.count == WorkBranchMemory.maximumTurns)
+    #expect(memory.entries[turnA] == nil && memory.entries[turnB] == nil)
+}
+
+@Test func aSightingIsAPresenceInItsFolder() {
+    #expect(WorkPresence(sighting(turnA)) == presence(sessionA, "t1", "/w/repo"))
 }

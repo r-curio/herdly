@@ -217,10 +217,14 @@ struct ProcessWorkStatusRunner: WorkStatusCommandRunning {
             reader.stop()
             close(pipeEnds[0])
         }
-        switch AgentUpdateRunner.waitForExit(pid, until: Date().addingTimeInterval(command.timeout), reap: true) {
+        // The leader is never reaped before the last `killpg`: a zombie keeps its pid, and with it the
+        // group id, so a signal sent to that group cannot reach an unrelated group that reused the id.
+        // Every path below reaps it before returning.
+        defer { _ = AgentUpdateRunner.waitForExit(pid, until: .distantFuture, reap: true) }
+        switch AgentUpdateRunner.waitForExit(pid, until: Date().addingTimeInterval(command.timeout), reap: false) {
         case .exited(let status):
-            // A descendant may still hold stdout after the command exited: its output is incomplete,
-            // and the descendant is still in the group, so the group id is still its own to signal.
+            // A descendant may still hold stdout after the command exited: its output is incomplete, and
+            // the group, its id held by the unreaped leader, is ended.
             guard reader.waitForEnd(until: .now() + Self.grace) else {
                 killpg(pid, SIGKILL)
                 return .timedOut
@@ -230,14 +234,13 @@ struct ProcessWorkStatusRunner: WorkStatusCommandRunning {
             guard bytes.count <= Self.maximumOutput else { return .tooLarge }
             return .succeeded(bytes)
         case .lost:
+            // Waiting failed (ECHILD), so how it ended cannot be known. Not reachable in a test without a
+            // second reaper of Herdly's children, which this runner never has.
             return .exitUnknown
         case .running:
-            // The leader is not reaped until its group has had SIGKILL, so its pid, and with it the
-            // group id, cannot be reused by an unrelated group while these are sent.
             killpg(pid, SIGTERM)
             _ = AgentUpdateRunner.waitForExit(pid, until: Date().addingTimeInterval(Self.grace), reap: false)
             killpg(pid, SIGKILL)
-            _ = AgentUpdateRunner.waitForExit(pid, until: .distantFuture, reap: true)
             return .timedOut
         }
     }
