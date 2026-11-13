@@ -113,6 +113,73 @@ public enum SpotlightCardKeys {
     }
 }
 
+/// A key pressed while an approval card is on screen (#439, Paper K "B · Approval keys"). The panel
+/// only receives keys once the hotkey or a click made it key, so a key typed in another app never
+/// becomes one of these. The panel hands an approval card no other key: digits, other letters and
+/// bare Delete go on to macOS and never reach the table.
+public enum ApprovalCardKey: Equatable, Sendable, CaseIterable {
+    /// ⌘⏎ (Return or keypad Enter with Command only): the card's Approve.
+    case commandReturn
+    /// ⌘⌫ (Delete with Command only): the card's Deny.
+    case commandDelete
+    /// Return or keypad Enter with no modifier.
+    case returnKey
+    /// O with no modifier: the card's Open.
+    case open
+}
+
+/// What one key does on an approval card. Only `approve` and `deny` lead to a decision, each exactly
+/// as clicking that button, through the same path and live check.
+public enum ApprovalCardAction: Equatable, Sendable {
+    /// The card's Approve (allow once), only while it is shown and enabled.
+    case approve
+    /// The card's Deny, only while it is shown and enabled.
+    case deny
+    /// The card's Open, exactly as clicking it, where the card shows one. Decides nothing.
+    case open
+    /// The key does nothing here and goes on to the queue or macOS.
+    case none
+
+    /// Whether the panel takes the key rather than passing it on.
+    public var consumesKey: Bool { self != .none }
+
+    /// The decision the action's button sends: allow once for Approve, deny for Deny, none otherwise.
+    public var decision: ApprovalDecision? {
+        switch self {
+        case .approve: .allowOnce
+        case .deny: .deny
+        case .open, .none: nil
+        }
+    }
+}
+
+/// Whether the approval card on screen has deliberate keyboard focus: a clicked card, the hotkey's
+/// queue then Return, or a spotlight the hotkey or a click gave the keyboard.
+public enum ApprovalCardFocus: Equatable, Sendable {
+    /// A spotlight before the hotkey or a click, or a card once another app took the keyboard.
+    case withoutKeyboard
+    case keyboard
+}
+
+/// The one key table for an approval card (#439). Only ⌘⏎ and ⌘⌫ decide, only with the keyboard and
+/// only while Approve and Deny are shown and enabled (`ApprovalCardReading.decisionEnabled`: a source
+/// Herdly can decide, inside its deadline). Bare Return and O never decide, and no other key reaches
+/// the table, so a stray key typed into a card that just appeared decides nothing. Without an enabled decision
+/// (past the deadline, handed back, or a request that stays native) Open is the card's one action,
+/// by O or Return. The table moves no deadline: keyboard focus pauses nothing (ADR 0020).
+public enum ApprovalCardKeys {
+    public static func action(for key: ApprovalCardKey, card: ApprovalCardReading,
+                              focus: ApprovalCardFocus) -> ApprovalCardAction {
+        guard focus == .keyboard else { return .none }
+        switch key {
+        case .commandReturn: return card.decisionEnabled ? .approve : .none
+        case .commandDelete: return card.decisionEnabled ? .deny : .none
+        case .open: return .open
+        case .returnKey: return card.decisionEnabled ? .none : .open
+        }
+    }
+}
+
 /// What a card says once its Send left Herdly: "Sent to Claude: 2 · Every workflow that mentions it".
 /// Sending does not establish that the agent acted on it; the row follows the agent's own events.
 public struct SpotlightSentAnswer: Equatable, Sendable {
