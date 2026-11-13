@@ -306,6 +306,10 @@ public struct AgentAttentionQueue: Equatable, Sendable {
     /// idle fallback below. Hook events stay on disk, so every scan repeats a turn's running evidence;
     /// evidence no newer than this cannot reopen the row.
     private var endedTurns: [AgentTurnIdentity: Double] = [:]
+    /// Claude turns whose working row the user removed while it listed running subagents, with the latest
+    /// listed subagent's start. Subagent activity after the turn ended never moves its update time, so a
+    /// row shown for it (`applyAfterTurnEnded`) shows again only for a subagent that started later.
+    private var removedSubagentRows: [AgentTurnIdentity: Double] = [:]
     /// Claude sessions whose running, waiting, or status-unavailable row the user removed. Inventory
     /// repeats a session's lifecycle every scan, so a removed session's inventory row and ambiguity stay
     /// hidden until the scan stops reporting the session active, or new hook activity arrives.
@@ -492,6 +496,12 @@ public struct AgentAttentionQueue: Equatable, Sendable {
             inventoryRunning.removeValue(forKey: turn.session)
         case let .running(active):
             guard !resolved.contains(.running(active.id)) else { return }
+            if active.identity.session.source == .claude,
+               let endedAt = [endedTurns[active.id], outcomes[active.id]?.arrivedAt].compactMap({ $0 }).max(),
+               active.updatedAt <= endedAt {
+                applyAfterTurnEnded(active, endedAt: endedAt)
+                return
+            }
             if let endedAt = endedTurns[active.id], active.updatedAt <= endedAt { return }
             if active.identity.session.source == .claude, acknowledged.contains(active.id),
                endedTurns[active.id] != nil {
@@ -531,6 +541,28 @@ public struct AgentAttentionQueue: Equatable, Sendable {
             dismiss(id)
         }
         if let now { expire(at: now) }
+    }
+
+    /// A Claude running observation no newer than its turn's end here: a finished result (acknowledged or
+    /// not), the idle fallback, or a removal. Claude's reader keeps reporting the turn as running, but late
+    /// subagent activity never updates the turn (#404), so `updatedAt` stays at the Stop. While the
+    /// observation lists running subagents, a subagent started or restarted inside that ended turn (#426):
+    /// the session's working row shows it, in place of the inventory placeholder. The turn is not reopened:
+    /// its result card, acknowledgment and ended time stay, so no new result follows. Once no subagent is
+    /// listed (its own stop, session end, or `ClaudeObservationReader.maximumSubagentAge`), that row ends.
+    /// A removed row stays removed until a subagent starts after the ones it listed.
+    private mutating func applyAfterTurnEnded(_ active: AgentRunning, endedAt: Double) {
+        let session = active.identity.session
+        let current = running[session]
+        let currentIsAfterEnd = current.map { $0.id == active.id && $0.updatedAt <= endedAt } ?? false
+        guard let latestStart = active.subagents.map(\.startedAt).max(),
+              latestStart > (removedSubagentRows[active.id] ?? -.infinity) else {
+            if currentIsAfterEnd { running.removeValue(forKey: session) }
+            return
+        }
+        guard current == nil || currentIsAfterEnd else { return }
+        running[session] = active
+        inventoryRunning.removeValue(forKey: session)
     }
 
     public mutating func apply(_ observations: [AgentObservation], now: Double? = nil) {
@@ -779,6 +811,9 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         guard session.source == .claude else { return }
         if let active = running[session] {
             endedTurns[active.id] = max(endedTurns[active.id] ?? -.infinity, active.updatedAt)
+            if let latestStart = active.subagents.map(\.startedAt).max() {
+                removedSubagentRows[active.id] = max(removedSubagentRows[active.id] ?? latestStart, latestStart)
+            }
             running.removeValue(forKey: session)
         }
         inventoryRunning.removeValue(forKey: session)

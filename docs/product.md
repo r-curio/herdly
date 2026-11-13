@@ -134,7 +134,10 @@ While a session's working row lists a running subagent, the row stays working (i
 not to check): an idle registry reading neither confirms the provisional `Stop` as Finished nor ends
 the row after the two-minute idle grace, and the subagent's own tool calls do not reopen the ended
 turn. A subagent with no `SubagentStop` stops counting 30 minutes after its start once its parent's turn
-has ended. When no subagent is listed any more, the usual rules resume: the next idle reading confirms
+has ended. A subagent that starts, or starts again, inside a turn Herdly has already finished (#426) shows
+the same way: the session's working row lists it with its latest action instead of an empty "Unknown"
+row, while the finished result and its acknowledgment stay as they are, and no new result follows when
+it stops. When no subagent is listed any more, the usual rules resume: the next idle reading confirms
 the `Stop` and the result goes to check. A session that ends meanwhile ends its row as before. The hold
 covers `Stop` only: a `StopFailure` is a result the user must see, so its Failed card shows at once even
 while subagents run (2026-11-10, #404 review). Approvals, questions, and other results are unaffected,

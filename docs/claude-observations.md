@@ -58,7 +58,8 @@ parent's turn ends, and its tool events keep the parent turn's prompt id until i
 (recorded 2026-11-10, #404). A subagent whose parent turn has ended (a `Stop` or `StopFailure` in its
 session, or a submit of another prompt, after its start; a repeated submit of its own prompt is not
 one; a start with no valid prompt id is bounded only by its parent's `Stop` or `StopFailure`, not by a
-newer prompt) leaves the list 30 minutes after its `SubagentStart` (`maximumSubagentAge`, owner decision 2026-11-10), so a
+newer prompt), or that started in a prompt its own `Stop` or `StopFailure` had already ended (a background
+subagent restarting after its parent's turn, #426), leaves the list 30 minutes after its `SubagentStart` (`maximumSubagentAge`, owner decision 2026-11-10), so a
 lost stop cannot leave it listed forever. One inside a live turn has no age bound, since a
 foreground subagent may run longer. Retention keeps a start by the same rule. Its name is its type;
 two running subagents of one type are numbered by start order ("Explore", "Explore 2"), and a missing,
@@ -88,7 +89,8 @@ approval (only one whose matched call ran inside a subagent; the session's own l
 as before). Whether a subagent's call has ended is decided by `ClaudeSubagentLifetimes`, which the
 reader and retention share: a subagent's run starts at its `SubagentStart`, ends at its first
 `SubagentStop` at or after that start or at its session's end (a later start of the same agent id is a
-new run), and, once its parent turn has ended, also ends at `maximumSubagentAge`. The switcher list is
+new run), and, once its parent turn has ended (or when it started in an already ended prompt), also ends
+at `maximumSubagentAge`. The switcher list is
 the runs this rule finds open. A call belongs to
 the run whose span holds its capture time. A request from a call a run holds carries its `agent_id` as
 `AgentApproval.subagentID`. Its parent turn's own end (its `Stop`, `StopFailure`, or a newer prompt) ends
@@ -113,6 +115,18 @@ of its own right after the `SubagentStop`. That turn's result is the one carded;
 second card. A session that ends during the hold has no working row and no card, as when a `Stop` is
 followed by `SessionEnd` before any idle reading. Codex is unaffected: its rows have no provisional Stop or
 idle registry reading.
+
+A subagent can also start, or start again, after the queue has already finished its parent's turn (#426):
+the `Stop` came while no subagent was listed, the next idle reading confirmed it, and the user may have
+acknowledged the result. The reader still reports that turn as running with the subagent listed, but
+its update time stays at the `Stop`, so it is no newer than the turn's end. While such an observation
+lists running subagents, `AgentAttentionQueue` gives the session's working row to it, in place of the
+inventory placeholder (which has no prompt, action or subagents and reads "Unknown"), and holds it
+through idle readings as above. It does not reopen the turn: the result card, if still there, stays
+beside the row, the acknowledgment and the turn's end stay, and the `Stop` is not confirmed again. When
+no subagent is listed any more, the row ends with no new result. A user's Remove keeps that row removed
+until a subagent starts later than the ones it listed. The inventory placeholder is still used when no
+hook evidence gives the session a working row.
 
 Each `UserPromptSubmit` also yields reply evidence for its exact session and root, timed at the
 prompt's earliest capture. The queue acknowledges that session's outcomes from other turns that
@@ -190,7 +204,9 @@ staying cleared across rescans unless newer activity reopens it. `ClaudeSubagent
 covers a subagent's start, latest action and stop, numbering by start order, nested subagents, the
 session's own action staying unchanged, approval matching inside a subagent, a background subagent
 outliving its parent's `Stop` until its own stop, session end, the 30-minute bound on both sides (also
-through the record cache), no bound inside a live turn, the held working row through an idle reading
+through the record cache, and for a start after its prompt's own `Stop` or `StopFailure`), no bound inside
+a live turn, a subagent starting after its turn was finished, acknowledged or not, shown in the working
+row with no new or revived result until its stop or the bound, Remove of that row and of a held row, the held working row through an idle reading
 and past the idle grace with the card after the subagent's stop, one card for the finishing turn, no
 revived older turn, approvals of a closed turn's subagent, release at the bound, `SessionEnd` during the
 hold, sessions without subagents unchanged, `StopFailure` not held, a subagent's request after its

@@ -127,6 +127,29 @@ private let day: TimeInterval = 86400
     #expect(!lab.exists(weekOld))
 }
 
+@Test func retentionBoundsASubagentStartedAfterItsPromptsStopLikeTheReader() throws {
+    // #426: a subagent restarting in a prompt whose Stop already came is bounded from its start, on both sides.
+    let lab = try EventLab()
+    defer { lab.remove() }
+    let claude = "herdly-claude-hook-v1"
+    let past = UUID().uuidString, live = UUID().uuidString
+    for session in [past, live] {
+        try lab.record("UserPromptSubmit", session: session, age: 4 * hour, source: claude, fields: ["prompt_id": "p1"])
+        try lab.record("Stop", session: session, age: 4 * hour - 2, source: claude, fields: ["prompt_id": "p1"])
+    }
+    try lab.record("UserPromptSubmit", session: live, age: 4 * hour - 1, source: claude, fields: ["prompt_id": "p2"])
+    let expired = try lab.record("SubagentStart", session: past, age: 3 * hour, source: claude,
+                                 fields: ["prompt_id": "p1", "agent_id": "a1"])
+    let foreground = try lab.record("SubagentStart", session: live, age: 3 * hour, source: claude,
+                                    fields: ["prompt_id": "p2", "agent_id": "a1"])
+
+    HookEventRetention.prune(lab.root, now: lab.now)
+
+    #expect(!lab.exists(expired))
+    // A subagent of the live prompt p2 has no bound, as before.
+    #expect(lab.exists(foreground))
+}
+
 @Test func retentionExpiresASubagentStartWhoseAgentIDTheReaderWouldIgnore() throws {
     let lab = try EventLab()
     defer { lab.remove() }
