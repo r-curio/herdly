@@ -5,7 +5,7 @@ import Foundation
 /// establish is `none`, never a guess. Presentation only: no verdict orders the queue, counts as work,
 /// acknowledges anything or touches a deadline.
 public enum WorkStatus: String, CaseIterable, Equatable, Sendable {
-    case none
+    case noVerdict
     case uncommitted
     case notPushed
     case checksRunning
@@ -17,7 +17,7 @@ public enum WorkStatus: String, CaseIterable, Equatable, Sendable {
     /// The state words the row shows (agreed 2026-11-13); nil for no verdict.
     public var words: String? {
         switch self {
-        case .none: nil
+        case .noVerdict: nil
         case .uncommitted: "uncommitted"
         case .notPushed: "not pushed"
         case .checksRunning: "checks running"
@@ -28,14 +28,9 @@ public enum WorkStatus: String, CaseIterable, Equatable, Sendable {
         }
     }
 
-    /// Checks have finished or the work merged: nothing further happens on its own, so an Earlier row
-    /// with one of these is not read again.
-    public var isTerminal: Bool {
-        switch self {
-        case .checksFailing, .conflict, .checksPassed, .merged: true
-        case .none, .uncommitted, .notPushed, .checksRunning: false
-        }
-    }
+    /// Every verdict but checks running is terminal for refresh: only running checks are read again
+    /// on a schedule. A "checks passed" row is not re-read to catch a later merge.
+    public var isTerminal: Bool { self != .checksRunning }
 }
 
 /// What a work tree's HEAD names: a branch, or a detached commit (shortened to seven characters).
@@ -100,6 +95,14 @@ public struct WorkBranchMemory: Equatable, Sendable {
         var startedAt: Double
         var shared: Bool
         var repository: WorkRepository
+
+        /// The one folder and HEAD seen throughout the turn, nil when it was shared, moved, changed
+        /// branch, or never had a readable HEAD.
+        var single: (directory: String, head: GitHead)? {
+            guard !shared, directories.count == 1, heads.count == 1,
+                  let directory = directories.first, let head = heads.first else { return nil }
+            return (directory, head)
+        }
     }
 
     private(set) var entries: [AgentTurnIdentity: Entry] = [:]
@@ -146,8 +149,7 @@ public struct WorkBranchMemory: Equatable, Sendable {
 
     public func branch(for turn: AgentTurnIdentity) -> WorkBranch {
         guard let entry = entries[turn], !entry.heads.isEmpty else { return .unknown }
-        guard !entry.shared, entry.directories.count == 1, entry.heads.count == 1,
-              let directory = entry.directories.first, let head = entry.heads.first else { return .ambiguous }
+        guard let (directory, head) = entry.single else { return .ambiguous }
         switch head {
         case .detached: return .detached(directory: directory)
         case .branch(let name):
@@ -157,12 +159,11 @@ public struct WorkBranchMemory: Equatable, Sendable {
     }
 
     /// Turns on a named branch whose repository is still unread, with their folder.
-    public var unreadRepositories: [(turn: AgentTurnIdentity, directory: String)] {
+    public var unreadRepositories: [WorkRepositoryRead] {
         entries.compactMap { turn, entry in
-            guard entry.repository == .unread, !entry.shared, entry.directories.count == 1, entry.heads.count == 1,
-                  case .branch? = entry.heads.first, let directory = entry.directories.first else { return nil }
-            return (turn, directory)
-        }.sorted { $0.directory < $1.directory }
+            guard entry.repository == .unread, let (directory, head) = entry.single, case .branch = head else { return nil }
+            return WorkRepositoryRead(turn: turn, directory: directory)
+        }.sorted { ($0.directory, $0.turn.turn) < ($1.directory, $1.turn.turn) }
     }
 
     /// Whether `directory` is the same as, or inside, a folder another running turn works in. A
@@ -321,7 +322,7 @@ public enum GitHubRepositoryName {
 public struct GitHubPullRequest: Equatable, Sendable {
     public enum State: Equatable, Sendable { case open, merged, closed }
     public enum Mergeable: Equatable, Sendable { case mergeable, conflicting, unknown }
-    public enum Checks: Equatable, Sendable { case none, running, failing, passed, unknown }
+    public enum Checks: Equatable, Sendable { case noChecks, running, failing, passed, unknown }
 
     public let number: Int
     public let state: State
@@ -331,7 +332,7 @@ public struct GitHubPullRequest: Equatable, Sendable {
     public let checks: Checks
 
     public init(number: Int, state: State, mergedAt: Double? = nil, headCommit: String? = nil,
-                mergeable: Mergeable = .unknown, checks: Checks = .none) {
+                mergeable: Mergeable = .unknown, checks: Checks = .noChecks) {
         self.number = number
         self.state = state
         self.mergedAt = mergedAt
@@ -345,7 +346,7 @@ public struct GitHubPullRequest: Equatable, Sendable {
 public enum GitHubPullRequestLookup: Equatable, Sendable {
     /// `gh` missing, signed out, offline, rate-limited, failed, timed out, or printed something unreadable.
     case unavailable
-    case none
+    case noPullRequest
     /// More than one open pull request for the branch: none is chosen.
     case ambiguous
     case found(GitHubPullRequest)
@@ -355,6 +356,8 @@ public enum GitHubPullRequestReader {
     /// The `--json` fields one `gh pr list` call asks for (docs/evidence/github-pr-status.md).
     public static let fields = "number,state,headRefName,headRefOid,isCrossRepository,mergedAt,mergeable,statusCheckRollup"
     public static let maximumBytes = 1 << 20
+    /// GitHub's `mergedAt`, such as "2026-11-11T04:43:51Z". A value type, so one is shared.
+    private static let timestamp = Date.ISO8601FormatStyle()
 
     /// The arguments for the one read: every state, so a merged pull request whose branch was deleted
     /// is still found.
@@ -402,7 +405,7 @@ public enum GitHubPullRequestReader {
             }
             var mergedAt: Double?
             if state == .merged {
-                guard let text = entry.mergedAt, let date = ISO8601DateFormatter().date(from: text) else { return .unavailable }
+                guard let text = entry.mergedAt, let date = try? Date(text, strategy: Self.timestamp) else { return .unavailable }
                 mergedAt = date.timeIntervalSince1970
             }
             let mergeable: GitHubPullRequest.Mergeable = switch entry.mergeable {
@@ -419,13 +422,13 @@ public enum GitHubPullRequestReader {
         if let request = open.first { return .found(request) }
         let merged = requests.filter { $0.state == .merged && ($0.mergedAt ?? -.infinity) >= turnStartedAt }
         if let latest = merged.max(by: { ($0.mergedAt ?? 0) < ($1.mergedAt ?? 0) }) { return .found(latest) }
-        return .none
+        return .noPullRequest
     }
 
     /// One state for every check and status: any failure fails; otherwise anything unfinished runs;
     /// otherwise all passed. A value Herdly does not know makes the whole reading unknown.
     private static func checks(_ rollup: [Check]) -> GitHubPullRequest.Checks {
-        guard !rollup.isEmpty else { return .none }
+        guard !rollup.isEmpty else { return .noChecks }
         var failing = false, running = false, unknown = false
         for check in rollup {
             switch check.typename {
@@ -468,10 +471,10 @@ public enum WorkStatusRule {
                                pullRequest: GitHubPullRequestLookup?) -> WorkStatus {
         switch branch {
         case .unknown, .ambiguous:
-            return .none
+            return .noVerdict
         case .detached:
             // No pull request for a detached HEAD, and no upstream to compare with.
-            guard let local, case .detached = local.head, local.changed else { return .none }
+            guard let local, case .detached = local.head, local.changed else { return .noVerdict }
             return .uncommitted
         case .branch(let name, _, _, _):
             let found: GitHubPullRequest? = if case .found(let request)? = pullRequest { request } else { nil }
@@ -481,19 +484,19 @@ public enum WorkStatusRule {
             let matching = local.flatMap { $0.head == .branch(name) ? $0 : nil }
             if let matching {
                 if matching.changed { return .uncommitted }
-                guard let unpushed = matching.unpushed else { return .none }
+                guard let unpushed = matching.unpushed else { return .noVerdict }
                 if unpushed > 0 { return .notPushed }
             }
             // Clean and pushed, or the folder has moved on to another branch: the open pull request
             // carries the work. An unreadable folder might hold uncommitted work, so only a merge,
             // which already happened, is certain without it.
-            guard local != nil, let found, found.state == .open else { return .none }
+            guard local != nil, let found, found.state == .open else { return .noVerdict }
             if found.mergeable == .conflicting { return .conflict }
             switch found.checks {
             case .failing: return .checksFailing
             case .running: return .checksRunning
             case .passed: return .checksPassed
-            case .none, .unknown: return .none
+            case .noChecks, .unknown: return .noVerdict
             }
         }
     }
@@ -513,110 +516,81 @@ public struct WorkStatusReading: Equatable, Sendable {
     }
 }
 
-/// When a finished turn is read again (#417). Bounded: checks running every 30 seconds, anything
-/// else not yet settled every 2 minutes, never past an hour from the first reading, never again once
-/// merged, and never for an Earlier row whose checks finished.
+/// When a finished turn is read (#417): once when it first appears, then again only while its checks
+/// run, every 30 seconds, never past an hour from the first reading. Every other verdict is terminal,
+/// so no row, recent or Earlier, is re-read for it.
 public enum WorkStatusSchedule {
     public static let runningInterval: Double = 30
-    public static let settledInterval: Double = 120
     public static let cap: Double = 60 * 60
 
-    public static func isDue(_ last: WorkStatusReading?, isEarlier: Bool, now: Double) -> Bool {
+    public static func isDue(_ last: WorkStatusReading?, now: Double) -> Bool {
         guard let last else { return true }
-        if last.verdict == .merged { return false }
-        if isEarlier && last.verdict.isTerminal { return false }
-        guard now - last.firstReadAt < cap else { return false }
-        let interval = last.verdict == .checksRunning ? runningInterval : settledInterval
-        return now - last.readAt >= interval
+        guard !last.verdict.isTerminal, now - last.firstReadAt < cap else { return false }
+        return now - last.readAt >= runningInterval
     }
 }
 
-// MARK: - GitHub CLI and the switch
+/// A folder whose `origin` is read for a running turn.
+public struct WorkRepositoryRead: Equatable, Sendable {
+    public let turn: AgentTurnIdentity
+    public let directory: String
 
-/// The GitHub card's state (Paper "GitHub status in Agents"): the CLI's presence and sign-in.
-public enum GitHubCLIStatus: Equatable, Sendable {
-    case checking
-    case notInstalled
-    case signedOut(version: String?)
-    case signedIn(version: String?)
-    /// Installed, but its sign-in could not be read (offline, timed out, unreadable).
-    case unknown(version: String?)
-
-    public var subtitle: String {
-        switch self {
-        case .checking: "GitHub CLI"
-        case .notInstalled: "GitHub CLI not installed"
-        case .signedOut(let version): "\(Self.name(version)) · signed out"
-        case .signedIn(let version): "\(Self.name(version)) · signed in to github.com"
-        case .unknown(let version): "\(Self.name(version)) · sign-in unknown"
-        }
-    }
-
-    public var header: AgentHeaderStatus {
-        switch self {
-        case .checking: .checking
-        case .signedIn: .connected
-        case .signedOut: .attention("Sign in required")
-        case .notInstalled: .attention("Not installed")
-        case .unknown: .attention("Status unknown")
-        }
-    }
-
-    /// Whether the header's dot is gray rather than orange.
-    public var isQuiet: Bool {
-        switch self {
-        case .checking, .notInstalled, .unknown: true
-        case .signedIn, .signedOut: false
-        }
-    }
-
-    private static func name(_ version: String?) -> String {
-        version.map { "GitHub CLI \($0)" } ?? "GitHub CLI"
-    }
-
-    /// "gh version 2.62.0 (2024-11-14)" → "2.62.0".
-    public static func version(_ output: String) -> String? {
-        guard let line = output.split(separator: "\n").first, line.hasPrefix("gh version ") else { return nil }
-        let value = line.dropFirst("gh version ".count).split(separator: " ").first.map(String.init) ?? ""
-        guard !value.isEmpty, value.count <= 32,
-              value.allSatisfy({ $0.isNumber || $0 == "." || $0.isLetter || $0 == "-" }) else { return nil }
-        return value
-    }
-
-    /// `gh auth status --hostname github.com --json hosts`: signed in when the active github.com
-    /// account's state is "success", signed out when github.com has no account, nil otherwise.
-    public static func signedIn(_ data: Data) -> Bool? {
-        struct Status: Decodable { let hosts: [String: [Account]] }
-        struct Account: Decodable { let state: String; let active: Bool }
-        guard data.count <= 64 * 1024, let status = try? JSONDecoder().decode(Status.self, from: data) else { return nil }
-        let accounts = status.hosts["github.com"] ?? []
-        if accounts.isEmpty { return false }
-        guard let active = accounts.first(where: \.active) else { return nil }
-        return active.state == "success" ? true : nil
+    public init(turn: AgentTurnIdentity, directory: String) {
+        self.turn = turn
+        self.directory = directory
     }
 }
 
-/// The "Pull request status on finished rows" switch: the user's choice once made; until then on
-/// only while `gh` is installed and signed in.
-public enum WorkStatusSetting {
-    public static let defaultsKey = "workStatusEnabled"
+/// A finished turn read on its remembered branch.
+public struct WorkStatusRead: Equatable, Sendable {
+    public let turn: AgentTurnIdentity
+    public let branch: WorkBranch
 
-    public static func isOn(stored: Bool?, cli: GitHubCLIStatus) -> Bool {
-        if let stored { return stored }
-        if case .signedIn = cli { return true }
-        return false
+    public init(turn: AgentTurnIdentity, branch: WorkBranch) {
+        self.turn = turn
+        self.branch = branch
     }
 }
 
-/// Where Herdly looks for `git` and `gh`. The app does not inherit the shell's PATH. `/usr/bin/git` is
-/// never used: without the developer tools it is a stub that offers to install them.
-public enum WorkStatusTools {
-    public static func git(home: String, isExecutable: (String) -> Bool) -> String? {
-        ["/opt/homebrew/bin/git", "/usr/local/bin/git", "/Library/Developer/CommandLineTools/usr/bin/git",
-         "/Applications/Xcode.app/Contents/Developer/usr/bin/git"].first(where: isExecutable)
-    }
+/// What one scan reads (#417), chosen without running anything.
+public struct WorkStatusBatch: Equatable, Sendable {
+    /// Running turns' repositories still unread.
+    public let repositories: [WorkRepositoryRead]
+    /// Finished turns due a reading.
+    public let reads: [WorkStatusRead]
+    /// Finished turns with no reading whose verdict is known to be none without reading: the branch
+    /// is unknown or ambiguous.
+    public let settledNoVerdict: [AgentTurnIdentity]
 
-    public static func gh(home: String, isExecutable: (String) -> Bool) -> String? {
-        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "\(home)/.local/bin/gh", "/usr/bin/gh"].first(where: isExecutable)
+    public var isEmpty: Bool { repositories.isEmpty && reads.isEmpty }
+
+    /// Most commands' worth of turns in one batch, so a long queue cannot start a burst.
+    public static let limit = 6
+
+    /// - `finished`: finished rows' turns in queue order.
+    /// - `running`: this scan's running turns, for the busy-folder rule.
+    public static func plan(finished: [AgentTurnIdentity], running: [WorkBranchSighting], memory: WorkBranchMemory,
+                            readings: [AgentTurnIdentity: WorkStatusReading], now: Double,
+                            limit: Int = limit) -> WorkStatusBatch {
+        let unread = memory.unreadRepositories
+        let repositories = Array(unread.prefix(limit))
+        let waiting = Set(unread.map(\.turn))
+        var reads: [WorkStatusRead] = [], settled: [AgentTurnIdentity] = []
+        for turn in finished {
+            let branch = memory.branch(for: turn)
+            switch branch {
+            case .unknown, .ambiguous:
+                if readings[turn] == nil { settled.append(turn) }
+                continue
+            case .detached(let folder), .branch(_, let folder, _, _):
+                // Another turn working there changes what git sees; a repository not yet read would
+                // make this reading skip GitHub.
+                guard !WorkBranchMemory.busy(folder, turn: turn, running: running), !waiting.contains(turn) else { continue }
+            }
+            guard reads.count + repositories.count < limit,
+                  WorkStatusSchedule.isDue(readings[turn], now: now) else { continue }
+            reads.append(WorkStatusRead(turn: turn, branch: branch))
+        }
+        return WorkStatusBatch(repositories: repositories, reads: reads, settledNoVerdict: settled)
     }
 }

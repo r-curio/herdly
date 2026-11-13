@@ -944,8 +944,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         updateNotchDisplayChoices()
         refresh()
         refreshSetup()
-        // The switch's default waits on whether `gh` is signed in (#417).
-        if previewMode == nil, !CommandLine.arguments.contains("--smoke-test") { workStatus.refreshCLI(launch: true) }
+        // The switch's default waits on whether `gh` is signed in (#417); with the switch off nothing runs.
+        if previewMode == nil, !CommandLine.arguments.contains("--smoke-test") { workStatus.refreshCLI() }
         // A first/unconfigured launch should explain setup immediately. Once state
         // exists, refresh can keep the normal quiet launch behavior.
         if previewMode == nil, launchAtLogin.shouldOpenUnconfiguredControls,
@@ -2702,10 +2702,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return candidates.compactMap { $0 }.first { $0.hasPrefix("/") }
     }
 
-    /// How far a finished row's work got (#417), `none` for every other row. Read only; the row's drawing
+    /// How far a finished row's work got (#417), `noVerdict` for every other row. Read only; the row's drawing
     /// is a follow-up.
     func workStatus(for item: AgentAttentionItem) -> WorkStatus {
-        guard let outcome = item.outcome else { return .none }
+        guard let outcome = item.outcome else { return .noVerdict }
         return workStatus.verdict(for: outcome.identity)
     }
 

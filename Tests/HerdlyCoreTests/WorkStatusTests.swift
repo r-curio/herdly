@@ -120,7 +120,7 @@ private let mergedPR = GitHubPullRequestLookup.found(GitHubPullRequest(number: 7
 
 @Test func aMergeFromBeforeTheTurnIsNotThisTurnsWork() {
     let startedAfter = Date(timeIntervalSince1970: 1_794_372_231 + 60).timeIntervalSince1970
-    #expect(lookup([pr(state: "MERGED", mergedAt: "2026-11-11T04:43:51Z")], startedAt: startedAfter) == GitHubPullRequestLookup.none)
+    #expect(lookup([pr(state: "MERGED", mergedAt: "2026-11-11T04:43:51Z")], startedAt: startedAfter) == GitHubPullRequestLookup.noPullRequest)
 }
 
 @Test func ghReadsChecksAndMergeability() {
@@ -133,7 +133,7 @@ private let mergedPR = GitHubPullRequestLookup.found(GitHubPullRequest(number: 7
     #expect(checks([statusContext("PENDING")]) == .running)
     #expect(checks([checkRun("FAILURE"), checkRun(nil, status: "QUEUED")]) == .failing)
     #expect(checks([statusContext("ERROR")]) == .failing)
-    #expect(checks([]) == GitHubPullRequest.Checks.none)
+    #expect(checks([]) == GitHubPullRequest.Checks.noChecks)
     #expect(checks([checkRun("SOMETHING_NEW")]) == .unknown)
     if case .found(let request) = lookup([pr(mergeable: "CONFLICTING")]) {
         #expect(request.mergeable == .conflicting)
@@ -141,10 +141,10 @@ private let mergedPR = GitHubPullRequestLookup.found(GitHubPullRequest(number: 7
 }
 
 @Test func ghIgnoresForksOtherBranchesAndClosedPullRequests() {
-    #expect(lookup([pr(fork: true)]) == GitHubPullRequestLookup.none)
-    #expect(lookup([pr(branch: "feat/other")]) == GitHubPullRequestLookup.none)
-    #expect(lookup([pr(state: "CLOSED")]) == GitHubPullRequestLookup.none)
-    #expect(lookup([]) == GitHubPullRequestLookup.none)
+    #expect(lookup([pr(fork: true)]) == GitHubPullRequestLookup.noPullRequest)
+    #expect(lookup([pr(branch: "feat/other")]) == GitHubPullRequestLookup.noPullRequest)
+    #expect(lookup([pr(state: "CLOSED")]) == GitHubPullRequestLookup.noPullRequest)
+    #expect(lookup([]) == GitHubPullRequestLookup.noPullRequest)
 }
 
 @Test func twoOpenPullRequestsForOneBranchChooseNone() {
@@ -168,16 +168,16 @@ private let mergedPR = GitHubPullRequestLookup.found(GitHubPullRequest(number: 7
     func verdict(_ local: GitLocalReading?, _ pr: GitHubPullRequestLookup?) -> WorkStatus {
         WorkStatusRule.verdict(branch: feature, local: local, pullRequest: pr)
     }
-    #expect(verdict(dirty, GitHubPullRequestLookup.none) == .uncommitted)
+    #expect(verdict(dirty, GitHubPullRequestLookup.noPullRequest) == .uncommitted)
     #expect(verdict(ahead, open(.passed)) == .notPushed)
     #expect(verdict(clean, open(.running)) == .checksRunning)
     #expect(verdict(clean, open(.failing)) == .checksFailing)
     #expect(verdict(clean, open(.passed, mergeable: .conflicting)) == .conflict)
     #expect(verdict(clean, open(.passed)) == .checksPassed)
     #expect(verdict(dirty, mergedPR) == .merged)
-    #expect(verdict(clean, GitHubPullRequestLookup.none) == WorkStatus.none)
-    #expect(verdict(clean, open(.none)) == WorkStatus.none)
-    #expect(verdict(clean, open(.unknown)) == WorkStatus.none)
+    #expect(verdict(clean, GitHubPullRequestLookup.noPullRequest) == WorkStatus.noVerdict)
+    #expect(verdict(clean, open(.noChecks)) == WorkStatus.noVerdict)
+    #expect(verdict(clean, open(.unknown)) == WorkStatus.noVerdict)
 }
 
 @Test func aFolderThatMovedOnSaysNothingAboutTheRememberedBranch() throws {
@@ -185,11 +185,11 @@ private let mergedPR = GitHubPullRequestLookup.found(GitHubPullRequest(number: 7
     let main = try #require(GitLocalReading.parse(status: status(head: "main", upstream: "origin/main",
                                                                   entries: ["? scratch.txt"])))
     #expect(WorkStatusRule.verdict(branch: feature, local: main, pullRequest: mergedPR) == .merged)
-    #expect(WorkStatusRule.verdict(branch: feature, local: main, pullRequest: .unavailable) == WorkStatus.none)
+    #expect(WorkStatusRule.verdict(branch: feature, local: main, pullRequest: .unavailable) == WorkStatus.noVerdict)
     #expect(WorkStatusRule.verdict(branch: feature, local: main, pullRequest: open(.failing)) == .checksFailing)
     // A folder that cannot be read (deleted worktree, timeout) still shows a merge, but nothing open.
     #expect(WorkStatusRule.verdict(branch: feature, local: nil, pullRequest: mergedPR) == .merged)
-    #expect(WorkStatusRule.verdict(branch: feature, local: nil, pullRequest: open(.passed)) == WorkStatus.none)
+    #expect(WorkStatusRule.verdict(branch: feature, local: nil, pullRequest: open(.passed)) == WorkStatus.noVerdict)
 }
 
 @Test func aMissingSignedOutOrFailingGhNeverGoesBeyondLocalGit() throws {
@@ -197,16 +197,16 @@ private let mergedPR = GitHubPullRequestLookup.found(GitHubPullRequest(number: 7
     let dirty = try #require(GitLocalReading.parse(status: status(entries: ["? a"])))
     let ahead = try #require(GitLocalReading.parse(status: status(ahead: 1)))
     for failed in [GitHubPullRequestLookup.unavailable, nil, .ambiguous] {
-        #expect(WorkStatusRule.verdict(branch: feature, local: clean, pullRequest: failed) == WorkStatus.none)
+        #expect(WorkStatusRule.verdict(branch: feature, local: clean, pullRequest: failed) == WorkStatus.noVerdict)
         #expect(WorkStatusRule.verdict(branch: feature, local: dirty, pullRequest: failed) == .uncommitted)
         #expect(WorkStatusRule.verdict(branch: feature, local: ahead, pullRequest: failed) == .notPushed)
-        #expect(WorkStatusRule.verdict(branch: feature, local: nil, pullRequest: failed) == WorkStatus.none)
+        #expect(WorkStatusRule.verdict(branch: feature, local: nil, pullRequest: failed) == WorkStatus.noVerdict)
     }
 }
 
 @Test func anUnknownUnpushedCountClaimsNothingPastIt() throws {
     let gone = try #require(GitLocalReading.parse(status: status(ahead: nil)))
-    #expect(WorkStatusRule.verdict(branch: feature, local: gone, pullRequest: open(.passed)) == WorkStatus.none)
+    #expect(WorkStatusRule.verdict(branch: feature, local: gone, pullRequest: open(.passed)) == WorkStatus.noVerdict)
     #expect(WorkStatusRule.verdict(branch: feature, local: gone, pullRequest: mergedPR) == .merged)
 }
 
@@ -214,11 +214,11 @@ private let mergedPR = GitHubPullRequestLookup.found(GitHubPullRequest(number: 7
     let dirty = try #require(GitLocalReading.parse(status: status(entries: ["? a"])))
     let detachedDirty = try #require(GitLocalReading.parse(status: status(head: "(detached)", upstream: nil, ahead: nil,
                                                                            entries: ["? a"])))
-    #expect(WorkStatusRule.verdict(branch: .unknown, local: dirty, pullRequest: mergedPR) == WorkStatus.none)
-    #expect(WorkStatusRule.verdict(branch: .ambiguous, local: dirty, pullRequest: mergedPR) == WorkStatus.none)
+    #expect(WorkStatusRule.verdict(branch: .unknown, local: dirty, pullRequest: mergedPR) == WorkStatus.noVerdict)
+    #expect(WorkStatusRule.verdict(branch: .ambiguous, local: dirty, pullRequest: mergedPR) == WorkStatus.noVerdict)
     #expect(WorkStatusRule.verdict(branch: .detached(directory: "/w/repo"), local: detachedDirty, pullRequest: mergedPR)
         == .uncommitted)
-    #expect(WorkStatusRule.verdict(branch: .detached(directory: "/w/repo"), local: dirty, pullRequest: nil) == WorkStatus.none)
+    #expect(WorkStatusRule.verdict(branch: .detached(directory: "/w/repo"), local: dirty, pullRequest: nil) == WorkStatus.noVerdict)
 }
 
 // MARK: - Branch memory
@@ -311,25 +311,73 @@ private func sighting(_ turn: AgentTurnIdentity, _ directory: String = "/w/repo"
 
 // MARK: - Refresh schedule
 
-@Test func checksRunningRefreshesOnAFixedIntervalUntilTheCap() {
+@Test func onlyRunningChecksAreReadAgainOnAFixedIntervalUntilTheCap() {
     let running = WorkStatusReading(verdict: .checksRunning, readAt: 100, firstReadAt: 100)
-    #expect(WorkStatusSchedule.isDue(nil, isEarlier: true, now: 0))
-    #expect(!WorkStatusSchedule.isDue(running, isEarlier: false, now: 129))
-    #expect(WorkStatusSchedule.isDue(running, isEarlier: false, now: 130))
-    #expect(WorkStatusSchedule.isDue(running, isEarlier: true, now: 130))
+    #expect(WorkStatusSchedule.isDue(nil, now: 0))
+    #expect(!WorkStatusSchedule.isDue(running, now: 129))
+    #expect(WorkStatusSchedule.isDue(running, now: 130))
     let late = WorkStatusReading(verdict: .checksRunning, readAt: 100 + 3_590, firstReadAt: 100)
-    #expect(!WorkStatusSchedule.isDue(late, isEarlier: false, now: 100 + WorkStatusSchedule.cap))
+    #expect(!WorkStatusSchedule.isDue(late, now: 100 + WorkStatusSchedule.cap))
 }
 
-@Test func settledVerdictsRefreshSlowlyAndEarlierTerminalRowsNever() {
-    let failing = WorkStatusReading(verdict: .checksFailing, readAt: 100, firstReadAt: 100)
-    #expect(!WorkStatusSchedule.isDue(failing, isEarlier: false, now: 219))
-    #expect(WorkStatusSchedule.isDue(failing, isEarlier: false, now: 220))
-    #expect(!WorkStatusSchedule.isDue(failing, isEarlier: true, now: 10_000 - 7_000))
-    let uncommitted = WorkStatusReading(verdict: .uncommitted, readAt: 100, firstReadAt: 100)
-    #expect(WorkStatusSchedule.isDue(uncommitted, isEarlier: true, now: 220))
-    let merged = WorkStatusReading(verdict: .merged, readAt: 100, firstReadAt: 100)
-    #expect(!WorkStatusSchedule.isDue(merged, isEarlier: false, now: 1_000))
+@Test func everyOtherVerdictIsTerminalAndNeverReadAgain() {
+    for verdict in WorkStatus.allCases where verdict != .checksRunning {
+        #expect(verdict.isTerminal)
+        // Not even a "checks passed" row, to catch a later merge.
+        #expect(!WorkStatusSchedule.isDue(WorkStatusReading(verdict: verdict, readAt: 100, firstReadAt: 100), now: 2_000))
+    }
+    #expect(!WorkStatus.checksRunning.isTerminal)
+}
+
+// MARK: - Batch selection
+
+private func memory(_ sightings: [WorkBranchSighting], repositories: [AgentTurnIdentity: WorkRepository] = [:])
+    -> WorkBranchMemory {
+    var memory = WorkBranchMemory()
+    memory.observe(sightings)
+    for (turn, repository) in repositories { memory.record(repository, for: turn) }
+    return memory
+}
+
+@Test func aBatchReadsDueFinishedTurnsOnTheirRememberedBranch() {
+    let remembered = memory([sighting(turnA)], repositories: [turnA: .gitHub("o/repo")])
+    let batch = WorkStatusBatch.plan(finished: [turnA], running: [], memory: remembered, readings: [:], now: 2_000)
+    #expect(batch == WorkStatusBatch(repositories: [], reads: [WorkStatusRead(turn: turnA, branch: feature)],
+                                     settledNoVerdict: []))
+    let read = WorkStatusReading(verdict: .checksPassed, readAt: 1_900, firstReadAt: 1_900)
+    #expect(WorkStatusBatch.plan(finished: [turnA], running: [], memory: remembered, readings: [turnA: read], now: 2_000).isEmpty)
+}
+
+@Test func unknownAndAmbiguousTurnsSettleAsNoVerdictWithoutRunning() {
+    let shared = memory([sighting(turnA), sighting(turnB, "/w/repo")])
+    let batch = WorkStatusBatch.plan(finished: [turnA, turnA2], running: [], memory: shared, readings: [:], now: 2_000)
+    #expect(batch.isEmpty)
+    #expect(batch.settledNoVerdict == [turnA, turnA2])
+    let settled = WorkStatusReading(verdict: .noVerdict, readAt: 2_000, firstReadAt: 2_000)
+    #expect(WorkStatusBatch.plan(finished: [turnA], running: [], memory: shared, readings: [turnA: settled],
+                                 now: 3_000).settledNoVerdict.isEmpty)
+}
+
+@Test func aBatchWaitsForTheRepositoryAndForABusyFolder() {
+    let unread = memory([sighting(turnA)])
+    let first = WorkStatusBatch.plan(finished: [turnA], running: [], memory: unread, readings: [:], now: 2_000)
+    #expect(first.repositories == [WorkRepositoryRead(turn: turnA, directory: "/w/repo")])
+    #expect(first.reads.isEmpty)
+    let known = memory([sighting(turnA)], repositories: [turnA: .notOnGitHub])
+    let busy = WorkStatusBatch.plan(finished: [turnA], running: [sighting(turnB, "/w/repo/sub")], memory: known,
+                                    readings: [:], now: 2_000)
+    #expect(busy.isEmpty && busy.settledNoVerdict.isEmpty)
+}
+
+@Test func aBatchIsCappedAcrossRepositoriesAndReads() {
+    let turns = (0..<10).map { AgentTurnIdentity(session: AgentSessionIdentity(source: .claude, sourceScope: "s",
+                                                                               session: "s\($0)", surface: .cli), turn: "t") }
+    var many = WorkBranchMemory()
+    many.observe(turns.enumerated().map { sighting($1, "/w/\($0)") })
+    for turn in turns.prefix(8) { many.record(.notOnGitHub, for: turn) }
+    let batch = WorkStatusBatch.plan(finished: Array(turns.prefix(8)), running: [], memory: many, readings: [:], now: 0)
+    #expect(batch.repositories.count == 2)
+    #expect(batch.reads.count == WorkStatusBatch.limit - 2)
 }
 
 // MARK: - GitHub CLI card and switch
@@ -350,9 +398,29 @@ private func sighting(_ turn: AgentTurnIdentity, _ directory: String = "/w/repo"
     #expect(GitHubCLIStatus.signedIn(version: "2.62.0").header == .connected)
     #expect(GitHubCLIStatus.signedOut(version: "2.62.0").subtitle == "GitHub CLI 2.62.0 · signed out")
     #expect(GitHubCLIStatus.signedOut(version: "2.62.0").header == .attention("Sign in required"))
-    #expect(!GitHubCLIStatus.signedOut(version: nil).isQuiet)
     #expect(GitHubCLIStatus.notInstalled.subtitle == "GitHub CLI not installed")
-    #expect(GitHubCLIStatus.notInstalled.header == .attention("Not installed") && GitHubCLIStatus.notInstalled.isQuiet)
+    #expect(GitHubCLIStatus.notInstalled.header == .unavailable("Not installed"))
+    // Not a Paper frame: gray, and no switch shown as if connected.
+    #expect(GitHubCLIStatus.unknown(version: "2.62.0").header == .unavailable("Status unknown"))
+    #expect(!WorkStatusSetting.showsSwitch(stored: nil, cli: .unknown(version: nil)))
+    #expect(!WorkStatusSetting.showsSwitch(stored: false, cli: .signedOut(version: nil)))
+    #expect(WorkStatusSetting.showsSwitch(stored: false, cli: .signedIn(version: nil)))
+    // Once the user turned it on, it can always be turned off.
+    #expect(WorkStatusSetting.showsSwitch(stored: true, cli: .unknown(version: nil)))
+}
+
+@Test func theLastCheckIsRememberedWithoutAnAccountOrToken() {
+    #expect(GitHubCLIStatus.signedIn(version: "2.62.0").remembered == "signedIn 2.62.0")
+    #expect(GitHubCLIStatus.remembered("signedIn 2.62.0") == .signedIn(version: "2.62.0"))
+    #expect(GitHubCLIStatus.remembered("signedOut ") == .signedOut(version: nil))
+    #expect(GitHubCLIStatus.unknown(version: "1").remembered == nil && GitHubCLIStatus.notInstalled.remembered == nil)
+    #expect(GitHubCLIStatus.remembered("signedIn 2.62.0 token") == nil)
+    #expect(GitHubCLIStatus.remembered("admin 1.0") == nil && GitHubCLIStatus.remembered(nil) == nil)
+    #expect(GitHubCLIStatus.withoutRunning(installed: false, remembered: .signedIn(version: "1")) == .notInstalled)
+    #expect(GitHubCLIStatus.withoutRunning(installed: true, remembered: nil) == .unknown(version: nil))
+    #expect(GitHubCLIStatus.withoutRunning(installed: true, remembered: .signedOut(version: "2")) == .signedOut(version: "2"))
+    #expect(WorkStatusSetting.mayCheckCLI(stored: nil) && WorkStatusSetting.mayCheckCLI(stored: true))
+    #expect(!WorkStatusSetting.mayCheckCLI(stored: false))
 }
 
 @Test func theSwitchIsOnByDefaultOnlyWhenSignedIn() {
@@ -365,8 +433,8 @@ private func sighting(_ turn: AgentTurnIdentity, _ directory: String = "/w/repo"
 }
 
 @Test func theShellStubGitIsNeverUsed() {
-    #expect(WorkStatusTools.git(home: "/h", isExecutable: { $0 == "/usr/bin/git" }) == nil)
-    #expect(WorkStatusTools.git(home: "/h", isExecutable: { _ in true }) == "/opt/homebrew/bin/git")
+    #expect(WorkStatusTools.git(isExecutable: { $0 == "/usr/bin/git" }) == nil)
+    #expect(WorkStatusTools.git(isExecutable: { _ in true }) == "/opt/homebrew/bin/git")
     #expect(WorkStatusTools.gh(home: "/h", isExecutable: { $0 == "/h/.local/bin/gh" }) == "/h/.local/bin/gh")
     #expect(WorkStatusTools.gh(home: "/h", isExecutable: { _ in false }) == nil)
 }
@@ -429,9 +497,9 @@ private func reader(_ runner: FakeRunner, open: Bool = true, gh: String? = "/opt
 @Test func theSwitchOffRunsNoCommand() {
     let runner = FakeRunner(reply())
     let reader = reader(runner, open: false)
-    #expect(reader.verdict(feature) == WorkStatus.none)
+    #expect(reader.verdict(feature) == WorkStatus.noVerdict)
     #expect(reader.repository("/w/repo") == .notOnGitHub)
-    #expect(reader.verdict(.detached(directory: "/w/repo")) == WorkStatus.none)
+    #expect(reader.verdict(.detached(directory: "/w/repo")) == WorkStatus.noVerdict)
     #expect(runner.calls.isEmpty)
 }
 
@@ -439,17 +507,17 @@ private func reader(_ runner: FakeRunner, open: Bool = true, gh: String? = "/opt
     let timedOut = FakeRunner { command in
         command.executable.hasSuffix("/gh") ? .succeeded(pullRequests([pr()])) : .timedOut
     }
-    #expect(reader(timedOut).verdict(feature) == WorkStatus.none)
+    #expect(reader(timedOut).verdict(feature) == WorkStatus.noVerdict)
     #expect(reader(timedOut).repository("/w/repo") == .notOnGitHub)
     let notATree = FakeRunner { _ in .failed(128) }
-    #expect(reader(notATree).verdict(feature) == WorkStatus.none)
+    #expect(reader(notATree).verdict(feature) == WorkStatus.noVerdict)
 }
 
 @Test func aMissingOrFailingGhKeepsOnlyTheLocalVerdict() {
     let dirty = status(entries: ["? new.swift"])
     #expect(reader(FakeRunner(reply(status: dirty)), gh: nil).verdict(feature) == .uncommitted)
     for failure in [WorkStatusCommandResult.failed(1), .timedOut, .notLaunched, .tooLarge, .succeeded(Data("<html>".utf8))] {
-        #expect(reader(FakeRunner(reply(gh: failure))).verdict(feature) == WorkStatus.none)
+        #expect(reader(FakeRunner(reply(gh: failure))).verdict(feature) == WorkStatus.noVerdict)
         #expect(reader(FakeRunner(reply(status: dirty, gh: failure))).verdict(feature) == .uncommitted)
     }
 }
@@ -476,7 +544,7 @@ private func reader(_ runner: FakeRunner, open: Bool = true, gh: String? = "/opt
         if command.arguments.contains("remote") { return .succeeded(Data()) }
         return .failed(1)
     }
-    #expect(reader(noRemote).verdict(feature) == WorkStatus.none)
+    #expect(reader(noRemote).verdict(feature) == WorkStatus.noVerdict)
     #expect(!noRemote.calls.contains { $0.arguments.contains("rev-list") })
 }
 
@@ -512,48 +580,89 @@ private func item(finished turn: AgentTurnIdentity) -> AgentAttentionItem {
                        running: nil, unavailableReason: nil)
 }
 
-@MainActor @Test func theModelRunsNothingWhileTheSwitchIsOff() async throws {
+private func defaults(_ stored: Bool?) throws -> (UserDefaults, String) {
     let suite = "herdly-work-status-" + UUID().uuidString
     let defaults = try #require(UserDefaults(suiteName: suite))
+    if let stored { defaults.set(stored, forKey: WorkStatusSetting.defaultsKey) }
+    return (defaults, suite)
+}
+
+@MainActor @Test func theModelRunsNothingWhileTheSwitchIsOff() async throws {
+    let (defaults, suite) = try defaults(false)
     defer { defaults.removePersistentDomain(forName: suite) }
-    defaults.set(false, forKey: WorkStatusSetting.defaultsKey)
     let runner = FakeRunner(reply())
     let gate = WorkStatusGate(open: true)
     let model = WorkStatusModel(reader: reader(runner).with(gate: gate), gate: gate, defaults: defaults)
     #expect(!gate.isOpen)
-    model.scanned([item(running: turnA)], heads: ["/w/repo": .branch("feat/x")], directory: { _ in "/w/repo" }, now: 1_000)
-    model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_100)
-    try await Task.sleep(for: .milliseconds(200))
+    #expect(model.scanned([item(running: turnA)], heads: ["/w/repo": .branch("feat/x")], directory: { _ in "/w/repo" },
+                          now: 1_000) == nil)
+    #expect(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_100) == nil)
     #expect(runner.calls.isEmpty)
-    #expect(model.verdict(for: turnA) == WorkStatus.none)
+    #expect(model.verdict(for: turnA) == WorkStatus.noVerdict)
+}
+
+@MainActor @Test func theCardRunsNoGhWhileTheSwitchIsOff() async throws {
+    let (defaults, suite) = try defaults(false)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let runner = FakeRunner { _ in .succeeded(Data("gh version 2.62.0\n".utf8)) }
+    let gate = WorkStatusGate(open: false)
+    // No check remembered: installed on disk reads unknown, with no switch and nothing run.
+    let model = WorkStatusModel(reader: reader(runner).with(gate: gate), gate: gate, defaults: defaults)
+    #expect(model.cli == .unknown(version: nil))
+    #expect(model.refreshCLI() == nil)
+    #expect(model.cli == .unknown(version: nil) && !model.mayCheckCLI)
+    // A remembered check is shown as it was; a missing binary is found on disk.
+    defaults.set("signedIn 2.62.0", forKey: WorkStatusSetting.rememberedCLIKey)
+    #expect(model.refreshCLI() == nil)
+    #expect(model.cli == .signedIn(version: "2.62.0") && model.showsSwitch && !model.isEnabled)
+    let missing = WorkStatusModel(reader: reader(runner, gh: nil).with(gate: gate), gate: gate, defaults: defaults)
+    #expect(missing.cli == .notInstalled)
+    #expect(runner.calls.isEmpty)
+}
+
+@MainActor @Test func turningTheSwitchOnChecksGhAgainAndRemembersTheResult() async throws {
+    let (defaults, suite) = try defaults(false)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let signedOut = #"{"hosts":{}}"#
+    let runner = FakeRunner { command in
+        command.arguments == ["--version"] ? .succeeded(Data("gh version 2.62.0 (2024-11-14)\n".utf8))
+            : .succeeded(Data(signedOut.utf8))
+    }
+    let gate = WorkStatusGate(open: false)
+    let model = WorkStatusModel(reader: reader(runner).with(gate: gate), gate: gate, defaults: defaults)
+    #expect(runner.calls.isEmpty)
+    let check = try #require(model.setEnabled(true))
+    await check.value
+    #expect(runner.calls.map(\.arguments.first) == ["--version", "auth"])
+    #expect(model.cli == .signedOut(version: "2.62.0"))
+    #expect(defaults.string(forKey: WorkStatusSetting.rememberedCLIKey) == "signedOut 2.62.0")
+    // The user's choice stands; the switch stays so it can be turned off again.
+    #expect(model.isEnabled && gate.isOpen && model.showsSwitch)
 }
 
 @MainActor @Test func theModelReadsAFinishedTurnOnItsRememberedBranch() async throws {
-    let suite = "herdly-work-status-" + UUID().uuidString
-    let defaults = try #require(UserDefaults(suiteName: suite))
+    let (defaults, suite) = try defaults(true)
     defer { defaults.removePersistentDomain(forName: suite) }
-    defaults.set(true, forKey: WorkStatusSetting.defaultsKey)
     let runner = FakeRunner(reply())
     let gate = WorkStatusGate(open: false)
     let model = WorkStatusModel(reader: reader(runner).with(gate: gate), gate: gate, defaults: defaults)
     #expect(gate.isOpen)
-    model.scanned([item(running: turnA)], heads: ["/w/repo": .branch("feat/x")], directory: { _ in "/w/repo" }, now: 1_000)
-    try await waitUntil { !model.memory.unreadRepositories.contains { $0.turn == turnA } }
-    model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_100)
-    try await waitUntil { model.readings[turnA] != nil }
+    let repository = try #require(model.scanned([item(running: turnA)], heads: ["/w/repo": .branch("feat/x")],
+                                                directory: { _ in "/w/repo" }, now: 1_000))
+    await repository.value
+    #expect(model.memory.unreadRepositories.isEmpty)
+    let read = try #require(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_100))
+    await read.value
     #expect(model.verdict(for: turnA) == .checksFailing)
+    #expect(model.readings[turnA] == WorkStatusReading(verdict: .checksFailing, readAt: 1_100, firstReadAt: 1_100))
+    // A terminal verdict is not read again.
+    #expect(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 9_000) == nil)
     // Nothing is read while the switch is off, and what was read is forgotten.
     let before = runner.calls.count
     model.setEnabled(false)
-    model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 5_000)
-    try await Task.sleep(for: .milliseconds(100))
+    #expect(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 9_100) == nil)
     #expect(runner.calls.count == before)
-    #expect(model.verdict(for: turnA) == WorkStatus.none)
-}
-
-@MainActor private func waitUntil(_ condition: () -> Bool) async throws {
-    for _ in 0..<100 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
-    #expect(condition())
+    #expect(model.verdict(for: turnA) == WorkStatus.noVerdict)
 }
 
 private extension WorkStatusReader {
@@ -579,4 +688,36 @@ private extension WorkStatusReader {
     #expect(Date().timeIntervalSince(started) < 5)
     #expect(ProcessWorkStatusRunner().run(WorkStatusCommand(executable: folder.appendingPathComponent("none").path,
                                                             arguments: [], environment: [:], timeout: 1)) == .notLaunched)
+}
+
+/// Runs `body` as a shell script whose background child writes its pid to `child.pid` and keeps the
+/// command's stdout open; the child is killed afterwards so no orphan outlives the test.
+private func runHoldingStdout(_ body: String, timeout: Double) throws -> (result: WorkStatusCommandResult, seconds: Double) {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-work-status-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let pidFile = folder.appendingPathComponent("child.pid")
+    defer {
+        if let text = try? String(contentsOf: pidFile, encoding: .utf8),
+           let pid = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)) { kill(pid, SIGKILL) }
+        try? FileManager.default.removeItem(at: folder)
+    }
+    let script = folder.appendingPathComponent("holds")
+    try Data("#!/bin/sh\nsleep 20 &\necho $! > '\(pidFile.path)'\n\(body)\n".utf8).write(to: script)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+    let started = Date()
+    let result = ProcessWorkStatusRunner().run(WorkStatusCommand(executable: script.path, arguments: [],
+                                                                 environment: [:], timeout: timeout))
+    return (result, Date().timeIntervalSince(started))
+}
+
+@Test func aChildHoldingStdoutCannotKeepARunWaiting() throws {
+    // The command itself is still running at its deadline.
+    let slow = try runHoldingStdout("sleep 20", timeout: 0.3)
+    #expect(slow.result == .timedOut && slow.seconds < 4)
+    // It ignores SIGTERM, so SIGKILL ends it.
+    let stubborn = try runHoldingStdout("trap '' TERM\nwhile :; do sleep 1; done", timeout: 0.3)
+    #expect(stubborn.result == .timedOut && stubborn.seconds < 5)
+    // It exited, but its output never ended: incomplete, not success.
+    let exited = try runHoldingStdout("echo partial\nexit 0", timeout: 0.3)
+    #expect(exited.result == .timedOut && exited.seconds < 4)
 }

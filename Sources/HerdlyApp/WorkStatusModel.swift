@@ -7,9 +7,6 @@ import HerdlyCore
 /// acknowledgment, the spotlight or any deadline.
 @MainActor
 final class WorkStatusModel: ObservableObject {
-    /// Most turns read in one batch, so a long queue cannot start a burst of commands.
-    static let batchLimit = 6
-
     @Published private(set) var cli: GitHubCLIStatus = .checking
     @Published private(set) var stored: Bool?
     @Published private(set) var readings: [AgentTurnIdentity: WorkStatusReading] = [:]
@@ -21,105 +18,123 @@ final class WorkStatusModel: ObservableObject {
     private let defaults: UserDefaults?
 
     init(reader: WorkStatusReader? = nil, gate: WorkStatusGate? = nil, defaults: UserDefaults? = .standard) {
-        let stored = defaults?.object(forKey: WorkStatusSetting.defaultsKey) as? Bool
         let gate = gate ?? WorkStatusGate(open: false)
         self.gate = gate
         self.reader = reader ?? WorkStatusReader.live(gate: gate)
         self.defaults = defaults
-        self.stored = stored
+        stored = defaults?.object(forKey: WorkStatusSetting.defaultsKey) as? Bool
+        if !WorkStatusSetting.mayCheckCLI(stored: stored) { cli = cardWithoutRunning }
         gate.set(isEnabled)
     }
 
     /// "Pull request status on finished rows": the stored choice, or on while `gh` is signed in.
     var isEnabled: Bool { WorkStatusSetting.isOn(stored: stored, cli: cli) }
 
-    func setEnabled(_ on: Bool) {
+    /// Whether the card may run `gh`: not once the switch is off.
+    var mayCheckCLI: Bool { WorkStatusSetting.mayCheckCLI(stored: stored) }
+
+    var showsSwitch: Bool { WorkStatusSetting.showsSwitch(stored: stored, cli: cli) }
+
+    /// Turning the switch on checks `gh` again (the returned task); off runs nothing more and forgets
+    /// what was read.
+    @discardableResult
+    func setEnabled(_ on: Bool) -> Task<Void, Never>? {
         stored = on
         defaults?.set(on, forKey: WorkStatusSetting.defaultsKey)
         applySwitch()
+        guard on else {
+            cli = cardWithoutRunning
+            return nil
+        }
+        return refreshCLI()
     }
 
-    /// The finished turn's verdict, `none` while the switch is off or nothing is known.
+    /// The finished turn's verdict, `noVerdict` while the switch is off or nothing is known.
     func verdict(for turn: AgentTurnIdentity) -> WorkStatus {
-        guard isEnabled else { return .none }
-        return readings[turn]?.verdict ?? .none
+        guard isEnabled else { return .noVerdict }
+        return readings[turn]?.verdict ?? .noVerdict
     }
 
-    /// Reads the GitHub card's state off the main actor. At launch only when the switch's default
-    /// depends on it; otherwise when Settings › Agents shows.
-    func refreshCLI(launch: Bool = false) {
-        if launch && stored != nil { return }
-        guard !checkingCLI else { return }
+    /// Reads the GitHub card's state off the main actor: at launch while the switch's default is
+    /// undecided or on, when Settings › Agents shows, and on Check Again. With the switch off no `gh`
+    /// runs: the card shows the binary's presence on disk and the last remembered check. The returned
+    /// task finishes when the card is updated.
+    @discardableResult
+    func refreshCLI() -> Task<Void, Never>? {
+        guard mayCheckCLI else {
+            cli = cardWithoutRunning
+            return nil
+        }
+        guard !checkingCLI else { return nil }
         checkingCLI = true
         let reader = reader
-        Task {
+        return Task {
             let status = await Task.detached { reader.cliStatus() }.value
             checkingCLI = false
+            // A switch turned off while `gh` ran keeps the card as the switch-off rule shows it.
+            guard mayCheckCLI else { return }
             if cli != status { cli = status }
+            if let remembered = status.remembered { defaults?.set(remembered, forKey: WorkStatusSetting.rememberedCLIKey) }
             applySwitch()
         }
     }
 
     /// One scan's rows (#417): remember running turns' branches, then read the finished turns that are
-    /// due. `heads` are the HEADs the scan read by folder; `directory` is each row's folder.
+    /// due at `now`. `heads` are the HEADs the scan read by folder; `directory` is each row's folder.
+    /// The returned task finishes once that batch's readings are stored.
+    @discardableResult
     func scanned(_ items: [AgentAttentionItem], heads: [String: GitHead], directory: (AgentAttentionItem) -> String?,
-                 now: Double) {
-        guard isEnabled else { return }
+                 now: Double) -> Task<Void, Never>? {
+        guard isEnabled else { return nil }
         let sightings: [WorkBranchSighting] = items.compactMap { item in
             guard item.kind == .running, let running = item.running, let folder = directory(item) else { return nil }
             return WorkBranchSighting(turn: running.identity, startedAt: running.arrivedAt, directory: folder,
                                       head: heads[folder])
         }
         memory.observe(sightings)
-        let finished = items.compactMap { item -> (turn: AgentTurnIdentity, earlier: Bool)? in
-            guard item.kind == .outcome || item.kind == .earlierOutcome, let outcome = item.outcome else { return nil }
-            return (outcome.identity, item.kind == .earlierOutcome)
+        let finished = items.compactMap { item -> AgentTurnIdentity? in
+            guard item.kind == .outcome || item.kind == .earlierOutcome else { return nil }
+            return item.outcome?.identity
         }
-        let kept = Set(sightings.map(\.turn) + finished.map(\.turn))
+        let kept = Set(sightings.map(\.turn) + finished)
         memory.retain(kept)
-        let retained = readings.filter { kept.contains($0.key) }
-        if retained.count != readings.count { readings = retained }
-        guard !inFlight else { return }
-
-        let repositories = Array(memory.unreadRepositories.prefix(Self.batchLimit))
-        var due: [(turn: AgentTurnIdentity, branch: WorkBranch)] = []
-        for (turn, earlier) in finished {
-            let branch = memory.branch(for: turn)
-            switch branch {
-            case .unknown, .ambiguous:
-                // Nothing to read: the verdict is none without running anything.
-                if readings[turn] == nil {
-                    readings[turn] = WorkStatusReading(verdict: .none, readAt: now, firstReadAt: now)
-                }
-                continue
-            case .detached(let folder), .branch(_, let folder, _, _):
-                guard !WorkBranchMemory.busy(folder, turn: turn, running: sightings),
-                      !memory.unreadRepositories.contains(where: { $0.turn == turn }) else { continue }
-            }
-            guard WorkStatusSchedule.isDue(readings[turn], isEarlier: earlier, now: now) else { continue }
-            due.append((turn, branch))
-            if due.count + repositories.count >= Self.batchLimit { break }
+        var next = readings.filter { kept.contains($0.key) }
+        guard !inFlight else {
+            if next != readings { readings = next }
+            return nil
         }
-        guard !repositories.isEmpty || !due.isEmpty else { return }
+        let batch = WorkStatusBatch.plan(finished: finished, running: sightings, memory: memory, readings: next, now: now)
+        for turn in batch.settledNoVerdict {
+            next[turn] = WorkStatusReading(verdict: .noVerdict, readAt: now, firstReadAt: now)
+        }
+        if next != readings { readings = next }
+        guard !batch.isEmpty else { return nil }
         inFlight = true
-        let reader = reader, toRead = due
-        Task {
-            let result = await Task.detached {
-                (repositories.map { ($0.turn, reader.repository($0.directory)) },
-                 toRead.map { ($0.turn, reader.verdict($0.branch)) })
+        let reader = reader
+        return Task {
+            let (repositories, verdicts) = await Task.detached {
+                (batch.repositories.map { ($0.turn, reader.repository($0.directory)) },
+                 batch.reads.map { ($0.turn, reader.verdict($0.branch)) })
             }.value
             inFlight = false
             // A switch turned off while the batch ran keeps nothing it read.
             guard isEnabled else { return }
-            for (turn, repository) in result.0 { memory.record(repository, for: turn) }
-            let readAt = Date().timeIntervalSince1970
-            var next = readings
-            for (turn, verdict) in result.1 {
-                next[turn] = WorkStatusReading(verdict: verdict, readAt: readAt,
-                                               firstReadAt: readings[turn]?.firstReadAt ?? readAt)
+            for (turn, repository) in repositories { memory.record(repository, for: turn) }
+            var updated = readings
+            for (turn, verdict) in verdicts {
+                updated[turn] = WorkStatusReading(verdict: verdict, readAt: now,
+                                                  firstReadAt: readings[turn]?.firstReadAt ?? now)
             }
-            if next != readings { readings = next }
+            if updated != readings { readings = updated }
         }
+    }
+
+    /// The card with the switch off: not installed from the binary's presence on disk, otherwise the
+    /// last remembered check, or unknown.
+    private var cardWithoutRunning: GitHubCLIStatus {
+        GitHubCLIStatus.withoutRunning(installed: reader.gh != nil,
+                                       remembered: GitHubCLIStatus.remembered(
+                                           defaults?.string(forKey: WorkStatusSetting.rememberedCLIKey)))
     }
 
     /// Opens or closes the gate to match the switch. Off forgets everything read, so turning it back

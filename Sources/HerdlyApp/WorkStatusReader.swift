@@ -51,6 +51,8 @@ final class WorkStatusGate: @unchecked Sendable {
 struct WorkStatusReader: Sendable {
     static let gitTimeout: Double = 3
     static let ghTimeout: Double = 10
+    /// `gh --version` prints locally; it never waits on the network.
+    static let versionTimeout: Double = 3
 
     let runner: any WorkStatusCommandRunning
     let gate: WorkStatusGate
@@ -72,7 +74,7 @@ struct WorkStatusReader: Sendable {
         let home = NSHomeDirectory()
         let executable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
         return WorkStatusReader(runner: ProcessWorkStatusRunner(), gate: gate,
-                                git: WorkStatusTools.git(home: home, isExecutable: executable),
+                                git: WorkStatusTools.git(isExecutable: executable),
                                 gh: WorkStatusTools.gh(home: home, isExecutable: executable), home: home)
     }
 
@@ -80,7 +82,7 @@ struct WorkStatusReader: Sendable {
     func verdict(_ branch: WorkBranch) -> WorkStatus {
         switch branch {
         case .unknown, .ambiguous:
-            return .none
+            return .noVerdict
         case .detached(let directory):
             return WorkStatusRule.verdict(branch: branch, local: local(directory), pullRequest: nil)
         case .branch(let name, let directory, let startedAt, let repository):
@@ -133,7 +135,7 @@ struct WorkStatusReader: Sendable {
     func cliStatus() -> GitHubCLIStatus {
         guard let gh else { return .notInstalled }
         guard case .succeeded(let output) = runner.run(WorkStatusCommand(executable: gh, arguments: ["--version"],
-                                                                          environment: ghEnvironment, timeout: 3)) else {
+                                                                          environment: ghEnvironment, timeout: Self.versionTimeout)) else {
             return .unknown(version: nil)
         }
         let version = GitHubCLIStatus.version(String(decoding: output, as: UTF8.self))
@@ -179,9 +181,12 @@ struct WorkStatusReader: Sendable {
 }
 
 /// Runs a work-status command with a minimal environment, empty stdin, stderr discarded and stdout
-/// bounded. A command past its wait is terminated; nothing is retried.
+/// bounded. Past its wait the command gets SIGTERM, then SIGKILL a second later, and the pipe reader
+/// stops, so a descendant still holding stdout cannot keep a thread waiting. Nothing is retried.
 struct ProcessWorkStatusRunner: WorkStatusCommandRunning {
     static let maximumOutput = 1 << 20
+    /// How long a terminated command gets before SIGKILL, and how long output may trail an exit.
+    static let grace: Double = 1
 
     func run(_ command: WorkStatusCommand) -> WorkStatusCommandResult {
         guard FileManager.default.isExecutableFile(atPath: command.executable) else { return .notLaunched }
@@ -193,27 +198,91 @@ struct ProcessWorkStatusRunner: WorkStatusCommandRunning {
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        let exited = DispatchSemaphore(value: 0), drained = DispatchSemaphore(value: 0)
+        let exited = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in exited.signal() }
         do { try process.run() } catch { return .notLaunched }
-        // Written once by the drain block before `drained` is signalled and read only after the wait on
-        // `drained` succeeds, so the semaphore orders every access.
-        final class Box: @unchecked Sendable { var bytes: Data? }
-        let box = Box()
-        let reader = output.fileHandleForReading
-        DispatchQueue.global(qos: .utility).async {
-            box.bytes = try? reader.read(upToCount: Self.maximumOutput + 1)
-            drained.signal()
-        }
+        let reader = BoundedPipeReader(output.fileHandleForReading.fileDescriptor, limit: Self.maximumOutput)
+        defer { reader.stop() }
         let deadline = DispatchTime.now() + command.timeout
         guard exited.wait(timeout: deadline) == .success else {
             process.terminate()
+            if exited.wait(timeout: .now() + Self.grace) != .success {
+                kill(process.processIdentifier, SIGKILL)
+                _ = exited.wait(timeout: .now() + Self.grace)
+            }
             return .timedOut
         }
-        guard drained.wait(timeout: max(deadline, .now() + 1)) == .success else { return .timedOut }
+        // A descendant may still hold stdout after the command exited: its output is incomplete.
+        guard reader.waitForEnd(until: max(deadline, .now() + Self.grace)) else { return .timedOut }
         guard process.terminationStatus == 0 else { return .failed(process.terminationStatus) }
-        let bytes = box.bytes ?? Data()
+        let bytes = reader.bytes
         guard bytes.count <= Self.maximumOutput else { return .tooLarge }
         return .succeeded(bytes)
+    }
+}
+
+/// Reads one pipe to EOF on its own thread, keeping at most `limit + 1` bytes. `poll` with a short
+/// interval lets `stop()` end it even while a descendant keeps the pipe open; it never closes the
+/// descriptor, which the `Pipe` owns.
+private final class BoundedPipeReader: @unchecked Sendable {
+    // `@unchecked Sendable`: `data`, `stopped` and `ended` are used only under `lock`.
+    private let lock = NSLock()
+    private var data = Data()
+    private var stopped = false
+    private let done = DispatchSemaphore(value: 0)
+    private let finished = DispatchGroup()
+
+    init(_ descriptor: Int32, limit: Int) {
+        finished.enter()
+        Thread.detachNewThread { [self] in
+            var buffer = [UInt8](repeating: 0, count: 16 * 1024)
+            var poller = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            var reachedEnd = false
+            while !isStopped {
+                poller.revents = 0
+                let ready = poll(&poller, 1, 100)
+                if ready == 0 || (ready < 0 && errno == EINTR) { continue }
+                if ready < 0 { break }
+                let count = buffer.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
+                if count < 0 && errno == EINTR { continue }
+                if count == 0 { reachedEnd = true }
+                if count <= 0 { break }
+                lock.lock()
+                data.append(contentsOf: buffer[0..<min(count, limit + 1 - data.count)])
+                let full = data.count > limit
+                lock.unlock()
+                // Past the limit the result is `tooLarge` whatever follows.
+                if full { reachedEnd = true; break }
+            }
+            if reachedEnd { done.signal() }
+            finished.leave()
+        }
+    }
+
+    private var isStopped: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopped
+    }
+
+    var bytes: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
+
+    /// Whether the pipe reached its end (or the limit) by `deadline`.
+    func waitForEnd(until deadline: DispatchTime) -> Bool {
+        guard done.wait(timeout: deadline) == .success else { return false }
+        done.signal()
+        return true
+    }
+
+    /// Ends the reader and waits for its thread, at most one poll interval.
+    func stop() {
+        lock.lock()
+        stopped = true
+        lock.unlock()
+        finished.wait()
     }
 }

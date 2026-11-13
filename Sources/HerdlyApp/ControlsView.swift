@@ -648,13 +648,12 @@ private struct SetupPreviewSheet: View {
 /// An agent's status: a green dot when connected, orange when it needs attention, gray while unknown.
 private struct AgentStatusBadge: View {
     let status: AgentHeaderStatus
-    /// A reason that needs nothing from the user (GitHub CLI not installed) keeps a gray dot.
-    var quiet = false
 
     var body: some View {
         switch status {
         case .connected: StatusBadge(title: status.title, color: .green)
-        case .attention: StatusBadge(title: status.title, color: quiet ? .secondary : .orange)
+        case .attention: StatusBadge(title: status.title, color: .orange)
+        case .unavailable: StatusBadge(title: status.title, color: .secondary)
         case .checking: StatusBadge(title: status.title, color: .secondary)
         }
     }
@@ -684,7 +683,6 @@ private struct AgentCardHeader<Configure: View, Actions: View>: View {
     let symbol: String
     let tile: Color
     let status: AgentHeaderStatus
-    var quiet = false
     let menuLabel: String
     @ViewBuilder let configure: Configure
     @ViewBuilder let actions: Actions
@@ -703,7 +701,7 @@ private struct AgentCardHeader<Configure: View, Actions: View>: View {
             }
             .accessibilityElement(children: .combine)
             Spacer(minLength: 8)
-            AgentStatusBadge(status: status, quiet: quiet)
+            AgentStatusBadge(status: status)
             configure
             AgentActionsMenu(label: menuLabel) { actions }
         }
@@ -821,20 +819,23 @@ private struct GitHubAgentControls: View {
         let cli = workStatus.cli
         SettingsCard {
             AgentCardHeader(name: "GitHub", subtitle: cli.subtitle, symbol: "arrow.triangle.branch",
-                            tile: Color(red: 0.14, green: 0.16, blue: 0.18), status: cli.header, quiet: cli.isQuiet,
+                            tile: Color(red: 0.14, green: 0.16, blue: 0.18), status: cli.header,
                             menuLabel: "GitHub actions") {
                 EmptyView()
             } actions: {
+                // With the switch off no `gh` runs, so there is nothing to check again.
                 Button("Check Again") { workStatus.refreshCLI() }
+                    .disabled(!workStatus.mayCheckCLI)
             }
-            switch cli {
-            case .checking:
-                EmptyView()
-            case .signedIn, .unknown:
+            if workStatus.showsSwitch {
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
                 SettingsRow(title: "Pull request status on finished rows", detail: nil) {
                     switchToggle.labelsHidden().toggleStyle(.switch).controlSize(.mini)
                 }
+            }
+            switch cli {
+            case .checking, .signedIn, .unknown:
+                EmptyView()
             case .signedOut:
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
                 GitHubCommandRow(text: "Sign in from a terminal, then finished rows show pull requests",
