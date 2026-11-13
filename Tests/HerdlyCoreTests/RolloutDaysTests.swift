@@ -345,3 +345,32 @@ private func rolloutLines(session: UUID, turn: UUID) -> String {
     #expect(RolloutDays.directoryReads(root: link) == 2)
     #expect(!RolloutDays.keeps(root: link))
 }
+
+/// A count several threads add to.
+private final class Tally: @unchecked Sendable {
+    // Invariant for `@unchecked Sendable`: `total` is only touched while holding `lock`.
+    private let lock = NSLock()
+    private var total = 0
+
+    func add() { lock.lock(); total += 1; lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return total }
+}
+
+@Test func manyReadersOfOneRootAtOnceEachGetWhatAFreshListingGives() throws {
+    let tree = try Tree()
+    defer { tree.remove() }
+    for day in 1...16 {
+        for file in 0..<4 { try tree.write(String(format: "2026/11/%02d/r%d.jsonl", day, file), modified: 1_800_000_000 + Double(day * 10 + file)) }
+    }
+    let expected = Dictionary(uniqueKeysWithValues: [8, 24, 200].map { ($0, freshListing(root: tree.root, limit: $0)) })
+    // Readers start cold together, so some walk with nothing kept while others reuse what was just stored.
+    let failures = Tally()
+    DispatchQueue.concurrentPerform(iterations: 96) { index in
+        let limit = [8, 24, 200][index % 3]
+        let got = RolloutDays.newest(root: tree.root, limit: limit, now: index % 4 == 0 ? Date().timeIntervalSince1970 : settled)
+        let want = expected[limit] ?? []
+        if got.map(\.url) != want.map(\.url) || got.map(\.modified) != want.map(\.modified) { failures.add() }
+    }
+    #expect(failures.count == 0)
+    tree.expectSame("after the readers")
+}
