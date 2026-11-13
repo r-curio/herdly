@@ -122,6 +122,30 @@ import Testing
     #expect(approval.details?.command == "touch marker")
 }
 
+@Test func claudeBashApprovalShowsACommandLongerThanAnIdentifier() throws {
+    // Observed 2026-11-13: 52 of 57 recorded Bash requests carried a command over 256 bytes (a long
+    // scratchpad `cd` or `source` prefix), and the card said Claude didn't say which command.
+    let long = "cd /private/tmp/claude-503/" + String(repeating: "a", count: 900) + " && swift test"
+    let tooLong = String(repeating: "b", count: ClaudeObservationReader.maximumToolInput + 1)
+    func events(_ command: String) throws -> URL {
+        try makeClaudeEvents([
+            claudeRecord("UserPromptSubmit", at: 1, promptID: "p1"),
+            claudeRecord("PreToolUse", at: 2, promptID: "p1", toolName: "Bash", toolUseID: "call",
+                         toolInput: ["command": command]),
+            claudeRecord("PermissionRequest", at: 3, promptID: "p1", toolName: "Bash",
+                         toolInput: ["command": command], approvalRequestID: "request-1")
+        ])
+    }
+    let shown = try events(long)
+    defer { try? FileManager.default.removeItem(at: shown) }
+    #expect(approvals(shown).first?.details?.command == long)
+
+    // Past the helper's own bound the command is still not shown, never cut and shown as if whole.
+    let unbounded = try events(tooLong)
+    defer { try? FileManager.default.removeItem(at: unbounded) }
+    #expect(approvals(unbounded).allSatisfy { $0.details?.command == nil })
+}
+
 @Test func claudeBashApprovalMatchesItsOwnCommandWhileParallelSubagentsRunBash() throws {
     // Observed 2026-11-10: a subagent's Bash request arrived while another subagent's Bash call in the
     // same session and prompt was still running, and the name-only rule dropped it as ambiguous.
