@@ -534,47 +534,151 @@ private let secondExternal = NotchDisplay(id: 3, frame: CGRect(x: -1920, y: 0, w
     #expect(NotchPlacement.strip(on: builtIn, expanded: false, wing: 0) == StripLayout(leading: 112, gap: 180, trailing: 60, height: 32))
 }
 
-@Test func usageStripOrdersClaudeBeforeCodexAndSizesItsWing() {
-    let codex = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 37, resetsAt: 1_000),
-                                  fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: 1_000))
-    let claude = ClaudeUsageReading(sourceScope: "/a", sessionID: "00000000-0000-4000-8000-000000000001",
-                                    fiveHour: ClaudeUsageWindow(usedPercentage: 100, resetsAt: 1_000),
-                                    sevenDay: ClaudeUsageWindow(usedPercentage: 18, resetsAt: 1_000), observedAt: 1)
-    let all = UsageStripReadouts.make(codex: codex, claude: claude)
-    #expect(all.map(\.source) == [.claude, .claude, .codex, .codex])
-    #expect(all.map(\.caption) == ["5h", "7d", "5h", nil])
-    #expect(all.map(\.spokenLabel) == ["Claude five-hour limit 100% used", "Claude seven-day limit 18% used",
-                                        "Codex five-hour limit 40% used", "Codex weekly limit 37% used"])
-    // Codex-only widths are unchanged; each Claude readout adds room for "100%" plus the group gap.
-    #expect(UsageStripReadouts.wingWidth(all) == 240) // 60 + 52 + 2 × 62 + 4
-    let codexOnly = UsageStripReadouts.make(codex: codex, claude: nil)
-    #expect(UsageStripReadouts.wingWidth(codexOnly) == 112)
-    // With no readings the weekly readout is still there, unknown, and the wing is its own width.
-    let none = UsageStripReadouts.make(codex: nil, claude: nil)
-    #expect(none == [UsageStripReadout(source: .codex, caption: nil, usedPercent: nil, percentText: nil)])
-    #expect(none.map(\.spokenLabel) == ["Codex weekly limit unknown"])
-    #expect(UsageStripReadouts.wingWidth(none) == NotchPlacement.trailingWing)
-    // Only Claude's seven-day window: one Claude readout ahead of the weekly one.
-    let sevenOnly = ClaudeUsageReading(sourceScope: "/a", sessionID: nil, fiveHour: nil,
-                                       sevenDay: ClaudeUsageWindow(usedPercentage: 5, resetsAt: 1_000), observedAt: 1)
-    #expect(UsageStripReadouts.make(codex: nil, claude: sevenOnly).map(\.caption) == ["7d", nil])
+private let bothCodex = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 58, resetsAt: 1_000),
+                                          fiveHour: CodexUsageWindow(usedPercent: 36, resetsAt: 1_000))
+private let bothClaude = ClaudeUsageReading(sourceScope: "/a", sessionID: "00000000-0000-4000-8000-000000000001",
+                                            fiveHour: ClaudeUsageWindow(usedPercentage: 61, resetsAt: 1_000),
+                                            sevenDay: ClaudeUsageWindow(usedPercentage: 18, resetsAt: 1_000), observedAt: 1)
+
+private func runs(_ readout: UsageStripReadout) -> String {
+    readout.openText.map { $0.dim ? "[\($0.text)]" : $0.text }.joined()
 }
 
-@Test func weeklyOnlyUsageDropsBothFiveHourReadoutsAndNarrowsTheWing() {
-    let codex = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 37, resetsAt: 1_000),
-                                  fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: 1_000))
-    let claude = ClaudeUsageReading(sourceScope: "/a", sessionID: nil,
-                                    fiveHour: ClaudeUsageWindow(usedPercentage: 1, resetsAt: 1_000),
-                                    sevenDay: ClaudeUsageWindow(usedPercentage: 53, resetsAt: 1_000), observedAt: 1)
-    let weekly = UsageStripReadouts.make(codex: codex, claude: claude, fiveHour: false)
-    // Every bar left is weekly, so none is captioned; the hue tells the sources apart.
-    #expect(weekly.map(\.caption) == [nil, nil])
-    #expect(weekly.map(\.spokenLabel) == ["Claude weekly limit 53% used", "Codex weekly limit 37% used"])
-    #expect(UsageStripReadouts.wingWidth(weekly) == 108) // 60 + 44 + 4
-    let codexOnly = UsageStripReadouts.make(codex: codex, claude: nil, fiveHour: false)
-    #expect(UsageStripReadouts.wingWidth(codexOnly) == NotchPlacement.trailingWing)
-    // The weekly readout stays, unknown, when nothing is reported.
-    #expect(UsageStripReadouts.make(codex: nil, claude: nil, fiveHour: false).map(\.spokenLabel) == ["Codex weekly limit unknown"])
+@Test func usageStripShowsOneRingPerSourceClaudeFirst() {
+    let rings = UsageStripReadouts.make(codex: bothCodex, claude: bothClaude)
+    #expect(rings == [UsageStripReadout(source: .claude, fiveHour: .known(UsageShare(usedPercent: 61)),
+                                        weekly: .known(UsageShare(usedPercent: 18)), weeklyWindow: .sevenDay),
+                      UsageStripReadout(source: .codex, fiveHour: .known(UsageShare(usedPercent: 36)),
+                                        weekly: .known(UsageShare(usedPercent: 58)), weeklyWindow: .weekly)])
+    // Open: five-hour, a dim slash, week, one trailing percent.
+    #expect(rings.map(runs) == ["61[/]18%", "36[/]58%"])
+    // VoiceOver keeps today's wording, both windows per source, in today's order.
+    #expect(rings.flatMap(\.spokenLabels) == ["Claude five-hour limit 61% used", "Claude seven-day limit 18% used",
+                                              "Codex five-hour limit 36% used", "Codex weekly limit 58% used"])
+    // Only Codex reporting: one ring.
+    #expect(UsageStripReadouts.make(codex: bothCodex, claude: nil).map(\.source) == [.codex])
+}
+
+@Test func usageRingFillsClampAndUnknownIsNeverZero() {
+    #expect(UsageShare(usedPercent: 0).fraction == 0)
+    #expect(UsageShare(usedPercent: 50).fraction == 0.5)
+    #expect(UsageShare(usedPercent: 100).fraction == 1)
+    #expect(UsageShare(usedPercent: 140).fraction == 1)
+    #expect(UsageShare(usedPercent: 140).percentText == "100%")
+    #expect(UsageShare(usedPercent: -3).fraction == 0)
+    // The windows' own percent text is the same clamp and format.
+    #expect(CodexUsageWindow(usedPercent: 140, resetsAt: 1).percentText == "100%")
+    #expect(ClaudeUsageWindow(usedPercentage: 61.6, resetsAt: 1).percentText == "62%")
+    // A 0% reading is a known window with an empty fill, not the unknown dash.
+    let zero = UsageStripReadouts.make(codex: CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 0, resetsAt: 1_000), fiveHour: nil), claude: nil)
+    #expect(zero.map(\.showsDash) == [false])
+    #expect(zero.map(runs) == ["0%"])
+    // With no reading Codex's ring is still there: an empty outer track and a dim dash.
+    let none = UsageStripReadouts.make(codex: nil, claude: nil)
+    #expect(none == [UsageStripReadout(source: .codex, fiveHour: .notReported, weekly: .unknown, weeklyWindow: .weekly)])
+    #expect(none[0].showsDash)
+    #expect(none.map(runs) == ["[—]"])
+    #expect(none.flatMap(\.spokenLabels) == ["Codex weekly limit unknown"])
+    // A five-hour reading with the week unknown: a dim dash for the week, still one trailing percent.
+    let weekUnknown = UsageStripReadouts.make(codex: CodexUsageReading(weekly: nil, fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: 1_000)),
+                                              claude: nil)
+    #expect(weekUnknown.map(runs) == ["40[/][—]%"])
+    // Collapsed, the empty outer track still carries the dash, so the unknown week never reads as 0%.
+    #expect(weekUnknown[0].showsDash)
+    // A window that is not reported is no ring, so it needs no dash.
+    let weeklyPlan = UsageStripReadouts.make(codex: CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 0, resetsAt: 1_000), fiveHour: nil),
+                                             claude: nil)
+    #expect(weeklyPlan[0].showsDash == false)
+}
+
+@Test func usageRingLeavesOutWindowsThatAreNotReported() {
+    // Some Codex plans report only the week: no inner ring at all, and just that number open.
+    let weeklyPlan = UsageStripReadouts.make(codex: CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 58, resetsAt: 1_000), fiveHour: nil), claude: nil)
+    #expect(weeklyPlan[0].fiveHour == .notReported && weeklyPlan[0].weekly == .known(UsageShare(usedPercent: 58)))
+    #expect(weeklyPlan.map(runs) == ["58%"])
+    // Claude reporting only its five-hour window: an inner ring and no outer one.
+    let fiveOnly = ClaudeUsageReading(sourceScope: "/a", sessionID: nil, fiveHour: ClaudeUsageWindow(usedPercentage: 7, resetsAt: 1_000),
+                                      sevenDay: nil, observedAt: 1)
+    let claude = UsageStripReadouts.make(codex: nil, claude: fiveOnly)[0]
+    #expect(claude.source == .claude && claude.weekly == .notReported && claude.fiveHour == .known(UsageShare(usedPercent: 7)))
+    #expect(runs(claude) == "7%")
+    #expect(claude.spokenLabels == ["Claude five-hour limit 7% used"])
+}
+
+@Test func weeklyOnlyUsageDropsEveryInnerRing() {
+    let weekly = UsageStripReadouts.make(codex: bothCodex, claude: bothClaude, fiveHour: false)
+    #expect(weekly.map(\.fiveHour) == [.notReported, .notReported])
+    #expect(weekly.map(\.weeklyWindow) == [.weekly, .weekly])
+    #expect(weekly.map(runs) == ["18%", "58%"])
+    #expect(weekly.flatMap(\.spokenLabels) == ["Claude weekly limit 18% used", "Codex weekly limit 58% used"])
+    // A Claude reading with only a five-hour window has nothing left to show.
+    let fiveOnly = ClaudeUsageReading(sourceScope: "/a", sessionID: nil, fiveHour: ClaudeUsageWindow(usedPercentage: 7, resetsAt: 1_000),
+                                      sevenDay: nil, observedAt: 1)
+    #expect(UsageStripReadouts.make(codex: nil, claude: fiveOnly, fiveHour: false).map(\.source) == [.codex])
+    #expect(UsageStripReadouts.make(codex: nil, claude: nil, fiveHour: false).flatMap(\.spokenLabels) == ["Codex weekly limit unknown"])
+}
+
+@Test func collapsedUsageWingIsTheMinimumWhateverTheSourcesReport() {
+    let both = UsageStripReadouts.make(codex: bothCodex, claude: bothClaude)
+    #expect(UsageStripReadouts.collapsedWingWidth(both) == NotchPlacement.trailingWing) // 18 + 8 + 18 + 8 inset
+    #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: bothCodex, claude: nil)) == NotchPlacement.trailingWing)
+    #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: nil, claude: nil)) == NotchPlacement.trailingWing)
+    #expect(UsageStripReadouts.collapsedWingWidth([]) == NotchPlacement.trailingWing) // Hidden
+    // A dash beside another ring is the one case that needs more: 18 + 8 + 18 + 5 + 6.8 + 8.
+    #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: nil, claude: bothClaude)) == 64)
+    let weekUnknown = CodexUsageReading(weekly: nil, fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: 1_000))
+    #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: weekUnknown, claude: bothClaude)) == 64)
+    // A dash beside no other ring fits the minimum.
+    #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: weekUnknown, claude: nil)) == NotchPlacement.trailingWing)
+    #expect(UsageStripReadouts.wingWidth(both, expanded: false) == NotchPlacement.trailingWing)
+}
+
+@Test func openUsageWingFitsEveryRingsNumbers() {
+    // Each ring, 5pt, "99/99%" reserved at 6.8pt a glyph; 12pt between sources; the 8pt inset.
+    let both = UsageStripReadouts.make(codex: bothCodex, claude: bothClaude)
+    #expect(UsageStripReadouts.openWingWidth(both) == 148) // 2 × (18 + 5 + 40.8) + 12 + 8
+    #expect(UsageStripReadouts.wingWidth(both, expanded: true) == 148)
+    #expect(UsageStripReadouts.openWingWidth(UsageStripReadouts.make(codex: bothCodex, claude: nil)) == 72)
+    // Weekly only: one "99%" per ring.
+    #expect(UsageStripReadouts.openWingWidth(UsageStripReadouts.make(codex: bothCodex, claude: bothClaude, fiveHour: false)) == 107)
+    // Single digits keep the two-digit room, so the panel holds still as the numbers change.
+    let low = UsageStripReadouts.make(codex: CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 1, resetsAt: 1_000),
+                                                               fiveHour: CodexUsageWindow(usedPercent: 2, resetsAt: 1_000)), claude: nil)
+    #expect(UsageStripReadouts.openWingWidth(low) == 72)
+    // A spent window's "100" takes one glyph more.
+    let spent = UsageStripReadouts.make(codex: CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 30, resetsAt: 1_000),
+                                                                 fiveHour: CodexUsageWindow(usedPercent: 100, resetsAt: 1_000)), claude: nil)
+    #expect(UsageStripReadouts.openWingWidth(spent) == 79) // 18 + 5 + 7 × 6.8 + 8
+    // The unknown week is one dash: "40/—%".
+    let weekUnknown = UsageStripReadouts.make(codex: CodexUsageReading(weekly: nil, fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: 1_000)),
+                                              claude: nil)
+    #expect(UsageStripReadouts.openWingWidth(weekUnknown) == 65) // 18 + 5 + 5 × 6.8 + 8
+    // An unknown ring and Hidden keep the minimum.
+    #expect(UsageStripReadouts.openWingWidth(UsageStripReadouts.make(codex: nil, claude: nil)) == NotchPlacement.trailingWing)
+    #expect(UsageStripReadouts.openWingWidth([]) == NotchPlacement.trailingWing)
+}
+
+@Test func openUsageWingKeepsTheHousingCentredAndGrowsBothWings() {
+    let both = UsageStripReadouts.make(codex: bothCodex, claude: bothClaude)
+    let collapsed = UsageStripReadouts.wingWidth(both, expanded: false)
+    let open = UsageStripReadouts.wingWidth(both, expanded: true)
+    for width in PanelWidth.allCases {
+        let layout = NotchPlacement.strip(on: builtIn, expanded: true, wing: open, width: width)
+        let frame = NotchPlacement.frame(on: builtIn, expanded: true, contentHeight: 200, wing: open, width: width)
+        // The numbers fit inside the content inset, and the left wing gains at least the usual growth.
+        #expect(layout.trailing >= open)
+        #expect(layout.leading >= NotchPlacement.leadingWing + NotchPlacement.expandedGrowth / 2)
+        #expect(layout.trailing - open == layout.leading - NotchPlacement.leadingWing)
+        #expect(frame.minX + NotchPlacement.earRadius + layout.leading + layout.gap / 2 == builtIn.frame.midX)
+        let externalLayout = NotchPlacement.strip(on: external, expanded: true, wing: open, width: width)
+        let externalFrame = NotchPlacement.frame(on: external, expanded: true, contentHeight: 200, wing: open, width: width)
+        #expect(externalLayout.trailing == open)
+        #expect(externalLayout.leading >= NotchPlacement.leadingWing)
+        #expect(externalFrame.midX == external.frame.midX)
+    }
+    // Standard on the MacBook notch: 180 + 112 + 148 + 60 growth, split evenly.
+    #expect(NotchPlacement.strip(on: builtIn, expanded: true, wing: open) == StripLayout(leading: 142, gap: 180, trailing: 178, height: 32))
+    #expect(NotchPlacement.strip(on: builtIn, expanded: false, wing: collapsed) == StripLayout(leading: 112, gap: 180, trailing: 60, height: 32))
 }
 
 @Test func centerLabelWidensOnlyAStripWithoutAHousing() {

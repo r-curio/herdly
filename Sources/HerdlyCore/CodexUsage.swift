@@ -32,7 +32,7 @@ public struct CodexUsageWindow: Equatable, Sendable {
     }
 
     /// Whole percent for the strip: never above 100, never negative.
-    public var percentText: String { "\(Int(min(100, max(0, usedPercent)).rounded()))%" }
+    public var percentText: String { UsageShare(usedPercent: usedPercent).percentText }
 
     /// Once the window has reset, the reading no longer describes the current period.
     public func isCurrent(now: Double) -> Bool { resetsAt > now }

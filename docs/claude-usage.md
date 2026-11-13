@@ -31,7 +31,7 @@ its reset is still in the future on Herdly's clock. A missing, malformed, expire
 is unavailable. A newer malformed record does not resurrect an older reading. The `spend_limit`
 object is ignored.
 
-The collapsed strip draws the current five-hour and seven-day windows as orange bars (captioned "5h" and "7d") ahead of Codex's blue bars. With several roots it shows only the newest still-current reading (`ClaudeUsageReading.newest`; equal observation times go to the lexicographically smallest root path); a root whose windows have all reset never hides an older current one.
+The strip draws the current five-hour and seven-day windows as one orange ring (inner ring five-hour, outer ring seven-day) ahead of Codex's blue ring; a window that is not current draws no ring, and the open panel prints the numbers beside it ("61/18%"). With several roots it shows only the newest still-current reading (`ClaudeUsageReading.newest`; equal observation times go to the lexicographically smallest root path); a root whose windows have all reset never hides an older current one.
 
 The expanded notch does not list Claude usage. The Claude Code setup page lists every opted-in root and labels readings as **last reported**. Readings are
 not proof that Claude made a fresh server request. A root with no accepted record remains unavailable;
