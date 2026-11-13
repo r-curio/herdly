@@ -9,6 +9,11 @@ import HerdlyCore
 /// directory's entry count itself, and reads the directory in full whenever a report is missing,
 /// late or says the events cannot be trusted. Nothing here decides what a record is. If a stream
 /// cannot be started the directory is simply not watched, and it is read as it always was.
+///
+/// The same reports are the hook scan's change evidence (#306). Nothing hops to the main actor from
+/// the event callback: it records into the lock-protected `HookEventListing.changes`, and the
+/// main-actor refresh tick asks that log (`takeScanEvidence`) before deciding whether to scan. A
+/// directory with no running stream reads there as untrusted, which keeps the scan on its clock.
 @MainActor
 final class HookDirectoryWatch {
     static let shared = HookDirectoryWatch()
@@ -18,7 +23,8 @@ final class HookDirectoryWatch {
     /// Watches exactly `directories`: starts the new ones and stops the rest. Cheap when unchanged.
     func watch(_ directories: [URL]) {
         let wanted = Dictionary(directories.map { ($0.standardizedFileURL.path, $0) }) { first, _ in first }
-        for (path, stream) in streams where wanted[path] == nil {
+        // A stream that said it may have lost its directory is replaced, like one never started.
+        for (path, stream) in streams where wanted[path].map(HookEventListing.changes.isWatchLost) ?? true {
             stream.stop()
             streams.removeValue(forKey: path)
         }
@@ -32,10 +38,13 @@ final class HookDirectoryWatch {
 /// One directory's event stream. Events arrive on `queue`; `flush` is called from whichever thread
 /// lists the directory.
 private final class HookDirectoryStream: @unchecked Sendable {
-    /// Event flags that mean names were lost or the directory itself moved: read it in full.
-    private static let untrusted = UInt32(kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagUserDropped
-        | kFSEventStreamEventFlagKernelDropped | kFSEventStreamEventFlagEventIdsWrapped
-        | kFSEventStreamEventFlagRootChanged | kFSEventStreamEventFlagMount | kFSEventStreamEventFlagUnmount)
+    /// Event flags that mean the directory itself moved or its volume changed: the stream may be
+    /// following nothing, so it is replaced.
+    private static let lost = UInt32(kFSEventStreamEventFlagRootChanged | kFSEventStreamEventFlagMount
+        | kFSEventStreamEventFlagUnmount)
+    /// Event flags that mean names were lost: read the directory in full.
+    private static let dropped = UInt32(kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagUserDropped
+        | kFSEventStreamEventFlagKernelDropped | kFSEventStreamEventFlagEventIdsWrapped)
 
     private let directory: URL
     /// The directory's real path with a trailing slash, as events name it.
@@ -99,17 +108,12 @@ private final class HookDirectoryStream: @unchecked Sendable {
     }
 
     private func handle(_ paths: [String], _ flags: [FSEventStreamEventFlags]) {
-        var names = Set<String>()
-        for (path, flag) in zip(paths, flags) {
-            // Lost events, the directory itself, or anything not under it: the names cannot be relied on.
-            guard flag & Self.untrusted == 0, path.hasPrefix(prefix) else {
-                HookEventListing.changes.reportUnknown(in: directory)
-                return
-            }
-            let name = path.dropFirst(prefix.count)
-            // The listing is top-level only; what changes inside a subdirectory does not change it.
-            if !name.isEmpty, !name.contains("/") { names.insert(String(name)) }
+        switch HookWatchReport.from(paths: paths, flags: flags, prefix: prefix, droppedFlags: Self.dropped, lostFlags: Self.lost) {
+        case .unknown(let watchLost):
+            HookEventListing.changes.reportUnknown(in: directory, watchLost: watchLost)
+        case .names(let names):
+            // Reported even with no top-level name: a change below still makes a scan due (#306).
+            HookEventListing.changes.report(names, in: directory)
         }
-        if !names.isEmpty { HookEventListing.changes.report(names, in: directory) }
     }
 }

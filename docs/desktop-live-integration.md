@@ -27,8 +27,9 @@ open output/Herdly.app --args --desktop-events "$PWD/output/desktop-hook-lab/eve
 
 Use `--desktop-events "$PWD/docs/evidence"` to replay the checked-in turn.
 
-The `--desktop-events` path is an isolated replay override. The app polls it
-every two seconds off the main actor. Existing completion records restore
+The `--desktop-events` path is an isolated replay override. The app reads it
+off the main actor in the hook scan, on the timing set out in
+[architecture](architecture.md) (`HookScanSchedule`). Existing completion records restore
 silently; a newly observed completion expands the notch for the card-open time
 (3 seconds by default) and
 stays queued until its own Dismiss action. Codex foreground hides the whole

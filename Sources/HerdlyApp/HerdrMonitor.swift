@@ -1,7 +1,7 @@
 import Foundation
 import HerdlyCore
 
-/// Polls herdr on the scheduled scan at `HerdrScanCadence`'s interval (two seconds, ten while nothing
+/// Polls herdr after each hook scan (`HookScanSchedule`) at `HerdrScanCadence`'s interval (two seconds, ten while nothing
 /// can use the result sooner), and only while the gate in ADR 0009 holds: herdr's switch
 /// allows contact (`TerminalHostSwitches.mayContact(.herdr)`) and either a live Claude Code session's newest Herdly hook event recorded
 /// a `HERDR_PANE_ID` or a live or daemon-loaded Codex terminal session exists beside a known Ghostty inventory while herdr's

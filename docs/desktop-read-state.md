@@ -30,7 +30,7 @@ Known honest limits: a thread cleared by archive or delete also acknowledges its
 
 ## App integration
 
-Each two-second scan reads the file off the main actor alongside the hook events and rollouts, then applies the rule before presentation decisions, so a completion that finished while its thread was open in front never pops or plays a sound. Acknowledgments persist in Herdly's attention snapshot like dismissals. Settings › Notifications has a switch, "Clear when read in Codex" (on by default, stored in UserDefaults as `desktopReadStateEnabled`), whose tooltip is a status line with the file's write time, the unread count, how many completions the last scan cleared, and a note when the installed desktop version differs from the tested one. `--desktop-read-state <path>` points a lab run at a copy of the file.
+Each hook scan (two seconds apart while a session is live or a row is held, [architecture](architecture.md)) reads the file off the main actor alongside the hook events and rollouts, then applies the rule before presentation decisions, so a completion that finished while its thread was open in front never pops or plays a sound. Acknowledgments persist in Herdly's attention snapshot like dismissals. Settings › Notifications has a switch, "Clear when read in Codex" (on by default, stored in UserDefaults as `desktopReadStateEnabled`), whose tooltip is a status line with the file's write time, the unread count, how many completions the last scan cleared, and a note when the installed desktop version differs from the tested one. `--desktop-read-state <path>` points a lab run at a copy of the file.
 
 ## Verification
 

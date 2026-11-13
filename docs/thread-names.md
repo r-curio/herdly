@@ -22,7 +22,7 @@ Only desktop threads are named. CLI sessions have no entry, so they keep the `se
 
 ## App integration
 
-Each two-second scan reads the index off the main actor alongside the hook events, rollouts, and read state, and publishes the map on the companion model. A running item may show the identifier for its first scans and switch to the name once Codex writes it. Rows show the name in the header (one line, tail-truncated) and, when a request has details, the full name as a selectable "thread" line. `--thread-names <path>` points a lab run at a copy of the file.
+Each hook scan (two seconds apart while a session is live or a row is held, [architecture](architecture.md)) reads the index off the main actor alongside the hook events, rollouts, and read state, and publishes the map on the companion model. A running item may show the identifier for its first scans and switch to the name once Codex writes it. Rows show the name in the header (one line, tail-truncated) and, when a request has details, the full name as a selectable "thread" line. `--thread-names <path>` points a lab run at a copy of the file.
 
 ## Verification
 

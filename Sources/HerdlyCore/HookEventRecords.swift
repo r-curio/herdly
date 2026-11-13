@@ -723,6 +723,33 @@ public enum HookDirectoryChanges: Equatable, Sendable {
     case unknown
 }
 
+/// What one batch of a watcher's events says about its directory, for `HookDirectoryChangeLog`.
+public enum HookWatchReport: Equatable, Sendable {
+    /// These top-level names changed; none when every change lay below the top level.
+    case names(Set<String>)
+    /// Events were lost or name something else: read the directory in full. `watchLost` when the
+    /// directory itself moved or its volume changed, so the watcher may be following nothing.
+    case unknown(watchLost: Bool)
+
+    /// - Parameters:
+    ///   - prefix: the directory's real path with a trailing slash, as events name it.
+    ///   - droppedFlags: event flags meaning names were lost.
+    ///   - lostFlags: event flags meaning the directory moved or its volume changed.
+    public static func from(paths: [String], flags: [UInt32], prefix: String,
+                            droppedFlags: UInt32, lostFlags: UInt32) -> HookWatchReport {
+        var names = Set<String>()
+        for (path, flag) in zip(paths, flags) {
+            guard flag & (droppedFlags | lostFlags) == 0, path.hasPrefix(prefix) else {
+                return .unknown(watchLost: flags.contains { $0 & lostFlags != 0 })
+            }
+            let name = path.dropFirst(prefix.count)
+            // The listing is top-level only; what changes inside a subdirectory does not change it.
+            if !name.isEmpty, !name.contains("/") { names.insert(String(name)) }
+        }
+        return .names(names)
+    }
+}
+
 /// Changed names reported by whatever watches a hook event directory (HerdlyApp, through macOS
 /// file-system events), held until `HookEventListing` next lists that directory.
 ///
@@ -755,6 +782,11 @@ public final class HookDirectoryChangeLog: @unchecked Sendable {
     private let lock = NSLock()
     private var pending: [String: HookDirectoryChanges] = [:]
     private var flushes: [String: @Sendable () -> Void] = [:]
+    /// Watched directories with a report since `takeScanEvidence` last asked (#306). Kept apart from
+    /// `pending`, which the listing empties from the scan's own thread.
+    private var touched: Set<String> = []
+    /// Watched directories whose watch said it may no longer follow them, until watching starts again.
+    private var lost: Set<String> = []
 
     public init() {}
 
@@ -765,12 +797,17 @@ public final class HookDirectoryChangeLog: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         pending[Self.key(directory)] = .unknown
         flushes[Self.key(directory)] = flush
+        // A new watch knows nothing of what changed before it started.
+        touched.insert(Self.key(directory))
+        lost.remove(Self.key(directory))
     }
 
     public func stopWatching(_ directory: URL) {
         lock.lock(); defer { lock.unlock() }
         pending.removeValue(forKey: Self.key(directory))
         flushes.removeValue(forKey: Self.key(directory))
+        touched.remove(Self.key(directory))
+        lost.remove(Self.key(directory))
     }
 
     /// Asks the directory's watcher, if any, to report what it has not reported yet.
@@ -781,18 +818,45 @@ public final class HookDirectoryChangeLog: @unchecked Sendable {
         flush?()
     }
 
+    /// `names` may be empty: something changed under the directory that is not a top-level name.
     public func report(_ names: Set<String>, in directory: URL) {
         lock.lock(); defer { lock.unlock() }
         let key = Self.key(directory)
+        if pending[key] != nil { touched.insert(key) }
         guard case .names(let known)? = pending[key] else { return }
         let all = known.union(names)
         pending[key] = all.count > Self.maximumNames ? .unknown : .names(all)
     }
 
-    public func reportUnknown(in directory: URL) {
+    /// - Parameter watchLost: the watcher may no longer follow the directory (it moved, or its volume
+    ///   went away). The directory then counts as unwatched for `takeScanEvidence` until
+    ///   `startWatching` is called for it again.
+    public func reportUnknown(in directory: URL, watchLost: Bool = false) {
         lock.lock(); defer { lock.unlock() }
         let key = Self.key(directory)
-        if pending[key] != nil { pending[key] = .unknown }
+        guard pending[key] != nil else { return }
+        pending[key] = .unknown
+        touched.insert(key)
+        if watchLost { lost.insert(key) }
+    }
+
+    /// Whether the watcher gave up on this directory (`reportUnknown(in:watchLost:)`).
+    public func isWatchLost(_ directory: URL) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return lost.contains(Self.key(directory))
+    }
+
+    /// What the watchers say about the directories a scan would list, for `HookScanSchedule` (#306).
+    /// `changed`: any watched directory had a report since the last call, which then starts again
+    /// from nothing. `trusted`: every one of `directories` is watched by a watcher that has not given
+    /// up; with none to watch there is nothing to distrust. A caller that does not scan loses nothing:
+    /// it passes `changed` on (`HookScanSchedule.noteChange`), where it stays until a scan starts.
+    public func takeScanEvidence(for directories: [URL]) -> (changed: Bool, trusted: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        let changed = !touched.isEmpty
+        touched = []
+        let trusted = directories.allSatisfy { pending[Self.key($0)] != nil && !lost.contains(Self.key($0)) }
+        return (changed, trusted)
     }
 
     /// What was reported for the directory with this listing key since the last call, which then
