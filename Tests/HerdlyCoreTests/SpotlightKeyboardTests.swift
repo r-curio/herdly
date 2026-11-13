@@ -308,8 +308,19 @@ private let allKeys: [SpotlightCardKey] = (0...10).map(SpotlightCardKey.digit)
 // MARK: - Foot line (Paper L frames 1, 2, 4, 5, 7)
 
 private func foot(_ card: SpotlightCardFocus, count: Int = 1, last: Bool = true, app: String? = "Ghostty",
-                  hotkey: String? = "⌃⌥Space") -> SpotlightCardFoot? {
-    SpotlightCardFoot.make(card: card, questionCount: count, viewedIsLast: last, returnApp: app, hotkey: hotkey)
+                  hotkey: String? = "⌃⌥Space", openOffered: Bool = true) -> SpotlightCardFoot? {
+    SpotlightCardFoot.make(card: card, questionCount: count, viewedIsLast: last, returnApp: app, hotkey: hotkey,
+                           openOffered: openOffered)
+}
+
+@Test func theFootAdvertisesReturnOnlyWhenTheCardShowsAnOpen() {
+    // A Claude card handed back with no reachable Open, or a Codex card waiting for terminal setup:
+    // there is nothing for Return to open, so the line names no Return.
+    #expect(foot(.keyboard(.handedBack(askedAt: 0)), openOffered: false)?.text == "esc back to Ghostty")
+    #expect(foot(.keyboard(.readOnly), count: 2, openOffered: false)?.text == "← → step · esc back to Ghostty")
+    #expect(foot(.keyboard(.readOnly), openOffered: false)?.spoken == "Escape goes back to Ghostty")
+    // Answering, Return is the card's own Send, whatever Open does.
+    #expect(foot(.keyboard(.answering), openOffered: false)?.text == "1–9 pick · ⏎ send · esc back to Ghostty")
 }
 
 @Test func beforeTheKeyboardIsInTheFootNamesTheHotkeyOnlyWhenItIsOn() {

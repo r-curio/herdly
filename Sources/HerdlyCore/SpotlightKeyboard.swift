@@ -263,12 +263,14 @@ public struct SpotlightCardFoot: Equatable, Sendable {
     /// - Parameters:
     ///   - returnApp: the app Escape gives the keyboard back to, when known (`NotchKeyboardReturn.target`).
     ///   - hotkey: the notch hotkey's title while it is on and registered; nil otherwise.
+    ///   - openOffered: the card shows an Open, by the same decision as its button. Without one,
+    ///     Return opens nothing, so a read-only or handed-back card's line names no Return.
     public static func make(card: SpotlightCardFocus, questionCount: Int, viewedIsLast: Bool,
-                            returnApp: String?, hotkey: String?) -> Self? {
+                            returnApp: String?, hotkey: String?, openOffered: Bool) -> Self? {
         let back = returnApp.map { Part(shown: "esc back to \($0)", spoken: "Escape goes back to \($0)") }
             ?? Part(shown: "esc close", spoken: "Escape closes")
         let steps = questionCount > 1 ? [Part(shown: "← → step", spoken: "left and right arrows step between questions")] : []
-        let open = Part(shown: "⏎ open", spoken: "Return opens the agent")
+        let open = openOffered ? [Part(shown: "⏎ open", spoken: "Return opens the agent")] : []
         switch card {
         case let .withoutKeyboard(answerable):
             // "Answer here" would be false on a card Herdly cannot answer, and the key must work.
@@ -280,9 +282,9 @@ public struct SpotlightCardFoot: Equatable, Sendable {
                                                       spoken: "Back to \($0) in \(seconds) second\(seconds == 1 ? "" : "s")") }
                 ?? Part(shown: "Closing in \(seconds)s", spoken: "Closing in \(seconds) second\(seconds == 1 ? "" : "s")")])
         case .keyboard(.handedBack):
-            return Self(parts: [open, back])
+            return Self(parts: open + [back])
         case .keyboard(.readOnly):
-            return Self(parts: [open] + steps + [back])
+            return Self(parts: open + steps + [back])
         case .keyboard(.answering):
             let pick = Part(shown: "1–9 pick", spoken: "1 to 9 picks")
             let primary = questionCount > 1 && !viewedIsLast

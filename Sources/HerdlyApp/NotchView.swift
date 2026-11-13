@@ -1475,13 +1475,18 @@ struct Notch: View {
     /// (`claudeOpenOffered`, `codexFooterMode`, `codexOpenOffered`), so a key never opens what the
     /// card does not show.
     private func questionOpen(_ item: AgentAttentionItem) -> (() -> Void)? {
-        guard !model.openingTask, let question = item.question else { return nil }
-        if item.session.source == .claude {
-            return claudeOpenOffered(item.session) ? { model.openClaudeQuestion(question) } : nil
-        }
-        let card = model.codexQuestion(for: question).map(codexCard)
-        guard codexOpenOffered(item), codexFooterMode(card, item: item) != .setUpTerminal else { return nil }
+        guard !model.openingTask, questionOpenOffered(item), let question = item.question else { return nil }
+        if item.session.source == .claude { return { model.openClaudeQuestion(question) } }
         return { model.openAgent(item.session) }
+    }
+
+    /// Whether the question card shows an Open: the decision its button, O, Return after hand-back,
+    /// and the foot line's "⏎ open" all read.
+    private func questionOpenOffered(_ item: AgentAttentionItem) -> Bool {
+        guard let question = item.question else { return false }
+        if item.session.source == .claude { return claudeOpenOffered(item.session) }
+        let card = model.codexQuestion(for: question).map(codexCard)
+        return codexOpenOffered(item) && codexFooterMode(card, item: item) != .setUpTerminal
     }
 
     /// The viewed question of a card and how many it has: where Next last moved on to unless the
@@ -1728,7 +1733,8 @@ struct Notch: View {
                 model.orderedAgentAttentionItems.first { $0.id == waitingID }
             }
             let foot = SpotlightCardFoot.make(card: card, questionCount: count, viewedIsLast: viewed >= count - 1,
-                                              returnApp: model.keyboardReturnApp, hotkey: model.cardHotkey)
+                                              returnApp: model.keyboardReturnApp, hotkey: model.cardHotkey,
+                                              openOffered: questionOpenOffered(item))
             if waiting != nil || foot != nil {
                 VStack(alignment: .leading, spacing: 8) {
                     if let waiting {

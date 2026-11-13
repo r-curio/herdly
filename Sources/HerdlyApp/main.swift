@@ -727,10 +727,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The rows the open panel shows, under their group headings: the explicit queue (working rows
     /// folded below anything that needs the user), or only the one card. A card is never grouped.
     /// The view draws these and the keyboard selection steps through them.
-    /// The single card's item: the queue's, or the kept sent card once its question has left (#428).
-    func spotlightItem(_ id: AgentAttentionID) -> AgentAttentionItem? {
-        orderedAgentAttentionItems.first { $0.id == id } ?? sentCardItem.flatMap { $0.id == id ? $0 : nil }
-    }
     var visibleSections: QueueSections {
         let items: [AgentAttentionItem]
         if presentationMode.showsAll {
@@ -744,6 +740,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return QueueSections.make(items, grouping: grouping, project: projectFolder(for:),
                                   kindSections: presentationMode.showsAll, openSections: openQueueFolds,
                                   earlier: presentationMode.showsAll ? earlierFold : .opened)
+    }
+    /// The single card's item: the queue's, or the kept sent card once its question has left (#428).
+    func spotlightItem(_ id: AgentAttentionID) -> AgentAttentionItem? {
+        orderedAgentAttentionItems.first { $0.id == id } ?? sentCardItem.flatMap { $0.id == id ? $0 : nil }
     }
     /// The open queue's rows in reading order as they are on screen: the arrows step through these,
     /// skipping a closed working fold and the rows of a folded Earlier, whose heading is one stop.
