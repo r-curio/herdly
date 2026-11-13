@@ -8,6 +8,10 @@ public enum NotchPresentationMode: Equatable, Sendable {
     case spotlight(AttentionItemID)
     case agentSpotlight(AgentAttentionID)
     case clickedCard(AgentAttentionID)
+    /// One to-check item as its card in the keyboard walk (#440), under the "‹ 3 of 4 to check ›" header.
+    case walkCard(AgentAttentionID)
+    /// The walk's last item was done: "All checked", then the panel folds (#440).
+    case allChecked
     case queue
 
     public static func resolve(spotlight: AttentionItemID?, manualOpen: Bool,
@@ -23,11 +27,19 @@ public enum NotchPresentationMode: Equatable, Sendable {
     /// The one item a spotlight or clicked card shows; nil for the queue and the collapsed strip.
     public var singleCard: AgentAttentionID? {
         switch self {
-        case let .agentSpotlight(id), let .clickedCard(id): return id
-        case .collapsed, .spotlight, .queue: return nil
+        case let .agentSpotlight(id), let .clickedCard(id), let .walkCard(id): return id
+        case .collapsed, .spotlight, .allChecked, .queue: return nil
         }
     }
     public var showsSingleCard: Bool { singleCard != nil }
+    /// A card the user opened from the queue: a clicked card, or the to-check walk's card (#440), which
+    /// takes the same question keys and labels. Nil for a spotlight, the queue, or "All checked".
+    public var openedCard: AgentAttentionID? {
+        switch self {
+        case let .clickedCard(id), let .walkCard(id): return id
+        case .collapsed, .spotlight, .agentSpotlight, .allChecked, .queue: return nil
+        }
+    }
     /// True when the notch shows a card that opened by itself and its item has left the queue (a
     /// question just answered on it, an approval decided). The panel then closes outright, even under
     /// the pointer, rather than falling back to the queue. A clicked card returns to the queue (D10).
@@ -65,10 +77,11 @@ public enum AgentPresentationEligibility {
     }
 }
 
-/// What one Escape did: a clicked card steps back to the queue; anything else collapses (D6).
-/// Neither dismisses an item.
+/// What one Escape did: a clicked card steps back to the queue; a walk card leaves the walk for the
+/// queue with its own row selected (#440); anything else collapses (D6). None dismisses an item.
 public enum NotchEscape: Equatable, Sendable {
     case backToQueue
+    case walkToQueue(selecting: AgentAttentionID)
     case collapse
 }
 
@@ -127,6 +140,9 @@ public struct NotchPresentationController: Equatable, Sendable {
     /// touches its request's deadline; it ends on Escape, ‹ Queue, an action, the end of
     /// interaction, or its item leaving the queue.
     private var clicked: AgentAttentionID?
+    /// The to-check walk (#440), entered only from the hotkey's queue and held, as that queue is, by
+    /// keyboard focus. It never touches a deadline and acknowledges nothing.
+    public private(set) var walk: ToCheckWalk?
 
     public init() {}
     public mutating func present(_ item: AttentionItemID, now: Double) { spotlight.present(item, now: now) }
@@ -135,7 +151,7 @@ public struct NotchPresentationController: Equatable, Sendable {
     /// Until I act keeps it open until the user interacts with it, then closes it once that
     /// interaction ends. Approval deadlines are separate and never move.
     public mutating func present(_ item: AgentAttentionID, now: Double, duration: CardOpenDuration = .standard) {
-        guard clicked == nil else { return }
+        guard clicked == nil, walk == nil else { return }
         agentSpotlight.present(item, now: now, duration: duration)
     }
     public func agentSpotlightIsActive(interacting: Bool, now: Double) -> Bool {
@@ -148,12 +164,12 @@ public struct NotchPresentationController: Equatable, Sendable {
     /// hands back (`keyboardHoldEnded`).
     public func acceptsAgentSpotlight(interacting: Bool, draftInProgress: Bool, keyboardFocus: Bool = false,
                                       keyboardHoldEnded: Bool = false, now: Double) -> Bool {
-        clicked == nil && !draftInProgress
+        clicked == nil && walk == nil && !draftInProgress
             && !agentSpotlight.isActive(interacting: interacting || (keyboardFocus && !keyboardHoldEnded), now: now)
     }
     /// The header's explicit open: the whole queue, leaving any clicked card. It also ends the
     /// spotlight, whose time would otherwise start over and show it again once the user leaves.
-    public mutating func openQueue() { manualOpen = true; clicked = nil; spotlight.clear(); agentSpotlight.clear() }
+    public mutating func openQueue() { manualOpen = true; clicked = nil; walk = nil; spotlight.clear(); agentSpotlight.clear() }
     /// The hotkey's open (#427): the whole queue, held while `update`'s `keyboardFocus` stays true.
     public mutating func openQueueForKeyboard() { openQueue(); keyboardOpen = true }
     /// Opens one approval or question as its own card in place of the queue. Other rows (results,
@@ -162,6 +178,7 @@ public struct NotchPresentationController: Equatable, Sendable {
     public mutating func openCard(_ item: AgentAttentionID) -> Bool {
         guard item.isRequest else { return false }
         clicked = item
+        walk = nil
         manualOpen = true
         agentSpotlight.clear()
         spotlight.clear()
@@ -182,8 +199,37 @@ public struct NotchPresentationController: Equatable, Sendable {
         backToQueue()
         return true
     }
-    /// The one Escape rule (D6): a clicked card returns to the queue; otherwise the panel collapses.
+    /// → in the hotkey's queue (#440): the first to-check item opens as its card. False outside the
+    /// hotkey's queue, or with nothing to check, so the key goes on.
+    @discardableResult
+    public mutating func enterWalk(items: [AgentAttentionItem]) -> Bool {
+        guard keyboardHoldsQueue, clicked == nil, let walk = ToCheckWalk(items: items) else { return false }
+        self.walk = walk
+        agentSpotlight.clear()
+        spotlight.clear()
+        return true
+    }
+
+    /// ← or → in the walk (`ToCheckWalk.step`). `.stop` when there is no walk.
+    @discardableResult
+    public mutating func stepWalk(_ direction: ToCheckWalk.Direction, items: [AgentAttentionItem],
+                                  question: ToCheckWalk.QuestionPosition? = nil, now: Double) -> ToCheckWalk.Step {
+        walk?.step(direction, items: items, question: question, now: now) ?? .stop
+    }
+
+    /// "All checked" has shown for its hold: the caller folds the panel through its hand-back path.
+    public func walkFoldDue(now: Double) -> Bool {
+        walk?.foldDue(now: now) ?? false
+    }
+
+    /// The one Escape rule (D6): a clicked card returns to the queue, a walk card returns to it with
+    /// its row selected (#440); otherwise the panel collapses.
     public mutating func escape() -> NotchEscape {
+        if let walk, case let .card(id) = walk.screen {
+            self.walk = nil
+            manualOpen = true
+            return .walkToQueue(selecting: id)
+        }
         if clicked != nil {
             backToQueue()
             return .backToQueue
@@ -192,7 +238,7 @@ public struct NotchPresentationController: Equatable, Sendable {
         return .collapse
     }
     public mutating func collapse() {
-        manualOpen = false; keyboardOpen = false; clicked = nil; spotlight.clear(); agentSpotlight.clear()
+        manualOpen = false; keyboardOpen = false; clicked = nil; walk = nil; spotlight.clear(); agentSpotlight.clear()
     }
     /// `draftInProgress` (unsent text in a field on screen) keeps the current card open like
     /// interaction does, so a hover or focus gap cannot swap it for the queue mid-answer. It does
@@ -207,11 +253,29 @@ public struct NotchPresentationController: Equatable, Sendable {
     /// for it (ADR 0020), and a clicked queue still folds when the pointer leaves (#376).
     /// `keyboardHoldEnded` is true once the focused card handed back (`SpotlightKeyboardCard`): from
     /// then on the card follows its normal open time, as if focus had just left.
+    /// `walkItems` is the open queue's rows in its chosen sort: a walk follows it (`ToCheckWalk.observe`),
+    /// so an arrival takes its place and a card whose item left hands over to its neighbour. The walk
+    /// is held by the hotkey's keyboard focus (or the pointer, or unsent text) like a clicked card,
+    /// and ends with the panel when that hold goes.
     public mutating func update(interacting: Bool, draftInProgress: Bool = false, keyboardFocus: Bool = false,
                                 keyboardHoldEnded: Bool = false, now: Double, legacyPopup: Bool = false,
-                                queued: Set<AgentAttentionID>? = nil) -> NotchPresentationMode {
+                                queued: Set<AgentAttentionID>? = nil,
+                                walkItems: [AgentAttentionItem]? = nil) -> NotchPresentationMode {
         if !keyboardFocus { keyboardOpen = false }
         let keyboardHeld = keyboardHoldsQueue
+        if var walk {
+            if let walkItems { walk.observe(items: walkItems, now: now) }
+            if interacting || draftInProgress || keyboardHeld {
+                self.walk = walk
+                switch walk.screen {
+                case let .card(id): return .walkCard(id)
+                case .allChecked: return .allChecked
+                }
+            }
+            // The walk closes with the panel, as the queue it started from does.
+            self.walk = nil
+            manualOpen = false
+        }
         if let card = clicked {
             if let queued, !queued.contains(card) {
                 clicked = nil
@@ -554,6 +618,8 @@ public enum QuestionStepperPlacement: Equatable, Sendable {
         switch mode {
         case let .clickedCard(id) where id == card: return .queueBar
         case let .agentSpotlight(id) where id == card: return .ownRow
+        // The walk's header holds its place among items (#440); the card's own questions step below it.
+        case let .walkCard(id) where id == card: return .ownRow
         default: return .none
         }
     }

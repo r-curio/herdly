@@ -424,6 +424,23 @@ struct NotchButton: View {
     }
 }
 
+/// One of the walk header's ‹ › wells (#440, Paper K "D · Walk the to-check list"): the notch's own
+/// button style at the slim 2pt height the subagent switcher's wells use; dim and not pressable at
+/// either end.
+struct WalkStepWell: View {
+    let symbol: String
+    let enabled: Bool
+    let action: () -> Void
+    @FocusState private var focused: Bool
+    var body: some View {
+        Button(action: action) { Text(verbatim: symbol) }
+            .buttonStyle(NotchButtonStyle(verticalPadding: 2))
+            .disabled(!enabled)
+            .focused($focused)
+            .modifier(NotchFocusRing(focused: focused))
+    }
+}
+
 /// A keyboard card's key labels (#428): what each key is called aloud, and the hint that says it, so a
 /// key label is never part of a button's name ("Shortcut: O").
 enum NotchShortcut: Equatable {
@@ -1796,8 +1813,7 @@ struct Notch: View {
         let prompts = questionPrompts(question)
         let viewed = viewedQuestionIndex(question).viewed
         guard prompts.indices.contains(viewed), let text = prompts[viewed].question else { return }
-        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
-                             userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        announce(text)
     }
 
     /// Key labels show only on the card that has the keyboard (frame 2), never before it (frame 1),
@@ -2306,15 +2322,48 @@ struct Notch: View {
     /// whose Open follows the same reading.
     @ViewBuilder
     private func resultOpen(_ item: AgentAttentionItem, subject: String, codexOpen: Bool,
-                            target: ResultRowTarget) -> some View {
-        if item.session.source == .codex, codexOpen, target == .reachable {
-            NotchButton(title: Self.rowOpenTitle) { model.openAgent(item.session) }
+                            target: ResultRowTarget, shortcut: NotchShortcut? = nil) -> some View {
+        if let open = resultOpenAction(item, codexOpen: codexOpen, target: target) {
+            NotchButton(title: Self.rowOpenTitle, shortcut: shortcut, action: open)
                 .disabled(model.openingTask)
                 .accessibilityLabel("Open Session: \(subject)")
-                .accessibilityHint(Self.resultOpenHint(item.session.source))
+                .accessibilityHint(NotchShortcut.hint(Self.resultOpenHint(item.session.source), shortcut: shortcut))
+        } else {
+            // No Open: a Claude result that cannot be opened may offer "Set up Ghostty" instead.
+            claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle,
+                                openHint: Self.resultOpenHint(item.session.source))
         }
-        claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle,
-                            openHint: Self.resultOpenHint(item.session.source))
+    }
+
+    /// A result's Open, or nil where it shows none: the one decision its button and the walk's O key
+    /// (#440) both read, so a key never opens what the card does not show. Codex's while Open is
+    /// offered and the result's reading is reachable; Claude's by `claudeReturnControl`'s own rule.
+    /// Opening acknowledges nothing.
+    private func resultOpenAction(_ item: AgentAttentionItem, codexOpen: Bool, target: ResultRowTarget) -> (() -> Void)? {
+        let session = item.session
+        if session.source == .codex {
+            return codexOpen && target == .reachable ? { model.openAgent(session) } : nil
+        }
+        let herdr = herdrOpen(session)
+        guard herdr == .available || (herdr == .notInHerdr && model.canOpenClaude(session)),
+              claudeOpenOffered(session) else { return nil }
+        return { model.openAgent(session) }
+    }
+
+    /// O or X the panel handed to the walk's result card (#440), already mapped by `ResultCardKeys`:
+    /// exactly as clicking Open or Dismiss. Dismiss clears this one result, and the walk moves on
+    /// once it has left.
+    private func handleResultCardKey(_ press: ResultCardKeyPress?) {
+        guard let press, press.card == model.presentationMode.singleCard,
+              let item = model.orderedAgentAttentionItems.first(where: { $0.id == press.card }), item.outcome != nil
+        else { return }
+        switch press.action {
+        case .open:
+            guard !model.openingTask else { return }
+            resultOpenAction(item, codexOpen: codexOpenOffered(item), target: model.resultRowReading(item.session).target)?()
+        case .dismiss: model.dismissAgent(item.id)
+        case .none: break
+        }
     }
 
     /// The line under a result row's name (`ResultRowReading.line`): why Open is not offered, or
@@ -2538,11 +2587,73 @@ struct Notch: View {
         }
     }
 
+    // MARK: The to-check walk (#440, Paper K "D · Walk the to-check list")
+
+    /// The walk's header above its card: the ‹ › wells around "3 of 4 to check" (the index in ink,
+    /// the rest in text gray), then one dashed mark per item on the right, the passed ones dim, the current
+    /// one ink, the ones still ahead in the well's gray. The wells move by item; ← → also step a
+    /// card's own questions first. Moving shows another card and clears nothing.
+    private func walkHeader(_ position: ToCheckWalk.Position) -> some View {
+        HStack(spacing: 8) {
+            WalkStepWell(symbol: "‹", enabled: position.index > 1) { model.stepWalk(.previous) }
+                .accessibilityLabel("Previous item")
+            (Text(verbatim: "\(position.index)").foregroundStyle(NotchStyle.ink).fontWeight(.semibold)
+                + Text(verbatim: " of \(position.count) to check").foregroundStyle(NotchStyle.text))
+                .font(NotchStyle.mono(10)).monospacedDigit().lineLimit(1).fixedSize()
+                .accessibilityLabel(position.spoken)
+            WalkStepWell(symbol: "›", enabled: position.index < position.count) { model.stepWalk(.next) }
+                .accessibilityLabel("Next item")
+            HStack(spacing: 4) {
+                // Positional marks: the walk's items have no other identity on screen.
+                ForEach(Array(1...position.count), id: \.self) { mark in
+                    Rectangle()
+                        .fill(mark < position.index ? NotchStyle.dim : mark == position.index ? NotchStyle.ink : NotchStyle.well)
+                        .frame(minWidth: 2, maxWidth: 18)
+                        .frame(height: 2)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .accessibilityHidden(true)
+        }
+        .padding(.horizontal, 6)
+    }
+
+    /// The space between the walk's header and its card (Paper K frame D).
+    private static let walkHeaderGap: CGFloat = 10
+
+    /// The walk's end (#440): the last item was done, so the panel says so, then folds and gives the
+    /// keyboard back. It names nothing as checked beyond what was decided, answered or dismissed.
+    private var allCheckedRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
+            spriteSlot(working: false, color: 0, unlit: true)
+            Text("All checked").font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
+        }
+        .frame(minHeight: 26)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// ← or → on a walk card that shows a question (#440): the walk is asked with the viewed question,
+    /// so a call of several questions steps its own first, and shows the one the step names.
+    private func handleWalkKey(_ press: WalkKeyPress?) {
+        guard let press, press.card == model.presentationMode.singleCard,
+              let question = model.spotlightItem(press.card)?.question else { return }
+        let (viewed, count) = viewedQuestionIndex(question)
+        if case let .question(next) = model.stepWalk(press.action, question: .init(viewed: viewed, count: count)) {
+            showQuestion(next, of: question)
+        }
+    }
+
+    private func announce(_ text: String) {
+        guard NSWorkspace.shared.isVoiceOverEnabled else { return }
+        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                             userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+    }
+
     /// The spotlight question card's stepper (#384, Paper "G · Claude: answer several questions",
     /// panel 4): a card that opened by itself has no "‹ Queue" bar, so a request with two or more
     /// questions gets a slim row above the title with the same right-aligned stepper.
     private var spotlightStepperQuestion: AgentQuestion? {
-        guard case let .agentSpotlight(id) = model.presentationMode,
+        guard let id = model.presentationMode.singleCard,
               let question = model.orderedAgentAttentionItems.first(where: { $0.id == id })?.question,
               QuestionStepperPlacement.resolve(mode: model.presentationMode, card: id,
                                                questionCount: questionPrompts(question).count) == .ownRow
@@ -2862,11 +2973,15 @@ struct Notch: View {
             }
             if let outcome = item.outcome { resultReplyField(outcome, subject: subject) }
             resultRowLine(item, reading: reading)
+            // The walk's result card with the keyboard shows its keys, "O" and "X" (#440).
+            let keys = model.resultKeysCard == item.id
             HStack(spacing: 6) {
                 Spacer(minLength: 6)
-                resultOpen(item, subject: subject, codexOpen: codexOpen, target: reading.target)
-                NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+                resultOpen(item, subject: subject, codexOpen: codexOpen, target: reading.target,
+                           shortcut: keys ? NotchShortcut.open : nil)
+                NotchButton(title: "Dismiss", shortcut: keys ? NotchShortcut.dismiss : nil) { model.dismissAgent(item.id) }
                     .accessibilityLabel("Dismiss completion: \(subject)")
+                    .accessibilityHint(NotchShortcut.hint(nil, shortcut: keys ? NotchShortcut.dismiss : nil))
             }
         }
         .padding(.leading, Sprite.slotWidth + Sprite.slotGap)
@@ -3589,9 +3704,19 @@ struct Notch: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         if model.presentationMode.clickedCard != nil { clickedCardBar }
-                        if let question = spotlightStepperQuestion { spotlightStepperRow(question) }
-                        // An empty stack would still take the column's spacing, so each part is drawn only with rows.
-                        if !sections.attention.isEmpty { groupRows(sections.attention) }
+                        if model.presentationMode == .allChecked { allCheckedRow }
+                        if let position = model.walkPosition {
+                            // Frame D sets the walk's header 10pt above its card, closer than the column's 14pt.
+                            VStack(alignment: .leading, spacing: Self.walkHeaderGap) {
+                                walkHeader(position)
+                                if let question = spotlightStepperQuestion { spotlightStepperRow(question) }
+                                if !sections.attention.isEmpty { groupRows(sections.attention) }
+                            }
+                        } else {
+                            if let question = spotlightStepperQuestion { spotlightStepperRow(question) }
+                            // An empty stack would still take the column's spacing, so each part is drawn only with rows.
+                            if !sections.attention.isEmpty { groupRows(sections.attention) }
+                        }
                         spotlightQuestionFoot
                         if sections.foldsWorking {
                             NotchDisclosure(title: "\(sections.workingCount) working", expanded: $model.workingFoldOpen) {
@@ -3667,6 +3792,10 @@ struct Notch: View {
         }
         .onChange(of: model.questionCardKeyPress) { _, press in handleQuestionCardKey(press) }
         .onChange(of: model.approvalCardKeyPress) { _, press in handleApprovalCardKey(press) }
+        .onChange(of: model.resultCardKeyPress) { _, press in handleResultCardKey(press) }
+        .onChange(of: model.walkKeyPress) { _, press in handleWalkKey(press) }
+        // "All checked" is said aloud as the walk ends (#440).
+        .onChange(of: model.presentationMode == .allChecked) { _, done in if done { announce("All checked") } }
         // VoiceOver reads the question on screen whenever a card takes the keyboard, by the hotkey or
         // a click (#428).
         .onChange(of: model.keyboardCard?.id) { _, id in announceKeyboardCard(id) }
