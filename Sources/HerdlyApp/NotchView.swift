@@ -100,6 +100,18 @@ enum NotchStyle {
     /// Usage ring fills name their source: Codex blue, Claude orange. Nothing else uses these.
     static let codexUsage = Color(red: 0.231, green: 0.510, blue: 0.965)  // #3b82f6
     static let claudeUsage = Color(red: 0.851, green: 0.467, blue: 0.341) // #d97757
+    /// A finished row's state words (#418) and nothing else: red for checks failing and conflict, amber
+    /// for uncommitted and not pushed, gray for checks running, green for checks passed and merged.
+    static let stateRed = stateColor(.red)        // #f87171
+    static let stateAmber = stateColor(.amber)    // #fbbf24
+    static let stateGray = stateColor(.gray)      // #8f8f8f
+    static let stateGreen = stateColor(.green)    // #4ade80
+
+    /// The one mapping from a tone to its colour: the exact sRGB value (`WorkStatusTone.hex`).
+    static func stateColor(_ tone: WorkStatusTone) -> Color {
+        let channels = tone.components
+        return Color(.sRGB, red: channels.red, green: channels.green, blue: channels.blue)
+    }
 
     /// Sprite colors by session, body and highlight; index 0 is the original green.
     static let spriteColors: [(body: Color, light: Color)] = [
@@ -992,6 +1004,66 @@ struct ExceptionWord: View {
     }
 }
 
+/// The place after a row's name as one line (`RowPlaceLine`, #418): dim "· ", a finished row's state
+/// words in their tone, then dim " · herdly#431" or the place. The state never truncates; the part
+/// after it takes what width is left and tail-truncates. A verdict change redraws the text in place
+/// with no motion of its own. Spoken through the row heading.
+struct RowPlaceLineText: View {
+    let line: RowPlaceLine
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            if let label = line.label {
+                Text("\(Text("· ").foregroundStyle(NotchStyle.dim))\(Text(label.words).foregroundStyle(NotchStyle.stateColor(label.tone)))")
+                    .lineLimit(1).fixedSize()
+                if let detail = line.detail {
+                    Text(" · \(detail)").foregroundStyle(NotchStyle.dim)
+                        .lineLimit(1).truncationMode(.tail)
+                }
+            } else if let detail = line.detail {
+                Text("· \(detail)").foregroundStyle(NotchStyle.dim)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+        }
+        .font(NotchStyle.mono(11))
+        .accessibilityHidden(true)
+    }
+}
+
+/// A row header's name and place (D17, #418): the name in 12pt semibold ink, then the row note or the
+/// place line, which takes the free width. When the row runs out of room the place's repository or
+/// branch truncates first, then the name; a finished row's state words never do, and the word slot and
+/// age after this view are fixed. Spoken through the row heading.
+struct RowHeaderNamePlace: View {
+    let name: String
+    let note: RowNote?
+    let place: RowPlaceLine?
+    /// The place's tooltip: the full working directory when known.
+    var help: String?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(name)
+                .font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
+                .lineLimit(1).truncationMode(.tail).layoutPriority(2)
+            if let note {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("·")
+                    Text(note.text).lineLimit(1).truncationMode(.tail)
+                }
+                .font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if let place {
+                RowPlaceLineText(line: place)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(help ?? place.detail ?? place.text)
+            } else {
+                Spacer(minLength: 0)
+            }
+        }
+    }
+}
+
 /// "18s left" on a live approval (D7, D12): ink on a well, with a 2pt ink bar along its bottom edge
 /// as long as the remaining share of the request's own window. It steps once a second with no
 /// animation, so Reduce Motion needs nothing extra. Display only; the deadline never moves.
@@ -1229,6 +1301,9 @@ struct Notch: View {
     @ObservedObject var model: Companion
     /// Observed so the empty queue's reading follows Claude setup changes; read through `model`.
     @ObservedObject var claudeSetup: ClaudeSetupModel
+    /// Observed so a finished row's work status redraws in place when a reading lands (#418); read
+    /// through `model`.
+    @ObservedObject var workStatus: WorkStatusModel
     @FocusState private var headerFocused: Bool
     /// The opened running row's focused switcher well and Open (#397), owned here so focus can move
     /// between them after the switcher itself has left.
@@ -2347,11 +2422,6 @@ struct Notch: View {
         model.presentationMode.showsAll ? model.rowNote(for: item.id) : nil
     }
 
-    private func rowNoteText(_ note: RowNote, questionCard: Bool) -> some View {
-        Text(note.text).font(questionCard ? QuestionCardStyle.font(11) : NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-            .lineLimit(1).truncationMode(.tail)
-    }
-
     /// The keyboard hint at the foot of the queue the notch hotkey opened (#427, Paper K "A · Hotkey"):
     /// 10pt dim, 12pt apart, inset to the row edge. A clicked queue has none.
     private func keyboardFoot(hotkey: String) -> some View {
@@ -3024,11 +3094,14 @@ struct Notch: View {
         .padding(.vertical, resultRow ? QueueRowMetrics.resultGap / 2 : 0)
     }
 
-    /// The spoken heading (`QueueRowPresentation.spokenHeading`): name, place, any row note, the
-    /// full state the visual word shortens, and a live approval's seconds left.
+    /// The spoken heading (`QueueRowPresentation.spokenHeading`): name, place (a finished row's work
+    /// status in words first, #418), any row note, the full state the visual word shortens, and a live
+    /// approval's seconds left.
     private func rowHeading(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil) -> String {
-        QueueRowPresentation.spokenHeading(item, name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
-                                           place: model.rowPlace(for: item), note: rowNote(item), countdown: countdown)
+        let note = rowNote(item)
+        return QueueRowPresentation.spokenHeading(item, name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
+                                                  place: model.rowPlaceLine(for: item, note: note)?.spoken, note: note,
+                                                  countdown: countdown)
     }
 
     /// A non-question row's heading line (D17): sprite, name, dim "· place" (it truncates first),
@@ -3073,27 +3146,13 @@ struct Notch: View {
 
     /// The row's name, then "· project @ branch" (in the profile's label format) when Herdly has seen
     /// the working directory. The place takes the free width and tail-truncates first, so the name
-    /// and any word after it stay whole. Presentation only; nothing here selects a target.
+    /// and any word after it stay whole. A finished row's work status (#418) leads the place in its
+    /// tone and never truncates; the pull request or place after it gives way. Presentation only;
+    /// nothing here selects a target.
     private func rowHeader(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(QueueRowPresentation.sessionName(item.session, names: sessionNames))
-                .font(NotchStyle.mono(12, .semibold)).foregroundStyle(NotchStyle.ink)
-                .lineLimit(1).truncationMode(.tail).layoutPriority(2)
-            if let note = rowNote(item) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("·").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                    rowNoteText(note, questionCard: false)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else if let place = model.rowPlace(for: item) {
-                Text("· \(place)").font(NotchStyle.mono(11)).foregroundStyle(NotchStyle.dim)
-                    .lineLimit(1).truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .help(model.rowDirectory(for: item) ?? place)
-            } else {
-                Spacer(minLength: 0)
-            }
-        }
+        let note = rowNote(item)
+        return RowHeaderNamePlace(name: QueueRowPresentation.sessionName(item.session, names: sessionNames), note: note,
+                                  place: model.rowPlaceLine(for: item, note: note), help: model.rowDirectory(for: item))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(rowHeading(item, countdown: countdown))
         .accessibilityAddTraits(.isHeader)
