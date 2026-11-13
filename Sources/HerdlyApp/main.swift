@@ -328,7 +328,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     var currentWeeklyLimit: CodexUsageWindow? { currentUsage?.weekly }
     /// Claude readings remain keyed by their selected configuration root; values are never merged.
     @Published var claudeUsage: [String: ClaudeUsageReading] = [:]
-    /// The strip's usage bars, Claude's then Codex's, from one clock reading so the bars drawn and
+    /// The strip's usage rings, Claude's then Codex's, from one clock reading so the rings drawn and
     /// the wing laid out for them agree.
     var usageStripReadouts: [UsageStripReadout] {
         guard appearance.usage != .hidden else { return [] }
@@ -1074,10 +1074,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             "display_preference": notchDisplayPreference.pin.map { ["pinned_id": $0.id, "pinned_name": $0.name] as Any } ?? "follow_pointer",
             "pointer": ["x": pointer.x, "y": pointer.y],
             "chosen_display": chosen.map { Int($0.id) } ?? NSNull(),
-            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts))) } ?? NSNull(),
-            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts))) } ?? NSNull(),
-            "five_hour_shown": usageStripReadouts.contains { $0.source == .codex && $0.caption != nil },
+            "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts, expanded: false))) } ?? NSNull(),
+            "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts, expanded: true))) } ?? NSNull(),
+            "five_hour_shown": usageStripReadouts.contains { $0.source == .codex && $0.fiveHour != nil },
+            // One ring per source; `usage_windows` counts the windows the rings draw.
             "usage_readouts": usageStripReadouts.count,
+            "usage_windows": usageStripReadouts.reduce(0) { $0 + ($1.fiveHour == nil ? 0 : 1) + ($1.weekly == nil ? 0 : 1) },
             "panel_frame": rect(panel.frame),
             "codex_foreground": desktopForeground,
             "panel": ["level": panel.level.rawValue, "nonactivating": panel.styleMask.contains(.nonactivatingPanel),
@@ -1991,7 +1993,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         currentDisplayID = display.id
         let profile = DisplayProfile(hasCameraHousing: display.hasPhysicalNotch)
         if activeProfile != profile { activeProfile = profile }
-        let wing = UsageStripReadouts.wingWidth(usageStripReadouts)
+        // The open panel widens the right wing to fit each ring's numbers; collapsed it holds rings only.
+        let wing = UsageStripReadouts.wingWidth(usageStripReadouts, expanded: expanded)
         let center = appearance.effectiveCenterLabel(on: profile) == .off ? 0 : NotchPlacement.centerLabelWidth
         let width = appearance.panelWidth
         let layout = NotchPlacement.strip(on: display, expanded: expanded, wing: wing, centerLabel: center, width: width)

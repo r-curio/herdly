@@ -97,7 +97,7 @@ enum NotchStyle {
     static let seam = Color.white.opacity(0.08)
     /// The well behind "Failed" and nothing else: the one red in the panel (D14).
     static let failure = Color(red: 0.227, green: 0.114, blue: 0.114)  // #3a1d1d
-    /// Usage bar fills name their source: Codex blue, Claude orange. Nothing else uses these.
+    /// Usage ring fills name their source: Codex blue, Claude orange. Nothing else uses these.
     static let codexUsage = Color(red: 0.231, green: 0.510, blue: 0.965)  // #3b82f6
     static let claudeUsage = Color(red: 0.851, green: 0.467, blue: 0.341) // #d97757
 
@@ -252,40 +252,58 @@ struct Badge: View {
     }
 }
 
-/// One usage limit as a vertical bar: a dark-well track filled from the bottom to the used share in
-/// its source's hue (Codex blue, Claude orange), with the percent beside it in gray; an empty track
-/// and a dash while Herdly has no current reading. A dim caption ahead of the bar names the window
-/// ("5h", "7d"); Codex's weekly readout carries none, as it always has. Hidden from VoiceOver; the
-/// strip label speaks it.
-struct UsageLimitReading: View {
-    var percent: Double?
-    var percentText: String?
-    var caption: String? = nil
-    var tint: Color
-    static let barWidth: CGFloat = 4
-    static let barHeight: CGFloat = 14
+/// One source's usage limits as one ring (D35): the outer ring is the weekly (Claude: seven-day)
+/// window, the inner ring the five-hour one, each a dark-well track filled clockwise from 12 o'clock
+/// in the source's hue (Codex blue, Claude orange), with no warning colour near the cap. A window
+/// that is not reported draws no ring at all; Codex with no current reading draws an empty outer
+/// track and a dim dash. Open, the ring is followed by its numbers ("61/18%"). Fill changes are not
+/// animated. Hidden from VoiceOver; the strip label speaks it.
+struct UsageRing: View {
+    let readout: UsageStripReadout
+    var showsNumbers: Bool
 
-    init(_ readout: UsageStripReadout) {
-        percent = readout.usedPercent
-        percentText = readout.percentText
-        caption = readout.caption
-        tint = readout.source == .claude ? NotchStyle.claudeUsage : NotchStyle.codexUsage
-    }
-
-    private var fraction: CGFloat { CGFloat(min(100, max(0, percent ?? 0)) / 100) }
+    private var tint: Color { readout.source == .claude ? NotchStyle.claudeUsage : NotchStyle.codexUsage }
 
     var body: some View {
-        HStack(spacing: 5) {
-            if let caption { Text(caption).foregroundStyle(NotchStyle.dim) }
-            ZStack(alignment: .bottom) {
-                Capsule().fill(NotchStyle.well)
-                Capsule().fill(tint).frame(height: Self.barHeight * fraction)
+        HStack(spacing: UsageStripReadouts.textGap) {
+            ZStack {
+                // 2pt strokes centred on radius 7.5 and 4 in the 18pt box.
+                if readout.hasOuterRing { arc(diameter: 15, fraction: readout.weekly?.fraction) }
+                if let fiveHour = readout.fiveHour { arc(diameter: 8, fraction: fiveHour.fraction) }
             }
-            .frame(width: Self.barWidth, height: Self.barHeight)
-            Text(percentText ?? "—").foregroundStyle(percentText == nil ? NotchStyle.dim : NotchStyle.ink).monospacedDigit()
+            .frame(width: UsageStripReadouts.ringSize, height: UsageStripReadouts.ringSize)
+            if showsNumbers {
+                numbers
+            } else if readout.isUnknown {
+                Text(verbatim: "—").foregroundStyle(NotchStyle.dim)
+            }
         }
-        .font(NotchStyle.mono(11, .medium))
+        .font(NotchStyle.mono(11, .medium)).monospacedDigit()
+        .lineLimit(1).fixedSize()
         .accessibilityHidden(true)
+    }
+
+    /// The track, and over it the used share; an unknown window keeps the track alone, so it never
+    /// reads as a fill of 0%.
+    private func arc(diameter: CGFloat, fraction: Double?) -> some View {
+        let stroke = StrokeStyle(lineWidth: 2, lineCap: .butt)
+        return ZStack {
+            Circle().stroke(NotchStyle.well, style: stroke)
+            if let fraction, fraction > 0 {
+                Circle().trim(from: 0, to: fraction).stroke(tint, style: stroke).rotationEffect(.degrees(-90))
+            }
+        }
+        .frame(width: diameter, height: diameter)
+    }
+
+    /// Five-hour, a dim regular-weight slash, week, one trailing percent, as one line of text.
+    private var numbers: Text {
+        readout.openText.reduce(Text(verbatim: "")) { line, run in
+            let part = run.dim
+                ? Text(verbatim: run.text).fontWeight(.regular).foregroundStyle(NotchStyle.dim)
+                : Text(verbatim: run.text).foregroundStyle(NotchStyle.ink)
+            return Text("\(line)\(part)")
+        }
     }
 }
 
@@ -2958,7 +2976,7 @@ struct Notch: View {
 
     private var stripLabel: String {
         strip.spokenLabel(emptyQueueTitle: model.emptyQueueReading.title,
-                          readouts: model.usageStripReadouts.map(\.spokenLabel))
+                          readouts: model.usageStripReadouts.flatMap(\.spokenLabels))
     }
 
     /// Rows under their optional group headings, with each run of Earlier rows under its count. Each
@@ -3044,9 +3062,8 @@ struct Notch: View {
             Button(action: model.expand) {
                 // The sprites and the to-check count sit together in the wing left of the housing
                 // (`StripWing`: up to three sprites and the bare count collapsed, one sprite and
-                // "N to check" open); Codex's weekly limit reading sits in the
-                // wing right of it, with its five-hour reading ahead of it while Codex reports one, and
-                // Claude's current five-hour and seven-day readings (orange) ahead of Codex's (blue).
+                // "N to check" open); the usage rings sit in the wing right of it, Claude's (orange)
+                // ahead of Codex's (blue), with each ring's numbers while the panel is open.
                 // The gap between them is the housing itself. On a display without a housing the
                 // gap holds the optional center label instead; otherwise the name is read from the
                 // open queue and the accessibility label. The 8pt content inset on each side comes
@@ -3079,14 +3096,10 @@ struct Notch: View {
                     }
                     HStack(spacing: 0) {
                         Spacer(minLength: 0)
-                        let readouts = model.usageStripReadouts
-                        ForEach(readouts.indices, id: \.self) { index in
-                            let readout = readouts[index]
-                            UsageLimitReading(readout)
-                            if index + 1 < readouts.count {
-                                // 8pt between readouts; the groupGap more where Claude's bars end.
-                                Color.clear.frame(width: 8 + (readout.source != readouts[index + 1].source
-                                                              ? UsageStripReadouts.groupGap : 0))
+                        // One ring per source, Claude's then Codex's; numbers only while open.
+                        HStack(spacing: model.expanded ? UsageStripReadouts.openGroupGap : UsageStripReadouts.collapsedRingGap) {
+                            ForEach(model.usageStripReadouts, id: \.source) { readout in
+                                UsageRing(readout: readout, showsNumbers: model.expanded)
                             }
                         }
                     }
