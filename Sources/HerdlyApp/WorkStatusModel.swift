@@ -2,9 +2,9 @@ import Foundation
 import HerdlyCore
 
 /// Work status for finished rows (#417, ADR 0024): the branch each running turn was seen on, the
-/// verdict read for each finished turn, and the GitHub card's state and switch. It draws nothing in the
-/// notch; `verdict(for:)` is what a row will read. Nothing here changes the queue, its counts,
-/// acknowledgment, the spotlight or any deadline.
+/// verdict read for each finished turn, and the GitHub card's state and switch. A finished row reads
+/// `finishedLabel(for:)` (#418). Nothing here changes the queue, its counts, acknowledgment, the
+/// spotlight or any deadline.
 @MainActor
 final class WorkStatusModel: ObservableObject {
     @Published private(set) var cli: GitHubCLIStatus = .checking
@@ -59,6 +59,13 @@ final class WorkStatusModel: ObservableObject {
     func verdict(for turn: AgentTurnIdentity) -> WorkStatus {
         guard isEnabled else { return .noVerdict }
         return readings[turn]?.verdict ?? .noVerdict
+    }
+
+    /// What a finished row shows (#418): the verdict and the pull request it came from; nil while the
+    /// switch is off or there is no verdict.
+    func finishedLabel(for turn: AgentTurnIdentity) -> WorkStatusLabel? {
+        guard isEnabled else { return nil }
+        return readings[turn]?.label
     }
 
     /// Reads the GitHub card's state off the main actor: at launch while the switch's default is
@@ -138,8 +145,7 @@ final class WorkStatusModel: ObservableObject {
             for (turn, repository) in repositories { memory.record(repository, for: turn) }
             var updated = readings
             for (turn, result) in verdicts {
-                updated[turn] = WorkStatusReading(verdict: result.verdict, pending: result.pending, readAt: now,
-                                                  firstReadAt: readings[turn]?.firstReadAt ?? now)
+                updated[turn] = WorkStatusReading(result, readAt: now, firstReadAt: readings[turn]?.firstReadAt ?? now)
             }
             if updated != readings { readings = updated }
         }

@@ -54,6 +54,8 @@ private func open(_ checks: GitHubPullRequest.Checks, mergeable: GitHubPullReque
 }
 
 private let mergedPR = GitHubPullRequestLookup.found(GitHubPullRequest(number: 7, state: .merged, mergedAt: 2_000))
+/// The pull request the fixtures' "o/repo" branch finds.
+private let pullRequestSeven = WorkPullRequest(repository: "o/repo", number: 7)
 
 // MARK: - Local git output
 
@@ -665,7 +667,8 @@ private func defaults(_ stored: Bool?) throws -> (UserDefaults, String) {
     let read = try #require(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_100))
     await read.value
     #expect(model.verdict(for: turnA) == .checksFailing)
-    #expect(model.readings[turnA] == WorkStatusReading(verdict: .checksFailing, readAt: 1_100, firstReadAt: 1_100))
+    #expect(model.readings[turnA] == WorkStatusReading(verdict: .checksFailing, pullRequest: pullRequestSeven, readAt: 1_100,
+                                                         firstReadAt: 1_100))
     // A terminal verdict is not read again.
     #expect(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 9_000) == nil)
     // Nothing is read while the switch is off, and what was read is forgotten.
@@ -782,8 +785,10 @@ private func runHoldingStdout(_ body: String, timeout: Double) throws
 @Test func gitHubStillWorkingItOutIsPending() throws {
     let clean = try #require(GitLocalReading.parse(status: status()))
     let main = try #require(GitLocalReading.parse(status: status(head: "main", upstream: "origin/main")))
+    // Only the verdict and pending are under test here; the pull request it names is tested on its own.
     func result(_ local: GitLocalReading?, _ lookup: GitHubPullRequestLookup?) -> WorkStatusResult {
-        WorkStatusRule.result(branch: feature, local: local, pullRequest: lookup)
+        let result = WorkStatusRule.result(branch: feature, local: local, pullRequest: lookup)
+        return WorkStatusResult(result.verdict, pending: result.pending)
     }
     // Mergeability still being computed: the checks verdict stands, but a conflict may yet appear.
     #expect(result(clean, open(.passed, mergeable: .unknown)) == WorkStatusResult(.checksPassed, pending: true))
@@ -849,7 +854,8 @@ private func item(approval session: AgentSessionIdentity, turn: String) -> Agent
     await model.scanned([item(running: turnA)], heads: ["/w/repo": .branch("feat/x")], directory: { _ in "/w/repo" },
                         now: 1_000)?.value
     await model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_100)?.value
-    #expect(model.readings[turnA] == WorkStatusReading(verdict: .checksPassed, pending: true, readAt: 1_100, firstReadAt: 1_100))
+    #expect(model.readings[turnA] == WorkStatusReading(verdict: .checksPassed, pending: true, pullRequest: pullRequestSeven,
+                                                         readAt: 1_100, firstReadAt: 1_100))
     let again = try #require(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_130))
     await again.value
     #expect(model.readings[turnA]?.readAt == 1_130)
@@ -1104,7 +1110,8 @@ private func item(approval session: AgentSessionIdentity, turn: String) -> Agent
     #expect(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_120) == nil)
     #expect(runner.calls.count == calls)
     await scan(model, [item(finished: turnA)], now: 1_130)
-    #expect(model.readings[turnA] == WorkStatusReading(verdict: .checksFailing, readAt: 1_130, firstReadAt: 1_100))
+    #expect(model.readings[turnA] == WorkStatusReading(verdict: .checksFailing, pullRequest: pullRequestSeven, readAt: 1_130,
+                                                         firstReadAt: 1_100))
     // Back again after the original hour: dropped, and never read again.
     let late = 1_100 + WorkStatusSchedule.cap
     await scan(model, [item(finished: turnA), item(running: turnA)], head: feat, now: late)
@@ -1112,4 +1119,56 @@ private func item(approval session: AgentSessionIdentity, turn: String) -> Agent
     #expect(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: late + 60) == nil)
     #expect(runner.calls.count == before)
     #expect(model.verdict(for: turnA) == WorkStatus.noVerdict)
+}
+
+// MARK: - The pull request a verdict came from (#418)
+
+@Test func aVerdictReadFromAPullRequestNamesItAndItsRepository() throws {
+    let clean = try #require(GitLocalReading.parse(status: status()))
+    let dirty = try #require(GitLocalReading.parse(status: status(entries: ["? a"])))
+    let ahead = try #require(GitLocalReading.parse(status: status(ahead: 1)))
+    func result(_ local: GitLocalReading?, _ lookup: GitHubPullRequestLookup?,
+                branch: WorkBranch = feature) -> WorkStatusResult {
+        WorkStatusRule.result(branch: branch, local: local, pullRequest: lookup)
+    }
+    let seven = pullRequestSeven
+    #expect(seven.name == "repo")
+    #expect(result(clean, open(.failing)) == WorkStatusResult(.checksFailing, pullRequest: seven))
+    #expect(result(clean, open(.running)).pullRequest == seven)
+    #expect(result(clean, open(.passed)).pullRequest == seven)
+    #expect(result(clean, open(.passed, mergeable: .conflicting)).pullRequest == seven)
+    #expect(result(dirty, mergedPR) == WorkStatusResult(.merged, pullRequest: seven))
+    // A verdict git established says nothing about the pull request, even when one was found.
+    #expect(result(dirty, open(.passed)) == WorkStatusResult(.uncommitted))
+    #expect(result(ahead, open(.passed)) == WorkStatusResult(.notPushed))
+    // No verdict names no pull request.
+    #expect(result(clean, open(.noChecks)).pullRequest == nil)
+    #expect(result(clean, .noPullRequest).pullRequest == nil)
+    // A branch whose repository is unknown cannot name one.
+    let unnamed = WorkBranch.branch(name: "feat/x", directory: "/w/repo", startedAt: 1_000, repository: nil)
+    #expect(result(dirty, mergedPR, branch: unnamed) == WorkStatusResult(.merged))
+}
+
+@Test func aWithdrawnReadingDropsItsPullRequest() {
+    let seven = WorkPullRequest(repository: "o/repo", number: 7)
+    let reading = WorkStatusReading(verdict: .checksFailing, pullRequest: seven, readAt: 100, firstReadAt: 90)
+    #expect(reading.label == WorkStatusLabel(verdict: .checksFailing, pullRequest: seven))
+    #expect(reading.withdrawn.pullRequest == nil)
+    #expect(reading.withdrawn.label == nil)
+    #expect(WorkStatusReading(verdict: .noVerdict, readAt: 100, firstReadAt: 100).label == nil)
+}
+
+@MainActor @Test func theModelLabelsAFinishedTurnWithItsPullRequest() async throws {
+    let (defaults, suite) = try defaults(true)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let runner = FakeRunner(reply(gh: .succeeded(pullRequests([pr(number: 431, checks: [checkRun("FAILURE")])]))))
+    let model = makeModel(runner, gate: WorkStatusGate(open: false), defaults: defaults)
+    #expect(model.finishedLabel(for: turnA) == nil)
+    await model.scanned([item(running: turnA)], heads: ["/w/repo": .branch("feat/x")], directory: { _ in "/w/repo" },
+                        now: 1_000)?.value
+    await model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_100)?.value
+    #expect(model.finishedLabel(for: turnA)
+        == WorkStatusLabel(verdict: .checksFailing, pullRequest: WorkPullRequest(repository: "o/repo", number: 431)))
+    model.setEnabled(false)
+    #expect(model.finishedLabel(for: turnA) == nil)
 }
