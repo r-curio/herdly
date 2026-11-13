@@ -2385,7 +2385,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             else { .withoutKeyboard(answerable: canAnswerAgentQuestion(question)) }
         let action = SpotlightCardKeys.action(for: key, card: card)
         guard action.consumesKey else { return false }
-        questionCardKeyPress = QuestionCardKeyPress(action: action, card: id, serial: (questionCardKeyPress?.serial ?? 0) + 1)
+        questionCardKeyPress = .next(action, card: id, after: questionCardKeyPress)
         return true
     }
 
@@ -2401,7 +2401,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let action = ApprovalCardKeys.action(for: key, card: card.reading,
                                              focus: approvalKeysCard == id ? .keyboard : .withoutKeyboard)
         guard action.consumesKey else { return false }
-        approvalCardKeyPress = ApprovalCardKeyPress(action: action, card: id, serial: (approvalCardKeyPress?.serial ?? 0) + 1)
+        approvalCardKeyPress = .next(action, card: id, after: approvalCardKeyPress)
         return true
     }
 
@@ -2431,22 +2431,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         panel.hasDeliberateKeyboardFocus || (previewMode != nil && Companion.previewKeyboard)
     }
 
-    /// A card the user opened from the queue: a clicked card, or the walk's card (#440), which takes
-    /// the same keys and labels. Nil for a spotlight, the queue, or "All checked".
-    static func openedCard(_ mode: NotchPresentationMode) -> AgentAttentionID? {
-        switch mode {
-        case let .clickedCard(id), let .walkCard(id): id
-        case .collapsed, .spotlight, .agentSpotlight, .allChecked, .queue: nil
-        }
-    }
-
     /// The clicked question card that has the keyboard (#438), or the walk's question card (#440),
     /// decided on every refresh and before every key, so its labels and its keys read one state. It
     /// takes the keyboard spotlight card's keys and labels (`SpotlightCardFocus.clickedWithKeyboard`)
     /// and nothing else of it: no ring, hold, wait line, foot line or sent line.
     private func updateClickedKeyboardCard() {
         var next: KeyboardCard?
-        if let id = Self.openedCard(presentationMode), case .question = id, cardHasKeyboard,
+        if let id = presentationMode.openedCard, case .question = id, cardHasKeyboard,
            let question = spotlightItem(id)?.question,
            case let .keyboard(phase) = SpotlightCardFocus.clickedWithKeyboard(answerable: canAnswerAgentQuestion(question)) {
             next = KeyboardCard(id: id, phase: phase)
@@ -2469,9 +2460,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func pressResultCardKey(_ key: ResultCardKey) -> Bool {
         guard expanded, case let .walkCard(id) = presentationMode, case .outcome = id else { return false }
         updateResultKeysCard()
-        let action = ResultCardKeys.action(for: key, keyboard: resultKeysCard == id)
+        let action = ResultCardKeys.action(for: key, focus: resultKeysCard == id ? .keyboard : .withoutKeyboard)
         guard action.consumesKey else { return false }
-        resultCardKeyPress = ResultCardKeyPress(action: action, card: id, serial: (resultCardKeyPress?.serial ?? 0) + 1)
+        resultCardKeyPress = .next(action, card: id, after: resultCardKeyPress)
         return true
     }
 
@@ -2525,7 +2516,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func pressWalkKey(_ direction: ToCheckWalk.Direction) -> Bool {
         guard case let .walkCard(id) = presentationMode else { return false }
         if case .question = id, spotlightItem(id)?.question != nil {
-            walkKeyPress = WalkKeyPress(direction: direction, card: id, serial: (walkKeyPress?.serial ?? 0) + 1)
+            walkKeyPress = .next(direction, card: id, after: walkKeyPress)
         } else {
             stepWalk(direction)
         }

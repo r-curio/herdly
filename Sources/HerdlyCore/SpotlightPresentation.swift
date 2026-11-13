@@ -32,6 +32,14 @@ public enum NotchPresentationMode: Equatable, Sendable {
         }
     }
     public var showsSingleCard: Bool { singleCard != nil }
+    /// A card the user opened from the queue: a clicked card, or the to-check walk's card (#440), which
+    /// takes the same question keys and labels. Nil for a spotlight, the queue, or "All checked".
+    public var openedCard: AgentAttentionID? {
+        switch self {
+        case let .clickedCard(id), let .walkCard(id): return id
+        case .collapsed, .spotlight, .agentSpotlight, .allChecked, .queue: return nil
+        }
+    }
     /// True when the notch shows a card that opened by itself and its item has left the queue (a
     /// question just answered on it, an approval decided). The panel then closes outright, even under
     /// the pointer, rather than falling back to the queue. A clicked card returns to the queue (D10).

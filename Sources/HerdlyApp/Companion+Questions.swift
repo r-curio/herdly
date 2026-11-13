@@ -546,37 +546,23 @@ extension Companion {
     }
 }
 
-/// One key the panel handed to the question card on screen (#321). `serial` makes a repeated key a
-/// new value, so the card sees every press; `card` is the card it was pressed on.
-struct QuestionCardKeyPress: Equatable {
-    /// What the key does on the card, from `SpotlightCardKeys`, the one key table (#321, #428).
-    let action: SpotlightCardAction
+/// One key the panel handed to the card on screen, already mapped by that card's key table: a
+/// question card's (#321, `SpotlightCardKeys`), an approval card's (#439, `ApprovalCardKeys`), the
+/// walk's result card's (#440, `ResultCardKeys`), or ← → on a walk card that shows a question (#440),
+/// which the card answers with its viewed question. `serial` makes a repeated key a new value, so the
+/// card sees every press; `card` is the card it was pressed on.
+struct CardKeyPress<Action: Equatable>: Equatable {
+    let action: Action
     let card: AgentAttentionID
     let serial: Int
+
+    /// The press after `previous`, with the next serial.
+    static func next(_ action: Action, card: AgentAttentionID, after previous: Self?) -> Self {
+        Self(action: action, card: card, serial: (previous?.serial ?? 0) + 1)
+    }
 }
 
-/// One key the panel handed to the approval card on screen (#439). `serial` makes a repeated key a
-/// new value, so the card sees every press; `card` is the card it was pressed on.
-struct ApprovalCardKeyPress: Equatable {
-    /// What the key does on the card, from `ApprovalCardKeys`, the one approval key table.
-    let action: ApprovalCardAction
-    let card: AgentAttentionID
-    let serial: Int
-}
-
-/// One key the panel handed to the walk's result card (#440). `serial` makes a repeated key a new
-/// value, so the card sees every press; `card` is the card it was pressed on.
-struct ResultCardKeyPress: Equatable {
-    /// What the key does on the card, from `ResultCardKeys`.
-    let action: ResultCardAction
-    let card: AgentAttentionID
-    let serial: Int
-}
-
-/// ← or → pressed on a walk card that shows a question (#440). The card answers it with its viewed
-/// question (`Companion.stepWalk`), so a call of several questions steps them first.
-struct WalkKeyPress: Equatable {
-    let direction: ToCheckWalk.Direction
-    let card: AgentAttentionID
-    let serial: Int
-}
+typealias QuestionCardKeyPress = CardKeyPress<SpotlightCardAction>
+typealias ApprovalCardKeyPress = CardKeyPress<ApprovalCardAction>
+typealias ResultCardKeyPress = CardKeyPress<ResultCardAction>
+typealias WalkKeyPress = CardKeyPress<ToCheckWalk.Direction>

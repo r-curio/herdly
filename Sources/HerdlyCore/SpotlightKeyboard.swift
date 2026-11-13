@@ -404,11 +404,18 @@ public enum ResultCardAction: Equatable, Sendable {
     public var consumesKey: Bool { self != .none }
 }
 
+/// Whether the walk's result card has deliberate keyboard focus (the hotkey's walk, or a click).
+public enum ResultCardFocus: Equatable, Sendable {
+    /// A result card the keyboard is not in, such as one that popped up on its own.
+    case withoutKeyboard
+    case keyboard
+}
+
 /// The one key table for a result card (#440). Only with deliberate keyboard focus: a stray letter
 /// typed while a result merely pops up on its own never dismisses it.
 public enum ResultCardKeys {
-    public static func action(for key: ResultCardKey, keyboard: Bool) -> ResultCardAction {
-        guard keyboard else { return .none }
+    public static func action(for key: ResultCardKey, focus: ResultCardFocus) -> ResultCardAction {
+        guard focus == .keyboard else { return .none }
         switch key {
         case .open: return .open
         case .dismiss: return .dismiss

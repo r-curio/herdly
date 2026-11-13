@@ -243,13 +243,13 @@ private func hotkeyQueue() -> NotchPresentationController {
 // MARK: A result card's keys in the walk
 
 @Test func aResultCardWithTheKeyboardTakesOForOpenAndXForDismiss() {
-    #expect(ResultCardKeys.action(for: .open, keyboard: true) == .open)
-    #expect(ResultCardKeys.action(for: .dismiss, keyboard: true) == .dismiss)
+    #expect(ResultCardKeys.action(for: .open, focus: .keyboard) == .open)
+    #expect(ResultCardKeys.action(for: .dismiss, focus: .keyboard) == .dismiss)
 }
 
 @Test func aResultCardWithoutTheKeyboardTakesNoKeys() {
-    #expect(ResultCardKeys.action(for: .open, keyboard: false) == .none)
-    #expect(ResultCardKeys.action(for: .dismiss, keyboard: false) == .none)
+    #expect(ResultCardKeys.action(for: .open, focus: .withoutKeyboard) == .none)
+    #expect(ResultCardKeys.action(for: .dismiss, focus: .withoutKeyboard) == .none)
     #expect(!ResultCardAction.none.consumesKey)
 }
 
@@ -278,4 +278,12 @@ private func hotkeyQueue() -> NotchPresentationController {
     var walk = ToCheckWalk(items: [item(approval, .actionableApproval)])!
     walk.observe(items: [item(approval, .actionableApproval), item(earlier, .earlierOutcome)], now: 1)
     #expect(walk.order == [approval])
+}
+
+@Test func aCardOpenedFromTheQueueIsAClickedCardOrTheWalksCard() {
+    #expect(NotchPresentationMode.clickedCard(question).openedCard == question)
+    #expect(NotchPresentationMode.walkCard(result).openedCard == result)
+    #expect(NotchPresentationMode.agentSpotlight(question).openedCard == nil)
+    #expect(NotchPresentationMode.allChecked.openedCard == nil)
+    #expect(NotchPresentationMode.queue.openedCard == nil)
 }
