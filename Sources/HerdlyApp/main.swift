@@ -402,6 +402,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var setupMessage = ""
     /// Each version problem row's update and each agent's Restart required (#354).
     @Published var agentUpdates = AgentUpdates()
+    /// Work status for finished rows and the GitHub card (#417). Settings observes it directly.
+    let workStatus = WorkStatusModel()
     /// Watches for Codex desktop relaunching while a row waits for it to update itself.
     var codexLaunchObserver: NSObjectProtocol?
     let claude = ClaudeSetupModel()
@@ -942,6 +944,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         updateNotchDisplayChoices()
         refresh()
         refreshSetup()
+        // The switch's default waits on whether `gh` is signed in (#417).
+        if previewMode == nil, !CommandLine.arguments.contains("--smoke-test") { workStatus.refreshCLI(launch: true) }
         // A first/unconfigured launch should explain setup immediately. Once state
         // exists, refresh can keep the normal quiet launch behavior.
         if previewMode == nil, launchAtLogin.shouldOpenUnconfiguredControls,
@@ -1476,8 +1480,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                          result[root.scope] = reading
                      }
                  },
-                 branchDirectories.reduce(into: [String: String]()) { result, directory in
-                     result[directory] = GitBranchReader.branch(forDirectory: directory)
+                 branchDirectories.reduce(into: [String: GitHead]()) { result, directory in
+                     result[directory] = GitBranchReader.gitHead(forDirectory: directory)
                  },
                  claudeScans.map(\.cache),
                  reminders.hookCache.merging(desktop.cache),
@@ -1584,7 +1588,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             if threadNames != result.3 { threadNames = result.3 }
             if usage != result.4 { usage = result.4 }
             if claudeUsage != result.10 { claudeUsage = result.10 }
-            if gitBranches != result.11 { gitBranches = result.11 }
+            let branches = result.11.mapValues(\.label)
+            if gitBranches != branches { gitBranches = branches }
+            // Remembers running turns' branches and reads finished ones that are due (#417). Draws nothing.
+            workStatus.scanned(agentQueue.items(at: scanNow, earlier: appearance.earlier), heads: result.11,
+                               directory: rowDirectory(for:), now: scanNow)
             // Sessions already working before their first hook event: shown only with liveness
             // evidence, and only as working (see docs/session-discovery.md).
             let candidates = result.5
@@ -2692,6 +2700,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let candidates = [item.approval?.details?.project, details?.request?.directory?.full, details?.directory?.full,
                           claudeSessionDirectories[item.session]]
         return candidates.compactMap { $0 }.first { $0.hasPrefix("/") }
+    }
+
+    /// How far a finished row's work got (#417), `none` for every other row. Read only; the row's drawing
+    /// is a follow-up.
+    func workStatus(for item: AgentAttentionItem) -> WorkStatus {
+        guard let outcome = item.outcome else { return .none }
+        return workStatus.verdict(for: outcome.identity)
     }
 
     /// "project @ branch" for a row in the profile's label format, when its working directory is
