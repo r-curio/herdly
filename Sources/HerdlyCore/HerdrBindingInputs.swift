@@ -338,26 +338,26 @@ public enum HerdrHookRecordReader {
     /// What one read keeps for the next.
     public struct Cache: Sendable {
         /// The decoded record of each path in the window; nil for a file that holds no usable record.
-        public var records: [String: HerdrHookPaneRecord?] {
-            // Changed from outside, the last read's result no longer follows from these.
-            didSet { pass = nil }
-        }
+        /// Only the reader writes it: a holder that wants other records starts a new cache from
+        /// them (`init(records:)`), which carries no earlier result.
+        public private(set) var records: [String: HerdrHookPaneRecord?]
         /// The last read's result and the listings it was made from.
-        fileprivate var pass: Pass?
+        fileprivate var lastRead: LastRead?
 
         public init(records: [String: HerdrHookPaneRecord?] = [:]) {
             self.records = records
         }
     }
 
-    fileprivate struct Pass: Sendable {
-        let listings: [Listed]
+    /// What one read returned, with the directory listings that led to it.
+    fileprivate struct LastRead: Sendable {
+        let listings: [DirectoryListing]
         let newest: [HerdrHookPaneRecord]
     }
 
     /// One directory as a read found it: unreadable, or listed under `HookEventListing`'s number for
     /// that listing, which names one exact sequence of records.
-    fileprivate enum Listed: Equatable, Sendable {
+    fileprivate enum DirectoryListing: Equatable, Sendable {
         case unreadable(String)
         case records(String, number: UInt64)
     }
@@ -378,7 +378,7 @@ public enum HerdrHookRecordReader {
     public static func read(directories: [URL], cache: Cache = Cache()) -> Result {
         var windows: [ArraySlice<URL>] = []
         // Nil once a directory's listing has no number: nothing says it is the one read before.
-        var listings: [Listed]? = []
+        var listings: [DirectoryListing]? = []
         for directory in directories {
             let key = directory.standardizedFileURL.path
             guard let listing = HookEventListing.numberedRecords(in: directory) else {
@@ -390,8 +390,8 @@ public enum HerdrHookRecordReader {
         }
         // The same records and the same decoded cache give the same result: a window holds
         // thousands of records, and walking them every scan was this reader's whole cost (#306).
-        if let listings, let pass = cache.pass, pass.listings == listings {
-            return Result(records: pass.newest, cache: cache, reused: true)
+        if let listings, let last = cache.lastRead, last.listings == listings {
+            return Result(records: last.newest, cache: cache, reused: true)
         }
         var records: [HerdrHookPaneRecord] = []
         var kept: [String: HerdrHookPaneRecord?] = [:]
@@ -404,7 +404,7 @@ public enum HerdrHookRecordReader {
         }
         let newest = HerdrBindingInputs.newestRecords(records)
         var next = Cache(records: kept)
-        next.pass = listings.map { Pass(listings: $0, newest: newest) }
+        next.lastRead = listings.map { LastRead(listings: $0, newest: newest) }
         return Result(records: newest, cache: next, reused: false)
     }
 

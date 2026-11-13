@@ -251,10 +251,10 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID:
     #expect(first.cache.records.values.compactMap { $0 }.count == 2)
 
     // A cached path is not decoded again: a stand-in cache entry wins over the file.
-    var stale = first.cache
+    var stale = first.cache.records
     let newestPath = try #require(first.cache.records.first { $0.value?.paneID == "w1:p2" }?.key)
-    stale.records[newestPath] = .some(record(agent: .codex, pane: "w9:p9", at: 1_200))
-    #expect(HerdrHookRecordReader.read(directories: [directory], cache: stale).records == [record(agent: .codex, pane: "w9:p9", at: 1_200)])
+    stale[newestPath] = .some(record(agent: .codex, pane: "w9:p9", at: 1_200))
+    #expect(HerdrHookRecordReader.read(directories: [directory], cache: .init(records: stale)).records == [record(agent: .codex, pane: "w9:p9", at: 1_200)])
     // Paths no longer listed drop out of the cache.
     let gone = HerdrHookRecordReader.read(directories: [directory], cache: .init(records: ["/nowhere.json": record()]))
     #expect(gone.cache.records["/nowhere.json"] == nil)
@@ -314,11 +314,11 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID:
     directories = [directory]
     #expect(read(reused: false, "one directory again").map(\.paneID) == ["w1:p1"])
 
-    // A cache changed by its holder, or an empty one, is never answered from the last result.
-    var changed = cache
+    // A cache started from other records, or an empty one, is never answered from the last result.
+    var changed = cache.records
     let path = try #require(cache.records.first { $0.value != nil }?.key)
-    changed.records[path] = .some(record(agent: .codex, pane: "w9:p9", at: 1_100))
-    let stood = HerdrHookRecordReader.read(directories: directories, cache: changed)
+    changed[path] = .some(record(agent: .codex, pane: "w9:p9", at: 1_100))
+    let stood = HerdrHookRecordReader.read(directories: directories, cache: .init(records: changed))
     #expect(!stood.reused)
     #expect(stood.records.map(\.paneID) == ["w9:p9"])
     #expect(!HerdrHookRecordReader.read(directories: directories, cache: .init()).reused)
