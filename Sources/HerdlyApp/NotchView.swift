@@ -2509,7 +2509,7 @@ struct Notch: View {
     /// controls. Only the user's own Approve or Deny decides; the countdown only reads the deadline.
     @ViewBuilder
     private func approvalCardBody(_ request: SpotlightRequest, item: AgentAttentionItem, subject: String,
-                                  herdr: HerdrOpenAvailability, codexOpen: Bool, decidable: Bool) -> some View {
+                                  herdr: HerdrOpenAvailability, decidable: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if let ask = request.ask {
                 Text(ask).font(NotchStyle.mono(12)).foregroundStyle(NotchStyle.ink)
@@ -2599,7 +2599,7 @@ struct Notch: View {
                             Spacer(minLength: 6)
                             // O opens while a decision is on offer; once none is, Return opens too
                             // and the label names it, as on a handed-back question card.
-                            approvalOpenControl(item, reading: reading, subject: subject, codexOpen: codexOpen,
+                            approvalOpenControl(item, reading: reading, subject: subject,
                                                 shortcut: keys ? (reading.decisionEnabled ? .open : .returnKey) : nil)
                         }
                     }
@@ -2616,62 +2616,50 @@ struct Notch: View {
     /// Open still revalidates its exact target.
     @ViewBuilder
     private func approvalOpenControl(_ item: AgentAttentionItem, reading: ApprovalCardReading, subject: String,
-                                     codexOpen: Bool, shortcut: NotchShortcut? = nil) -> some View {
+                                     shortcut: NotchShortcut? = nil) -> some View {
         let handedBack = reading.stage == .handedBack
-        if item.session.source == .codex, codexOpen {
-            NotchButton(title: reading.openTitle, emphasized: handedBack, shortcut: shortcut) {
-                codexApprovalOpen(item, handedBack: handedBack)
-            }
-            .disabled(model.openingTask)
-            .accessibilityLabel("Open Session: \(subject)")
-            .accessibilityHint(NotchShortcut.hint(handedBack ? "Open this session in Codex." : "Hands this request back to Codex's own prompt.",
-                                                  shortcut: shortcut))
-        }
-        claudeReturnControl(item, subject: subject, emphasized: handedBack, openTitle: reading.openTitle, shortcut: shortcut)
-    }
-
-    /// A Codex approval card's Open: before the hand-back it hands the request back to Codex's own
-    /// prompt (`openAgentApproval`), after it it opens the session.
-    private func codexApprovalOpen(_ item: AgentAttentionItem, handedBack: Bool) {
-        if !handedBack, let approval = item.approval {
-            model.openAgentApproval(approval)
+        if let open = approvalOpen(item, handedBack: handedBack) {
+            let hint = item.session.source == .claude ? "Open this Claude session in its terminal."
+                : handedBack ? "Open this session in Codex." : "Hands this request back to Codex's own prompt."
+            NotchButton(title: reading.openTitle, emphasized: handedBack, shortcut: shortcut, action: open)
+                .disabled(model.openingTask)
+                .accessibilityLabel("Open Session: \(subject)")
+                .accessibilityHint(NotchShortcut.hint(hint, shortcut: shortcut))
         } else {
-            model.openAgent(item.session)
+            // No Open: a Claude card that cannot be opened may offer "Set up Ghostty" instead.
+            claudeReturnControl(item, subject: subject, emphasized: handedBack, openTitle: reading.openTitle)
         }
     }
 
-    /// The approval card's Open as its button does it, or nil where the card shows no Open or it is
-    /// disabled (#439: O, and Return once no decision is on offer). It reads the same decisions as
-    /// `approvalOpenControl` and `claudeReturnControl`, so a key never opens what the card does not show.
-    private func approvalOpen(_ item: AgentAttentionItem, reading: ApprovalCardReading) -> (() -> Void)? {
-        guard !model.openingTask, let approval = item.approval else { return nil }
+    /// The approval card's Open, or nil where the card shows none: the one decision its button and its
+    /// keys (#439: O, and Return once no decision is on offer) both read, so a key never opens what the
+    /// card does not show. A Codex request before its hand-back goes back to Codex's own prompt
+    /// (`openAgentApproval`) and after it the session opens; a Claude request opens its session's
+    /// terminal (`claudeOpenOffered`, as `claudeReturnControl` decides for every Claude card).
+    private func approvalOpen(_ item: AgentAttentionItem, handedBack: Bool) -> (() -> Void)? {
+        guard let approval = item.approval else { return nil }
         if item.session.source == .claude {
             return claudeOpenOffered(item.session) ? { model.openAgentApproval(approval) } : nil
         }
         guard codexOpenOffered(item) else { return nil }
-        let handedBack = reading.stage == .handedBack
-        return { codexApprovalOpen(item, handedBack: handedBack) }
+        return handedBack ? { model.openAgent(item.session) } : { model.openAgentApproval(approval) }
     }
 
     /// A key the panel handed to the approval card on screen (#439), already mapped by
-    /// `ApprovalCardKeys`. Approve and Deny do exactly what clicking them does, only while the card
-    /// as drawn now enables them; `decideAgent` then checks the request again before writing anything.
-    /// Open acts as the card's Open, where it shows one.
+    /// `ApprovalCardKeys`. The card is read again now through `approvalCardNow`, the helper the
+    /// mapping used: Approve and Deny do exactly what clicking them does, only while the card as drawn
+    /// now enables them, and `decideAgent` then checks the request again before writing anything.
+    /// Open acts as the card's Open, where it shows one and it is enabled.
     private func handleApprovalCardKey(_ press: ApprovalCardKeyPress?) {
         guard let press, press.card == model.presentationMode.singleCard,
-              let item = model.orderedAgentAttentionItems.first(where: { $0.id == press.card }),
-              let approval = item.approval,
-              let reading = ApprovalCardReading(item, decidable: model.canDecide(item),
-                                                now: Date().timeIntervalSince1970) else { return }
+              let card = model.approvalCardNow(press.card) else { return }
         switch press.action {
-        case .approve:
-            guard reading.showsDecision, reading.decisionEnabled else { return }
-            model.decideAgent(approval, as: .allowOnce)
-        case .deny:
-            guard reading.showsDecision, reading.decisionEnabled else { return }
-            model.decideAgent(approval, as: .deny)
+        case .approve, .deny:
+            guard card.reading.decisionEnabled, let decision = press.action.decision else { return }
+            model.decideAgent(card.approval, as: decision)
         case .open:
-            approvalOpen(item, reading: reading)?()
+            guard !model.openingTask else { return }
+            approvalOpen(card.item, handedBack: card.reading.stage == .handedBack)?()
         case .none:
             return
         }
@@ -3026,7 +3014,7 @@ struct Notch: View {
             } else if approvalRow {
                 // One card body for the spotlight and the clicked card (#320); nothing under a queue row.
                 if spotlit, let card = model.approvalCard(for: item) {
-                    approvalCardBody(card, item: item, subject: subject, herdr: herdr, codexOpen: codexOpen,
+                    approvalCardBody(card, item: item, subject: subject, herdr: herdr,
                                      decidable: decidable)
                 }
             } else if questionRow {
