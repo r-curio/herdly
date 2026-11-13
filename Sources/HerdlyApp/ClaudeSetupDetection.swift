@@ -153,7 +153,7 @@ enum ClaudeSetupDetection {
     /// Registry entries kept between scheduled scans (`ClaudeSessionRegistry.read`'s `memo`).
     private static let scheduledRegistryEntries = StampedFileMemo<Data>()
 
-    /// `scheduled` is true only for the two-second scans, which may skip registry entries whose files
+    /// `scheduled` is true only for the hook scans (`HookScanSchedule`), which may skip registry entries whose files
     /// are unchanged. Every read that chooses a target or answers a click leaves it false and reads all.
     static func activeSessionInventory(root: URL, capabilities: ClaudeCapabilities,
                                        observedAt: TimeInterval = Date().timeIntervalSince1970,
@@ -367,6 +367,13 @@ final class ClaudeSetupModel: ObservableObject {
         let usageInstalled: Bool
         let activeSessionStatus: ClaudeSetupDetection.ActiveSessionStatus
         var id: String { url.standardizedFileURL.path }
+        /// The root's hook event directory when Herdly reads records from it: connected, with an events
+        /// path and an installation ID. The one rule for what the hook scan reads and watches (#306).
+        var hookSource: (scope: String, events: URL, installationID: String)? {
+            guard status == .connected, !eventsPath.isEmpty,
+                  let installationID = plan?.installationID, !installationID.isEmpty else { return nil }
+            return (url.standardizedFileURL.path, URL(fileURLWithPath: eventsPath, isDirectory: true), installationID)
+        }
         var displayPath: String { url.path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~") }
     }
 

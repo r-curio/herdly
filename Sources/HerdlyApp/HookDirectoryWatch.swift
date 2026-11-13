@@ -24,7 +24,7 @@ final class HookDirectoryWatch {
     func watch(_ directories: [URL]) {
         let wanted = Dictionary(directories.map { ($0.standardizedFileURL.path, $0) }) { first, _ in first }
         // A stream that said it may have lost its directory is replaced, like one never started.
-        for (path, stream) in streams where wanted[path] == nil || HookEventListing.changes.isWatchLost(stream.directory) {
+        for (path, stream) in streams where wanted[path].map(HookEventListing.changes.isWatchLost) ?? true {
             stream.stop()
             streams.removeValue(forKey: path)
         }
@@ -42,11 +42,11 @@ private final class HookDirectoryStream: @unchecked Sendable {
     /// following nothing, so it is replaced.
     private static let lost = UInt32(kFSEventStreamEventFlagRootChanged | kFSEventStreamEventFlagMount
         | kFSEventStreamEventFlagUnmount)
-    /// Event flags that mean names were lost or the directory itself moved: read it in full.
-    private static let untrusted = UInt32(kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagUserDropped
-        | kFSEventStreamEventFlagKernelDropped | kFSEventStreamEventFlagEventIdsWrapped) | lost
+    /// Event flags that mean names were lost: read the directory in full.
+    private static let dropped = UInt32(kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagUserDropped
+        | kFSEventStreamEventFlagKernelDropped | kFSEventStreamEventFlagEventIdsWrapped)
 
-    let directory: URL
+    private let directory: URL
     /// The directory's real path with a trailing slash, as events name it.
     private let prefix: String
     private let queue = DispatchQueue(label: "dev.rcurio.herdly.hook-directory-watch", qos: .utility)
@@ -108,18 +108,12 @@ private final class HookDirectoryStream: @unchecked Sendable {
     }
 
     private func handle(_ paths: [String], _ flags: [FSEventStreamEventFlags]) {
-        var names = Set<String>()
-        for (path, flag) in zip(paths, flags) {
-            // Lost events, the directory itself, or anything not under it: the names cannot be relied on.
-            guard flag & Self.untrusted == 0, path.hasPrefix(prefix) else {
-                HookEventListing.changes.reportUnknown(in: directory, watchLost: flags.contains { $0 & Self.lost != 0 })
-                return
-            }
-            let name = path.dropFirst(prefix.count)
-            // The listing is top-level only; what changes inside a subdirectory does not change it.
-            if !name.isEmpty, !name.contains("/") { names.insert(String(name)) }
+        switch HookWatchReport.from(paths: paths, flags: flags, prefix: prefix, droppedFlags: Self.dropped, lostFlags: Self.lost) {
+        case .unknown(let watchLost):
+            HookEventListing.changes.reportUnknown(in: directory, watchLost: watchLost)
+        case .names(let names):
+            // Reported even with no top-level name: a change below still makes a scan due (#306).
+            HookEventListing.changes.report(names, in: directory)
         }
-        // Reported even with no top-level name: a change below still makes a scan due (#306).
-        HookEventListing.changes.report(names, in: directory)
     }
 }

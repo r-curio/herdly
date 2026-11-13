@@ -1392,7 +1392,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let watched = hookScanDirectories
         let evidence = HookEventListing.changes.takeScanEvidence(for: watched)
         if evidence.changed { scanSchedule.noteChange() }
-        guard scanSchedule.start(now: now, watchTrusted: evidence.trusted, needs: hookScanNeeds) else { return }
+        guard scanSchedule.start(now: now, watchTrusted: evidence.trusted,
+                                 needs: hookScanNeeds(wallNow: Date().timeIntervalSince1970)) else { return }
         scanning = true
         claudeQuestionScanGeneration &+= 1
         let questionScanGeneration = claudeQuestionScanGeneration
@@ -1426,11 +1427,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let appsRunning = Set(TerminalHost.terminals.filter { TerminalApps.isRunning($0) })
         let observingSince = Companion.launchedAt
         let observationNow = Date().timeIntervalSince1970
-        let claudeRoots = claude.roots.compactMap { root -> (scope: String, events: URL, installationID: String)? in
-            guard root.status == .connected, !root.eventsPath.isEmpty,
-                  let installationID = root.plan?.installationID, !installationID.isEmpty else { return nil }
-            return (root.url.standardizedFileURL.path, URL(fileURLWithPath: root.eventsPath, isDirectory: true), installationID)
-        }
+        let claudeRoots = claude.roots.compactMap(\.hookSource)
         // The directories this scan lists: macOS names what changes in them, so a new record does not
         // cost a full read of a directory holding thousands (`HookDirectoryWatch`).
         HookDirectoryWatch.shared.watch(watched)
@@ -1617,10 +1614,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             daemonCLISessions = scan.cliSessions.intersection(daemonThreads)
             liveCLI = scan.cliState.liveSessions.union(discoveredCLI)
             cliLivenessRead = true
-            lastScanNeeds = scanNeeds(codexMayRun: liveness.desktopRunning || liveness.cliProcessRunning || result.15,
-                                      codexActivity: !candidates.isEmpty || !codexSubagents.isEmpty,
-                                      unreadable: claudeObservationScans.contains { !$0.available }
-                                          || result.7.contains { !$0.available })
+            // What only another scan can see change (#306); `hookScanNeeds` adds what the app holds.
+            var scanned = HookScanNeeds()
+            scanned.codexMayRun = liveness.desktopRunning || liveness.cliProcessRunning || result.15
+            // A fresh rollout candidate or a running subagent counts as a live session.
+            scanned.sessionsLive = !candidates.isEmpty || !codexSubagents.isEmpty
+            scanned.sourceUnwatchedOrUnreadable = claudeObservationScans.contains { !$0.available }
+                || result.7.contains { !$0.available }
+            lastScanNeeds = scanned
             knownCLISessions.formUnion(scan.titledCLISessions)
             rememberedDaemonCLISessions = ReminderReader.rememberedDaemonCLISessions(
                 rememberedDaemonCLISessions, provedNow: scan.daemonProvedCLISessions, authoritativeLoaded: authoritativeLoaded)
