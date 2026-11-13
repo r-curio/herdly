@@ -119,7 +119,7 @@ final class WorkStatusModel: ObservableObject {
             return nil
         }
         let batch = WorkStatusBatch.plan(finished: finished, present: present, memory: memory, readings: next, now: now)
-        for turn in batch.dropped { next[turn] = nil }
+        for turn in batch.dropped { next[turn] = next[turn]?.withdrawn }
         for turn in batch.settledNoVerdict {
             next[turn] = WorkStatusReading(verdict: .noVerdict, readAt: now, firstReadAt: now)
         }

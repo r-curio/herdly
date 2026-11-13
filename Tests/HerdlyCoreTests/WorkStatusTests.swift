@@ -1073,3 +1073,43 @@ private func item(approval session: AgentSessionIdentity, turn: String) -> Agent
     await scan(model, [item(finished: turnA)], now: 1_400)
     #expect(runner.calls.count == calls)
 }
+
+// MARK: - A dropped reading keeps its window
+
+@Test func aWithdrawnReadingIsDueOnTheIntervalWithinItsOriginalCap() {
+    let withdrawn = WorkStatusReading(verdict: .checksPassed, readAt: 100, firstReadAt: 100).withdrawn
+    #expect(withdrawn.verdict == WorkStatus.noVerdict && withdrawn.isWithdrawn)
+    #expect(withdrawn.readAt == 100 && withdrawn.firstReadAt == 100)
+    #expect(!WorkStatusSchedule.isDue(withdrawn, now: 129))
+    #expect(WorkStatusSchedule.isDue(withdrawn, now: 130))
+    #expect(!WorkStatusSchedule.isDue(withdrawn, now: 100 + WorkStatusSchedule.cap))
+    // Dropped once: a later scan with the row still live does not drop it again.
+    let remembered = memory([sighting(turnA)], repositories: [turnA: .gitHub("o/repo")])
+    #expect(WorkStatusBatch.plan(finished: [turnA], present: [WorkPresence(sighting(turnA))], memory: remembered,
+                                 readings: [turnA: withdrawn], now: 2_000).dropped.isEmpty)
+}
+
+@MainActor @Test func aRowThatKeepsComingBackGetsNoFreshWindow() async throws {
+    let (defaults, suite) = try defaults(true)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let runner = FakeRunner(reply())
+    let model = makeModel(runner, gate: WorkStatusGate(open: false), defaults: defaults)
+    let feat = GitHead.branch("feat/x")
+    await scan(model, [item(running: turnA)], head: feat, now: 1_000)
+    await scan(model, [item(finished: turnA)], now: 1_100)
+    // Back and gone again within 30 s of the reading: not read yet.
+    await scan(model, [item(finished: turnA), item(running: turnA)], head: feat, now: 1_110)
+    #expect(model.verdict(for: turnA) == WorkStatus.noVerdict)
+    let calls = runner.calls.count
+    #expect(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_120) == nil)
+    #expect(runner.calls.count == calls)
+    await scan(model, [item(finished: turnA)], now: 1_130)
+    #expect(model.readings[turnA] == WorkStatusReading(verdict: .checksFailing, readAt: 1_130, firstReadAt: 1_100))
+    // Back again after the original hour: dropped, and never read again.
+    let late = 1_100 + WorkStatusSchedule.cap
+    await scan(model, [item(finished: turnA), item(running: turnA)], head: feat, now: late)
+    let before = runner.calls.count
+    #expect(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: late + 60) == nil)
+    #expect(runner.calls.count == before)
+    #expect(model.verdict(for: turnA) == WorkStatus.noVerdict)
+}

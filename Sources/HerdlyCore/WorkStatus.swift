@@ -593,11 +593,22 @@ public struct WorkStatusReading: Equatable, Sendable {
     /// When the turn's first reading was made; the refresh cap and pending grace count from here.
     public let firstReadAt: Double
 
-    public init(verdict: WorkStatus, pending: Bool = false, readAt: Double, firstReadAt: Double) {
+    /// A live row of the turn's own came back after it was read: the verdict no longer holds and reads
+    /// none, but the reading keeps its times, so a re-read stays inside the original cap and interval.
+    public let isWithdrawn: Bool
+
+    public init(verdict: WorkStatus, pending: Bool = false, readAt: Double, firstReadAt: Double,
+                isWithdrawn: Bool = false) {
         self.verdict = verdict
         self.pending = pending
         self.readAt = readAt
         self.firstReadAt = firstReadAt
+        self.isWithdrawn = isWithdrawn
+    }
+
+    /// This reading with its verdict withdrawn and its times kept.
+    public var withdrawn: WorkStatusReading {
+        WorkStatusReading(verdict: .noVerdict, readAt: readAt, firstReadAt: firstReadAt, isWithdrawn: true)
     }
 }
 
@@ -613,7 +624,7 @@ public enum WorkStatusSchedule {
     public static func isDue(_ last: WorkStatusReading?, now: Double) -> Bool {
         guard let last else { return true }
         let age = now - last.firstReadAt
-        let refreshing = !last.verdict.isTerminal || (last.pending && age < pendingGrace)
+        let refreshing = last.isWithdrawn || !last.verdict.isTerminal || (last.pending && age < pendingGrace)
         guard refreshing, age < cap else { return false }
         return now - last.readAt >= runningInterval
     }
@@ -647,12 +658,12 @@ public struct WorkStatusBatch: Equatable, Sendable {
     public let repositories: [WorkRepositoryRead]
     /// Finished turns due a reading.
     public let reads: [WorkStatusRead]
-    /// Finished turns whose verdict is known to be none without reading, because the branch is unknown
-    /// or ambiguous, and that do not already read none. A turn already read takes this too: a subagent
-    /// that came back and changed the branch makes the old verdict a guess.
+    /// Finished turns to set to no verdict without running anything, because their branch is unknown or
+    /// ambiguous. Includes a turn that already has a verdict: if its branch changed after the reading,
+    /// that verdict would be a guess. Turns that already read no verdict are left out.
     public let settledNoVerdict: [AgentTurnIdentity]
-    /// Finished turns whose reading no longer holds because a live row of their own is back (#426):
-    /// they read no verdict until those rows end, then are read again.
+    /// Finished turns whose reading is withdrawn because a live row of their own came back (#426). They
+    /// read no verdict until those rows end, then are read again within the original cap.
     public let dropped: [AgentTurnIdentity]
 
     public var isEmpty: Bool { repositories.isEmpty && reads.isEmpty }
@@ -680,7 +691,7 @@ public struct WorkStatusBatch: Equatable, Sendable {
             // paused on an approval or question that can resume (#426). Until every such row ends the
             // turn is not read, and a reading it already has no longer holds.
             if present.contains(where: { $0.turnIdentity == turn }) {
-                if readings[turn] != nil { dropped.append(turn) }
+                if let reading = readings[turn], !reading.isWithdrawn { dropped.append(turn) }
                 continue
             }
             // Another turn working there changes what git sees; a repository not yet read would make
