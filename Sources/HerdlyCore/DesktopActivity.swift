@@ -164,31 +164,82 @@ public struct DesktopState: Sendable {
 /// Each hook record as a reader last decoded it, with the bytes it was decoded from: the bytes of an
 /// unchanged file are already kept (`HookFileCache`), and decoding them again every scan was most of
 /// the cost of reading them. A record is reused only for exactly the same bytes, so whatever a
-/// caller's cache holds or lacks, it gets what decoding its own bytes would give. Bounded: past
-/// `maximumEntries` files it starts over.
+/// caller's cache holds or lacks, it gets what decoding its own bytes would give.
+///
+/// A reader brackets each scan of a directory with `begin` and `end`: what that scan did not read
+/// (a pruned record, one that left the window) is dropped at its end, so no more is held than one
+/// scan reads. The bytes held are the buffers `HookFileCache` holds for the same files, shared, not
+/// copies. As a backstop a directory past `maximumEntries` records starts over, and so does
+/// everything past `maximumDirectories` directories.
 final class DecodedHookRecords<Record: Sendable>: @unchecked Sendable {
-    private let maximumEntries: Int
-
-    // Invariant for `@unchecked Sendable`: `entries` and `decodes` are only touched while holding `lock`.
-    private let lock = NSLock()
-    private var entries: [String: (bytes: Data, record: Record?)] = [:]
-    private var decodes: [String: Int] = [:]
-
-    init(maximumEntries: Int) {
-        self.maximumEntries = maximumEntries
+    private struct Entry {
+        let bytes: Data
+        let record: Record?
+        /// The last scan that read it.
+        var scan: UInt64
     }
 
-    func record(_ path: String, bytes: Data, decode: () -> Record?) -> Record? {
+    private let maximumEntries: Int
+    private let maximumDirectories: Int
+
+    // Invariant for `@unchecked Sendable`: every property below is only touched while holding `lock`.
+    private let lock = NSLock()
+    private var directories: [String: [String: Entry]] = [:]
+    private var decodes: [String: Int] = [:]
+    private var scans: UInt64 = 0
+
+    init(maximumEntries: Int, maximumDirectories: Int = 16) {
+        self.maximumEntries = maximumEntries
+        self.maximumDirectories = maximumDirectories
+    }
+
+    /// Starts a scan; pass the result to `record` and `end`.
+    func begin() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        scans += 1
+        return scans
+    }
+
+    /// The record of the file at `path`, directly in `directory`, whose contents are `bytes`.
+    func record(_ path: String, in directory: URL, scan: UInt64, bytes: Data, decode: () -> Record?) -> Record? {
+        let key = directory.path
         lock.lock()
-        let kept = entries[path]
+        if let kept = directories[key]?[path], kept.bytes == bytes {
+            if kept.scan != scan { directories[key]?[path]?.scan = scan }
+            lock.unlock()
+            return kept.record
+        }
         lock.unlock()
-        if let kept, kept.bytes == bytes { return kept.record }
         let record = decode()
         lock.lock(); defer { lock.unlock() }
-        if entries[path] == nil, entries.count >= maximumEntries { entries.removeAll() }
-        entries[path] = (bytes, record)
-        decodes[(path as NSString).deletingLastPathComponent, default: 0] += 1
+        if directories[key] == nil, directories.count >= maximumDirectories {
+            directories.removeAll()
+            decodes.removeAll()
+        }
+        if directories[key]?[path] == nil, (directories[key]?.count ?? 0) >= maximumEntries { directories[key] = [:] }
+        directories[key, default: [:]][path] = Entry(bytes: bytes, record: record, scan: scan)
+        decodes[key, default: 0] += 1
         return record
+    }
+
+    /// Ends `scan` of `directory`: drops every record of it that the scan did not read.
+    func end(_ scan: UInt64, in directory: URL) {
+        let key = directory.path
+        lock.lock(); defer { lock.unlock() }
+        guard let entries = directories[key], entries.contains(where: { $0.value.scan != scan }) else { return }
+        directories[key] = entries.filter { $0.value.scan == scan }
+    }
+
+    /// Drops every record of `directory`, for one that can no longer be read.
+    func forget(_ directory: URL) {
+        lock.lock(); defer { lock.unlock() }
+        directories[directory.path] = nil
+    }
+
+    /// How many records of `directory` are held, for tests.
+    func count(in directory: URL) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return directories[directory.path]?.count ?? 0
     }
 
     /// How many records in `directory` were decoded rather than reused, for tests.
@@ -226,11 +277,16 @@ public enum DesktopEventReader {
     /// `ReminderScan.hookCache`) while their files are unchanged.
     public static func read(from directory: URL, cache: HookFileCache) -> (events: [DesktopEvent], cache: HookFileCache) {
         var next = HookFileCache()
-        guard let listing = HookEventListing.listing(in: directory) else { return ([], next) }
+        guard let listing = HookEventListing.listing(in: directory) else {
+            decoded.forget(directory)
+            return ([], next)
+        }
+        let scan = decoded.begin()
+        defer { decoded.end(scan, in: directory) }
         let events: [DesktopEvent] = listing.records
             .compactMap { url -> (Record, String)? in
                 guard let data = cache.bytes(url, limit: maximumRecordSize, next: &next),
-                      let record = decoded.record(url.path, bytes: data, decode: {
+                      let record = decoded.record(url.path, in: directory, scan: scan, bytes: data, decode: {
                           try? JSONDecoder().decode(Record.self, from: data)
                       }) else { return nil }
                 return (record, url.lastPathComponent)

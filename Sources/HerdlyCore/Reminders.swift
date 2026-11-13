@@ -191,9 +191,10 @@ public enum ReminderReader {
         }
     }
 
-    /// The window's records, and as many again looked back through for session ends, with room
-    /// before it starts over (`DecodedHookRecords`).
-    static let decodedHooks = DecodedHookRecords<Hook>(maximumEntries: 3 * HookEventListing.maximumRecords)
+    /// At most the window's records and as many again looked back through for session ends; a scan
+    /// drops what it no longer reads (`DecodedHookRecords`). Internal rather than private only so
+    /// tests can count what it decodes and holds.
+    static let decodedHooks = DecodedHookRecords<Hook>(maximumEntries: 2 * HookEventListing.maximumRecords)
 
     private static func bounded(_ url: URL, limit: Int) -> Data? {
         guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
@@ -562,7 +563,11 @@ public enum ReminderReader {
             return true
         }
         var result = ReminderScan()
-        guard let listing = HookEventListing.listing(in: events) else { return result }
+        guard let listing = HookEventListing.listing(in: events) else {
+            decodedHooks.forget(events)
+            return result
+        }
+        let decoding = decodedHooks.begin()
         let ordered = listing.entries
         var probes: [UUID: [ApprovalResolutionProbe]] = [:]
         for url in ordered where url.pathExtension == "approval" {
@@ -617,7 +622,7 @@ public enum ReminderReader {
         }
         func hook(_ url: URL) -> Hook? {
             guard let bytes = hookCache.bytes(url, limit: 65536, next: &result.hookCache) else { return nil }
-            return decodedHooks.record(url.path, bytes: bytes) { (try? JSONDecoder().decode(Hook.Record.self, from: bytes)).map(Hook.init) }
+            return decodedHooks.record(url.path, in: events, scan: decoding, bytes: bytes) { (try? JSONDecoder().decode(Hook.Record.self, from: bytes)).map(Hook.init) }
         }
         let window = listing.records
         var hooks = window.compactMap(hook)
@@ -633,6 +638,8 @@ public enum ReminderReader {
             }
             hooks.insert(contentsOf: ends.reversed(), at: 0)
         }
+        // Every hook record this scan reads has been read: what it did not read is no longer kept.
+        decodedHooks.end(decoding, in: events)
         for hook in hooks {
             guard let ended = hook.endedAt else { continue }
             result.sessionEnds[hook.session_id] = max(result.sessionEnds[hook.session_id] ?? 0, ended)
