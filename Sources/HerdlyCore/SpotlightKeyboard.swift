@@ -380,3 +380,45 @@ public enum SpotlightCardLines {
         return "Handed back with no answer · asked \(ago)"
     }
 }
+
+/// A key pressed while a result card is the walk's card (#440, Paper K "D · Walk the to-check
+/// list"): its Open and Dismiss, labelled "O" and "X" on the card.
+public enum ResultCardKey: Equatable, Sendable, CaseIterable {
+    /// O with no modifier: the card's Open.
+    case open
+    /// X with no modifier: the card's Dismiss.
+    case dismiss
+}
+
+/// What one key does on a result card. Only `dismiss` clears anything, and only that one result,
+/// exactly as clicking Dismiss; Open, like its button, acknowledges nothing.
+public enum ResultCardAction: Equatable, Sendable {
+    /// The card's Open, exactly as clicking it, where the card shows one.
+    case open
+    /// The card's Dismiss, exactly as clicking it.
+    case dismiss
+    /// The key does nothing here and goes on to macOS.
+    case none
+
+    /// Whether the panel takes the key rather than passing it on.
+    public var consumesKey: Bool { self != .none }
+}
+
+/// Whether the walk's result card has deliberate keyboard focus (the hotkey's walk, or a click).
+public enum ResultCardFocus: Equatable, Sendable {
+    /// A result card the keyboard is not in, such as one that popped up on its own.
+    case withoutKeyboard
+    case keyboard
+}
+
+/// The one key table for a result card (#440). Only with deliberate keyboard focus: a stray letter
+/// typed while a result merely pops up on its own never dismisses it.
+public enum ResultCardKeys {
+    public static func action(for key: ResultCardKey, focus: ResultCardFocus) -> ResultCardAction {
+        guard focus == .keyboard else { return .none }
+        switch key {
+        case .open: return .open
+        case .dismiss: return .dismiss
+        }
+    }
+}
