@@ -101,5 +101,9 @@ A particular completion cleared by explicit dismissal; for a supported CLI surfa
 **Uncertain completion**:
 A completion that arrived while the companion was not observing. The user may have viewed it unobserved, so it is retained without a sound and offered for opening or dismissal; it is never described as unread.
 
+**Work status**:
+How far a finished session's work got, as a verdict: uncommitted, not pushed, checks running, checks failing, conflict, checks passed, or merged; otherwise none. It is about the branch the companion saw that session on while the turn ran, and it reports only facts it read from git and the branch's pull request; it never judges the code. Anything uncertain (the branch changed mid-turn, two sessions shared the folder, nothing could be read) is none, never a guess. It is presentation only: it never orders the queue, counts as work, or acknowledges anything.
+_Avoid_: Build status, CI status, health
+
 **Resolution evidence**:
 A recorded sign that a handed-back approval request or a question request is no longer pending in Codex: Codex's recorded answer to that exact request or call, the end of that exact turn, or the end of its session. A prompt that merely disappeared is not evidence. For Claude, whose native No fires no hook, the session registry's status changing after the request arrived is also evidence: Claude shows one prompt per session and changes that status as soon as the prompt is answered. For a Claude question, only the status changing to idle after it arrived counts, since a question handed back to Claude's own prompt changes the status to waiting.
