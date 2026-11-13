@@ -208,3 +208,34 @@ private struct HeaderLineProbe: View {
     // Squeezed to nothing, the header keeps the whole state: the name and the detail collapse first.
     #expect(fittedWidth(header, proposed: 0) >= stateOnly)
 }
+
+// MARK: A quiet working row (#419; Paper "Q1 · Coloured word · Chosen 2026-11-13")
+
+@Test func aQuietWorkingRowReadsQuietAfterItsPlace() throws {
+    let running = row(.running, status: nil)
+    let line = try #require(RowPlaceLine.make(running, label: nil, place: "herdly @ docs/notes", note: nil, quiet: true))
+    #expect(line.quiet)
+    #expect(line.label == nil)
+    #expect(line.detail == "herdly @ docs/notes")
+    #expect(line.text == "· herdly @ docs/notes · quiet")
+    #expect(line.spoken == "herdly @ docs/notes, quiet")
+    // With no place known, the word alone.
+    let bare = try #require(RowPlaceLine.make(running, label: nil, place: nil, note: nil, quiet: true))
+    #expect(bare.text == "· quiet")
+    #expect(bare.spoken == "quiet")
+    // Not quiet: the place as before.
+    #expect(RowPlaceLine.make(running, label: nil, place: "herdly @ docs/notes", note: nil, quiet: false)?.text
+        == "· herdly @ docs/notes")
+}
+
+@Test func onlyAWorkingRowWithoutANoteReadsQuiet() throws {
+    for kind in [AgentAttentionKind.outcome, .earlierOutcome, .waiting, .statusUnavailable] {
+        #expect(RowPlaceLine.make(row(kind), label: nil, place: "herdly @ main", note: nil, quiet: true)?.quiet == false)
+    }
+    #expect(RowPlaceLine.make(row(.running, status: nil), label: nil, place: "herdly @ main", note: .sending, quiet: true)?.quiet == false)
+}
+
+@Test func theQuietWordIsDrawnInTheAmberStateTone() {
+    #expect(RowPlaceLine.quietTone == .amber)
+    #expect(NotchStyle.stateColor(RowPlaceLine.quietTone) == NotchStyle.stateAmber)
+}

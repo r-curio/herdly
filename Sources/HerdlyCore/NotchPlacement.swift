@@ -543,12 +543,18 @@ public struct AgentStripSession: Equatable, Sendable {
     public let session: AgentSessionIdentity
     public let working: Bool
     public let color: Int
+    /// A working session that has gone quiet (#419): still working, but its sprite stands still.
+    public let quiet: Bool
 
-    public init(session: AgentSessionIdentity, working: Bool, color: Int) {
+    public init(session: AgentSessionIdentity, working: Bool, color: Int, quiet: Bool = false) {
         self.session = session
         self.working = working
         self.color = color
+        self.quiet = quiet
     }
+
+    /// Whether its sprite steps: working and not quiet.
+    public var stepping: Bool { working && !quiet }
 }
 
 /// What the strip shows across agents: one sprite per session (at most `maximumSprites`, in priority
@@ -562,10 +568,10 @@ public struct AgentStripSummary: Equatable, Sendable {
     public let working: Bool
     public let toCheck: Int
     public let sessions: [AgentStripSession]
-    /// The first working session in priority order, even when it ranks below the shown sprites, so
-    /// a wing that draws one sprite can still step while anything works. Its color is the one its
-    /// queue row uses: its strip color when shown, otherwise its preferred color. `nil` while
-    /// nothing works.
+    /// The first working session that is not quiet (#419) in priority order, even when it ranks below
+    /// the shown sprites, so a wing that draws one sprite can still step while anything steps. Its
+    /// color is the one its queue row uses: its strip color when shown, otherwise its preferred color.
+    /// `nil` while no session works, or every working session is quiet.
     public let busy: AgentStripSession?
 
     public init(subject: String, working: Bool, toCheck: Int, sessions: [AgentStripSession] = [],
@@ -591,9 +597,11 @@ public struct AgentStripSummary: Equatable, Sendable {
 
     /// Results that have moved under "Earlier" stay in the open queue but leave the strip: they
     /// are not counted in its badge and give no session a sprite. A session with other rows still
-    /// shows through those rows.
+    /// shows through those rows. `now` decides which working sessions are quiet (#419); nil reads none
+    /// as quiet. Quiet changes only which sprites step: never the subject, the counts, or `working`.
     public static func make(items: [AgentAttentionItem], testPending: Bool = false,
-                            names: [AgentSessionIdentity: String] = [:]) -> Self {
+                            names: [AgentSessionIdentity: String] = [:], now: Double? = nil) -> Self {
+        let isQuiet: (AgentAttentionItem) -> Bool = { item in now.map(item.isQuiet(at:)) ?? false }
         let items = items.filter { $0.kind != .earlierOutcome }
         let toCheck = items.filter { $0.kind != .running }.count + (testPending ? 1 : 0)
         let working = items.contains { $0.running?.status == .working }
@@ -617,10 +625,11 @@ public struct AgentStripSummary: Equatable, Sendable {
             guard sessions.count < maximumSprites else { break }
             let color = StripSummary.nextFreeColor(preferred: preferredColor(for: item.session), taken: colors)
             colors.insert(color)
-            sessions.append(AgentStripSession(session: item.session, working: item.running?.status == .working, color: color))
+            sessions.append(AgentStripSession(session: item.session, working: item.running?.status == .working, color: color,
+                                              quiet: isQuiet(item)))
         }
-        var busy = sessions.first(where: \.working)
-        if busy == nil, let item = items.first(where: { $0.running?.status == .working }) {
+        var busy = sessions.first(where: \.stepping)
+        if busy == nil, let item = items.first(where: { $0.running?.status == .working && !isQuiet($0) }) {
             // Below the shown sprites: its preferred color, as its queue row draws it.
             busy = AgentStripSession(session: item.session, working: true, color: preferredColor(for: item.session))
         }

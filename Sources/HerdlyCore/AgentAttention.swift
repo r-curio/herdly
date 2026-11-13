@@ -177,6 +177,14 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     /// The session's running subagents, oldest first (#395). Live observation only: left out of
     /// `Codable`, so a restored row starts with none until the next scan.
     public private(set) var subagents: [SubagentActivity] = []
+    /// The session's latest activity in this turn (#419): its source's own tool start or finish, or
+    /// the prompt, never a scan, a registry status change or a turn's Stop, so a refresh cannot make
+    /// a quiet session look busy. Nil when Herdly has none (a row known only from a scan), and such a
+    /// row is never quiet. Live observation only: left out of `Codable`.
+    public private(set) var activityAt: Double?
+    /// When the call named by `toolName` started, when the source recorded it (#419). Live
+    /// observation only: left out of `Codable`.
+    public private(set) var toolStartedAt: Double?
 
     private enum CodingKeys: String, CodingKey {
         case identity, arrivedAt, updatedAt, prompt, promptShortened, toolName, toolInput, status
@@ -196,8 +204,10 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double, updatedAt: Double? = nil,
                 prompt: String? = nil, promptShortened: Bool = false, toolName: String? = nil,
                 toolInput: [String: String] = [:], status: AgentRunningStatus = .working,
-                subagents: [SubagentActivity] = []) {
+                subagents: [SubagentActivity] = [], activityAt: Double? = nil, toolStartedAt: Double? = nil) {
         self.identity = AgentTurnIdentity(session: session, turn: turn)
+        self.activityAt = activityAt
+        self.toolStartedAt = toolStartedAt
         self.subagents = subagents.sorted { SubagentActivity.startsBefore(($0.startedAt, $0.id), ($1.startedAt, $1.id)) }
         self.arrivedAt = arrivedAt
         self.updatedAt = updatedAt ?? arrivedAt

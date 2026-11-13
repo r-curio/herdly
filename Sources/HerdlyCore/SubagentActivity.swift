@@ -19,10 +19,14 @@ public struct SubagentActivity: Identifiable, Equatable, Sendable {
     /// The subagent's current tool call, shaped like the opened row's "now" line. Nil while it is
     /// between calls or its call is no longer fresh.
     public let latestAction: RunningRowDetails.Now?
+    /// The subagent's latest activity (#419): its start, or its newest tool start or finish. Nil when
+    /// the source gives none; it then adds nothing to its session's activity.
+    public let lastActivityAt: Double?
 
     public init(id: String, name: String, role: String? = nil, asked: String? = nil, startedAt: Double,
-                latestAction: RunningRowDetails.Now? = nil) {
+                latestAction: RunningRowDetails.Now? = nil, lastActivityAt: Double? = nil) {
         self.id = id
+        self.lastActivityAt = lastActivityAt
         self.name = name
         self.role = role
         self.asked = asked
