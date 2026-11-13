@@ -6,7 +6,9 @@ import Foundation
 /// A subagent's run starts with its `SubagentStart` and ends at its first `SubagentStop` at or after
 /// that start, or at its session's end; a start while a run is open is a repeat. Once its parent turn has
 /// ended (a `Stop` or `StopFailure` in the session, or a submit of another prompt, at or after the
-/// start), an open run also ends at `ClaudeObservationReader.maximumSubagentAge`. The
+/// start), an open run also ends at `ClaudeObservationReader.maximumSubagentAge`. So does a run that
+/// started in a prompt already ended by its own `Stop` or `StopFailure` (#426: a background subagent
+/// restarting after its parent's turn finished), so a lost stop cannot keep it listed either. The
 /// same agent id may run again after its run ended. A call belongs to the run whose span holds its
 /// capture time; a call before any start, or after a run ended and before the next, belongs to none.
 struct ClaudeSubagentLifetimes {
@@ -35,6 +37,8 @@ struct ClaudeSubagentLifetimes {
     private var latestTurnEnds: [String: Double] = [:]
     /// Each session's prompt submits.
     private var submits: [String: [(at: Double, prompt: String)]] = [:]
+    /// Each session's `Stop`/`StopFailure` times by the prompt they ended.
+    private var promptEnds: [String: [String: [Double]]] = [:]
 
     /// Takes one record, in any order. `agent` is the record's accepted `agent_id`, nil when it has none;
     /// `prompt` is its raw `prompt_id`, bounded here as the reader bounds it (`promptID`), so a malformed one
@@ -49,6 +53,9 @@ struct ClaudeSubagentLifetimes {
             sessionEnds[session, default: []].append(capturedAt)
         }
         if event == "UserPromptSubmit", let prompt { submits[session, default: []].append((capturedAt, prompt)) }
+        if ClaudeObservationReader.turnEndingEvents.contains(event), let prompt {
+            promptEnds[session, default: [:]][prompt, default: []].append(capturedAt)
+        }
         ClaudeObservationReader.noteTurnEnd(event: event, session: session, at: capturedAt, in: &latestTurnEnds)
     }
 
@@ -77,13 +84,17 @@ struct ClaudeSubagentLifetimes {
 
     /// The latest end of the parent turn of a run that started with `start`, nil while it has none: a
     /// `Stop`/`StopFailure` in the session, or a submit of another prompt, at or after the start. A repeated
-    /// submit of the run's own prompt is not one.
+    /// submit of the run's own prompt is not one. A run that started in a prompt its own `Stop`/`StopFailure`
+    /// had already ended counts its start as that end, so its bound runs from its start.
     private func parentTurnEnd(session: String, start: Start) -> Double? {
         let stop = latestTurnEnds[session].flatMap { $0 >= start.at ? $0 : nil }
         let submit = start.prompt.flatMap { prompt in
             submits[session]?.filter { $0.at >= start.at && $0.prompt != prompt }.map(\.at).max()
         }
-        return [stop, submit].compactMap { $0 }.max()
+        let endedBeforeStartAt = start.prompt.flatMap { prompt in
+            promptEnds[session]?[prompt]?.contains { $0 < start.at } == true ? start.at : nil
+        }
+        return [stop, submit, endedBeforeStartAt].compactMap { $0 }.max()
     }
 
     /// When the open run holding the call `agent` made at `at` reaches its age bound; nil when no open
