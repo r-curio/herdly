@@ -519,6 +519,35 @@ public enum GitHubPullRequestReader {
 
 // MARK: - The verdict
 
+/// The pull request a verdict was read from, as a finished row names it (#418): "herdly#431".
+public struct WorkPullRequest: Equatable, Sendable {
+    /// GitHub's "owner/name", from the remembered branch's `origin`.
+    public let repository: String
+    public let number: Int
+
+    public init(repository: String, number: Int) {
+        self.repository = repository
+        self.number = number
+    }
+
+    /// The repository's name without its owner, as the row shows it.
+    public var name: String {
+        repository.split(separator: "/").last.map(String.init) ?? repository
+    }
+}
+
+/// What a finished row says about its work (#418): a verdict, and the pull request it came from when
+/// a pull request decided it. Only a verdict other than `noVerdict` makes one.
+public struct WorkStatusLabel: Equatable, Sendable {
+    public let verdict: WorkStatus
+    public let pullRequest: WorkPullRequest?
+
+    public init(verdict: WorkStatus, pullRequest: WorkPullRequest? = nil) {
+        self.verdict = verdict
+        self.pullRequest = pullRequest
+    }
+}
+
 /// A verdict, and whether GitHub was still working it out when it was read.
 public struct WorkStatusResult: Equatable, Sendable {
     public let verdict: WorkStatus
@@ -526,10 +555,14 @@ public struct WorkStatusResult: Equatable, Sendable {
     /// whose checks have not registered, or a pushed branch whose pull request is not listed yet.
     /// Read again within `WorkStatusSchedule.pendingGrace`.
     public let pending: Bool
+    /// The pull request that decided the verdict (merged, conflict, or a checks verdict); nil when git
+    /// decided it, there is no verdict, or the branch's repository is unknown.
+    public let pullRequest: WorkPullRequest?
 
-    public init(_ verdict: WorkStatus, pending: Bool = false) {
+    public init(_ verdict: WorkStatus, pending: Bool = false, pullRequest: WorkPullRequest? = nil) {
         self.verdict = verdict
         self.pending = pending
+        self.pullRequest = verdict == .noVerdict ? nil : pullRequest
     }
 }
 
@@ -552,9 +585,10 @@ public enum WorkStatusRule {
             // No pull request for a detached HEAD, and no upstream to compare with.
             guard let local, case .detached = local.head, local.changed else { return WorkStatusResult(.noVerdict) }
             return WorkStatusResult(.uncommitted)
-        case .branch(let name, _, _, _):
+        case .branch(let name, _, _, let repository):
             let found: GitHubPullRequest? = if case .found(let request)? = pullRequest { request } else { nil }
-            if let found, found.state == .merged { return WorkStatusResult(.merged) }
+            let named = found.flatMap { request in repository.map { WorkPullRequest(repository: $0, number: request.number) } }
+            if let found, found.state == .merged { return WorkStatusResult(.merged, pullRequest: named) }
             // The folder may have moved on (an agent merged and went back to the default branch);
             // then git describes another branch and says nothing about this turn's.
             let matching = local.flatMap { $0.head == .branch(name) ? $0 : nil }
@@ -572,14 +606,14 @@ public enum WorkStatusRule {
                 return WorkStatusResult(.noVerdict, pending: matching != nil && pullRequest == .noPullRequest)
             }
             let computing = found.mergeable == .unknown || found.checks == .noChecks
-            if found.mergeable == .conflicting { return WorkStatusResult(.conflict) }
+            if found.mergeable == .conflicting { return WorkStatusResult(.conflict, pullRequest: named) }
             let verdict: WorkStatus = switch found.checks {
             case .failing: .checksFailing
             case .running: .checksRunning
             case .passed: .checksPassed
             case .noChecks, .unknown: .noVerdict
             }
-            return WorkStatusResult(verdict, pending: computing)
+            return WorkStatusResult(verdict, pending: computing, pullRequest: named)
         }
     }
 }
@@ -589,6 +623,8 @@ public struct WorkStatusReading: Equatable, Sendable {
     public let verdict: WorkStatus
     /// GitHub was still working it out (`WorkStatusResult.pending`).
     public let pending: Bool
+    /// The pull request that decided the verdict (`WorkStatusResult.pullRequest`).
+    public let pullRequest: WorkPullRequest?
     public let readAt: Double
     /// When the turn's first reading was made; the refresh cap and pending grace count from here.
     public let firstReadAt: Double
@@ -597,18 +633,30 @@ public struct WorkStatusReading: Equatable, Sendable {
     /// none, but the reading keeps its times, so a re-read stays inside the original cap and interval.
     public let isWithdrawn: Bool
 
-    public init(verdict: WorkStatus, pending: Bool = false, readAt: Double, firstReadAt: Double,
-                isWithdrawn: Bool = false) {
+    public init(verdict: WorkStatus, pending: Bool = false, pullRequest: WorkPullRequest? = nil, readAt: Double,
+                firstReadAt: Double, isWithdrawn: Bool = false) {
         self.verdict = verdict
         self.pending = pending
+        self.pullRequest = verdict == .noVerdict ? nil : pullRequest
         self.readAt = readAt
         self.firstReadAt = firstReadAt
         self.isWithdrawn = isWithdrawn
     }
 
+    /// One fresh result read at `readAt`.
+    public init(_ result: WorkStatusResult, readAt: Double, firstReadAt: Double) {
+        self.init(verdict: result.verdict, pending: result.pending, pullRequest: result.pullRequest, readAt: readAt,
+                  firstReadAt: firstReadAt)
+    }
+
     /// This reading with its verdict withdrawn and its times kept.
     public var withdrawn: WorkStatusReading {
         WorkStatusReading(verdict: .noVerdict, readAt: readAt, firstReadAt: firstReadAt, isWithdrawn: true)
+    }
+
+    /// What the row shows: nil without a verdict.
+    public var label: WorkStatusLabel? {
+        verdict == .noVerdict ? nil : WorkStatusLabel(verdict: verdict, pullRequest: pullRequest)
     }
 }
 
