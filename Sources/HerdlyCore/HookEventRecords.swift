@@ -39,6 +39,20 @@ public enum HookEventListing {
     /// `now` is the wall clock, compared with the directory's modification time (`settleTime`).
     static func detailedListing(in directory: URL, limit: Int = maximumEntries, now: Double = Date().timeIntervalSince1970)
         -> (entries: [URL], records: ArraySlice<URL>, recordInodes: [UInt64])? {
+        current(in: directory, limit: limit, now: now).map { ($0.urls, $0.records, $0.recordInodes) }
+    }
+
+    /// `listing(in:)`'s `records` with a number naming that listing: two calls that give the same
+    /// number gave the same records, so a reader can reuse what it made of them without comparing
+    /// thousands of URLs. Nil for a listing that was not kept (its directory could not be stamped),
+    /// which is never the same as another.
+    static func numberedRecords(in directory: URL) -> (records: ArraySlice<URL>, number: UInt64?)? {
+        current(in: directory, limit: maximumEntries, now: Date().timeIntervalSince1970).map {
+            ($0.records, $0.number == 0 ? nil : $0.number)
+        }
+    }
+
+    private static func current(in directory: URL, limit: Int, now: Double) -> ListingCache.Entry? {
         let stamp = FileStamp(directory, followingLinks: true)
         let key = directory.standardizedFileURL.path
         let previous = listings.entry(key)
@@ -48,18 +62,16 @@ public enum HookEventListing {
         if stamp == nil || previous?.stamp != stamp { changes.flush(key) }
         let reported = changes.take(key)
         if let stamp, let previous, previous.stamp == stamp, reported ?? .names([]) == .names([]) {
-            return previous.urls.count <= limit ? (previous.urls, previous.records, previous.recordInodes) : nil
+            return previous.urls.count <= limit ? previous : nil
         }
         if let stamp, let previous, case .names(let names)? = reported, !names.isEmpty,
            HookDirectoryChangeLog.settled(modifiedAt: stamp.modifiedAt, now: now),
            let entry = updated(previous, with: names, in: directory, stamp: stamp), entry.urls.count <= limit {
-            listings.store(entry, for: key)
-            return (entry.urls, entry.records, entry.recordInodes)
+            return listings.store(entry, for: key)
         }
         listings.countFullRead(key)
         guard let entry = relisted(directory, previous: previous, stamp: stamp, limit: limit) else { return nil }
-        if stamp != nil { listings.store(entry, for: key) }
-        return (entry.urls, entry.records, entry.recordInodes)
+        return stamp != nil ? listings.store(entry, for: key) : entry
     }
 
     /// How many times this directory was read in full, for tests.
@@ -237,6 +249,8 @@ public enum HookEventListing {
             /// `urls`' names, in the same order.
             let order: [String]
             let dates: [String: Dated]
+            /// Set when the listing is kept: a number no other kept listing has. Zero until then.
+            var number: UInt64 = 0
         }
 
         // Invariant for `@unchecked Sendable`: `entries` is only touched while holding `lock`.
@@ -248,11 +262,18 @@ public enum HookEventListing {
             return entries[key]
         }
 
-        func store(_ entry: Entry, for key: String) {
+        /// Keeps `entry` and returns it numbered.
+        @discardableResult
+        func store(_ entry: Entry, for key: String) -> Entry {
             lock.lock(); defer { lock.unlock() }
+            stored += 1
+            var entry = entry
+            entry.number = stored
             entries[key] = entry
+            return entry
         }
 
+        private var stored: UInt64 = 0
         private var reads: [String: Int] = [:]
 
         func countFullRead(_ key: String) {

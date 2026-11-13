@@ -329,36 +329,83 @@ public enum HerdrBindingInputs {
 
 /// Reads the newest window of Herdly's hook event records for the herdr binding. Each record file
 /// is written once by an atomic move, so a decoded record is cached by path and the cache is
-/// trimmed to the current window; a scan decodes only new files. Run it off the main actor.
+/// trimmed to the current window; a scan decodes only new files, and a scan whose directories list
+/// the same records as the last one returns that scan's result as it is. Run it off the main actor.
 public enum HerdrHookRecordReader {
     /// Matches the Claude observation reader's per-record bound.
     public static let maximumRecordSize = 128 * 1024
+
+    /// What one read keeps for the next.
+    public struct Cache: Sendable {
+        /// The decoded record of each path in the window; nil for a file that holds no usable record.
+        public var records: [String: HerdrHookPaneRecord?] {
+            // Changed from outside, the last read's result no longer follows from these.
+            didSet { pass = nil }
+        }
+        /// The last read's result and the listings it was made from.
+        fileprivate var pass: Pass?
+
+        public init(records: [String: HerdrHookPaneRecord?] = [:]) {
+            self.records = records
+        }
+    }
+
+    fileprivate struct Pass: Sendable {
+        let listings: [Listed]
+        let newest: [HerdrHookPaneRecord]
+    }
+
+    /// One directory as a read found it: unreadable, or listed under `HookEventListing`'s number for
+    /// that listing, which names one exact sequence of records.
+    fileprivate enum Listed: Equatable, Sendable {
+        case unreadable(String)
+        case records(String, number: UInt64)
+    }
 
     public struct Result: Sendable {
         /// Each session's newest records (`HerdrBindingInputs.newestRecords`).
         public let records: [HerdrHookPaneRecord]
         /// Pass back into the next read.
-        public let cache: [String: HerdrHookPaneRecord?]
+        public let cache: Cache
+        /// The last read's result was returned without looking at any record, for tests.
+        let reused: Bool
 
         /// No directories to read.
-        public static let empty = Result(records: [], cache: [:])
+        public static let empty = Result(records: [], cache: Cache(), reused: false)
     }
 
     /// Unreadable or overgrown directories contribute nothing, as with the other hook readers.
-    public static func read(directories: [URL], cache: [String: HerdrHookPaneRecord?] = [:]) -> Result {
+    public static func read(directories: [URL], cache: Cache = Cache()) -> Result {
+        var windows: [ArraySlice<URL>] = []
+        // Nil once a directory's listing has no number: nothing says it is the one read before.
+        var listings: [Listed]? = []
+        for directory in directories {
+            let key = directory.standardizedFileURL.path
+            guard let listing = HookEventListing.numberedRecords(in: directory) else {
+                listings?.append(.unreadable(key))
+                continue
+            }
+            if let number = listing.number { listings?.append(.records(key, number: number)) } else { listings = nil }
+            windows.append(listing.records)
+        }
+        // The same records and the same decoded cache give the same result: a window holds
+        // thousands of records, and walking them every scan was this reader's whole cost (#306).
+        if let listings, let pass = cache.pass, pass.listings == listings {
+            return Result(records: pass.newest, cache: cache, reused: true)
+        }
         var records: [HerdrHookPaneRecord] = []
         var kept: [String: HerdrHookPaneRecord?] = [:]
-        for directory in directories {
-            guard let listing = HookEventListing.listing(in: directory) else { continue }
-            for url in listing.records {
-                let path = url.path
-                let record: HerdrHookPaneRecord?
-                if let cached = cache[path] { record = cached } else { record = decode(url) }
-                kept[path] = record
-                if let record { records.append(record) }
-            }
+        for url in windows.joined() {
+            let path = url.path
+            let record: HerdrHookPaneRecord?
+            if let cached = cache.records[path] { record = cached } else { record = decode(url) }
+            kept[path] = record
+            if let record { records.append(record) }
         }
-        return Result(records: HerdrBindingInputs.newestRecords(records), cache: kept)
+        let newest = HerdrBindingInputs.newestRecords(records)
+        var next = Cache(records: kept)
+        next.pass = listings.map { Pass(listings: $0, newest: newest) }
+        return Result(records: newest, cache: next, reused: false)
     }
 
     private static func decode(_ url: URL) -> HerdrHookPaneRecord? {
