@@ -257,3 +257,25 @@ private func hotkeyQueue() -> NotchPresentationController {
     #expect(QuestionStepperPlacement.resolve(mode: .walkCard(question), card: question, questionCount: 3) == .ownRow)
     #expect(QuestionStepperPlacement.resolve(mode: .walkCard(question), card: question, questionCount: 1) == .none)
 }
+
+// MARK: Review round 1
+
+@Test func aResultThatAgesIntoEarlierMidWalkStaysInTheWalk() {
+    let one = [item(result, .outcome), item(working, .running)]
+    var walk = ToCheckWalk(items: one)!
+    // Five minutes pass: the result moves under Earlier. Nothing was dismissed, so nothing is checked.
+    let aged = [item(result, .earlierOutcome), item(working, .running)]
+    walk.observe(items: aged, now: 400)
+    #expect(walk.screen == .card(result))
+    #expect(walk.position == ToCheckWalk.Position(index: 1, count: 1))
+    #expect(!walk.foldDue(now: 1_000))
+    // Dismissed: now it has left, and the walk ends.
+    walk.observe(items: [item(working, .running)], now: 401)
+    #expect(walk.screen == .allChecked)
+}
+
+@Test func anEarlierResultThatWasNotInTheWalkDoesNotJoinIt() {
+    var walk = ToCheckWalk(items: [item(approval, .actionableApproval)])!
+    walk.observe(items: [item(approval, .actionableApproval), item(earlier, .earlierOutcome)], now: 1)
+    #expect(walk.order == [approval])
+}

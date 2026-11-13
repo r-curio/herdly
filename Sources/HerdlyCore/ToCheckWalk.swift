@@ -56,13 +56,17 @@ public struct ToCheckWalk: Equatable, Sendable {
     }
 
     /// One refresh with the queue as it is now. An item that arrives takes its queue position and the
-    /// count follows; one that leaves drops out. When the card on screen leaves (it was decided,
+    /// count follows; one that leaves the queue (decided, answered, dismissed, or resolved elsewhere)
+    /// drops out. An item already in the walk stays in it when it moves under Earlier. When the card on screen leaves (it was decided,
     /// answered or dismissed, or resolved elsewhere) the walk moves to the item that followed it, or
     /// failing that the one before it. When nothing is left to check the walk shows "All checked"
     /// and its fold falls due `allCheckedHold` later. Once "All checked", it stays so.
     public mutating func observe(items: [AgentAttentionItem], now: Double) {
         guard case let .card(current) = screen else { return }
-        let next = Self.order(of: items)
+        // A result already in the walk stays when it ages under Earlier: ageing checks nothing. Only a
+        // result that was already Earlier when it would have joined stays out, as the badge leaves it out.
+        let walked = Set(order)
+        let next = items.filter { $0.kind != .running && ($0.kind != .earlierOutcome || walked.contains($0.id)) }.map(\.id)
         defer { order = next }
         guard !next.contains(current) else { return }
         if let index = order.firstIndex(of: current) {
