@@ -150,7 +150,7 @@ public enum CodexSubagentReader {
         let asked: String?
         let latest: Call?
         /// The newest tool call or call output in the child's open turn, by its line's timestamp (#419).
-        var lastToolEventAt: Double? = nil
+        let lastToolEventAt: Double?
     }
 
     /// The header of a spawned agent's rollout; nil for any other rollout or an unusable header.
@@ -203,17 +203,16 @@ public enum CodexSubagentReader {
             guard let payload = event["payload"] as? [String: Any],
                   SessionDiscovery.turnID(in: payload) == open,
                   let callID = text(payload["call_id"]) else { continue }
-            let kind = payload["type"] as? String
-            switch kind {
+            switch payload["type"] as? String {
             case "custom_tool_call_output", "function_call_output":
                 pending.removeValue(forKey: callID)
             case "custom_tool_call", "function_call":
                 if let call = call(payload) { pending[callID] = (order, call) }
             default:
-                break
+                continue
             }
-            if ["custom_tool_call", "function_call", "custom_tool_call_output", "function_call_output"].contains(kind),
-               let at = (event["timestamp"] as? String).flatMap(RolloutTimestamp.parse) {
+            // A tool call or its output: the child's activity (#419).
+            if let at = (event["timestamp"] as? String).flatMap(RolloutTimestamp.parse) {
                 lastToolEventAt = max(lastToolEventAt ?? at, at)
             }
         }

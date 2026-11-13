@@ -540,21 +540,31 @@ public struct StripSummary: Equatable, Sendable {
 }
 
 public struct AgentStripSession: Equatable, Sendable {
-    public let session: AgentSessionIdentity
-    public let working: Bool
-    public let color: Int
-    /// A working session that has gone quiet (#419): still working, but its sprite stands still.
-    public let quiet: Bool
-
-    public init(session: AgentSessionIdentity, working: Bool, color: Int, quiet: Bool = false) {
-        self.session = session
-        self.working = working
-        self.color = color
-        self.quiet = quiet
+    /// What the session is doing, as its sprite shows it.
+    public enum State: Equatable, Sendable {
+        /// Not working (waiting, a request, a result): the sprite stands still.
+        case idle
+        /// Working: the sprite steps.
+        case stepping
+        /// Working but quiet (#419): still working, and the sprite stands still.
+        case quiet
     }
 
+    public let session: AgentSessionIdentity
+    public let state: State
+    public let color: Int
+
+    public init(session: AgentSessionIdentity, state: State, color: Int) {
+        self.session = session
+        self.state = state
+        self.color = color
+    }
+
+    /// Whether the session is working, quiet or not.
+    public var working: Bool { state != .idle }
     /// Whether its sprite steps: working and not quiet.
-    public var stepping: Bool { working && !quiet }
+    public var stepping: Bool { state == .stepping }
+    public var quiet: Bool { state == .quiet }
 }
 
 /// What the strip shows across agents: one sprite per session (at most `maximumSprites`, in priority
@@ -597,11 +607,14 @@ public struct AgentStripSummary: Equatable, Sendable {
 
     /// Results that have moved under "Earlier" stay in the open queue but leave the strip: they
     /// are not counted in its badge and give no session a sprite. A session with other rows still
-    /// shows through those rows. `now` decides which working sessions are quiet (#419); nil reads none
-    /// as quiet. Quiet changes only which sprites step: never the subject, the counts, or `working`.
+    /// shows through those rows. `now` decides which working sessions are quiet (#419): quiet changes
+    /// only which sprites step, never the subject, the counts, or `working`.
     public static func make(items: [AgentAttentionItem], testPending: Bool = false,
-                            names: [AgentSessionIdentity: String] = [:], now: Double? = nil) -> Self {
-        let isQuiet: (AgentAttentionItem) -> Bool = { item in now.map(item.isQuiet(at:)) ?? false }
+                            names: [AgentSessionIdentity: String] = [:], now: Double) -> Self {
+        func state(_ item: AgentAttentionItem) -> AgentStripSession.State {
+            guard item.running?.status == .working else { return .idle }
+            return item.spriteSteps(at: now) ? .stepping : .quiet
+        }
         let items = items.filter { $0.kind != .earlierOutcome }
         let toCheck = items.filter { $0.kind != .running }.count + (testPending ? 1 : 0)
         let working = items.contains { $0.running?.status == .working }
@@ -625,13 +638,12 @@ public struct AgentStripSummary: Equatable, Sendable {
             guard sessions.count < maximumSprites else { break }
             let color = StripSummary.nextFreeColor(preferred: preferredColor(for: item.session), taken: colors)
             colors.insert(color)
-            sessions.append(AgentStripSession(session: item.session, working: item.running?.status == .working, color: color,
-                                              quiet: isQuiet(item)))
+            sessions.append(AgentStripSession(session: item.session, state: state(item), color: color))
         }
         var busy = sessions.first(where: \.stepping)
-        if busy == nil, let item = items.first(where: { $0.running?.status == .working && !isQuiet($0) }) {
+        if busy == nil, let item = items.first(where: { $0.spriteSteps(at: now) }) {
             // Below the shown sprites: its preferred color, as its queue row draws it.
-            busy = AgentStripSession(session: item.session, working: true, color: preferredColor(for: item.session))
+            busy = AgentStripSession(session: item.session, state: .stepping, color: preferredColor(for: item.session))
         }
         return Self(subject: subject, working: working, toCheck: toCheck, sessions: sessions, busy: busy)
     }

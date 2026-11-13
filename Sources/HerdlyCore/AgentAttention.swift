@@ -182,9 +182,11 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     /// a quiet session look busy. Nil when Herdly has none (a row known only from a scan), and such a
     /// row is never quiet. Live observation only: left out of `Codable`.
     public private(set) var activityAt: Double?
-    /// When the call named by `toolName` started, when the source recorded it (#419). Live
-    /// observation only: left out of `Codable`.
-    public private(set) var toolStartedAt: Double?
+    /// The session's own newest unfinished call, however old, when the source records it (Claude):
+    /// `toolName` drops a call after its freshness bound, this keeps it until its finish, so a quiet
+    /// row can show what it stopped on (#419, `shownCall(at:)`). Live observation only: left out of
+    /// `Codable`.
+    public private(set) var openCall: OpenCall?
 
     private enum CodingKeys: String, CodingKey {
         case identity, arrivedAt, updatedAt, prompt, promptShortened, toolName, toolInput, status
@@ -204,10 +206,10 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double, updatedAt: Double? = nil,
                 prompt: String? = nil, promptShortened: Bool = false, toolName: String? = nil,
                 toolInput: [String: String] = [:], status: AgentRunningStatus = .working,
-                subagents: [SubagentActivity] = [], activityAt: Double? = nil, toolStartedAt: Double? = nil) {
+                subagents: [SubagentActivity] = [], activityAt: Double? = nil, openCall: OpenCall? = nil) {
         self.identity = AgentTurnIdentity(session: session, turn: turn)
         self.activityAt = activityAt
-        self.toolStartedAt = toolStartedAt
+        self.openCall = openCall
         self.subagents = subagents.sorted { SubagentActivity.startsBefore(($0.startedAt, $0.id), ($1.startedAt, $1.id)) }
         self.arrivedAt = arrivedAt
         self.updatedAt = updatedAt ?? arrivedAt

@@ -788,7 +788,7 @@ private func wingStrip(sessions count: Int, working: Set<Int> = []) -> AgentStri
                                               arrivedAt: Double(index))))
         }
     }
-    return AgentStripSummary.make(items: queue.items(at: Double(count)))
+    return AgentStripSummary.make(items: queue.items(at: Double(count)), now: Double(count))
 }
 
 @Test func collapsedWingShowsUpToThreeSpritesAndABareCount() {

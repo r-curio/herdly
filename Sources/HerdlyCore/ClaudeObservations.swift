@@ -421,9 +421,6 @@ public enum ClaudeObservationReader {
         /// was built for: `now` changes a part only through those calls' freshness.
         let openToolTimes: [Double]
         let builtNow: Double
-        /// The earliest `now` after `builtNow` at which a turn holding an unfinished call of its own turns
-        /// quiet (#419): from then its row shows that call again, so the part must be rebuilt.
-        let quietChangesAt: Double
         /// The earliest `now` at which a subagent the part lists reaches `maximumSubagentAge`: with no new
         /// record, that changes the part's switcher list, held row and requests (#404).
         let subagentExpiresAt: Double
@@ -438,7 +435,7 @@ public enum ClaudeObservationReader {
     /// was built from: time has not gone back, every open call is fresh or not exactly as it was when the
     /// part was built, and no listed subagent has reached its age bound since.
     private static func stands(_ part: SessionPart, at now: Double) -> Bool {
-        guard now.isFinite, now >= part.builtNow, now < part.subagentExpiresAt, now < part.quietChangesAt else { return false }
+        guard now.isFinite, now >= part.builtNow, now < part.subagentExpiresAt else { return false }
         return part.openToolTimes.allSatisfy { isFresh($0, now: now) == isFresh($0, now: part.builtNow) }
     }
 
@@ -788,10 +785,6 @@ public enum ClaudeObservationReader {
                lifetimes.call(session: turn.session, agent: agent, at: call.at, now: now) == .ended { return nil }
             return approval
         }
-        /// The turn's latest activity with its session's listed subagents' (`AgentRunning.lastActivityAt`).
-        func lastActivity(_ turn: Turn) -> Double {
-            ([turn.activityAt] + (listed[turn.session] ?? [:]).values.map(\.lastActivityAt)).max() ?? turn.activityAt
-        }
         let turnParts = turns.values.map { turn -> TurnPart in
             let observations: [AgentObservation] = {
             let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
@@ -817,18 +810,17 @@ public enum ClaudeObservationReader {
                 }
             } else {
                 let activity = isCurrentPrompt ? subagentActivity(listed[turn.session] ?? [:], now: now) : []
-                // A call is the row's "now" while fresh; on a quiet row (#419, owner decision 2026-11-13) the
-                // session's newest unfinished call stays shown however old, so the user sees what it stopped on.
-                let rowActivity = ([turn.activityAt] + activity.compactMap(\.lastActivityAt)).max()
                 let freshTool = turn.tool.flatMap { fresh($0, now: now) }
-                    ?? (QuietRule.isQuiet(lastActivity: rowActivity, now: now) ? turn.tool : nil)
                 result.append(.running(AgentRunning(session: identity, turn: turn.prompt, arrivedAt: turn.startedAt,
                                                     updatedAt: turn.updatedAt,
                                                     prompt: turn.promptText, promptShortened: turn.promptShortened,
                                                     toolName: freshTool?.name,
                                                     toolInput: freshTool?.input ?? [:],
                                                     subagents: activity, activityAt: turn.activityAt,
-                                                    toolStartedAt: freshTool?.at)))
+                                                    // Kept however old: a quiet row shows it (#419).
+                                                    openCall: turn.tool.map {
+                                                        OpenCall(name: $0.name, input: $0.input, startedAt: $0.at)
+                                                    })))
                 if let question = turn.question { result.append(.question(question)) }
                 if let approval = pendingApproval(turn) { result.append(.approval(approval)) }
             }
@@ -853,16 +845,11 @@ public enum ClaudeObservationReader {
         let openTools = turns.values.flatMap { $0.tools.values + ($0.tool.map { [$0] } ?? []) }
             + subagents.values.flatMap { $0.values.flatMap(\.tools.values) }
         let openToolTimes = openTools.map(\.at).filter(\.isFinite)
-        let quietChangesAt = turns.values.compactMap { turn -> Double? in
-            guard turn.tool != nil, let quietAt = QuietRule.quietAt(lastActivity: lastActivity(turn)), quietAt > now else { return nil }
-            return quietAt
-        }.min() ?? .infinity
         let firstSubagentExpiry = listed.flatMap { session, running in
             running.compactMap { agent, subagent in lifetimes.expiresAt(session: session, agent: agent, at: subagent.startedAt) }
         }.min() ?? .infinity
         return SessionPart(fileNames: records.map(\.fileName), turns: turnParts, results: results,
                            latestSessionStartAt: latestSessionStartAt, openToolTimes: openToolTimes, builtNow: now,
-                           quietChangesAt: quietChangesAt,
                            subagentExpiresAt: firstSubagentExpiry)
     }
 

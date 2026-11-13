@@ -36,6 +36,39 @@ extension AgentRunning {
     }
 }
 
+/// A call the session started and has not finished, as the opened row's "now" line names it.
+public struct OpenCall: Equatable, Sendable {
+    public let name: String
+    public let input: [String: String]
+    /// When the call started; nil when the source did not record it.
+    public let startedAt: Double?
+
+    public init(name: String, input: [String: String], startedAt: Double?) {
+        self.name = name
+        self.input = input
+        self.startedAt = startedAt
+    }
+}
+
+extension AgentRunning {
+    /// Whether the session is quiet at `now` (`QuietRule`).
+    public func isQuiet(at now: Double) -> Bool {
+        QuietRule.isQuiet(lastActivity: lastActivityAt, now: now)
+    }
+
+    /// The call the opened row's "now" names at `now`: the fresh call the source reports (`toolName`),
+    /// or, once the session is quiet (#419, owner decision 2026-11-13), the session's newest unfinished
+    /// call (`openCall`) however old, so the user sees what it stopped on. A finished call is never
+    /// `openCall`. Decided at render time, so the line changes at the quiet moment itself.
+    public func shownCall(at now: Double) -> OpenCall? {
+        if let toolName {
+            let started = openCall.flatMap { $0.name == toolName && $0.input == toolInput ? $0.startedAt : nil }
+            return OpenCall(name: toolName, input: toolInput, startedAt: started)
+        }
+        return isQuiet(at: now) ? openCall : nil
+    }
+}
+
 extension AgentAttentionItem {
     /// When this row becomes quiet: only a working row (`.running`) with an activity time can.
     public var quietAt: Double? {
@@ -45,8 +78,12 @@ extension AgentAttentionItem {
 
     /// Whether this row is a quiet working row at `now`.
     public func isQuiet(at now: Double) -> Bool {
-        guard let quietAt, now.isFinite else { return false }
-        return now >= quietAt
+        kind == .running && running?.isQuiet(at: now) == true
+    }
+
+    /// Whether the row's sprite steps at `now`: its session is working and not quiet.
+    public func spriteSteps(at now: Double) -> Bool {
+        running?.status == .working && !isQuiet(at: now)
     }
 }
 
@@ -59,23 +96,17 @@ public struct QuietLine: Equatable, Sendable {
     /// What VoiceOver reads after the "quiet" label, with the unit spelled out.
     public let spoken: String
 
-    /// The line for `running` at `now`, or nil while it is not quiet.
+    /// The line for `running` at `now`, or nil while it is not quiet. Only a shell command counts from
+    /// its own start: the frame and the word "command" are a shell's, and another open call reads
+    /// "since the last activity".
     public static func make(_ running: AgentRunning, now: Double) -> QuietLine? {
         guard let activity = running.lastActivityAt, QuietRule.isQuiet(lastActivity: activity, now: now) else { return nil }
-        let command = running.action?.isCommand == true ? running.toolStartedAt.flatMap { $0.isFinite ? $0 : nil } : nil
+        let shown = running.shownCall(at: now)
+        let isCommand = shown.flatMap { ToolAction(name: $0.name, input: $0.input) }?.isCommand == true
+        let command = isCommand ? shown?.startedAt.flatMap { $0.isFinite ? $0 : nil } : nil
         let since = command ?? activity
         let what = command == nil ? "since the last activity" : "since this command started"
         return QuietLine(text: "\(QueueRowPresentation.age(since: since, now: now)) \(what)",
-                         spoken: "\(spokenDuration(since: since, now: now)) \(what)")
-    }
-
-    /// "14 minutes", "2 hours", "1 day": the age format's units in words.
-    static func spokenDuration(since start: Double, now: Double) -> String {
-        let seconds = max(0, now - start)
-        func unit(_ count: Int, _ name: String) -> String { "\(count) \(name)\(count == 1 ? "" : "s")" }
-        if seconds < 60 { return "less than a minute" }
-        if seconds < 3_600 { return unit(Int(seconds / 60), "minute") }
-        if seconds < 86_400 { return unit(Int(seconds / 3_600), "hour") }
-        return unit(Int(seconds / 86_400), "day")
+                         spoken: "\(QueueRowPresentation.spokenDuration(since: since, now: now)) \(what)")
     }
 }

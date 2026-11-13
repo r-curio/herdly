@@ -39,10 +39,10 @@ private func working(_ session: AgentSessionIdentity = claude, turn: String = "t
 
 extension AgentAttentionItem {
     /// A working row on its own, as the queue would list it.
-    fileprivate static func running(_ running: AgentRunning) -> AgentAttentionItem {
+    fileprivate static func running(_ running: AgentRunning) throws -> AgentAttentionItem {
         var queue = AgentAttentionQueue()
         queue.apply(.running(running))
-        return queue.items(at: running.arrivedAt).first { $0.id == .running(running.id) }!
+        return try #require(queue.items(at: running.arrivedAt).first { $0.id == .running(running.id) })
     }
 }
 
@@ -68,13 +68,13 @@ private func runningRow(_ queue: AgentAttentionQueue, _ session: AgentSessionIde
 
 @Test func aSubagentsActivityKeepsItsSessionFromGoingQuiet() throws {
     let explore = SubagentActivity(id: "a1", name: "Explore", startedAt: t0 + 60, lastActivityAt: t0 + 500)
-    let row = AgentAttentionItem.running(working(activityAt: t0, subagents: [explore]))
+    let row = try AgentAttentionItem.running(working(activityAt: t0, subagents: [explore]))
     #expect(row.running?.lastActivityAt == t0 + 500)
     #expect(!row.isQuiet(at: t0 + 1_099))
     #expect(row.isQuiet(at: t0 + 1_100))
     // A subagent the source gives no activity time adds nothing.
     let silent = SubagentActivity(id: "a2", name: "Plan", startedAt: t0 + 60)
-    #expect(AgentAttentionItem.running(working(activityAt: t0, subagents: [silent])).quietAt == t0 + 600)
+    #expect(try AgentAttentionItem.running(working(activityAt: t0, subagents: [silent])).quietAt == t0 + 600)
 }
 
 @Test func aRowKnownOnlyFromAScanIsNeverQuiet() throws {
@@ -128,12 +128,12 @@ private func runningRow(_ queue: AgentAttentionQueue, _ session: AgentSessionIde
     #expect(AgentStripSummary.make(items: after, now: t0 + 600).toCheck == AgentStripSummary.make(items: before, now: t0 + 599).toCheck)
 }
 
-@Test func aQuietRowStaysInsideTheWorkingFold() {
+@Test func aQuietRowStaysInsideTheWorkingFold() throws {
     var queue = AgentAttentionQueue()
     queue.apply(.running(working(activityAt: t0)), now: t0)
     queue.apply(.approval(AgentApproval(session: codex, turn: "t2", call: "c1", arrivedAt: t0 + 590)), now: t0 + 590)
     let items = queue.items(at: t0 + 600)
-    let quiet = items.first { $0.session == claude }!
+    let quiet = try #require(items.first { $0.session == claude })
     #expect(quiet.isQuiet(at: t0 + 600))
     let sections = QueueSections.make(items, grouping: .none, project: { _ in nil }, kindSections: true)
     #expect(sections.foldsWorking)
@@ -170,7 +170,8 @@ private func runningRow(_ queue: AgentAttentionQueue, _ session: AgentSessionIde
 
 @Test func whileACommandIsOpenTheLineCountsFromItsStart() {
     let running = AgentRunning(session: claude, turn: "t1", arrivedAt: t0 - 600, toolName: "Bash",
-                               toolInput: ["command": "npm run test:e2e"], activityAt: t0, toolStartedAt: t0 - 240)
+                               toolInput: ["command": "npm run test:e2e"], activityAt: t0,
+                               openCall: OpenCall(name: "Bash", input: ["command": "npm run test:e2e"], startedAt: t0 - 240))
     #expect(QuietLine.make(running, now: t0 + 600)?.text == "14m since this command started")
     #expect(QuietLine.make(running, now: t0 + 600)?.spoken == "14 minutes since this command started")
 }
@@ -181,7 +182,8 @@ private func runningRow(_ queue: AgentAttentionQueue, _ session: AgentSessionIde
                                     toolInput: ["command": "npm test"], activityAt: t0)
     #expect(QuietLine.make(unknownStart, now: t0 + 840)?.text == "14m since the last activity")
     let read = AgentRunning(session: claude, turn: "t1", arrivedAt: t0 - 600, toolName: "Read",
-                            toolInput: ["file_path": "/tmp/a.swift"], activityAt: t0, toolStartedAt: t0 - 240)
+                            toolInput: ["file_path": "/tmp/a.swift"], activityAt: t0,
+                            openCall: OpenCall(name: "Read", input: ["file_path": "/tmp/a.swift"], startedAt: t0 - 240))
     #expect(QuietLine.make(read, now: t0 + 840)?.text == "14m since the last activity")
 }
 

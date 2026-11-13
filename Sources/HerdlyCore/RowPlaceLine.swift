@@ -68,13 +68,16 @@ public struct RowPlaceLine: Equatable, Sendable {
 
     /// Nil when there is neither a verdict, a place, nor the quiet word to show. A label with a pull
     /// request shows the pull request in place of `place`.
-    public init?(label: WorkStatusLabel?, place: String?, quiet: Bool = false) {
+    public init?(label: WorkStatusLabel?, place: String?, quiet: Bool) {
         let detail = label?.pullRequest.map { "\($0.name)#\($0.number)" } ?? place
         guard label != nil || detail != nil || quiet else { return nil }
         self.label = label
         self.detail = detail
         self.quiet = quiet
     }
+
+    /// The dim separator drawn before "quiet": " · " after a state or place, "· " when the word is alone.
+    public var quietLead: String { label == nil && detail == nil ? "· " : " · " }
 
     /// The whole slot as one line, as the row draws it.
     public var text: String {
@@ -96,7 +99,7 @@ public struct RowPlaceLine: Equatable, Sendable {
     /// - `label`: the turn's work status (`WorkStatusModel.finishedLabel`), nil without a verdict.
     /// - `place`: the place in the display profile's "After each name" format.
     /// - `note`: a row note keeps the slot while it shows (it is drawn instead), so no verdict or quiet
-    ///   word is shown; VoiceOver still reads the place before the note.
+    ///   word is drawn; VoiceOver still reads the place, and "quiet", before the note.
     /// - `quiet`: whether the row is quiet now (`AgentAttentionItem.isQuiet(at:)`); only a working row
     ///   reads it.
     ///
@@ -104,9 +107,10 @@ public struct RowPlaceLine: Equatable, Sendable {
     /// slot and the verdict still shows here; a result whose status is unavailable ("Status unknown")
     /// and a waiting or status-unavailable Claude row show none.
     public static func make(_ item: AgentAttentionItem, label: WorkStatusLabel?, place: String?,
-                            note: RowNote?, quiet: Bool = false) -> RowPlaceLine? {
+                            note: RowNote?, quiet: Bool) -> RowPlaceLine? {
         let shown = note == nil && showsVerdict(item) ? label : nil
-        return RowPlaceLine(label: shown, place: place, quiet: quiet && note == nil && item.kind == .running)
+        // Kept with a note too: the note takes the visual slot, but VoiceOver still reads "quiet" (#419).
+        return RowPlaceLine(label: shown, place: place, quiet: quiet && item.kind == .running)
     }
 
     /// Result rows whose status is known: "Failed" may sit beside a verdict, "Status unknown" may not.

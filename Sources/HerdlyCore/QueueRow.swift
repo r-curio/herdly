@@ -16,9 +16,14 @@ public enum QueueRowPresentation {
 
     /// The same age read aloud by VoiceOver, where "<1m" and "4m" would be spelled out.
     public static func spokenAge(since start: Double, now: Double) -> String {
+        "Updated \(spokenDuration(since: start, now: now)) ago"
+    }
+
+    /// The age format's span in words: "less than a minute", "14 minutes", "2 hours", "1 day".
+    public static func spokenDuration(since start: Double, now: Double) -> String {
         let seconds = max(0, now - start)
-        func unit(_ count: Int, _ name: String) -> String { "Updated \(count) \(name)\(count == 1 ? "" : "s") ago" }
-        if seconds < 60 { return "Updated less than a minute ago" }
+        func unit(_ count: Int, _ name: String) -> String { "\(count) \(name)\(count == 1 ? "" : "s")" }
+        if seconds < 60 { return "less than a minute" }
         if seconds < 3_600 { return unit(Int(seconds / 60), "minute") }
         if seconds < 86_400 { return unit(Int(seconds / 3_600), "hour") }
         return unit(Int(seconds / 86_400), "day")

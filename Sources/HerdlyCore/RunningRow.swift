@@ -163,18 +163,16 @@ public struct RunningRowDetails: Equatable, Sendable {
     public let place: String
 
     /// `host` is the terminal app or multiplexer whose inventory last showed the session, if any.
-    public static func make(_ running: AgentRunning, host: TerminalHost?) -> RunningRowDetails {
+    /// `now` decides which call "now" names (`AgentRunning.shownCall(at:)`): a quiet row keeps its
+    /// unfinished call however old (#419).
+    public static func make(_ running: AgentRunning, host: TerminalHost?, now time: Double) -> RunningRowDetails {
         let source = running.identity.session.sourceLabel
         let you = prompt(running)
-        var now = action(running)
+        var now = running.shownCall(at: time).flatMap { Self.now(toolName: $0.name, toolInput: $0.input) }
         if now == nil && you == nil {
             now = Now(text: "Unknown", full: nil, disclosureTitle: nil, isUnknown: true)
         }
         return RunningRowDetails(now: now, you: you, place: source + (host.map { " · " + $0.displayName } ?? ""))
-    }
-
-    private static func action(_ running: AgentRunning) -> Now? {
-        now(toolName: running.toolName, toolInput: running.toolInput)
     }
 
     /// The "now" line for one tool call, or nil without a tool name. A subagent's latest action

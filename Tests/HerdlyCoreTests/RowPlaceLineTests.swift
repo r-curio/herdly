@@ -26,7 +26,7 @@ private func row(_ kind: AgentAttentionKind, status: AgentOutcomeStatus? = .fini
 
 @Test func aPullRequestVerdictReadsStateThenTheRepositoryAndNumber() throws {
     let line = try #require(RowPlaceLine.make(row(.outcome), label: label(.checksFailing, pr431),
-                                              place: "herdly @ feat/usage", note: nil))
+                                              place: "herdly @ feat/usage", note: nil, quiet: false))
     #expect(line.label?.verdict == .checksFailing)
     #expect(line.detail == "herdly#431")
     #expect(line.text == "· checks failing · herdly#431")
@@ -35,30 +35,30 @@ private func row(_ kind: AgentAttentionKind, status: AgentOutcomeStatus? = .fini
 
 @Test func aVerdictWithoutAPullRequestReadsStateThenThePlaceInTheChosenFormat() throws {
     let notPushed = try label(.notPushed)
-    let full = try #require(RowPlaceLine.make(row(.outcome), label: notPushed, place: "herdly @ feat/usage", note: nil))
+    let full = try #require(RowPlaceLine.make(row(.outcome), label: notPushed, place: "herdly @ feat/usage", note: nil, quiet: false))
     #expect(full.text == "· not pushed · herdly @ feat/usage")
     #expect(full.spoken == "not pushed, herdly @ feat/usage")
-    #expect(RowPlaceLine.make(row(.outcome), label: notPushed, place: "feat/usage", note: nil)?.text == "· not pushed · feat/usage")
+    #expect(RowPlaceLine.make(row(.outcome), label: notPushed, place: "feat/usage", note: nil, quiet: false)?.text == "· not pushed · feat/usage")
     // A format that shows nothing leaves the state alone.
-    let bare = try #require(RowPlaceLine.make(row(.outcome), label: notPushed, place: nil, note: nil))
+    let bare = try #require(RowPlaceLine.make(row(.outcome), label: notPushed, place: nil, note: nil, quiet: false))
     #expect(bare.detail == nil)
     #expect(bare.text == "· not pushed")
     #expect(bare.spoken == "not pushed")
 }
 
 @Test func noVerdictKeepsTodaysPlaceExactly() throws {
-    let today = try #require(RowPlaceLine.make(row(.outcome), label: nil, place: "herdly @ main", note: nil))
-    #expect(today == RowPlaceLine(label: nil, place: "herdly @ main"))
+    let today = try #require(RowPlaceLine.make(row(.outcome), label: nil, place: "herdly @ main", note: nil, quiet: false))
+    #expect(today == RowPlaceLine(label: nil, place: "herdly @ main", quiet: false))
     #expect(today.label == nil)
     #expect(today.text == "· herdly @ main")
     #expect(today.spoken == "herdly @ main")
-    #expect(RowPlaceLine.make(row(.outcome), label: nil, place: nil, note: nil) == nil)
+    #expect(RowPlaceLine.make(row(.outcome), label: nil, place: nil, note: nil, quiet: false) == nil)
 }
 
 @Test func noVerdictHasNoLabelSoALineHasOneFormOfNoVerdict() {
     #expect(WorkStatusLabel(verdict: .noVerdict) == nil)
     #expect(WorkStatusLabel(verdict: .noVerdict, pullRequest: pr431) == nil)
-    #expect(RowPlaceLine(label: nil, place: nil) == nil)
+    #expect(RowPlaceLine(label: nil, place: nil, quiet: false) == nil)
 }
 
 @Test func everyStateReadsInItsLowercaseWordsAndTone() throws {
@@ -70,7 +70,7 @@ private func row(_ kind: AgentAttentionKind, status: AgentOutcomeStatus? = .fini
     ]
     for (verdict, words, tone) in expected {
         let state = try label(verdict, pr431)
-        let line = try #require(RowPlaceLine.make(row(.earlierOutcome), label: state, place: "herdly @ main", note: nil))
+        let line = try #require(RowPlaceLine.make(row(.earlierOutcome), label: state, place: "herdly @ main", note: nil, quiet: false))
         #expect(line.text == "· \(words) · herdly#431")
         #expect(state.words == words)
         #expect(state.tone == tone)
@@ -80,7 +80,7 @@ private func row(_ kind: AgentAttentionKind, status: AgentOutcomeStatus? = .fini
 @Test func aRowNoteKeepsThePlaceSlotSoNoVerdictShows() throws {
     let passed = try label(.checksPassed, pr431)
     for note in [RowNote.sending, .sentUnconfirmed, .replyNotDelivered(.codex)] {
-        let line = try #require(RowPlaceLine.make(row(.outcome), label: passed, place: "herdly @ main", note: note))
+        let line = try #require(RowPlaceLine.make(row(.outcome), label: passed, place: "herdly @ main", note: note, quiet: false))
         #expect(line.label == nil)
         // VoiceOver still reads the place before the note, as it did.
         #expect(line.spoken == "herdly @ main")
@@ -90,9 +90,9 @@ private func row(_ kind: AgentAttentionKind, status: AgentOutcomeStatus? = .fini
 @Test func failedAndUnreachableResultsKeepTheirWordAndStillShowTheVerdict() throws {
     let conflict = try label(.conflict, pr431)
     let failed = row(.outcome, status: .failed)
-    #expect(RowPlaceLine.make(failed, label: conflict, place: "herdly @ main", note: nil)?.label == conflict)
+    #expect(RowPlaceLine.make(failed, label: conflict, place: "herdly @ main", note: nil, quiet: false)?.label == conflict)
     #expect(QueueRowPresentation.exception(failed, target: .unreachable) == .unreachable)
-    #expect(RowPlaceLine.make(row(.outcome), label: conflict, place: "herdly @ main", note: nil)?.label == conflict)
+    #expect(RowPlaceLine.make(row(.outcome), label: conflict, place: "herdly @ main", note: nil, quiet: false)?.label == conflict)
 }
 
 @Test func statusUnknownWaitingAndLiveRowsShowNoVerdict() throws {
@@ -100,14 +100,14 @@ private func row(_ kind: AgentAttentionKind, status: AgentOutcomeStatus? = .fini
     for item in [row(.outcome, status: .unavailable), row(.earlierOutcome, status: .unavailable),
                  row(.waiting, status: nil, session: claude), row(.statusUnavailable, status: nil, session: claude),
                  row(.running, status: nil)] {
-        #expect(RowPlaceLine.make(item, label: merged, place: "herdly @ main", note: nil)
-            == RowPlaceLine(label: nil, place: "herdly @ main"))
+        #expect(RowPlaceLine.make(item, label: merged, place: "herdly @ main", note: nil, quiet: false)
+            == RowPlaceLine(label: nil, place: "herdly @ main", quiet: false))
     }
 }
 
 @Test func theSpokenHeadingReadsTheVerdictInWords() throws {
     let item = row(.outcome)
-    let line = try #require(RowPlaceLine.make(item, label: label(.checksFailing, pr431), place: "herdly @ main", note: nil))
+    let line = try #require(RowPlaceLine.make(item, label: label(.checksFailing, pr431), place: "herdly @ main", note: nil, quiet: false))
     #expect(QueueRowPresentation.spokenHeading(item, name: "Fix sort", place: line.spoken, note: nil, countdown: nil)
         == "Fix sort, checks failing, pull request 431 in herdly, Codex finished")
 }
@@ -167,8 +167,8 @@ private struct HeaderLineProbe: View {
 }
 
 @MainActor @Test func theRepositoryOrBranchTruncatesBeforeTheState() {
-    let line = RowPlaceLine(label: WorkStatusLabel(verdict: .checksFailing), place: longPlace)
-    let stateOnly = fittedWidth(RowPlaceLineText(line: RowPlaceLine(label: WorkStatusLabel(verdict: .checksFailing), place: nil)!),
+    let line = RowPlaceLine(label: WorkStatusLabel(verdict: .checksFailing), place: longPlace, quiet: false)
+    let stateOnly = fittedWidth(RowPlaceLineText(line: RowPlaceLine(label: WorkStatusLabel(verdict: .checksFailing), place: nil, quiet: false)!),
                                 proposed: 1_000)
     for proposed: CGFloat in [400, 160, 60, 0] {
         #expect(fittedWidth(RowPlaceLineText(line: line!), proposed: proposed) >= stateOnly)
@@ -179,8 +179,8 @@ private struct HeaderLineProbe: View {
     // The header's width at each panel width: the body less the 16pt insets and a result row's 30pt
     // Dismiss lane.
     let widths = PanelWidth.allCases.map { $0.minimumBody - 32 - 30 }
-    let lines = [try #require(RowPlaceLine(label: WorkStatusLabel(verdict: .checksFailing), place: longPlace)),
-                 try #require(RowPlaceLine(label: WorkStatusLabel(verdict: .checksRunning, pullRequest: pr431), place: longPlace))]
+    let lines = [try #require(RowPlaceLine(label: WorkStatusLabel(verdict: .checksFailing), place: longPlace, quiet: false)),
+                 try #require(RowPlaceLine(label: WorkStatusLabel(verdict: .checksRunning, pullRequest: pr431), place: longPlace, quiet: false))]
     for width in widths {
         for line in lines {
             for word in [nil, RowException.failed, .unreachable] {
@@ -198,8 +198,8 @@ private struct HeaderLineProbe: View {
 @MainActor @Test func aNameTooLongForTheRowTruncatesRatherThanTheState() {
     // Even with no room left for any of the place's detail, the state words stay whole: the header
     // reserves their width and the name gives way.
-    let line = RowPlaceLine(label: WorkStatusLabel(verdict: .checksFailing), place: longPlace)!
-    let stateOnly = fittedWidth(RowPlaceLineText(line: RowPlaceLine(label: WorkStatusLabel(verdict: .checksFailing), place: nil)!),
+    let line = RowPlaceLine(label: WorkStatusLabel(verdict: .checksFailing), place: longPlace, quiet: false)!
+    let stateOnly = fittedWidth(RowPlaceLineText(line: RowPlaceLine(label: WorkStatusLabel(verdict: .checksFailing), place: nil, quiet: false)!),
                                 proposed: 1_000)
     let header = RowHeaderNamePlace(name: longName, note: nil, place: line)
     for tight: CGFloat in [220, 160] {
@@ -223,16 +223,24 @@ private struct HeaderLineProbe: View {
     let bare = try #require(RowPlaceLine.make(running, label: nil, place: nil, note: nil, quiet: true))
     #expect(bare.text == "· quiet")
     #expect(bare.spoken == "quiet")
+    #expect(bare.quietLead == "· ")
+    #expect(line.quietLead == " · ")
     // Not quiet: the place as before.
     #expect(RowPlaceLine.make(running, label: nil, place: "herdly @ docs/notes", note: nil, quiet: false)?.text
         == "· herdly @ docs/notes")
 }
 
-@Test func onlyAWorkingRowWithoutANoteReadsQuiet() throws {
+@Test func onlyAWorkingRowReadsQuietAndANoteKeepsItSpoken() throws {
     for kind in [AgentAttentionKind.outcome, .earlierOutcome, .waiting, .statusUnavailable] {
         #expect(RowPlaceLine.make(row(kind), label: nil, place: "herdly @ main", note: nil, quiet: true)?.quiet == false)
     }
-    #expect(RowPlaceLine.make(row(.running, status: nil), label: nil, place: "herdly @ main", note: .sending, quiet: true)?.quiet == false)
+    // A row note takes the visual slot (the view draws the note instead), but VoiceOver still reads "quiet".
+    let noted = try #require(RowPlaceLine.make(row(.running, status: nil), label: nil, place: "herdly @ main", note: .sending, quiet: true))
+    #expect(noted.quiet)
+    #expect(noted.spoken == "herdly @ main, quiet")
+    let heading = QueueRowPresentation.spokenHeading(row(.running, status: nil), name: "Release notes", place: noted.spoken,
+                                                     note: .sending, countdown: nil)
+    #expect(heading == "Release notes, herdly @ main, quiet, Sending…, Working")
 }
 
 @Test func theQuietWordIsDrawnInTheAmberStateTone() {

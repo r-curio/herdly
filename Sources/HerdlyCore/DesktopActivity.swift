@@ -134,12 +134,12 @@ public struct DesktopState: Sendable {
             running.append(DesktopRunningTurn(session: session, turn: turn, startedAt: receivedAt, prompt: prompt,
                                               activityAt: RolloutTimestamp.parse(receivedAt)))
         case let .toolStarted(session, turn, useID, action, capturedAt):
-            guard let index = running.firstIndex(where: { $0.session == session && $0.turn == turn }) else { return }
+            guard let index = runningIndex(session, turn) else { return }
             running[index].toolUseID = useID
             running[index].action = action
             noteActivity(at: capturedAt, index: index)
         case let .toolCompleted(session, turn, useID, capturedAt):
-            guard let index = running.firstIndex(where: { $0.session == session && $0.turn == turn }) else { return }
+            guard let index = runningIndex(session, turn) else { return }
             noteActivity(at: capturedAt, index: index)
             guard running[index].toolUseID == useID else { return }
             running[index].toolUseID = nil
@@ -162,13 +162,17 @@ public struct DesktopState: Sendable {
             case let .toolStarted(session, turn, _, _, capturedAt), let .toolCompleted(session, turn, _, capturedAt):
                 if capturedAt >= toolEventsSince {
                     state.apply(event)
-                } else if let index = state.running.firstIndex(where: { $0.session == session && $0.turn == turn }) {
+                } else if let index = state.runningIndex(session, turn) {
                     state.noteActivity(at: capturedAt, index: index)
                 }
             default: state.apply(event)
             }
         }
         return state
+    }
+
+    private func runningIndex(_ session: UUID, _ turn: UUID) -> Int? {
+        running.firstIndex { $0.session == session && $0.turn == turn }
     }
 
     /// Moves a running turn's activity time forward. A missing or unreadable capture time (the reader

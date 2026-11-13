@@ -138,7 +138,7 @@ enum NotchStyle {
 /// costs no timer until it can turn quiet.
 struct QuietSchedule: TimelineSchedule {
     let changes: [Date]
-    var every: TimeInterval?
+    let every: TimeInterval?
 
     init(changes: [Double], every: TimeInterval? = nil) {
         self.changes = changes.filter(\.isFinite).map { Date(timeIntervalSince1970: $0) }
@@ -1079,8 +1079,7 @@ struct RowPlaceLineText: View {
             }
             if line.quiet {
                 // #419: after the place, in amber; the place gives way first, the word never does.
-                let lead = line.label == nil && line.detail == nil ? "· " : " · "
-                Text("\(Text(lead).foregroundStyle(NotchStyle.dim))\(Text(RowPlaceLine.quietWord).foregroundStyle(NotchStyle.stateColor(RowPlaceLine.quietTone)))")
+                Text("\(Text(line.quietLead).foregroundStyle(NotchStyle.dim))\(Text(RowPlaceLine.quietWord).foregroundStyle(NotchStyle.stateColor(RowPlaceLine.quietTone)))")
                     .lineLimit(1).fixedSize()
             }
         }
@@ -1493,11 +1492,13 @@ struct Notch: View {
         return names
     }
 
-    private var strip: AgentStripSummary { strip(at: nil) }
+    /// The strip's summary now. The subject, counts, colours and spoken label do not depend on quiet;
+    /// the wing's sprites read `strip(at:)` on their own schedule.
+    private var strip: AgentStripSummary { strip(at: Date().timeIntervalSince1970) }
 
-    /// The strip's summary; `now` marks which working sessions are quiet (#419), which only stops their
-    /// sprites. Nil reads none as quiet: the subject, counts and spoken label do not depend on it.
-    private func strip(at now: Double?) -> AgentStripSummary {
+    /// The strip's summary at `now`, which marks which working sessions are quiet (#419) and so which
+    /// sprites stand still.
+    private func strip(at now: Double) -> AgentStripSummary {
         AgentStripSummary.make(items: model.orderedAgentAttentionItems,
                                testPending: model.attention.pending && !model.desktopForeground,
                                names: sessionNames, now: now)
@@ -1729,7 +1730,7 @@ struct Notch: View {
         }
         .frame(minHeight: 26)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(rowHeading(item, countdown: countdown)), \(item.session.sourceLabel)")
+        .accessibilityLabel("\(rowHeading(item, countdown: countdown, quiet: false)), \(item.session.sourceLabel)")
         .accessibilityAddTraits(.isHeader)
     }
 
@@ -2226,7 +2227,7 @@ struct Notch: View {
             Button { model.openCard(item.id) } label: { header().contentShape(Rectangle()) }
                 .buttonStyle(.plain)
                 .focusable(false)
-                .accessibilityLabel("Open card: \(rowHeading(item, countdown: countdown))")
+                .accessibilityLabel("Open card: \(rowHeading(item, countdown: countdown, quiet: false))")
                 .accessibilityHint("Shows this request alone. Escape or Queue returns to the queue.")
         } else {
             header()
@@ -2259,7 +2260,7 @@ struct Notch: View {
         } else {
             header()
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(rowHeading(item)), \(RowException.unreachable.word)")
+                .accessibilityLabel("\(rowHeading(item, quiet: false)), \(RowException.unreachable.word)")
         }
     }
 
@@ -2276,7 +2277,7 @@ struct Notch: View {
         Button { model.activateRow(item.id) } label: { header().contentShape(Rectangle()) }
             .buttonStyle(.plain)
             .focusable(false)
-            .accessibilityLabel("Open Session: \(rowHeading(item))")
+            .accessibilityLabel("Open Session: \(rowHeading(item, quiet: false))")
             .accessibilityHint(Self.resultOpenHint(item.session.source))
     }
 
@@ -2342,7 +2343,9 @@ struct Notch: View {
     private func runningDetails(_ item: AgentAttentionItem, subject: String, herdr: HerdrOpenAvailability,
                                 codexOpen: Bool) -> some View {
         if let running = item.running {
-            let details = RunningRowDetails.make(running, host: model.lastSeenHost(for: item.session))
+            // The prompt's disclosure below reads `you`, which does not depend on the time.
+            let details = RunningRowDetails.make(running, host: model.lastSeenHost(for: item.session),
+                                                 now: Date().timeIntervalSince1970)
             let promptKey = "prompt:\(item.session.session)"
             let agent = item.session.source.displayName
             // #397: with running subagents, a switcher above the lines picks whose they are. Every
@@ -2363,7 +2366,11 @@ struct Notch: View {
                 } else {
                     // #419: the lines redraw when the row turns quiet, then every 30 s while it stays
                     // quiet so the "quiet" line's minutes keep up; nothing ticks before then.
+                    // "now" is read at the same moment, so a quiet row's unfinished command and its
+                    // "since this command started" appear together, at the quiet moment itself.
                     TimelineView(QuietSchedule(changes: [item.quietAt].compactMap { $0 }, every: 30)) { context in
+                        let time = QuietSchedule.now(context.date)
+                        let details = RunningRowDetails.make(running, host: model.lastSeenHost(for: item.session), now: time)
                         VStack(alignment: .leading, spacing: 6) {
                             if let now = details.now {
                                 runningLine("now", now.text, tone: now.isUnknown ? NotchStyle.dim : NotchStyle.ink)
@@ -2376,7 +2383,7 @@ struct Notch: View {
                                 }
                             }
                             if let you = details.you { runningLine("you", you.text, tone: NotchStyle.text) }
-                            if let quiet = QuietLine.make(running, now: QuietSchedule.now(context.date)) {
+                            if let quiet = QuietLine.make(running, now: time) {
                                 runningLine("quiet", quiet.text, tone: NotchStyle.text, spoken: "quiet, \(quiet.spoken)")
                             }
                             runningLine("where", details.place, tone: NotchStyle.text)
@@ -3006,15 +3013,16 @@ struct Notch: View {
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             let countdown = QueueRowPresentation.countdown(item, now: context.date.timeIntervalSince1970)
                             cardOpener(item, countdown: countdown) {
-                                headerLine(item, working: working, countdown: countdown)
+                                headerLine(item, working: working, countdown: countdown, quiet: false)
                             }
                         }
                     } else if runningRow {
                         // #419: redrawn once more when the row turns quiet, with no event; nothing ticks before.
                         TimelineView(QuietSchedule(changes: [item.quietAt].compactMap { $0 })) { context in
-                            let quiet = item.isQuiet(at: QuietSchedule.now(context.date))
+                            let now = QuietSchedule.now(context.date)
+                            let quiet = item.isQuiet(at: now)
                             runningOpener(item, open: runningOpen, quiet: quiet) {
-                                headerLine(item, working: working && !quiet, countdown: nil, quiet: quiet)
+                                headerLine(item, working: item.spriteSteps(at: now), countdown: nil, quiet: quiet)
                             }
                         }
                     } else if resultRow, let reading = sessionReading {
@@ -3023,7 +3031,7 @@ struct Notch: View {
                         HStack(alignment: .center, spacing: 8) {
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
                                 sessionOpener(item, target: reading.target) {
-                                    headerLine(item, working: working, countdown: nil, target: reading.target, showsAge: false)
+                                    headerLine(item, working: working, countdown: nil, target: reading.target, showsAge: false, quiet: false)
                                 }
                                 if rowNote(item)?.offersOpen == true {
                                     // "Not delivered · reply in Codex": Open beside the note, as on an approval row.
@@ -3037,7 +3045,7 @@ struct Notch: View {
                         // Open sits outside the row's own button, so the two never nest.
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             cardOpener(item) {
-                                headerLine(item, working: working, countdown: nil, showsAge: false)
+                                headerLine(item, working: working, countdown: nil, showsAge: false, quiet: false)
                             }
                             claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle)
                             rowAge(item)
@@ -3045,14 +3053,15 @@ struct Notch: View {
                     } else if resultCard, let reading = sessionReading {
                         // 8DW "New ones": clicking the pop opens the session, by the result row's rule.
                         resultCardHeaderOpener(item, target: reading.target) {
-                            headerLine(item, working: working, countdown: nil)
+                            headerLine(item, working: working, countdown: nil, quiet: false)
                         }
                     } else if spotlit && approvalRow {
                         // The card header reads the same `ApprovalCardReading` as the card body below.
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             headerLine(item, working: working, countdown: nil,
                                        card: ApprovalCardReading(item, decidable: decidable,
-                                                                 now: context.date.timeIntervalSince1970))
+                                                                 now: context.date.timeIntervalSince1970),
+                                       quiet: false)
                         }
                     } else if inQueue, let question = item.question, question.identity.session.source == .claude,
                               model.canAnswerAgentQuestion(question) {
@@ -3061,12 +3070,12 @@ struct Notch: View {
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             let countdown = model.claudeQuestionCountdown(question, now: context.date.timeIntervalSince1970)
                             cardOpener(item, countdown: countdown) {
-                                headerLine(item, working: working, countdown: countdown)
+                                headerLine(item, working: working, countdown: countdown, quiet: false)
                             }
                         }
                     } else {
                         cardOpener(item) {
-                            headerLine(item, working: working, countdown: nil)
+                            headerLine(item, working: working, countdown: nil, quiet: false)
                         }
                     }
                 }
@@ -3198,7 +3207,7 @@ struct Notch: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(rowHeading(item)), \(subject)")
+        .accessibilityLabel("\(rowHeading(item, quiet: false)), \(subject)")
         .accessibilityAddTraits(selected ? .isSelected : [])
         // The opened running row is one container on its own ground (NotchStyle.openRow), 6pt outside
         // the row's left and right edges so the header line does not move when it opens (F3).
@@ -3225,7 +3234,7 @@ struct Notch: View {
     /// The spoken heading (`QueueRowPresentation.spokenHeading`): name, place (a finished row's work
     /// status in words first, #418), any row note, the full state the visual word shortens, and a live
     /// approval's seconds left.
-    private func rowHeading(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil, quiet: Bool = false) -> String {
+    private func rowHeading(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil, quiet: Bool) -> String {
         let note = rowNote(item)
         return QueueRowPresentation.spokenHeading(item, name: QueueRowPresentation.sessionName(item.session, names: sessionNames),
                                                   place: model.rowPlaceLine(for: item, note: note, quiet: quiet)?.spoken,
@@ -3241,7 +3250,7 @@ struct Notch: View {
     /// (`target`, #322) reads "Unreachable" in the word slot.
     private func headerLine(_ item: AgentAttentionItem, working: Bool, countdown: ApprovalCountdown?,
                             card: ApprovalCardReading? = nil, target: ResultRowTarget = .reachable,
-                            showsAge: Bool = true, quiet: Bool = false) -> some View {
+                            showsAge: Bool = true, quiet: Bool) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
                 spriteSlot(working: working, color: spriteColor(for: item.session))
@@ -3277,7 +3286,7 @@ struct Notch: View {
     /// and any word after it stay whole. A finished row's work status (#418) leads the place in its
     /// tone and never truncates; the pull request or place after it gives way. Presentation only;
     /// nothing here selects a target.
-    private func rowHeader(_ item: AgentAttentionItem, countdown: ApprovalCountdown? = nil, quiet: Bool = false) -> some View {
+    private func rowHeader(_ item: AgentAttentionItem, countdown: ApprovalCountdown?, quiet: Bool) -> some View {
         let note = rowNote(item)
         return RowHeaderNamePlace(name: QueueRowPresentation.sessionName(item.session, names: sessionNames), note: note,
                                   place: model.rowPlaceLine(for: item, note: note, quiet: quiet), help: model.rowDirectory(for: item))
