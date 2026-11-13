@@ -749,7 +749,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var notchPresentation = NotchPresentationController()
     /// Settings › Notch › Keyboard (#427): the hotkey and its switch. Changed only through
     /// `setHotkeySetting`, which saves it and registers it again at once.
-    @Published private(set) var hotkeySetting = NotchHotkeySetting.load { UserDefaults.standard.string(forKey: $0) }
+    @Published private(set) var hotkeySetting = NotchHotkeySetting.load(bool: { UserDefaults.standard.object(forKey: $0) as? Bool },
+                                                                         string: { UserDefaults.standard.string(forKey: $0) })
     /// The last registration's outcome; Settings shows its problem line.
     @Published private(set) var hotkeyStatus = NotchHotkeyStatus.off
     /// While Settings records a new shortcut the current one is unregistered, so pressing it is recorded.
@@ -2284,8 +2285,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // Taking key status can lose a race with the app it came from; the entry is then forgotten.
             if !panel.hasDeliberateKeyboardFocus { keyboardReturn.forget() }
             refresh()
+            // The queue opens with its top row selected (Paper K "A · Hotkey").
             if target == .queue {
-                let selection = NotchKeyboardEntry.firstSelection(rows: selectableRows)
+                let selection = QueueRowSelection(selected: selectableRows.first)
                 if selection != queueSelection { queueSelection = selection }
             }
         }
@@ -2295,7 +2297,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func setHotkeySetting(_ setting: NotchHotkeySetting) {
         guard setting != hotkeySetting else { return }
         hotkeySetting = setting
-        setting.save { UserDefaults.standard.set($1, forKey: $0) }
+        setting.save(bool: { UserDefaults.standard.set($1, forKey: $0) }, string: { UserDefaults.standard.set($1, forKey: $0) })
         registerHotkey()
     }
 

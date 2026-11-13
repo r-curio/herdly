@@ -15,11 +15,6 @@ public enum NotchKeyboardEntry {
         if let card = mode.singleCard { return .card(card) }
         return .queue
     }
-
-    /// The selection the queue opens with: its top row, or none when it lists nothing.
-    public static func firstSelection(rows: [AgentAttentionID]) -> QueueRowSelection {
-        QueueRowSelection(selected: rows.first)
-    }
 }
 
 extension NotchKeyboardEntry {
@@ -61,9 +56,6 @@ public struct NotchKeyboardReturn<App: Equatable & Sendable>: Equatable, Sendabl
 
     public init() {}
 
-    /// True from a hotkey entry until the keyboard is handed back or lost.
-    public var enteredByHotkey: Bool { entry != .none }
-
     /// The hotkey put the keyboard in the notch; `frontmost` is the app that had it.
     public mutating func enter(frontmost: App?) { entry = .hotkey(remembered: frontmost) }
 
@@ -98,6 +90,8 @@ public struct NotchHotkey: Equatable, Sendable {
     }
 
     public static let standard = NotchHotkey(keyCode: 49, modifiers: [.control, .option], keyName: "Space")!
+    /// `kVK_Escape`: alone it cancels recording; with a modifier it is a shortcut like any other key.
+    public static let escapeKeyCode: UInt32 = 53
 
     public let keyCode: UInt32
     public let modifiers: Modifiers
@@ -120,6 +114,21 @@ public struct NotchHotkey: Equatable, Sendable {
     }
 }
 
+/// What one key press does while Settings records a new shortcut.
+public enum NotchHotkeyRecording: Equatable, Sendable {
+    /// Escape alone: stop recording and keep the current shortcut.
+    case cancel
+    /// A shortcut Herdly accepts: save it and stop recording.
+    case shortcut(NotchHotkey)
+    /// Not a shortcut (no Control, Option or Command, or no key name): keep listening.
+    case ignore
+
+    public static func decide(keyCode: UInt32, modifiers: NotchHotkey.Modifiers, keyName: String) -> Self {
+        if keyCode == NotchHotkey.escapeKeyCode && modifiers.isEmpty { return .cancel }
+        return NotchHotkey(keyCode: keyCode, modifiers: modifiers, keyName: keyName).map(Self.shortcut) ?? .ignore
+    }
+}
+
 /// Settings › Notch › Keyboard: the hotkey and its off switch, saved in UserDefaults.
 public struct NotchHotkeySetting: Equatable, Sendable {
     public var enabled: Bool
@@ -132,23 +141,23 @@ public struct NotchHotkeySetting: Equatable, Sendable {
         self.hotkey = hotkey
     }
 
-    /// Reads the setting through `value(key)`. Missing means on with ⌃⌥Space; a saved shortcut that
-    /// is unreadable or not allowed falls back to ⌃⌥Space and keeps the saved switch.
-    public static func load(value: (String) -> String?) -> NotchHotkeySetting {
-        let enabled = value(Key.enabled).map { $0 == "true" } ?? true
-        let saved = value(Key.keyCode).flatMap(UInt32.init).flatMap { keyCode in
-            value(Key.modifiers).flatMap(Int.init).flatMap { modifiers in
-                value(Key.keyName).flatMap { NotchHotkey(keyCode: keyCode, modifiers: .init(rawValue: modifiers), keyName: $0) }
+    /// Reads the switch through `bool(key)` and the shortcut through `string(key)`. A missing switch
+    /// means on; a saved shortcut that is unreadable or not allowed falls back to ⌃⌥Space and keeps
+    /// the saved switch.
+    public static func load(bool: (String) -> Bool?, string: (String) -> String?) -> NotchHotkeySetting {
+        let saved = string(Key.keyCode).flatMap(UInt32.init).flatMap { keyCode in
+            string(Key.modifiers).flatMap(Int.init).flatMap { modifiers in
+                string(Key.keyName).flatMap { NotchHotkey(keyCode: keyCode, modifiers: .init(rawValue: modifiers), keyName: $0) }
             }
         }
-        return NotchHotkeySetting(enabled: enabled, hotkey: saved ?? .standard)
+        return NotchHotkeySetting(enabled: bool(Key.enabled) ?? true, hotkey: saved ?? .standard)
     }
 
-    public func save(write: (String, String) -> Void) {
-        write(Key.enabled, enabled ? "true" : "false")
-        write(Key.keyCode, String(hotkey.keyCode))
-        write(Key.modifiers, String(hotkey.modifiers.rawValue))
-        write(Key.keyName, hotkey.keyName)
+    public func save(bool: (String, Bool) -> Void, string: (String, String) -> Void) {
+        bool(Key.enabled, enabled)
+        string(Key.keyCode, String(hotkey.keyCode))
+        string(Key.modifiers, String(hotkey.modifiers.rawValue))
+        string(Key.keyName, hotkey.keyName)
     }
 
     private enum Key {
@@ -169,8 +178,6 @@ public enum NotchHotkeyStatus: Equatable, Sendable {
     case taken
     /// Registration failed with this OSStatus.
     case failed(Int32)
-
-    public var registered: Bool { self == .registered }
 
     /// The line Settings shows under the Keyboard row, nil when nothing needs saying.
     public var problemLine: String? {

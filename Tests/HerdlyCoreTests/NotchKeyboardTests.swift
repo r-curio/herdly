@@ -24,12 +24,6 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
     #expect(NotchKeyboardEntry.target(showing: .queue) == .queue)
 }
 
-@Test func theQueueOpensWithItsTopRowSelected() {
-    #expect(NotchKeyboardEntry.firstSelection(rows: [approvalID, questionID, resultID])
-            == QueueRowSelection(selected: approvalID))
-    #expect(NotchKeyboardEntry.firstSelection(rows: []) == QueueRowSelection())
-}
-
 // MARK: - Giving the keyboard back (#427)
 
 @Test func theKeyboardGoesBackToTheAppThatHadItWhenTheHotkeyWasPressed() {
@@ -79,7 +73,6 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
     var handBack = NotchKeyboardReturn<String>()
     handBack.enter(frontmost: "Ghostty")
     handBack.forget()
-    #expect(!handBack.enteredByHotkey)
     #expect(handBack.handBack(isRunning: { _ in true }, frontmost: "Ghostty", herdly: "Herdly") == .reactivateFrontmost)
 }
 
@@ -150,7 +143,7 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
 // MARK: - The hotkey setting (Settings › Notch › Keyboard)
 
 @Test func theHotkeyIsControlOptionSpaceAndOnByDefault() {
-    let setting = NotchHotkeySetting.load { _ in nil }
+    let setting = NotchHotkeySetting.load(bool: { _ in nil }, string: { _ in nil })
     #expect(setting.enabled)
     #expect(setting.hotkey == .standard)
     #expect(setting.hotkey.keyCode == 49)
@@ -158,10 +151,13 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
 }
 
 @Test func aChangedOrSwitchedOffHotkeyIsRememberedAcrossLaunches() {
+    var flags: [String: Bool] = [:]
     var stored: [String: String] = [:]
     let custom = NotchHotkey(keyCode: 40, modifiers: [.command, .shift], keyName: "K")!
-    NotchHotkeySetting(enabled: false, hotkey: custom).save { stored[$0] = $1 }
-    let loaded = NotchHotkeySetting.load { stored[$0] }
+    NotchHotkeySetting(enabled: false, hotkey: custom).save(bool: { flags[$0] = $1 }, string: { stored[$0] = $1 })
+    // The switch is a real Bool, as every other Herdly switch is.
+    #expect(flags == ["notchHotkey.enabled": false])
+    let loaded = NotchHotkeySetting.load(bool: { flags[$0] }, string: { stored[$0] })
     #expect(loaded == NotchHotkeySetting(enabled: false, hotkey: custom))
     #expect(loaded.hotkey.title == "⇧⌘K")
 }
@@ -173,17 +169,34 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
 }
 
 @Test func anUnreadableSavedHotkeyFallsBackToTheStandardOne() {
-    let stored = ["notchHotkey.enabled": "true", "notchHotkey.keyCode": "x", "notchHotkey.modifiers": "0",
-                  "notchHotkey.keyName": "K"]
-    #expect(NotchHotkeySetting.load { stored[$0] }.hotkey == .standard)
+    let stored = ["notchHotkey.keyCode": "x", "notchHotkey.modifiers": "0", "notchHotkey.keyName": "K"]
+    #expect(NotchHotkeySetting.load(bool: { _ in true }, string: { stored[$0] }).hotkey == .standard)
     let noModifiers = ["notchHotkey.keyCode": "40", "notchHotkey.modifiers": "0", "notchHotkey.keyName": "K"]
-    #expect(NotchHotkeySetting.load { noModifiers[$0] }.hotkey == .standard)
+    #expect(NotchHotkeySetting.load(bool: { _ in nil }, string: { noModifiers[$0] }).hotkey == .standard)
 }
 
 @Test func aTakenShortcutIsReportedAndTheNotchStaysClickOnly() {
     #expect(NotchHotkeyStatus.taken.problemLine == "Another app already uses this shortcut, so the notch opens only by click. Choose another.")
-    #expect(NotchHotkeyStatus.taken.registered == false)
     #expect(NotchHotkeyStatus.failed(-50).problemLine != nil)
     #expect(NotchHotkeyStatus.registered.problemLine == nil)
     #expect(NotchHotkeyStatus.off.problemLine == nil)
+}
+
+// MARK: - Recording a new shortcut (Settings › Notch › Keyboard)
+
+@Test func escapeAloneCancelsRecording() {
+    #expect(NotchHotkeyRecording.decide(keyCode: NotchHotkey.escapeKeyCode, modifiers: [], keyName: "⎋") == .cancel)
+}
+
+@Test func aKeyWithControlOptionOrCommandIsRecorded() {
+    let expected = NotchHotkey(keyCode: 40, modifiers: [.control, .option], keyName: "K")!
+    #expect(NotchHotkeyRecording.decide(keyCode: 40, modifiers: [.control, .option], keyName: "K") == .shortcut(expected))
+    // Escape with a modifier is a shortcut like any other key.
+    let escape = NotchHotkey(keyCode: NotchHotkey.escapeKeyCode, modifiers: [.command], keyName: "⎋")!
+    #expect(NotchHotkeyRecording.decide(keyCode: NotchHotkey.escapeKeyCode, modifiers: [.command], keyName: "⎋") == .shortcut(escape))
+}
+
+@Test func aKeyWithoutControlOptionOrCommandIsIgnoredAndRecordingGoesOn() {
+    #expect(NotchHotkeyRecording.decide(keyCode: 40, modifiers: [], keyName: "K") == .ignore)
+    #expect(NotchHotkeyRecording.decide(keyCode: 40, modifiers: [.shift], keyName: "K") == .ignore)
 }

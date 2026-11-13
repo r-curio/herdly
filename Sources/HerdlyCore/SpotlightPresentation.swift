@@ -202,7 +202,7 @@ public struct NotchPresentationController: Equatable, Sendable {
                                 now: Double, legacyPopup: Bool = false,
                                 queued: Set<AgentAttentionID>? = nil) -> NotchPresentationMode {
         if !keyboardFocus { keyboardOpen = false }
-        let keyboardHeld = keyboardOpen && manualOpen
+        let keyboardHeld = keyboardHoldsQueue
         if let card = clicked {
             if let queued, !queued.contains(card) {
                 clicked = nil

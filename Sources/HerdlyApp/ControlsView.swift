@@ -1797,7 +1797,7 @@ private struct HotkeyRecorder: View {
         .controlSize(.small)
         .accessibilityLabel("Notch hotkey shortcut")
         .accessibilityValue(recording ? "Recording. Press the new shortcut, or Escape to cancel." : model.hotkeySetting.hotkey.title)
-        .accessibilityHint(recording ? "" : "Records a new shortcut.")
+        .accessibilityHint(recording ? "Escape cancels." : "Records a new shortcut.")
         .onDisappear(perform: stop)
     }
 
@@ -1805,15 +1805,15 @@ private struct HotkeyRecorder: View {
         rejected = false
         model.setRecordingHotkey(true)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
-            if event.keyCode == 53, modifiers.isEmpty {
+            switch NotchHotkeyRegistrar.recording(event) {
+            case .cancel:
                 stop()
-            } else if let hotkey = NotchHotkeyRegistrar.hotkey(from: event) {
+            case .shortcut(let hotkey):
                 var setting = model.hotkeySetting
                 setting.hotkey = hotkey
                 stop()
                 model.setHotkeySetting(setting)
-            } else {
+            case .ignore:
                 rejected = true
             }
             return nil

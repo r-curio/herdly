@@ -22,11 +22,12 @@ final class NotchHotkeyRegistrar {
     func register(_ hotkey: NotchHotkey?) -> NotchHotkeyStatus {
         unregister()
         guard let hotkey else { return .off }
-        guard installHandler() else { return .failed(OSStatus(eventInternalErr)) }
+        let installed = installHandler()
+        guard installed == noErr else { return .failed(installed) }
         var reference: EventHotKeyRef?
         let id = EventHotKeyID(signature: Self.signature, id: Self.identifier)
         let status = RegisterEventHotKey(hotkey.keyCode, Self.carbonModifiers(hotkey.modifiers), id,
-                                         GetApplicationEventTarget(), 0, &reference)
+                                         GetApplicationEventTarget(), Self.registrationOptions, &reference)
         switch status {
         case noErr:
             hotKey = reference
@@ -43,16 +44,20 @@ final class NotchHotkeyRegistrar {
         hotKey = nil
     }
 
-    private func installHandler() -> Bool {
-        guard handler == nil else { return true }
+    /// Exclusive, so Carbon answers `eventHotKeyExistsErr` when another process already holds the
+    /// shortcut; without it the registration succeeds and only one of the two apps ever sees the key.
+    nonisolated static let registrationOptions = OptionBits(kEventHotKeyExclusive)
+
+    /// Installs the press handler once; returns its OSStatus.
+    private func installHandler() -> OSStatus {
+        guard handler == nil else { return noErr }
         var type = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let status = InstallEventHandler(GetApplicationEventTarget(), notchHotkeyHandler, 1, &type, nil, &handler)
-        guard status == noErr else { return false }
-        Self.installed = self
-        return true
+        if status == noErr { Self.installed = self }
+        return status
     }
 
-    static func carbonModifiers(_ modifiers: NotchHotkey.Modifiers) -> UInt32 {
+    nonisolated static func carbonModifiers(_ modifiers: NotchHotkey.Modifiers) -> UInt32 {
         var flags: UInt32 = 0
         if modifiers.contains(.control) { flags |= UInt32(controlKey) }
         if modifiers.contains(.option) { flags |= UInt32(optionKey) }
@@ -61,23 +66,24 @@ final class NotchHotkeyRegistrar {
         return flags
     }
 
-    /// The shortcut a key press in the recorder describes, or nil when it is not one Herdly accepts
-    /// (no Control, Option or Command, or a key with no printable name).
-    static func hotkey(from event: NSEvent) -> NotchHotkey? {
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        var modifiers: NotchHotkey.Modifiers = []
-        if flags.contains(.control) { modifiers.insert(.control) }
-        if flags.contains(.option) { modifiers.insert(.option) }
-        if flags.contains(.shift) { modifiers.insert(.shift) }
-        if flags.contains(.command) { modifiers.insert(.command) }
+    /// The shortcut modifiers among AppKit's flags; Caps Lock, Fn and the rest are not part of a shortcut.
+    nonisolated static func modifiers(from flags: NSEvent.ModifierFlags) -> NotchHotkey.Modifiers {
+        let pairs: [(NSEvent.ModifierFlags, NotchHotkey.Modifiers)] = [(.control, .control), (.option, .option),
+                                                                        (.shift, .shift), (.command, .command)]
+        return pairs.reduce(into: []) { result, pair in if flags.contains(pair.0) { result.insert(pair.1) } }
+    }
+
+    /// What a key press in the recorder does (`NotchHotkeyRecording`).
+    static func recording(_ event: NSEvent) -> NotchHotkeyRecording {
         let name = keyNames[event.keyCode]
             ?? event.charactersIgnoringModifiers?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        return NotchHotkey(keyCode: UInt32(event.keyCode), modifiers: modifiers, keyName: name)
+        return NotchHotkeyRecording.decide(keyCode: UInt32(event.keyCode), modifiers: modifiers(from: event.modifierFlags),
+                                           keyName: name)
     }
 
     /// Keys that print nothing useful on their own, by `kVK_*` code.
     private static let keyNames: [UInt16: String] = [
-        UInt16(kVK_Space): "Space", UInt16(kVK_Return): "↩", UInt16(kVK_Tab): "⇥", UInt16(kVK_Delete): "⌫",
+        UInt16(kVK_Space): "Space", UInt16(kVK_Escape): "⎋", UInt16(kVK_Return): "↩", UInt16(kVK_Tab): "⇥", UInt16(kVK_Delete): "⌫",
         UInt16(kVK_ForwardDelete): "⌦", UInt16(kVK_LeftArrow): "←", UInt16(kVK_RightArrow): "→",
         UInt16(kVK_UpArrow): "↑", UInt16(kVK_DownArrow): "↓", UInt16(kVK_Home): "↖", UInt16(kVK_End): "↘",
         UInt16(kVK_PageUp): "⇞", UInt16(kVK_PageDown): "⇟",
