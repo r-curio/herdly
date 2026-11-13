@@ -102,7 +102,7 @@ final class WorkStatusModel: ObservableObject {
         }
         let present: [WorkPresence] = items.compactMap { item in
             guard item.kind != .outcome, item.kind != .earlierOutcome, let folder = directory(item) else { return nil }
-            return WorkPresence(session: item.session, turn: item.turn, directory: folder, running: item.running != nil)
+            return WorkPresence(session: item.session, turn: item.turn, directory: folder)
         }
         memory.observe(sightings, present: present, at: now)
         let finished = items.compactMap { item -> AgentTurnIdentity? in
@@ -119,6 +119,7 @@ final class WorkStatusModel: ObservableObject {
             return nil
         }
         let batch = WorkStatusBatch.plan(finished: finished, present: present, memory: memory, readings: next, now: now)
+        for turn in batch.dropped { next[turn] = nil }
         for turn in batch.settledNoVerdict {
             next[turn] = WorkStatusReading(verdict: .noVerdict, readAt: now, firstReadAt: now)
         }

@@ -98,19 +98,16 @@ public struct WorkPresence: Equatable, Sendable {
     /// The turn when the row names one; nil when it does not (an empty name is none).
     public let turn: String?
     public let directory: String
-    /// A working row (running or waiting), as opposed to an approval, question or handed-back request.
-    public let running: Bool
 
-    public init(session: AgentSessionIdentity, turn: String?, directory: String, running: Bool = false) {
+    public init(session: AgentSessionIdentity, turn: String?, directory: String) {
         self.session = session
         self.turn = turn.flatMap { $0.isEmpty ? nil : $0 }
         self.directory = directory
-        self.running = running
     }
 
     /// A running turn's sighting as a presence in its folder.
     public init(_ sighting: WorkBranchSighting) {
-        self.init(session: sighting.turn.session, turn: sighting.turn.turn, directory: sighting.directory, running: true)
+        self.init(session: sighting.turn.session, turn: sighting.turn.turn, directory: sighting.directory)
     }
 
     /// The turn this row is about, when it names one.
@@ -650,9 +647,13 @@ public struct WorkStatusBatch: Equatable, Sendable {
     public let repositories: [WorkRepositoryRead]
     /// Finished turns due a reading.
     public let reads: [WorkStatusRead]
-    /// Finished turns with no reading whose verdict is known to be none without reading: the branch
-    /// is unknown or ambiguous.
+    /// Finished turns whose verdict is known to be none without reading, because the branch is unknown
+    /// or ambiguous, and that do not already read none. A turn already read takes this too: a subagent
+    /// that came back and changed the branch makes the old verdict a guess.
     public let settledNoVerdict: [AgentTurnIdentity]
+    /// Finished turns whose reading no longer holds because a live row of their own is back (#426):
+    /// they read no verdict until those rows end, then are read again.
+    public let dropped: [AgentTurnIdentity]
 
     public var isEmpty: Bool { repositories.isEmpty && reads.isEmpty }
 
@@ -667,25 +668,28 @@ public struct WorkStatusBatch: Equatable, Sendable {
         let unread = memory.unreadRepositories
         let repositories = Array(unread.prefix(limit))
         let waiting = Set(unread.map(\.turn))
-        var reads: [WorkStatusRead] = [], settled: [AgentTurnIdentity] = []
+        var reads: [WorkStatusRead] = [], settled: [AgentTurnIdentity] = [], dropped: [AgentTurnIdentity] = []
         for turn in finished {
             let branch = memory.branch(for: turn)
             guard let folder = branch.directory else {
                 // Unknown or ambiguous: no verdict, without running anything.
-                if readings[turn] == nil { settled.append(turn) }
+                if readings[turn]?.verdict != .noVerdict || readings[turn]?.pending == true { settled.append(turn) }
                 continue
             }
-            // Another turn working there changes what git sees; so does this turn's own work still
-            // running after it finished (a background subagent's working row, #426), and its first
-            // reading waits until those rows end. A repository not yet read would make this reading
-            // skip GitHub.
-            guard !WorkBranchMemory.busy(folder, turn: turn, present: present),
-                  !present.contains(where: { $0.running && $0.turnIdentity == turn }),
-                  !waiting.contains(turn) else { continue }
+            // This turn's own work can go on after it finished: a background subagent working, or one
+            // paused on an approval or question that can resume (#426). Until every such row ends the
+            // turn is not read, and a reading it already has no longer holds.
+            if present.contains(where: { $0.turnIdentity == turn }) {
+                if readings[turn] != nil { dropped.append(turn) }
+                continue
+            }
+            // Another turn working there changes what git sees; a repository not yet read would make
+            // this reading skip GitHub.
+            guard !WorkBranchMemory.busy(folder, turn: turn, present: present), !waiting.contains(turn) else { continue }
             guard reads.count + repositories.count < limit,
                   WorkStatusSchedule.isDue(readings[turn], now: now) else { continue }
             reads.append(WorkStatusRead(turn: turn, branch: branch))
         }
-        return WorkStatusBatch(repositories: repositories, reads: reads, settledNoVerdict: settled)
+        return WorkStatusBatch(repositories: repositories, reads: reads, settledNoVerdict: settled, dropped: dropped)
     }
 }

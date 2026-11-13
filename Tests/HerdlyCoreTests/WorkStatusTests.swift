@@ -350,7 +350,7 @@ private func memory(_ sightings: [WorkBranchSighting], repositories: [AgentTurnI
     let remembered = memory([sighting(turnA)], repositories: [turnA: .gitHub("o/repo")])
     let batch = WorkStatusBatch.plan(finished: [turnA], present: [], memory: remembered, readings: [:], now: 2_000)
     #expect(batch == WorkStatusBatch(repositories: [], reads: [WorkStatusRead(turn: turnA, branch: feature)],
-                                     settledNoVerdict: []))
+                                     settledNoVerdict: [], dropped: []))
     let read = WorkStatusReading(verdict: .checksPassed, readAt: 1_900, firstReadAt: 1_900)
     #expect(WorkStatusBatch.plan(finished: [turnA], present: [], memory: remembered, readings: [turnA: read], now: 2_000).isEmpty)
 }
@@ -712,7 +712,7 @@ private extension WorkStatusReader {
                                                             arguments: [], environment: [:], timeout: 1)) == .notLaunched)
 }
 
-// The commands' own sleeps are 5 s: longer than any bound asserted here. The lock holder sleeps 30 s so
+// The commands' own sleeps are 5 s: longer than any bound asserted here. The lock holder sleeps 60 s so
 // only a kill can free its lock early.
 
 /// Runs `body` as a shell script after starting a descendant that keeps the command's stdout open and
@@ -727,7 +727,7 @@ private func runHoldingStdout(_ body: String, timeout: Double) throws
     defer { try? FileManager.default.removeItem(at: folder) }
     let lock = folder.appendingPathComponent("lock").path, marker = folder.appendingPathComponent("locked").path
     let holder = #"use Fcntl ":flock"; open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die; "#
-        + #"open(my $m, ">", $ARGV[1]) or die; close $m; sleep 30"#
+        + #"open(my $m, ">", $ARGV[1]) or die; close $m; sleep 60"#
     let script = folder.appendingPathComponent("holds")
     try Data("""
     #!/bin/sh
@@ -742,8 +742,8 @@ private func runHoldingStdout(_ body: String, timeout: Double) throws
                                                                  environment: [:], timeout: timeout))
     let seconds = Date().timeIntervalSince(started)
     let held = FileManager.default.fileExists(atPath: marker)
-    // The kernel frees the lock as the holder exits. The holder sleeps 30 s, so a release within the
-    // 10 s allowed here (generous for a loaded test machine) can only come from the group kill.
+    // The kernel frees the lock as the holder exits. The holder sleeps 60 s, so a release within a run
+    // allowed 25 s plus 10 s of polling here (generous for a loaded machine) can only come from the group kill.
     let descriptor = open(lock, O_RDWR)
     defer { if descriptor >= 0 { close(descriptor) } }
     var released = false
@@ -757,11 +757,15 @@ private func runHoldingStdout(_ body: String, timeout: Double) throws
 @Test func aChildHoldingStdoutCannotKeepARunWaitingAndDiesWithTheGroup() throws {
     // Deadlines leave the descendant time to take its lock first. A stalled machine can still delay it
     // past the deadline; that run says nothing about the group kill, so it checks only that the run
-    // ended. The time bound shows the run did not wait for the holder's 30 s sleep to end its output.
+    // ended. The 25 s bound shows the run did not wait for the holder's 60 s sleep to end its output.
+    var held = 0
     func check(_ run: (result: WorkStatusCommandResult, seconds: Double, held: Bool, released: Bool)) {
         #expect(run.result == .timedOut)
         #expect(run.seconds < 25)
-        if run.held { #expect(run.released) }
+        if run.held {
+            held += 1
+            #expect(run.released)
+        }
     }
     // The command itself is still running at its deadline.
     check(try runHoldingStdout("sleep 5", timeout: 3))
@@ -769,6 +773,8 @@ private func runHoldingStdout(_ body: String, timeout: Double) throws
     check(try runHoldingStdout("trap '' TERM\nwhile :; do sleep 1; done", timeout: 3))
     // It exited, but its output never ended: incomplete, and the descendant is killed with the group.
     check(try runHoldingStdout("echo partial\nexit 0", timeout: 4))
+    // At least one run must have proved the group kill.
+    if held == 0 { Issue.record("The lock holder never took its lock before a deadline; the group kill went untested.") }
 }
 
 // MARK: - Pending readings, live sessions in a folder and the card gate
@@ -962,21 +968,25 @@ private func item(approval session: AgentSessionIdentity, turn: String) -> Agent
 }
 
 @Test func aSightingIsAPresenceInItsFolder() {
-    #expect(WorkPresence(sighting(turnA)) == WorkPresence(session: sessionA, turn: "t1", directory: "/w/repo", running: true))
+    #expect(WorkPresence(sighting(turnA)) == presence(sessionA, "t1", "/w/repo"))
 }
 
 // MARK: - A finished turn whose subagent still runs
 
-@Test func aFinishedTurnIsNotDueWhileItsOwnRowStillRuns() {
+@Test func aFinishedTurnIsNotDueWhileAnyRowOfItsOwnIsLive() {
     let remembered = memory([sighting(turnA)], repositories: [turnA: .gitHub("o/repo")])
     // Its own working row (a background subagent) names the same turn.
     let working = WorkStatusBatch.plan(finished: [turnA], present: [WorkPresence(sighting(turnA))], memory: remembered,
                                        readings: [:], now: 2_000)
     #expect(working.reads.isEmpty && working.settledNoVerdict.isEmpty)
-    // A request row of the same turn is not running work.
+    // So does a subagent paused on an approval or question: it can resume editing.
     let request = WorkStatusBatch.plan(finished: [turnA], present: [presence(sessionA, "t1", "/w/repo")],
                                        memory: remembered, readings: [:], now: 2_000)
-    #expect(request.reads == [WorkStatusRead(turn: turnA, branch: feature)])
+    #expect(request.reads.isEmpty && request.settledNoVerdict.isEmpty)
+    // The session's next turn is not this turn's work.
+    let next = WorkStatusBatch.plan(finished: [turnA], present: [presence(sessionA, "t2", "/w/elsewhere")],
+                                    memory: remembered, readings: [:], now: 2_000)
+    #expect(next.reads == [WorkStatusRead(turn: turnA, branch: feature)])
     let ended = WorkStatusBatch.plan(finished: [turnA], present: [], memory: remembered, readings: [:], now: 2_000)
     #expect(ended.reads == [WorkStatusRead(turn: turnA, branch: feature)])
 }
@@ -1006,4 +1016,60 @@ private func item(approval session: AgentSessionIdentity, turn: String) -> Agent
     await scan(model, [item(finished: turnA)], now: 1_200)
     #expect(model.memory.branch(for: turnA) == .ambiguous)
     #expect(model.verdict(for: turnA) == WorkStatus.noVerdict)
+}
+
+// MARK: - A read turn that comes back
+
+@Test func aReadTurnWithItsOwnRowBackLosesItsReading() {
+    let remembered = memory([sighting(turnA)], repositories: [turnA: .gitHub("o/repo")])
+    let passed = WorkStatusReading(verdict: .checksPassed, readAt: 1_900, firstReadAt: 1_900)
+    for row in [WorkPresence(sighting(turnA)), presence(sessionA, "t1", "/w/repo")] {
+        let batch = WorkStatusBatch.plan(finished: [turnA], present: [row], memory: remembered,
+                                         readings: [turnA: passed], now: 2_000)
+        #expect(batch.dropped == [turnA] && batch.reads.isEmpty && batch.settledNoVerdict.isEmpty)
+    }
+}
+
+@Test func aReadTurnWhoseBranchBecameUncertainSettlesAsNoVerdict() {
+    let changed = memory([sighting(turnA), sighting(turnA, "/w/repo", .branch("main"))])
+    let passed = WorkStatusReading(verdict: .checksPassed, readAt: 1_900, firstReadAt: 1_900)
+    #expect(WorkStatusBatch.plan(finished: [turnA], present: [], memory: changed, readings: [turnA: passed],
+                                 now: 2_000).settledNoVerdict == [turnA])
+    // Already no verdict: nothing to change, every scan.
+    let none = WorkStatusReading(verdict: .noVerdict, readAt: 1_900, firstReadAt: 1_900)
+    #expect(WorkStatusBatch.plan(finished: [turnA], present: [], memory: changed, readings: [turnA: none],
+                                 now: 2_000).settledNoVerdict.isEmpty)
+}
+
+@MainActor @Test func aSubagentRestartingAfterTheReadingClearsItUntilItEnds() async throws {
+    let (defaults, suite) = try defaults(true)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let model = makeModel(FakeRunner(reply()), gate: WorkStatusGate(open: false), defaults: defaults)
+    let feat = GitHead.branch("feat/x")
+    await scan(model, [item(running: turnA)], head: feat, now: 1_000)
+    await scan(model, [item(finished: turnA)], now: 1_100)
+    #expect(model.verdict(for: turnA) == .checksFailing)
+    // The subagent restarts on the same branch: the old verdict is no longer certain.
+    await scan(model, [item(finished: turnA), item(running: turnA)], head: feat, now: 1_200)
+    #expect(model.verdict(for: turnA) == WorkStatus.noVerdict)
+    // It ends and the branch never changed: read again.
+    await scan(model, [item(finished: turnA)], now: 1_300)
+    #expect(model.readings[turnA]?.readAt == 1_300 && model.verdict(for: turnA) == .checksFailing)
+}
+
+@MainActor @Test func aSubagentRestartThatChangesTheBranchLeavesNoVerdict() async throws {
+    let (defaults, suite) = try defaults(true)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let runner = FakeRunner(reply())
+    let model = makeModel(runner, gate: WorkStatusGate(open: false), defaults: defaults)
+    await scan(model, [item(running: turnA)], head: .branch("feat/x"), now: 1_000)
+    await scan(model, [item(finished: turnA)], now: 1_100)
+    #expect(model.verdict(for: turnA) == .checksFailing)
+    await scan(model, [item(finished: turnA), item(running: turnA)], head: .branch("main"), now: 1_200)
+    await scan(model, [item(finished: turnA)], now: 1_300)
+    #expect(model.memory.branch(for: turnA) == .ambiguous)
+    #expect(model.verdict(for: turnA) == WorkStatus.noVerdict)
+    let calls = runner.calls.count
+    await scan(model, [item(finished: turnA)], now: 1_400)
+    #expect(runner.calls.count == calls)
 }
