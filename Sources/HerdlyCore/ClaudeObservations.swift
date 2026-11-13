@@ -55,16 +55,19 @@ public struct ClaudeTurnResult: Equatable, Sendable {
 ///
 /// It also holds the last scan's result with the directory's own stamp. Every record arrives as a
 /// new name, which changes that stamp, so while it is unchanged a scan checks no record file and,
-/// when no tool call can still be fresh, rebuilds nothing. A record rewritten in place leaves the
+/// while every session's part still stands, rebuilds nothing. A record rewritten in place leaves the
 /// directory's stamp alone, so every file is checked again once the last full check is
 /// `ClaudeObservationReader.maximumUncheckedAge` old.
 ///
 /// When the directory does change, two more things are reused until that same full check. A record
 /// already read is not looked at again while the directory still lists its name under the inode it
 /// was read under (a replaced file has a new inode). And each session's part of the result is kept:
-/// sessions share no state, so only a session whose records changed, whose tool call can still be
-/// fresh, or whose listed subagent has reached `ClaudeObservationReader.maximumSubagentAge` (#404), is
-/// built again.
+/// sessions share no state, so only a session whose records changed, whose open tool call has become
+/// fresh or stopped being fresh, or whose listed subagent has reached
+/// `ClaudeObservationReader.maximumSubagentAge` (#404), is built again.
+///
+/// A kept record holds what a build needs from it, already bounded, so building a session again
+/// converts nothing (`ClaudeObservationReader.Record`).
 public struct ClaudeRecordCache: Sendable {
     fileprivate struct Entry: Sendable {
         let stamp: FileStamp
@@ -80,20 +83,22 @@ public struct ClaudeRecordCache: Sendable {
     fileprivate var checkedAt: Double?
     /// That check's records, in scan order.
     fileprivate var records: [ClaudeObservationReader.Record] = []
-    /// The last result built from `records`, the `now` it was built for, and the latest capture time
-    /// among the uncompleted tool calls it read: only their freshness makes a result depend on `now`.
+    /// The last result built from `records`, and the `now` it was built for.
     fileprivate var result: ClaudeObservationScan?
     fileprivate var resultNow: Double = -.infinity
-    fileprivate var latestToolAt: Double = -.infinity
-    /// Each session's part of `result`, by session id.
+    /// Each session's part of `result`, by session id. The result stands while every part does.
     fileprivate var sessions: [String: ClaudeObservationReader.SessionPart] = [:]
-    /// The earliest `now` at which a subagent the result lists (the earliest of its sessions' parts) reaches `maximumSubagentAge`.
-    fileprivate var subagentExpiresAt: Double = .infinity
 
     public init() {}
 
     /// Number of record files held, for tests.
     var count: Int { entries.count }
+    /// The sessions whose parts are held, for tests.
+    var heldSessions: Set<String> { Set(sessions.keys) }
+    /// What the scan that returned this cache did, for tests: how many record files it opened, and
+    /// the sessions it built, in scan order.
+    fileprivate(set) var recordsRead = 0
+    fileprivate(set) var sessionsBuilt: [String] = []
 }
 
 /// Reads only Herdly's normalized Claude records. A malformed record is ignored; an unreadable
@@ -169,24 +174,37 @@ public enum ClaudeObservationReader {
         valid(value)
     }
 
-    // `@unchecked Sendable`: `toolInput` holds only the immutable Foundation property-list values
-    // `JSONSerialization` returned (read without mutable-container options), and a record is never
-    // mutated after decoding, so sharing it between scans on different threads is safe.
-    fileprivate struct Record: @unchecked Sendable {
+    /// One record as a session's build reads it. Everything a build needs from the record alone is
+    /// worked out here, once, when the file is decoded: a session is built again on every scan while
+    /// it is active, and bounding the same tool inputs again each time was most of a scan's cost (#306).
+    fileprivate struct Record: Sendable {
         let fileName: String
         let event: String
         let session: String
         let capturedAt: Double
+        /// `prompt_id` when it is a bounded identifier, else nil.
         let promptID: String?
-        let prompt: String?
+        /// A UserPromptSubmit's `promptFallback`, and whether the helper stored only the prompt's start.
+        let prompt: KeptText?
         let promptShortened: Bool
         /// A Stop's bounded last message and whether it was shortened.
         let lastMessage: KeptText?
+        /// `tool_name` when it is a bounded identifier, else nil.
         let toolName: String?
+        /// `tool_use_id` when it is a bounded identifier, else nil.
         let toolUseID: String?
         let helperRequestID: String?
         let hookRequestID: String?
-        let toolInput: [String: Any]
+        /// A PreToolUse's string inputs, each bounded to `maximumToolInput`.
+        let input: [String: String]
+        /// The file, notebook, URL or query a PreToolUse targets (`ClaudeDirectApproval.target`).
+        let target: String?
+        /// A Bash call's or request's exact command, unshortened.
+        let command: String?
+        /// The calls a PostToolBatch completes.
+        let batchToolIDs: [String]
+        /// An AskUserQuestion call's prompts, nil unless there are between one and `maximumQuestions`.
+        let questionPrompts: [QuestionPrompt]?
         /// What the helper validated and bounded for a decidable non-Bash request (ClaudeDirectApproval).
         let approvalDetails: ApprovalDetails?
         /// Which subagent the event belongs to (`agent_id`), if any.
@@ -280,6 +298,10 @@ public enum ClaudeObservationReader {
     public static func scan(events: URL, sourceScope: String, installationID: String,
                             observingSince: Double = -.infinity, now: Double = Date().timeIntervalSince1970,
                             cache: ClaudeRecordCache) -> (scan: ClaudeObservationScan, cache: ClaudeRecordCache) {
+        // Cleared here, once, so the cache any path below returns says only what this scan did.
+        var cache = cache
+        cache.recordsRead = 0
+        cache.sessionsBuilt = []
         let scope = normalizedScope(sourceScope)
         // Taken before the directory is listed, so a change during the scan shows as a new stamp next time.
         let directoryStamp = FileStamp(events, followingLinks: true)
@@ -293,19 +315,17 @@ public enum ClaudeObservationReader {
         // Unchanged directory, checked recently: the same records, with no file looked at.
         if reusable, let stamp = directoryStamp, cache.directoryStamp == stamp, let checkedAt = cache.checkedAt,
            now.isFinite, now >= checkedAt, now - checkedAt < maximumUncheckedAge {
-            // No tool call was fresh when the result was built, none can become fresh later, and no
-            // listed subagent has reached its age bound since.
+            // Every session's part still stands, so the result built from them does.
             if let result = cache.result, result.sourceScope == scope, now >= cache.resultNow,
-               cache.resultNow - cache.latestToolAt > maximumToolFreshness, now < cache.subagentExpiresAt {
+               cache.sessions.values.allSatisfy({ stands($0, at: now) }) {
                 return (result, cache)
             }
             var next = cache
             let built = build(cache.records, scope: scope, now: now, previous: sameScope ? cache.sessions : [:], changed: [])
             next.result = built.scan
             next.resultNow = now
-            next.latestToolAt = built.latestToolAt
             next.sessions = built.sessions
-            next.subagentExpiresAt = built.subagentExpiresAt
+            next.sessionsBuilt = built.rebuilt
             return (built.scan, next)
         }
         // The directory changed, but the last full check is recent: a record already read is trusted
@@ -336,6 +356,7 @@ public enum ClaudeObservationReader {
                     next.entries[path] = entry
                     return entry.record
                 }
+                if stamp.isRegularFile { next.recordsRead += 1 }
                 let record = stamp.isRegularFile ? record(at: url, installationID: installationID, observingSince: observingSince) : nil
                 next.entries[path] = ClaudeRecordCache.Entry(stamp: stamp, record: record)
                 if let record { changed.insert(record.session) }
@@ -350,9 +371,8 @@ public enum ClaudeObservationReader {
         next.records = records
         next.result = built.scan
         next.resultNow = now
-        next.latestToolAt = built.latestToolAt
         next.sessions = built.sessions
-        next.subagentExpiresAt = built.subagentExpiresAt
+        next.sessionsBuilt = built.rebuilt
         return (built.scan, next)
     }
 
@@ -391,13 +411,26 @@ public enum ClaudeObservationReader {
         let turns: [TurnPart]
         let results: [AgentTurnIdentity: ClaudeTurnResult]
         let latestSessionStartAt: Double?
-        /// The latest finite capture time among the uncompleted tool calls left open, and the `now`
-        /// the part was built for: `now` changes a part only through those calls' freshness.
-        let latestToolAt: Double
+        /// The finite capture times of the uncompleted tool calls left open, and the `now` the part
+        /// was built for: `now` changes a part only through those calls' freshness.
+        let openToolTimes: [Double]
         let builtNow: Double
         /// The earliest `now` at which a subagent the part lists reaches `maximumSubagentAge`: with no new
         /// record, that changes the part's switcher list, held row and requests (#404).
         let subagentExpiresAt: Double
+    }
+
+    /// Whether a call captured at `at` is within `maximumToolFreshness` of `now`: `fresh`'s rule.
+    private static func isFresh(_ at: Double, now: Double) -> Bool {
+        now.isFinite && at.isFinite && at <= now && now - at <= maximumToolFreshness
+    }
+
+    /// Whether `part` is still its session's part at `now`, given the session's records are the ones it
+    /// was built from: time has not gone back, every open call is fresh or not exactly as it was when the
+    /// part was built, and no listed subagent has reached its age bound since.
+    private static func stands(_ part: SessionPart, at now: Double) -> Bool {
+        guard now.isFinite, now >= part.builtNow, now < part.subagentExpiresAt else { return false }
+        return part.openToolTimes.allSatisfy { isFresh($0, now: now) == isFresh($0, now: part.builtNow) }
     }
 
     /// One turn's observations with what orders turns across sessions.
@@ -408,16 +441,13 @@ public enum ClaudeObservationReader {
         let observations: [AgentObservation]
     }
 
-    /// The scan `records` (in scan order) give at `now`, with the latest finite capture time among the
-    /// uncompleted tool calls left open, and each session's part for the next scan. A part in
-    /// `previous` is reused when its session has exactly the same record files, none of them read in
-    /// this scan (`changed`), no tool call of its could have been fresh since it was built, and none of
-    /// its listed subagents has reached its age bound since (that changes a part with no new record).
-    /// Also returns the earliest such bound among the parts, for the whole-result reuse.
+    /// The scan `records` (in scan order) give at `now`, with each session's part for the next scan and
+    /// the sessions built rather than reused, in scan order. A part in `previous` is reused when its
+    /// session has exactly the same record files, none of them read in this scan (`changed`), and it
+    /// still stands at `now` (`stands`).
     private static func build(_ records: [Record], scope: String, now: Double, previous: [String: SessionPart],
                               changed: Set<String>)
-        -> (scan: ClaudeObservationScan, latestToolAt: Double, sessions: [String: SessionPart],
-            subagentExpiresAt: Double) {
+        -> (scan: ClaudeObservationScan, sessions: [String: SessionPart], rebuilt: [String]) {
         var order: [String] = []
         var grouped: [String: [Record]] = [:]
         for record in records {
@@ -426,14 +456,15 @@ public enum ClaudeObservationReader {
         }
         var sessions: [String: SessionPart] = [:]
         sessions.reserveCapacity(order.count)
+        var built: [String] = []
         for session in order {
             let own = grouped[session] ?? []
-            if let part = previous[session], !changed.contains(session), now.isFinite, now >= part.builtNow,
-               part.builtNow - part.latestToolAt > maximumToolFreshness, now < part.subagentExpiresAt,
+            if let part = previous[session], !changed.contains(session), stands(part, at: now),
                part.fileNames.count == own.count, part.fileNames.elementsEqual(own.lazy.map(\.fileName)) {
                 sessions[session] = part
             } else {
                 sessions[session] = buildSession(own, scope: scope, now: now)
+                built.append(session)
             }
         }
         let parts = order.compactMap { sessions[$0] }
@@ -446,10 +477,8 @@ public enum ClaudeObservationReader {
         var results: [AgentTurnIdentity: ClaudeTurnResult] = [:]
         for part in parts { results.merge(part.results) { _, latest in latest } }
         let latestSessionStartAt = parts.compactMap(\.latestSessionStartAt).max()
-        let latestToolAt = parts.map(\.latestToolAt).max() ?? -.infinity
-        let subagentExpiresAt = parts.map(\.subagentExpiresAt).min() ?? .infinity
         return (ClaudeObservationScan(sourceScope: scope, observations: observations, results: results,
-                                      latestSessionStartAt: latestSessionStartAt), latestToolAt, sessions, subagentExpiresAt)
+                                      latestSessionStartAt: latestSessionStartAt), sessions, built)
     }
 
     /// One session's part at `now`, from that session's records alone, in scan order.
@@ -537,7 +566,7 @@ public enum ClaudeObservationReader {
                     }
                 }
             case "UserPromptSubmit":
-                guard let promptID = valid(record.promptID) else { continue }
+                guard let promptID = record.promptID else { continue }
                 if let endedAt = sessionEndAt[record.session], record.capturedAt > endedAt {
                     endedSessions.remove(record.session)
                     sessionEndAt.removeValue(forKey: record.session)
@@ -561,14 +590,14 @@ public enum ClaudeObservationReader {
                     if existing.terminal == nil, let closedAt = existing.closedAt, record.capturedAt > closedAt {
                         existing.closedAt = nil
                     }
-                    if existing.promptText == nil, let prompt = promptFallback(record.prompt) {
+                    if existing.promptText == nil, let prompt = record.prompt {
                         existing.promptText = prompt.text
                         existing.promptShortened = record.promptShortened || prompt.shortened
                     }
                     existing.startedAt = min(existing.startedAt, record.capturedAt)
                     turns[turnID] = existing
                 } else {
-                    let prompt = promptFallback(record.prompt)
+                    let prompt = record.prompt
                     turns[turnID] = Turn(session: record.session, prompt: promptID,
                                          promptText: prompt?.text,
                                          promptShortened: prompt.map { record.promptShortened || $0.shortened } ?? false,
@@ -577,16 +606,13 @@ public enum ClaudeObservationReader {
                                          approval: nil, terminal: nil, provisionalStopAt: nil, closedAt: nil)
                 }
             case "PreToolUse":
-                guard let promptID = valid(record.promptID), let toolID = valid(record.toolUseID),
-                      let name = bounded(record.toolName), !name.isEmpty else { continue }
+                guard let promptID = record.promptID, let toolID = record.toolUseID,
+                      let name = record.toolName else { continue }
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
-                let input = stringInput(record.toolInput)
-                let tool = Tool(id: toolID, name: name, input: input, at: record.capturedAt,
-                                target: ClaudeDirectApproval.target(toolName: name, toolInput: record.toolInput),
-                                command: name == "Bash" ? record.toolInput["command"] as? String : nil,
-                                agent: record.agent)
+                let tool = Tool(id: toolID, name: name, input: record.input, at: record.capturedAt,
+                                target: record.target, command: record.command, agent: record.agent)
                 if let agent = record.agent.id { subagents[record.session]?[agent]?.tools[toolID] = tool }
                 guard var turn = turns[turnID] else { continue }
                 if let closedAt = turn.closedAt {
@@ -621,7 +647,7 @@ public enum ClaudeObservationReader {
                 turn.terminal = nil
                 turns[turnID] = turn
             case "PostToolUse", "PostToolUseFailure":
-                guard let promptID = valid(record.promptID), let toolID = valid(record.toolUseID) else { continue }
+                guard let promptID = record.promptID, let toolID = record.toolUseID else { continue }
                 finishSubagentCalls([toolID], of: record)
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
@@ -638,9 +664,8 @@ public enum ClaudeObservationReader {
                 }
                 turns[turnID] = turn
             case "PostToolBatch":
-                guard let promptID = valid(record.promptID) else { continue }
-                let ids = record.toolInput["tool_use_ids"] as? [String]
-                    ?? (record.toolInput["tool_uses"] as? [[String: Any]] ?? []).compactMap { $0["tool_use_id"] as? String }
+                guard let promptID = record.promptID else { continue }
+                let ids = record.batchToolIDs
                 guard !ids.isEmpty else { continue }
                 finishSubagentCalls(ids, of: record)
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
@@ -662,7 +687,7 @@ public enum ClaudeObservationReader {
                 }
                 turns[turnID] = turn
             case "PermissionRequest":
-                guard let promptID = valid(record.promptID), let name = bounded(record.toolName),
+                guard let promptID = record.promptID, let name = record.toolName,
                       ClaudeDirectApproval.tools.contains(name) else { continue }
                 // A file request is shown only with the helper's validated details, and only for the one
                 // uncompleted call of that tool on the same path. A Bash request that carries its command
@@ -670,7 +695,7 @@ public enum ClaudeObservationReader {
                 // session and prompt); one without it keeps the name-only rule.
                 let fileDetails = name == "Bash" ? nil : record.approvalDetails
                 guard name == "Bash" || fileDetails?.command != nil else { continue }
-                let requestedCommand = name == "Bash" ? record.toolInput["command"] as? String : nil
+                let requestedCommand = record.command
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
@@ -694,7 +719,7 @@ public enum ClaudeObservationReader {
                                               })
                 turns[turnID] = turn
             case "StopFailure":
-                guard let promptID = valid(record.promptID) else { continue }
+                guard let promptID = record.promptID else { continue }
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
@@ -710,7 +735,7 @@ public enum ClaudeObservationReader {
             case "Stop":
                 // Stop can continue into another prompt. It clears a stale tool label but never
                 // becomes Finished without the later inventory confirmation slice.
-                guard let promptID = valid(record.promptID) else { continue }
+                guard let promptID = record.promptID else { continue }
                 let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                     session: record.session, surface: .cli)
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
@@ -798,12 +823,12 @@ public enum ClaudeObservationReader {
         }
         let openTools = turns.values.flatMap { $0.tools.values + ($0.tool.map { [$0] } ?? []) }
             + subagents.values.flatMap { $0.values.flatMap(\.tools.values) }
-        let latestToolAt = openTools.map(\.at).filter(\.isFinite).max() ?? -.infinity
+        let openToolTimes = openTools.map(\.at).filter(\.isFinite)
         let firstSubagentExpiry = listed.flatMap { session, running in
             running.compactMap { agent, subagent in lifetimes.expiresAt(session: session, agent: agent, at: subagent.startedAt) }
         }.min() ?? .infinity
         return SessionPart(fileNames: records.map(\.fileName), turns: turnParts, results: results,
-                           latestSessionStartAt: latestSessionStartAt, latestToolAt: latestToolAt, builtNow: now,
+                           latestSessionStartAt: latestSessionStartAt, openToolTimes: openToolTimes, builtNow: now,
                            subagentExpiresAt: firstSubagentExpiry)
     }
 
@@ -814,7 +839,7 @@ public enum ClaudeObservationReader {
 
     /// `tool` while it is within `maximumToolFreshness` of `now`.
     private static func fresh(_ tool: Tool, now: Double) -> Tool? {
-        guard now.isFinite, tool.at.isFinite, tool.at <= now, now - tool.at <= maximumToolFreshness else { return nil }
+        guard isFresh(tool.at, now: now) else { return nil }
         return tool
     }
 
@@ -843,17 +868,30 @@ public enum ClaudeObservationReader {
               let session = valid(object["session_id"] as? String),
               let captured = (object["captured_at"] as? NSNumber)?.doubleValue,
               captured.isFinite, captured >= observingSince else { return nil }
+        let toolName = bounded(object["tool_name"] as? String)
+        let toolInput = object["tool_input"] as? [String: Any] ?? [:]
+        let isCall = event == "PreToolUse"
         return Record(fileName: url.lastPathComponent, event: event, session: session, capturedAt: captured,
-                      promptID: object["prompt_id"] as? String, prompt: object["prompt"] as? String,
+                      promptID: valid(object["prompt_id"] as? String),
+                      prompt: event == "UserPromptSubmit" ? promptFallback((object["prompt"] as? String).map(native)) : nil,
                       promptShortened: object[promptShortenedKey] as? Bool ?? false,
                       lastMessage: event == "Stop"
                         ? lastMessage(object[lastMessageKey] as? String).map {
                             KeptText(text: $0.text, shortened: $0.shortened || object[lastMessageShortenedKey] as? Bool == true)
                         } : nil,
-                      toolName: object["tool_name"] as? String, toolUseID: object["tool_use_id"] as? String,
+                      toolName: toolName, toolUseID: valid(object["tool_use_id"] as? String),
                       helperRequestID: valid(object["helper_request_id"] as? String),
                       hookRequestID: valid(object["approval_request_id"] as? String),
-                      toolInput: object["tool_input"] as? [String: Any] ?? [:],
+                      input: isCall ? stringInput(toolInput) : [:],
+                      target: isCall ? toolName.flatMap { ClaudeDirectApproval.target(toolName: $0, toolInput: toolInput) }
+                                        .map(native) : nil,
+                      command: toolName == "Bash" && (isCall || event == "PermissionRequest")
+                        ? (toolInput["command"] as? String).map(native) : nil,
+                      batchToolIDs: event == "PostToolBatch"
+                        ? (toolInput["tool_use_ids"] as? [String]
+                            ?? (toolInput["tool_uses"] as? [[String: Any]] ?? []).compactMap { $0["tool_use_id"] as? String })
+                            .map(native) : [],
+                      questionPrompts: isCall && toolName == "AskUserQuestion" ? questionPrompts(toolInput) : nil,
                       approvalDetails: approvalDetails(object["approval_details"]),
                       agent: Agent(object["agent_id"]), agentType: bounded(object["agent_type"] as? String))
     }
@@ -877,18 +915,33 @@ public enum ClaudeObservationReader {
 
     private static func question(from record: Record, identity: AgentSessionIdentity, turn: String,
                                  at: Double) -> AgentQuestion? {
-        guard let call = valid(record.toolUseID),
-              let parsed = QuestionPrompt.parseCall(toolInput: record.toolInput),
-              !parsed.prompts.isEmpty, parsed.count <= QuestionPrompt.maximumQuestions else { return nil }
+        guard let call = record.toolUseID, let prompts = record.questionPrompts else { return nil }
         return AgentQuestion(session: identity, turn: turn, call: call, arrivedAt: at,
-                             prompts: parsed.prompts, helperRequestID: record.helperRequestID)
+                             prompts: prompts, helperRequestID: record.helperRequestID)
+    }
+
+    private static func questionPrompts(_ toolInput: [String: Any]) -> [QuestionPrompt]? {
+        guard let parsed = QuestionPrompt.parseCall(toolInput: toolInput),
+              !parsed.prompts.isEmpty, parsed.count <= QuestionPrompt.maximumQuestions else { return nil }
+        return parsed.prompts
     }
 
     private static func stringInput(_ input: [String: Any]) -> [String: String] {
-        input.compactMapValues { value in
-            guard let text = value as? String else { return nil }
-            return boundedText(text, limit: maximumToolInput)
+        var result: [String: String] = [:]
+        for (key, value) in input {
+            guard let text = boundedText(value as? String, limit: maximumToolInput) else { continue }
+            result[native(key)] = text
         }
+        return result
+    }
+
+    /// `value` in Swift's own UTF-8 storage. `JSONSerialization` hands back bridged strings, and one
+    /// holding text outside ASCII is read through an Objective-C call per UTF-16 unit, every time it
+    /// is walked, compared or hashed.
+    private static func native(_ value: String) -> String {
+        var value = value
+        value.makeContiguousUTF8()
+        return value
     }
 
     private static func valid(_ value: String?) -> String? {
@@ -897,7 +950,7 @@ public enum ClaudeObservationReader {
     }
 
     private static func bounded(_ value: String?, limit: Int = maximumIdentifier) -> String? {
-        guard let value, !value.isEmpty, value.utf8.count <= limit,
+        guard let value = value.map(native), !value.isEmpty, value.utf8.count <= limit,
               !value.contains(where: { $0.isNewline || $0 == "\u{1b}" || $0 == "\u{7}" }) else { return nil }
         return value
     }
@@ -947,7 +1000,7 @@ public enum ClaudeObservationReader {
     }
 
     private static func boundedText(_ value: String?, limit: Int = maximumIdentifier) -> String? {
-        guard let value, !value.isEmpty, value.utf8.count <= limit,
+        guard let value = value.map(native), !value.isEmpty, value.utf8.count <= limit,
               !value.contains(where: { $0 == "\u{1b}" || $0 == "\u{7}" || $0 == "\u{0}" }) else { return nil }
         return value
     }
