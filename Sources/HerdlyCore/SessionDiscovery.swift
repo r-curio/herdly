@@ -68,7 +68,7 @@ public enum CodexCLIProcesses {
         let words = line.split(separator: " ", omittingEmptySubsequences: true)
         // The executable, or the script an interpreter runs, is one of the first two words.
         return words.prefix(2).contains { isCodexExecutable($0.split(separator: "/").last ?? "") }
-            && !words.contains("app-server")
+            && !words.contains { $0 == appServerWord }
     }
 
     /// `runsCodex` for a line of ASCII bytes, where a byte is a character.
@@ -79,15 +79,15 @@ public enum CodexCLIProcesses {
             guard line[index] != space else { index += 1; continue }
             var end = index
             while end < line.endIndex, line[end] != space { end += 1 }
-            if equals("app-server", line, index, end) { return false }
+            if line[index..<end].elementsEqual(appServerBytes) { return false }
             if word < 2, !named {
                 // The last part between slashes that is not empty, as splitting on "/" gives.
                 var last = end
                 while last > index, line[last - 1] == slash { last -= 1 }
                 var first = last
                 while first > index, line[first - 1] != slash { first -= 1 }
-                named = equals("codex", line, first, last) || equals("codex.js", line, first, last)
-                    || (last - first >= 6 && equals("codex-", line, first, first + 6))
+                named = executableNameBytes.contains { line[first..<last].elementsEqual($0) }
+                    || executablePrefixBytes.contains { last - first >= $0.count && line[first..<(first + $0.count)].elementsEqual($0) }
             }
             word += 1
             index = end
@@ -95,9 +95,19 @@ public enum CodexCLIProcesses {
         return named
     }
 
-    private static func equals(_ text: StaticString, _ line: UnsafeBufferPointer<UInt8>, _ from: Int, _ to: Int) -> Bool {
-        guard to - from == text.utf8CodeUnitCount, let base = line.baseAddress else { return false }
-        return memcmp(base + from, text.utf8Start, to - from) == 0
+    /// The rule's names, read by both readings of a listing, by character and as bytes, so the two
+    /// cannot come to name different things: an executable called exactly one of `executableNames`
+    /// or starting with one of `executablePrefixes`, on a line without the word `appServerWord`.
+    static let executableNames = ["codex", "codex.js"]
+    static let executablePrefixes = ["codex-"]
+    static let appServerWord = "app-server"
+    private static let executableNameBytes = executableNames.map { Array($0.utf8) }
+    private static let executablePrefixBytes = executablePrefixes.map { Array($0.utf8) }
+    private static let appServerBytes = Array(appServerWord.utf8)
+
+    /// Whether the text before a line's first space is a process id: both readings ask this.
+    private static func isPID(_ text: some StringProtocol) -> Bool {
+        Int32(text) != nil
     }
 
     /// The lines of a process listing as bytes, empty ones left out, each with whether it is all
@@ -105,7 +115,7 @@ public enum CodexCLIProcesses {
     /// where the rules compare characters; any other line must be read as characters, since a space,
     /// slash or digit followed by a combining mark is not that character. Nil for text with a carriage
     /// return, which joins a following newline into one character that does not end a line.
-    struct Lines {
+    private struct Lines {
         let bytes: UnsafeBufferPointer<UInt8>
 
         init?(_ bytes: UnsafeBufferPointer<UInt8>) {
@@ -128,7 +138,7 @@ public enum CodexCLIProcesses {
     }
 
     static func isCodexExecutable(_ name: Substring) -> Bool {
-        name == "codex" || name == "codex.js" || name.hasPrefix("codex-")
+        executableNames.contains { name == $0 } || executablePrefixes.contains { name.hasPrefix($0) }
     }
 }
 
@@ -203,8 +213,7 @@ extension CodexCLIProcesses {
                 while start < line.endIndex, line[start] == space { start += 1 }
                 var end = start
                 while end < line.endIndex, line[end] != space { end += 1 }
-                // The same parse as `withoutPID`: a sign is allowed, a number past Int32 is not a pid.
-                if end < line.endIndex, Int32(String(decoding: line[start..<end], as: UTF8.self)) != nil {
+                if end < line.endIndex, isPID(String(decoding: line[start..<end], as: UTF8.self)) {
                     start = end
                     while start < line.endIndex, line[start] == space { start += 1 }
                 }
@@ -222,7 +231,7 @@ extension CodexCLIProcesses {
 
     private static func withoutPID(_ line: Substring) -> String {
         let trimmed = line.drop { $0 == " " }
-        guard let space = trimmed.firstIndex(of: " "), Int32(trimmed[..<space]) != nil else { return String(trimmed) }
+        guard let space = trimmed.firstIndex(of: " "), isPID(trimmed[..<space]) else { return String(trimmed) }
         return String(trimmed[space...].drop { $0 == " " })
     }
 

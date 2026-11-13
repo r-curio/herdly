@@ -59,7 +59,20 @@ private func expectSameReading(_ list: String, sourceLocation: SourceLocation = 
     for first in lines { for second in lines { expectSameReading(first + "\n" + second) } }
 
     // The same pieces in a fixed pseudo-random order.
-    let pieces = [" ", " ", "\n", "\n", "/", "codex", "codex.js", "codex-", "app-server", "1", "23", "+", "-", "x", "\r", "\u{301}", "é", "\u{200D}", "\t"]
+    // Every name, prefix and word of the rule comes from the rule's own lists, so one added there is
+    // exercised here in both readings without this test being touched.
+    let named = CodexCLIProcesses.executableNames + CodexCLIProcesses.executablePrefixes + [CodexCLIProcesses.appServerWord]
+    for name in named {
+        for line in [name, name + "x", "x" + name, String(name.dropLast()), "/bin/" + name, name + "/", "node " + name,
+                     "a b " + name, name + " " + CodexCLIProcesses.appServerWord, "101 " + name, name + "\u{301}"] {
+            expectSameReading(line)
+            expectSameReading("7 zsh\n" + line + "\n8 vim")
+        }
+    }
+    for name in CodexCLIProcesses.executableNames { #expect(CodexCLIProcesses.isRunning(processList: "/bin/" + name + " --flag")) }
+    for prefix in CodexCLIProcesses.executablePrefixes { #expect(CodexCLIProcesses.isRunning(processList: "node /bin/" + prefix + "arch")) }
+    #expect(!CodexCLIProcesses.isRunning(processList: CodexCLIProcesses.executableNames[0] + " " + CodexCLIProcesses.appServerWord))
+    let pieces = [" ", " ", "\n", "\n", "/", "1", "23", "+", "-", "x", "\r", "\u{301}", "é", "\u{200D}", "\t"] + named + named
     var state: UInt64 = 0x9E37_79B9_7F4A_7C15
     func next(_ bound: Int) -> Int {
         state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
