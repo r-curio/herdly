@@ -386,6 +386,10 @@ enum NotchShortcut: Equatable {
     case open
     case dismiss
     case returnKey
+    /// An approval card's Approve (#439, Paper K "B · Approval keys").
+    case commandReturn
+    /// An approval card's Deny (#439).
+    case commandDelete
 
     /// What the button shows after its title.
     var symbol: String {
@@ -393,6 +397,8 @@ enum NotchShortcut: Equatable {
         case .open: "O"
         case .dismiss: "X"
         case .returnKey: "⏎"
+        case .commandReturn: "⌘⏎"
+        case .commandDelete: "⌘⌫"
         }
     }
 
@@ -402,6 +408,8 @@ enum NotchShortcut: Equatable {
         case .open: "O"
         case .dismiss: "X"
         case .returnKey: "Return"
+        case .commandReturn: "Command Return"
+        case .commandDelete: "Command Delete"
         }
     }
 
@@ -2568,20 +2576,31 @@ struct Notch: View {
                 if let reading = ApprovalCardReading(item, decidable: decidable, now: context.date.timeIntervalSince1970) {
                     VStack(alignment: .leading, spacing: 10) {
                         if let countdown = reading.countdown { ApprovalCountdownRow(countdown: countdown) }
+                        // A key label shows only while that key acts (#439): ⌘⏎ and ⌘⌫ while Approve and
+                        // Deny are enabled, on a card with deliberate keyboard focus.
+                        let keys = model.approvalKeysCard == item.id
+                        let decisionKeys = keys && reading.decisionEnabled
                         HStack(spacing: 6) {
                             if reading.showsDecision, let approval = item.approval {
                                 let request = "\(item.session.source.displayName) \(Self.requestKind(approval)) request"
-                                NotchButton(title: "Approve", emphasized: true) { model.decideAgent(approval, as: .allowOnce) }
+                                let approveKey = decisionKeys ? NotchShortcut.commandReturn : nil
+                                let denyKey = decisionKeys ? NotchShortcut.commandDelete : nil
+                                NotchButton(title: "Approve", emphasized: true, shortcut: approveKey) {
+                                    model.decideAgent(approval, as: .allowOnce)
+                                }
                                     .disabled(!reading.decisionEnabled)
                                     .accessibilityLabel("Approve this request once: \(subject)")
-                                    .accessibilityHint("Approves this \(request) once.")
-                                NotchButton(title: "Deny") { model.decideAgent(approval, as: .deny) }
+                                    .accessibilityHint(NotchShortcut.hint("Approves this \(request) once.", shortcut: approveKey))
+                                NotchButton(title: "Deny", shortcut: denyKey) { model.decideAgent(approval, as: .deny) }
                                     .disabled(!reading.decisionEnabled)
                                     .accessibilityLabel("Deny: \(subject)")
-                                    .accessibilityHint("Denies this \(request).")
+                                    .accessibilityHint(NotchShortcut.hint("Denies this \(request).", shortcut: denyKey))
                             }
                             Spacer(minLength: 6)
-                            approvalOpenControl(item, reading: reading, subject: subject, codexOpen: codexOpen)
+                            // O opens while a decision is on offer; once none is, Return opens too
+                            // and the label names it, as on a handed-back question card.
+                            approvalOpenControl(item, reading: reading, subject: subject, codexOpen: codexOpen,
+                                                shortcut: keys ? (reading.decisionEnabled ? .open : .returnKey) : nil)
                         }
                     }
                 }
@@ -2597,21 +2616,65 @@ struct Notch: View {
     /// Open still revalidates its exact target.
     @ViewBuilder
     private func approvalOpenControl(_ item: AgentAttentionItem, reading: ApprovalCardReading, subject: String,
-                                     codexOpen: Bool) -> some View {
+                                     codexOpen: Bool, shortcut: NotchShortcut? = nil) -> some View {
         let handedBack = reading.stage == .handedBack
         if item.session.source == .codex, codexOpen {
-            NotchButton(title: reading.openTitle, emphasized: handedBack) {
-                if !handedBack, let approval = item.approval {
-                    model.openAgentApproval(approval)
-                } else {
-                    model.openAgent(item.session)
-                }
+            NotchButton(title: reading.openTitle, emphasized: handedBack, shortcut: shortcut) {
+                codexApprovalOpen(item, handedBack: handedBack)
             }
             .disabled(model.openingTask)
             .accessibilityLabel("Open Session: \(subject)")
-            .accessibilityHint(handedBack ? "Open this session in Codex." : "Hands this request back to Codex's own prompt.")
+            .accessibilityHint(NotchShortcut.hint(handedBack ? "Open this session in Codex." : "Hands this request back to Codex's own prompt.",
+                                                  shortcut: shortcut))
         }
-        claudeReturnControl(item, subject: subject, emphasized: handedBack, openTitle: reading.openTitle)
+        claudeReturnControl(item, subject: subject, emphasized: handedBack, openTitle: reading.openTitle, shortcut: shortcut)
+    }
+
+    /// A Codex approval card's Open: before the hand-back it hands the request back to Codex's own
+    /// prompt (`openAgentApproval`), after it it opens the session.
+    private func codexApprovalOpen(_ item: AgentAttentionItem, handedBack: Bool) {
+        if !handedBack, let approval = item.approval {
+            model.openAgentApproval(approval)
+        } else {
+            model.openAgent(item.session)
+        }
+    }
+
+    /// The approval card's Open as its button does it, or nil where the card shows no Open or it is
+    /// disabled (#439: O, and Return once no decision is on offer). It reads the same decisions as
+    /// `approvalOpenControl` and `claudeReturnControl`, so a key never opens what the card does not show.
+    private func approvalOpen(_ item: AgentAttentionItem, reading: ApprovalCardReading) -> (() -> Void)? {
+        guard !model.openingTask, let approval = item.approval else { return nil }
+        if item.session.source == .claude {
+            return claudeOpenOffered(item.session) ? { model.openAgentApproval(approval) } : nil
+        }
+        guard codexOpenOffered(item) else { return nil }
+        let handedBack = reading.stage == .handedBack
+        return { codexApprovalOpen(item, handedBack: handedBack) }
+    }
+
+    /// A key the panel handed to the approval card on screen (#439), already mapped by
+    /// `ApprovalCardKeys`. Approve and Deny do exactly what clicking them does, only while the card
+    /// as drawn now enables them; `decideAgent` then checks the request again before writing anything.
+    /// Open acts as the card's Open, where it shows one.
+    private func handleApprovalCardKey(_ press: ApprovalCardKeyPress?) {
+        guard let press, press.card == model.presentationMode.singleCard,
+              let item = model.orderedAgentAttentionItems.first(where: { $0.id == press.card }),
+              let approval = item.approval,
+              let reading = ApprovalCardReading(item, decidable: model.canDecide(item),
+                                                now: Date().timeIntervalSince1970) else { return }
+        switch press.action {
+        case .approve:
+            guard reading.showsDecision, reading.decisionEnabled else { return }
+            model.decideAgent(approval, as: .allowOnce)
+        case .deny:
+            guard reading.showsDecision, reading.decisionEnabled else { return }
+            model.decideAgent(approval, as: .deny)
+        case .open:
+            approvalOpen(item, reading: reading)?()
+        case .none:
+            return
+        }
     }
 
     /// The exact turn's working directory, home shortened to `~`; hover and Copy Path give the full path.
@@ -3533,6 +3596,7 @@ struct Notch: View {
             }
         }
         .onChange(of: model.questionCardKeyPress) { _, press in handleQuestionCardKey(press) }
+        .onChange(of: model.approvalCardKeyPress) { _, press in handleApprovalCardKey(press) }
         // VoiceOver reads the question on screen whenever a card takes the keyboard, by the hotkey or
         // a click (#428).
         .onChange(of: model.keyboardCard?.id) { _, id in announceKeyboardCard(id) }

@@ -146,6 +146,11 @@ final class NotchPanel: NSPanel {
     var onLeft: (() -> Bool)?
     /// A plain letter, lowercased: O and X are a keyboard card's Open and Dismiss (#428).
     var onLetter: ((Character) -> Bool)?
+    /// ⌘⏎ (Return or keypad Enter with Command only) and ⌘⌫ (Delete with Command only): an approval
+    /// card's Approve and Deny (#439). Bare Delete reaches the same table, which never decides on it.
+    var onCommandReturn: (() -> Bool)?
+    var onCommandDelete: (() -> Bool)?
+    var onDelete: (() -> Bool)?
 
     /// Virtual key codes from the HIToolbox `kVK_*` table.
     private enum KeyCode {
@@ -156,6 +161,7 @@ final class NotchPanel: NSPanel {
         static let rightArrow: UInt16 = 124
         static let leftArrow: UInt16 = 123
         static let escape: UInt16 = 53
+        static let delete: UInt16 = 51
     }
     /// True once the user has clicked in the panel or pressed the notch hotkey; launch or app
     /// activation can also make the panel key, and that must not count as the user interacting with it.
@@ -206,6 +212,10 @@ final class NotchPanel: NSPanel {
         // than as `cancelOperation`; it follows the same one Escape rule.
         case (true, KeyCode.escape): onEscape?(); handled = onEscape != nil
         case (true, KeyCode.returnKey), (true, KeyCode.keypadEnter): handled = onReturn?() ?? false
+        case (true, KeyCode.delete): handled = onDelete?() ?? false
+        case (false, KeyCode.returnKey) where modifiers == .command, (false, KeyCode.keypadEnter) where modifiers == .command:
+            handled = onCommandReturn?() ?? false
+        case (false, KeyCode.delete) where modifiers == .command: handled = onCommandDelete?() ?? false
         default:
             if modifiers.isEmpty, let characters = event.charactersIgnoringModifiers, characters.count == 1,
                let digit = Int(characters), (1...9).contains(digit) {
@@ -798,6 +808,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// where it stands (#438, Paper K "C · Answer keys"); nil otherwise. Changed only through
     /// `updateClickedKeyboardCard`.
     @Published private(set) var clickedKeyboardCard: KeyboardCard?
+    /// The approval card on screen while the panel has deliberate keyboard focus (#439, Paper K
+    /// "B · Approval keys"): a clicked card, or a spotlight the hotkey or a click gave the keyboard.
+    /// Its buttons show their keys and `pressApprovalCardKey` reads it. Changed only through
+    /// `updateApprovalKeysCard`; nil otherwise.
+    @Published private(set) var approvalKeysCard: AgentAttentionID?
+    /// The last key the approval card on screen takes (#439), already mapped by `ApprovalCardKeys`.
+    /// The card acts on it exactly as on a click of that button.
+    @Published var approvalCardKeyPress: ApprovalCardKeyPress?
     /// The approval or question waiting behind the keyboard card (Paper L "8 · Another one arrives").
     @Published private(set) var keyboardWaiting: AgentAttentionID?
     /// The app Escape gives the keyboard back to, named in the card's foot line.
@@ -959,20 +977,28 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         panel.onMoveSelection = { [weak self] in self?.moveSelection($0) ?? false }
         panel.onReturn = { [weak self] in
             guard let self else { return false }
-            return self.pressQuestionCardKey(.returnKey) || self.activateSelectedRow()
+            return self.pressQuestionCardKey(.returnKey) || self.pressApprovalCardKey(.returnKey) || self.activateSelectedRow()
         }
+        panel.onCommandReturn = { [weak self] in self?.pressApprovalCardKey(.commandReturn) ?? false }
+        panel.onCommandDelete = { [weak self] in self?.pressApprovalCardKey(.commandDelete) ?? false }
+        panel.onDelete = { [weak self] in self?.pressApprovalCardKey(.delete) ?? false }
         panel.onRight = { [weak self] in
             guard let self else { return false }
             return self.openSelectedEarlierFold() || self.pressQuestionCardKey(.nextQuestion)
         }
         panel.onLeft = { [weak self] in self?.pressQuestionCardKey(.previousQuestion) ?? false }
-        panel.onDigit = { [weak self] in self?.pressQuestionCardKey(.digit($0)) ?? false }
+        panel.onDigit = { [weak self] digit in
+            guard let self else { return false }
+            return self.pressQuestionCardKey(.digit(digit)) || self.pressApprovalCardKey(.digit(digit))
+        }
         panel.onLetter = { [weak self] letter in
-            switch letter {
-            case "o": self?.pressQuestionCardKey(.open) ?? false
-            case "x": self?.pressQuestionCardKey(.dismiss) ?? false
+            guard let self else { return false }
+            let question = switch letter {
+            case "o": self.pressQuestionCardKey(.open)
+            case "x": self.pressQuestionCardKey(.dismiss)
             default: false
             }
+            return question || self.pressApprovalCardKey(.letter(letter))
         }
         // Another app taking the keyboard ends the hotkey's entry: nothing is re-activated later, and
         // the next refresh lets the hotkey's queue fold.
@@ -2115,6 +2141,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             .union(Set(eligibleFreshQuestions.map(\.id)).intersection(freshAgentQuestionIDs))
         let sentFoldDue = updateKeyboardCard(items: agentItems, waiting: waitingIDs)
         updateClickedKeyboardCard()
+        updateApprovalKeysCard()
         if sentFoldDue {
             // The sent line has shown its second: fold and give the keyboard back (Paper L "4 · Sent").
             collapse()
@@ -2332,6 +2359,32 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         guard action.consumesKey else { return false }
         questionCardKeyPress = QuestionCardKeyPress(action: action, card: id, serial: (questionCardKeyPress?.serial ?? 0) + 1)
         return true
+    }
+
+    /// Hands a key to the approval card on screen (the spotlight or a clicked card) as the action
+    /// `ApprovalCardKeys` gives it, reading the card as it is drawn now (`ApprovalCardReading` with
+    /// `canDecide`). False when the key does nothing there, so it goes on to the queue or AppKit. The
+    /// card then acts through its own buttons' path: Approve and Deny reach `decideAgent`, which
+    /// checks the request again, deadline included, before writing anything.
+    func pressApprovalCardKey(_ key: ApprovalCardKey) -> Bool {
+        guard expanded, let id = presentationMode.singleCard, case .approval = id,
+              let item = spotlightItem(id),
+              let card = ApprovalCardReading(item, decidable: canDecide(item), now: Date().timeIntervalSince1970) else { return false }
+        // Decided again now, so the key and the labels it shows read the same focus.
+        updateApprovalKeysCard()
+        let action = ApprovalCardKeys.action(for: key, card: card, focus: approvalKeysCard == id ? .keyboard : .withoutKeyboard)
+        guard action.consumesKey else { return false }
+        approvalCardKeyPress = ApprovalCardKeyPress(action: action, card: id, serial: (approvalCardKeyPress?.serial ?? 0) + 1)
+        return true
+    }
+
+    /// The approval card that has deliberate keyboard focus (#439), decided on every refresh and
+    /// before every key, so its key labels and its keys read one state. Focus pauses no deadline:
+    /// `applyApprovalHolds` reads the pointer only (ADR 0020).
+    private func updateApprovalKeysCard() {
+        var next: AgentAttentionID?
+        if let id = presentationMode.singleCard, case .approval = id, cardHasKeyboard { next = id }
+        if approvalKeysCard != next { approvalKeysCard = next }
     }
 
     /// Deliberate keyboard focus in the panel (a click or the hotkey), or a `--preview-keyboard`

@@ -554,3 +554,12 @@ struct QuestionCardKeyPress: Equatable {
     let card: AgentAttentionID
     let serial: Int
 }
+
+/// One key the panel handed to the approval card on screen (#439). `serial` makes a repeated key a
+/// new value, so the card sees every press; `card` is the card it was pressed on.
+struct ApprovalCardKeyPress: Equatable {
+    /// What the key does on the card, from `ApprovalCardKeys`, the one approval key table.
+    let action: ApprovalCardAction
+    let card: AgentAttentionID
+    let serial: Int
+}
