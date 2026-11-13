@@ -101,6 +101,9 @@ public struct ClaudeRecordCache: Sendable {
 public enum ClaudeObservationReader {
     public static let maximumRecordSize = 128 * 1024
     public static let maximumIdentifier = 256
+    /// The longest tool-input value kept, in UTF-8 bytes: the helper's own bound, so a Bash command it
+    /// stored (often over 256 bytes with a long `cd` prefix) reaches the approval card whole.
+    public static let maximumToolInput = 4_096
     /// Claude's prompt is kept only as the working row's fallback text, so at most this many
     /// characters of it are stored. A longer prompt is shortened, never dropped.
     public static let maximumPrompt = 240
@@ -884,7 +887,7 @@ public enum ClaudeObservationReader {
     private static func stringInput(_ input: [String: Any]) -> [String: String] {
         input.compactMapValues { value in
             guard let text = value as? String else { return nil }
-            return boundedText(text)
+            return boundedText(text, limit: maximumToolInput)
         }
     }
 
