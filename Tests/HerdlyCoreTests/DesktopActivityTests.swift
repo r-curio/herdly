@@ -393,3 +393,63 @@ import Testing
                               .turnCompleted(session: session, turn: other, receivedAt: "03")])
     #expect(DesktopEventReader.read(from: root) == second.events)
 }
+
+// MARK: Activity for the quiet rule (#419)
+
+@Test func codexActivityIsThePromptAndEachToolStartOrFinish() {
+    let session = UUID(), turn = UUID()
+    var state = DesktopState()
+    state.apply(.sessionStarted(session: session, receivedAt: "1970-01-01T00:00:01Z"))
+    state.apply(.turnStarted(session: session, turn: turn, receivedAt: "1970-01-01T00:00:02Z"))
+    // A turn known only from its start has no activity time.
+    #expect(state.running.first?.activityAt == nil)
+    state.apply(.promptSubmitted(session: session, turn: turn, prompt: "Run the checks", receivedAt: "1970-01-01T00:00:10Z"))
+    #expect(state.running.first?.activityAt == 10)
+    state.apply(.toolStarted(session: session, turn: turn, useID: "a", action: nil, capturedAt: 20))
+    #expect(state.running.first?.activityAt == 20)
+    // A finish that does not match the current call is still a tool event.
+    state.apply(.toolCompleted(session: session, turn: turn, useID: "older", capturedAt: 30))
+    #expect(state.running.first?.activityAt == 30)
+    // An unreadable time adds nothing, and an older event never moves it back.
+    state.apply(.toolCompleted(session: session, turn: turn, useID: "a", capturedAt: 0))
+    state.apply(.toolStarted(session: session, turn: turn, useID: "b", action: nil, capturedAt: 25))
+    #expect(state.running.first?.activityAt == 30)
+}
+
+@Test func codexToolEventsFromBeforeObservationStillCountAsActivityButRestoreNoAction() {
+    let session = UUID(), turn = UUID()
+    let events: [DesktopEvent] = [
+        .promptSubmitted(session: session, turn: turn, prompt: "Run the checks", receivedAt: "1970-01-01T00:00:10Z"),
+        .toolStarted(session: session, turn: turn, useID: "a",
+                     action: ToolAction(name: "Bash", input: ["command": "npm test"]), capturedAt: 50)
+    ]
+    let replayed = DesktopState.replay(events, toolEventsSince: 100)
+    #expect(replayed.running.first?.action == nil)
+    #expect(replayed.running.first?.activityAt == 50)
+}
+
+@Test func codexRunningRowsCarryTheirActivityIntoTheSharedQueue() throws {
+    let desktopSession = UUID(), desktopTurn = UUID(), cliSession = UUID(), cliTurn = UUID()
+    var scan = ReminderScan()
+    scan.cliSessions = [cliSession]
+    scan.cliState.apply(.turnStarted(session: cliSession, turn: cliTurn, receivedAt: "1970-01-01T00:00:01Z"))
+    let events: [DesktopEvent] = [
+        .promptSubmitted(session: desktopSession, turn: desktopTurn, prompt: "Desktop work", receivedAt: "1970-01-01T00:00:05Z"),
+        .promptSubmitted(session: cliSession, turn: cliTurn, prompt: "CLI work", receivedAt: "1970-01-01T00:00:06Z"),
+        .toolStarted(session: cliSession, turn: cliTurn, useID: "t", action: nil, capturedAt: 40)
+    ]
+    var queue = AttentionQueue(observingSince: 0)
+    queue.apply(scan: scan, desktopEvents: events, now: 41)
+    let running = queue.items.compactMap(\.running)
+    #expect(running.first { $0.session == desktopSession }?.activityAt == 5)
+    #expect(running.first { $0.session == cliSession }?.activityAt == 40)
+
+    let shared = CodexAttentionAdapter.observations(running: running).compactMap { observation -> AgentRunning? in
+        if case let .running(value) = observation { return value }
+        return nil
+    }
+    #expect(Set(shared.compactMap(\.activityAt)) == [5, 40])
+    // A turn found only by discovery carries none, so it is never quiet.
+    let discovered = AttentionRunning(source: .cli, session: UUID(), turn: UUID(), arrivedAt: 1)
+    #expect(CodexAttentionAdapter.running(from: discovered).activityAt == nil)
+}

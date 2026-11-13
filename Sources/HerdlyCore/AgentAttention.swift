@@ -929,7 +929,8 @@ public enum CodexAttentionAdapter {
     /// `subagents` are the session's running subagents (`CodexSubagentReader`), live only.
     public static func running(from running: AttentionRunning, subagents: [SubagentActivity] = []) -> AgentRunning {
         AgentRunning(session: session(running.session, surface: running.source == .cli ? .cli : .desktop),
-                     turn: running.turn.uuidString, arrivedAt: running.arrivedAt, subagents: subagents)
+                     turn: running.turn.uuidString, arrivedAt: running.arrivedAt, subagents: subagents,
+                     activityAt: running.activityAt)
     }
 
     /// `subagents` maps a root session to its running subagents (`CodexSubagentReader.activity`); each

@@ -74,7 +74,8 @@ public enum CodexSubagentReader {
                                  role: child.head.role, asked: child.activity.asked, startedAt: child.head.startedAt,
                                  latestAction: child.activity.latest.flatMap {
                                      RunningRowDetails.now(toolName: $0.name, toolInput: $0.input)
-                                 })
+                                 },
+                                 lastActivityAt: max(child.head.startedAt, child.activity.lastToolEventAt ?? -.infinity))
             }
         }
     }
@@ -148,6 +149,8 @@ public enum CodexSubagentReader {
     struct Activity: Equatable, Sendable {
         let asked: String?
         let latest: Call?
+        /// The newest tool call or call output in the child's open turn, by its line's timestamp (#419).
+        var lastToolEventAt: Double? = nil
     }
 
     /// The header of a spawned agent's rollout; nil for any other rollout or an unusable header.
@@ -195,11 +198,13 @@ public enum CodexSubagentReader {
     static func activity(_ events: [[String: Any]]) -> Activity? {
         guard let open = SessionDiscovery.openTurn(in: events)?.turn else { return nil }
         var pending: [String: (order: Int, call: Call)] = [:]
+        var lastToolEventAt: Double?
         for (order, event) in events.enumerated() where event["type"] as? String == "response_item" {
             guard let payload = event["payload"] as? [String: Any],
                   SessionDiscovery.turnID(in: payload) == open,
                   let callID = text(payload["call_id"]) else { continue }
-            switch payload["type"] as? String {
+            let kind = payload["type"] as? String
+            switch kind {
             case "custom_tool_call_output", "function_call_output":
                 pending.removeValue(forKey: callID)
             case "custom_tool_call", "function_call":
@@ -207,8 +212,13 @@ public enum CodexSubagentReader {
             default:
                 break
             }
+            if ["custom_tool_call", "function_call", "custom_tool_call_output", "function_call_output"].contains(kind),
+               let at = (event["timestamp"] as? String).flatMap(RolloutTimestamp.parse) {
+                lastToolEventAt = max(lastToolEventAt ?? at, at)
+            }
         }
-        return Activity(asked: asked(events), latest: pending.values.max { $0.order < $1.order }?.call)
+        return Activity(asked: asked(events), latest: pending.values.max { $0.order < $1.order }?.call,
+                        lastToolEventAt: lastToolEventAt)
     }
 
     /// A tool call as the "now" line names it, the way the session's own Codex calls read: the

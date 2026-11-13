@@ -235,6 +235,8 @@ public enum ClaudeObservationReader {
         let type: String?
         let startedAt: Double
         var tools: [String: Tool]
+        /// Its start or its newest tool start or finish (#419).
+        var lastActivityAt: Double
     }
 
     private struct Tool {
@@ -269,6 +271,10 @@ public enum ClaudeObservationReader {
         var lastMessage: KeptText?
         var startedAt: Double
         var updatedAt: Double
+        /// The turn's latest activity (#419): its prompt and the tool starts and finishes it owns,
+        /// including a subagent's while the turn is open. Not a Stop, StopFailure or SessionEnd, which
+        /// move `updatedAt` only.
+        var activityAt: Double
         var tool: Tool?
         var tools: [String: Tool]
         var question: AgentQuestion?
@@ -517,6 +523,7 @@ public enum ClaudeObservationReader {
             for (agent, var subagent) in running {
                 for id in ids where (subagent.tools[id]?.at ?? .infinity) <= record.capturedAt {
                     subagent.tools.removeValue(forKey: id)
+                    subagent.lastActivityAt = max(subagent.lastActivityAt, record.capturedAt)
                 }
                 running[agent] = subagent
             }
@@ -533,7 +540,8 @@ public enum ClaudeObservationReader {
             case "SubagentStart":
                 guard let agent = record.agent.id, subagents[record.session]?[agent] == nil else { continue }
                 subagents[record.session, default: [:]][agent] = Subagent(id: agent, type: record.agentType,
-                                                                          startedAt: record.capturedAt, tools: [:])
+                                                                          startedAt: record.capturedAt, tools: [:],
+                                                                          lastActivityAt: record.capturedAt)
             case "SubagentStop":
                 guard let agent = record.agent.id else { continue }
                 subagents[record.session]?.removeValue(forKey: agent)
@@ -595,6 +603,7 @@ public enum ClaudeObservationReader {
                         existing.promptShortened = record.promptShortened || prompt.shortened
                     }
                     existing.startedAt = min(existing.startedAt, record.capturedAt)
+                    existing.activityAt = max(existing.activityAt, record.capturedAt)
                     turns[turnID] = existing
                 } else {
                     let prompt = record.prompt
@@ -602,7 +611,8 @@ public enum ClaudeObservationReader {
                                          promptText: prompt?.text,
                                          promptShortened: prompt.map { record.promptShortened || $0.shortened } ?? false,
                                          lastMessage: nil, startedAt: record.capturedAt,
-                                         updatedAt: record.capturedAt, tool: nil, tools: [:], question: nil,
+                                         updatedAt: record.capturedAt, activityAt: record.capturedAt,
+                                         tool: nil, tools: [:], question: nil,
                                          approval: nil, terminal: nil, provisionalStopAt: nil, closedAt: nil)
                 }
             case "PreToolUse":
@@ -613,7 +623,11 @@ public enum ClaudeObservationReader {
                 let turnID = AgentTurnIdentity(session: identity, turn: promptID)
                 let tool = Tool(id: toolID, name: name, input: record.input, at: record.capturedAt,
                                 target: record.target, command: record.command, agent: record.agent)
-                if let agent = record.agent.id { subagents[record.session]?[agent]?.tools[toolID] = tool }
+                if let agent = record.agent.id, var subagent = subagents[record.session]?[agent] {
+                    subagent.tools[toolID] = tool
+                    subagent.lastActivityAt = max(subagent.lastActivityAt, record.capturedAt)
+                    subagents[record.session]?[agent] = subagent
+                }
                 guard var turn = turns[turnID] else { continue }
                 if let closedAt = turn.closedAt {
                     guard record.capturedAt > closedAt else { continue }
@@ -637,6 +651,7 @@ public enum ClaudeObservationReader {
                 turn.tools[toolID] = tool
                 if !tool.inSubagent { turn.tool = tool }
                 turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                turn.activityAt = max(turn.activityAt, record.capturedAt)
                 if name == "AskUserQuestion", let question = question(from: record, identity: identity,
                                                                          turn: promptID, at: record.capturedAt) {
                     if seenQuestions.insert(question.id).inserted
@@ -660,6 +675,7 @@ public enum ClaudeObservationReader {
                 if turn.approval?.identity.call == toolID { turn.approval = nil }
                 if !turn.isLateSubagentActivity([tool]) {
                     turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                    turn.activityAt = max(turn.activityAt, record.capturedAt)
                     turn.provisionalStopAt = nil
                 }
                 turns[turnID] = turn
@@ -684,6 +700,7 @@ public enum ClaudeObservationReader {
                 }
                 if !turn.isLateSubagentActivity(matching) {
                     turn.updatedAt = max(turn.updatedAt, record.capturedAt)
+                    turn.activityAt = max(turn.activityAt, record.capturedAt)
                 }
                 turns[turnID] = turn
             case "PermissionRequest":
@@ -799,7 +816,8 @@ public enum ClaudeObservationReader {
                                                     prompt: turn.promptText, promptShortened: turn.promptShortened,
                                                     toolName: freshTool?.name,
                                                     toolInput: freshTool?.input ?? [:],
-                                                    subagents: activity)))
+                                                    subagents: activity, activityAt: turn.activityAt,
+                                                    toolStartedAt: freshTool?.at)))
                 if let question = turn.question { result.append(.question(question)) }
                 if let approval = pendingApproval(turn) { result.append(.approval(approval)) }
             }
@@ -852,7 +870,8 @@ public enum ClaudeObservationReader {
             let latest = Tool.latest(subagent.tools.values).flatMap { fresh($0, now: now) }
             return SubagentActivity(id: subagent.id, name: names[subagent.id] ?? SubagentActivity.unnamed,
                                     startedAt: subagent.startedAt,
-                                    latestAction: latest.flatMap { RunningRowDetails.now(toolName: $0.name, toolInput: $0.input) })
+                                    latestAction: latest.flatMap { RunningRowDetails.now(toolName: $0.name, toolInput: $0.input) },
+                                    lastActivityAt: subagent.lastActivityAt)
         }
     }
 

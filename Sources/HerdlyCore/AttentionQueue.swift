@@ -146,6 +146,9 @@ public struct AttentionRunning: Identifiable, Equatable, Sendable {
     public let arrivedAt: Double
     public let prompt: String?
     public let action: ToolAction?
+    /// The turn's latest activity from Codex's hook events (#419); nil for a turn found only by
+    /// discovery, which is never quiet.
+    public let activityAt: Double?
     public var id: RunningIdentity { RunningIdentity(source: source, session: session, turn: turn) }
     public var rowText: String? { action?.rowText ?? QuestionPrompt.display(prompt, limit: 160) }
     public var fullAction: String? { action?.fullText }
@@ -156,7 +159,8 @@ public struct AttentionRunning: Identifiable, Equatable, Sendable {
     }
 
     public init(source: AttentionSource, session: UUID, turn: UUID, arrivedAt: Double,
-                prompt: String? = nil, action: ToolAction? = nil) {
+                prompt: String? = nil, action: ToolAction? = nil, activityAt: Double? = nil) {
+        self.activityAt = activityAt
         self.source = source
         self.session = session
         self.turn = turn
@@ -381,12 +385,14 @@ public struct AttentionQueue: Equatable, Sendable {
         let rolloutEnded = scan.completed.union(scan.canceled)
         let desktopRunning = desktopState.running.filter { !rolloutEnded.contains($0.id) }.map {
             AttentionRunning(source: .desktop, session: $0.session, turn: $0.turn,
-                             arrivedAt: timestamp($0.startedAt), prompt: $0.prompt, action: $0.action)
+                             arrivedAt: timestamp($0.startedAt), prompt: $0.prompt, action: $0.action,
+                             activityAt: $0.activityAt)
         }
         let cliRunning = scan.cliState.running.map {
             let event = eventRunning[$0.id]
             return AttentionRunning(source: .cli, session: $0.session, turn: $0.turn,
-                                    arrivedAt: timestamp($0.startedAt), prompt: event?.prompt, action: event?.action)
+                                    arrivedAt: timestamp($0.startedAt), prompt: event?.prompt, action: event?.action,
+                                    activityAt: event?.activityAt)
         }
         runningBySession.removeAll()
         resolve(questions: Array(scan.answeredQuestions))

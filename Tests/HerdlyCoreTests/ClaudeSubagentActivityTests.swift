@@ -873,3 +873,60 @@ private var restartedSubagentStops: [[String: Any]] { [
     #expect(session.kinds.isEmpty)
     #expect(session.queue.toCheckCount == 0)
 }
+
+// MARK: Activity for the quiet rule (#419)
+
+@Test func claudeActivityIsTheTurnsPromptAndToolEventsNotItsStop() throws {
+    let prompted = [promptSubmit]
+    #expect(try running(prompted)?.activityAt == 1)
+    #expect(try running(prompted)?.toolStartedAt == nil)
+
+    let toolStarted = prompted + [record("PreToolUse", at: 3, tool: "Bash", call: "c1", input: ["command": "npm test"])]
+    let started = try #require(try running(toolStarted, now: 5))
+    #expect(started.activityAt == 3)
+    #expect(started.toolName == "Bash")
+    #expect(started.toolStartedAt == 3)
+
+    let finished = toolStarted + [record("PostToolUse", at: 7, call: "c1")]
+    #expect(try running(finished, now: 8)?.activityAt == 7)
+    #expect(try running(finished, now: 8)?.toolStartedAt == nil)
+
+    // A Stop moves the turn's update time but is not activity.
+    let stopped = finished + [record("Stop", at: 9)]
+    let afterStop = try #require(try running(stopped, now: 10))
+    #expect(afterStop.updatedAt == 9)
+    #expect(afterStop.activityAt == 7)
+}
+
+@Test func claudeAToolCallThatIsNoLongerFreshKeepsItsActivityButNamesNoStart() throws {
+    let records = [promptSubmit, record("PreToolUse", at: 3, tool: "Bash", call: "c1", input: ["command": "npm test"])]
+    let stale = try #require(try running(records, now: 3 + ClaudeObservationReader.maximumToolFreshness + 1))
+    #expect(stale.toolName == nil)
+    #expect(stale.toolStartedAt == nil)
+    #expect(stale.activityAt == 3)
+}
+
+@Test func claudeASubagentsStartAndToolEventsAreItsActivity() throws {
+    let started = [promptSubmit, record("SubagentStart", at: 2, agent: "a1", type: "Explore")]
+    #expect(try running(started)?.subagents.first?.lastActivityAt == 2)
+    let called = started + [record("PreToolUse", at: 4, agent: "a1", type: "Explore", tool: "Bash", call: "s1",
+                                   input: ["command": "rg x"])]
+    #expect(try running(called)?.subagents.first?.lastActivityAt == 4)
+    let done = called + [record("PostToolUse", at: 6, agent: "a1", type: "Explore", call: "s1")]
+    let row = try #require(try running(done, now: 7))
+    #expect(row.subagents.first?.lastActivityAt == 6)
+    #expect(row.lastActivityAt == 6)
+}
+
+@Test func claudeLateSubagentActivityKeepsAnEndedTurnsRowFromGoingQuiet() throws {
+    // The turn's own activity ends at its last tool event; a background subagent keeps working after the Stop.
+    let records = [promptSubmit,
+                   record("SubagentStart", at: 2, agent: "bg", type: "Explore"),
+                   record("Stop", at: 3),
+                   record("PreToolUse", at: 700, agent: "bg", type: "Explore", tool: "Bash", call: "s1",
+                          input: ["command": "rg y"])]
+    let row = try #require(try running(records, now: 701))
+    #expect(row.activityAt == 1)
+    #expect(row.lastActivityAt == 700)
+    #expect(!QuietRule.isQuiet(lastActivity: row.lastActivityAt, now: 701))
+}

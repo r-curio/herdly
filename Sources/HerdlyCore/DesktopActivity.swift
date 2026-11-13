@@ -69,6 +69,8 @@ public struct DesktopRunningTurn: Equatable, Identifiable, Sendable {
     public let startedAt: String
     public fileprivate(set) var prompt: String? = nil
     public fileprivate(set) var action: ToolAction? = nil
+    /// The turn's latest activity (#419): its prompt or a tool start or finish, nil until one is seen.
+    public fileprivate(set) var activityAt: Double? = nil
     fileprivate var toolUseID: String? = nil
     public var id: TurnIdentity { TurnIdentity(session: session, turn: turn) }
     public var rowText: String? { action?.rowText ?? QuestionPrompt.display(prompt, limit: 160) }
@@ -129,14 +131,17 @@ public struct DesktopState: Sendable {
                 backgroundJobs.insert(session)
                 return
             }
-            running.append(DesktopRunningTurn(session: session, turn: turn, startedAt: receivedAt, prompt: prompt))
-        case let .toolStarted(session, turn, useID, action, _):
+            running.append(DesktopRunningTurn(session: session, turn: turn, startedAt: receivedAt, prompt: prompt,
+                                              activityAt: RolloutTimestamp.parse(receivedAt)))
+        case let .toolStarted(session, turn, useID, action, capturedAt):
             guard let index = running.firstIndex(where: { $0.session == session && $0.turn == turn }) else { return }
             running[index].toolUseID = useID
             running[index].action = action
-        case let .toolCompleted(session, turn, useID, _):
-            guard let index = running.firstIndex(where: { $0.session == session && $0.turn == turn }),
-                  running[index].toolUseID == useID else { return }
+            noteActivity(at: capturedAt, index: index)
+        case let .toolCompleted(session, turn, useID, capturedAt):
+            guard let index = running.firstIndex(where: { $0.session == session && $0.turn == turn }) else { return }
+            noteActivity(at: capturedAt, index: index)
+            guard running[index].toolUseID == useID else { return }
             running[index].toolUseID = nil
             running[index].action = nil
         case let .turnCompleted(session, turn, receivedAt):
@@ -148,16 +153,29 @@ public struct DesktopState: Sendable {
         }
     }
 
+    /// A tool event captured before `toolEventsSince` restores no action (actions are not restored
+    /// across a restart), but it still happened, so it still counts as the turn's activity (#419).
     public static func replay(_ events: [DesktopEvent], toolEventsSince: Double = -.infinity) -> DesktopState {
         var state = DesktopState()
         events.forEach { event in
             switch event {
-            case let .toolStarted(_, _, _, _, capturedAt), let .toolCompleted(_, _, _, capturedAt):
-                if capturedAt >= toolEventsSince { state.apply(event) }
+            case let .toolStarted(session, turn, _, _, capturedAt), let .toolCompleted(session, turn, _, capturedAt):
+                if capturedAt >= toolEventsSince {
+                    state.apply(event)
+                } else if let index = state.running.firstIndex(where: { $0.session == session && $0.turn == turn }) {
+                    state.noteActivity(at: capturedAt, index: index)
+                }
             default: state.apply(event)
             }
         }
         return state
+    }
+
+    /// Moves a running turn's activity time forward. A missing or unreadable capture time (the reader
+    /// gives 0) adds nothing.
+    private mutating func noteActivity(at time: Double, index: Int) {
+        guard time.isFinite, time > 0 else { return }
+        running[index].activityAt = max(running[index].activityAt ?? time, time)
     }
 }
 
