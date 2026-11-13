@@ -1,8 +1,8 @@
 import Foundation
 
 /// A key pressed while a question card has the keyboard (#428, Paper L "Spotlight question by
-/// keyboard"; #438, Paper K "C · Answer keys" for a clicked card). The panel only receives keys once the hotkey or a click made it key, so a key typed
-/// in another app never becomes one of these.
+/// keyboard"; #438, Paper K "C · Answer keys" for a clicked card). The panel only receives keys once
+/// the hotkey or a click made it key, so a key typed in another app never becomes one of these.
 public enum SpotlightCardKey: Equatable, Sendable {
     case digit(Int)
     case returnKey
@@ -53,15 +53,6 @@ public enum SpotlightCardPhase: Equatable, Sendable {
     case sent(SpotlightSentAnswer)
 }
 
-/// Where the one question card is on screen, and whether the user's keyboard is in it.
-public enum QuestionCardSurface: Equatable, Sendable {
-    /// The spotlight, with its phase while it has the keyboard (`SpotlightKeyboardCard`), nil before.
-    case spotlight(keyboard: SpotlightCardPhase?)
-    /// A card opened from the queue (a click on its row, or Return on the selected row). It has the
-    /// keyboard while the panel has deliberate keyboard focus: a click or the hotkey (#438).
-    case clicked(hasKeyboard: Bool)
-}
-
 /// The one question card on screen as the key table sees it (#321, #428, #438).
 public enum SpotlightCardFocus: Equatable, Sendable {
     /// Shown, but the keyboard is not in it: a spotlight before the hotkey or a click, or a clicked
@@ -71,16 +62,13 @@ public enum SpotlightCardFocus: Equatable, Sendable {
     /// A question card that has the keyboard: a spotlight card (#428) or a clicked one (#438).
     case keyboard(SpotlightCardPhase)
 
-    /// A clicked card with the keyboard takes the same keys and labels as a spotlight card with it
+    /// A card opened from the queue (a click on its row, or Return on the selected row) while the
+    /// panel has deliberate keyboard focus takes the same keys and labels as a spotlight card with it
     /// (#438): answering while Herdly can answer it, otherwise read-only. It has no hand-back or sent
     /// phase of its own: Send returns a clicked card to the queue at once (D10), and a countdown that
     /// ends leaves it to read, as its own read-only body shows (Open, Dismiss).
-    public init(surface: QuestionCardSurface, answerable: Bool) {
-        switch surface {
-        case let .spotlight(phase?): self = .keyboard(phase)
-        case .clicked(hasKeyboard: true): self = .keyboard(answerable ? .answering : .readOnly)
-        case .spotlight(nil), .clicked(hasKeyboard: false): self = .withoutKeyboard(answerable: answerable)
-        }
+    public static func clickedWithKeyboard(answerable: Bool) -> Self {
+        .keyboard(answerable ? .answering : .readOnly)
     }
 }
 

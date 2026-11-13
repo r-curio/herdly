@@ -364,12 +364,8 @@ private func foot(_ card: SpotlightCardFocus, count: Int = 1, last: Bool = true,
 
 // MARK: - A clicked card with the keyboard takes the same keys (#438, Paper K "C · Answer keys")
 
-private func clicked(keyboard: Bool, answerable: Bool) -> SpotlightCardFocus {
-    SpotlightCardFocus(surface: .clicked(hasKeyboard: keyboard), answerable: answerable)
-}
-
 @Test func aClickedCardWithTheKeyboardTakesTheSpotlightCardsKeys() {
-    let card = clicked(keyboard: true, answerable: true)
+    let card = SpotlightCardFocus.clickedWithKeyboard(answerable: true)
     #expect(card == .keyboard(.answering))
     #expect(SpotlightCardKeys.action(for: .digit(2), card: card) == .select(2))
     #expect(SpotlightCardKeys.action(for: .returnKey, card: card) == .primary)
@@ -380,9 +376,10 @@ private func clicked(keyboard: Bool, answerable: Bool) -> SpotlightCardFocus {
 }
 
 @Test func onAClickedCardOnlyReturnReachesSendAndOnlyWhileHerdlyCanAnswerIt() {
-    for keyboard in [true, false] {
-        for answerable in [true, false] {
-            for key in allKeys where SpotlightCardKeys.action(for: key, card: clicked(keyboard: keyboard, answerable: answerable)) == .primary {
+    for answerable in [true, false] {
+        // With the keyboard (#438), and without it, as before (#321).
+        for card in [SpotlightCardFocus.clickedWithKeyboard(answerable: answerable), .withoutKeyboard(answerable: answerable)] {
+            for key in allKeys where SpotlightCardKeys.action(for: key, card: card) == .primary {
                 #expect(key == .returnKey && answerable)
             }
         }
@@ -393,7 +390,7 @@ private func clicked(keyboard: Bool, answerable: Bool) -> SpotlightCardFocus {
     // The Codex app without the daemon, or a Claude question whose countdown ended: the card is left
     // to read, with Open and Dismiss as its buttons. Return opens only where the card shows an Open;
     // the view's Open (`questionOpen`) does nothing where it shows none.
-    let card = clicked(keyboard: true, answerable: false)
+    let card = SpotlightCardFocus.clickedWithKeyboard(answerable: false)
     #expect(card == .keyboard(.readOnly))
     #expect((1...9).allSatisfy { SpotlightCardKeys.action(for: .digit($0), card: card) == .consume })
     #expect(SpotlightCardKeys.action(for: .returnKey, card: card) == .open)
@@ -401,25 +398,20 @@ private func clicked(keyboard: Bool, answerable: Bool) -> SpotlightCardFocus {
     #expect(SpotlightCardKeys.action(for: .dismiss, card: card) == .dismiss)
 }
 
-@Test func aClickedCardWithoutTheKeyboardKeepsDigitsAndReturnOnly() {
-    #expect(clicked(keyboard: false, answerable: true) == .withoutKeyboard(answerable: true))
-    #expect(clicked(keyboard: false, answerable: false) == .withoutKeyboard(answerable: false))
-}
-
-@Test func aSpotlightCardReadsItsTrackedKeyboardPhase() {
-    // The spotlight keeps #428's own phases (hand-back, sent), which a clicked card never has: Send
-    // returns a clicked card to the queue at once (D10).
-    #expect(SpotlightCardFocus(surface: .spotlight(keyboard: .handedBack(askedAt: 3)), answerable: false)
-            == .keyboard(.handedBack(askedAt: 3)))
-    #expect(SpotlightCardFocus(surface: .spotlight(keyboard: nil), answerable: true) == .withoutKeyboard(answerable: true))
-}
-
-@Test func focusOnAClickedCardPausesNoCountdown() {
+@Test func aFocusedClickedCardStillRunsOutAtItsDeadline() {
     // ADR 0020 is unchanged by #438: holds read the pointer, and keyboard focus is not interaction.
+    // A Claude question asked at 100 has its clicked card focused from 110 with the pointer away.
     var holds = ApprovalHoverHold<String>()
-    holds.update(hovering: NotchInteraction.isActive(pointerInside: false, keyboardFocus: true),
-                 live: [.init(key: "question", expiresAt: 130)], now: 110)
-    holds.update(hovering: NotchInteraction.isActive(pointerInside: false, keyboardFocus: true),
-                 live: [.init(key: "question", expiresAt: 130)], now: 125)
-    #expect(holds.deadline(for: "question", expiresAt: 130) == 130)
+    let receiptDeadline = 100 + ApprovalTiming.handoffTimeout
+    var card = SpotlightCardFocus.clickedWithKeyboard(answerable: true)
+    for now in stride(from: 110.0, through: receiptDeadline, by: 1) {
+        holds.update(hovering: NotchInteraction.isActive(pointerInside: false, keyboardFocus: true),
+                     live: [.init(key: "question", expiresAt: receiptDeadline)], now: now)
+        let deadline = holds.deadline(for: "question", expiresAt: receiptDeadline)
+        #expect(deadline == receiptDeadline)
+        card = .clickedWithKeyboard(answerable: now < deadline)
+    }
+    // At the deadline the card is read-only: Return opens the agent and can no longer send.
+    #expect(card == .keyboard(.readOnly))
+    #expect(SpotlightCardKeys.action(for: .returnKey, card: card) == .open)
 }
