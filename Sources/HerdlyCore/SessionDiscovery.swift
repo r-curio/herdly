@@ -43,16 +43,102 @@ public enum CodexCLIProcesses {
     /// Homebrew binary `codex-aarch64-apple-darwin`) other than an app-server, which is the
     /// desktop app's own backend and never a terminal session.
     public static func isRunning(processList: String) -> Bool {
-        processList.split(separator: "\n").contains { line in
-            let words = line.split(separator: " ", omittingEmptySubsequences: true)
-            // The executable, or the script an interpreter runs, is one of the first two words.
-            return words.prefix(2).contains { isCodexExecutable($0.split(separator: "/").last ?? "") }
-                && !words.contains("app-server")
+        // The listing holds every process's full arguments and is read every scan. Splitting it into
+        // substrings by character cost about as much as the rest of the scan (#306), so lines that
+        // are plain ASCII, nearly all of them, are examined as bytes. The rules are `runsCodex`'s.
+        var text = processList
+        return text.withUTF8 { bytes -> Bool? in
+            guard let lines = Lines(bytes) else { return nil }
+            var running = false
+            lines.forEach { line, ascii in
+                running = ascii ? runsCodex(ascii: line) : runsCodex(Substring(String(decoding: line, as: UTF8.self)))
+                return !running
+            }
+            return running
+        } ?? isRunningByCharacter(processList: processList)
+    }
+
+    /// `isRunning` as the rule is written, a character at a time: what the byte reading must equal,
+    /// and what reads a listing with a carriage return in it.
+    static func isRunningByCharacter(processList: String) -> Bool {
+        processList.split(separator: "\n").contains(where: runsCodex)
+    }
+
+    private static func runsCodex(_ line: Substring) -> Bool {
+        let words = line.split(separator: " ", omittingEmptySubsequences: true)
+        // The executable, or the script an interpreter runs, is one of the first two words.
+        return words.prefix(2).contains { isCodexExecutable($0.split(separator: "/").last ?? "") }
+            && !words.contains { $0 == appServerWord }
+    }
+
+    /// `runsCodex` for a line of ASCII bytes, where a byte is a character.
+    private static func runsCodex(ascii line: UnsafeBufferPointer<UInt8>) -> Bool {
+        let space = UInt8(ascii: " "), slash = UInt8(ascii: "/")
+        var index = line.startIndex, word = 0, named = false
+        while index < line.endIndex {
+            guard line[index] != space else { index += 1; continue }
+            var end = index
+            while end < line.endIndex, line[end] != space { end += 1 }
+            if line[index..<end].elementsEqual(appServerBytes) { return false }
+            if word < 2, !named {
+                // The last part between slashes that is not empty, as splitting on "/" gives.
+                var last = end
+                while last > index, line[last - 1] == slash { last -= 1 }
+                var first = last
+                while first > index, line[first - 1] != slash { first -= 1 }
+                named = executableNameBytes.contains { line[first..<last].elementsEqual($0) }
+                    || executablePrefixBytes.contains { last - first >= $0.count && line[first..<(first + $0.count)].elementsEqual($0) }
+            }
+            word += 1
+            index = end
+        }
+        return named
+    }
+
+    /// The rule's names, read by both readings of a listing, by character and as bytes, so the two
+    /// cannot come to name different things: an executable called exactly one of `executableNames`
+    /// or starting with one of `executablePrefixes`, on a line without the word `appServerWord`.
+    static let executableNames = ["codex", "codex.js"]
+    static let executablePrefixes = ["codex-"]
+    static let appServerWord = "app-server"
+    private static let executableNameBytes = executableNames.map { Array($0.utf8) }
+    private static let executablePrefixBytes = executablePrefixes.map { Array($0.utf8) }
+    private static let appServerBytes = Array(appServerWord.utf8)
+
+    /// Whether the text before a line's first space is a process id: both readings ask this.
+    private static func isPID(_ text: some StringProtocol) -> Bool {
+        Int32(text) != nil
+    }
+
+    /// The lines of a process listing as bytes, empty ones left out, each with whether it is all
+    /// ASCII. In ASCII text without a carriage return a byte is a character, so bytes may be compared
+    /// where the rules compare characters; any other line must be read as characters, since a space,
+    /// slash or digit followed by a combining mark is not that character. Nil for text with a carriage
+    /// return, which joins a following newline into one character that does not end a line.
+    private struct Lines {
+        let bytes: UnsafeBufferPointer<UInt8>
+
+        init?(_ bytes: UnsafeBufferPointer<UInt8>) {
+            if let base = bytes.baseAddress, memchr(base, 0x0D, bytes.count) != nil { return nil }
+            self.bytes = bytes
+        }
+
+        /// Calls `body` with each line until it returns false.
+        func forEach(_ body: (UnsafeBufferPointer<UInt8>, _ ascii: Bool) -> Bool) {
+            guard let base = bytes.baseAddress else { return }
+            var start = 0
+            while start < bytes.count {
+                let end = memchr(base + start, 0x0A, bytes.count - start).map { UnsafeRawPointer($0) - UnsafeRawPointer(base) } ?? bytes.count
+                defer { start = end + 1 }
+                guard end > start else { continue }
+                let line = UnsafeBufferPointer(rebasing: bytes[start..<end])
+                guard body(line, !line.contains { $0 >= 0x80 }) else { return }
+            }
         }
     }
 
     static func isCodexExecutable(_ name: Substring) -> Bool {
-        name == "codex" || name == "codex.js" || name.hasPrefix("codex-")
+        executableNames.contains { name == $0 } || executablePrefixes.contains { name.hasPrefix($0) }
     }
 }
 
@@ -108,11 +194,45 @@ extension CodexCLIProcesses {
 
     /// `ps -axo pid=,args=` output without its pid column, for `isRunning`.
     public static func arguments(processList: String) -> String {
-        processList.split(separator: "\n").map { line in
-            let trimmed = line.drop { $0 == " " }
-            guard let space = trimmed.firstIndex(of: " "), Int32(trimmed[..<space]) != nil else { return String(trimmed) }
-            return String(trimmed[space...].drop { $0 == " " })
-        }.joined(separator: "\n")
+        // Read as bytes where a line is ASCII, for the reason `isRunning` gives.
+        var text = processList
+        return text.withUTF8 { bytes -> String? in
+            guard let lines = Lines(bytes) else { return nil }
+            let space = UInt8(ascii: " ")
+            var result: [UInt8] = []
+            result.reserveCapacity(bytes.count)
+            var first = true
+            lines.forEach { line, ascii in
+                if !first { result.append(0x0A) }
+                first = false
+                guard ascii else {
+                    result.append(contentsOf: withoutPID(Substring(String(decoding: line, as: UTF8.self))).utf8)
+                    return true
+                }
+                var start = line.startIndex
+                while start < line.endIndex, line[start] == space { start += 1 }
+                var end = start
+                while end < line.endIndex, line[end] != space { end += 1 }
+                if end < line.endIndex, isPID(String(decoding: line[start..<end], as: UTF8.self)) {
+                    start = end
+                    while start < line.endIndex, line[start] == space { start += 1 }
+                }
+                result.append(contentsOf: line[start...])
+                return true
+            }
+            return String(decoding: result, as: UTF8.self)
+        } ?? argumentsByCharacter(processList: processList)
+    }
+
+    /// `arguments` as the rule is written, a character at a time (see `isRunningByCharacter`).
+    static func argumentsByCharacter(processList: String) -> String {
+        processList.split(separator: "\n").map(withoutPID).joined(separator: "\n")
+    }
+
+    private static func withoutPID(_ line: Substring) -> String {
+        let trimmed = line.drop { $0 == " " }
+        guard let space = trimmed.firstIndex(of: " "), isPID(trimmed[..<space]) else { return String(trimmed) }
+        return String(trimmed[space...].drop { $0 == " " })
     }
 
     /// The host a Codex TUI runs in, from its ancestry: nil when the process is not a Codex
