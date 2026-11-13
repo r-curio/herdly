@@ -2539,15 +2539,21 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     /// Escape on a walk card: back to the queue with that item's row selected, opening its "+N more"
-    /// section when the row sits behind it. Nothing is dismissed.
+    /// section when the row sits behind it, or the Earlier fold when the result aged under Earlier
+    /// during the walk, as → on the Earlier heading does. Should the row still not be on screen, the
+    /// Earlier heading is selected instead. Nothing is dismissed.
     private func leaveWalk(selecting id: AgentAttentionID) {
         refresh()
-        if !selectableRows.contains(id), let item = queueAgentAttentionItems.first(where: { $0.id == id }),
-           let section = QueueKindSection(item.kind) {
-            openQueueFolds.insert(section)
+        if !selectableRows.contains(id), let item = queueAgentAttentionItems.first(where: { $0.id == id }) {
+            if item.kind == .earlierOutcome {
+                setEarlierFold(.opened)
+            } else if let section = QueueKindSection(item.kind) {
+                openQueueFolds.insert(section)
+            }
         }
-        guard selectableRows.contains(id) else { return }
-        let selection = QueueRowSelection(selected: id)
+        let rows = selectableRows
+        guard let stop = rows.contains(id) ? id : visibleSections.earlierHeadingStops.first(where: rows.contains) else { return }
+        let selection = QueueRowSelection(selected: stop)
         if selection != queueSelection { queueSelection = selection }
     }
 
