@@ -139,11 +139,13 @@ final class NotchPanel: NSPanel {
     var onMoveSelection: ((QueueRowSelection.Direction) -> Bool)?
     /// Return acts on the one card on screen, or else on the selected row.
     var onReturn: (() -> Bool)?
-    /// → on the selected stop: opens a folded Earlier heading (D34); otherwise unhandled.
+    /// → on the selected stop: opens a folded Earlier heading (D34); otherwise, in the hotkey's queue,
+    /// starts the to-check walk, and on a walk card steps it (#440).
     var onRight: (() -> Bool)?
     /// A digit 1 through 9 selects that option on a question card (#321); it never sends.
     var onDigit: ((Int) -> Bool)?
-    /// ← on a question card with the keyboard steps to the previous question (#428); otherwise unhandled.
+    /// ← steps the to-check walk back (#440), or on a question card with the keyboard steps to the
+    /// previous question (#428); otherwise unhandled.
     var onLeft: (() -> Bool)?
     /// A plain letter, lowercased: O and X are a keyboard card's Open and Dismiss (#428).
     var onLetter: ((Character) -> Bool)?
@@ -815,6 +817,19 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The last key the approval card on screen takes (#439), already mapped by `ApprovalCardKeys`.
     /// The card acts on it exactly as on a click of that button.
     @Published private(set) var approvalCardKeyPress: ApprovalCardKeyPress?
+    /// The result card the walk shows while the panel has deliberate keyboard focus (#440): its Open and
+    /// Dismiss show "O" and "X", and `pressResultCardKey` reads it. Changed only through
+    /// `updateResultKeysCard`; nil otherwise.
+    @Published private(set) var resultKeysCard: AgentAttentionID?
+    /// The last key the walk's result card takes (#440), already mapped by `ResultCardKeys`.
+    @Published private(set) var resultCardKeyPress: ResultCardKeyPress?
+    /// The walk header's "3 of 4 to check" (#440) while a walk card is on screen; nil otherwise.
+    @Published private(set) var walkPosition: ToCheckWalk.Position?
+    /// ← or → on a walk card that shows a question (#440): the card knows which of its questions is
+    /// viewed, so it asks `stepWalk` with that and shows the question the step names.
+    @Published private(set) var walkKeyPress: WalkKeyPress?
+    /// Refreshes once "All checked" has shown for its hold, so the panel folds. It only asks again.
+    private var walkFoldTask: Task<Void, Never>?
     /// The approval or question waiting behind the keyboard card (Paper L "8 · Another one arrives").
     @Published private(set) var keyboardWaiting: AgentAttentionID?
     /// The app Escape gives the keyboard back to, named in the card's foot line.
@@ -846,7 +861,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var frameAnimation: UUID?
     /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|spotlight-result|spotlight-result-markdown|row-note-reply|expanded>`
     /// seeds in-memory sample items for screenshots; `clicked-approval` shows the approval sample as a
-    /// clicked card (`clicked-approval-long` with a command past the six-line cap, `clicked-claude-approval`
+    /// clicked card (`walk` shows the result sample as the to-check walk's card under its header, #440,
+    /// with `--preview-keyboard` showing its O and X; `clicked-approval-long` with a command past the six-line cap, `clicked-claude-approval`
     /// a Claude request with no command, `clicked-question` the Codex question sample, which with
     /// `--preview-keyboard` shows its key labels, #438), and `row-note` the queue with that row selected and carrying a note;
     /// `empty-collapsed`, `empty-expanded`, and `empty-not-connected` seed only the usage readouts, to show the empty notch.
@@ -983,15 +999,19 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
 
         panel.onRight = { [weak self] in
             guard let self else { return false }
-            return self.openSelectedEarlierFold() || self.pressQuestionCardKey(.nextQuestion)
+            return self.pressWalkKey(.next) || self.openSelectedEarlierFold() || self.enterWalk()
+                || self.pressQuestionCardKey(.nextQuestion)
         }
-        panel.onLeft = { [weak self] in self?.pressQuestionCardKey(.previousQuestion) ?? false }
+        panel.onLeft = { [weak self] in
+            guard let self else { return false }
+            return self.pressWalkKey(.previous) || self.pressQuestionCardKey(.previousQuestion)
+        }
         panel.onDigit = { [weak self] in self?.pressQuestionCardKey(.digit($0)) ?? false }
         panel.onLetter = { [weak self] letter in
             guard let self else { return false }
             return switch letter {
-            case "o": self.pressQuestionCardKey(.open) || self.pressApprovalCardKey(.open)
-            case "x": self.pressQuestionCardKey(.dismiss)
+            case "o": self.pressQuestionCardKey(.open) || self.pressApprovalCardKey(.open) || self.pressResultCardKey(.open)
+            case "x": self.pressQuestionCardKey(.dismiss) || self.pressResultCardKey(.dismiss)
             default: false
             }
         }
@@ -2115,7 +2135,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                             keyboardFocus: panel.hasDeliberateKeyboardFocus,
                                                             keyboardHoldEnded: spotlightKeyboard.endsKeyboardHold,
                                                             now: now, legacyPopup: attention.expanded,
-                                                            queued: liveAgentIDs.union([keptSentCard].compactMap { $0 }))
+                                                            queued: liveAgentIDs.union([keptSentCard].compactMap { $0 }),
+                                                            walkItems: queueAgentAttentionItems)
         let hint = notchPresentation.keyboardHoldsQueue ? hotkeySetting.hotkey.title : nil
         if keyboardQueueHotkey != hint { keyboardQueueHotkey = hint }
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
@@ -2125,6 +2146,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let mode = previewSpotlightAgent.map(NotchPresentationMode.clickedCard) ?? .collapsed
             if presentationMode != mode { presentationMode = mode }
         case "collapsed", "empty-collapsed": presentationMode = .collapsed
+        case "walk":
+            // #440: the result sample as the walk's card, with the walk's real order and header.
+            let mode = previewSpotlightAgent.map(NotchPresentationMode.walkCard) ?? .collapsed
+            if presentationMode != mode { presentationMode = mode }
         case _ where Self.spotlightPreviewModes.contains(previewMode ?? ""):
             let mode = spotlightItem.map(NotchPresentationMode.agentSpotlight) ?? .collapsed
             if presentationMode != mode { presentationMode = mode }
@@ -2137,6 +2162,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let sentFoldDue = updateKeyboardCard(items: agentItems, waiting: waitingIDs)
         updateClickedKeyboardCard()
         updateApprovalKeysCard()
+        updateResultKeysCard()
+        if updateWalk(now: now) {
+            // "All checked" has shown for its hold: fold and give the keyboard back (#440), by the
+            // same path as Escape at the top level.
+            collapse()
+            return
+        }
         if sentFoldDue {
             // The sent line has shown its second: fold and give the keyboard back (Paper L "4 · Sent").
             collapse()
@@ -2299,6 +2331,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if escapeOpenRunningRow() { return }
         switch notchPresentation.escape() {
         case .backToQueue: refresh()
+        case let .walkToQueue(id): leaveWalk(selecting: id)
         case .collapse: collapse()
         }
     }
@@ -2398,18 +2431,133 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         panel.hasDeliberateKeyboardFocus || (previewMode != nil && Companion.previewKeyboard)
     }
 
-    /// The clicked question card that has the keyboard (#438), decided on every refresh and before
-    /// every key, so its labels and its keys read one state. It takes the keyboard spotlight card's
-    /// keys and labels (`SpotlightCardFocus.clickedWithKeyboard`) and nothing else of it: no ring,
-    /// hold, wait line, foot line or sent line.
+    /// A card the user opened from the queue: a clicked card, or the walk's card (#440), which takes
+    /// the same keys and labels. Nil for a spotlight, the queue, or "All checked".
+    static func openedCard(_ mode: NotchPresentationMode) -> AgentAttentionID? {
+        switch mode {
+        case let .clickedCard(id), let .walkCard(id): id
+        case .collapsed, .spotlight, .agentSpotlight, .allChecked, .queue: nil
+        }
+    }
+
+    /// The clicked question card that has the keyboard (#438), or the walk's question card (#440),
+    /// decided on every refresh and before every key, so its labels and its keys read one state. It
+    /// takes the keyboard spotlight card's keys and labels (`SpotlightCardFocus.clickedWithKeyboard`)
+    /// and nothing else of it: no ring, hold, wait line, foot line or sent line.
     private func updateClickedKeyboardCard() {
         var next: KeyboardCard?
-        if case let .clickedCard(id) = presentationMode, case .question = id, cardHasKeyboard,
+        if let id = Self.openedCard(presentationMode), case .question = id, cardHasKeyboard,
            let question = spotlightItem(id)?.question,
            case let .keyboard(phase) = SpotlightCardFocus.clickedWithKeyboard(answerable: canAnswerAgentQuestion(question)) {
             next = KeyboardCard(id: id, phase: phase)
         }
         if clickedKeyboardCard != next { clickedKeyboardCard = next }
+    }
+
+    // MARK: The to-check walk (#440, Paper K "D · Walk the to-check list")
+
+    /// The walk's result card that has the keyboard, decided on every refresh and before every key, so
+    /// its "O" and "X" labels and its keys read one state.
+    private func updateResultKeysCard() {
+        var next: AgentAttentionID?
+        if case let .walkCard(id) = presentationMode, case .outcome = id, cardHasKeyboard { next = id }
+        if resultKeysCard != next { resultKeysCard = next }
+    }
+
+    /// Hands O or X to the walk's result card as `ResultCardKeys` maps it. False when the key does
+    /// nothing there, so it goes on. The card then acts through its own buttons' path.
+    func pressResultCardKey(_ key: ResultCardKey) -> Bool {
+        guard expanded, case let .walkCard(id) = presentationMode, case .outcome = id else { return false }
+        updateResultKeysCard()
+        let action = ResultCardKeys.action(for: key, keyboard: resultKeysCard == id)
+        guard action.consumesKey else { return false }
+        resultCardKeyPress = ResultCardKeyPress(action: action, card: id, serial: (resultCardKeyPress?.serial ?? 0) + 1)
+        return true
+    }
+
+    /// One refresh of the walk: its header's place, and the fold once "All checked" has shown for its
+    /// hold. Returns true when the panel should fold now. The timer it starts only refreshes; the
+    /// walk's own rule (`ToCheckWalk.foldDue`) decides, and nothing here acknowledges anything.
+    private func updateWalk(now: Double) -> Bool {
+        let position: ToCheckWalk.Position? = if case .walkCard = presentationMode {
+            (notchPresentation.walk ?? previewWalk())?.position
+        } else { nil }
+        if walkPosition != position { walkPosition = position }
+        guard presentationMode == .allChecked else {
+            walkFoldTask?.cancel()
+            walkFoldTask = nil
+            return false
+        }
+        if notchPresentation.walkFoldDue(now: now) { return true }
+        if walkFoldTask == nil {
+            walkFoldTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(ToCheckWalk.allCheckedHold))
+                guard !Task.isCancelled else { return }
+                self?.walkFoldTask = nil
+                self?.refresh()
+            }
+        }
+        return false
+    }
+
+    /// `--preview-queue walk`: the walk stepped to the preview's card, for the header's screenshot. It
+    /// never makes the panel key and nothing in it acts.
+    private func previewWalk() -> ToCheckWalk? {
+        guard previewMode == "walk", let target = previewSpotlightAgent else { return nil }
+        let items = queueAgentAttentionItems
+        guard var walk = ToCheckWalk(items: items) else { return nil }
+        while walk.screen != .card(target), walk.step(.next, items: items, now: 0) != .stop {}
+        return walk
+    }
+
+    /// → in the hotkey's queue: the first to-check item opens as its card, "1 of N to check". False
+    /// outside the hotkey's queue or with nothing to check, so the key goes on.
+    func enterWalk() -> Bool {
+        guard presentationMode.showsAll, notchPresentation.enterWalk(items: queueAgentAttentionItems) else { return false }
+        // The card takes the keys itself: no field inside it holds focus, so a digit selects.
+        panel.makeFirstResponder(nil)
+        refresh()
+        return true
+    }
+
+    /// ← or → on a walk card. Always taken while a walk card is on screen, so the ends simply stop. A
+    /// question card is asked first, since only it knows which of its questions is viewed.
+    func pressWalkKey(_ direction: ToCheckWalk.Direction) -> Bool {
+        guard case let .walkCard(id) = presentationMode else { return false }
+        if case .question = id, spotlightItem(id)?.question != nil {
+            walkKeyPress = WalkKeyPress(direction: direction, card: id, serial: (walkKeyPress?.serial ?? 0) + 1)
+        } else {
+            stepWalk(direction)
+        }
+        return true
+    }
+
+    /// One step of the walk (`ToCheckWalk.step`), with the queue re-read now. `question` is the card's
+    /// viewed question when a key stepped a question card; the header's ‹ › wells pass none and so
+    /// always move by item. A step to another card redraws; a step within the card's questions is the
+    /// caller's to show. Passing an item clears nothing.
+    @discardableResult
+    func stepWalk(_ direction: ToCheckWalk.Direction, question: ToCheckWalk.QuestionPosition? = nil) -> ToCheckWalk.Step {
+        let step = notchPresentation.stepWalk(direction, items: queueAgentAttentionItems, question: question,
+                                              now: ProcessInfo.processInfo.systemUptime)
+        if case .card = step {
+            panel.makeFirstResponder(nil)
+            refresh()
+        }
+        return step
+    }
+
+    /// Escape on a walk card: back to the queue with that item's row selected, opening its "+N more"
+    /// section when the row sits behind it. Nothing is dismissed.
+    private func leaveWalk(selecting id: AgentAttentionID) {
+        refresh()
+        if !selectableRows.contains(id), let item = queueAgentAttentionItems.first(where: { $0.id == id }),
+           let section = QueueKindSection(item.kind) {
+            openQueueFolds.insert(section)
+        }
+        guard selectableRows.contains(id) else { return }
+        let selection = QueueRowSelection(selected: id)
+        if selection != queueSelection { queueSelection = selection }
     }
 
     /// The spotlight question card that has the keyboard (#428), observed once per refresh: whether
@@ -3322,7 +3470,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                          now: now)
         previewSpotlightAgent = .outcome(CodexAttentionAdapter.outcome(from: completion).id)
         if Self.previewsCodexQuestionCard(mode) { previewSpotlightAgent = .question(CodexAttentionAdapter.question(from: question).id) }
-        if mode == "spotlight-result" || mode == "spotlight-result-markdown" || mode == "row-note-reply" {
+        if mode == "spotlight-result" || mode == "spotlight-result-markdown" || mode == "row-note-reply" || mode == "walk" {
             // #323: a CLI result's card (9NU): a message past five lines, the turn's prompt, and a
             // reachable reply field; `row-note-reply` shows its row after a send, with the reply's note.
             let notes = UUID(uuidString: "2B7C9E10-3D4F-4A5B-8C6D-0000000000F6")!

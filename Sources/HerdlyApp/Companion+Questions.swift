@@ -563,3 +563,20 @@ struct ApprovalCardKeyPress: Equatable {
     let card: AgentAttentionID
     let serial: Int
 }
+
+/// One key the panel handed to the walk's result card (#440). `serial` makes a repeated key a new
+/// value, so the card sees every press; `card` is the card it was pressed on.
+struct ResultCardKeyPress: Equatable {
+    /// What the key does on the card, from `ResultCardKeys`.
+    let action: ResultCardAction
+    let card: AgentAttentionID
+    let serial: Int
+}
+
+/// ← or → pressed on a walk card that shows a question (#440). The card answers it with its viewed
+/// question (`Companion.stepWalk`), so a call of several questions steps them first.
+struct WalkKeyPress: Equatable {
+    let direction: ToCheckWalk.Direction
+    let card: AgentAttentionID
+    let serial: Int
+}
