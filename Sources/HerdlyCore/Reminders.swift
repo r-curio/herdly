@@ -165,30 +165,27 @@ public struct ReminderQueue: Sendable {
 }
 
 public enum ReminderReader {
-    /// What `scan` reads from one hook record.
+    /// What `scan` reads from one hook record: the record's own fields, read through it by name.
+    @dynamicMemberLookup
     struct Hook: Sendable {
-        struct Record: Decodable {
+        struct Record: Decodable, Sendable {
             let hook_event_name: String
             let session_id: UUID
             let turn_id: UUID?
             let received_at: String
         }
 
-        let hook_event_name: String
-        let session_id: UUID
-        let turn_id: UUID?
-        let received_at: String
+        let record: Record
         /// When a `SessionEnd` record says the session ended; nil for any other event, or a time
         /// that cannot be read. Parsed with the record, not on every scan.
         let endedAt: Double?
 
         init(_ record: Record) {
-            hook_event_name = record.hook_event_name
-            session_id = record.session_id
-            turn_id = record.turn_id
-            received_at = record.received_at
+            self.record = record
             endedAt = record.hook_event_name == "SessionEnd" ? RolloutTimestamp.parse(record.received_at) : nil
         }
+
+        subscript<Value>(dynamicMember path: KeyPath<Record, Value>) -> Value { record[keyPath: path] }
     }
 
     /// At most the window's records and as many again looked back through for session ends; a scan
