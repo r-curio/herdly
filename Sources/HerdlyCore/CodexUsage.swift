@@ -83,37 +83,10 @@ public enum CodexUsageReader {
 
     private static let memo = StampedFileMemo<CodexUsageReading?>()
 
-    /// Rollouts from the newest day directories, newest modification first, at most `limit`.
+    /// Rollouts from the newest day directories, newest modification first, at most `limit`
+    /// (`RolloutDays`, which lists a directory again only when it changed).
     static func newestRollouts(root: URL, limit: Int = maximumFiles) -> [(url: URL, modified: Date)] {
-        var days: [URL] = []
-        for year in subdirectories(root).prefix(3) {
-            for month in subdirectories(year).prefix(3) {
-                for day in subdirectories(month) {
-                    days.append(day)
-                    if days.count == maximumDays { break }
-                }
-                if days.count == maximumDays { break }
-            }
-            if days.count == maximumDays { break }
-        }
-        var files: [(URL, Date)] = []
-        for day in days {
-            guard let entries = try? FileManager.default.contentsOfDirectory(at: day, includingPropertiesForKeys: [.contentModificationDateKey],
-                                                                              options: [.skipsHiddenFiles]) else { continue }
-            for url in entries where url.pathExtension == "jsonl" {
-                let modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                files.append((url, modified))
-            }
-        }
-        return files.sorted { $0.1 == $1.1 ? $0.0.path > $1.0.path : $0.1 > $1.1 }.prefix(limit).map { (url: $0.0, modified: $0.1) }
-    }
-
-    /// Child directories with numeric names, newest (largest) first.
-    private static func subdirectories(_ url: URL) -> [URL] {
-        guard let entries = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey],
-                                                                          options: [.skipsHiddenFiles]) else { return [] }
-        return entries.filter { Int($0.lastPathComponent) != nil && (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
-            .sorted { $0.lastPathComponent > $1.lastPathComponent }
+        RolloutDays.newest(root: root, limit: limit)
     }
 
     /// An open handle and the size of a regular, non-symlinked file; nil for anything else.
