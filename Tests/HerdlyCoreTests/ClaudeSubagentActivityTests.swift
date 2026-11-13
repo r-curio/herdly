@@ -930,3 +930,63 @@ private var restartedSubagentStops: [[String: Any]] { [
     #expect(row.lastActivityAt == 700)
     #expect(!QuietRule.isQuiet(lastActivity: row.lastActivityAt, now: 701))
 }
+
+// MARK: A quiet row keeps its unfinished command (#419, owner decision 2026-11-13)
+
+private func bash(_ call: String, at: Double, _ command: String) -> [String: Any] {
+    record("PreToolUse", at: at, tool: "Bash", call: call, input: ["command": command])
+}
+
+@Test func claudeAnUnfinishedCommandIsHiddenAfterThirtySecondsAndShownAgainOnceTheRowIsQuiet() throws {
+    let records = [promptSubmit, bash("c1", at: 100, "npm run test:e2e")]
+    let notQuiet = try #require(try running(records, now: 100 + QuietRule.after - 1))
+    #expect(notQuiet.toolName == nil)
+    #expect(notQuiet.toolStartedAt == nil)
+    let quiet = try #require(try running(records, now: 100 + QuietRule.after))
+    #expect(quiet.toolName == "Bash")
+    #expect(quiet.toolInput["command"] == "npm run test:e2e")
+    #expect(quiet.toolStartedAt == 100)
+    #expect(QuietLine.make(quiet, now: 100 + 14 * 60)?.text == "14m since this command started")
+}
+
+@Test func claudeAFinishedCallIsNeverShownOnAQuietRow() throws {
+    for finish in ["PostToolUse", "PostToolUseFailure"] {
+        let records = [promptSubmit, bash("c1", at: 100, "npm test"), record(finish, at: 110, call: "c1")]
+        let row = try #require(try running(records, now: 110 + QuietRule.after))
+        #expect(row.toolName == nil)
+        #expect(QuietLine.make(row, now: 110 + 14 * 60)?.text == "14m since the last activity")
+    }
+}
+
+@Test func claudeALaterCallReplacesTheShownCommandAndTheNewestOpenCallWins() throws {
+    // Two calls open at once: the newer one is shown, counted from its own start.
+    let both = [promptSubmit, bash("c1", at: 100, "swift build"), bash("c2", at: 130, "swift test")]
+    let row = try #require(try running(both, now: 130 + QuietRule.after))
+    #expect(row.toolInput["command"] == "swift test")
+    #expect(row.toolStartedAt == 130)
+    // The newer one finishes: the older call still open is shown again once quiet.
+    let newerDone = both + [record("PostToolUse", at: 140, call: "c2")]
+    let older = try #require(try running(newerDone, now: 140 + QuietRule.after))
+    #expect(older.toolInput["command"] == "swift build")
+    #expect(QuietLine.make(older, now: 140 + QuietRule.after)?.text == "10m since this command started")
+}
+
+@Test func claudeACachedScanRebuildsWhenTheRowCrossesTheQuietBoundary() throws {
+    let root = try events([promptSubmit, bash("c1", at: 100, "npm test")])
+    defer { try? FileManager.default.removeItem(at: root) }
+    func tool(_ now: Double, _ cache: ClaudeRecordCache) -> (String?, ClaudeRecordCache) {
+        let (scan, next) = ClaudeObservationReader.scan(events: root, sourceScope: root.path, installationID: "install",
+                                                        now: now, cache: cache)
+        let running = scan.observations.compactMap { observation -> AgentRunning? in
+            if case let .running(value) = observation { return value }
+            return nil
+        }.first
+        return (running?.toolName, next)
+    }
+    var (name, cache) = tool(100 + QuietRule.after - 10, ClaudeRecordCache())
+    #expect(name == nil)
+    (name, cache) = tool(100 + QuietRule.after - 1, cache)
+    #expect(name == nil)
+    (name, cache) = tool(100 + QuietRule.after, cache)
+    #expect(name == "Bash")
+}
