@@ -3,6 +3,10 @@ import Foundation
 /// The tone a finished row's state words take (#418, Paper "R3 · State first"): the one exception to
 /// the One Color Rule and D14 besides the "Failed" well and the usage rings. Only the state words carry
 /// it; the pull request, repository and branch stay dim. Each holds at least 4.5:1 on black.
+///
+/// The values live here, as plain sRGB numbers, rather than in `NotchStyle`: there is then one copy,
+/// HerdlyCore stays free of AppKit and SwiftUI, and the contrast rule can be tested on the exact values.
+/// `NotchStyle`'s four state tokens are built from them.
 public enum WorkStatusTone: Equatable, Sendable {
     /// Checks failing, conflict.
     case red
@@ -47,25 +51,34 @@ extension WorkStatus {
 /// pushed · herdly @ feat/usage"); without a verdict, the place as before ("· herdly @ main"). The
 /// state never truncates: `detail` is the part that gives way. Presentation only; it orders, counts
 /// and acknowledges nothing.
-public struct RowPlace: Equatable, Sendable {
-    /// The state words, drawn first in their tone; nil when the row shows no verdict.
-    public let state: WorkStatus?
-    /// The dim text after the state, or the whole place without one; it truncates first. Nil when
-    /// there is nothing to show after the state.
+public struct RowPlaceLine: Equatable, Sendable {
+    /// The work status drawn first, in its tone; nil when the row shows no verdict.
+    public let label: WorkStatusLabel?
+    /// The dim text after the state ("herdly#431", or the place), or the whole place without one; it
+    /// truncates first. Nil when there is nothing after the state.
     public let detail: String?
-    /// What VoiceOver reads in the place's position: the state in words, then the pull request or
-    /// the place. Colour is never the only signal.
-    public let spoken: String
 
-    public init(state: WorkStatus?, detail: String?, spoken: String) {
-        self.state = state
+    /// Nil when there is neither a verdict nor a place to show. A label with a pull request shows the
+    /// pull request in place of `place`.
+    public init?(label: WorkStatusLabel?, place: String?) {
+        let detail = label?.pullRequest.map { "\($0.name)#\($0.number)" } ?? place
+        guard label != nil || detail != nil else { return nil }
+        self.label = label
         self.detail = detail
-        self.spoken = spoken
     }
 
     /// The whole slot as one line, as the row draws it.
     public var text: String {
-        "· " + [state?.words, detail].compactMap { $0 }.joined(separator: " · ")
+        "· " + [label?.words, detail].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// What VoiceOver reads in the place's position: the state in words, then the pull request ("checks
+    /// failing, pull request 431 in herdly") or the place. Colour is never the only signal.
+    public var spoken: String {
+        if let label, let request = label.pullRequest {
+            return "\(label.words), pull request \(request.number) in \(request.name)"
+        }
+        return [label?.words, detail].compactMap { $0 }.joined(separator: ", ")
     }
 
     /// The row's place slot, or nil when it has nothing to show.
@@ -78,16 +91,9 @@ public struct RowPlace: Equatable, Sendable {
     /// slot and the verdict still shows here; a result whose status is unavailable ("Status unknown")
     /// and a waiting or status-unavailable Claude row show none.
     public static func make(_ item: AgentAttentionItem, label: WorkStatusLabel?, place: String?,
-                            note: RowNote?) -> RowPlace? {
-        guard note == nil, let label, let words = label.verdict.words, showsVerdict(item) else {
-            return place.map { RowPlace(state: nil, detail: $0, spoken: $0) }
-        }
-        let state = label.verdict
-        if let request = label.pullRequest {
-            return RowPlace(state: state, detail: "\(request.name)#\(request.number)",
-                            spoken: "\(words), pull request \(request.number) in \(request.name)")
-        }
-        return RowPlace(state: state, detail: place, spoken: [words, place].compactMap { $0 }.joined(separator: ", "))
+                            note: RowNote?) -> RowPlaceLine? {
+        let shown = note == nil && showsVerdict(item) ? label : nil
+        return RowPlaceLine(label: shown, place: place)
     }
 
     /// Result rows whose status is known: "Failed" may sit beside a verdict, "Status unknown" may not.

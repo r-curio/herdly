@@ -537,14 +537,22 @@ public struct WorkPullRequest: Equatable, Sendable {
 }
 
 /// What a finished row says about its work (#418): a verdict, and the pull request it came from when
-/// a pull request decided it. Only a verdict other than `noVerdict` makes one.
+/// a pull request decided it. There is no label for `noVerdict`, so a label always has state words and
+/// a tone, and no verdict never names a pull request: the one home of that rule.
 public struct WorkStatusLabel: Equatable, Sendable {
     public let verdict: WorkStatus
     public let pullRequest: WorkPullRequest?
+    /// The state words, lowercase ("checks failing").
+    public let words: String
+    public let tone: WorkStatusTone
 
-    public init(verdict: WorkStatus, pullRequest: WorkPullRequest? = nil) {
+    /// Nil for `noVerdict`.
+    public init?(verdict: WorkStatus, pullRequest: WorkPullRequest? = nil) {
+        guard let words = verdict.words, let tone = verdict.tone else { return nil }
         self.verdict = verdict
         self.pullRequest = pullRequest
+        self.words = words
+        self.tone = tone
     }
 }
 
@@ -562,7 +570,7 @@ public struct WorkStatusResult: Equatable, Sendable {
     public init(_ verdict: WorkStatus, pending: Bool = false, pullRequest: WorkPullRequest? = nil) {
         self.verdict = verdict
         self.pending = pending
-        self.pullRequest = verdict == .noVerdict ? nil : pullRequest
+        self.pullRequest = WorkStatusLabel(verdict: verdict, pullRequest: pullRequest)?.pullRequest
     }
 }
 
@@ -637,7 +645,7 @@ public struct WorkStatusReading: Equatable, Sendable {
                 firstReadAt: Double, isWithdrawn: Bool = false) {
         self.verdict = verdict
         self.pending = pending
-        self.pullRequest = verdict == .noVerdict ? nil : pullRequest
+        self.pullRequest = WorkStatusLabel(verdict: verdict, pullRequest: pullRequest)?.pullRequest
         self.readAt = readAt
         self.firstReadAt = firstReadAt
         self.isWithdrawn = isWithdrawn
@@ -655,9 +663,7 @@ public struct WorkStatusReading: Equatable, Sendable {
     }
 
     /// What the row shows: nil without a verdict.
-    public var label: WorkStatusLabel? {
-        verdict == .noVerdict ? nil : WorkStatusLabel(verdict: verdict, pullRequest: pullRequest)
-    }
+    public var label: WorkStatusLabel? { WorkStatusLabel(verdict: verdict, pullRequest: pullRequest) }
 }
 
 /// When a finished turn is read (#417): once when it first appears, then again only while its checks
