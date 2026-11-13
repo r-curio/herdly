@@ -6,7 +6,8 @@ Accepted on 2026-11-13 ([issue #417](https://github.com/r-curio/herdly/issues/41
 
 - **Switch.** Everything sits behind "Pull request status on finished rows" on the GitHub card in Settings › Agents. Until the user chooses, it is on only while `gh` is installed and signed in to github.com.
   - Every command checks the switch immediately before it starts (`WorkStatusGate`), off the main actor, and turning it off forgets every reading.
-  - With the switch off, no `git` and no `gh` runs for any session. The card's own `gh --version` and `gh auth status` run once at launch while the default is undecided, and when Settings › Agents opens.
+  - With the switch off, no `git` and no `gh` process runs at all, including the card's own check. The card then finds "not installed" by looking for the binary on disk. Otherwise it shows the last check, kept in `UserDefaults` as the version and whether github.com was signed in (never an account or token), or "Status unknown" when none is kept. Check Again is disabled.
+  - While the switch is on, or still undecided because its default depends on the check, the card runs `gh --version` and `gh auth status`: at launch, when Settings › Agents opens, on Check Again, and when the user turns the switch on.
 - **Remembered branch.** Each scan already reads every row's HEAD from disk. While a turn runs, Herdly remembers its folder and HEAD, keyed by session and turn, in memory only. The pull request is looked up for that branch, so it still resolves after an agent merges and the folder goes back to the default branch. There is no verdict when:
   - the HEAD or folder changed during the turn;
   - another session ran in the same folder, or one inside it, in the same scan;
@@ -26,13 +27,9 @@ Accepted on 2026-11-13 ([issue #417](https://github.com/r-curio/herdly/issues/41
   2. Then, only while the folder is still on the remembered branch: uncommitted changes, then unpushed commits. Unpushed means ahead of the branch's own upstream (`origin/<branch>`). A branch with no upstream, or one tracking another branch (a worktree made from `origin/main`), counts commits on no remote instead. An upstream branch that is gone, deleted after a merge, leaves this unknown.
   3. Then the open pull request: conflict, then checks failing, running or passed.
   An unreadable folder allows only "merged". The evidence for these fields is in [github-pr-status](../evidence/github-pr-status.md).
-- **Schedule.** `WorkStatusSchedule` reads a finished turn once when it appears. After that:
-  - every 30 seconds while checks run;
-  - every 2 minutes while not settled;
-  - never past an hour from its first reading;
-  - never again once merged;
-  - never for an Earlier row whose checks finished.
-  At most six turns are read per batch, one batch at a time, and nothing is retried outside the schedule. A finished turn is not read while another turn runs in its folder.
+- **Schedule.** `WorkStatusSchedule` reads a finished turn once when it appears. After that it reads again only while checks run, every 30 seconds, never past an hour from the first reading.
+  - Every other verdict is terminal: it is not read again, recent or Earlier. A "checks passed" row is not re-read to catch a later merge, and a reading that failed is not retried.
+  - `WorkStatusBatch` picks each scan's reads without running anything: at most six turns per batch, one batch at a time. It skips a finished turn while another turn runs in its folder, or while its repository is still unread. Unknown and ambiguous turns settle as no verdict without a command.
 - **Boundary.** Parsing and rules live in HerdlyCore. Processes, the switch and `UserDefaults` live in HerdlyApp (`WorkStatusReader`, `WorkStatusModel`). The verdict draws nothing yet: the row presentation is a follow-up. It never orders the queue, counts as work, acknowledges anything or moves a deadline.
 
 ## What leaves the Mac
@@ -45,7 +42,7 @@ Accepted on 2026-11-13 ([issue #417](https://github.com/r-curio/herdly/issues/41
 - **GitHub's REST or GraphQL API with a token Herdly stores.** This would need Herdly's own sign-in flow and Keychain storage for a credential with repository scope. It would also create a second place where that credential can leak. `gh` already holds the user's sign-in and handles GitHub Enterprise hosts and SSO. Rejected for now.
 - **libgit2, or reading `.git` files directly for status.** Working-tree status needs the index, untracked-file rules, ignore files and filesystem metadata, and `git` already implements all of that. A second implementation could disagree with what the user sees. libgit2 would also be the first third-party dependency. Reading `.git/HEAD` stays the per-scan branch read, which runs no process.
 - **`gh pr checks` and `gh pr view` per pull request.** Two or three calls per read. `gh pr list --json` returns state, merge, mergeability and checks in one call, and it finds the pull request by branch.
-- **Polling cadence.** Reading on every 2-second scan would mean a GitHub call per row per scan and would hit rate limits. Reading only once would never see checks finish. A fixed 30-second interval while checks run, with a one-hour cap, bounds a busy hour to about 120 calls per row.
+- **Polling cadence.** Reading on every 2-second scan would mean a GitHub call per row per scan and would hit rate limits. Reading only once would never see checks finish. A fixed 30-second interval while checks run, with a one-hour cap, bounds a busy hour to about 120 calls per row. Re-reading settled verdicts every few minutes, to catch a merge after checks passed or a later push, was tried and dropped: the issue asks for refresh only while checks run.
 - **Treating "merged" as known only while Herdly watched it.** Not needed: the evidence shows a merged pull request is still found by head branch after the branch is deleted.
 
 ## Not yet shown live

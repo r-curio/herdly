@@ -415,9 +415,10 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - Claude's rows: "Usage limits on the strip" (the current "5h 32% · 7d 61%" reading before the switch, "Unavailable" when no window is current, or, with an orange dot, why usage cannot be read) and "Name sessions with Haiku", without descriptions.
   - The GitHub card (#417, Paper "Herdly Settings", page "GitHub status in Agents (2026-11-13)", frames 01–03) follows Claude Code, 28pt below it. Its tile is near-black slate with a white `arrow.triangle.branch`, and its title is "GitHub".
     - Subtitles: "GitHub CLI <version> · signed in to github.com", "GitHub CLI <version> · signed out", or "GitHub CLI not installed".
-    - Status: green Connected, orange Sign in required, or gray Not installed. Gray Checking shows until the first check, and gray Status unknown when the sign-in cannot be read.
-    - Its ⋯ menu holds Check Again.
-    - Connected: one row, "Pull request status on finished rows", with a mini switch. It is on by default while `gh` is installed and signed in, and the user's choice is kept once made.
+    - Status: green Connected, orange Sign in required, or gray Not installed. Gray Checking shows until the first check.
+    - Gray Status unknown is not in the Paper frames. It shows when the sign-in cannot be read, or when the switch is off and no earlier check is remembered. It has no switch row unless the user turned the switch on.
+    - Its ⋯ menu holds Check Again, disabled while the switch is off, because then no `gh` runs. With the switch off the card shows the last check, or Not installed when `gh` is missing on disk.
+    - Connected: one row, "Pull request status on finished rows", with a mini switch. It is on by default while `gh` is installed and signed in, and the user's choice is kept once made. Once the user has turned it on, the row stays in every state so it can be turned off. Turning it on checks `gh` again.
     - Signed out: a "GitHub CLI" row with an orange dot and "Sign in from a terminal, then finished rows show pull requests". Under it, right-aligned, `gh auth login` in 12pt monospace with a small Copy button.
     - Not installed: the same row with a gray dot, "Optional. Install it to see pull requests on finished rows", then `brew install gh` with Copy.
     - Herdly never runs either command. Copy's VoiceOver hint says so.
