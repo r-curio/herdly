@@ -30,12 +30,14 @@ public struct AgentProblem: Equatable, Sendable, Identifiable {
 public enum AgentHeaderStatus: Equatable, Sendable {
     case connected
     case attention(String)
+    /// A short reason that asks nothing of the user, with a gray dot (GitHub CLI not installed, #417).
+    case unavailable(String)
     case checking
 
     public var title: String {
         switch self {
         case .connected: "Connected"
-        case .attention(let reason): reason
+        case .attention(let reason), .unavailable(let reason): reason
         case .checking: "Checking"
         }
     }

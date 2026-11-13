@@ -71,7 +71,7 @@ enum AgentUpdateRunner {
         return .timedOut
     }
 
-    private enum Wait: Equatable {
+    enum Wait: Equatable {
         /// Exit status; death by signal reads as 128 + signal.
         case exited(Int32)
         case running
@@ -82,32 +82,42 @@ enum AgentUpdateRunner {
     /// Starts the command as the leader of a new process group, with /dev/null as stdin, the two
     /// pipes as stdout and stderr, and every other descriptor of Herdly's closed.
     private static func spawn(_ command: AgentUpdateCommand, stdout: Int32, stderr: Int32) -> pid_t? {
+        spawnGroup(executable: command.executable, arguments: command.arguments,
+                   environment: environment(for: URL(fileURLWithPath: command.executable)), stdout: stdout, stderr: stderr)
+    }
+
+    /// Starts `executable` as the leader of a new process group, so the whole group can be signalled,
+    /// with /dev/null as stdin, `stdout` as fd 1, `stderr` as fd 2 (/dev/null when nil), and every other
+    /// descriptor of Herdly's closed. Also used by `ProcessWorkStatusRunner` (#417).
+    static func spawnGroup(executable: String, arguments: [String], environment: [String: String],
+                           stdout: Int32, stderr: Int32?) -> pid_t? {
         var actions: posix_spawn_file_actions_t?
         var attributes: posix_spawnattr_t?
         guard posix_spawn_file_actions_init(&actions) == 0 else { return nil }
         defer { posix_spawn_file_actions_destroy(&actions) }
         guard posix_spawnattr_init(&attributes) == 0 else { return nil }
         defer { posix_spawnattr_destroy(&attributes) }
+        let errors = stderr.map { posix_spawn_file_actions_adddup2(&actions, $0, 2) }
+            ?? posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0)
         guard posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0) == 0,
-              posix_spawn_file_actions_adddup2(&actions, stdout, 1) == 0,
-              posix_spawn_file_actions_adddup2(&actions, stderr, 2) == 0,
+              posix_spawn_file_actions_adddup2(&actions, stdout, 1) == 0, errors == 0,
               posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT)) == 0,
               posix_spawnattr_setpgroup(&attributes, 0) == 0 else { return nil }
-        let arguments = ([command.executable] + command.arguments).map { strdup($0) } + [nil]
-        let environment = environment(for: URL(fileURLWithPath: command.executable))
-            .map { strdup("\($0.key)=\($0.value)") } + [nil]
+        let argv = ([executable] + arguments).map { strdup($0) } + [nil]
+        let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer {
-            arguments.forEach { free($0) }
-            environment.forEach { free($0) }
+            argv.forEach { free($0) }
+            envp.forEach { free($0) }
         }
         var pid: pid_t = 0
-        guard posix_spawn(&pid, command.executable, &actions, &attributes, arguments, environment) == 0 else { return nil }
+        guard posix_spawn(&pid, executable, &actions, &attributes, argv, envp) == 0 else { return nil }
         return pid
     }
 
     /// Polls until `pid` exits or `deadline` passes. With `reap` false the exited leader stays a
     /// zombie (`WNOWAIT`), keeping its pid and process group reserved for a later `killpg`.
-    private static func waitForExit(_ pid: pid_t, until deadline: Date, reap: Bool) -> Wait {
+    /// Also used by `ProcessWorkStatusRunner` (#417).
+    static func waitForExit(_ pid: pid_t, until deadline: Date, reap: Bool) -> Wait {
         while true {
             if reap {
                 var status: Int32 = 0

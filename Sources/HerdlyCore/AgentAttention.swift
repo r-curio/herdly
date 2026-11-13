@@ -259,6 +259,12 @@ public struct AgentAttentionItem: Identifiable, Equatable, Sendable {
     public let running: AgentRunning?
     public let unavailableReason: String?
 
+    /// The turn this row is about: its running turn, approval, question or outcome. Nil for a row that
+    /// names none (status unavailable); an approval without a turn names an empty one.
+    public var turn: String? {
+        running?.identity.turn ?? approval?.identity.turn ?? question?.identity.turn ?? outcome?.turn
+    }
+
     /// The latest evidence for this row: a running turn's newest observation, otherwise its arrival.
     /// Used only by the optional "Last update" sort.
     public var lastUpdate: Double { running?.updatedAt ?? arrivedAt }
