@@ -84,9 +84,10 @@ public enum CodexUsageReader {
     private static let memo = StampedFileMemo<CodexUsageReading?>()
 
     /// Rollouts from the newest day directories, newest modification first, at most `limit`
-    /// (`RolloutDays`, which lists a directory again only when it changed).
+    /// (`RolloutDays`, which lists a directory again only when it changed). This is the one place
+    /// the readers' wall clock for `RolloutDays` is taken.
     static func newestRollouts(root: URL, limit: Int = maximumFiles) -> [(url: URL, modified: Date)] {
-        RolloutDays.newest(root: root, limit: limit)
+        RolloutDays.newest(root: root, limit: limit, now: Date().timeIntervalSince1970)
     }
 
     /// An open handle and the size of a regular, non-symlinked file; nil for anything else.

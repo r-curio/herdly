@@ -34,6 +34,9 @@ private func freshListing(root: URL, limit: Int) -> [(url: URL, modified: Date)]
     return files.sorted { $0.1 == $1.1 ? $0.0.path > $1.0.path : $0.1 > $1.1 }.prefix(limit).map { (url: $0.0, modified: $0.1) }
 }
 
+/// A wall clock long after every directory here was made, so a kept listing is trusted.
+private let settled = Date().timeIntervalSince1970 + 3_600
+
 private struct Tree {
     let root: URL
 
@@ -70,7 +73,7 @@ private struct Tree {
     /// The kept listing and a fresh one agree at every limit the readers use.
     func expectSame(_ comment: Comment, sourceLocation: SourceLocation = #_sourceLocation) {
         for limit in [1, CodexUsageReader.maximumFiles, SessionDiscovery.maximumFiles, ReminderReader.maximumChildProbes] {
-            let kept = RolloutDays.newest(root: root, limit: limit), fresh = freshListing(root: root, limit: limit)
+            let kept = RolloutDays.newest(root: root, limit: limit, now: settled), fresh = freshListing(root: root, limit: limit)
             #expect(kept.map(\.url.path) == fresh.map(\.url.path), comment, sourceLocation: sourceLocation)
             #expect(kept.map(\.url) == fresh.map(\.url), comment, sourceLocation: sourceLocation)
             #expect(kept.map(\.modified) == fresh.map(\.modified), comment, sourceLocation: sourceLocation)
@@ -181,36 +184,36 @@ private struct Tree {
     try tree.write("2026/10/30/c.jsonl", modified: 1_800_000_020)
     func reads() -> Int { RolloutDays.directoryReads(root: tree.root) }
 
-    _ = RolloutDays.newest(root: tree.root, limit: 24)
+    _ = RolloutDays.newest(root: tree.root, limit: 24, now: settled)
     // The root, one year, two months and three days.
     #expect(reads() == 7)
-    for limit in [8, 24, 200, 24] { _ = RolloutDays.newest(root: tree.root, limit: limit) }
+    for limit in [8, 24, 200, 24] { _ = RolloutDays.newest(root: tree.root, limit: limit, now: settled) }
     #expect(reads() == 7)
 
     // An append changes the rollout alone: seen without listing anything.
     try tree.write("2026/11/12/a.jsonl", "{}\n{}\n", modified: 1_800_000_100)
-    #expect(RolloutDays.newest(root: tree.root, limit: 24).first?.url.lastPathComponent == "a.jsonl")
+    #expect(RolloutDays.newest(root: tree.root, limit: 24, now: settled).first?.url.lastPathComponent == "a.jsonl")
     #expect(reads() == 7)
 
     // A new rollout changes its day directory, which alone is listed again.
     try tree.write("2026/11/11/d.jsonl", modified: 1_800_000_200)
-    #expect(RolloutDays.newest(root: tree.root, limit: 24).first?.url.lastPathComponent == "d.jsonl")
+    #expect(RolloutDays.newest(root: tree.root, limit: 24, now: settled).first?.url.lastPathComponent == "d.jsonl")
     #expect(reads() == 8)
     // A new day changes its month.
     try tree.write("2026/11/13/e.jsonl", modified: 1_800_000_300)
-    #expect(RolloutDays.newest(root: tree.root, limit: 24).first?.url.lastPathComponent == "e.jsonl")
+    #expect(RolloutDays.newest(root: tree.root, limit: 24, now: settled).first?.url.lastPathComponent == "e.jsonl")
     #expect(reads() == 10)
-    _ = RolloutDays.newest(root: tree.root, limit: 24)
+    _ = RolloutDays.newest(root: tree.root, limit: 24, now: settled)
     #expect(reads() == 10)
 }
 
 @Test func aRolloutTreeThatDisappearsIsNotKept() throws {
     let tree = try Tree()
     try tree.write("2026/11/12/a.jsonl", modified: 1_800_000_000)
-    #expect(RolloutDays.newest(root: tree.root, limit: 24).count == 1)
+    #expect(RolloutDays.newest(root: tree.root, limit: 24, now: settled).count == 1)
     #expect(RolloutDays.keeps(root: tree.root))
     tree.remove()
-    #expect(RolloutDays.newest(root: tree.root, limit: 24).isEmpty)
+    #expect(RolloutDays.newest(root: tree.root, limit: 24, now: settled).isEmpty)
     #expect(!RolloutDays.keeps(root: tree.root))
 }
 
@@ -254,4 +257,60 @@ private func rolloutLines(session: UUID, turn: UUID) -> String {
     #expect(found(written + SessionDiscovery.maximumAge) == [turn])
     #expect(found(written + SessionDiscovery.maximumAge + 0.001).isEmpty)
     #expect(found(written + SessionDiscovery.maximumAge) == [turn])
+}
+
+@Test func equalMarksAreTrustedOnlyOnceTheDirectoryHadBeenQuietWhenTheMarkWasTaken() throws {
+    let tree = try Tree()
+    defer { tree.remove() }
+    try tree.write("2026/11/12/a.jsonl")
+    let day = tree.root.appendingPathComponent("2026/11/12")
+    let mark = try #require(RolloutDays.Mark(day))
+    let touched = max(mark.modifiedAt, mark.changedAt)
+    func kept(markedAt: Double) -> RolloutDays.Listed { RolloutDays.Listed(mark: mark, markedAt: markedAt, visible: [], hidden: []) }
+    // The same mark, young and old: a rollout made in the same clock tick as a young mark would not change it.
+    #expect(!kept(markedAt: touched).reusable(for: mark))
+    #expect(!kept(markedAt: touched + RolloutDays.settleTime - 0.01).reusable(for: mark))
+    #expect(kept(markedAt: touched + RolloutDays.settleTime + 0.01).reusable(for: mark))
+    #expect(kept(markedAt: touched + 86_400).reusable(for: mark))
+    // A clock behind the directory's own times, or no clock at all, is never trusted.
+    #expect(!kept(markedAt: touched - 100).reusable(for: mark))
+    #expect(!kept(markedAt: .nan).reusable(for: mark))
+    #expect(!kept(markedAt: -.infinity).reusable(for: mark))
+    // An old mark is still only good for the same mark.
+    try tree.write("2026/11/12/b.jsonl")
+    #expect(!kept(markedAt: touched + 86_400).reusable(for: try #require(RolloutDays.Mark(day))))
+}
+
+@Test func aDirectoryMarkedWhileYoungIsListedAgainUntilItHasBeenQuiet() throws {
+    let tree = try Tree()
+    defer { tree.remove() }
+    try tree.write("2026/11/12/a.jsonl", modified: 1_800_000_000)
+    try tree.write("2026/11/11/b.jsonl", modified: 1_800_000_010)
+    func reads() -> Int { RolloutDays.directoryReads(root: tree.root) }
+    func names(now: Double) -> [String] { RolloutDays.newest(root: tree.root, limit: 24, now: now).map(\.url.lastPathComponent) }
+    // Just made: the root, a year, a month and two days are listed on every call.
+    let young = Date().timeIntervalSince1970
+    #expect(names(now: young) == ["b.jsonl", "a.jsonl"])
+    #expect(reads() == 5)
+    #expect(names(now: young + 1) == ["b.jsonl", "a.jsonl"])
+    #expect(reads() == 10)
+    // A clock that went backwards, or is no clock, lists again too.
+    #expect(names(now: young - 1_000) == ["b.jsonl", "a.jsonl"])
+    #expect(names(now: .nan) == ["b.jsonl", "a.jsonl"])
+    #expect(reads() == 20)
+    // Quiet for long enough: the marks kept so far were taken young, so one more listing, then none.
+    #expect(names(now: young + 60) == ["b.jsonl", "a.jsonl"])
+    #expect(reads() == 25)
+    #expect(names(now: young + 62) == ["b.jsonl", "a.jsonl"])
+    #expect(names(now: young + 64) == ["b.jsonl", "a.jsonl"])
+    #expect(reads() == 25)
+    // A new rollout makes its day young again: that day alone is listed until it has been quiet.
+    try tree.write("2026/11/12/c.jsonl", modified: 1_800_000_020)
+    let added = Date().timeIntervalSince1970
+    #expect(names(now: added).first == "c.jsonl")
+    #expect(names(now: added + 1).first == "c.jsonl")
+    #expect(reads() == 27)
+    #expect(names(now: young + 120).first == "c.jsonl")
+    #expect(names(now: young + 122).first == "c.jsonl")
+    #expect(reads() == 28)
 }

@@ -63,6 +63,8 @@ func readerCostRolloutReaders() throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let now = Date()
     try writeSyntheticRollouts(in: root, now: now)
+    // A directory's listing is kept only once it has been quiet for `RolloutDays.settleTime`.
+    Thread.sleep(forTimeInterval: RolloutDays.settleTime + 0.5)
     report("SessionDiscovery.candidates") { _ = SessionDiscovery.candidates(root: root, now: now.timeIntervalSince1970) }
     report("CodexSubagentReader.activity") { _ = CodexSubagentReader.activity(root: root, now: now.timeIntervalSince1970) }
     report("CodexUsageReader.latest") { _ = CodexUsageReader.latest(root: root) }

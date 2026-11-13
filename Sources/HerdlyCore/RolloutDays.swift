@@ -15,19 +15,32 @@ import Foundation
 /// is compared too (a permission change), and the hidden flag, which hides an entry from the listing
 /// without touching its parent, is read from each entry's own `lstat`. A listing that could not be
 /// read, or whose directory could not be `lstat`'ed first, is never kept.
+///
+/// Equal marks prove nothing while a directory is still young. A volume with coarse timestamps
+/// (exFAT, SMB, NFS: one or two seconds) gives a rollout created just after a listing the same
+/// directory times that listing saw. So, as git does for its index, a kept listing is trusted only
+/// when its mark was taken at least `settleTime` after the directory's last change; until then the
+/// directory is listed again on every call, as it was before anything was kept.
 enum RolloutDays {
     /// Roots kept at once; the least recently walked is dropped past it. The app reads one.
     static let maximumRoots = 16
+    /// How long after a directory's last change its mark must have been taken to be trusted: past
+    /// the two seconds of the coarsest timestamps in use (FAT), with a second to spare.
+    static let settleTime: Double = 3
 
     /// At most `limit` rollouts from the newest `CodexUsageReader.maximumDays` day directories under
     /// `root`, looking at no more than the three newest years and their three newest months.
-    static func newest(root: URL, limit: Int) -> [(url: URL, modified: Date)] {
+    ///
+    /// `now` is the wall clock in seconds since 1970, the clock directory times are written in: each
+    /// mark taken during this call is dated with it (`settleTime`). A clock that has gone backwards
+    /// or is not a number only makes marks untrusted, so directories are listed again.
+    static func newest(root: URL, limit: Int, now: Double) -> [(url: URL, modified: Date)] {
         let key = root.standardizedFileURL.path
-        var walk = Walk(root: root, previous: cache.walk(key))
+        var walk = Walk(root: root, previous: cache.walk(key), now: now)
         var reads = walk.reads
         // A kept listing named something that is gone or hidden now: read the tree with nothing reused.
         if walk.stale {
-            walk = Walk(root: root, previous: nil)
+            walk = Walk(root: root, previous: nil, now: now)
             reads += walk.reads
         }
         cache.store(walk.directories.isEmpty ? nil : walk, reads: reads, for: key)
@@ -64,6 +77,9 @@ enum RolloutDays {
         let hidden: Bool
 
         var isDirectory: Bool { mode & S_IFMT == S_IFDIR }
+        /// The modification and status-change times as seconds since 1970.
+        var modifiedAt: Double { Double(modifiedSeconds) + Double(modifiedNanoseconds) / 1_000_000_000 }
+        var changedAt: Double { Double(changedSeconds) + Double(changedNanoseconds) / 1_000_000_000 }
 
         /// The modification time as `URLResourceValues.contentModificationDate` gives it.
         var modified: Date {
@@ -90,6 +106,15 @@ enum RolloutDays {
     /// One directory as last listed, under the mark taken before listing it.
     struct Listed: Sendable {
         let mark: Mark
+        /// The wall clock when `mark` was taken.
+        let markedAt: Double
+
+        /// Whether this listing still stands for a directory whose mark is now `current`: the same
+        /// mark, taken once the directory had been unchanged for `settleTime`. False when the clock
+        /// that dated the mark was behind the directory's own times or was not a number.
+        func reusable(for current: Mark) -> Bool {
+            mark == current && markedAt - max(mark.modifiedAt, mark.changedAt) >= RolloutDays.settleTime
+        }
         /// The entries the walk uses: numbered directories, newest first, or rollouts.
         let visible: [URL]
         /// Entries that would be used but for their hidden flag; one that loses it must be noticed.
@@ -108,20 +133,20 @@ enum RolloutDays {
         var stale = false
         var reads = 0
 
-        fileprivate init(root: URL, previous: Walk?) {
+        fileprivate init(root: URL, previous: Walk?, now: Double) {
             var changed = previous == nil
             var days: [URL] = []
             let maximumDays = CodexUsageReader.maximumDays
-            outer: for year in children(of: root, .numberedDirectories, previous, &changed).prefix(3) {
-                for month in children(of: year, .numberedDirectories, previous, &changed).prefix(3) {
-                    for day in children(of: month, .numberedDirectories, previous, &changed) {
+            outer: for year in children(of: root, .numberedDirectories, previous, now, &changed).prefix(3) {
+                for month in children(of: year, .numberedDirectories, previous, now, &changed).prefix(3) {
+                    for day in children(of: month, .numberedDirectories, previous, now, &changed) {
                         days.append(day)
                         if days.count == maximumDays { break outer }
                     }
                 }
             }
             for day in days {
-                for url in children(of: day, .rollouts, previous, &changed) {
+                for url in children(of: day, .rollouts, previous, now, &changed) {
                     let mark = Mark(url)
                     if previous != nil, mark == nil || mark?.hidden == true { stale = true }
                     files.append((url, mark?.modified ?? .distantPast))
@@ -136,13 +161,14 @@ enum RolloutDays {
         }
 
         /// The entries of `directory` the walk uses, from `previous` while the directory is unchanged.
-        private mutating func children(of directory: URL, _ kind: Kind, _ previous: Walk?, _ changed: inout Bool) -> [URL] {
+        private mutating func children(of directory: URL, _ kind: Kind, _ previous: Walk?, _ now: Double,
+                                       _ changed: inout Bool) -> [URL] {
             // Taken before listing, so a change during the listing shows as a new mark next time.
             let mark = Mark(directory)
             // The parent's kept listing named this as a directory that is not hidden.
             if previous != nil, mark == nil || mark?.hidden == true || mark?.isDirectory == false { stale = true }
             let path = directory.path
-            if let mark, let kept = previous?.directories[path], kept.mark == mark,
+            if let mark, let kept = previous?.directories[path], kept.reusable(for: mark),
                kept.hidden.allSatisfy({ Mark($0)?.hidden == true }) {
                 directories[path] = kept
                 return kept.visible
@@ -150,7 +176,7 @@ enum RolloutDays {
             changed = true
             reads += 1
             guard let listed = Self.list(directory, kind) else { return [] }
-            if let mark { directories[path] = Listed(mark: mark, visible: listed.visible, hidden: listed.hidden) }
+            if let mark { directories[path] = Listed(mark: mark, markedAt: now, visible: listed.visible, hidden: listed.hidden) }
             return listed.visible
         }
 
