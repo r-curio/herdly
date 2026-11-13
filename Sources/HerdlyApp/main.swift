@@ -102,12 +102,34 @@ enum DesktopReadStateStatus: Equatable, Sendable {
     }
 }
 
+/// The app the notch hotkey took the keyboard from (#427). The bundle identifier guards against a
+/// reused process identifier: a different app under the same pid is never activated.
+struct RememberedApp: Equatable, Sendable {
+    let processIdentifier: pid_t
+    let bundleIdentifier: String?
+
+    init(_ app: NSRunningApplication) {
+        processIdentifier = app.processIdentifier
+        bundleIdentifier = app.bundleIdentifier
+    }
+
+    @MainActor var running: NSRunningApplication? {
+        guard let app = NSRunningApplication(processIdentifier: processIdentifier), !app.isTerminated,
+              app.bundleIdentifier == bundleIdentifier else { return nil }
+        return app
+    }
+
+    @MainActor var isRunning: Bool { running != nil }
+}
+
 @MainActor
 final class NotchPanel: NSPanel {
-    /// Key status is only ever taken by a deliberate click or Tab into the panel; automatic
-    /// presentation uses orderFrontRegardless, which never makes the panel key.
+    /// Key status is only ever taken by a deliberate click, Tab into the panel, or the notch hotkey
+    /// (#427); automatic presentation uses orderFrontRegardless, which never makes the panel key.
     override var canBecomeKey: Bool { true }
     var onEscape: (() -> Void)?
+    /// The panel gave up key status (another app or window took it, or the panel was ordered out).
+    var onResignKey: (() -> Void)?
     /// Up and Down arrows move the queue's row selection; Return acts on the selected row. Only
     /// keys no control in the panel handled reach here. Each returns false when it did nothing, so
     /// the key continues to AppKit.
@@ -126,8 +148,8 @@ final class NotchPanel: NSPanel {
         static let upArrow: UInt16 = 126
         static let rightArrow: UInt16 = 124
     }
-    /// True once the user has clicked in the panel; launch or app activation can also make the
-    /// panel key, and that must not count as the user interacting with it.
+    /// True once the user has clicked in the panel or pressed the notch hotkey; launch or app
+    /// activation can also make the panel key, and that must not count as the user interacting with it.
     private(set) var clickedForKey = false
 
     override func sendEvent(_ event: NSEvent) {
@@ -138,10 +160,24 @@ final class NotchPanel: NSPanel {
     override func resignKey() {
         clickedForKey = false
         super.resignKey()
+        onResignKey?()
     }
 
-    /// Keyboard focus the user asked for by clicking, as opposed to key status handed over at launch.
+    /// Keyboard focus the user asked for by clicking or by the hotkey, as opposed to key status
+    /// handed over at launch.
     var hasDeliberateKeyboardFocus: Bool { isKeyWindow && clickedForKey }
+
+    /// The notch hotkey (#427): the panel takes the keyboard as a click gives it, without activating
+    /// Herdly, so the user's app stays frontmost and gets typing back when the panel lets go. Only if
+    /// the window server refuses key status to the inactive app is Herdly activated to take it.
+    func takeKeyboardFromHotkey() {
+        makeKeyAndOrderFront(nil)
+        if !isKeyWindow {
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            makeKeyAndOrderFront(nil)
+        }
+        clickedForKey = isKeyWindow
+    }
 
     /// Escape follows `NotchPresentationController.escape()`: a clicked card steps back to the
     /// queue; otherwise the panel collapses and returns keyboard input to the app the user was using.
@@ -711,6 +747,19 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// After Escape, hover does not reopen the panel until the pointer has left it.
     private var hoverSuppressed = false
     private var notchPresentation = NotchPresentationController()
+    /// Settings › Notch › Keyboard (#427): the hotkey and its switch. Changed only through
+    /// `setHotkeySetting`, which saves it and registers it again at once.
+    @Published private(set) var hotkeySetting = NotchHotkeySetting.load { UserDefaults.standard.string(forKey: $0) }
+    /// The last registration's outcome; Settings shows its problem line.
+    @Published private(set) var hotkeyStatus = NotchHotkeyStatus.off
+    /// While Settings records a new shortcut the current one is unregistered, so pressing it is recorded.
+    @Published private(set) var recordingHotkey = false
+    private let hotkeyRegistrar = NotchHotkeyRegistrar()
+    /// The app the hotkey took the keyboard from, given it back on hand-back (`NotchKeyboardReturn`).
+    private var keyboardReturn = NotchKeyboardReturn<RememberedApp>()
+    /// The shortcut the queue's foot line names while the hotkey's queue holds the keyboard (Paper K
+    /// "A · Hotkey"); nil otherwise, so a clicked queue shows no foot line.
+    @Published private(set) var keyboardQueueHotkey: String?
     /// Fresh IDs stay pending until an eligible card is selected for the single shared spotlight.
     /// Keeping all IDs lets a Claude card remain eligible when a same-scan Codex card is newer.
     private var freshAgentRequestIDs: Set<AgentAttentionID> = []
@@ -846,6 +895,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         panel.onRight = { [weak self] in self?.openSelectedEarlierFold() ?? false }
         panel.onDigit = { [weak self] in self?.pressQuestionCardKey(.digit($0)) ?? false }
+        // Another app taking the keyboard ends the hotkey's entry: nothing is re-activated later, and
+        // the next refresh lets the hotkey's queue fold.
+        panel.onResignKey = { [weak self] in
+            guard let self else { return }
+            self.keyboardReturn.forget()
+            Task { @MainActor in self.refresh() }
+        }
+        hotkeyRegistrar.onPress = { [weak self] in self?.hotkeyPressed() }
+        // Screenshot previews never claim the shortcut from the user's own Herdly.
+        if previewMode == nil { registerHotkey() }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in Task { @MainActor in self?.refresh() } }
@@ -1929,7 +1988,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         if let mode = previewMode, Self.spotlightPreviewModes.contains(mode), let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
         let resolvedPresentation = notchPresentation.update(interacting: interacting, draftInProgress: notchDraftInProgress,
+                                                            keyboardFocus: panel.hasDeliberateKeyboardFocus,
                                                             now: now, legacyPopup: attention.expanded, queued: liveAgentIDs)
+        let hint = notchPresentation.keyboardHoldsQueue ? hotkeySetting.hotkey.title : nil
+        if keyboardQueueHotkey != hint { keyboardQueueHotkey = hint }
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
         case "expanded", "empty-expanded", "empty-not-connected", "row-note", "row-note-reply": presentationMode = .queue
@@ -1950,13 +2012,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 earlierFold = .automatic
                 openQueueFolds = []
                 closeOpenRunningRow()
-                // A clicked panel that folds because the pointer left still holds key status;
-                // ordering it out drops it and hands typing back to the user's app, as Escape does.
-                // The strip is ordered front again below, without becoming key.
-                if panel.isKeyWindow {
-                    panel.orderOut(nil)
-                    NSWorkspace.shared.frontmostApplication?.activate()
-                }
+                // A clicked panel that folds because the pointer left, or the hotkey's panel folding for
+                // any reason, still holds key status; ordering it out drops it and hands typing back to
+                // the user's app, as Escape does. The strip is ordered front again below, without
+                // becoming key.
+                handBackKeyboard()
             }
         }
         reconcileSelection()
@@ -1984,8 +2044,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // One panel, one queue: the display is chosen by the documented rule (the pinned display when
         // there is one) and frozen while the user is interacting, so controls never move away
         // mid-action. Only geometry changes here.
+        // The hotkey's queue is frozen too, so it never jumps to the pointer's display mid-keystroke.
+        let placementFrozen = (interacting || notchPresentation.keyboardHoldsQueue) && panel.isVisible
         guard let display = NotchDisplaySelection.choose(displays: Companion.attachedDisplays(), pointer: NSEvent.mouseLocation,
-                                                         current: currentDisplayID, interacting: interacting && panel.isVisible,
+                                                         current: currentDisplayID, interacting: placementFrozen,
                                                          preference: notchDisplayPreference)
         else { panel.orderOut(nil); currentDisplayID = nil; return }
         currentDisplayID = display.id
@@ -2184,11 +2246,72 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         notchPresentation.collapse()
         hoverSuppressed = true
         hoverHold = HoverHold()
-        if panel.isKeyWindow {
-            panel.orderOut(nil)
-            NSWorkspace.shared.frontmostApplication?.activate()
-        }
+        handBackKeyboard()
         refresh()
+    }
+
+    /// Gives the keyboard back as the panel folds, by Escape, the hotkey, or on its own (#427). Only
+    /// a key panel has anything to give: it is ordered out, and the app the hotkey took the keyboard
+    /// from is re-activated if it still runs. A clicked panel re-activates the app still in front, as
+    /// before. When the remembered app has quit Herdly activates nothing and macOS chooses.
+    private func handBackKeyboard() {
+        guard panel.isKeyWindow else { keyboardReturn.forget(); return }
+        // Decided before ordering out: resigning key forgets the remembered app.
+        let action = keyboardReturn.handBack(isRunning: \.isRunning,
+                                             frontmost: NSWorkspace.shared.frontmostApplication.map(RememberedApp.init),
+                                             herdly: RememberedApp(.current))
+        panel.orderOut(nil)
+        switch action {
+        case .activate(let app): app.running?.activate()
+        case .leaveToSystem: if NSApp.isActive { NSApp.deactivate() }
+        case .reactivateFrontmost: NSWorkspace.shared.frontmostApplication?.activate()
+        }
+    }
+
+    /// The notch hotkey (#427). With the keyboard already in the notch it hands back, as Escape at the
+    /// top level does. Otherwise it remembers the frontmost app and takes the keyboard: into the card
+    /// on screen, or into the queue with its top row selected. It pauses no countdown (ADR 0020).
+    func hotkeyPressed() {
+        switch NotchKeyboardEntry.press(keyboardInNotch: panel.hasDeliberateKeyboardFocus) {
+        case .handBack:
+            collapse()
+        case .enter:
+            keyboardReturn.enter(frontmost: NSWorkspace.shared.frontmostApplication.map(RememberedApp.init))
+            let target = NotchKeyboardEntry.target(showing: presentationMode)
+            if target == .queue { notchPresentation.openQueueForKeyboard() }
+            hoverSuppressed = false
+            panel.takeKeyboardFromHotkey()
+            // Taking key status can lose a race with the app it came from; the entry is then forgotten.
+            if !panel.hasDeliberateKeyboardFocus { keyboardReturn.forget() }
+            refresh()
+            if target == .queue {
+                let selection = NotchKeyboardEntry.firstSelection(rows: selectableRows)
+                if selection != queueSelection { queueSelection = selection }
+            }
+        }
+    }
+
+    /// Settings › Notch › Keyboard: saves the switch and shortcut and registers them at once.
+    func setHotkeySetting(_ setting: NotchHotkeySetting) {
+        guard setting != hotkeySetting else { return }
+        hotkeySetting = setting
+        setting.save { UserDefaults.standard.set($1, forKey: $0) }
+        registerHotkey()
+    }
+
+    /// The recorder takes the shortcut away while it listens, then puts the current one back.
+    func setRecordingHotkey(_ recording: Bool) {
+        guard recording != recordingHotkey else { return }
+        recordingHotkey = recording
+        registerHotkey()
+    }
+
+    private func registerHotkey() {
+        let wanted = hotkeySetting.enabled && !recordingHotkey ? hotkeySetting.hotkey : nil
+        let status = hotkeyRegistrar.register(wanted)
+        // While recording, the switch is still on: no problem line for the pause.
+        let shown = recordingHotkey && hotkeySetting.enabled ? .registered : status
+        if hotkeyStatus != shown { hotkeyStatus = shown }
     }
 
     @objc func sendTest() {

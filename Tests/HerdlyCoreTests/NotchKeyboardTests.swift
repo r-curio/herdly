@@ -35,31 +35,44 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
 @Test func theKeyboardGoesBackToTheAppThatHadItWhenTheHotkeyWasPressed() {
     var handBack = NotchKeyboardReturn<String>()
     handBack.enter(frontmost: "Ghostty")
-    #expect(handBack.handBack(isRunning: { _ in true }) == .activate("Ghostty"))
+    #expect(handBack.handBack(isRunning: { _ in true }, frontmost: "Ghostty", herdly: "Herdly") == .activate("Ghostty"))
 }
 
 @Test func whenThatAppHasQuitHerdlyActivatesNothingAndLeavesItToMacOS() {
     var handBack = NotchKeyboardReturn<String>()
     handBack.enter(frontmost: "Ghostty")
-    #expect(handBack.handBack(isRunning: { $0 != "Ghostty" }) == .leaveToSystem)
+    #expect(handBack.handBack(isRunning: { $0 != "Ghostty" }, frontmost: nil, herdly: "Herdly") == .leaveToSystem)
 }
 
 @Test func withNoFrontmostAppAtEntryThereIsNothingToReturnTo() {
     var handBack = NotchKeyboardReturn<String>()
     handBack.enter(frontmost: nil)
-    #expect(handBack.handBack(isRunning: { _ in true }) == .leaveToSystem)
+    #expect(handBack.handBack(isRunning: { _ in true }, frontmost: "Herdly", herdly: "Herdly") == .leaveToSystem)
+}
+
+@Test func herdlyHavingTakenActivationStillHandsBackToTheRememberedApp() {
+    var handBack = NotchKeyboardReturn<String>()
+    handBack.enter(frontmost: "Ghostty")
+    #expect(handBack.handBack(isRunning: { _ in true }, frontmost: "Herdly", herdly: "Herdly") == .activate("Ghostty"))
+}
+
+@Test func anAppBroughtForwardMeanwhileKeepsTheKeyboard() {
+    // Return on a result row opened its session in Terminal; folding must not pull Ghostty back over it.
+    var handBack = NotchKeyboardReturn<String>()
+    handBack.enter(frontmost: "Ghostty")
+    #expect(handBack.handBack(isRunning: { _ in true }, frontmost: "Terminal", herdly: "Herdly") == .reactivateFrontmost)
 }
 
 @Test func aClickedPanelHandsBackAsBeforeToTheAppStillInFront() {
     var handBack = NotchKeyboardReturn<String>()
-    #expect(handBack.handBack(isRunning: { _ in true }) == .reactivateFrontmost)
+    #expect(handBack.handBack(isRunning: { _ in true }, frontmost: "Ghostty", herdly: "Herdly") == .reactivateFrontmost)
 }
 
 @Test func theRememberedAppIsUsedOnceThenForgotten() {
     var handBack = NotchKeyboardReturn<String>()
     handBack.enter(frontmost: "Ghostty")
-    _ = handBack.handBack(isRunning: { _ in true })
-    #expect(handBack.handBack(isRunning: { _ in true }) == .reactivateFrontmost)
+    _ = handBack.handBack(isRunning: { _ in true }, frontmost: "Ghostty", herdly: "Herdly")
+    #expect(handBack.handBack(isRunning: { _ in true }, frontmost: "Ghostty", herdly: "Herdly") == .reactivateFrontmost)
 }
 
 @Test func focusLostToAnotherAppForgetsTheRememberedApp() {
@@ -67,7 +80,7 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
     handBack.enter(frontmost: "Ghostty")
     handBack.forget()
     #expect(!handBack.enteredByHotkey)
-    #expect(handBack.handBack(isRunning: { _ in true }) == .reactivateFrontmost)
+    #expect(handBack.handBack(isRunning: { _ in true }, frontmost: "Ghostty", herdly: "Herdly") == .reactivateFrontmost)
 }
 
 @Test func theHotkeyEntersWhenTheKeyboardIsElsewhereAndHandsBackWhenItIsInTheNotch() {

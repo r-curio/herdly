@@ -72,13 +72,15 @@ public struct NotchKeyboardReturn<App: Equatable & Sendable>: Equatable, Sendabl
     public mutating func forget() { entry = .none }
 
     /// What to activate as the notch gives the keyboard back. Spends the remembered app.
-    public mutating func handBack(isRunning: (App) -> Bool) -> Action {
+    /// `frontmost` is the app in front now and `herdly` is Herdly itself. When some third app has come
+    /// forward since the hotkey (an Open from the notch brought a terminal forward), that app keeps
+    /// the keyboard: the remembered app is not pulled back over it.
+    public mutating func handBack(isRunning: (App) -> Bool, frontmost: App?, herdly: App?) -> Action {
         defer { entry = .none }
-        switch entry {
-        case .none: return .reactivateFrontmost
-        case .hotkey(remembered: let app?) where isRunning(app): return .activate(app)
-        case .hotkey: return .leaveToSystem
-        }
+        guard case let .hotkey(remembered) = entry else { return .reactivateFrontmost }
+        if let frontmost, frontmost != remembered, frontmost != herdly { return .reactivateFrontmost }
+        guard let remembered, isRunning(remembered) else { return .leaveToSystem }
+        return .activate(remembered)
     }
 }
 
