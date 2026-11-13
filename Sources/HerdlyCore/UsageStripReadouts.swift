@@ -4,17 +4,18 @@ import CoreGraphics
 /// windows format their percent through it too.
 public struct UsageShare: Equatable, Sendable {
     /// As reported; values outside 0 to 100 are clamped by `fraction` and `figure`, never here.
-    public let usedPercent: Double
+    let usedPercent: Double
 
-    public init(usedPercent: Double) {
+    init(usedPercent: Double) {
         self.usedPercent = usedPercent
     }
 
+    private var clamped: Double { min(100, max(0, usedPercent)) }
     /// Length of the ring's fill, 0 to 1; a reading above 100% closes the ring and no more.
-    public var fraction: Double { min(100, max(0, usedPercent)) / 100 }
+    public var fraction: Double { clamped / 100 }
     /// The whole percent without its sign ("61"), as the open strip prints it.
-    public var figure: String { "\(Int(min(100, max(0, usedPercent)).rounded()))" }
-    public var percentText: String { figure + "%" }
+    var figure: String { "\(Int(clamped.rounded()))" }
+    var percentText: String { figure + "%" }
 }
 
 /// One usage window as a ring shows it. A window that is not reported draws no ring at all; an
@@ -29,7 +30,8 @@ public enum UsageWindowState: Equatable, Sendable {
         if case .known(let share) = self { share } else { nil }
     }
 
-    var isShown: Bool { self != .notReported }
+    /// False for a window that is not reported, which draws no ring at all.
+    public var isShown: Bool { self != .notReported }
 }
 
 /// One source's usage ring in the strip's right wing (D35), drawn left to right in the order `make`
@@ -51,7 +53,7 @@ public struct UsageStripReadout: Equatable, Sendable {
         public let text: String
         public let dim: Bool
 
-        public init(_ text: String, dim: Bool = false) {
+        init(_ text: String, dim: Bool = false) {
             self.text = text
             self.dim = dim
         }
@@ -65,18 +67,21 @@ public struct UsageStripReadout: Equatable, Sendable {
     public let weekly: UsageWindowState
     public let weeklyWindow: WeeklyWindow
 
-    public init(source: Source, fiveHour: UsageWindowState, weekly: UsageWindowState, weeklyWindow: WeeklyWindow) {
+    init(source: Source, fiveHour: UsageWindowState, weekly: UsageWindowState, weeklyWindow: WeeklyWindow) {
         self.source = source
         self.fiveHour = fiveHour
         self.weekly = weekly
         self.weeklyWindow = weeklyWindow
     }
 
-    /// No current reading at all: the empty outer track carries a dim "—", collapsed and open.
-    public var isUnknown: Bool { fiveHour.share == nil && weekly.share == nil }
-
     /// The windows the ring shows, five-hour first, in the order the open numbers print them.
     private var shownWindows: [UsageWindowState] { [fiveHour, weekly].filter(\.isShown) }
+
+    private var hasKnownWindow: Bool { shownWindows.contains { $0.share != nil } }
+
+    /// A shown window is unknown, so its empty track never reads as 0%: the collapsed ring carries
+    /// a dim "—" after it, as the open numbers do in that window's place.
+    public var showsDash: Bool { shownWindows.contains(.unknown) }
 
     /// The open strip's numbers after the ring: five-hour, a dim slash, week, one trailing percent
     /// ("61/18%"); one window alone is just that number ("58%"); an unknown window is a dim "—"
@@ -87,7 +92,7 @@ public struct UsageStripReadout: Equatable, Sendable {
             if index > 0 { runs.append(TextRun("/", dim: true)) }
             runs.append(window.share.map { TextRun($0.figure) } ?? TextRun("—", dim: true))
         }
-        guard !isUnknown, let last = runs.last else { return runs }
+        guard hasKnownWindow, let last = runs.last else { return runs }
         if last.dim { runs.append(TextRun("%")) } else { runs[runs.count - 1] = TextRun(last.text + "%") }
         return runs
     }
@@ -96,7 +101,7 @@ public struct UsageStripReadout: Equatable, Sendable {
     /// wing holds still as the numbers change, and three while a window reads 100%.
     var reservedOpenCharacters: Int {
         let figures = shownWindows.reduce(0) { $0 + ($1.share.map { max(2, $0.figure.count) } ?? 1) }
-        return figures + max(0, shownWindows.count - 1) + (isUnknown ? 0 : 1)
+        return figures + max(0, shownWindows.count - 1) + (hasKnownWindow ? 1 : 0)
     }
 
     /// What VoiceOver says for this source in the strip label, one phrase per window, e.g.
@@ -131,9 +136,9 @@ public enum UsageStripReadouts {
     /// Between a ring and its numbers or its dash.
     public static let textGap: CGFloat = 5
     /// One glyph of the 11pt system monospaced face (digits, slash, percent and dash alike).
-    public static let glyphWidth: CGFloat = 6.8
+    static let glyphWidth: CGFloat = 6.8
     /// The strip's content inset on the wing's outer side, part of the wing's width.
-    public static let contentInset: CGFloat = 8
+    static let contentInset: CGFloat = 8
 
     public static func make(codex: CodexUsageReading?, claude: ClaudeUsageReading?,
                             fiveHour: Bool = true) -> [UsageStripReadout] {
@@ -147,25 +152,25 @@ public enum UsageStripReadouts {
             readouts.append(UsageStripReadout(source: .claude, fiveHour: claudeFive, weekly: claudeSeven,
                                               weeklyWindow: fiveHour ? .sevenDay : .weekly))
         }
-        let codexWeekly = codex?.weekly.map { UsageWindowState.known(UsageShare(usedPercent: $0.usedPercent)) } ?? .unknown
+        let codexWeekly = codex?.weekly == nil ? .unknown : state(codex?.weekly?.usedPercent)
         readouts.append(UsageStripReadout(source: .codex, fiveHour: state(fiveHour ? codex?.fiveHour?.usedPercent : nil),
                                           weekly: codexWeekly, weeklyWindow: .weekly))
         return readouts
     }
 
     /// The collapsed wing: rings only, which fit the 60pt minimum (`NotchPlacement.trailingWing`).
-    /// Only Codex's unknown dash beside Claude's ring needs a few points more, so it never clips.
-    public static func collapsedWingWidth(_ readouts: [UsageStripReadout]) -> CGFloat {
+    /// Only an unknown window's dash beside another ring needs a few points more, so it never clips.
+    static func collapsedWingWidth(_ readouts: [UsageStripReadout]) -> CGFloat {
         guard !readouts.isEmpty else { return NotchPlacement.trailingWing }
         let rings = CGFloat(readouts.count) * ringSize + CGFloat(readouts.count - 1) * collapsedRingGap
-        let dashes = readouts.reduce(CGFloat(0)) { $0 + ($1.isUnknown ? textGap + glyphWidth : 0) }
+        let dashes = readouts.reduce(CGFloat(0)) { $0 + ($1.showsDash ? textGap + glyphWidth : 0) }
         return max(NotchPlacement.trailingWing, (rings + dashes + contentInset).rounded(.up))
     }
 
     /// The open wing: each ring followed by its numbers, two digits reserved per figure (three while
     /// a window reads 100%). Pass it
     /// as the placement's wing while the panel is open; the open growth then still adds to both wings.
-    public static func openWingWidth(_ readouts: [UsageStripReadout]) -> CGFloat {
+    static func openWingWidth(_ readouts: [UsageStripReadout]) -> CGFloat {
         guard !readouts.isEmpty else { return NotchPlacement.trailingWing }
         let groups = readouts.reduce(CGFloat(0)) {
             $0 + ringSize + textGap + CGFloat($1.reservedOpenCharacters) * glyphWidth

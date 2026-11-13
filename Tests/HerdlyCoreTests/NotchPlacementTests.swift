@@ -571,19 +571,24 @@ private func runs(_ readout: UsageStripReadout) -> String {
     #expect(ClaudeUsageWindow(usedPercentage: 61.6, resetsAt: 1).percentText == "62%")
     // A 0% reading is a known window with an empty fill, not the unknown dash.
     let zero = UsageStripReadouts.make(codex: CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 0, resetsAt: 1_000), fiveHour: nil), claude: nil)
-    #expect(zero.map(\.isUnknown) == [false])
+    #expect(zero.map(\.showsDash) == [false])
     #expect(zero.map(runs) == ["0%"])
     // With no reading Codex's ring is still there: an empty outer track and a dim dash.
     let none = UsageStripReadouts.make(codex: nil, claude: nil)
     #expect(none == [UsageStripReadout(source: .codex, fiveHour: .notReported, weekly: .unknown, weeklyWindow: .weekly)])
-    #expect(none[0].isUnknown)
+    #expect(none[0].showsDash)
     #expect(none.map(runs) == ["[—]"])
     #expect(none.flatMap(\.spokenLabels) == ["Codex weekly limit unknown"])
     // A five-hour reading with the week unknown: a dim dash for the week, still one trailing percent.
     let weekUnknown = UsageStripReadouts.make(codex: CodexUsageReading(weekly: nil, fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: 1_000)),
                                               claude: nil)
     #expect(weekUnknown.map(runs) == ["40[/][—]%"])
-    #expect(weekUnknown[0].isUnknown == false)
+    // Collapsed, the empty outer track still carries the dash, so the unknown week never reads as 0%.
+    #expect(weekUnknown[0].showsDash)
+    // A window that is not reported is no ring, so it needs no dash.
+    let weeklyPlan = UsageStripReadouts.make(codex: CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 0, resetsAt: 1_000), fiveHour: nil),
+                                             claude: nil)
+    #expect(weeklyPlan[0].showsDash == false)
 }
 
 @Test func usageRingLeavesOutWindowsThatAreNotReported() {
@@ -619,8 +624,12 @@ private func runs(_ readout: UsageStripReadout) -> String {
     #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: bothCodex, claude: nil)) == NotchPlacement.trailingWing)
     #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: nil, claude: nil)) == NotchPlacement.trailingWing)
     #expect(UsageStripReadouts.collapsedWingWidth([]) == NotchPlacement.trailingWing) // Hidden
-    // Codex's dash beside Claude's ring is the one case that needs more: 18 + 8 + 18 + 5 + 6.8 + 8.
+    // A dash beside another ring is the one case that needs more: 18 + 8 + 18 + 5 + 6.8 + 8.
     #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: nil, claude: bothClaude)) == 64)
+    let weekUnknown = CodexUsageReading(weekly: nil, fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: 1_000))
+    #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: weekUnknown, claude: bothClaude)) == 64)
+    // A dash beside no other ring fits the minimum.
+    #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: weekUnknown, claude: nil)) == NotchPlacement.trailingWing)
     #expect(UsageStripReadouts.wingWidth(both, expanded: false) == NotchPlacement.trailingWing)
 }
 

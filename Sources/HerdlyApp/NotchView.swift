@@ -255,8 +255,8 @@ struct Badge: View {
 /// One source's usage limits as one ring (D35): the outer ring is the weekly (Claude: seven-day)
 /// window, the inner ring the five-hour one, each a dark-well track filled clockwise from 12 o'clock
 /// in the source's hue (Codex blue, Claude orange), with no warning colour near the cap. A window
-/// that is not reported draws no ring at all; Codex with no current reading draws an empty outer
-/// track and a dim dash. Open, the ring is followed by its numbers ("61/18%"). Fill changes are not
+/// that is not reported draws no ring at all; an unknown window draws an empty track, and the ring
+/// carries a dim dash after it so it never reads as 0%. Open, the ring is followed by its numbers ("61/18%"). Fill changes are not
 /// animated. Hidden from VoiceOver; the strip label speaks it.
 struct UsageRing: View {
     let readout: UsageStripReadout
@@ -275,7 +275,7 @@ struct UsageRing: View {
             .transaction { $0.animation = nil }
             if showsNumbers {
                 numbers
-            } else if readout.isUnknown {
+            } else if readout.showsDash {
                 Text(verbatim: "—").foregroundStyle(NotchStyle.dim)
             }
         }
@@ -288,7 +288,7 @@ struct UsageRing: View {
     /// reads as a fill of 0%, and a window that is not reported draws nothing.
     @ViewBuilder
     private func arc(_ window: UsageWindowState, diameter: CGFloat) -> some View {
-        if window != .notReported {
+        if window.isShown {
             let stroke = StrokeStyle(lineWidth: UsageStripReadouts.ringLineWidth, lineCap: .butt)
             ZStack {
                 Circle().stroke(NotchStyle.well, style: stroke)
