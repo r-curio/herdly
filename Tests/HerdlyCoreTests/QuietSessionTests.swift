@@ -176,15 +176,27 @@ private func runningRow(_ queue: AgentAttentionQueue, _ session: AgentSessionIde
     #expect(QuietLine.make(running, now: t0 + 600)?.spoken == "14 minutes since this command started")
 }
 
-@Test func withoutACommandStartTheLineFallsBackToTheLastActivity() {
-    // A command with no recorded start, and a tool that is not a command, both count from the last activity.
+@Test func withoutAShownCallStartTheLineFallsBackToTheLastActivity() {
+    // A call the source reports without its start counts from the last activity.
     let unknownStart = AgentRunning(session: claude, turn: "t1", arrivedAt: t0 - 600, toolName: "Bash",
                                     toolInput: ["command": "npm test"], activityAt: t0)
     #expect(QuietLine.make(unknownStart, now: t0 + 840)?.text == "14m since the last activity")
-    let read = AgentRunning(session: claude, turn: "t1", arrivedAt: t0 - 600, toolName: "Read",
-                            toolInput: ["file_path": "/tmp/a.swift"], activityAt: t0,
+}
+
+@Test func aQuietRowStoppedOnAnyOpenCallCountsFromThatCallsStart() {
+    // Not only a shell command: any unfinished call (owner decision on #419) is "this command".
+    let read = AgentRunning(session: claude, turn: "t1", arrivedAt: t0 - 600, activityAt: t0 - 240,
                             openCall: OpenCall(name: "Read", input: ["file_path": "/tmp/a.swift"], startedAt: t0 - 240))
-    #expect(QuietLine.make(read, now: t0 + 840)?.text == "14m since the last activity")
+    #expect(read.shownCall(at: t0 + 600) == ShownCall(name: "Read", input: ["file_path": "/tmp/a.swift"], startedAt: t0 - 240))
+    #expect(QuietLine.make(read, now: t0 + 600)?.text == "14m since this command started")
+}
+
+@Test func aSubagentActiveAfterTheCallStartedDelaysQuietButTheLineStillCountsFromTheCall() {
+    let explore = SubagentActivity(id: "a1", name: "Explore", startedAt: t0 - 300, lastActivityAt: t0)
+    let row = AgentRunning(session: claude, turn: "t1", arrivedAt: t0 - 600, subagents: [explore], activityAt: t0 - 240,
+                           openCall: OpenCall(name: "WebFetch", input: [:], startedAt: t0 - 240))
+    #expect(QuietLine.make(row, now: t0 + 599) == nil)
+    #expect(QuietLine.make(row, now: t0 + 600)?.text == "14m since this command started")
 }
 
 // MARK: The strip
@@ -199,7 +211,7 @@ private func runningRow(_ queue: AgentAttentionQueue, _ session: AgentSessionIde
     let summary = AgentStripSummary.make(items: items, now: t0 + 600)
     #expect(summary.working)
     #expect(summary.sessions.map(\.session) == [claude, other])
-    #expect(summary.sessions.map(\.quiet) == [true, false])
+    #expect(summary.sessions.map(\.state) == [.quiet, .stepping])
     #expect(summary.sessions.map(\.stepping) == [false, true])
     #expect(summary.busy?.session == other)
     // Open, the wing's one sprite is the first session that still steps.

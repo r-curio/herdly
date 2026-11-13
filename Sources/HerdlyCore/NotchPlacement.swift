@@ -564,7 +564,6 @@ public struct AgentStripSession: Equatable, Sendable {
     public var working: Bool { state != .idle }
     /// Whether its sprite steps: working and not quiet.
     public var stepping: Bool { state == .stepping }
-    public var quiet: Bool { state == .quiet }
 }
 
 /// What the strip shows across agents: one sprite per session (at most `maximumSprites`, in priority

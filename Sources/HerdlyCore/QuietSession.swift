@@ -36,8 +36,23 @@ extension AgentRunning {
     }
 }
 
-/// A call the session started and has not finished, as the opened row's "now" line names it.
+/// The session's own newest unfinished call, as the source recorded it: a `PreToolUse` with no
+/// matching finish, however old.
 public struct OpenCall: Equatable, Sendable {
+    public let name: String
+    public let input: [String: String]
+    public let startedAt: Double
+
+    public init(name: String, input: [String: String], startedAt: Double) {
+        self.name = name
+        self.input = input
+        self.startedAt = startedAt
+    }
+}
+
+/// The call the opened row's "now" line names: a fresh call the source reports, whose start may be
+/// unknown, or a quiet row's open call (#419).
+public struct ShownCall: Equatable, Sendable {
     public let name: String
     public let input: [String: String]
     /// When the call started; nil when the source did not record it.
@@ -60,12 +75,13 @@ extension AgentRunning {
     /// or, once the session is quiet (#419, owner decision 2026-11-13), the session's newest unfinished
     /// call (`openCall`) however old, so the user sees what it stopped on. A finished call is never
     /// `openCall`. Decided at render time, so the line changes at the quiet moment itself.
-    public func shownCall(at now: Double) -> OpenCall? {
+    public func shownCall(at now: Double) -> ShownCall? {
         if let toolName {
             let started = openCall.flatMap { $0.name == toolName && $0.input == toolInput ? $0.startedAt : nil }
-            return OpenCall(name: toolName, input: toolInput, startedAt: started)
+            return ShownCall(name: toolName, input: toolInput, startedAt: started)
         }
-        return isQuiet(at: now) ? openCall : nil
+        guard isQuiet(at: now), let openCall else { return nil }
+        return ShownCall(name: openCall.name, input: openCall.input, startedAt: openCall.startedAt)
     }
 }
 
@@ -88,22 +104,19 @@ extension AgentAttentionItem {
 }
 
 /// The opened quiet row's "quiet" line (#419, Paper "Q3 · Opened quiet row"): how long the session has
-/// been quiet, in the rows' age format. While the "now" line shows a shell command whose start Herdly
-/// recorded, it counts from that start ("14m since this command started"); otherwise from the latest
-/// activity ("14m since the last activity"). Presentation only.
+/// been quiet, in the rows' age format. While the "now" line shows a call whose start Herdly recorded
+/// (any unfinished call, shell or not, owner decision on #419), it counts from that start ("14m since
+/// this command started"); otherwise from the latest activity ("14m since the last activity").
+/// Presentation only.
 public struct QuietLine: Equatable, Sendable {
     public let text: String
     /// What VoiceOver reads after the "quiet" label, with the unit spelled out.
     public let spoken: String
 
-    /// The line for `running` at `now`, or nil while it is not quiet. Only a shell command counts from
-    /// its own start: the frame and the word "command" are a shell's, and another open call reads
-    /// "since the last activity".
+    /// The line for `running` at `now`, or nil while it is not quiet.
     public static func make(_ running: AgentRunning, now: Double) -> QuietLine? {
         guard let activity = running.lastActivityAt, QuietRule.isQuiet(lastActivity: activity, now: now) else { return nil }
-        let shown = running.shownCall(at: now)
-        let isCommand = shown.flatMap { ToolAction(name: $0.name, input: $0.input) }?.isCommand == true
-        let command = isCommand ? shown?.startedAt.flatMap { $0.isFinite ? $0 : nil } : nil
+        let command = running.shownCall(at: now)?.startedAt.flatMap { $0.isFinite ? $0 : nil }
         let since = command ?? activity
         let what = command == nil ? "since the last activity" : "since this command started"
         return QuietLine(text: "\(QueueRowPresentation.age(since: since, now: now)) \(what)",

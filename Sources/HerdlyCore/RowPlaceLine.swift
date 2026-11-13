@@ -63,7 +63,8 @@ public struct RowPlaceLine: Equatable, Sendable {
     /// The dim text after the state ("herdly#431", or the place), or the whole place without one; it
     /// truncates first. Nil when there is nothing after the state.
     public let detail: String?
-    /// The working row has gone quiet (`QuietRule`): "quiet" follows the place.
+    /// The working row has gone quiet (`QuietRule`): "quiet" follows the place. It stays true while a
+    /// row note hides the place slot, so VoiceOver still reads "quiet" (`spoken`) though it is not drawn.
     public let quiet: Bool
 
     /// Nil when there is neither a verdict, a place, nor the quiet word to show. A label with a pull

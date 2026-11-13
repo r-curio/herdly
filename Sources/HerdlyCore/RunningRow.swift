@@ -167,7 +167,7 @@ public struct RunningRowDetails: Equatable, Sendable {
     /// unfinished call however old (#419).
     public static func make(_ running: AgentRunning, host: TerminalHost?, now time: Double) -> RunningRowDetails {
         let source = running.identity.session.sourceLabel
-        let you = prompt(running)
+        let you = Self.you(running)
         var now = running.shownCall(at: time).flatMap { Self.now(toolName: $0.name, toolInput: $0.input) }
         if now == nil && you == nil {
             now = Now(text: "Unknown", full: nil, disclosureTitle: nil, isUnknown: true)
@@ -191,7 +191,9 @@ public struct RunningRowDetails: Equatable, Sendable {
                    disclosureTitle: line.shortened ? (action?.disclosureTitle ?? "Show full action") : nil, isUnknown: false)
     }
 
-    private static func prompt(_ running: AgentRunning) -> You? {
+    /// The "you" line alone: the last prompt, which does not depend on the time, so the prompt's
+    /// disclosure can read it outside the opened row's timeline. Nil without a prompt.
+    public static func you(_ running: AgentRunning) -> You? {
         guard let prompt = nonBlank(running.prompt) else { return nil }
         let line = shortened(prompt)
         let kept = running.promptShortened

@@ -953,7 +953,7 @@ private func nowLine(_ row: AgentRunning, at now: Double) -> String? {
     #expect(row.shownCall(at: 100 + QuietRule.after - 1) == nil)
     #expect(nowLine(row, at: 100 + QuietRule.after - 1) == nil)
     // 10:00: quiet, so the unfinished command is "now" and the line counts from its start.
-    #expect(row.shownCall(at: 100 + QuietRule.after) == OpenCall(name: "Bash", input: ["command": "npm run test:e2e"], startedAt: 100))
+    #expect(row.shownCall(at: 100 + QuietRule.after) == ShownCall(name: "Bash", input: ["command": "npm run test:e2e"], startedAt: 100))
     #expect(nowLine(row, at: 100 + QuietRule.after) == "$ npm run test:e2e")
     #expect(QuietLine.make(row, now: 100 + 14 * 60)?.text == "14m since this command started")
 }

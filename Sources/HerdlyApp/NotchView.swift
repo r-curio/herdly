@@ -2343,9 +2343,8 @@ struct Notch: View {
     private func runningDetails(_ item: AgentAttentionItem, subject: String, herdr: HerdrOpenAvailability,
                                 codexOpen: Bool) -> some View {
         if let running = item.running {
-            // The prompt's disclosure below reads `you`, which does not depend on the time.
-            let details = RunningRowDetails.make(running, host: model.lastSeenHost(for: item.session),
-                                                 now: Date().timeIntervalSince1970)
+            // The prompt's disclosure below reads only `you`, which does not depend on the time.
+            let you = RunningRowDetails.you(running)
             let promptKey = "prompt:\(item.session.session)"
             let agent = item.session.source.displayName
             // #397: with running subagents, a switcher above the lines picks whose they are. Every
@@ -2397,7 +2396,7 @@ struct Notch: View {
                 }
                 if item.session.source == .claude { claudeReturnMessage(item) }
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if shownSubagent == nil, let you = details.you, let title = you.disclosureTitle {
+                    if shownSubagent == nil, let you, let title = you.disclosureTitle {
                         // The toggle only; what it reveals goes below the whole line, not beside Open.
                         NotchDisclosure(title: title, expandedTitle: "Show less", subject: subject,
                                         expanded: disclosure(promptKey)) { EmptyView() }
@@ -2416,7 +2415,7 @@ struct Notch: View {
                     claudeRemoveControl(item, subject: subject)
                 }
                 .padding(.top, 4)
-                if shownSubagent == nil, let you = details.you, you.disclosureTitle != nil, openDisclosures.contains(promptKey) {
+                if shownSubagent == nil, let you, you.disclosureTitle != nil, openDisclosures.contains(promptKey) {
                     VStack(alignment: .leading, spacing: 6) {
                         if let full = you.full { fullText(full) }
                         if you.keptOnlyStart {
