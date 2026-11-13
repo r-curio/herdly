@@ -188,10 +188,12 @@ public enum ReminderReader {
         subscript<Value>(dynamicMember path: KeyPath<Record, Value>) -> Value { record[keyPath: path] }
     }
 
-    /// At most the window's records and as many again looked back through for session ends; a scan
-    /// drops what it no longer reads (`DecodedHookRecords`). Internal rather than private only so
-    /// tests can count what it decodes and holds.
-    static let decodedHooks = DecodedHookRecords<Hook>(maximumEntries: 2 * HookEventListing.maximumRecords)
+    /// A scan reads at most the window's records and as many again looked back through for session
+    /// ends, and drops what it no longer reads (`DecodedHookRecords`). The bound leaves a window of
+    /// headroom above that: a record arriving while a scan holds its full two windows must not reach
+    /// the backstop, which starts the directory over and decodes everything again. Internal rather
+    /// than private only so tests can count what it decodes and holds.
+    static let decodedHooks = DecodedHookRecords<Hook>(maximumEntries: 3 * HookEventListing.maximumRecords)
 
     private static func bounded(_ url: URL, limit: Int) -> Data? {
         guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
