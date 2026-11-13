@@ -1687,8 +1687,8 @@ private struct NotchControls: View {
                 .contentShape(Rectangle())
                 .help("Text in the middle of the strip naming the top item. External displays only; on a MacBook the camera covers that space.")
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Usage bars", detail: nil) {
-                    SlidingSegments(title: "Usage bars", selection: binding(\.usage),
+                SettingsRow(title: "Usage limits", detail: nil) {
+                    SlidingSegments(title: "Usage limits", selection: binding(\.usage),
                                     options: [(UsageDisplay.compact, "Compact"), (UsageDisplay.weeklyOnly, "Weekly only"), (UsageDisplay.hidden, "Hidden")])
                 }
             }

@@ -190,11 +190,9 @@ public enum NotchPlacement {
     /// Visible body left of the camera housing, where up to three session sprites and the to-check
     /// count live (`StripWing`).
     public static let leadingWing: CGFloat = 112
-    /// Visible body right of the camera housing while it holds only Codex's weekly readout.
+    /// Visible body right of the camera housing: the collapsed usage rings' wing, and the least any
+    /// wing gets. The open panel's wing is sized by `UsageStripReadouts.openWingWidth`.
     public static let trailingWing: CGFloat = 60
-    /// Width Codex's five-hour readout adds ahead of the weekly one. Claude readouts are sized by
-    /// `UsageStripReadouts.wingWidth`.
-    public static let readoutWidth: CGFloat = 52
     /// Concave fillet joining the body to the menu bar at each top corner; part of the frame.
     public static let earRadius: CGFloat = 8
     /// Radius of the two bottom corners.
@@ -239,7 +237,8 @@ public enum NotchPlacement {
 
     /// How the strip's content is split around the housing. Extra width when the panel is open is
     /// shared equally by both wings so the housing stays centered in the gap. `wing` is the trailing
-    /// wing's width for the usage readouts shown (`UsageStripReadouts.wingWidth`); the leading wing never moves for it.
+    /// wing's width for the usage rings shown (`UsageStripReadouts.wingWidth(_:expanded:)`, wider open to fit the
+    /// numbers); the leading wing never moves for it.
     public static func strip(on display: NotchDisplay, expanded: Bool, wing: CGFloat = trailingWing,
                              centerLabel: CGFloat = 0, width: PanelWidth = .standard) -> StripLayout {
         let body = bodyWidth(on: display, expanded: expanded, wing: wing, centerLabel: centerLabel, width: width)
