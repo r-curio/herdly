@@ -384,3 +384,25 @@ private func runningChild(_ child: UUID, turn: UUID = UUID(), parent: UUID = roo
     // The root's own rollout is not a subagent's, read or kept.
     #expect(CodexSubagentReader.activity(root: root, now: now.timeIntervalSince1970).isEmpty)
 }
+
+@Test func aSubagentLeavesAtTheAgeBoundOverAKeptListing() throws {
+    let root = try sessionsTree()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try writeRoot(in: root)
+    let child = UUID()
+    try write(runningChild(child), session: child, time: "10-54-48", in: root)
+    // Keep the tree's listing: marked by a clock long after the directories were made, it is
+    // trusted from here on, whatever `now` the reader is asked about.
+    _ = RolloutDays.newest(root: root, limit: 1, now: Date().timeIntervalSince1970 + 3_600)
+    let listed = RolloutDays.directoryReads(root: root)
+    func running(_ at: Double) -> [String] { CodexSubagentReader.activity(root: root, now: at)[rootSession]?.map(\.id) ?? [] }
+    let written = now.timeIntervalSince1970
+    #expect(running(written) == [id(child)])
+    #expect(running(written + SessionDiscovery.maximumAge) == [id(child)])
+    #expect(running(written + SessionDiscovery.maximumAge + 0.001).isEmpty)
+    #expect(running(written + SessionDiscovery.maximumAge) == [id(child)])
+    #expect(running(written + 2 * SessionDiscovery.maximumAge).isEmpty)
+    #expect(running(written - 10) == [id(child)])
+    // Every answer came from the kept listing.
+    #expect(RolloutDays.directoryReads(root: root) == listed)
+}

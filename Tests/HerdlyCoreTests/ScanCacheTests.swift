@@ -265,6 +265,140 @@ private func runningPrompts(_ scan: ClaudeObservationScan) -> [String: String] {
     #expect(next.hookCache.merging(replay.cache).count == 2)
 }
 
+@Test func reminderScanDecodesAHookRecordOnceAndAgainOnlyWhenItsBytesChange() throws {
+    let root = try temporaryDirectory(), rollouts = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: rollouts) }
+    let ended = UUID(), live = UUID(), unreadable = UUID()
+    func record(_ session: UUID, _ event: String, at time: String) -> Data {
+        Data("{\"session_id\":\"\(session.uuidString)\",\"hook_event_name\":\"\(event)\",\"received_at\":\"\(time)\"}".utf8)
+    }
+    func time(_ text: String) throws -> Double { try #require(RolloutTimestamp.parse(text)) }
+    let end = root.appendingPathComponent("end.json")
+    try record(ended, "SessionStart", at: "2026-01-01T00:00:00Z").write(to: root.appendingPathComponent("a.json"))
+    try record(ended, "SessionEnd", at: "2026-01-01T00:00:05Z").write(to: end)
+    try record(live, "SessionStart", at: "2026-01-01T00:00:01Z").write(to: root.appendingPathComponent("b.json"))
+    try record(unreadable, "SessionEnd", at: "sometime").write(to: root.appendingPathComponent("c.json"))
+    try Data("not json".utf8).write(to: root.appendingPathComponent("d.json"))
+    func decodes() -> Int { ReminderReader.decodedHooks.decodes(in: root) }
+
+    var cache = HookFileCache()
+    /// A scan with the kept file cache, checked against one that reads every file again.
+    func scan(_ comment: Comment, sourceLocation: SourceLocation = #_sourceLocation) -> ReminderScan {
+        let warm = ReminderReader.scan(events: root, rollouts: rollouts, hookCache: cache)
+        let cold = ReminderReader.scan(events: root, rollouts: rollouts)
+        #expect(warm.sessionEnds == cold.sessionEnds, comment, sourceLocation: sourceLocation)
+        #expect(warm.endedSessions == cold.endedSessions, comment, sourceLocation: sourceLocation)
+        #expect(String(describing: warm.cliEvents) == String(describing: cold.cliEvents), comment, sourceLocation: sourceLocation)
+        cache = warm.hookCache
+        return warm
+    }
+    #expect(scan("first").sessionEnds == [ended: try time("2026-01-01T00:00:05Z")])
+    #expect(decodes() == 5)
+    // Unchanged: nothing is decoded, with or without the file cache. A record that did not decode,
+    // or whose end time cannot be read, stays that way.
+    #expect(scan("unchanged").sessionEnds == [ended: try time("2026-01-01T00:00:05Z")])
+    #expect(scan("unchanged again").endedSessions == [ended])
+    #expect(decodes() == 5)
+
+    // Replaced atomically, then rewritten in place at another length: each is decoded once more.
+    try record(ended, "SessionEnd", at: "2026-01-01T00:00:06Z").write(to: end, options: .atomic)
+    #expect(scan("replaced").sessionEnds == [ended: try time("2026-01-01T00:00:06Z")])
+    #expect(decodes() == 6)
+    try record(ended, "SessionEnd", at: "2026-01-01T00:00:07.500Z").write(to: end)
+    #expect(scan("rewritten").sessionEnds == [ended: try time("2026-01-01T00:00:07.500Z")])
+    #expect(decodes() == 7)
+
+    // Rewritten in place under the same stamp: the file cache still holds the old bytes, as it did
+    // before decoded records were kept, and a scan that reads the file again decodes the new ones.
+    try overwriteKeepingStamp(end, with: String(decoding: record(ended, "SessionEnd", at: "2026-01-01T00:00:09.500Z"), as: UTF8.self))
+    #expect(ReminderReader.scan(events: root, rollouts: rollouts, hookCache: cache).sessionEnds
+        == [ended: try time("2026-01-01T00:00:07.500Z")])
+    #expect(decodes() == 7)
+    #expect(ReminderReader.scan(events: root, rollouts: rollouts).sessionEnds == [ended: try time("2026-01-01T00:00:09.500Z")])
+    #expect(decodes() == 8)
+
+    // The record whose time could not be read becomes readable, and the first session's end is removed.
+    try record(unreadable, "SessionEnd", at: "2026-01-01T00:00:08Z").write(to: root.appendingPathComponent("c.json"), options: .atomic)
+    try FileManager.default.removeItem(at: end)
+    cache = HookFileCache()
+    #expect(scan("one fixed, one removed").sessionEnds == [unreadable: try time("2026-01-01T00:00:08Z")])
+    #expect(decodes() == 9)
+}
+
+@Test func decodedHookRecordsAreDroppedOnceAScanNoLongerListsThem() throws {
+    let root = try temporaryDirectory(), rollouts = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: rollouts) }
+    let session = UUID()
+    func write(_ name: String, _ event: String) throws {
+        let record: [String: String] = ["session_id": session.uuidString, "hook_event_name": event, "received_at": "2026-01-01T00:00:00Z"]
+        try JSONSerialization.data(withJSONObject: record).write(to: root.appendingPathComponent(name), options: .atomic)
+    }
+    func kept() -> Int { ReminderReader.decodedHooks.count(in: root) }
+    try write("a.json", "SessionStart")
+    try write("b.json", "UserPromptSubmit")
+    try write("c.json", "Stop")
+    _ = ReminderReader.scan(events: root, rollouts: rollouts)
+    #expect(kept() == 3)
+    // A pruned record leaves with the scan that no longer lists it; the others are not decoded again.
+    try FileManager.default.removeItem(at: root.appendingPathComponent("b.json"))
+    let decodes = ReminderReader.decodedHooks.decodes(in: root)
+    _ = ReminderReader.scan(events: root, rollouts: rollouts)
+    #expect(kept() == 2)
+    #expect(ReminderReader.decodedHooks.decodes(in: root) == decodes)
+    // A directory that can no longer be read keeps nothing.
+    try FileManager.default.removeItem(at: root)
+    _ = ReminderReader.scan(events: root, rollouts: rollouts)
+    #expect(kept() == 0)
+}
+
+@Test func decodedHookRecordsKeepOnlyWhatTheLastScanOfADirectoryUsed() {
+    let records = DecodedHookRecords<Int>(maximumEntries: 3, maximumDirectories: 2)
+    let directory = URL(fileURLWithPath: "/events"), other = URL(fileURLWithPath: "/other")
+    var decoded = 0
+    func read(_ name: String, in folder: URL = directory, scan: UInt64, bytes: String = "1") -> Int? {
+        records.record(folder.appendingPathComponent(name).path, in: folder, scan: scan, bytes: Data(bytes.utf8)) {
+            decoded += 1
+            return Int(bytes)
+        }
+    }
+    var scan = records.begin()
+    #expect(read("a", scan: scan) == 1)
+    #expect(read("b", scan: scan, bytes: "x") == nil)
+    #expect(read("o", in: other, scan: scan) == 1)
+    records.end(scan, in: directory)
+    #expect(decoded == 3)
+    #expect(records.count(in: directory) == 2)
+
+    // Reused for the same bytes, a failed decode included; decoded again for other bytes.
+    scan = records.begin()
+    #expect(read("a", scan: scan) == 1)
+    #expect(read("b", scan: scan, bytes: "x") == nil)
+    #expect(decoded == 3)
+    #expect(read("a", scan: scan, bytes: "2") == 2)
+    #expect(decoded == 4)
+    records.end(scan, in: directory)
+    #expect(records.count(in: directory) == 2)
+
+    // What a scan did not read is dropped at its end, in that directory only.
+    scan = records.begin()
+    #expect(read("b", scan: scan, bytes: "x") == nil)
+    records.end(scan, in: directory)
+    #expect(records.count(in: directory) == 1)
+    #expect(records.count(in: other) == 1)
+    #expect(read("a", scan: scan, bytes: "2") == 2)
+    #expect(decoded == 5)
+
+    // Past its bound a directory starts over, and so does the whole of it past its directories.
+    scan = records.begin()
+    for name in ["c", "d", "e"] { #expect(read(name, scan: scan) == 1) }
+    #expect(records.count(in: directory) <= 3)
+    #expect(read("p", in: URL(fileURLWithPath: "/third"), scan: scan) == 1)
+    #expect(records.count(in: directory) == 0)
+    #expect(records.count(in: other) == 0)
+    records.forget(URL(fileURLWithPath: "/third"))
+    #expect(records.count(in: URL(fileURLWithPath: "/third")) == 0)
+}
+
 /// A fixed sequence, so a failure repeats.
 private struct SeededGenerator: RandomNumberGenerator {
     var state: UInt64

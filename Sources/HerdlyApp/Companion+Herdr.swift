@@ -26,7 +26,7 @@ final class HerdrSessionBindings: ObservableObject {
     /// Pane IDs from live Claude sessions' newest hook events at the last read: the hook-record half
     /// of the gate, and whether a scan reads Claude's integration status.
     fileprivate var claudePaneIDs: Set<String> = []
-    fileprivate var recordCache: [String: HerdrHookPaneRecord?] = [:]
+    fileprivate var recordCache = HerdrHookRecordReader.Cache()
     fileprivate var reading = false
 
     init(client: HerdrClient = HerdrClient()) {
@@ -159,7 +159,7 @@ extension Companion {
         let directories = herdrEventDirectories()
         guard !live.isEmpty || !daemonCLISessions.isEmpty else {
             herdr.hookRecords = []
-            herdr.recordCache = [:]
+            herdr.recordCache = HerdrHookRecordReader.Cache()
             herdr.claudePaneIDs = []
             tickHerdrMonitor(paneIDs: [], codexGate: false, codex: .none)
             return

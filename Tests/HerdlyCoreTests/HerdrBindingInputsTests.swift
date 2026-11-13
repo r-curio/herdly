@@ -247,18 +247,82 @@ private let target = HerdrPaneTarget(sessionID: session, agent: .claude, paneID:
 
     let first = HerdrHookRecordReader.read(directories: [directory])
     #expect(first.records == [record(agent: .codex, pane: "w1:p2", at: 1_200)])
-    #expect(first.cache.count == 4)
-    #expect(first.cache.values.compactMap { $0 }.count == 2)
+    #expect(first.cache.records.count == 4)
+    #expect(first.cache.records.values.compactMap { $0 }.count == 2)
 
     // A cached path is not decoded again: a stand-in cache entry wins over the file.
-    var stale = first.cache
-    let newestPath = try #require(first.cache.first { $0.value?.paneID == "w1:p2" }?.key)
+    var stale = first.cache.records
+    let newestPath = try #require(first.cache.records.first { $0.value?.paneID == "w1:p2" }?.key)
     stale[newestPath] = .some(record(agent: .codex, pane: "w9:p9", at: 1_200))
-    #expect(HerdrHookRecordReader.read(directories: [directory], cache: stale).records == [record(agent: .codex, pane: "w9:p9", at: 1_200)])
+    #expect(HerdrHookRecordReader.read(directories: [directory], cache: .init(records: stale)).records == [record(agent: .codex, pane: "w9:p9", at: 1_200)])
     // Paths no longer listed drop out of the cache.
-    let gone = HerdrHookRecordReader.read(directories: [directory], cache: ["/nowhere.json": record()])
-    #expect(gone.cache["/nowhere.json"] == nil)
+    let gone = HerdrHookRecordReader.read(directories: [directory], cache: .init(records: ["/nowhere.json": record()]))
+    #expect(gone.cache.records["/nowhere.json"] == nil)
     #expect(HerdrHookRecordReader.read(directories: [directory.appendingPathComponent("missing")]).records.isEmpty)
+}
+
+@Test func herdrHookRecordReaderReusesItsLastResultOnlyWhileTheSameRecordsAreListed() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("herdr-inputs-\(UUID().uuidString)")
+    let other = FileManager.default.temporaryDirectory.appendingPathComponent("herdr-inputs-\(UUID().uuidString)")
+    for url in [directory, other] { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
+    defer { for url in [directory, other] { try? FileManager.default.removeItem(at: url) } }
+    func write(_ name: String, in folder: URL? = nil, session: String = session, pane: String, at: Double) throws {
+        let object: [String: Any] = ["hook_event_name": "UserPromptSubmit", "session_id": session, "source": "herdly-hook-v1",
+                                     "captured_at": at, HerdrPaneID.recordKey: pane, HerdrSocketPath.recordKey: socket]
+        try JSONSerialization.data(withJSONObject: object).write(to: (folder ?? directory).appendingPathComponent(name), options: .atomic)
+    }
+    var cache = HerdrHookRecordReader.Cache()
+    var directories = [directory]
+    /// A read with the kept cache, checked against a read that keeps nothing.
+    func read(reused: Bool, _ comment: Comment, sourceLocation: SourceLocation = #_sourceLocation) -> [HerdrHookPaneRecord] {
+        let warm = HerdrHookRecordReader.read(directories: directories, cache: cache)
+        let cold = HerdrHookRecordReader.read(directories: directories)
+        #expect(warm.records == cold.records, comment, sourceLocation: sourceLocation)
+        #expect(warm.cache.records == cold.cache.records, comment, sourceLocation: sourceLocation)
+        #expect(warm.reused == reused, comment, sourceLocation: sourceLocation)
+        #expect(!cold.reused, comment, sourceLocation: sourceLocation)
+        cache = warm.cache
+        return warm.records
+    }
+    try write("a.json", pane: "w1:p1", at: 1_100)
+    #expect(read(reused: false, "first read") == [record(agent: .codex, pane: "w1:p1", at: 1_100)])
+    #expect(read(reused: true, "unchanged") == [record(agent: .codex, pane: "w1:p1", at: 1_100)])
+    #expect(read(reused: true, "unchanged again") == [record(agent: .codex, pane: "w1:p1", at: 1_100)])
+
+    try write("b.json", pane: "w1:p2", at: 1_200)
+    #expect(read(reused: false, "a record added") == [record(agent: .codex, pane: "w1:p2", at: 1_200)])
+    #expect(read(reused: true, "unchanged after the addition") == [record(agent: .codex, pane: "w1:p2", at: 1_200)])
+    try Data("not json".utf8).write(to: directory.appendingPathComponent("c.json"))
+    #expect(read(reused: false, "a malformed record added") == [record(agent: .codex, pane: "w1:p2", at: 1_200)])
+    #expect(read(reused: true, "unchanged with a malformed record").count == 1)
+    try FileManager.default.removeItem(at: directory.appendingPathComponent("b.json"))
+    #expect(read(reused: false, "a record removed") == [record(agent: .codex, pane: "w1:p1", at: 1_100)])
+    #expect(cache.records.count == 2)
+
+    // Another directory joins, changes, becomes unreadable, and leaves.
+    let second = "33333333-3333-4333-8333-333333333333"
+    try write("d.json", in: other, session: second, pane: "w2:p1", at: 1_300)
+    directories = [directory, other]
+    #expect(read(reused: false, "a directory added").count == 2)
+    #expect(read(reused: true, "two directories unchanged").count == 2)
+    try write("e.json", in: other, session: second, pane: "w2:p2", at: 1_400)
+    #expect(read(reused: false, "the second directory changed").map(\.paneID) == ["w1:p1", "w2:p2"])
+    try FileManager.default.removeItem(at: other)
+    #expect(read(reused: false, "the second directory gone").map(\.paneID) == ["w1:p1"])
+    #expect(read(reused: true, "still gone").map(\.paneID) == ["w1:p1"])
+    #expect(cache.records.count == 2)
+    directories = [directory]
+    #expect(read(reused: false, "one directory again").map(\.paneID) == ["w1:p1"])
+
+    // A cache started from other records, or an empty one, is never answered from the last result.
+    var changed = cache.records
+    let path = try #require(cache.records.first { $0.value != nil }?.key)
+    changed[path] = .some(record(agent: .codex, pane: "w9:p9", at: 1_100))
+    let stood = HerdrHookRecordReader.read(directories: directories, cache: .init(records: changed))
+    #expect(!stood.reused)
+    #expect(stood.records.map(\.paneID) == ["w9:p9"])
+    #expect(!HerdrHookRecordReader.read(directories: directories, cache: .init()).reused)
+    #expect(HerdrHookRecordReader.read(directories: [], cache: cache).records.isEmpty)
 }
 
 // MARK: - Foreground process (ADR 0008, #148)
