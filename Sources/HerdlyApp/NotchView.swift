@@ -1502,7 +1502,7 @@ struct Notch: View {
               let question = item.question else { return }
         let action = press.action
         switch action {
-        case .none:
+        case .none, .consume:
             return
         case .open:
             questionOpen(item)?()

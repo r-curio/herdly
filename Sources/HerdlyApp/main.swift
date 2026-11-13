@@ -2303,7 +2303,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let card: SpotlightCardFocus = if let keyboardCard, keyboardCard.id == id { .keyboard(keyboardCard.phase) }
             else { .withoutKeyboard(answerable: canAnswerAgentQuestion(question)) }
         let action = SpotlightCardKeys.action(for: key, card: card)
-        guard action != .none else { return false }
+        guard action.consumesKey else { return false }
         questionCardKeyPress = QuestionCardKeyPress(action: action, card: id, serial: (questionCardKeyPress?.serial ?? 0) + 1)
         return true
     }

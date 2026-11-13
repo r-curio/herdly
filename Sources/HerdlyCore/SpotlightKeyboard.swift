@@ -29,7 +29,14 @@ public enum SpotlightCardAction: Equatable, Sendable {
     case dismiss
     /// Moves the viewed question by this many steps, as ‹ › do. Sends nothing.
     case step(Int)
+    /// A digit on a keyboard card that cannot take one (read-only or handed back, Paper L frame 7:
+    /// "digits do nothing"): the key is swallowed silently. Nothing is selected and nothing is sent.
+    case consume
+    /// The key does nothing here and goes on to the queue or macOS.
     case none
+
+    /// Whether the panel takes the key rather than passing it on.
+    public var consumesKey: Bool { self != .none }
 }
 
 /// Where a question card with the keyboard stands.
@@ -72,7 +79,8 @@ public enum SpotlightCardKeys {
         case .keyboard(.handedBack):
             switch key {
             case .returnKey, .open: return .open
-            case .digit, .dismiss, .previousQuestion, .nextQuestion: return .none
+            case let .digit(number): return (1...9).contains(number) ? .consume : .none
+            case .dismiss, .previousQuestion, .nextQuestion: return .none
             }
         case .keyboard(.readOnly):
             switch key {
@@ -80,7 +88,7 @@ public enum SpotlightCardKeys {
             case .dismiss: return .dismiss
             case .previousQuestion: return .step(-1)
             case .nextQuestion: return .step(1)
-            case .digit: return .none
+            case let .digit(number): return (1...9).contains(number) ? .consume : .none
             }
         case .keyboard(.answering):
             switch key {

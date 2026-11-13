@@ -187,7 +187,8 @@ private let allKeys: [SpotlightCardKey] = (0...10).map(SpotlightCardKey.digit)
 
 @Test func afterHandBackDigitsAreInertAndReturnOpensTheAgent() {
     let phase = SpotlightCardPhase.handedBack(askedAt: 0)
-    #expect((1...9).allSatisfy { SpotlightCardKeys.action(for: .digit($0), card: .keyboard(phase)) == .none })
+    // Frame 7: "digits do nothing", silently. The key is consumed, so macOS does not beep.
+    #expect((1...9).allSatisfy { SpotlightCardKeys.action(for: .digit($0), card: .keyboard(phase)) == .consume })
     #expect(SpotlightCardKeys.action(for: .returnKey, card: .keyboard(phase)) == .open)
     #expect(SpotlightCardKeys.action(for: .open, card: .keyboard(phase)) == .open)
     // "Open in <agent>" is the only button.
@@ -195,7 +196,7 @@ private let allKeys: [SpotlightCardKey] = (0...10).map(SpotlightCardKey.digit)
 }
 
 @Test func aReadOnlyCardTakesNoDigitsAndReturnOpens() {
-    #expect(SpotlightCardKeys.action(for: .digit(1), card: .keyboard(.readOnly)) == .none)
+    #expect((1...9).allSatisfy { SpotlightCardKeys.action(for: .digit($0), card: .keyboard(.readOnly)) == .consume })
     #expect(SpotlightCardKeys.action(for: .returnKey, card: .keyboard(.readOnly)) == .open)
     #expect(SpotlightCardKeys.action(for: .dismiss, card: .keyboard(.readOnly)) == .dismiss)
 }
@@ -338,4 +339,14 @@ private func foot(_ card: SpotlightCardFocus, count: Int = 1, last: Bool = true,
 @Test func theHandedBackLineSaysWhenItWasAsked() {
     #expect(SpotlightCardLines.handedBack(askedAt: 100, now: 130) == "Handed back with no answer · asked 30s ago")
     #expect(SpotlightCardLines.handedBack(askedAt: 100, now: 400) == "Handed back with no answer · asked 5m ago")
+}
+
+@Test func aConsumedDigitIsHandledButNeverSelectsOrSends() {
+    #expect(SpotlightCardAction.consume.consumesKey)
+    #expect(!SpotlightCardAction.none.consumesKey)
+    #expect(SpotlightCardAction.select(1).consumesKey)
+    // Only the keyboard card's read-only and handed-back phases swallow digits; elsewhere a digit
+    // past the options, or on a card without the keyboard Herdly cannot answer, goes on to macOS.
+    #expect(SpotlightCardKeys.action(for: .digit(0), card: .keyboard(.readOnly)) == .none)
+    #expect(SpotlightCardKeys.action(for: .digit(1), card: .withoutKeyboard(answerable: false)) == .none)
 }
