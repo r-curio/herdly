@@ -266,7 +266,7 @@ private func rolloutLines(session: UUID, turn: UUID) -> String {
     let day = tree.root.appendingPathComponent("2026/11/12")
     let mark = try #require(RolloutDays.Mark(day))
     let touched = max(mark.modifiedAt, mark.changedAt)
-    func kept(markedAt: Double) -> RolloutDays.Listed { RolloutDays.Listed(mark: mark, markedAt: markedAt, visible: [], hidden: []) }
+    func kept(markedAt: Double) -> RolloutDays.Listing { RolloutDays.Listing(mark: mark, markedAt: markedAt, visible: [], hidden: []) }
     // The same mark, young and old: a rollout made in the same clock tick as a young mark would not change it.
     #expect(!kept(markedAt: touched).reusable(for: mark))
     #expect(!kept(markedAt: touched + RolloutDays.settleTime - 0.01).reusable(for: mark))
