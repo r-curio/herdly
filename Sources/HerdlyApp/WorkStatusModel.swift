@@ -102,7 +102,7 @@ final class WorkStatusModel: ObservableObject {
         }
         let present: [WorkPresence] = items.compactMap { item in
             guard item.kind != .outcome, item.kind != .earlierOutcome, let folder = directory(item) else { return nil }
-            return WorkPresence(session: item.session, turn: item.turn, directory: folder)
+            return WorkPresence(session: item.session, turn: item.turn, directory: folder, running: item.running != nil)
         }
         memory.observe(sightings, present: present, at: now)
         let finished = items.compactMap { item -> AgentTurnIdentity? in

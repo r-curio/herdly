@@ -98,16 +98,19 @@ public struct WorkPresence: Equatable, Sendable {
     /// The turn when the row names one; nil when it does not (an empty name is none).
     public let turn: String?
     public let directory: String
+    /// A working row (running or waiting), as opposed to an approval, question or handed-back request.
+    public let running: Bool
 
-    public init(session: AgentSessionIdentity, turn: String?, directory: String) {
+    public init(session: AgentSessionIdentity, turn: String?, directory: String, running: Bool = false) {
         self.session = session
         self.turn = turn.flatMap { $0.isEmpty ? nil : $0 }
         self.directory = directory
+        self.running = running
     }
 
     /// A running turn's sighting as a presence in its folder.
     public init(_ sighting: WorkBranchSighting) {
-        self.init(session: sighting.turn.session, turn: sighting.turn.turn, directory: sighting.directory)
+        self.init(session: sighting.turn.session, turn: sighting.turn.turn, directory: sighting.directory, running: true)
     }
 
     /// The turn this row is about, when it names one.
@@ -672,9 +675,13 @@ public struct WorkStatusBatch: Equatable, Sendable {
                 if readings[turn] == nil { settled.append(turn) }
                 continue
             }
-            // Another turn working there changes what git sees; a repository not yet read would make
-            // this reading skip GitHub.
-            guard !WorkBranchMemory.busy(folder, turn: turn, present: present), !waiting.contains(turn) else { continue }
+            // Another turn working there changes what git sees; so does this turn's own work still
+            // running after it finished (a background subagent's working row, #426), and its first
+            // reading waits until those rows end. A repository not yet read would make this reading
+            // skip GitHub.
+            guard !WorkBranchMemory.busy(folder, turn: turn, present: present),
+                  !present.contains(where: { $0.running && $0.turnIdentity == turn }),
+                  !waiting.contains(turn) else { continue }
             guard reads.count + repositories.count < limit,
                   WorkStatusSchedule.isDue(readings[turn], now: now) else { continue }
             reads.append(WorkStatusRead(turn: turn, branch: branch))

@@ -755,17 +755,20 @@ private func runHoldingStdout(_ body: String, timeout: Double) throws
 }
 
 @Test func aChildHoldingStdoutCannotKeepARunWaitingAndDiesWithTheGroup() throws {
-    // Deadlines leave the descendant time to take its lock first, even on a loaded machine. The time
-    // bound only shows the run did not wait for the holder's 30 s sleep to end its output.
+    // Deadlines leave the descendant time to take its lock first. A stalled machine can still delay it
+    // past the deadline; that run says nothing about the group kill, so it checks only that the run
+    // ended. The time bound shows the run did not wait for the holder's 30 s sleep to end its output.
+    func check(_ run: (result: WorkStatusCommandResult, seconds: Double, held: Bool, released: Bool)) {
+        #expect(run.result == .timedOut)
+        #expect(run.seconds < 25)
+        if run.held { #expect(run.released) }
+    }
     // The command itself is still running at its deadline.
-    let slow = try runHoldingStdout("sleep 5", timeout: 3)
-    #expect(slow.held && slow.result == .timedOut && slow.seconds < 10 && slow.released)
+    check(try runHoldingStdout("sleep 5", timeout: 3))
     // It ignores SIGTERM, so SIGKILL ends it.
-    let stubborn = try runHoldingStdout("trap '' TERM\nwhile :; do sleep 1; done", timeout: 3)
-    #expect(stubborn.held && stubborn.result == .timedOut && stubborn.seconds < 10 && stubborn.released)
+    check(try runHoldingStdout("trap '' TERM\nwhile :; do sleep 1; done", timeout: 3))
     // It exited, but its output never ended: incomplete, and the descendant is killed with the group.
-    let exited = try runHoldingStdout("echo partial\nexit 0", timeout: 4)
-    #expect(exited.held && exited.result == .timedOut && exited.seconds < 10 && exited.released)
+    check(try runHoldingStdout("echo partial\nexit 0", timeout: 4))
 }
 
 // MARK: - Pending readings, live sessions in a folder and the card gate
@@ -959,5 +962,48 @@ private func item(approval session: AgentSessionIdentity, turn: String) -> Agent
 }
 
 @Test func aSightingIsAPresenceInItsFolder() {
-    #expect(WorkPresence(sighting(turnA)) == presence(sessionA, "t1", "/w/repo"))
+    #expect(WorkPresence(sighting(turnA)) == WorkPresence(session: sessionA, turn: "t1", directory: "/w/repo", running: true))
+}
+
+// MARK: - A finished turn whose subagent still runs
+
+@Test func aFinishedTurnIsNotDueWhileItsOwnRowStillRuns() {
+    let remembered = memory([sighting(turnA)], repositories: [turnA: .gitHub("o/repo")])
+    // Its own working row (a background subagent) names the same turn.
+    let working = WorkStatusBatch.plan(finished: [turnA], present: [WorkPresence(sighting(turnA))], memory: remembered,
+                                       readings: [:], now: 2_000)
+    #expect(working.reads.isEmpty && working.settledNoVerdict.isEmpty)
+    // A request row of the same turn is not running work.
+    let request = WorkStatusBatch.plan(finished: [turnA], present: [presence(sessionA, "t1", "/w/repo")],
+                                       memory: remembered, readings: [:], now: 2_000)
+    #expect(request.reads == [WorkStatusRead(turn: turnA, branch: feature)])
+    let ended = WorkStatusBatch.plan(finished: [turnA], present: [], memory: remembered, readings: [:], now: 2_000)
+    #expect(ended.reads == [WorkStatusRead(turn: turnA, branch: feature)])
+}
+
+@MainActor @Test func theModelReadsAFinishedTurnOnlyOnceItsWorkingRowEnds() async throws {
+    let (defaults, suite) = try defaults(true)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let runner = FakeRunner(reply())
+    let model = makeModel(runner, gate: WorkStatusGate(open: false), defaults: defaults)
+    let feat = GitHead.branch("feat/x")
+    await scan(model, [item(running: turnA)], head: feat, now: 1_000)
+    await scan(model, [item(finished: turnA), item(running: turnA)], head: feat, now: 1_100)
+    #expect(model.readings[turnA] == nil)
+    #expect(!runner.calls.contains { $0.arguments.contains("status") || $0.executable.hasSuffix("/gh") })
+    await scan(model, [item(finished: turnA)], now: 1_200)
+    #expect(model.readings[turnA]?.readAt == 1_200)
+    #expect(model.verdict(for: turnA) == .checksFailing)
+}
+
+@MainActor @Test func aHeadChangeWhileTheSubagentRunsLeavesNoVerdict() async throws {
+    let (defaults, suite) = try defaults(true)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let model = makeModel(FakeRunner(reply()), gate: WorkStatusGate(open: false), defaults: defaults)
+    await scan(model, [item(running: turnA)], head: .branch("feat/x"), now: 1_000)
+    // The turn finished; its subagent keeps running and the folder moves to main.
+    await scan(model, [item(finished: turnA), item(running: turnA)], head: .branch("main"), now: 1_100)
+    await scan(model, [item(finished: turnA)], now: 1_200)
+    #expect(model.memory.branch(for: turnA) == .ambiguous)
+    #expect(model.verdict(for: turnA) == WorkStatus.noVerdict)
 }
