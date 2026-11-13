@@ -10,9 +10,10 @@ Accepted on 2026-11-13 ([issue #417](https://github.com/r-curio/herdly/issues/41
   - While the switch is on, or still undecided because its default depends on the check, the card runs `gh --version` and `gh auth status`: at launch, when Settings › Agents opens, on Check Again, and when the user turns the switch on.
 - **Remembered branch.** Each scan already reads every row's HEAD from disk. While a turn runs, Herdly remembers its folder and HEAD, keyed by session and turn, in memory only. The pull request is looked up for that branch, so it still resolves after an agent merges and the folder goes back to the default branch. There is no verdict when:
   - the HEAD or folder changed during the turn;
-  - another session ran in the same folder, or one inside it, in the same scan;
+  - another live session was in the same folder, or one inside it, in the same scan: running, waiting, or holding an approval, question or handed-back request;
   - Herdly never saw the turn running.
   A detached HEAD gets no pull request lookup.
+- **Processes.** Each `git` or `gh` starts as the leader of its own process group, with close-on-exec on Herdly's end of its output pipe. Past its wait, the whole group gets SIGTERM, then SIGKILL a second later. The output reader stops either way, so a leftover descendant holding the pipe cannot block it.
 - **Local git.** Herdly runs only read-only commands, each with a 3-second wait:
   - `git --no-optional-locks -c core.fsmonitor=false -C <folder>`, followed by `status --porcelain=v2 --branch`, `config --get remote.origin.url`, `remote`, or `rev-list --count HEAD --not --remotes`.
   - These run with `GIT_OPTIONAL_LOCKS=0`, a minimal environment and no prompt, so a read never takes the index lock an agent may need.
@@ -28,8 +29,9 @@ Accepted on 2026-11-13 ([issue #417](https://github.com/r-curio/herdly/issues/41
   3. Then the open pull request: conflict, then checks failing, running or passed.
   An unreadable folder allows only "merged". The evidence for these fields is in [github-pr-status](../evidence/github-pr-status.md).
 - **Schedule.** `WorkStatusSchedule` reads a finished turn once when it appears. After that it reads again only while checks run, every 30 seconds, never past an hour from the first reading.
+  - **Pending.** While GitHub is still working something out, the reading is pending. That covers an open pull request whose `mergeable` is UNKNOWN, an open pull request with no checks registered, and a pushed branch with no pull request listed. A pending reading is read again at the same 30-second interval for 5 minutes from the first reading, then settles on the furthest certain verdict.
   - Every other verdict is terminal: it is not read again, recent or Earlier. A "checks passed" row is not re-read to catch a later merge, and a reading that failed is not retried.
-  - `WorkStatusBatch` picks each scan's reads without running anything: at most six turns per batch, one batch at a time. It skips a finished turn while another turn runs in its folder, or while its repository is still unread. Unknown and ambiguous turns settle as no verdict without a command.
+  - `WorkStatusBatch` picks each scan's reads without running anything: at most six turns per batch, one batch at a time. It skips a finished turn while other live work is in its folder (another session, or this session's next turn), or while its repository is still unread. Unknown and ambiguous turns settle as no verdict without a command.
 - **Boundary.** Parsing and rules live in HerdlyCore. Processes, the switch and `UserDefaults` live in HerdlyApp (`WorkStatusReader`, `WorkStatusModel`). The verdict draws nothing yet: the row presentation is a follow-up. It never orders the queue, counts as work, acknowledges anything or moves a deadline.
 
 ## What leaves the Mac
