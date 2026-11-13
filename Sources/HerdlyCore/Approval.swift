@@ -2,7 +2,8 @@ import Foundation
 
 public enum ApprovalTiming {
     public static let handoffTimeout: TimeInterval = 30
-    /// The companion scans the events directory on this cadence; a receipt can only follow a scan.
+    /// The longest the companion goes between scans of the events directory while a request can be
+    /// waiting, and the least between any two (`HookScanSchedule`); a receipt can only follow a scan.
     public static let scanInterval: TimeInterval = 2
     /// Covers one full scan interval plus scan time before the helper gives up on the companion.
     public static let connectionTimeout: TimeInterval = 5

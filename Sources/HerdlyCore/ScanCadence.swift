@@ -79,3 +79,83 @@ public struct RestartRecheckGate: Sendable {
         state = .idle(due: now + Self.interval)
     }
 }
+
+/// What can change the hook scan's result without a record arriving in a watched hook directory
+/// (#306). The scan also reads Codex rollouts, the process table, Claude's session registry and usage
+/// files, thread names, the desktop read state and git branches, and applies rules that depend on the
+/// time; none of those is watched. While any of these holds, the scan keeps its fixed cadence.
+public struct HookScanNeeds: Equatable, Sendable {
+    /// No scan has been applied since launch: nothing below is known yet.
+    public var nothingAppliedYet = false
+    /// A row is queued or a result is held: a scan can end, acknowledge, rename or re-date it.
+    public var rowsHeld = false
+    /// A Codex or Claude session, subagent or daemon thread is live: its process can exit and its
+    /// rollout or registry entry can change without a hook record.
+    public var sessionsLive = false
+    /// A Codex CLI process or the Codex desktop app was running at the last scan, or the process table
+    /// could not be read: a rollout alone can then show a working session (docs/session-discovery.md).
+    public var codexMayRun = false
+    /// The last scan could not read a source, or a Claude root is read without a watched hook
+    /// directory (not connected, or waiting for a restart): its sessions are only seen by reading.
+    public var sourceUnwatchedOrUnreadable = false
+    /// The scan holds state that ends at a time within the safety interval (a Claude usage window's reset).
+    public var timedStateDue = false
+    /// The notch is open or Herdly is the active app: what the scan reads is on screen.
+    public var herdlyInUse = false
+
+    public init() {}
+
+    public var fastCadence: Bool {
+        nothingAppliedYet || rowsHeld || sessionsLive || codexMayRun || sourceUnwatchedOrUnreadable
+            || timedStateDue || herdlyInUse
+    }
+}
+
+/// When the hook scan runs (#306). A change in a watched hook directory, app activation, or an
+/// explicit request makes a scan due; scans stay at least `interval` apart, so a burst of records
+/// costs one scan per interval, as the fixed clock did. With no such evidence a scan still runs every
+/// `interval` while the watch cannot be trusted or `HookScanNeeds.fastCadence` holds, and every
+/// `safetyInterval` otherwise. Times are monotonic seconds (system uptime).
+///
+/// Evidence stays pending until a scan starts. One that arrives while a scan runs, or after that scan
+/// listed its directories, is noted after the start and makes the next scan due.
+public struct HookScanSchedule: Sendable {
+    /// Minimum spacing, and the cadence whenever anything is uncertain: the scan's former fixed clock,
+    /// which the hook helper's connection timeout is sized against (`ApprovalTiming`).
+    public static let interval: Double = ApprovalTiming.scanInterval
+    /// The cadence when nothing is held, live, uncertain or changed. Nothing the user can see waits on
+    /// it; it bounds how long a wrong "nothing can have changed" lasts.
+    public static let safetyInterval: Double = 10
+
+    private var lastStartedAt: Double?
+    private var changePending = false
+
+    public init() {}
+
+    /// A watched directory changed, its watch lost events, or an app was activated.
+    public mutating func noteChange() {
+        changePending = true
+    }
+
+    /// The next ask is due whatever the spacing: a setting changed, or a row needs its status now.
+    public mutating func requestNow() {
+        lastStartedAt = nil
+    }
+
+    public func isDue(now: Double, watchTrusted: Bool, needs: HookScanNeeds) -> Bool {
+        guard let lastStartedAt else { return true }
+        // A clock that is not a number or ran backwards proves nothing about the spacing: scan.
+        guard now.isFinite, now >= lastStartedAt else { return true }
+        guard now >= lastStartedAt + Self.interval else { return false }
+        if changePending || !watchTrusted || needs.fastCadence { return true }
+        return now >= lastStartedAt + Self.safetyInterval
+    }
+
+    /// Starts a scan when one is due and returns true; the pending evidence is then that scan's.
+    public mutating func start(now: Double, watchTrusted: Bool, needs: HookScanNeeds) -> Bool {
+        guard isDue(now: now, watchTrusted: watchTrusted, needs: needs) else { return false }
+        lastStartedAt = now.isFinite ? now : nil
+        changePending = false
+        return true
+    }
+}

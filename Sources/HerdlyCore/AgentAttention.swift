@@ -366,6 +366,12 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         guard let delay = earlier.seconds else { return toCheckCount }
         return toCheckCount - outcomes.values.filter { now - $0.arrivedAt >= delay }.count
     }
+    /// Whether the queue holds a row, a result, or a session it is still following: anything a later
+    /// scan could end, acknowledge or change without a new hook record (`HookScanNeeds`, #306).
+    public var holdsSessionState: Bool {
+        !(approvals.isEmpty && questions.isEmpty && outcomes.isEmpty && running.isEmpty && inventoryRunning.isEmpty
+            && provisionalStops.isEmpty && ambiguousClaudeSessions.isEmpty)
+    }
     public var acknowledgedOutcomes: Set<AgentTurnIdentity> { acknowledged }
     public var unavailableClaudeSessions: Set<AgentSessionIdentity> { ambiguousClaudeSessions }
     public func isClaudeSessionUnavailable(_ identity: AgentSessionIdentity) -> Bool {
