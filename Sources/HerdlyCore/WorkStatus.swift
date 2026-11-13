@@ -196,23 +196,38 @@ public struct GitLocalReading: Equatable, Sendable {
     public let head: GitHead
     /// HEAD's full commit; nil before the first commit.
     public let commit: String?
-    /// The branch has an upstream configured.
-    public let hasUpstream: Bool
-    /// Commits ahead of the upstream; nil without one, or when the upstream is gone.
+    /// The configured upstream ("origin/feat/x"), nil without one.
+    public let upstream: String?
+    /// Commits ahead of the upstream; nil without one, or when the upstream branch is gone.
     public let ahead: Int?
     /// Any changed, staged, conflicted or untracked file.
     public let changed: Bool
-    /// Commits not on any remote: `ahead`, or a separate count when there is no upstream. Nil when
-    /// it cannot be known (the upstream is gone, no remote exists, or the count failed).
+    /// Commits not on any remote. `ahead` when the upstream is this branch's own remote branch;
+    /// otherwise a separate count (`needsRemoteCount`). Nil when it cannot be known: the upstream
+    /// branch is gone, no remote exists, or the count failed.
     public var unpushed: Int?
 
-    public init(head: GitHead, commit: String?, hasUpstream: Bool, ahead: Int?, changed: Bool, unpushed: Int? = nil) {
+    public init(head: GitHead, commit: String?, upstream: String?, ahead: Int?, changed: Bool, unpushed: Int? = nil) {
         self.head = head
         self.commit = commit
-        self.hasUpstream = hasUpstream
+        self.upstream = upstream
         self.ahead = ahead
         self.changed = changed
-        self.unpushed = unpushed ?? ahead
+        self.unpushed = unpushed ?? (Self.tracksOwnBranch(head: head, upstream: upstream) ? ahead : nil)
+    }
+
+    /// A branch whose upstream is another branch (a worktree made from `origin/main`) or that has
+    /// none is compared with every remote instead: ahead of `main` is not "not pushed". A branch
+    /// whose own upstream is gone (deleted after a merge) is left unknown.
+    public var needsRemoteCount: Bool {
+        guard case .branch = head, commit != nil, unpushed == nil else { return false }
+        guard upstream != nil else { return true }
+        return !Self.tracksOwnBranch(head: head, upstream: upstream)
+    }
+
+    static func tracksOwnBranch(head: GitHead, upstream: String?) -> Bool {
+        guard case .branch(let name) = head, let upstream else { return false }
+        return upstream.hasSuffix("/" + name)
     }
 
     public static let maximumBytes = 1 << 20
@@ -221,7 +236,7 @@ public struct GitLocalReading: Equatable, Sendable {
     /// missing `branch.oid`/`branch.head`, is nil.
     public static func parse(status: String) -> GitLocalReading? {
         guard status.utf8.count <= maximumBytes else { return nil }
-        var oid: String?, headName: String?, upstream = false, ahead: Int?, changed = false
+        var oid: String?, headName: String?, upstream: String?, ahead: Int?, changed = false
         for raw in status.split(separator: "\n", omittingEmptySubsequences: true) {
             let line = String(raw)
             if line.hasPrefix("# ") {
@@ -230,7 +245,7 @@ public struct GitLocalReading: Equatable, Sendable {
                 switch parts[0] {
                 case "branch.oid": oid = parts[1]
                 case "branch.head": headName = parts[1]
-                case "branch.upstream": upstream = !parts[1].isEmpty
+                case "branch.upstream": upstream = parts[1].isEmpty ? nil : parts[1]
                 case "branch.ab":
                     let counts = parts[1].split(separator: " ")
                     guard counts.count == 2, counts[0].hasPrefix("+"), counts[1].hasPrefix("-"),
@@ -255,8 +270,8 @@ public struct GitLocalReading: Equatable, Sendable {
         } else {
             head = .branch(headName)
         }
-        return GitLocalReading(head: head, commit: commit?.lowercased(), hasUpstream: upstream,
-                               ahead: upstream ? ahead : nil, changed: changed)
+        return GitLocalReading(head: head, commit: commit?.lowercased(), upstream: upstream,
+                               ahead: upstream == nil ? nil : ahead, changed: changed)
     }
 
     /// A `git rev-list --count` result: one non-negative integer.

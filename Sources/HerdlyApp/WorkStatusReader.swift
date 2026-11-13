@@ -106,8 +106,8 @@ struct WorkStatusReader: Sendable {
         guard case .succeeded(let output)? = git(directory, ["status", "--porcelain=v2", "--branch",
                                                             "--untracked-files=normal"]),
               var reading = GitLocalReading.parse(status: String(decoding: output, as: UTF8.self)) else { return nil }
-        if case .branch = reading.head, !reading.hasUpstream, reading.commit != nil {
-            // No upstream: count commits on no remote, but only when a remote exists to push to.
+        if reading.needsRemoteCount {
+            // Count commits on no remote, but only when a remote exists to push to.
             if case .succeeded(let remotes)? = git(directory, ["remote"]),
                !String(decoding: remotes, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                case .succeeded(let count)? = git(directory, ["rev-list", "--count", "HEAD", "--not", "--remotes"]) {

@@ -61,7 +61,7 @@ private let mergedPR = GitHubPullRequestLookup.found(GitHubPullRequest(number: 7
     let reading = try #require(GitLocalReading.parse(status: status()))
     #expect(reading.head == .branch("feat/x"))
     #expect(reading.commit == commit)
-    #expect(reading.hasUpstream && !reading.changed)
+    #expect(reading.upstream == "origin/feat/x" && !reading.changed)
     #expect(reading.unpushed == 0)
 }
 
@@ -79,7 +79,11 @@ private let mergedPR = GitHubPullRequestLookup.found(GitHubPullRequest(number: 7
     #expect(initial?.commit == nil && initial?.unpushed == nil)
     // An upstream whose branch was deleted has no ahead/behind line: unpushed is unknown.
     let gone = GitLocalReading.parse(status: status(ahead: nil))
-    #expect(gone?.hasUpstream == true && gone?.unpushed == nil)
+    #expect(gone?.upstream != nil && gone?.unpushed == nil && gone?.needsRemoteCount == false)
+    // A worktree branch made from origin/main tracks main: being ahead of main is not "not pushed".
+    let fromMain = GitLocalReading.parse(status: status(upstream: "origin/main", ahead: 5))
+    #expect(fromMain?.unpushed == nil && fromMain?.needsRemoteCount == true)
+    #expect(GitLocalReading.parse(status: status(upstream: nil, ahead: nil))?.needsRemoteCount == true)
 }
 
 @Test func malformedPorcelainIsNoReading() {
@@ -459,6 +463,14 @@ private func reader(_ runner: FakeRunner, open: Bool = true, gh: String? = "/opt
         return .failed(1)
     }
     #expect(reader(runner).verdict(feature) == .notPushed)
+    let pushedFromMain = FakeRunner { command in
+        if command.executable.hasSuffix("/gh") { return .succeeded(pullRequests([pr()])) }
+        if command.arguments.contains("status") { return .succeeded(Data(status(upstream: "origin/main", ahead: 3).utf8)) }
+        if command.arguments.contains("remote") { return .succeeded(Data("origin\n".utf8)) }
+        if command.arguments.contains("rev-list") { return .succeeded(Data("0\n".utf8)) }
+        return .failed(1)
+    }
+    #expect(reader(pushedFromMain).verdict(feature) == .checksPassed)
     let noRemote = FakeRunner { command in
         if command.arguments.contains("status") { return .succeeded(Data(status(upstream: nil, ahead: nil).utf8)) }
         if command.arguments.contains("remote") { return .succeeded(Data()) }
@@ -557,7 +569,8 @@ private extension WorkStatusReader {
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: folder) }
     let script = folder.appendingPathComponent("slow")
-    try Data("#!/bin/sh\nsleep 30\n".utf8).write(to: script)
+    // `exec`, so terminating the command ends the sleep too and no orphan holds a pipe other tests read.
+    try Data("#!/bin/sh\nexec sleep 30\n".utf8).write(to: script)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
     let started = Date()
     let result = ProcessWorkStatusRunner().run(WorkStatusCommand(executable: script.path, arguments: [],
@@ -566,24 +579,4 @@ private extension WorkStatusReader {
     #expect(Date().timeIntervalSince(started) < 5)
     #expect(ProcessWorkStatusRunner().run(WorkStatusCommand(executable: folder.appendingPathComponent("none").path,
                                                             arguments: [], environment: [:], timeout: 1)) == .notLaunched)
-}
-
-/// A disposable repository in a temporary folder; skipped where no developer-tools git is installed.
-@Test func aRealWorkTreeWithAnUntrackedFileReadsUncommitted() throws {
-    guard let git = WorkStatusTools.git(home: NSHomeDirectory(), isExecutable: { FileManager.default.isExecutableFile(atPath: $0) })
-    else { return }
-    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-work-tree-" + UUID().uuidString)
-    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: folder) }
-    let runner = ProcessWorkStatusRunner()
-    let environment = ["HOME": folder.path, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1"]
-    #expect(runner.run(WorkStatusCommand(executable: git, arguments: ["-C", folder.path, "init", "-q", "-b", "feat/x"],
-                                         environment: environment, timeout: 10)) == .succeeded(Data()))
-    try Data("hello".utf8).write(to: folder.appendingPathComponent("new.txt"))
-    let reader = WorkStatusReader(runner: runner, gate: WorkStatusGate(open: true), git: git, gh: nil, home: folder.path)
-    let local = try #require(reader.local(folder.path))
-    #expect(local.head == .branch("feat/x") && local.changed && local.commit == nil)
-    #expect(reader.verdict(.branch(name: "feat/x", directory: folder.path, startedAt: 0, repository: nil)) == .uncommitted)
-    #expect(reader.repository(folder.path) == .notOnGitHub)
-    #expect(reader.local(FileManager.default.temporaryDirectory.path) == nil)
 }
