@@ -1,7 +1,7 @@
 import Foundation
 import HerdlyCore
 
-/// Work status for finished rows (#417, ADR 0023): the branch each running turn was seen on, the
+/// Work status for finished rows (#417, ADR 0024): the branch each running turn was seen on, the
 /// verdict read for each finished turn, and the GitHub card's state and switch. It draws nothing in the
 /// notch; `verdict(for:)` is what a row will read. Nothing here changes the queue, its counts,
 /// acknowledgment, the spotlight or any deadline.

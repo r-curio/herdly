@@ -1,7 +1,7 @@
 import Foundation
 import HerdlyCore
 
-/// One read-only command for work status (#417, ADR 0023): `git` in a session's folder, or `gh`.
+/// One read-only command for work status (#417, ADR 0024): `git` in a session's folder, or `gh`.
 struct WorkStatusCommand: Equatable, Sendable {
     let executable: String
     let arguments: [String]

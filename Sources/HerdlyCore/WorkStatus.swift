@@ -1,6 +1,6 @@
 import Foundation
 
-/// How far a finished session's work got (#417, ADR 0023): a fact Herdly read from git and, through the
+/// How far a finished session's work got (#417, ADR 0024): a fact Herdly read from git and, through the
 /// GitHub CLI, from the branch's pull request. It never judges the code. Anything Herdly cannot
 /// establish is `noVerdict`, never a guess. Presentation only: no verdict orders the queue, counts as work,
 /// acknowledges anything or touches a deadline.

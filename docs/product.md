@@ -327,7 +327,7 @@ If the companion was fully quit when the user visited the result, that visit may
 
 ## Agreed work status on finished rows
 
-Agreed on 2026-11-13 ([#417](https://github.com/r-curio/herdly/issues/417), Paper journey board "I · Finished verdict and stuck sessions", and the Herdly Settings page "GitHub status in Agents"). A finished row can say how far its session's work got (its **work status**, see [CONTEXT.md](../CONTEXT.md)): uncommitted, not pushed, checks running, checks failing, conflict, checks passed, or merged. Herdly reports facts and never judges the code. Anything it cannot establish has no verdict, never a guess. ADR 0023 records the boundary.
+Agreed on 2026-11-13 ([#417](https://github.com/r-curio/herdly/issues/417), Paper journey board "I · Finished verdict and stuck sessions", and the Herdly Settings page "GitHub status in Agents"). A finished row can say how far its session's work got (its **work status**, see [CONTEXT.md](../CONTEXT.md)): uncommitted, not pushed, checks running, checks failing, conflict, checks passed, or merged. Herdly reports facts and never judges the code. Anything it cannot establish has no verdict, never a guess. ADR 0024 records the boundary.
 
 - **Which branch.** The verdict is about the branch Herdly saw the session on while the turn ran, remembered so it still resolves after an agent merges and the folder returns to the default branch. There is no verdict when:
   - the branch or folder changed during the turn;
