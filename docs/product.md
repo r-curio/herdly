@@ -49,7 +49,7 @@ Confirmed capabilities and rules are detailed in the sections below and in the [
 
 Terminology is fixed by the glossary: companion, Codex surface, notch, Codex session, approval request, Open in Codex, attention queue, acknowledged completion, uncertain completion, resolution evidence.
 
-Undecided product facts: a global hotkey for keyboard-only entry to the panel; exact desktop conversation focus; Ghostty split panes; the items listed under Open decisions below.
+Undecided product facts: exact desktop conversation focus; Ghostty split panes; the items listed under Open decisions below.
 
 ## Brand Commitments
 
@@ -74,7 +74,7 @@ Undecided product facts: a global hotkey for keyboard-only entry to the panel; e
 
 ## Accessibility & Inclusion
 
-Keyboard and VoiceOver operation of the notch panel are in scope: every row and button carries a label naming its action and subject, Tab moves through controls once the panel is key, Up and Down arrows select a row in the open queue (drawn with the focus ring and spoken as selected) and Return opens a selected approval or question as its clicked card, Escape collapses without dismissing (on a clicked card the first Escape returns to the queue and a second collapses, agreed 2026-10-21, D6), and long commands read in full. Keyboard-only entry currently requires one click; a global hotkey is deferred. Placement follows the pointer's display unless the user has pinned a display.
+Keyboard and VoiceOver operation of the notch panel are in scope: every row and button carries a label naming its action and subject, Tab moves through controls once the panel is key, Up and Down arrows select a row in the open queue (drawn with the focus ring and spoken as selected) and Return opens a selected approval or question as its clicked card, Escape collapses without dismissing (on a clicked card the first Escape returns to the queue and a second collapses, agreed 2026-10-21, D6), and long commands read in full. Agreed with the user on 2026-11-13 ([#427](https://github.com/r-curio/herdly/issues/427), Paper L "2 · Keyboard in" and "4 · Sent", K "A · Hotkey"): one global hotkey, ⌃⌥Space by default, puts the keyboard in the notch from any app without a click. It is the only key Herdly claims system-wide; plain 1–9 and every other key stay with the app in front. With a spotlight card showing, the hotkey gives that card the keyboard; otherwise it opens the queue with its top row selected and a foot line naming the keys ("↑↓ select · ⏎ open · esc close · ⌃⌥Space hide"), and that queue stays open while the keyboard is in it, as a draft holds a card. Pressing the hotkey again, Escape at the top level, or the panel folding for any reason gives the keyboard back to the app that had it when the hotkey was pressed, at the same cursor; if that app has quit, Herdly activates nothing and macOS chooses, and an app that came forward meanwhile (an Open from the notch) keeps it. Keyboard focus pauses no countdown: ADR 0020 is unchanged. Settings › Notch has a Keyboard row with a shortcut recorder and an off switch; changes take effect at once. A shortcut another app already holds is reported there and the notch stays click-only. Placement follows the pointer's display unless the user has pinned a display.
 
 ## Initial supported surfaces
 
