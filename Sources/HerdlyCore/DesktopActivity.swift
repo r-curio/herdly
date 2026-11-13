@@ -161,6 +161,43 @@ public struct DesktopState: Sendable {
     }
 }
 
+/// Each hook record as a reader last decoded it, with the bytes it was decoded from: the bytes of an
+/// unchanged file are already kept (`HookFileCache`), and decoding them again every scan was most of
+/// the cost of reading them. A record is reused only for exactly the same bytes, so whatever a
+/// caller's cache holds or lacks, it gets what decoding its own bytes would give. Bounded: past
+/// `maximumEntries` files it starts over.
+final class DecodedHookRecords<Record: Sendable>: @unchecked Sendable {
+    private let maximumEntries: Int
+
+    // Invariant for `@unchecked Sendable`: `entries` and `decodes` are only touched while holding `lock`.
+    private let lock = NSLock()
+    private var entries: [String: (bytes: Data, record: Record?)] = [:]
+    private var decodes: [String: Int] = [:]
+
+    init(maximumEntries: Int) {
+        self.maximumEntries = maximumEntries
+    }
+
+    func record(_ path: String, bytes: Data, decode: () -> Record?) -> Record? {
+        lock.lock()
+        let kept = entries[path]
+        lock.unlock()
+        if let kept, kept.bytes == bytes { return kept.record }
+        let record = decode()
+        lock.lock(); defer { lock.unlock() }
+        if entries[path] == nil, entries.count >= maximumEntries { entries.removeAll() }
+        entries[path] = (bytes, record)
+        decodes[(path as NSString).deletingLastPathComponent, default: 0] += 1
+        return record
+    }
+
+    /// How many records in `directory` were decoded rather than reused, for tests.
+    func decodes(in directory: URL) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return decodes[directory.path] ?? 0
+    }
+}
+
 public enum DesktopEventReader {
     /// A hook input is capped at 64 KiB; normalized metadata and JSON escaping can make its record larger.
     public static let maximumRecordSize = 128 * 1024
@@ -177,32 +214,7 @@ public enum DesktopEventReader {
         let tool_input: [String: String]?
     }
 
-    private static let decoded = DecodedRecords()
-
-    /// Each record as last decoded, with the bytes it was decoded from: the bytes of an unchanged
-    /// file are already kept (`HookFileCache`), and decoding them again every scan was most of this
-    /// reader's cost. A record is reused only for exactly the same bytes, so whatever a caller's
-    /// cache holds or lacks, it gets what decoding its own bytes would give. Bounded: past
-    /// `maximumEntries` files it starts over.
-    private final class DecodedRecords: @unchecked Sendable {
-        static let maximumEntries = 2 * HookEventListing.maximumRecords
-
-        // Invariant for `@unchecked Sendable`: `entries` is only touched while holding `lock`.
-        private let lock = NSLock()
-        private var entries: [String: (bytes: Data, record: Record?)] = [:]
-
-        func record(_ path: String, bytes: Data, decode: () -> Record?) -> Record? {
-            lock.lock()
-            let kept = entries[path]
-            lock.unlock()
-            if let kept, kept.bytes == bytes { return kept.record }
-            let record = decode()
-            lock.lock(); defer { lock.unlock() }
-            if entries[path] == nil, entries.count >= Self.maximumEntries { entries.removeAll() }
-            entries[path] = (bytes, record)
-            return record
-        }
-    }
+    private static let decoded = DecodedHookRecords<Record>(maximumEntries: 2 * HookEventListing.maximumRecords)
 
     /// Replays only the newest `HookEventListing.maximumRecords` records; an overgrown or
     /// unreadable directory yields no events.

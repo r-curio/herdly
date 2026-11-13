@@ -165,6 +165,36 @@ public struct ReminderQueue: Sendable {
 }
 
 public enum ReminderReader {
+    /// What `scan` reads from one hook record.
+    struct Hook: Sendable {
+        struct Record: Decodable {
+            let hook_event_name: String
+            let session_id: UUID
+            let turn_id: UUID?
+            let received_at: String
+        }
+
+        let hook_event_name: String
+        let session_id: UUID
+        let turn_id: UUID?
+        let received_at: String
+        /// When a `SessionEnd` record says the session ended; nil for any other event, or a time
+        /// that cannot be read. Parsed with the record, not on every scan.
+        let endedAt: Double?
+
+        init(_ record: Record) {
+            hook_event_name = record.hook_event_name
+            session_id = record.session_id
+            turn_id = record.turn_id
+            received_at = record.received_at
+            endedAt = record.hook_event_name == "SessionEnd" ? RolloutTimestamp.parse(record.received_at) : nil
+        }
+    }
+
+    /// The window's records, and as many again looked back through for session ends, with room
+    /// before it starts over (`DecodedHookRecords`).
+    static let decodedHooks = DecodedHookRecords<Hook>(maximumEntries: 3 * HookEventListing.maximumRecords)
+
     private static func bounded(_ url: URL, limit: Int) -> Data? {
         guard let file = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? file.close() }
@@ -585,15 +615,9 @@ public enum ReminderReader {
                 if item.outcome == "no_decision" { result.reminders.append(item) }
             }
         }
-        struct Hook: Decodable {
-            let hook_event_name: String
-            let session_id: UUID
-            let turn_id: UUID?
-            let received_at: String
-        }
         func hook(_ url: URL) -> Hook? {
             guard let bytes = hookCache.bytes(url, limit: 65536, next: &result.hookCache) else { return nil }
-            return try? JSONDecoder().decode(Hook.self, from: bytes)
+            return decodedHooks.record(url.path, bytes: bytes) { (try? JSONDecoder().decode(Hook.Record.self, from: bytes)).map(Hook.init) }
         }
         let window = listing.records
         var hooks = window.compactMap(hook)
@@ -609,8 +633,8 @@ public enum ReminderReader {
             }
             hooks.insert(contentsOf: ends.reversed(), at: 0)
         }
-        for hook in hooks where hook.hook_event_name == "SessionEnd" {
-            guard let ended = RolloutTimestamp.parse(hook.received_at) else { continue }
+        for hook in hooks {
+            guard let ended = hook.endedAt else { continue }
             result.sessionEnds[hook.session_id] = max(result.sessionEnds[hook.session_id] ?? 0, ended)
         }
         let sessions = Set(result.attentionRequests.map(\.session)).union(hooks.map(\.session_id))

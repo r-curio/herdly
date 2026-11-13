@@ -265,6 +265,66 @@ private func runningPrompts(_ scan: ClaudeObservationScan) -> [String: String] {
     #expect(next.hookCache.merging(replay.cache).count == 2)
 }
 
+@Test func reminderScanDecodesAHookRecordOnceAndAgainOnlyWhenItsBytesChange() throws {
+    let root = try temporaryDirectory(), rollouts = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: rollouts) }
+    let ended = UUID(), live = UUID(), unreadable = UUID()
+    func record(_ session: UUID, _ event: String, at time: String) -> Data {
+        Data("{\"session_id\":\"\(session.uuidString)\",\"hook_event_name\":\"\(event)\",\"received_at\":\"\(time)\"}".utf8)
+    }
+    func time(_ text: String) throws -> Double { try #require(RolloutTimestamp.parse(text)) }
+    let end = root.appendingPathComponent("end.json")
+    try record(ended, "SessionStart", at: "2026-01-01T00:00:00Z").write(to: root.appendingPathComponent("a.json"))
+    try record(ended, "SessionEnd", at: "2026-01-01T00:00:05Z").write(to: end)
+    try record(live, "SessionStart", at: "2026-01-01T00:00:01Z").write(to: root.appendingPathComponent("b.json"))
+    try record(unreadable, "SessionEnd", at: "sometime").write(to: root.appendingPathComponent("c.json"))
+    try Data("not json".utf8).write(to: root.appendingPathComponent("d.json"))
+    func decodes() -> Int { ReminderReader.decodedHooks.decodes(in: root) }
+
+    var cache = HookFileCache()
+    /// A scan with the kept file cache, checked against one that reads every file again.
+    func scan(_ comment: Comment, sourceLocation: SourceLocation = #_sourceLocation) -> ReminderScan {
+        let warm = ReminderReader.scan(events: root, rollouts: rollouts, hookCache: cache)
+        let cold = ReminderReader.scan(events: root, rollouts: rollouts)
+        #expect(warm.sessionEnds == cold.sessionEnds, comment, sourceLocation: sourceLocation)
+        #expect(warm.endedSessions == cold.endedSessions, comment, sourceLocation: sourceLocation)
+        #expect(String(describing: warm.cliEvents) == String(describing: cold.cliEvents), comment, sourceLocation: sourceLocation)
+        cache = warm.hookCache
+        return warm
+    }
+    #expect(scan("first").sessionEnds == [ended: try time("2026-01-01T00:00:05Z")])
+    #expect(decodes() == 5)
+    // Unchanged: nothing is decoded, with or without the file cache. A record that did not decode,
+    // or whose end time cannot be read, stays that way.
+    #expect(scan("unchanged").sessionEnds == [ended: try time("2026-01-01T00:00:05Z")])
+    #expect(scan("unchanged again").endedSessions == [ended])
+    #expect(decodes() == 5)
+
+    // Replaced atomically, then rewritten in place at another length: each is decoded once more.
+    try record(ended, "SessionEnd", at: "2026-01-01T00:00:06Z").write(to: end, options: .atomic)
+    #expect(scan("replaced").sessionEnds == [ended: try time("2026-01-01T00:00:06Z")])
+    #expect(decodes() == 6)
+    try record(ended, "SessionEnd", at: "2026-01-01T00:00:07.500Z").write(to: end)
+    #expect(scan("rewritten").sessionEnds == [ended: try time("2026-01-01T00:00:07.500Z")])
+    #expect(decodes() == 7)
+
+    // Rewritten in place under the same stamp: the file cache still holds the old bytes, as it did
+    // before decoded records were kept, and a scan that reads the file again decodes the new ones.
+    try overwriteKeepingStamp(end, with: String(decoding: record(ended, "SessionEnd", at: "2026-01-01T00:00:09.500Z"), as: UTF8.self))
+    #expect(ReminderReader.scan(events: root, rollouts: rollouts, hookCache: cache).sessionEnds
+        == [ended: try time("2026-01-01T00:00:07.500Z")])
+    #expect(decodes() == 7)
+    #expect(ReminderReader.scan(events: root, rollouts: rollouts).sessionEnds == [ended: try time("2026-01-01T00:00:09.500Z")])
+    #expect(decodes() == 8)
+
+    // The record whose time could not be read becomes readable, and the first session's end is removed.
+    try record(unreadable, "SessionEnd", at: "2026-01-01T00:00:08Z").write(to: root.appendingPathComponent("c.json"), options: .atomic)
+    try FileManager.default.removeItem(at: end)
+    cache = HookFileCache()
+    #expect(scan("one fixed, one removed").sessionEnds == [unreadable: try time("2026-01-01T00:00:08Z")])
+    #expect(decodes() == 9)
+}
+
 /// A fixed sequence, so a failure repeats.
 private struct SeededGenerator: RandomNumberGenerator {
     var state: UInt64
