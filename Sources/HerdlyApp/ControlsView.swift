@@ -563,6 +563,7 @@ private struct AgentControls: View {
                 codexCard
                 ClaudeAgentControls(setup: model.claude, preview: $preview, updates: model.agentUpdates,
                                     perform: model.performAgentRowAction)
+                GitHubAgentControls(workStatus: model.workStatus)
             }
         }
         .sheet(item: $preview) { SetupPreviewSheet(preview: $0) }
@@ -647,11 +648,13 @@ private struct SetupPreviewSheet: View {
 /// An agent's status: a green dot when connected, orange when it needs attention, gray while unknown.
 private struct AgentStatusBadge: View {
     let status: AgentHeaderStatus
+    /// A reason that needs nothing from the user (GitHub CLI not installed) keeps a gray dot.
+    var quiet = false
 
     var body: some View {
         switch status {
         case .connected: StatusBadge(title: status.title, color: .green)
-        case .attention: StatusBadge(title: status.title, color: .orange)
+        case .attention: StatusBadge(title: status.title, color: quiet ? .secondary : .orange)
         case .checking: StatusBadge(title: status.title, color: .secondary)
         }
     }
@@ -681,6 +684,7 @@ private struct AgentCardHeader<Configure: View, Actions: View>: View {
     let symbol: String
     let tile: Color
     let status: AgentHeaderStatus
+    var quiet = false
     let menuLabel: String
     @ViewBuilder let configure: Configure
     @ViewBuilder let actions: Actions
@@ -699,7 +703,7 @@ private struct AgentCardHeader<Configure: View, Actions: View>: View {
             }
             .accessibilityElement(children: .combine)
             Spacer(minLength: 8)
-            AgentStatusBadge(status: status)
+            AgentStatusBadge(status: status, quiet: quiet)
             configure
             AgentActionsMenu(label: menuLabel) { actions }
         }
@@ -804,6 +808,89 @@ private struct AgentMessageRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, SettingsStyle.rowInset).padding(.vertical, 9)
         }
+    }
+}
+
+/// The GitHub card (#417, Paper "GitHub status in Agents", 01–03): the GitHub CLI's presence and
+/// sign-in, and the "Pull request status on finished rows" switch while it is signed in. Signed out
+/// and not installed show the command to run with Copy; Herdly never runs either.
+private struct GitHubAgentControls: View {
+    @ObservedObject var workStatus: WorkStatusModel
+
+    var body: some View {
+        let cli = workStatus.cli
+        SettingsCard {
+            AgentCardHeader(name: "GitHub", subtitle: cli.subtitle, symbol: "arrow.triangle.branch",
+                            tile: Color(red: 0.14, green: 0.16, blue: 0.18), status: cli.header, quiet: cli.isQuiet,
+                            menuLabel: "GitHub actions") {
+                EmptyView()
+            } actions: {
+                Button("Check Again") { workStatus.refreshCLI() }
+            }
+            switch cli {
+            case .checking:
+                EmptyView()
+            case .signedIn, .unknown:
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                SettingsRow(title: "Pull request status on finished rows", detail: nil) {
+                    switchToggle.labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                }
+            case .signedOut:
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                GitHubCommandRow(text: "Sign in from a terminal, then finished rows show pull requests",
+                                 dot: .orange, command: "gh auth login")
+            case .notInstalled:
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                GitHubCommandRow(text: "Optional. Install it to see pull requests on finished rows",
+                                 dot: .secondary, command: "brew install gh")
+            }
+        }
+        .onAppear { workStatus.refreshCLI() }
+    }
+
+    private var switchToggle: some View {
+        Toggle("Pull request status on finished rows", isOn: Binding(
+            get: { workStatus.isEnabled },
+            set: { workStatus.setEnabled($0) }
+        ))
+    }
+}
+
+/// "GitHub CLI" with a dot and what to do on the right, then the command in monospace with Copy.
+private struct GitHubCommandRow: View {
+    let text: String
+    let dot: Color
+    let command: String
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text("GitHub CLI")
+                Spacer(minLength: 16)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Circle().fill(dot).frame(width: 7, height: 7).accessibilityHidden(true)
+                    Text(text).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            HStack(spacing: 8) {
+                Text(command)
+                    .font(.system(size: 12, design: .monospaced))
+                    .textSelection(.enabled)
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                }
+                .controlSize(.small)
+                .accessibilityLabel("Copy \(command)")
+                .accessibilityHint("Copies the command. Herdly does not run it.")
+            }
+        }
+        .padding(.horizontal, SettingsStyle.rowInset)
+        .padding(.vertical, 9)
+        .accessibilityElement(children: .contain)
     }
 }
 
