@@ -2,10 +2,12 @@ import Foundation
 
 public enum ApprovalTiming {
     public static let handoffTimeout: TimeInterval = 30
-    /// The longest the companion goes between scans of the events directory while a request can be
-    /// waiting, and the least between any two (`HookScanSchedule`); a receipt can only follow a scan.
+    /// The least the companion goes between scans of the events directory, and the most while it
+    /// holds a row or session; with nothing held and a file-system event missed, a waiting request
+    /// is found by the safety scan instead (`HookScanSchedule`). A receipt can only follow a scan.
     public static let scanInterval: TimeInterval = 2
-    /// Covers one full scan interval plus scan time before the helper gives up on the companion.
+    /// Covers the longer of the two waits above (the safety interval), the slowest tick, and scan
+    /// time before the helper gives up on the companion.
     public static let connectionTimeout: TimeInterval = 5
     /// While the pointer is on the notch a live approval's countdown pauses (ADR 0020), but never
     /// past this long after its receipt: the hold adds at most `maximumHold - handoffTimeout`.

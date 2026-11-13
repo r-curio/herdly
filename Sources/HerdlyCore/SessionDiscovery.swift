@@ -151,7 +151,7 @@ public enum SessionDiscovery {
     /// The first line carries the session identity; the tail carries its latest turn events.
     public static let headBytes = 64 * 1024
     public static let tailBytes = CodexUsageReader.tailBytes
-    /// Newest rollouts inspected per scan; each two-second scan rereads them.
+    /// Newest rollouts inspected per scan; each scan rereads them.
     public static let maximumFiles = 24
 
     /// Open turns in the newest rollouts under `root` that were written within `maximumAge` of
