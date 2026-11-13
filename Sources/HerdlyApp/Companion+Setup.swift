@@ -47,7 +47,7 @@ extension Companion {
         completionPresentation = Attention(restored: queue.items.contains { $0.kind == .completion })
         eventsPath = url.path
         UserDefaults.standard.set(eventsPath, forKey: "approvalEventsPath")
-        nextScan = 0
+        scanSchedule.requestNow()
         refresh()
     }
 
@@ -100,7 +100,7 @@ extension Companion {
         completionPresentation = Attention(restored: queue.items.contains { $0.kind == .completion })
         eventsPath = installed
         UserDefaults.standard.set(installed, forKey: "approvalEventsPath")
-        nextScan = 0
+        scanSchedule.requestNow()
         refresh()
     }
 
