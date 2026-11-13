@@ -15,8 +15,9 @@ public enum RefreshCadence {
 /// its result can matter within seconds: a terminal app is frontmost (a pane can be visited, ADR 0016),
 /// Herdly is in use (a row may be opened), or something waits for the user (a visit may acknowledge
 /// it). Otherwise every ten: nobody is looking at a pane or a row. The rule is asked again each time
-/// the two-second hook scan completes, so once any of the three turns true the next of those scans
-/// herdr if two seconds have passed since the last. An Open or relay never waits for this: it revalidates with its own fresh read.
+/// a hook scan completes (every two seconds while a session is live, `HookScanSchedule`), so once
+/// any of the three turns true the next of those scans herdr if two seconds have passed since the
+/// last. An Open or relay never waits for this: it revalidates with its own fresh read.
 public enum HerdrScanCadence {
     public static let near: Double = 2
     public static let away: Double = 10
@@ -98,7 +99,7 @@ public struct HookScanNeeds: Equatable, Sendable {
     /// The last scan could not read a source, or a Claude root is read without a watched hook
     /// directory (not connected, or waiting for a restart): its sessions are only seen by reading.
     public var sourceUnwatchedOrUnreadable = false
-    /// The scan holds state that ends at a time within the safety interval (a Claude usage window's reset).
+    /// The scan holds state that ends at a time within the safety interval (`claudeUsageResetDue`).
     public var timedStateDue = false
     /// The notch is open or Herdly is the active app: what the scan reads is on screen.
     public var herdlyInUse = false
@@ -108,6 +109,18 @@ public struct HookScanNeeds: Equatable, Sendable {
     public var fastCadence: Bool {
         nothingAppliedYet || rowsHeld || sessionsLive || codexMayRun || sourceUnwatchedOrUnreadable
             || timedStateDue || herdlyInUse
+    }
+
+    /// Whether any held Claude usage window resets by `wallNow` (Unix time) plus one safety interval,
+    /// or has already: the scan stops showing a window at its reset, so a safety scan could be late for
+    /// it. A reset or clock that is not a number counts as due. Codex's usage needs no such rule: the
+    /// app applies `CodexUsageReading.current(now:)` each time it shows the ring, not in the scan.
+    public static func claudeUsageResetDue(_ readings: [ClaudeUsageReading], wallNow: Double) -> Bool {
+        readings.contains { reading in
+            [reading.fiveHour, reading.sevenDay].contains { window in
+                window.map { !($0.resetsAt > wallNow + HookScanSchedule.safetyInterval) } ?? false
+            }
+        }
     }
 }
 
@@ -123,9 +136,11 @@ public struct HookScanSchedule: Sendable {
     /// Minimum spacing, and the cadence whenever anything is uncertain: the scan's former fixed clock,
     /// which the hook helper's connection timeout is sized against (`ApprovalTiming`).
     public static let interval: Double = ApprovalTiming.scanInterval
-    /// The cadence when nothing is held, live, uncertain or changed. Nothing the user can see waits on
-    /// it; it bounds how long a wrong "nothing can have changed" lasts.
-    public static let safetyInterval: Double = 10
+    /// The cadence when nothing is held, live, uncertain or changed. It bounds how long a wrong
+    /// "nothing can have changed" lasts, including a hook record whose file-system event never came:
+    /// a safety scan, the slowest refresh tick and a second of scan time still fit inside the helper's
+    /// connection timeout, so such a request is receipted rather than handed back.
+    public static let safetyInterval: Double = ApprovalTiming.connectionTimeout - RefreshCadence.idle - 1
 
     private var lastStartedAt: Double?
     private var changePending = false

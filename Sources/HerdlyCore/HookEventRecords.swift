@@ -723,6 +723,33 @@ public enum HookDirectoryChanges: Equatable, Sendable {
     case unknown
 }
 
+/// What one batch of a watcher's events says about its directory, for `HookDirectoryChangeLog`.
+public enum HookWatchReport: Equatable, Sendable {
+    /// These top-level names changed; none when every change lay below the top level.
+    case names(Set<String>)
+    /// Events were lost or name something else: read the directory in full. `watchLost` when the
+    /// directory itself moved or its volume changed, so the watcher may be following nothing.
+    case unknown(watchLost: Bool)
+
+    /// - Parameters:
+    ///   - prefix: the directory's real path with a trailing slash, as events name it.
+    ///   - droppedFlags: event flags meaning names were lost.
+    ///   - lostFlags: event flags meaning the directory moved or its volume changed.
+    public static func from(paths: [String], flags: [UInt32], prefix: String,
+                            droppedFlags: UInt32, lostFlags: UInt32) -> HookWatchReport {
+        var names = Set<String>()
+        for (path, flag) in zip(paths, flags) {
+            guard flag & (droppedFlags | lostFlags) == 0, path.hasPrefix(prefix) else {
+                return .unknown(watchLost: flags.contains { $0 & lostFlags != 0 })
+            }
+            let name = path.dropFirst(prefix.count)
+            // The listing is top-level only; what changes inside a subdirectory does not change it.
+            if !name.isEmpty, !name.contains("/") { names.insert(String(name)) }
+        }
+        return .names(names)
+    }
+}
+
 /// Changed names reported by whatever watches a hook event directory (HerdlyApp, through macOS
 /// file-system events), held until `HookEventListing` next lists that directory.
 ///

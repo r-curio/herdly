@@ -139,6 +139,14 @@ import Testing
     #expect(Double(CodexSetupRequirements.hookTimeout) >= ApprovalTiming.connectionTimeout + ApprovalTiming.helperWaitBound + 1)
 }
 
+/// With no change evidence at all the companion still scans every safety interval (#306), on a tick
+/// at most `RefreshCadence.idle` late: a record whose file-system event never arrives is receipted
+/// before the helper gives up.
+@Test func receiptDeadlineOutlastsOneSafetyScanIntervalAndTheSlowestTick() {
+    #expect(HookScanSchedule.safetyInterval + RefreshCadence.idle < ApprovalTiming.connectionTimeout)
+    #expect(HookScanSchedule.safetyInterval >= HookScanSchedule.interval)
+}
+
 @Test func abandonedRequestIsHandedBackWithoutAReceipt() throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
