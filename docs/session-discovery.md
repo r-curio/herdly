@@ -46,7 +46,7 @@ Each scan stores the result per root session, and `CodexAttentionAdapter.observa
 
 ## App integration
 
-Each two-second scan reads the candidates and the process list off the main actor alongside the hook events, rollouts, read state, names, and usage, then assembles `SessionLiveness` on the main actor from the desktop app's running state, the last Ghostty snapshot, and the scan's SessionEnd times. `--reminder-rollouts <path>` points a lab run at a copy of the sessions tree, as it does for reminders and usage. Restarts restore nothing here: discovery is re-derived from current evidence on every scan.
+Each hook scan (two seconds apart while a session is live or a row is held, [architecture](architecture.md)) reads the candidates and the process list off the main actor alongside the hook events, rollouts, read state, names, and usage, then assembles `SessionLiveness` on the main actor from the desktop app's running state, the last Ghostty snapshot, and the scan's SessionEnd times. `--reminder-rollouts <path>` points a lab run at a copy of the sessions tree, as it does for reminders and usage. Restarts restore nothing here: discovery is re-derived from current evidence on every scan.
 
 ## Verification
 

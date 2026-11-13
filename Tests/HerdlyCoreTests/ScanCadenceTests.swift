@@ -256,3 +256,266 @@ private func listingDirectory() throws -> URL {
     // The window's expiry still follows the clock passed in, kept record or not.
     #expect(ClaudeUsageReader.latest(root: root, now: 6_000)?.fiveHour == nil)
 }
+
+// MARK: - Hook scan schedule (#306)
+
+private let quiet = HookScanNeeds()
+
+/// A schedule whose last scan started at `at` with nothing pending.
+private func scheduleStarted(at: Double) -> HookScanSchedule {
+    var schedule = HookScanSchedule()
+    do { let started = schedule.start(now: at, watchTrusted: true, needs: quiet); #expect(started) }
+    return schedule
+}
+
+@Test func theFirstHookScanIsDueAtOnce() {
+    var schedule = HookScanSchedule()
+    #expect(schedule.isDue(now: 0, watchTrusted: true, needs: quiet))
+    do { let started = schedule.start(now: 0, watchTrusted: true, needs: quiet); #expect(started) }
+    #expect(!schedule.isDue(now: 0, watchTrusted: true, needs: quiet))
+}
+
+@Test func aHookDirectoryChangeAfterAQuietPeriodIsScannedOnTheNextAsk() {
+    var schedule = scheduleStarted(at: 100)
+    // Past the spacing and nothing changed: nothing is due before the safety interval.
+    #expect(!schedule.isDue(now: 102.5, watchTrusted: true, needs: quiet))
+    schedule.noteChange()
+    do { let started = schedule.start(now: 102.5, watchTrusted: true, needs: quiet); #expect(started) }
+}
+
+@Test func aBurstOfChangesWithinTheIntervalCostsOneScanAndIsNotLost() {
+    var schedule = scheduleStarted(at: 100)
+    schedule.noteChange()
+    do { let started = schedule.start(now: 103, watchTrusted: true, needs: quiet); #expect(started) }
+    // More records arrive while that scan runs, or after it listed its directories.
+    for now in stride(from: 103.2, to: 105, by: 0.2) {
+        schedule.noteChange()
+        do { let started = schedule.start(now: now, watchTrusted: true, needs: quiet); #expect(!started) }
+    }
+    // The evidence waited: the next scan starts exactly one interval after the last, as the fixed clock did.
+    do { let started = schedule.start(now: 103 + HookScanSchedule.interval, watchTrusted: true, needs: quiet); #expect(started) }
+    // That scan took the evidence with it: nothing further is due until the safety interval.
+    #expect(!schedule.isDue(now: 105 + HookScanSchedule.interval, watchTrusted: true, needs: quiet))
+}
+
+@Test func aChangeNotedAfterAScanStartedCausesAnotherScan() {
+    var schedule = HookScanSchedule()
+    schedule.noteChange()
+    do { let started = schedule.start(now: 50, watchTrusted: true, needs: quiet); #expect(started) }
+    schedule.noteChange()
+    #expect(!schedule.isDue(now: 51.9, watchTrusted: true, needs: quiet))
+    #expect(schedule.isDue(now: 52, watchTrusted: true, needs: quiet))
+}
+
+@Test func withNoEvidenceAndNothingPendingOnlySafetyScansRun() {
+    var schedule = scheduleStarted(at: 0)
+    var starts: [Double] = []
+    for tick in 1...60 where schedule.start(now: Double(tick), watchTrusted: true, needs: quiet) {
+        starts.append(Double(tick))
+    }
+    #expect(starts == [3, 6, 9, 12, 15, 18, 21, 24, 27, 30, 33, 36, 39, 42, 45, 48, 51, 54, 57, 60])
+    #expect(HookScanSchedule.safetyInterval == 3)
+    #expect(HookScanSchedule.safetyInterval > HookScanSchedule.interval)
+}
+
+@Test func theSafetyBoundaryIsInclusive() {
+    let schedule = scheduleStarted(at: 7)
+    #expect(!schedule.isDue(now: 7 + HookScanSchedule.safetyInterval - 0.001, watchTrusted: true, needs: quiet))
+    #expect(schedule.isDue(now: 7 + HookScanSchedule.safetyInterval, watchTrusted: true, needs: quiet))
+}
+
+@Test func anUntrustedWatchKeepsTheFixedCadence() {
+    var schedule = scheduleStarted(at: 0)
+    var starts: [Double] = []
+    for tick in 1...8 where schedule.start(now: Double(tick), watchTrusted: false, needs: quiet) {
+        starts.append(Double(tick))
+    }
+    #expect(starts == [2, 4, 6, 8])
+}
+
+@Test func eachFastCadenceNeedKeepsTheFixedCadence() {
+    let each: [WritableKeyPath<HookScanNeeds, Bool>] = [
+        \.nothingAppliedYet, \.rowsHeld, \.sessionsLive, \.codexMayRun, \.sourceUnwatchedOrUnreadable,
+        \.timedStateDue, \.herdlyInUse,
+    ]
+    #expect(!quiet.fastCadence)
+    for need in each {
+        var needs = HookScanNeeds()
+        needs[keyPath: need] = true
+        #expect(needs.fastCadence)
+        let schedule = scheduleStarted(at: 0)
+        #expect(!schedule.isDue(now: 1.999, watchTrusted: true, needs: needs))
+        // Inclusive at exactly the interval, as the former `now >= nextScan` gate was.
+        #expect(schedule.isDue(now: HookScanSchedule.interval, watchTrusted: true, needs: needs))
+    }
+}
+
+@Test func scansAreNeverCloserThanTheIntervalWhateverIsPending() {
+    var needs = HookScanNeeds()
+    needs.rowsHeld = true
+    var schedule = scheduleStarted(at: 10)
+    schedule.noteChange()
+    #expect(!schedule.isDue(now: 11.999, watchTrusted: false, needs: needs))
+    #expect(schedule.isDue(now: 12, watchTrusted: false, needs: needs))
+}
+
+@Test func aClockThatDoesNotAdvanceStartsNoSecondScan() {
+    var schedule = HookScanSchedule()
+    schedule.noteChange()
+    do { let started = schedule.start(now: 5, watchTrusted: true, needs: quiet); #expect(started) }
+    schedule.noteChange()
+    for _ in 0..<5 { do { let started = schedule.start(now: 5, watchTrusted: false, needs: quiet); #expect(!started) } }
+}
+
+@Test func aClockThatCannotBeComparedScansRatherThanSkips() {
+    var schedule = scheduleStarted(at: 100)
+    #expect(schedule.isDue(now: 99, watchTrusted: true, needs: quiet))
+    #expect(schedule.isDue(now: .nan, watchTrusted: true, needs: quiet))
+    // A scan started on an unreadable clock leaves no spacing to rely on.
+    do { let started = schedule.start(now: .nan, watchTrusted: true, needs: quiet); #expect(started) }
+    #expect(schedule.isDue(now: 100.1, watchTrusted: true, needs: quiet))
+}
+
+@Test func anExplicitRequestIsDueWithoutWaitingForTheInterval() {
+    var schedule = scheduleStarted(at: 100)
+    schedule.requestNow()
+    do { let started = schedule.start(now: 100.2, watchTrusted: true, needs: quiet); #expect(started) }
+    #expect(!schedule.isDue(now: 100.4, watchTrusted: true, needs: quiet))
+}
+
+@Test func theFallbackCadenceIsTheIntervalTheHelpersConnectionTimeoutIsSizedAgainst() {
+    #expect(HookScanSchedule.interval == ApprovalTiming.scanInterval)
+    #expect(ApprovalTiming.connectionTimeout > HookScanSchedule.interval + RefreshCadence.idle)
+}
+
+@Test func watchReportsBecomeScanEvidenceOnceAndAnUnwatchedDirectoryIsUntrusted() {
+    let log = HookDirectoryChangeLog()
+    let watched = URL(fileURLWithPath: "/tmp/herdly-evidence-a", isDirectory: true)
+    let other = URL(fileURLWithPath: "/tmp/herdly-evidence-b", isDirectory: true)
+    // Nothing to watch: nothing to distrust, nothing changed.
+    #expect(log.takeScanEvidence(for: []) == (false, true))
+    // Not watched yet, or its stream could not start: untrusted for as long as that holds.
+    #expect(log.takeScanEvidence(for: [watched]) == (false, false))
+    #expect(log.takeScanEvidence(for: [watched]) == (false, false))
+
+    log.startWatching(watched)
+    // A new watch knows nothing of what came before it: one scan.
+    #expect(log.takeScanEvidence(for: [watched]) == (true, true))
+    #expect(log.takeScanEvidence(for: [watched]) == (false, true))
+    #expect(log.takeScanEvidence(for: [watched, other]) == (false, false))
+
+    log.report(["a.json"], in: watched)
+    log.report(["b.json"], in: watched)
+    #expect(log.takeScanEvidence(for: [watched]) == (true, true))
+    #expect(log.takeScanEvidence(for: [watched]) == (false, true))
+    // A change below the top level names nothing the listing needs, and is still evidence.
+    log.report([], in: watched)
+    #expect(log.takeScanEvidence(for: [watched]) == (true, true))
+    // A report for a directory nobody watches is dropped.
+    log.report(["c.json"], in: other)
+    #expect(log.takeScanEvidence(for: [watched]) == (false, true))
+}
+
+@Test func theListingTakingItsNamesDoesNotConsumeTheScanEvidence() throws {
+    let root = try listingDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    HookEventListing.changes.startWatching(root)
+    defer { HookEventListing.changes.stopWatching(root) }
+    _ = HookEventListing.changes.takeScanEvidence(for: [root])
+    try Data("{}".utf8).write(to: root.appendingPathComponent("a.json"))
+    HookEventListing.changes.report(["a.json"], in: root)
+    // The scan's own listing empties the names it was told; the evidence is the schedule's to take.
+    #expect(HookEventListing.entries(in: root)?.map(\.lastPathComponent) == ["a.json"])
+    #expect(HookEventListing.changes.takeScanEvidence(for: [root]).changed)
+}
+
+@Test func droppedEventsAreEvidenceAndALostWatchIsUntrustedUntilItStartsAgain() {
+    let log = HookDirectoryChangeLog()
+    let directory = URL(fileURLWithPath: "/tmp/herdly-evidence-c", isDirectory: true)
+    log.startWatching(directory)
+    _ = log.takeScanEvidence(for: [directory])
+
+    // Dropped or overflowed events: one full read covers them, and each further report asks again.
+    log.reportUnknown(in: directory)
+    #expect(log.takeScanEvidence(for: [directory]) == (true, true))
+    log.report(Set((0...HookDirectoryChangeLog.maximumNames).map { "\($0).json" }), in: directory)
+    #expect(log.takeScanEvidence(for: [directory]) == (true, true))
+
+    // The directory moved or its volume went away: the watch may be following nothing.
+    log.reportUnknown(in: directory, watchLost: true)
+    #expect(log.isWatchLost(directory))
+    #expect(log.takeScanEvidence(for: [directory]) == (true, false))
+    #expect(log.takeScanEvidence(for: [directory]) == (false, false))
+    log.startWatching(directory)
+    #expect(!log.isWatchLost(directory))
+    #expect(log.takeScanEvidence(for: [directory]) == (true, true))
+    log.stopWatching(directory)
+    #expect(log.takeScanEvidence(for: [directory]) == (false, false))
+}
+
+@Test func anAgentQueueWithNothingHeldNeedsNoFixedCadence() {
+    #expect(!AgentAttentionQueue().holdsSessionState)
+}
+
+@Test func aHeldResultARunningRowOrABusyInventorySessionIsSessionState() {
+    let session = AgentSessionIdentity(source: .claude, sourceScope: "/tmp/root", session: "s", surface: .cli)
+    let outcome = AgentOutcome(session: session, turn: "turn", status: .finished, arrivedAt: 10)
+    #expect(AgentAttentionQueue(snapshot: AgentAttentionSnapshot(outcomes: [outcome])).holdsSessionState)
+
+    var running = AgentAttentionQueue()
+    running.apply(.running(AgentRunning(session: session, turn: "turn", arrivedAt: 1)))
+    #expect(running.holdsSessionState)
+
+    var busy = AgentAttentionQueue()
+    busy.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 1, sessions: [
+        ClaudeInventorySession(sessionID: "s", kind: .interactive, startedAt: 1, lifecycle: .interactive(status: "busy"))
+    ]))
+    #expect(busy.holdsSessionState)
+
+    // A listed idle session has no row and leaves nothing in the queue: the app counts listed
+    // sessions itself (`HookScanNeeds.sessionsLive`), since such a session can turn busy unseen.
+    var idle = AgentAttentionQueue()
+    idle.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: 1, sessions: [
+        ClaudeInventorySession(sessionID: "s", kind: .interactive, startedAt: 1, lifecycle: .interactive(status: "idle"))
+    ]))
+    #expect(!idle.holdsSessionState)
+}
+
+@Test func aClaudeUsageWindowResettingWithinTheSafetyIntervalKeepsTheClock() {
+    func reading(fiveHour: Double?, sevenDay: Double?) -> ClaudeUsageReading {
+        ClaudeUsageReading(sourceScope: "/tmp/root", sessionID: "s",
+                           fiveHour: fiveHour.map { ClaudeUsageWindow(usedPercentage: 10, resetsAt: $0) },
+                           sevenDay: sevenDay.map { ClaudeUsageWindow(usedPercentage: 10, resetsAt: $0) }, observedAt: 0)
+    }
+    let now = 1_000.0, within = HookScanSchedule.safetyInterval
+    #expect(!HookScanNeeds.claudeUsageResetDue([], wallNow: now))
+    #expect(!HookScanNeeds.claudeUsageResetDue([reading(fiveHour: now + within + 0.001, sevenDay: now + 86_400)], wallNow: now))
+    // Inclusive: a window resetting exactly one safety interval ahead could be missed by a safety scan.
+    #expect(HookScanNeeds.claudeUsageResetDue([reading(fiveHour: now + within, sevenDay: nil)], wallNow: now))
+    #expect(HookScanNeeds.claudeUsageResetDue([reading(fiveHour: nil, sevenDay: now + 1)], wallNow: now))
+    // Already past and still held, or not a time at all: the next scan must drop it.
+    #expect(HookScanNeeds.claudeUsageResetDue([reading(fiveHour: now - 5, sevenDay: nil)], wallNow: now))
+    #expect(HookScanNeeds.claudeUsageResetDue([reading(fiveHour: .nan, sevenDay: nil)], wallNow: now))
+    #expect(HookScanNeeds.claudeUsageResetDue([reading(fiveHour: now + 86_400, sevenDay: nil)], wallNow: .nan))
+}
+
+@Test func watchEventsMapToNamesEvidenceOrALostWatch() {
+    let prefix = "/private/tmp/events/", dropped: UInt32 = 0x1, lost: UInt32 = 0x20
+    func report(_ events: [(String, UInt32)]) -> HookWatchReport {
+        HookWatchReport.from(paths: events.map(\.0), flags: events.map(\.1), prefix: prefix,
+                             droppedFlags: dropped, lostFlags: lost)
+    }
+    #expect(report([(prefix + "a.json", 0x100), (prefix + "b.json", 0)]) == .names(["a.json", "b.json"]))
+    // Below the top level: no name the listing needs, still a report.
+    #expect(report([(prefix + "holds/a.hold", 0)]) == .names([]))
+    #expect(report([]) == .names([]))
+    // Dropped or overflowed events: read in full, the watch itself still stands.
+    #expect(report([(prefix + "a.json", 0), (prefix + "b.json", dropped)]) == .unknown(watchLost: false))
+    // The directory itself, or a path outside it: the names cannot be relied on.
+    #expect(report([("/private/tmp/events", 0)]) == .unknown(watchLost: false))
+    #expect(report([("/private/tmp/elsewhere/a.json", 0)]) == .unknown(watchLost: false))
+    // The directory moved or its volume changed, in any event of the batch: the watch is lost.
+    #expect(report([("/private/tmp/events", lost)]) == .unknown(watchLost: true))
+    #expect(report([(prefix + "a.json", dropped), (prefix + "b.json", lost)]) == .unknown(watchLost: true))
+    #expect(report([(prefix + "a.json", 0), (prefix + "b.json", lost | 0x100)]) == .unknown(watchLost: true))
+}

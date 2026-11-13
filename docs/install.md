@@ -170,5 +170,5 @@ Herdly starts with default settings, an empty attention snapshot, and no Automat
 - Desktop approvals stay in Codex's native prompt; only direct CLI approvals offer Approve (allow once) and Deny, with a 30-second handoff.
 - Ghostty targeting covers one Codex session per unsplit tab with session-ID titles; split tabs report unavailable.
 - There is no global hotkey; keyboard users click the panel once, then Tab and Escape work.
-- Hook records and rollouts are scanned fully every two seconds with fixed size caps; very large histories are a known, deferred cost.
+- Hook records and rollouts are scanned with fixed size caps every two seconds while a session is live or a row is held, and on a hook-folder change or every three seconds otherwise ([architecture](architecture.md)); very large histories are a known, deferred cost.
 - The bundle identifier is still `dev.rcurio.herdly.prototype`; changing it would orphan the preferences above.

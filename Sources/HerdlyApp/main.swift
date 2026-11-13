@@ -640,7 +640,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if update == .leaveQueue {
             agentQueue.dismiss(.approval(result.work.approvalID))
             // The session's running row replaces the request; read its current status now, not in 2 s.
-            nextScan = 0
+            scanSchedule.requestNow()
         }
         refresh()
     }
@@ -654,7 +654,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         queue.items.compactMap(\.completion).filter { $0.source == .cli }
     }
     private var scanning = false
-    var nextScan: Double = 0
+    /// When the hook scan runs: on change evidence, and on a clock only while it must (#306).
+    var scanSchedule = HookScanSchedule()
+    /// What the last applied scan found that only another scan can see change (`hookScanNeeds`).
+    var lastScanNeeds: HookScanNeeds = { var needs = HookScanNeeds(); needs.nothingAppliedYet = true; return needs }()
     /// What the last scan decoded, so unchanged rollouts and Claude records are not reread every scan.
     private var rolloutCache = RolloutCache()
     /// Codex hook record bytes, shared by the reminder and desktop readers within a scan.
@@ -910,7 +913,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if previewMode == nil { registerHotkey() }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-        ) { [weak self] _ in Task { @MainActor in self?.refresh() } }
+        ) { [weak self] _ in Task { @MainActor in self?.scanSchedule.noteChange(); self?.refresh() } }
         // Display connect, disconnect, and rearrangement re-place the one panel; queue state is untouched.
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
@@ -1384,9 +1387,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func scanReminders() {
         let now = ProcessInfo.processInfo.systemUptime
         let hasClaudeInventoryRoot = claude.roots.contains { $0.capabilities.supported }
-        guard previewMode == nil, (!eventsPath.isEmpty || hasClaudeInventoryRoot), !scanning, now >= nextScan else { return }
+        guard previewMode == nil, (!eventsPath.isEmpty || hasClaudeInventoryRoot), !scanning else { return }
+        // Evidence taken on a tick that does not scan stays pending in the schedule (#306).
+        let watched = hookScanDirectories
+        let evidence = HookEventListing.changes.takeScanEvidence(for: watched)
+        if evidence.changed { scanSchedule.noteChange() }
+        guard scanSchedule.start(now: now, watchTrusted: evidence.trusted,
+                                 needs: hookScanNeeds(wallNow: Date().timeIntervalSince1970)) else { return }
         scanning = true
-        nextScan = now + 2
         claudeQuestionScanGeneration &+= 1
         let questionScanGeneration = claudeQuestionScanGeneration
         claudeApprovalScanGeneration &+= 1
@@ -1419,14 +1427,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let appsRunning = Set(TerminalHost.terminals.filter { TerminalApps.isRunning($0) })
         let observingSince = Companion.launchedAt
         let observationNow = Date().timeIntervalSince1970
-        let claudeRoots = claude.roots.compactMap { root -> (scope: String, events: URL, installationID: String)? in
-            guard root.status == .connected, !root.eventsPath.isEmpty,
-                  let installationID = root.plan?.installationID, !installationID.isEmpty else { return nil }
-            return (root.url.standardizedFileURL.path, URL(fileURLWithPath: root.eventsPath, isDirectory: true), installationID)
-        }
+        let claudeRoots = claude.roots.compactMap(\.hookSource)
         // The directories this scan lists: macOS names what changes in them, so a new record does not
         // cost a full read of a directory holding thousands (`HookDirectoryWatch`).
-        HookDirectoryWatch.shared.watch((eventsPath.isEmpty ? [] : [events]) + claudeRoots.map(\.events))
+        HookDirectoryWatch.shared.watch(watched)
         let claudeInventoryRoots = claude.roots.compactMap { root -> (root: URL, capabilities: ClaudeCapabilities)? in
             guard root.capabilities.supported else { return nil }
             return (root.url.standardizedFileURL, root.capabilities)
@@ -1485,7 +1489,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                  },
                  claudeScans.map(\.cache),
                  reminders.hookCache.merging(desktop.cache),
-                 CodexSubagentReader.activity(root: rolloutRoot, now: observationNow))
+                 CodexSubagentReader.activity(root: rolloutRoot, now: observationNow),
+                 processList == nil)
             }.value
             let scan = result.0
             let desktopEvents = result.1
@@ -1609,6 +1614,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             daemonCLISessions = scan.cliSessions.intersection(daemonThreads)
             liveCLI = scan.cliState.liveSessions.union(discoveredCLI)
             cliLivenessRead = true
+            // What only another scan can see change (#306); `hookScanNeeds` adds what the app holds.
+            var scanned = HookScanNeeds()
+            scanned.codexMayRun = liveness.desktopRunning || liveness.cliProcessRunning || result.15
+            // A fresh rollout candidate or a running subagent counts as a live session.
+            scanned.sessionsLive = !candidates.isEmpty || !codexSubagents.isEmpty
+            scanned.sourceUnwatchedOrUnreadable = claudeObservationScans.contains { !$0.available }
+                || result.7.contains { !$0.available }
+            lastScanNeeds = scanned
             knownCLISessions.formUnion(scan.titledCLISessions)
             rememberedDaemonCLISessions = ReminderReader.rememberedDaemonCLISessions(
                 rememberedDaemonCLISessions, provedNow: scan.daemonProvedCLISessions, authoritativeLoaded: authoritativeLoaded)
@@ -3182,7 +3195,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func desktopReadStateChanged(_ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: "desktopReadStateEnabled")
         if !enabled { desktopReadState = .off }
-        nextScan = 0
+        scanSchedule.requestNow()
     }
     /// The Settings switch of a host without Automation access (every host but Ghostty, which goes
     /// through `ghosttyChanged`). Remembered at once; herdr's gate is re-evaluated now.
