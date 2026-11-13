@@ -544,14 +544,6 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         if let now { expire(at: now) }
     }
 
-    /// A Claude running observation no newer than its turn's end here: a finished result (acknowledged or
-    /// not), the idle fallback, or a removal. Claude's reader keeps reporting the turn as running, but late
-    /// subagent activity never updates the turn (#404), so `updatedAt` stays at the Stop. While the
-    /// observation lists running subagents, a subagent started or restarted inside that ended turn (#426):
-    /// the session's working row shows it, in place of the inventory placeholder. The turn is not reopened:
-    /// its result card, acknowledgment and ended time stay, so no new result follows. Once no subagent is
-    /// listed (its own stop, session end, or `ClaudeObservationReader.maximumSubagentAge`), that row ends.
-    /// A removed row stays removed until a subagent starts after the ones it listed.
     /// When the queue ended this Claude turn (its result's arrival, or `endedTurns`), nil for another
     /// source or a turn still open here. A Claude running observation no newer than it goes to
     /// `applyAfterTurnEnded`; only a newer one reopens the turn.
@@ -560,6 +552,14 @@ public struct AgentAttentionQueue: Equatable, Sendable {
         return [endedTurns[id], outcomes[id]?.arrivedAt].compactMap { $0 }.max()
     }
 
+    /// A Claude running observation no newer than its turn's end here: a finished result (acknowledged or
+    /// not), the idle fallback, or a removal. Claude's reader keeps reporting the turn as running, but late
+    /// subagent activity never updates the turn (#404), so `updatedAt` stays at the Stop. While the
+    /// observation lists running subagents, a subagent started or restarted inside that ended turn (#426):
+    /// the session's working row shows it, in place of the inventory placeholder. The turn is not reopened:
+    /// its result card, acknowledgment and ended time stay, so no new result follows. Once no subagent is
+    /// listed (its own stop, session end, or `ClaudeObservationReader.maximumSubagentAge`), that row ends.
+    /// A removed row stays removed until a subagent starts after the ones it listed.
     private mutating func applyAfterTurnEnded(_ active: AgentRunning, endedAt: Double) {
         let session = active.identity.session
         let current = running[session]
