@@ -873,3 +873,131 @@ private var restartedSubagentStops: [[String: Any]] { [
     #expect(session.kinds.isEmpty)
     #expect(session.queue.toCheckCount == 0)
 }
+
+// MARK: Activity for the quiet rule (#419)
+
+@Test func claudeActivityIsTheTurnsPromptAndToolEventsNotItsStop() throws {
+    let prompted = [promptSubmit]
+    #expect(try running(prompted)?.activityAt == 1)
+    #expect(try running(prompted)?.openCall == nil)
+
+    let toolStarted = prompted + [record("PreToolUse", at: 3, tool: "Bash", call: "c1", input: ["command": "npm test"])]
+    let started = try #require(try running(toolStarted, now: 5))
+    #expect(started.activityAt == 3)
+    #expect(started.toolName == "Bash")
+    #expect(started.openCall == OpenCall(name: "Bash", input: ["command": "npm test"], startedAt: 3))
+    #expect(started.shownCall(at: 5)?.startedAt == 3)
+
+    let finished = toolStarted + [record("PostToolUse", at: 7, call: "c1")]
+    #expect(try running(finished, now: 8)?.activityAt == 7)
+    #expect(try running(finished, now: 8)?.openCall == nil)
+
+    // A Stop moves the turn's update time but is not activity.
+    let stopped = finished + [record("Stop", at: 9)]
+    let afterStop = try #require(try running(stopped, now: 10))
+    #expect(afterStop.updatedAt == 9)
+    #expect(afterStop.activityAt == 7)
+}
+
+@Test func claudeAToolCallThatIsNoLongerFreshKeepsItsActivityAndStaysTheOpenCall() throws {
+    let records = [promptSubmit, record("PreToolUse", at: 3, tool: "Bash", call: "c1", input: ["command": "npm test"])]
+    let at = 3 + ClaudeObservationReader.maximumToolFreshness + 1
+    let stale = try #require(try running(records, now: at))
+    #expect(stale.toolName == nil)
+    #expect(stale.openCall?.startedAt == 3)
+    #expect(stale.shownCall(at: at) == nil)
+    #expect(stale.activityAt == 3)
+}
+
+@Test func claudeASubagentsStartAndToolEventsAreItsActivity() throws {
+    let started = [promptSubmit, record("SubagentStart", at: 2, agent: "a1", type: "Explore")]
+    #expect(try running(started)?.subagents.first?.lastActivityAt == 2)
+    let called = started + [record("PreToolUse", at: 4, agent: "a1", type: "Explore", tool: "Bash", call: "s1",
+                                   input: ["command": "rg x"])]
+    #expect(try running(called)?.subagents.first?.lastActivityAt == 4)
+    let done = called + [record("PostToolUse", at: 6, agent: "a1", type: "Explore", call: "s1")]
+    let row = try #require(try running(done, now: 7))
+    #expect(row.subagents.first?.lastActivityAt == 6)
+    #expect(row.lastActivityAt == 6)
+}
+
+@Test func claudeLateSubagentActivityKeepsAnEndedTurnsRowFromGoingQuiet() throws {
+    // The turn's own activity ends at its last tool event; a background subagent keeps working after the Stop.
+    let records = [promptSubmit,
+                   record("SubagentStart", at: 2, agent: "bg", type: "Explore"),
+                   record("Stop", at: 3),
+                   record("PreToolUse", at: 700, agent: "bg", type: "Explore", tool: "Bash", call: "s1",
+                          input: ["command": "rg y"])]
+    let row = try #require(try running(records, now: 701))
+    #expect(row.activityAt == 1)
+    #expect(row.lastActivityAt == 700)
+    #expect(!QuietRule.isQuiet(lastActivity: row.lastActivityAt, now: 701))
+}
+
+// MARK: A quiet row keeps its unfinished command (#419, owner decision 2026-11-13)
+
+private func bash(_ call: String, at: Double, _ command: String) -> [String: Any] {
+    record("PreToolUse", at: at, tool: "Bash", call: call, input: ["command": command])
+}
+
+/// The opened row's "now" text at `now`, as `RunningRowDetails` reads it.
+private func nowLine(_ row: AgentRunning, at now: Double) -> String? {
+    RunningRowDetails.make(row, host: nil, now: now).now.flatMap { $0.isUnknown ? nil : $0.text }
+}
+
+@Test func claudeAnUnfinishedCommandIsHiddenAfterThirtySecondsAndShownAgainOnceTheRowIsQuiet() throws {
+    let records = [promptSubmit, bash("c1", at: 100, "npm run test:e2e")]
+    let row = try #require(try running(records, now: 100 + QuietRule.after - 1))
+    // 9:59 without activity: past the 30-second bound and not yet quiet, so "now" is the prompt fallback.
+    #expect(row.toolName == nil)
+    #expect(row.shownCall(at: 100 + QuietRule.after - 1) == nil)
+    #expect(nowLine(row, at: 100 + QuietRule.after - 1) == nil)
+    // 10:00: quiet, so the unfinished command is "now" and the line counts from its start.
+    #expect(row.shownCall(at: 100 + QuietRule.after) == ShownCall(name: "Bash", input: ["command": "npm run test:e2e"], startedAt: 100))
+    #expect(nowLine(row, at: 100 + QuietRule.after) == "$ npm run test:e2e")
+    #expect(QuietLine.make(row, now: 100 + 14 * 60)?.text == "14m since this command started")
+}
+
+@Test func claudeAFinishedCallIsNeverShownOnAQuietRow() throws {
+    for finish in ["PostToolUse", "PostToolUseFailure"] {
+        let records = [promptSubmit, bash("c1", at: 100, "npm test"), record(finish, at: 110, call: "c1")]
+        let row = try #require(try running(records, now: 110 + QuietRule.after))
+        #expect(row.openCall == nil)
+        #expect(nowLine(row, at: 110 + QuietRule.after) == nil)
+        #expect(QuietLine.make(row, now: 110 + 14 * 60)?.text == "14m since the last activity")
+    }
+}
+
+@Test func claudeALaterCallReplacesTheShownCommandAndTheNewestOpenCallWins() throws {
+    // Two calls open at once: the newer one is shown, counted from its own start.
+    let both = [promptSubmit, bash("c1", at: 100, "swift build"), bash("c2", at: 130, "swift test")]
+    let row = try #require(try running(both, now: 130 + QuietRule.after))
+    #expect(nowLine(row, at: 130 + QuietRule.after) == "$ swift test")
+    #expect(row.shownCall(at: 130 + QuietRule.after)?.startedAt == 130)
+    // The newer one finishes: the older call still open is shown again once quiet.
+    let newerDone = both + [record("PostToolUse", at: 140, call: "c2")]
+    let older = try #require(try running(newerDone, now: 140 + QuietRule.after))
+    #expect(nowLine(older, at: 140 + QuietRule.after) == "$ swift build")
+    #expect(QuietLine.make(older, now: 140 + QuietRule.after)?.text == "10m since this command started")
+}
+
+@Test func claudeTheCommandAndItsLineAppearAtTheQuietMomentWithoutANewScan() throws {
+    // One scan taken before the mark; the row it gives is read at render time on either side of it,
+    // so "now" and the quiet line change together, with no rebuild and no flip.
+    let records = [promptSubmit, bash("c1", at: 100, "npm test")]
+    let row = try #require(try running(records, now: 100 + QuietRule.after - 10))
+    #expect(nowLine(row, at: 100 + QuietRule.after - 1) == nil)
+    #expect(QuietLine.make(row, now: 100 + QuietRule.after - 1) == nil)
+    #expect(nowLine(row, at: 100 + QuietRule.after) == "$ npm test")
+    #expect(QuietLine.make(row, now: 100 + QuietRule.after)?.text == "10m since this command started")
+}
+
+@Test func claudeASubagentsActivityDelaysTheQuietMomentForTheCommandToo() throws {
+    // The row's own clock includes its listed subagents, so "now" and the quiet word agree.
+    let records = [promptSubmit, bash("c1", at: 100, "npm test"),
+                   record("SubagentStart", at: 200, agent: "a1", type: "Explore")]
+    let row = try #require(try running(records, now: 300))
+    #expect(row.lastActivityAt == 200)
+    #expect(nowLine(row, at: 100 + QuietRule.after) == nil)
+    #expect(nowLine(row, at: 200 + QuietRule.after) == "$ npm test")
+}

@@ -2956,10 +2956,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     /// The place slot after a row's name (#418): a finished row's work status first, then its pull
-    /// request or place; otherwise the place as before. `note` is the row note shown, which keeps the slot.
-    func rowPlaceLine(for item: AgentAttentionItem, note: RowNote?) -> RowPlaceLine? {
+    /// request or place; otherwise the place as before, then "quiet" on a quiet working row (#419).
+    /// `note` is the row note shown, which keeps the slot.
+    func rowPlaceLine(for item: AgentAttentionItem, note: RowNote?, quiet: Bool) -> RowPlaceLine? {
         let label = item.outcome.flatMap { workStatus.finishedLabel(for: $0.identity) }
-        return RowPlaceLine.make(item, label: label, place: rowPlace(for: item), note: note)
+        return RowPlaceLine.make(item, label: label, place: rowPlace(for: item), note: note, quiet: quiet)
     }
 
     /// "project @ branch" for a row in the profile's label format, when its working directory is

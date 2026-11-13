@@ -70,16 +70,17 @@ private func newTask(path: String, payload: String = "", turn: UUID, ordinal: In
                                     "internal_chat_message_metadata_passthrough": ["turn_id": id(turn)]])
 }
 
-private func execCall(_ command: String, call: String, turn: UUID, ordinal: Int?) -> String {
+private func execCall(_ command: String, call: String, turn: UUID, ordinal: Int?,
+                      at: String = "2026-11-05T02:54:40.000Z") -> String {
     let literal = String(decoding: try! JSONSerialization.data(withJSONObject: command, options: [.fragmentsAllowed]), as: UTF8.self)
     let input = "const r = await tools.exec_command({\"cmd\":\(literal)});"
-    return line(ordinal, "response_item", ["type": "custom_tool_call", "status": "completed", "call_id": call,
+    return line(ordinal, "response_item", at: at, ["type": "custom_tool_call", "status": "completed", "call_id": call,
                                            "name": "exec", "input": input,
                                            "internal_chat_message_metadata_passthrough": ["turn_id": id(turn)]])
 }
 
-private func callOutput(_ call: String, turn: UUID, ordinal: Int?) -> String {
-    line(ordinal, "response_item", ["type": "custom_tool_call_output", "call_id": call,
+private func callOutput(_ call: String, turn: UUID, ordinal: Int?, at: String = "2026-11-05T02:54:40.000Z") -> String {
+    line(ordinal, "response_item", at: at, ["type": "custom_tool_call_output", "call_id": call,
                                     "output": [["type": "input_text", "text": "Script completed\nWall time 2.2 seconds\nOutput:\n"]],
                                     "internal_chat_message_metadata_passthrough": ["turn_id": id(turn)]])
 }
@@ -123,7 +124,9 @@ private func writeRoot(in root: URL) throws {
     #expect(activity == [rootSession: [SubagentActivity(
         id: id(child), name: "Kierkegaard", role: nil, asked: "Find three quiet beach stays",
         startedAt: 1793847288.902,
-        latestAction: RunningRowDetails.now(toolName: "exec_command", toolInput: ["cmd": "rg -n beach notes.md"]))]])
+        latestAction: RunningRowDetails.now(toolName: "exec_command", toolInput: ["cmd": "rg -n beach notes.md"]),
+        // The fixture's call is stamped before the start, so the start is the latest activity.
+        lastActivityAt: 1793847288.902)]])
 }
 
 private func runningChild(_ child: UUID, turn: UUID = UUID(), parent: UUID = rootSession, depth: Int = 1,
@@ -405,4 +408,25 @@ private func runningChild(_ child: UUID, turn: UUID = UUID(), parent: UUID = roo
     #expect(running(written - 10) == [id(child)])
     // Every answer came from the kept listing.
     #expect(RolloutDays.directoryReads(root: root) == listed)
+}
+
+// MARK: Activity for the quiet rule (#419)
+
+@Test func aCodexSubagentsActivityIsItsStartOrItsNewestToolCallOrOutput() throws {
+    let root = try sessionsTree()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try writeRoot(in: root)
+    let quiet = UUID(), busy = UUID(), busyTurn = UUID()
+    try write(runningChild(quiet, nickname: "Cicero", startedAt: "2026-11-05T02:54:35.000Z"),
+              session: quiet, time: "10-54-35", in: root)
+    try write(runningChild(busy, turn: busyTurn, nickname: "Raman", startedAt: "2026-11-05T02:54:41.000Z",
+                           extra: [execCall("ls", call: "c1", turn: busyTurn, ordinal: 6, at: "2026-11-05T02:54:50.000Z"),
+                                   callOutput("c1", turn: busyTurn, ordinal: 7, at: "2026-11-05T02:54:58.000Z"),
+                                   // Not a tool event: a message line never counts.
+                                   userMessage("more", turn: busyTurn, ordinal: 8)]),
+              session: busy, time: "10-54-41", in: root)
+
+    let listed = CodexSubagentReader.activity(root: root, now: now.timeIntervalSince1970)[rootSession] ?? []
+    #expect(listed.map(\.name) == ["Cicero", "Raman"])
+    #expect(listed.map(\.lastActivityAt) == [1793847275, 1793847298])
 }

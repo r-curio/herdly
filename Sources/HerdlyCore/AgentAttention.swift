@@ -177,6 +177,16 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     /// The session's running subagents, oldest first (#395). Live observation only: left out of
     /// `Codable`, so a restored row starts with none until the next scan.
     public private(set) var subagents: [SubagentActivity] = []
+    /// The session's latest activity in this turn (#419): its source's own tool start or finish, or
+    /// the prompt, never a scan, a registry status change or a turn's Stop, so a refresh cannot make
+    /// a quiet session look busy. Nil when Herdly has none (a row known only from a scan), and such a
+    /// row is never quiet. Live observation only: left out of `Codable`.
+    public private(set) var activityAt: Double?
+    /// The session's own newest unfinished call, however old, when the source records it (Claude):
+    /// `toolName` drops a call after its freshness bound, this keeps it until its finish, so a quiet
+    /// row can show what it stopped on (#419, `shownCall(at:)`). Live observation only: left out of
+    /// `Codable`.
+    public private(set) var openCall: OpenCall?
 
     private enum CodingKeys: String, CodingKey {
         case identity, arrivedAt, updatedAt, prompt, promptShortened, toolName, toolInput, status
@@ -196,8 +206,10 @@ public struct AgentRunning: Identifiable, Equatable, Codable, Sendable {
     public init(session: AgentSessionIdentity, turn: String, arrivedAt: Double, updatedAt: Double? = nil,
                 prompt: String? = nil, promptShortened: Bool = false, toolName: String? = nil,
                 toolInput: [String: String] = [:], status: AgentRunningStatus = .working,
-                subagents: [SubagentActivity] = []) {
+                subagents: [SubagentActivity] = [], activityAt: Double? = nil, openCall: OpenCall? = nil) {
         self.identity = AgentTurnIdentity(session: session, turn: turn)
+        self.activityAt = activityAt
+        self.openCall = openCall
         self.subagents = subagents.sorted { SubagentActivity.startsBefore(($0.startedAt, $0.id), ($1.startedAt, $1.id)) }
         self.arrivedAt = arrivedAt
         self.updatedAt = updatedAt ?? arrivedAt
@@ -919,7 +931,8 @@ public enum CodexAttentionAdapter {
     /// `subagents` are the session's running subagents (`CodexSubagentReader`), live only.
     public static func running(from running: AttentionRunning, subagents: [SubagentActivity] = []) -> AgentRunning {
         AgentRunning(session: session(running.session, surface: running.source == .cli ? .cli : .desktop),
-                     turn: running.turn.uuidString, arrivedAt: running.arrivedAt, subagents: subagents)
+                     turn: running.turn.uuidString, arrivedAt: running.arrivedAt, subagents: subagents,
+                     activityAt: running.activityAt)
     }
 
     /// `subagents` maps a root session to its running subagents (`CodexSubagentReader.activity`); each

@@ -272,7 +272,7 @@ func eachSpriteKindIsTwoSameSizedFramesWithinTheEighteenByTenPointBox(kind: Spri
     #expect(none.attention.map(\.heading) == ["Approve", "Answer", "Check"])
     #expect(none.attention.flatMap(\.items).map(\.session.session) == ["approval", "question", "done"])
     #expect(none.working.flatMap(\.items).map(\.session.session) == ["busy", "other"])
-    #expect(none.attention.flatMap(\.items).count == AgentStripSummary.make(items: items).toCheck)
+    #expect(none.attention.flatMap(\.items).count == AgentStripSummary.make(items: items, now: 0).toCheck)
     // The fold names the working rows, so State grouping drops its own "Working" heading.
     #expect(byState.attention.map(\.heading) == ["Needs you", "Done"])
     #expect(byState.working.map(\.heading) == [nil])
