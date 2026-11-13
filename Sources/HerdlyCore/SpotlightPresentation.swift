@@ -119,6 +119,10 @@ public struct NotchPresentationController: Equatable, Sendable {
     private var spotlight = Spotlight()
     private var agentSpotlight = AgentSpotlight()
     private var manualOpen = false
+    /// The queue was opened by the notch hotkey (#427): it stays open while the panel keeps that
+    /// keyboard focus, as a draft holds a card, and folds once focus goes. A clicked queue never
+    /// holds on focus alone (#376).
+    private var keyboardOpen = false
     /// The exact approval or question the user clicked open. It has no timed close and never
     /// touches its request's deadline; it ends on Escape, ‹ Queue, an action, the end of
     /// interaction, or its item leaving the queue.
@@ -146,6 +150,8 @@ public struct NotchPresentationController: Equatable, Sendable {
     /// The header's explicit open: the whole queue, leaving any clicked card. It also ends the
     /// spotlight, whose time would otherwise start over and show it again once the user leaves.
     public mutating func openQueue() { manualOpen = true; clicked = nil; spotlight.clear(); agentSpotlight.clear() }
+    /// The hotkey's open (#427): the whole queue, held while `update`'s `keyboardFocus` stays true.
+    public mutating func openQueueForKeyboard() { openQueue(); keyboardOpen = true }
     /// Opens one approval or question as its own card in place of the queue. Other rows (results,
     /// running work) are not cards here and return false.
     @discardableResult
@@ -181,19 +187,26 @@ public struct NotchPresentationController: Equatable, Sendable {
         collapse()
         return .collapse
     }
-    public mutating func collapse() { manualOpen = false; clicked = nil; spotlight.clear(); agentSpotlight.clear() }
+    public mutating func collapse() {
+        manualOpen = false; keyboardOpen = false; clicked = nil; spotlight.clear(); agentSpotlight.clear()
+    }
     /// `draftInProgress` (unsent text in a field on screen) keeps the current card open like
     /// interaction does, so a hover or focus gap cannot swap it for the queue mid-answer. It does
     /// not open anything by itself; Escape still ends the hold through `escape()`.
     /// `queued` is the queue's current identities: a clicked card whose item has left falls back to
     /// the queue and never shows another item, and a card that opened by itself ends. Nil leaves
     /// both unchecked.
-    public mutating func update(interacting: Bool, draftInProgress: Bool = false, now: Double,
-                                legacyPopup: Bool = false, queued: Set<AgentAttentionID>? = nil) -> NotchPresentationMode {
+    /// `keyboardFocus` is the panel's deliberate keyboard focus. It holds only a queue the hotkey
+    /// opened, and a card opened from it; once it is false that hold ends for good.
+    public mutating func update(interacting: Bool, draftInProgress: Bool = false, keyboardFocus: Bool = false,
+                                now: Double, legacyPopup: Bool = false,
+                                queued: Set<AgentAttentionID>? = nil) -> NotchPresentationMode {
+        if !keyboardFocus { keyboardOpen = false }
+        let keyboardHeld = keyboardHoldsQueue
         if let card = clicked {
             if let queued, !queued.contains(card) {
                 clicked = nil
-            } else if interacting || draftInProgress {
+            } else if interacting || draftInProgress || keyboardHeld {
                 return .clickedCard(card)
             } else {
                 // The card closes with the panel, as the queue it was opened from does.
@@ -201,7 +214,7 @@ public struct NotchPresentationController: Equatable, Sendable {
                 manualOpen = false
             }
         }
-        if !interacting { manualOpen = false }
+        if !interacting && !keyboardHeld { manualOpen = false }
         // A card whose item has left the queue (a question just answered on it, an approval decided)
         // has nothing to show: it ends at once rather than holding an empty panel open on its timer.
         if let queued, let id = agentSpotlight.item, !queued.contains(id) { agentSpotlight.clear() }
@@ -211,6 +224,9 @@ public struct NotchPresentationController: Equatable, Sendable {
         return NotchPresentationMode.resolve(spotlight: spotlight.update(interacting: interacting, now: now),
                                              manualOpen: manualOpen, interacting: interacting, legacyPopup: legacyPopup)
     }
+
+    /// True while a queue the hotkey opened (or a card opened from it) is held by keyboard focus.
+    public var keyboardHoldsQueue: Bool { keyboardOpen && manualOpen }
 }
 
 /// Keyboard selection over the open queue's rows (Up and Down arrows). The selection follows its

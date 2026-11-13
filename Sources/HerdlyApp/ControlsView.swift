@@ -1668,6 +1668,8 @@ private struct NotchControls: View {
                     ), options: model.notchDisplayChoices.options.map { ($0.preference, $0.label) })
                     .accessibilityHint(model.notchDisplayChoices.detail)
                 }
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                KeyboardHotkeyRow(model: model)
             }
 
             SettingsHeader("Strip")
@@ -1740,6 +1742,89 @@ private struct NotchControls: View {
                 }
             }
         }
+    }
+}
+
+/// Settings › Notch › Keyboard (#427): the shortcut that puts the keyboard in the notch from any app,
+/// a recorder to change it, and a switch to turn it off. Both take effect at once. A shortcut another
+/// app holds shows the problem line, and the notch stays click-only until another is chosen.
+private struct KeyboardHotkeyRow: View {
+    @ObservedObject var model: Companion
+
+    private var enabled: Binding<Bool> {
+        Binding(get: { model.hotkeySetting.enabled }, set: { on in
+            var setting = model.hotkeySetting
+            setting.enabled = on
+            model.setHotkeySetting(setting)
+        })
+    }
+
+    var body: some View {
+        SettingsRow(title: "Keyboard", detail: "Puts the keyboard in the notch from any app") {
+            HStack(spacing: 10) {
+                HotkeyRecorder(model: model)
+                    .disabled(!model.hotkeySetting.enabled)
+                Toggle("Notch hotkey", isOn: enabled)
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                    .accessibilityLabel("Notch hotkey")
+            }
+        }
+        .help("Press it again, or Escape, to give the keyboard back to the app you were using.")
+        if model.hotkeySetting.enabled, let problem = model.hotkeyStatus.problemLine {
+            CardProblemLine(problem)
+                .padding(.horizontal, SettingsStyle.rowInset)
+                .padding(.bottom, 10)
+        }
+    }
+}
+
+/// Shows the current shortcut; a click listens for the next key press with Control, Option or
+/// Command and saves it. Escape alone cancels. The current shortcut is unregistered while it listens
+/// so pressing it records it rather than opening the notch. Only key presses in this window are seen.
+private struct HotkeyRecorder: View {
+    @ObservedObject var model: Companion
+    @State private var monitor: Any?
+    @State private var rejected = false
+
+    private var recording: Bool { monitor != nil }
+
+    var body: some View {
+        Button(action: { recording ? stop() : start() }) {
+            Text(recording ? (rejected ? "Add ⌃, ⌥ or ⌘" : "Type shortcut…") : model.hotkeySetting.hotkey.title)
+                .monospacedDigit()
+                .frame(minWidth: 96)
+        }
+        .controlSize(.small)
+        .accessibilityLabel("Notch hotkey shortcut")
+        .accessibilityValue(recording ? "Recording. Press the new shortcut, or Escape to cancel." : model.hotkeySetting.hotkey.title)
+        .accessibilityHint(recording ? "Escape cancels." : "Records a new shortcut.")
+        .onDisappear(perform: stop)
+    }
+
+    private func start() {
+        rejected = false
+        model.setRecordingHotkey(true)
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            switch NotchHotkeyRegistrar.recording(event) {
+            case .cancel:
+                stop()
+            case .shortcut(let hotkey):
+                var setting = model.hotkeySetting
+                setting.hotkey = hotkey
+                stop()
+                model.setHotkeySetting(setting)
+            case .ignore:
+                rejected = true
+            }
+            return nil
+        }
+    }
+
+    private func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        rejected = false
+        model.setRecordingHotkey(false)
     }
 }
 

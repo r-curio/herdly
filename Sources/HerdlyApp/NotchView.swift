@@ -2103,6 +2103,20 @@ struct Notch: View {
             .lineLimit(1).truncationMode(.tail)
     }
 
+    /// The keyboard hint at the foot of the queue the notch hotkey opened (#427, Paper K "A · Hotkey"):
+    /// 10pt dim, 12pt apart, inset to the row edge. A clicked queue has none.
+    private func keyboardFoot(hotkey: String) -> some View {
+        HStack(spacing: 12) {
+            ForEach(["↑↓ select", "⏎ open", "esc close", "\(hotkey) hide"], id: \.self) { part in
+                Text(part).font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.dim)
+            }
+        }
+        .lineLimit(1)
+        .padding(.horizontal, 6)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Keys: up and down arrows select, Return opens, Escape closes, \(hotkey) gives the keyboard back.")
+    }
+
     /// The "‹ Queue" bar above a clicked card: back to the queue, nothing dismissed. No stepper to
     /// other items (D19); a question card with several questions steps through this request's own.
     private var clickedCardBar: some View {
@@ -3151,6 +3165,9 @@ struct Notch: View {
                                 NotchButton(title: "Dismiss", action: model.dismissTest).accessibilityLabel("Dismiss test notification")
                             }
                             .transition(rowTransition)
+                        }
+                        if model.presentationMode.showsAll, let hotkey = model.keyboardQueueHotkey {
+                            keyboardFoot(hotkey: hotkey)
                         }
                     }
                     .animation(QueueMotion.curve(reduceMotion: model.reduceMotion), value: QueueMotion.layoutKey(sections.attention + sections.working))
