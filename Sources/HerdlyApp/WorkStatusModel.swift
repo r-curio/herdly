@@ -102,15 +102,16 @@ final class WorkStatusModel: ObservableObject {
         }
         let present: [WorkPresence] = items.compactMap { item in
             guard item.kind != .outcome, item.kind != .earlierOutcome, let folder = directory(item) else { return nil }
-            let turn = item.running?.identity.turn ?? item.approval?.identity.turn ?? item.question?.identity.turn
-            return WorkPresence(session: item.session, turn: turn, directory: folder)
+            return WorkPresence(session: item.session, turn: item.turn, directory: folder)
         }
         memory.observe(sightings, present: present)
         let finished = items.compactMap { item -> AgentTurnIdentity? in
             guard item.kind == .outcome || item.kind == .earlierOutcome else { return nil }
             return item.outcome?.identity
         }
-        let kept = Set(sightings.map(\.turn) + finished)
+        // A turn waiting on an approval or question has no running row (the queue hides it), so every
+        // turn a live row names is kept, not only this scan's sightings.
+        let kept = Set(sightings.map(\.turn) + present.compactMap(\.turnIdentity) + finished)
         memory.retain(kept)
         var next = readings.filter { kept.contains($0.key) }
         guard !inFlight else {

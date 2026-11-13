@@ -701,7 +701,7 @@ private extension WorkStatusReader {
     defer { try? FileManager.default.removeItem(at: folder) }
     let script = folder.appendingPathComponent("slow")
     // `exec`, so terminating the command ends the sleep too and no orphan holds a pipe other tests read.
-    try Data("#!/bin/sh\nexec sleep 30\n".utf8).write(to: script)
+    try Data("#!/bin/sh\nexec sleep 5\n".utf8).write(to: script)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
     let started = Date()
     let result = ProcessWorkStatusRunner().run(WorkStatusCommand(executable: script.path, arguments: [],
@@ -712,6 +712,8 @@ private extension WorkStatusReader {
                                                             arguments: [], environment: [:], timeout: 1)) == .notLaunched)
 }
 
+/// Sleeps are 5 s, longer than any bound asserted here but far below other tests' 20 s subprocess
+/// deadlines, so a child that outlives a run can never stall them.
 /// Runs `body` as a shell script whose background child writes its pid to `child.pid` and keeps the
 /// command's stdout open; the child is killed afterwards so no orphan outlives the test.
 private func runHoldingStdout(_ body: String, timeout: Double) throws -> (result: WorkStatusCommandResult, seconds: Double) {
@@ -724,7 +726,7 @@ private func runHoldingStdout(_ body: String, timeout: Double) throws -> (result
         try? FileManager.default.removeItem(at: folder)
     }
     let script = folder.appendingPathComponent("holds")
-    try Data("#!/bin/sh\nsleep 20 &\necho $! > '\(pidFile.path)'\n\(body)\n".utf8).write(to: script)
+    try Data("#!/bin/sh\nsleep 5 &\necho $! > '\(pidFile.path)'\n\(body)\n".utf8).write(to: script)
     try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
     let started = Date()
     let result = ProcessWorkStatusRunner().run(WorkStatusCommand(executable: script.path, arguments: [],
@@ -734,17 +736,17 @@ private func runHoldingStdout(_ body: String, timeout: Double) throws -> (result
 
 @Test func aChildHoldingStdoutCannotKeepARunWaiting() throws {
     // The command itself is still running at its deadline.
-    let slow = try runHoldingStdout("sleep 20", timeout: 0.3)
-    #expect(slow.result == .timedOut && slow.seconds < 4)
+    let slow = try runHoldingStdout("sleep 5", timeout: 0.3)
+    #expect(slow.result == .timedOut && slow.seconds < 3.5)
     // It ignores SIGTERM, so SIGKILL ends it.
     let stubborn = try runHoldingStdout("trap '' TERM\nwhile :; do sleep 1; done", timeout: 0.3)
-    #expect(stubborn.result == .timedOut && stubborn.seconds < 5)
+    #expect(stubborn.result == .timedOut && stubborn.seconds < 4.5)
     // It exited, but its output never ended: incomplete, not success.
     let exited = try runHoldingStdout("echo partial\nexit 0", timeout: 0.3)
-    #expect(exited.result == .timedOut && exited.seconds < 4)
+    #expect(exited.result == .timedOut && exited.seconds < 3.5)
 }
 
-// MARK: - Review round 2
+// MARK: - Pending readings, live sessions in a folder and the card gate
 
 @Test func gitHubStillWorkingItOutIsPending() throws {
     let clean = try #require(GitLocalReading.parse(status: status()))
@@ -855,4 +857,69 @@ private func item(approval session: AgentSessionIdentity, turn: String) -> Agent
     #expect(runner.calls.map(\.arguments) == [["--version"]])
     #expect(reader(runner, cliGate: WorkStatusGate(open: false)).cliStatus() == .unknown(version: nil))
     #expect(runner.calls.count == 1)
+}
+
+// MARK: - Turns waiting on a request
+
+@Test func aSessionInAnApprovalForAnothersWholeRunIsSharedToo() {
+    // A never shows a running row while B runs; both are marked.
+    var memory = WorkBranchMemory()
+    memory.observe([sighting(turnB)], present: [presence(sessionA, "t1", "/w/repo")])
+    memory.observe([sighting(turnA)])
+    #expect(memory.branch(for: turnA) == .ambiguous)
+    #expect(memory.branch(for: turnB) == .ambiguous)
+    // The other way round.
+    var reversed = WorkBranchMemory()
+    reversed.observe([sighting(turnA)], present: [presence(sessionB, "t1", "/w/repo")])
+    reversed.observe([sighting(turnB)])
+    #expect(reversed.branch(for: turnA) == .ambiguous)
+    #expect(reversed.branch(for: turnB) == .ambiguous)
+    // A presence alone remembers no branch.
+    var waitingOnly = WorkBranchMemory()
+    waitingOnly.observe([], present: [presence(sessionA, "t1", "/w/repo"), presence(sessionB, "t1", "/w/repo")])
+    #expect(waitingOnly.branch(for: turnA) == .unknown)
+}
+
+@Test func anEmptyTurnNameIsNoTurn() {
+    #expect(WorkPresence(session: sessionA, turn: "", directory: "/w").turn == nil)
+    #expect(WorkPresence(session: sessionA, turn: "", directory: "/w").turnIdentity == nil)
+    #expect(WorkPresence(session: sessionA, turn: "t1", directory: "/w").turnIdentity == turnA)
+    #expect(item(approval: sessionB, turn: "t1").turn == "t1")
+    #expect(item(finished: turnA).turn == "t1")
+}
+
+@MainActor private func scan(_ model: WorkStatusModel, _ items: [AgentAttentionItem], head: GitHead? = nil,
+                             now: Double) async {
+    await model.scanned(items, heads: head.map { ["/w/repo": $0] } ?? [:], directory: { _ in "/w/repo" }, now: now)?.value
+}
+
+@MainActor @Test func aTurnInAnApprovalKeepsItsSharedMarkAndBranchHistory() async throws {
+    let (defaults, suite) = try defaults(true)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let feat = GitHead.branch("feat/x")
+
+    // Shared while A waited on an approval: B ran in the folder, then A ran on alone and finished.
+    let shared = makeModel(FakeRunner(reply()), gate: WorkStatusGate(open: false), defaults: defaults)
+    await scan(shared, [item(running: turnA)], head: feat, now: 1_000)
+    await scan(shared, [item(approval: sessionA, turn: "t1"), item(running: turnB)], head: feat, now: 1_010)
+    await scan(shared, [item(running: turnA)], head: feat, now: 1_020)
+    await scan(shared, [item(finished: turnA)], now: 1_030)
+    #expect(shared.memory.branch(for: turnA) == .ambiguous)
+    #expect(shared.verdict(for: turnA) == WorkStatus.noVerdict)
+
+    // The branch changed across the approval.
+    let changed = makeModel(FakeRunner(reply()), gate: WorkStatusGate(open: false), defaults: defaults)
+    await scan(changed, [item(running: turnA)], head: feat, now: 1_000)
+    await scan(changed, [item(approval: sessionA, turn: "t1")], now: 1_010)
+    await scan(changed, [item(running: turnA)], head: .branch("main"), now: 1_020)
+    await scan(changed, [item(finished: turnA)], now: 1_030)
+    #expect(changed.memory.branch(for: turnA) == .ambiguous)
+
+    // Finishing straight from an approval still resolves on the remembered branch.
+    let direct = makeModel(FakeRunner(reply()), gate: WorkStatusGate(open: false), defaults: defaults)
+    await scan(direct, [item(running: turnA)], head: feat, now: 1_000)
+    await scan(direct, [item(approval: sessionA, turn: "t1")], now: 1_010)
+    #expect(direct.memory.branch(for: turnA) == feature)
+    await scan(direct, [item(finished: turnA)], now: 1_020)
+    #expect(direct.verdict(for: turnA) == .checksFailing)
 }

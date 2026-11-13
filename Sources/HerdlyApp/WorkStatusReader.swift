@@ -16,6 +16,8 @@ enum WorkStatusCommandResult: Equatable, Sendable {
     /// The output passed its limit; nothing of it is used.
     case tooLarge
     case notLaunched
+    /// Waiting on the command failed, so how it ended cannot be known.
+    case exitUnknown
 }
 
 protocol WorkStatusCommandRunning: Sendable {
@@ -198,6 +200,8 @@ struct ProcessWorkStatusRunner: WorkStatusCommandRunning {
         // Close-on-exec, so a process another thread starts meanwhile (Foundation's `Process` keeps
         // inherited descriptors) cannot hold this pipe open; the spawn dup2s the write end onto stdout.
         pipeEnds.forEach { _ = fcntl($0, F_SETFD, FD_CLOEXEC) }
+        // The child inherits Herdly's working directory; that is safe because git always gets `-C <folder>`
+        // and gh always gets `--repo owner/name`, so neither reads where it was started.
         guard let pid = AgentUpdateRunner.spawnGroup(executable: command.executable, arguments: command.arguments,
                                                      environment: command.environment, stdout: pipeEnds[1], stderr: nil)
         else {
@@ -215,14 +219,18 @@ struct ProcessWorkStatusRunner: WorkStatusCommandRunning {
         }
         switch AgentUpdateRunner.waitForExit(pid, until: Date().addingTimeInterval(command.timeout), reap: true) {
         case .exited(let status):
-            // A descendant may still hold stdout after the command exited: its output is incomplete.
-            guard reader.waitForEnd(until: .now() + Self.grace) else { return .timedOut }
+            // A descendant may still hold stdout after the command exited: its output is incomplete,
+            // and the descendant is still in the group, so the group id is still its own to signal.
+            guard reader.waitForEnd(until: .now() + Self.grace) else {
+                killpg(pid, SIGKILL)
+                return .timedOut
+            }
             guard status == 0 else { return .failed(status) }
             let bytes = reader.bytes
             guard bytes.count <= Self.maximumOutput else { return .tooLarge }
             return .succeeded(bytes)
         case .lost:
-            return .failed(-1)
+            return .exitUnknown
         case .running:
             // The leader is not reaped until its group has had SIGKILL, so its pid, and with it the
             // group id, cannot be reused by an unrelated group while these are sent.
@@ -236,10 +244,11 @@ struct ProcessWorkStatusRunner: WorkStatusCommandRunning {
 }
 
 /// Reads one pipe to EOF on its own thread, keeping at most `limit + 1` bytes. `poll` with a short
-/// interval lets `stop()` end it even while a descendant keeps the pipe open; it never closes the
-/// descriptor, which the `Pipe` owns.
+/// interval lets `stop()` end it even while a descendant keeps the pipe open. It never closes the
+/// descriptor: the runner owns it and closes it after `stop()` returns.
 private final class BoundedPipeReader: @unchecked Sendable {
-    // `@unchecked Sendable`: `data`, `stopped` and `ended` are used only under `lock`.
+    // `@unchecked Sendable`: `data` and `stopped` are used only under `lock`; `done` and `finished`
+    // are thread-safe semaphores.
     private let lock = NSLock()
     private var data = Data()
     private var stopped = false

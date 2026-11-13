@@ -95,14 +95,19 @@ public enum WorkBranch: Equatable, Sendable {
 /// handed-back request. Any of these working in a folder makes it shared or busy.
 public struct WorkPresence: Equatable, Sendable {
     public let session: AgentSessionIdentity
-    /// The turn when the row names one; nil or empty when it does not.
+    /// The turn when the row names one; nil when it does not (an empty name is none).
     public let turn: String?
     public let directory: String
 
     public init(session: AgentSessionIdentity, turn: String?, directory: String) {
         self.session = session
-        self.turn = turn
+        self.turn = turn.flatMap { $0.isEmpty ? nil : $0 }
         self.directory = directory
+    }
+
+    /// The turn this row is about, when it names one.
+    public var turnIdentity: AgentTurnIdentity? {
+        turn.map { AgentTurnIdentity(session: session, turn: $0) }
     }
 }
 
@@ -157,10 +162,19 @@ public struct WorkBranchMemory: Equatable, Sendable {
         let everyone = present + sightings.map {
             WorkPresence(session: $0.turn.session, turn: $0.turn.turn, directory: $0.directory)
         }
-        for sighting in sightings where everyone.contains(where: {
-            $0.session != sighting.turn.session && Self.overlaps($0.directory, sighting.directory)
-        }) {
-            entries[sighting.turn]?.shared = true
+        // Both sides of an overlap are marked, whether or not that turn was seen running: a turn that
+        // sat in an approval or question while another session worked in its folder is shared too.
+        for member in everyone {
+            guard let turn = member.turnIdentity, everyone.contains(where: {
+                $0.session != member.session && Self.overlaps($0.directory, member.directory)
+            }) else { continue }
+            if entries[turn] == nil {
+                let directory = Self.normalized(member.directory)
+                // No HEAD yet: the turn reads unknown until a sighting, and ambiguous after one.
+                entries[turn] = Entry(directories: directory.isEmpty ? [] : [directory], heads: [],
+                                      startedAt: .infinity, shared: true, repository: .unread)
+            }
+            entries[turn]?.shared = true
         }
         if entries.count > Self.maximumTurns {
             let oldest = entries.sorted { $0.value.startedAt < $1.value.startedAt }.prefix(entries.count - Self.maximumTurns)
@@ -206,7 +220,7 @@ public struct WorkBranchMemory: Equatable, Sendable {
         present.contains { other in
             guard overlaps(other.directory, directory) else { return false }
             if other.session != turn.session { return true }
-            guard let otherTurn = other.turn, !otherTurn.isEmpty else { return false }
+            guard let otherTurn = other.turn else { return false }
             return otherTurn != turn.turn
         }
     }
@@ -649,15 +663,14 @@ public struct WorkStatusBatch: Equatable, Sendable {
         var reads: [WorkStatusRead] = [], settled: [AgentTurnIdentity] = []
         for turn in finished {
             let branch = memory.branch(for: turn)
-            switch branch {
-            case .unknown, .ambiguous:
+            guard let folder = branch.directory else {
+                // Unknown or ambiguous: no verdict, without running anything.
                 if readings[turn] == nil { settled.append(turn) }
                 continue
-            case .detached(let folder), .branch(_, let folder, _, _):
-                // Another turn working there changes what git sees; a repository not yet read would
-                // make this reading skip GitHub.
-                guard !WorkBranchMemory.busy(folder, turn: turn, present: present), !waiting.contains(turn) else { continue }
             }
+            // Another turn working there changes what git sees; a repository not yet read would make
+            // this reading skip GitHub.
+            guard !WorkBranchMemory.busy(folder, turn: turn, present: present), !waiting.contains(turn) else { continue }
             guard reads.count + repositories.count < limit,
                   WorkStatusSchedule.isDue(readings[turn], now: now) else { continue }
             reads.append(WorkStatusRead(turn: turn, branch: branch))
