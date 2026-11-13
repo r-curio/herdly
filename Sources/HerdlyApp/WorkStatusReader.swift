@@ -55,41 +55,40 @@ struct WorkStatusReader: Sendable {
     static let versionTimeout: Double = 3
 
     let runner: any WorkStatusCommandRunning
+    /// Open while the switch is on: session reads (git and `gh pr list`).
     let gate: WorkStatusGate
+    /// Open unless the user turned the switch off: the card's own `gh` check.
+    let cliGate: WorkStatusGate
     let git: String?
     let gh: String?
     let home: String
 
-    init(runner: any WorkStatusCommandRunning, gate: WorkStatusGate, git: String?, gh: String?,
-         home: String = NSHomeDirectory()) {
+    init(runner: any WorkStatusCommandRunning, gate: WorkStatusGate, cliGate: WorkStatusGate = WorkStatusGate(open: true),
+         git: String?, gh: String?, home: String = NSHomeDirectory()) {
         self.runner = runner
         self.gate = gate
+        self.cliGate = cliGate
         self.git = git
         self.gh = gh
         self.home = home
     }
 
     /// The installed tools, found in their usual locations.
-    static func live(gate: WorkStatusGate) -> WorkStatusReader {
+    static func live(gate: WorkStatusGate, cliGate: WorkStatusGate) -> WorkStatusReader {
         let home = NSHomeDirectory()
         let executable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
-        return WorkStatusReader(runner: ProcessWorkStatusRunner(), gate: gate,
+        return WorkStatusReader(runner: ProcessWorkStatusRunner(), gate: gate, cliGate: cliGate,
                                 git: WorkStatusTools.git(isExecutable: executable),
                                 gh: WorkStatusTools.gh(home: home, isExecutable: executable), home: home)
     }
 
     /// The finished turn's verdict from fresh readings. Nothing runs while the gate is closed.
-    func verdict(_ branch: WorkBranch) -> WorkStatus {
-        switch branch {
-        case .unknown, .ambiguous:
-            return .noVerdict
-        case .detached(let directory):
-            return WorkStatusRule.verdict(branch: branch, local: local(directory), pullRequest: nil)
-        case .branch(let name, let directory, let startedAt, let repository):
-            let local = local(directory)
-            let lookup = repository.map { pullRequest(repository: $0, branch: name, startedAt: startedAt) }
-            return WorkStatusRule.verdict(branch: branch, local: local, pullRequest: lookup)
+    func verdict(_ branch: WorkBranch) -> WorkStatusResult {
+        let local = branch.directory.flatMap(local)
+        let lookup = branch.pullRequestQuery.map {
+            pullRequest(repository: $0.repository, branch: $0.branch, startedAt: $0.startedAt)
         }
+        return WorkStatusRule.result(branch: branch, local: local, pullRequest: lookup)
     }
 
     /// GitHub's "owner/name" for the folder's `origin`, read once while a turn runs. No origin, another
@@ -130,15 +129,18 @@ struct WorkStatusReader: Sendable {
         return GitHubPullRequestReader.parse(output, branch: branch, turnStartedAt: startedAt)
     }
 
-    /// The GitHub card's state: `gh --version`, then its github.com sign-in. Runs only while Settings ›
-    /// Agents is showing or once at launch, never for a session.
+    /// The GitHub card's state: `gh --version`, then its github.com sign-in. Never for a session. The
+    /// card gate is checked before each command, so a switch turned off between them stops the second.
     func cliStatus() -> GitHubCLIStatus {
         guard let gh else { return .notInstalled }
-        guard case .succeeded(let output) = runner.run(WorkStatusCommand(executable: gh, arguments: ["--version"],
-                                                                          environment: ghEnvironment, timeout: Self.versionTimeout)) else {
+        guard cliGate.isOpen,
+              case .succeeded(let output) = runner.run(WorkStatusCommand(executable: gh, arguments: ["--version"],
+                                                                         environment: ghEnvironment,
+                                                                         timeout: Self.versionTimeout)) else {
             return .unknown(version: nil)
         }
         let version = GitHubCLIStatus.version(String(decoding: output, as: UTF8.self))
+        guard cliGate.isOpen else { return .unknown(version: version) }
         let auth = runner.run(WorkStatusCommand(executable: gh,
                                                 arguments: ["auth", "status", "--hostname", "github.com", "--json", "hosts"],
                                                 environment: ghEnvironment, timeout: Self.ghTimeout))
@@ -181,43 +183,55 @@ struct WorkStatusReader: Sendable {
 }
 
 /// Runs a work-status command with a minimal environment, empty stdin, stderr discarded and stdout
-/// bounded. Past its wait the command gets SIGTERM, then SIGKILL a second later, and the pipe reader
-/// stops, so a descendant still holding stdout cannot keep a thread waiting. Nothing is retried.
+/// bounded. The command leads its own process group (`AgentUpdateRunner.spawnGroup`), so past its
+/// wait the whole group gets SIGTERM, then SIGKILL a second later; the pipe reader stops either way,
+/// so a descendant still holding stdout cannot keep a thread waiting. Nothing is retried.
 struct ProcessWorkStatusRunner: WorkStatusCommandRunning {
     static let maximumOutput = 1 << 20
-    /// How long a terminated command gets before SIGKILL, and how long output may trail an exit.
+    /// How long a terminated group gets before SIGKILL, and how long output may trail an exit.
     static let grace: Double = 1
 
     func run(_ command: WorkStatusCommand) -> WorkStatusCommandResult {
         guard FileManager.default.isExecutableFile(atPath: command.executable) else { return .notLaunched }
-        let process = Process(), output = Pipe()
-        process.executableURL = URL(fileURLWithPath: command.executable)
-        process.arguments = command.arguments
-        process.environment = command.environment
-        process.currentDirectoryURL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-        process.standardInput = FileHandle.nullDevice
-        process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
-        let exited = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in exited.signal() }
-        do { try process.run() } catch { return .notLaunched }
-        let reader = BoundedPipeReader(output.fileHandleForReading.fileDescriptor, limit: Self.maximumOutput)
-        defer { reader.stop() }
-        let deadline = DispatchTime.now() + command.timeout
-        guard exited.wait(timeout: deadline) == .success else {
-            process.terminate()
-            if exited.wait(timeout: .now() + Self.grace) != .success {
-                kill(process.processIdentifier, SIGKILL)
-                _ = exited.wait(timeout: .now() + Self.grace)
-            }
+        var pipeEnds: [Int32] = [-1, -1]
+        guard pipe(&pipeEnds) == 0 else { return .notLaunched }
+        // Close-on-exec, so a process another thread starts meanwhile (Foundation's `Process` keeps
+        // inherited descriptors) cannot hold this pipe open; the spawn dup2s the write end onto stdout.
+        pipeEnds.forEach { _ = fcntl($0, F_SETFD, FD_CLOEXEC) }
+        guard let pid = AgentUpdateRunner.spawnGroup(executable: command.executable, arguments: command.arguments,
+                                                     environment: command.environment, stdout: pipeEnds[1], stderr: nil)
+        else {
+            pipeEnds.forEach { close($0) }
+            return .notLaunched
+        }
+        // The parent's write end would otherwise keep the reader from seeing EOF.
+        close(pipeEnds[1])
+        // This run owns the read end: it is closed only after the reader has stopped, so the number
+        // cannot be reused while the reader polls it.
+        let reader = BoundedPipeReader(pipeEnds[0], limit: Self.maximumOutput)
+        defer {
+            reader.stop()
+            close(pipeEnds[0])
+        }
+        switch AgentUpdateRunner.waitForExit(pid, until: Date().addingTimeInterval(command.timeout), reap: true) {
+        case .exited(let status):
+            // A descendant may still hold stdout after the command exited: its output is incomplete.
+            guard reader.waitForEnd(until: .now() + Self.grace) else { return .timedOut }
+            guard status == 0 else { return .failed(status) }
+            let bytes = reader.bytes
+            guard bytes.count <= Self.maximumOutput else { return .tooLarge }
+            return .succeeded(bytes)
+        case .lost:
+            return .failed(-1)
+        case .running:
+            // The leader is not reaped until its group has had SIGKILL, so its pid, and with it the
+            // group id, cannot be reused by an unrelated group while these are sent.
+            killpg(pid, SIGTERM)
+            _ = AgentUpdateRunner.waitForExit(pid, until: Date().addingTimeInterval(Self.grace), reap: false)
+            killpg(pid, SIGKILL)
+            _ = AgentUpdateRunner.waitForExit(pid, until: .distantFuture, reap: true)
             return .timedOut
         }
-        // A descendant may still hold stdout after the command exited: its output is incomplete.
-        guard reader.waitForEnd(until: max(deadline, .now() + Self.grace)) else { return .timedOut }
-        guard process.terminationStatus == 0 else { return .failed(process.terminationStatus) }
-        let bytes = reader.bytes
-        guard bytes.count <= Self.maximumOutput else { return .tooLarge }
-        return .succeeded(bytes)
     }
 }
 

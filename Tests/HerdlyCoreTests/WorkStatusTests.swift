@@ -223,6 +223,10 @@ private let mergedPR = GitHubPullRequestLookup.found(GitHubPullRequest(number: 7
 
 // MARK: - Branch memory
 
+private func presence(_ session: AgentSessionIdentity, _ turn: String?, _ directory: String) -> WorkPresence {
+    WorkPresence(session: session, turn: turn, directory: directory)
+}
+
 private func sighting(_ turn: AgentTurnIdentity, _ directory: String = "/w/repo", _ head: GitHead? = .branch("feat/x"),
                       at startedAt: Double = 1_000) -> WorkBranchSighting {
     WorkBranchSighting(turn: turn, startedAt: startedAt, directory: directory, head: head)
@@ -278,9 +282,12 @@ private func sighting(_ turn: AgentTurnIdentity, _ directory: String = "/w/repo"
 }
 
 @Test func aFinishedTurnIsNotReadWhileOtherWorkRunsInItsFolder() {
-    #expect(WorkBranchMemory.busy("/w/repo", turn: turnA, running: [sighting(turnB, "/w/repo")]))
-    #expect(WorkBranchMemory.busy("/w/repo", turn: turnA, running: [sighting(turnA2, "/w/repo")]))
-    #expect(!WorkBranchMemory.busy("/w/repo", turn: turnA, running: [sighting(turnB, "/w/elsewhere")]))
+    #expect(WorkBranchMemory.busy("/w/repo", turn: turnA, present: [presence(sessionB, "t1", "/w/repo")]))
+    #expect(WorkBranchMemory.busy("/w/repo", turn: turnA, present: [presence(sessionA, "t2", "/w/repo")]))
+    #expect(!WorkBranchMemory.busy("/w/repo", turn: turnA, present: [presence(sessionB, "t1", "/w/elsewhere")]))
+    // The same session's row naming no turn, or this turn itself, is not other work.
+    #expect(!WorkBranchMemory.busy("/w/repo", turn: turnA, present: [presence(sessionA, nil, "/w/repo"),
+                                                                     presence(sessionA, "t1", "/w/repo")]))
 }
 
 @Test func aDetachedHeadIsRememberedWithoutABranch() {
@@ -341,30 +348,30 @@ private func memory(_ sightings: [WorkBranchSighting], repositories: [AgentTurnI
 
 @Test func aBatchReadsDueFinishedTurnsOnTheirRememberedBranch() {
     let remembered = memory([sighting(turnA)], repositories: [turnA: .gitHub("o/repo")])
-    let batch = WorkStatusBatch.plan(finished: [turnA], running: [], memory: remembered, readings: [:], now: 2_000)
+    let batch = WorkStatusBatch.plan(finished: [turnA], present: [], memory: remembered, readings: [:], now: 2_000)
     #expect(batch == WorkStatusBatch(repositories: [], reads: [WorkStatusRead(turn: turnA, branch: feature)],
                                      settledNoVerdict: []))
     let read = WorkStatusReading(verdict: .checksPassed, readAt: 1_900, firstReadAt: 1_900)
-    #expect(WorkStatusBatch.plan(finished: [turnA], running: [], memory: remembered, readings: [turnA: read], now: 2_000).isEmpty)
+    #expect(WorkStatusBatch.plan(finished: [turnA], present: [], memory: remembered, readings: [turnA: read], now: 2_000).isEmpty)
 }
 
 @Test func unknownAndAmbiguousTurnsSettleAsNoVerdictWithoutRunning() {
     let shared = memory([sighting(turnA), sighting(turnB, "/w/repo")])
-    let batch = WorkStatusBatch.plan(finished: [turnA, turnA2], running: [], memory: shared, readings: [:], now: 2_000)
+    let batch = WorkStatusBatch.plan(finished: [turnA, turnA2], present: [], memory: shared, readings: [:], now: 2_000)
     #expect(batch.isEmpty)
     #expect(batch.settledNoVerdict == [turnA, turnA2])
     let settled = WorkStatusReading(verdict: .noVerdict, readAt: 2_000, firstReadAt: 2_000)
-    #expect(WorkStatusBatch.plan(finished: [turnA], running: [], memory: shared, readings: [turnA: settled],
+    #expect(WorkStatusBatch.plan(finished: [turnA], present: [], memory: shared, readings: [turnA: settled],
                                  now: 3_000).settledNoVerdict.isEmpty)
 }
 
 @Test func aBatchWaitsForTheRepositoryAndForABusyFolder() {
     let unread = memory([sighting(turnA)])
-    let first = WorkStatusBatch.plan(finished: [turnA], running: [], memory: unread, readings: [:], now: 2_000)
+    let first = WorkStatusBatch.plan(finished: [turnA], present: [], memory: unread, readings: [:], now: 2_000)
     #expect(first.repositories == [WorkRepositoryRead(turn: turnA, directory: "/w/repo")])
     #expect(first.reads.isEmpty)
     let known = memory([sighting(turnA)], repositories: [turnA: .notOnGitHub])
-    let busy = WorkStatusBatch.plan(finished: [turnA], running: [sighting(turnB, "/w/repo/sub")], memory: known,
+    let busy = WorkStatusBatch.plan(finished: [turnA], present: [presence(sessionB, nil, "/w/repo/sub")], memory: known,
                                     readings: [:], now: 2_000)
     #expect(busy.isEmpty && busy.settledNoVerdict.isEmpty)
 }
@@ -375,7 +382,7 @@ private func memory(_ sightings: [WorkBranchSighting], repositories: [AgentTurnI
     var many = WorkBranchMemory()
     many.observe(turns.enumerated().map { sighting($1, "/w/\($0)") })
     for turn in turns.prefix(8) { many.record(.notOnGitHub, for: turn) }
-    let batch = WorkStatusBatch.plan(finished: Array(turns.prefix(8)), running: [], memory: many, readings: [:], now: 0)
+    let batch = WorkStatusBatch.plan(finished: Array(turns.prefix(8)), present: [], memory: many, readings: [:], now: 0)
     #expect(batch.repositories.count == 2)
     #expect(batch.reads.count == WorkStatusBatch.limit - 2)
 }
@@ -403,7 +410,9 @@ private func memory(_ sightings: [WorkBranchSighting], repositories: [AgentTurnI
     // Not a Paper frame: gray, and no switch shown as if connected.
     #expect(GitHubCLIStatus.unknown(version: "2.62.0").header == .unavailable("Status unknown"))
     #expect(!WorkStatusSetting.showsSwitch(stored: nil, cli: .unknown(version: nil)))
-    #expect(!WorkStatusSetting.showsSwitch(stored: false, cli: .signedOut(version: nil)))
+    // A choice once made keeps its switch in every state, so off can be turned back on.
+    #expect(WorkStatusSetting.showsSwitch(stored: false, cli: .signedOut(version: nil)))
+    #expect(WorkStatusSetting.showsSwitch(stored: false, cli: .notInstalled))
     #expect(WorkStatusSetting.showsSwitch(stored: false, cli: .signedIn(version: nil)))
     // Once the user turned it on, it can always be turned off.
     #expect(WorkStatusSetting.showsSwitch(stored: true, cli: .unknown(version: nil)))
@@ -477,15 +486,17 @@ private func reply(status: String = status(), remote: String = "git@github.com:o
     }
 }
 
-private func reader(_ runner: FakeRunner, open: Bool = true, gh: String? = "/opt/homebrew/bin/gh") -> WorkStatusReader {
-    WorkStatusReader(runner: runner, gate: WorkStatusGate(open: open), git: "/opt/homebrew/bin/git", gh: gh, home: "/h")
+private func reader(_ runner: FakeRunner, open: Bool = true, cliGate: WorkStatusGate = WorkStatusGate(open: true),
+                    gh: String? = "/opt/homebrew/bin/gh") -> WorkStatusReader {
+    WorkStatusReader(runner: runner, gate: WorkStatusGate(open: open), cliGate: cliGate, git: "/opt/homebrew/bin/git",
+                     gh: gh, home: "/h")
 }
 
 @Test func theReaderCombinesGitAndGhReadOnly() {
     let runner = FakeRunner(reply())
     let reader = reader(runner)
     #expect(reader.repository("/w/repo") == .gitHub("o/repo"))
-    #expect(reader.verdict(feature) == .checksFailing)
+    #expect(reader.verdict(feature).verdict == .checksFailing)
     let git = runner.calls.filter { $0.executable.hasSuffix("/git") }
     #expect(git.allSatisfy { $0.arguments.starts(with: ["--no-optional-locks", "-c", "core.fsmonitor=false", "-C"]) })
     #expect(git.allSatisfy { $0.environment["GIT_OPTIONAL_LOCKS"] == "0" && $0.timeout == WorkStatusReader.gitTimeout })
@@ -497,9 +508,9 @@ private func reader(_ runner: FakeRunner, open: Bool = true, gh: String? = "/opt
 @Test func theSwitchOffRunsNoCommand() {
     let runner = FakeRunner(reply())
     let reader = reader(runner, open: false)
-    #expect(reader.verdict(feature) == WorkStatus.noVerdict)
+    #expect(reader.verdict(feature).verdict == WorkStatus.noVerdict)
     #expect(reader.repository("/w/repo") == .notOnGitHub)
-    #expect(reader.verdict(.detached(directory: "/w/repo")) == WorkStatus.noVerdict)
+    #expect(reader.verdict(.detached(directory: "/w/repo")).verdict == WorkStatus.noVerdict)
     #expect(runner.calls.isEmpty)
 }
 
@@ -507,18 +518,18 @@ private func reader(_ runner: FakeRunner, open: Bool = true, gh: String? = "/opt
     let timedOut = FakeRunner { command in
         command.executable.hasSuffix("/gh") ? .succeeded(pullRequests([pr()])) : .timedOut
     }
-    #expect(reader(timedOut).verdict(feature) == WorkStatus.noVerdict)
+    #expect(reader(timedOut).verdict(feature).verdict == WorkStatus.noVerdict)
     #expect(reader(timedOut).repository("/w/repo") == .notOnGitHub)
     let notATree = FakeRunner { _ in .failed(128) }
-    #expect(reader(notATree).verdict(feature) == WorkStatus.noVerdict)
+    #expect(reader(notATree).verdict(feature).verdict == WorkStatus.noVerdict)
 }
 
 @Test func aMissingOrFailingGhKeepsOnlyTheLocalVerdict() {
     let dirty = status(entries: ["? new.swift"])
-    #expect(reader(FakeRunner(reply(status: dirty)), gh: nil).verdict(feature) == .uncommitted)
+    #expect(reader(FakeRunner(reply(status: dirty)), gh: nil).verdict(feature).verdict == .uncommitted)
     for failure in [WorkStatusCommandResult.failed(1), .timedOut, .notLaunched, .tooLarge, .succeeded(Data("<html>".utf8))] {
-        #expect(reader(FakeRunner(reply(gh: failure))).verdict(feature) == WorkStatus.noVerdict)
-        #expect(reader(FakeRunner(reply(status: dirty, gh: failure))).verdict(feature) == .uncommitted)
+        #expect(reader(FakeRunner(reply(gh: failure))).verdict(feature).verdict == WorkStatus.noVerdict)
+        #expect(reader(FakeRunner(reply(status: dirty, gh: failure))).verdict(feature).verdict == .uncommitted)
     }
 }
 
@@ -530,7 +541,7 @@ private func reader(_ runner: FakeRunner, open: Bool = true, gh: String? = "/opt
         if command.arguments.contains("rev-list") { return .succeeded(Data("4\n".utf8)) }
         return .failed(1)
     }
-    #expect(reader(runner).verdict(feature) == .notPushed)
+    #expect(reader(runner).verdict(feature).verdict == .notPushed)
     let pushedFromMain = FakeRunner { command in
         if command.executable.hasSuffix("/gh") { return .succeeded(pullRequests([pr()])) }
         if command.arguments.contains("status") { return .succeeded(Data(status(upstream: "origin/main", ahead: 3).utf8)) }
@@ -538,13 +549,13 @@ private func reader(_ runner: FakeRunner, open: Bool = true, gh: String? = "/opt
         if command.arguments.contains("rev-list") { return .succeeded(Data("0\n".utf8)) }
         return .failed(1)
     }
-    #expect(reader(pushedFromMain).verdict(feature) == .checksPassed)
+    #expect(reader(pushedFromMain).verdict(feature).verdict == .checksPassed)
     let noRemote = FakeRunner { command in
         if command.arguments.contains("status") { return .succeeded(Data(status(upstream: nil, ahead: nil).utf8)) }
         if command.arguments.contains("remote") { return .succeeded(Data()) }
         return .failed(1)
     }
-    #expect(reader(noRemote).verdict(feature) == WorkStatus.noVerdict)
+    #expect(reader(noRemote).verdict(feature).verdict == WorkStatus.noVerdict)
     #expect(!noRemote.calls.contains { $0.arguments.contains("rev-list") })
 }
 
@@ -592,7 +603,7 @@ private func defaults(_ stored: Bool?) throws -> (UserDefaults, String) {
     defer { defaults.removePersistentDomain(forName: suite) }
     let runner = FakeRunner(reply())
     let gate = WorkStatusGate(open: true)
-    let model = WorkStatusModel(reader: reader(runner).with(gate: gate), gate: gate, defaults: defaults)
+    let model = makeModel(runner, gate: gate, defaults: defaults)
     #expect(!gate.isOpen)
     #expect(model.scanned([item(running: turnA)], heads: ["/w/repo": .branch("feat/x")], directory: { _ in "/w/repo" },
                           now: 1_000) == nil)
@@ -607,7 +618,7 @@ private func defaults(_ stored: Bool?) throws -> (UserDefaults, String) {
     let runner = FakeRunner { _ in .succeeded(Data("gh version 2.62.0\n".utf8)) }
     let gate = WorkStatusGate(open: false)
     // No check remembered: installed on disk reads unknown, with no switch and nothing run.
-    let model = WorkStatusModel(reader: reader(runner).with(gate: gate), gate: gate, defaults: defaults)
+    let model = makeModel(runner, gate: gate, defaults: defaults)
     #expect(model.cli == .unknown(version: nil))
     #expect(model.refreshCLI() == nil)
     #expect(model.cli == .unknown(version: nil) && !model.mayCheckCLI)
@@ -615,7 +626,7 @@ private func defaults(_ stored: Bool?) throws -> (UserDefaults, String) {
     defaults.set("signedIn 2.62.0", forKey: WorkStatusSetting.rememberedCLIKey)
     #expect(model.refreshCLI() == nil)
     #expect(model.cli == .signedIn(version: "2.62.0") && model.showsSwitch && !model.isEnabled)
-    let missing = WorkStatusModel(reader: reader(runner, gh: nil).with(gate: gate), gate: gate, defaults: defaults)
+    let missing = makeModel(runner, gate: gate, defaults: defaults, gh: nil)
     #expect(missing.cli == .notInstalled)
     #expect(runner.calls.isEmpty)
 }
@@ -629,7 +640,7 @@ private func defaults(_ stored: Bool?) throws -> (UserDefaults, String) {
             : .succeeded(Data(signedOut.utf8))
     }
     let gate = WorkStatusGate(open: false)
-    let model = WorkStatusModel(reader: reader(runner).with(gate: gate), gate: gate, defaults: defaults)
+    let model = makeModel(runner, gate: gate, defaults: defaults)
     #expect(runner.calls.isEmpty)
     let check = try #require(model.setEnabled(true))
     await check.value
@@ -645,7 +656,7 @@ private func defaults(_ stored: Bool?) throws -> (UserDefaults, String) {
     defer { defaults.removePersistentDomain(forName: suite) }
     let runner = FakeRunner(reply())
     let gate = WorkStatusGate(open: false)
-    let model = WorkStatusModel(reader: reader(runner).with(gate: gate), gate: gate, defaults: defaults)
+    let model = makeModel(runner, gate: gate, defaults: defaults)
     #expect(gate.isOpen)
     let repository = try #require(model.scanned([item(running: turnA)], heads: ["/w/repo": .branch("feat/x")],
                                                 directory: { _ in "/w/repo" }, now: 1_000))
@@ -665,13 +676,24 @@ private func defaults(_ stored: Bool?) throws -> (UserDefaults, String) {
     #expect(model.verdict(for: turnA) == WorkStatus.noVerdict)
 }
 
+/// A model whose reader shares its two gates.
+@MainActor private func makeModel(_ runner: FakeRunner, gate: WorkStatusGate, defaults: UserDefaults,
+                                  gh: String? = "/opt/homebrew/bin/gh") -> WorkStatusModel {
+    let cliGate = WorkStatusGate(open: false)
+    return WorkStatusModel(reader: reader(runner, gh: gh).with(gate: gate, cliGate: cliGate), gate: gate, cliGate: cliGate,
+                           defaults: defaults)
+}
+
 private extension WorkStatusReader {
-    func with(gate: WorkStatusGate) -> WorkStatusReader {
-        WorkStatusReader(runner: runner, gate: gate, git: git, gh: gh, home: home)
+    func with(gate: WorkStatusGate, cliGate: WorkStatusGate) -> WorkStatusReader {
+        WorkStatusReader(runner: runner, gate: gate, cliGate: cliGate, git: git, gh: gh, home: home)
     }
 }
 
 // MARK: - The real runner
+
+// Wall-clock margins on purpose: a real process past a real deadline is the only way to test that the
+// runner kills it and stops its reader; everything above runs on explicit clocks.
 
 @Test func theProcessRunnerStopsACommandPastItsWait() throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-work-status-" + UUID().uuidString)
@@ -720,4 +742,117 @@ private func runHoldingStdout(_ body: String, timeout: Double) throws -> (result
     // It exited, but its output never ended: incomplete, not success.
     let exited = try runHoldingStdout("echo partial\nexit 0", timeout: 0.3)
     #expect(exited.result == .timedOut && exited.seconds < 4)
+}
+
+// MARK: - Review round 2
+
+@Test func gitHubStillWorkingItOutIsPending() throws {
+    let clean = try #require(GitLocalReading.parse(status: status()))
+    let main = try #require(GitLocalReading.parse(status: status(head: "main", upstream: "origin/main")))
+    func result(_ local: GitLocalReading?, _ lookup: GitHubPullRequestLookup?) -> WorkStatusResult {
+        WorkStatusRule.result(branch: feature, local: local, pullRequest: lookup)
+    }
+    // Mergeability still being computed: the checks verdict stands, but a conflict may yet appear.
+    #expect(result(clean, open(.passed, mergeable: .unknown)) == WorkStatusResult(.checksPassed, pending: true))
+    #expect(result(clean, open(.failing, mergeable: .unknown)) == WorkStatusResult(.checksFailing, pending: true))
+    // No checks registered yet.
+    #expect(result(clean, open(.noChecks)) == WorkStatusResult(.noVerdict, pending: true))
+    // Pushed, but the pull request is not listed yet.
+    #expect(result(clean, .noPullRequest) == WorkStatusResult(.noVerdict, pending: true))
+    // Settled readings.
+    #expect(result(clean, open(.passed)) == WorkStatusResult(.checksPassed))
+    #expect(result(clean, open(.passed, mergeable: .conflicting)) == WorkStatusResult(.conflict))
+    #expect(result(main, .noPullRequest) == WorkStatusResult(.noVerdict))
+    #expect(result(clean, .unavailable) == WorkStatusResult(.noVerdict))
+    #expect(result(nil, .noPullRequest) == WorkStatusResult(.noVerdict))
+    #expect(result(clean, mergedPR) == WorkStatusResult(.merged))
+}
+
+@Test func aPendingReadingIsReadAgainOnlyWithinItsGrace() {
+    let pending = WorkStatusReading(verdict: .checksPassed, pending: true, readAt: 100, firstReadAt: 100)
+    #expect(!WorkStatusSchedule.isDue(pending, now: 129))
+    #expect(WorkStatusSchedule.isDue(pending, now: 130))
+    let late = WorkStatusReading(verdict: .noVerdict, pending: true, readAt: 360, firstReadAt: 100)
+    #expect(WorkStatusSchedule.isDue(late, now: 399))
+    let settled = WorkStatusReading(verdict: .noVerdict, pending: true, readAt: 380, firstReadAt: 100)
+    // Five minutes after the first reading it settles on what it has.
+    #expect(!WorkStatusSchedule.isDue(settled, now: 100 + WorkStatusSchedule.pendingGrace))
+}
+
+@Test func aSessionWaitingOnAnApprovalInTheFolderMakesItShared() {
+    var memory = WorkBranchMemory()
+    memory.observe([sighting(turnA)], present: [presence(sessionB, "t9", "/w/repo")])
+    #expect(memory.branch(for: turnA) == .ambiguous)
+    var alone = WorkBranchMemory()
+    alone.observe([sighting(turnA)], present: [presence(sessionA, "t1", "/w/repo"), presence(sessionB, nil, "/w/other")])
+    #expect(alone.branch(for: turnA) != .ambiguous)
+}
+
+private func item(approval session: AgentSessionIdentity, turn: String) -> AgentAttentionItem {
+    let approval = AgentApproval(session: session, turn: turn, call: "c1", arrivedAt: 1_000)
+    return AgentAttentionItem(id: .approval(approval.id), kind: .actionableApproval, session: session, arrivedAt: 1_000,
+                              approval: approval, question: nil, outcome: nil, running: nil, unavailableReason: nil)
+}
+
+@MainActor @Test func theModelGivesNoVerdictWhenAnotherSessionWaitsOnAnApprovalInTheFolder() async throws {
+    let (defaults, suite) = try defaults(true)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let runner = FakeRunner(reply())
+    let model = makeModel(runner, gate: WorkStatusGate(open: false), defaults: defaults)
+    model.scanned([item(running: turnA), item(approval: sessionB, turn: "t1")], heads: ["/w/repo": .branch("feat/x")],
+                  directory: { _ in "/w/repo" }, now: 1_000)
+    #expect(model.memory.branch(for: turnA) == .ambiguous)
+    #expect(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_100) == nil)
+    #expect(model.readings[turnA]?.verdict == WorkStatus.noVerdict)
+    #expect(!runner.calls.contains { $0.arguments.contains("status") || $0.executable.hasSuffix("/gh") })
+}
+
+@MainActor @Test func aPendingVerdictIsReadAgainThenSettles() async throws {
+    let (defaults, suite) = try defaults(true)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    // GitHub has not computed mergeability yet.
+    let runner = FakeRunner(reply(gh: .succeeded(pullRequests([pr(mergeable: "UNKNOWN")]))))
+    let model = makeModel(runner, gate: WorkStatusGate(open: false), defaults: defaults)
+    await model.scanned([item(running: turnA)], heads: ["/w/repo": .branch("feat/x")], directory: { _ in "/w/repo" },
+                        now: 1_000)?.value
+    await model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_100)?.value
+    #expect(model.readings[turnA] == WorkStatusReading(verdict: .checksPassed, pending: true, readAt: 1_100, firstReadAt: 1_100))
+    let again = try #require(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" }, now: 1_130))
+    await again.value
+    #expect(model.readings[turnA]?.readAt == 1_130)
+    #expect(model.scanned([item(finished: turnA)], heads: [:], directory: { _ in "/w/repo" },
+                          now: 1_100 + WorkStatusSchedule.pendingGrace) == nil)
+    #expect(model.verdict(for: turnA) == .checksPassed)
+}
+
+@MainActor @Test func aSwitchTurnedOffWhileSignedOutCanBeTurnedBackOn() async throws {
+    let (defaults, suite) = try defaults(true)
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let runner = FakeRunner { command in
+        command.arguments == ["--version"] ? .succeeded(Data("gh version 2.62.0\n".utf8))
+            : .succeeded(Data(#"{"hosts":{}}"#.utf8))
+    }
+    let model = makeModel(runner, gate: WorkStatusGate(open: false), defaults: defaults)
+    await model.refreshCLI()?.value
+    #expect(model.cli == .signedOut(version: "2.62.0"))
+    model.setEnabled(false)
+    #expect(model.showsSwitch && !model.mayCheckCLI)
+    let before = runner.calls.count
+    let check = try #require(model.setEnabled(true))
+    await check.value
+    #expect(runner.calls.count == before + 2)
+    #expect(model.isEnabled && model.showsSwitch)
+}
+
+@Test func turningTheSwitchOffBetweenCardCommandsStopsTheSecond() {
+    let cliGate = WorkStatusGate(open: true)
+    let runner = FakeRunner { command in
+        // The switch goes off while `gh --version` runs.
+        if command.arguments == ["--version"] { cliGate.set(false) }
+        return .succeeded(Data("gh version 2.62.0\n".utf8))
+    }
+    #expect(reader(runner, cliGate: cliGate).cliStatus() == .unknown(version: "2.62.0"))
+    #expect(runner.calls.map(\.arguments) == [["--version"]])
+    #expect(reader(runner, cliGate: WorkStatusGate(open: false)).cliStatus() == .unknown(version: nil))
+    #expect(runner.calls.count == 1)
 }

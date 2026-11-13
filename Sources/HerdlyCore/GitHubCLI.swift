@@ -22,6 +22,11 @@ public enum GitHubCLIStatus: Equatable, Sendable {
         }
     }
 
+    public var isSignedIn: Bool {
+        if case .signedIn = self { return true }
+        return false
+    }
+
     public var header: AgentHeaderStatus {
         switch self {
         case .checking: .checking
@@ -87,44 +92,5 @@ public enum GitHubCLIStatus: Equatable, Sendable {
     public static func withoutRunning(installed: Bool, remembered: GitHubCLIStatus?) -> GitHubCLIStatus {
         guard installed else { return .notInstalled }
         return remembered ?? .unknown(version: nil)
-    }
-}
-
-/// The "Pull request status on finished rows" switch: the user's choice once made; until then on
-/// only while `gh` is installed and signed in.
-public enum WorkStatusSetting {
-    public static let defaultsKey = "workStatusEnabled"
-    /// The last GitHub CLI check (`GitHubCLIStatus.remembered`).
-    public static let rememberedCLIKey = "gitHubCLILastCheck"
-
-    public static func isOn(stored: Bool?, cli: GitHubCLIStatus) -> Bool {
-        if let stored { return stored }
-        if case .signedIn = cli { return true }
-        return false
-    }
-
-    /// Whether the card may run `gh`: not once the user turned the switch off. Undecided may, since
-    /// its default depends on the check.
-    public static func mayCheckCLI(stored: Bool?) -> Bool { stored != false }
-
-    /// The switch row shows while signed in, and whenever the user has it on, so it can always be
-    /// turned off. Signed out, not installed and unknown otherwise show no switch.
-    public static func showsSwitch(stored: Bool?, cli: GitHubCLIStatus) -> Bool {
-        if stored == true { return true }
-        if case .signedIn = cli { return true }
-        return false
-    }
-}
-
-/// Where Herdly looks for `git` and `gh`. The app does not inherit the shell's PATH. `/usr/bin/git` is
-/// never used: without the developer tools it is a stub that offers to install them.
-public enum WorkStatusTools {
-    public static func git(isExecutable: (String) -> Bool) -> String? {
-        ["/opt/homebrew/bin/git", "/usr/local/bin/git", "/Library/Developer/CommandLineTools/usr/bin/git",
-         "/Applications/Xcode.app/Contents/Developer/usr/bin/git"].first(where: isExecutable)
-    }
-
-    public static func gh(home: String, isExecutable: (String) -> Bool) -> String? {
-        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "\(home)/.local/bin/gh", "/usr/bin/gh"].first(where: isExecutable)
     }
 }

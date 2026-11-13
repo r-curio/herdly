@@ -13,18 +13,24 @@ final class WorkStatusModel: ObservableObject {
     private(set) var memory = WorkBranchMemory()
     private var inFlight = false
     private var checkingCLI = false
+    /// Session reads: open while the switch is on.
     private let gate: WorkStatusGate
+    /// The card's own `gh` check: open unless the user turned the switch off.
+    private let cliGate: WorkStatusGate
     private let reader: WorkStatusReader
     private let defaults: UserDefaults?
 
-    init(reader: WorkStatusReader? = nil, gate: WorkStatusGate? = nil, defaults: UserDefaults? = .standard) {
-        let gate = gate ?? WorkStatusGate(open: false)
+    /// A `reader` passed in must use the same two gates.
+    init(reader: WorkStatusReader? = nil, gate: WorkStatusGate? = nil, cliGate: WorkStatusGate? = nil,
+         defaults: UserDefaults? = .standard) {
+        let gate = gate ?? WorkStatusGate(open: false), cliGate = cliGate ?? WorkStatusGate(open: false)
         self.gate = gate
-        self.reader = reader ?? WorkStatusReader.live(gate: gate)
+        self.cliGate = cliGate
+        self.reader = reader ?? WorkStatusReader.live(gate: gate, cliGate: cliGate)
         self.defaults = defaults
         stored = defaults?.object(forKey: WorkStatusSetting.defaultsKey) as? Bool
         if !WorkStatusSetting.mayCheckCLI(stored: stored) { cli = cardWithoutRunning }
-        gate.set(isEnabled)
+        applySwitch()
     }
 
     /// "Pull request status on finished rows": the stored choice, or on while `gh` is signed in.
@@ -86,12 +92,20 @@ final class WorkStatusModel: ObservableObject {
     func scanned(_ items: [AgentAttentionItem], heads: [String: GitHead], directory: (AgentAttentionItem) -> String?,
                  now: Double) -> Task<Void, Never>? {
         guard isEnabled else { return nil }
+        // Running and waiting turns are where a branch is seen; every live row, an approval, question
+        // or handed-back request included, marks its folder as in use.
         let sightings: [WorkBranchSighting] = items.compactMap { item in
-            guard item.kind == .running, let running = item.running, let folder = directory(item) else { return nil }
+            guard item.kind == .running || item.kind == .waiting, let running = item.running,
+                  let folder = directory(item) else { return nil }
             return WorkBranchSighting(turn: running.identity, startedAt: running.arrivedAt, directory: folder,
                                       head: heads[folder])
         }
-        memory.observe(sightings)
+        let present: [WorkPresence] = items.compactMap { item in
+            guard item.kind != .outcome, item.kind != .earlierOutcome, let folder = directory(item) else { return nil }
+            let turn = item.running?.identity.turn ?? item.approval?.identity.turn ?? item.question?.identity.turn
+            return WorkPresence(session: item.session, turn: turn, directory: folder)
+        }
+        memory.observe(sightings, present: present)
         let finished = items.compactMap { item -> AgentTurnIdentity? in
             guard item.kind == .outcome || item.kind == .earlierOutcome else { return nil }
             return item.outcome?.identity
@@ -103,7 +117,7 @@ final class WorkStatusModel: ObservableObject {
             if next != readings { readings = next }
             return nil
         }
-        let batch = WorkStatusBatch.plan(finished: finished, running: sightings, memory: memory, readings: next, now: now)
+        let batch = WorkStatusBatch.plan(finished: finished, present: present, memory: memory, readings: next, now: now)
         for turn in batch.settledNoVerdict {
             next[turn] = WorkStatusReading(verdict: .noVerdict, readAt: now, firstReadAt: now)
         }
@@ -121,8 +135,8 @@ final class WorkStatusModel: ObservableObject {
             guard isEnabled else { return }
             for (turn, repository) in repositories { memory.record(repository, for: turn) }
             var updated = readings
-            for (turn, verdict) in verdicts {
-                updated[turn] = WorkStatusReading(verdict: verdict, readAt: now,
+            for (turn, result) in verdicts {
+                updated[turn] = WorkStatusReading(verdict: result.verdict, pending: result.pending, readAt: now,
                                                   firstReadAt: readings[turn]?.firstReadAt ?? now)
             }
             if updated != readings { readings = updated }
@@ -141,6 +155,7 @@ final class WorkStatusModel: ObservableObject {
     /// on starts clean.
     private func applySwitch() {
         gate.set(isEnabled)
+        cliGate.set(mayCheckCLI)
         guard !isEnabled else { return }
         memory = WorkBranchMemory()
         if !readings.isEmpty { readings = [:] }
