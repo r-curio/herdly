@@ -935,7 +935,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         panel.level = .statusBar
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView: Notch(model: self, claudeSetup: claude))
+        panel.contentView = NSHostingView(rootView: Notch(model: self, claudeSetup: claude, workStatus: workStatus))
         panel.onEscape = { [weak self] in self?.escape() }
         panel.onMoveSelection = { [weak self] in self?.moveSelection($0) ?? false }
         panel.onReturn = { [weak self] in
@@ -2852,11 +2852,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return candidates.compactMap { $0 }.first { $0.hasPrefix("/") }
     }
 
-    /// How far a finished row's work got (#417), `noVerdict` for every other row. Read only; the row's drawing
-    /// is a follow-up.
-    func workStatus(for item: AgentAttentionItem) -> WorkStatus {
-        guard let outcome = item.outcome else { return .noVerdict }
-        return workStatus.verdict(for: outcome.identity)
+    /// The place slot after a row's name (#418): a finished row's work status first, then its pull
+    /// request or place; otherwise the place as before. `note` is the row note shown, which keeps the slot.
+    func rowPlaceSlot(for item: AgentAttentionItem, note: RowNote?) -> RowPlace? {
+        let label = item.outcome.flatMap { workStatus.finishedLabel(for: $0.identity) }
+        return RowPlace.make(item, label: label, place: rowPlace(for: item), note: note)
     }
 
     /// "project @ branch" for a row in the profile's label format, when its working directory is
