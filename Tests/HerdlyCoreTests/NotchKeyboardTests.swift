@@ -119,14 +119,6 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
     do { let result = controller.update(interacting: false, keyboardFocus: true, now: 2); #expect(result == .collapsed) }
 }
 
-@Test func keyboardFocusDoesNotHoldASpotlightCardPastItsOpenTime() {
-    // Holding a focused spotlight is #428's rule, not this one.
-    var controller = NotchPresentationController()
-    controller.present(questionID, now: 0, duration: .threeSeconds)
-    do { let result = controller.update(interacting: false, keyboardFocus: true, now: 1, queued: [questionID]); #expect(result == .agentSpotlight(questionID)) }
-    do { let result = controller.update(interacting: false, keyboardFocus: true, now: 4, queued: [questionID]); #expect(result == .collapsed) }
-}
-
 @Test func aFreshCardDoesNotReplaceTheHotkeysQueue() {
     var controller = NotchPresentationController()
     controller.openQueueForKeyboard()

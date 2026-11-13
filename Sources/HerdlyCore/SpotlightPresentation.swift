@@ -143,9 +143,11 @@ public struct NotchPresentationController: Equatable, Sendable {
     }
     /// Whether a fresh card may take the spotlight now. Never while one is active or a clicked card
     /// is open, and never while the user has unsent text in a field on screen, which a new card
-    /// would take away.
-    public func acceptsAgentSpotlight(interacting: Bool, draftInProgress: Bool, now: Double) -> Bool {
-        clicked == nil && !draftInProgress && !agentSpotlight.isActive(interacting: interacting, now: now)
+    /// would take away. A spotlight the keyboard is in (`keyboardFocus`, #428) is active however long
+    /// the user takes, so an arrival waits behind it with its own deadline running.
+    public func acceptsAgentSpotlight(interacting: Bool, draftInProgress: Bool, keyboardFocus: Bool = false,
+                                      now: Double) -> Bool {
+        clicked == nil && !draftInProgress && !agentSpotlight.isActive(interacting: interacting || keyboardFocus, now: now)
     }
     /// The header's explicit open: the whole queue, leaving any clicked card. It also ends the
     /// spotlight, whose time would otherwise start over and show it again once the user leaves.
@@ -196,8 +198,11 @@ public struct NotchPresentationController: Equatable, Sendable {
     /// `queued` is the queue's current identities: a clicked card whose item has left falls back to
     /// the queue and never shows another item, and a card that opened by itself ends. Nil leaves
     /// both unchecked.
-    /// `keyboardFocus` is the panel's deliberate keyboard focus. It holds only a queue the hotkey
-    /// opened, and a card opened from it; once it is false that hold ends for good.
+    /// `keyboardFocus` is the panel's deliberate keyboard focus (the hotkey or a click). It holds a
+    /// queue the hotkey opened, and a card opened from it; once it is false that hold ends for good.
+    /// It also holds a spotlight card like hover does (#428): open however long the user takes, its
+    /// card-open time starting over once focus leaves. It is not interaction: no countdown pauses
+    /// for it (ADR 0020), and a clicked queue still folds when the pointer leaves (#376).
     public mutating func update(interacting: Bool, draftInProgress: Bool = false, keyboardFocus: Bool = false,
                                 now: Double, legacyPopup: Bool = false,
                                 queued: Set<AgentAttentionID>? = nil) -> NotchPresentationMode {
@@ -218,7 +223,7 @@ public struct NotchPresentationController: Equatable, Sendable {
         // A card whose item has left the queue (a question just answered on it, an approval decided)
         // has nothing to show: it ends at once rather than holding an empty panel open on its timer.
         if let queued, let id = agentSpotlight.item, !queued.contains(id) { agentSpotlight.clear() }
-        if let id = agentSpotlight.update(interacting: interacting || draftInProgress, now: now) {
+        if let id = agentSpotlight.update(interacting: interacting || draftInProgress || keyboardFocus, now: now) {
             return manualOpen ? .queue : .agentSpotlight(id)
         }
         return NotchPresentationMode.resolve(spotlight: spotlight.update(interacting: interacting, now: now),
