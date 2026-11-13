@@ -424,24 +424,20 @@ struct NotchButton: View {
     }
 }
 
-/// One of the walk header's ‹ › wells (#440, Paper K "D · Walk the to-check list"): 11pt ink on the
-/// well, 7pt by 2pt padding, 5pt corners; dim and not pressable at either end.
+/// One of the walk header's ‹ › wells (#440, Paper K "D · Walk the to-check list"): the notch's own
+/// button style at the slim 2pt height the subagent switcher's wells use; dim and not pressable at
+/// either end.
 struct WalkStepWell: View {
     let symbol: String
     let enabled: Bool
     let action: () -> Void
     @FocusState private var focused: Bool
     var body: some View {
-        Button(action: action) {
-            Text(verbatim: symbol).font(NotchStyle.mono(11)).foregroundStyle(enabled ? NotchStyle.ink : NotchStyle.dim)
-                .padding(.horizontal, 7).padding(.vertical, 2)
-                .background(NotchStyle.well, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .focused($focused)
-        .modifier(NotchFocusRing(focused: focused))
+        Button(action: action) { Text(verbatim: symbol) }
+            .buttonStyle(NotchButtonStyle(verticalPadding: 2))
+            .disabled(!enabled)
+            .focused($focused)
+            .modifier(NotchFocusRing(focused: focused))
     }
 }
 
@@ -1817,8 +1813,7 @@ struct Notch: View {
         let prompts = questionPrompts(question)
         let viewed = viewedQuestionIndex(question).viewed
         guard prompts.indices.contains(viewed), let text = prompts[viewed].question else { return }
-        NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
-                             userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        announce(text)
     }
 
     /// Key labels show only on the card that has the keyboard (frame 2), never before it (frame 1),
@@ -2328,25 +2323,26 @@ struct Notch: View {
     @ViewBuilder
     private func resultOpen(_ item: AgentAttentionItem, subject: String, codexOpen: Bool,
                             target: ResultRowTarget, shortcut: NotchShortcut? = nil) -> some View {
-        if item.session.source == .codex, codexOpen, target == .reachable {
-            NotchButton(title: Self.rowOpenTitle, shortcut: shortcut) { model.openAgent(item.session) }
+        if let open = resultOpenAction(item, codexOpen: codexOpen, target: target) {
+            NotchButton(title: Self.rowOpenTitle, shortcut: shortcut, action: open)
                 .disabled(model.openingTask)
                 .accessibilityLabel("Open Session: \(subject)")
                 .accessibilityHint(NotchShortcut.hint(Self.resultOpenHint(item.session.source), shortcut: shortcut))
+        } else {
+            // No Open: a Claude result that cannot be opened may offer "Set up Ghostty" instead.
+            claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle,
+                                openHint: Self.resultOpenHint(item.session.source))
         }
-        claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle,
-                            openHint: Self.resultOpenHint(item.session.source), shortcut: shortcut)
     }
 
-    /// The result card's Open as its button does it, or nil where the card shows no Open: the same
-    /// decisions `resultOpen` and `claudeReturnControl` read, so O never opens what the card does not
-    /// show. Opening acknowledges nothing.
-    private func resultOpenAction(_ item: AgentAttentionItem) -> (() -> Void)? {
-        guard !model.openingTask else { return nil }
+    /// A result's Open, or nil where it shows none: the one decision its button and the walk's O key
+    /// (#440) both read, so a key never opens what the card does not show. Codex's while Open is
+    /// offered and the result's reading is reachable; Claude's by `claudeReturnControl`'s own rule.
+    /// Opening acknowledges nothing.
+    private func resultOpenAction(_ item: AgentAttentionItem, codexOpen: Bool, target: ResultRowTarget) -> (() -> Void)? {
         let session = item.session
         if session.source == .codex {
-            guard codexOpenOffered(item), model.resultRowReading(session).target == .reachable else { return nil }
-            return { model.openAgent(session) }
+            return codexOpen && target == .reachable ? { model.openAgent(session) } : nil
         }
         let herdr = herdrOpen(session)
         guard herdr == .available || (herdr == .notInHerdr && model.canOpenClaude(session)),
@@ -2362,7 +2358,9 @@ struct Notch: View {
               let item = model.orderedAgentAttentionItems.first(where: { $0.id == press.card }), item.outcome != nil
         else { return }
         switch press.action {
-        case .open: resultOpenAction(item)?()
+        case .open:
+            guard !model.openingTask else { return }
+            resultOpenAction(item, codexOpen: codexOpenOffered(item), target: model.resultRowReading(item.session).target)?()
         case .dismiss: model.dismissAgent(item.id)
         case .none: break
         }
@@ -2592,7 +2590,7 @@ struct Notch: View {
     // MARK: The to-check walk (#440, Paper K "D · Walk the to-check list")
 
     /// The walk's header above its card: the ‹ › wells around "3 of 4 to check" (the index in ink,
-    /// the rest in dim), then one dashed mark per item on the right, the passed ones dim, the current
+    /// the rest in text gray), then one dashed mark per item on the right, the passed ones dim, the current
     /// one ink, the ones still ahead in the well's gray. The wells move by item; ← → also step a
     /// card's own questions first. Moving shows another card and clears nothing.
     private func walkHeader(_ position: ToCheckWalk.Position) -> some View {
@@ -2600,7 +2598,7 @@ struct Notch: View {
             WalkStepWell(symbol: "‹", enabled: position.index > 1) { model.stepWalk(.previous) }
                 .accessibilityLabel("Previous item")
             (Text(verbatim: "\(position.index)").foregroundStyle(NotchStyle.ink).fontWeight(.semibold)
-                + Text(verbatim: " of \(position.count) to check").foregroundStyle(NotchStyle.dim))
+                + Text(verbatim: " of \(position.count) to check").foregroundStyle(NotchStyle.text))
                 .font(NotchStyle.mono(10)).monospacedDigit().lineLimit(1).fixedSize()
                 .accessibilityLabel(position.spoken)
             WalkStepWell(symbol: "›", enabled: position.index < position.count) { model.stepWalk(.next) }
@@ -2618,9 +2616,10 @@ struct Notch: View {
             .accessibilityHidden(true)
         }
         .padding(.horizontal, 6)
-        // The design keeps the header 10pt above the card; the column's own spacing is 14pt.
-        .padding(.bottom, -4)
     }
+
+    /// The space between the walk's header and its card (Paper K frame D).
+    private static let walkHeaderGap: CGFloat = 10
 
     /// The walk's end (#440): the last item was done, so the panel says so, then folds and gives the
     /// keyboard back. It names nothing as checked beyond what was decided, answered or dismissed.
@@ -2639,7 +2638,7 @@ struct Notch: View {
         guard let press, press.card == model.presentationMode.singleCard,
               let question = model.spotlightItem(press.card)?.question else { return }
         let (viewed, count) = viewedQuestionIndex(question)
-        if case let .question(next) = model.stepWalk(press.direction, question: .init(viewed: viewed, count: count)) {
+        if case let .question(next) = model.stepWalk(press.action, question: .init(viewed: viewed, count: count)) {
             showQuestion(next, of: question)
         }
     }
@@ -3705,11 +3704,19 @@ struct Notch: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         if model.presentationMode.clickedCard != nil { clickedCardBar }
-                        if let position = model.walkPosition { walkHeader(position) }
                         if model.presentationMode == .allChecked { allCheckedRow }
-                        if let question = spotlightStepperQuestion { spotlightStepperRow(question) }
-                        // An empty stack would still take the column's spacing, so each part is drawn only with rows.
-                        if !sections.attention.isEmpty { groupRows(sections.attention) }
+                        if let position = model.walkPosition {
+                            // Frame D sets the walk's header 10pt above its card, closer than the column's 14pt.
+                            VStack(alignment: .leading, spacing: Self.walkHeaderGap) {
+                                walkHeader(position)
+                                if let question = spotlightStepperQuestion { spotlightStepperRow(question) }
+                                if !sections.attention.isEmpty { groupRows(sections.attention) }
+                            }
+                        } else {
+                            if let question = spotlightStepperQuestion { spotlightStepperRow(question) }
+                            // An empty stack would still take the column's spacing, so each part is drawn only with rows.
+                            if !sections.attention.isEmpty { groupRows(sections.attention) }
+                        }
                         spotlightQuestionFoot
                         if sections.foldsWorking {
                             NotchDisclosure(title: "\(sections.workingCount) working", expanded: $model.workingFoldOpen) {
