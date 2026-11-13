@@ -23,10 +23,9 @@ private func action(_ key: ApprovalCardKey, _ card: ApprovalCardReading,
     ApprovalCardKeys.action(for: key, card: card, focus: focus)
 }
 
-/// Every key that is not ⌘⏎ or ⌘⌫: bare Return, every letter, every digit, bare Delete.
-private let undecidingKeys: [ApprovalCardKey] = [.returnKey, .delete]
-    + "abcdefghijklmnopqrstuvwxyz".map(ApprovalCardKey.letter)
-    + (0...9).map(ApprovalCardKey.digit)
+/// Every key the table can be handed that is not ⌘⏎ or ⌘⌫. The panel hands an approval card nothing
+/// else: digits, other letters and bare Delete never reach the table and go on to macOS.
+private let undecidingKeys = ApprovalCardKey.allCases.filter { $0 != .commandReturn && $0 != .commandDelete }
 
 @Test func onALiveDecidableCardWithTheKeyboardCommandReturnApprovesAndCommandDeleteDenies() throws {
     for source in [codexCLI, claude] {
@@ -34,8 +33,12 @@ private let undecidingKeys: [ApprovalCardKey] = [.returnKey, .delete]
         #expect(live.decisionEnabled)
         #expect(action(.commandReturn, live) == .approve)
         #expect(action(.commandDelete, live) == .deny)
-        #expect(action(.letter("o"), live) == .open)
+        #expect(action(.open, live) == .open)
     }
+    // Each decides exactly what its button does: Approve is allow-once, and Open decides nothing.
+    #expect(ApprovalCardAction.approve.decision == .allowOnce)
+    #expect(ApprovalCardAction.deny.decision == .deny)
+    #expect(ApprovalCardAction.open.decision == nil && ApprovalCardAction.none.decision == nil)
 }
 
 @Test func noKeyButCommandReturnOrCommandDeleteEverDecides() throws {
@@ -43,16 +46,13 @@ private let undecidingKeys: [ApprovalCardKey] = [.returnKey, .delete]
                  try reading(readAt: 130, now: 130), try reading(codexDesktop, readAt: 112, now: 112, decidable: false)]
     for card in cards {
         for key in undecidingKeys {
-            let result = action(key, card)
-            #expect(result != .approve && result != .deny, "\(key) decided")
+            #expect(action(key, card).decision == nil, "\(key) decided")
         }
     }
-    // On a live card bare Return, A, D, Y, N, digits and bare Delete do nothing at all.
+    // On a live card a bare Return does nothing at all and goes on to macOS.
     let live = try reading(readAt: 112, now: 112)
-    for key in [ApprovalCardKey.returnKey, .letter("a"), .letter("d"), .letter("y"), .letter("n"), .digit(1), .delete] {
-        #expect(action(key, live) == .none)
-        #expect(!action(key, live).consumesKey)
-    }
+    #expect(action(.returnKey, live) == .none)
+    #expect(!action(.returnKey, live).consumesKey)
 }
 
 @Test func pastTheDeadlineOrHandedBackOnlyOpenRemains() throws {
@@ -61,11 +61,9 @@ private let undecidingKeys: [ApprovalCardKey] = [.returnKey, .delete]
         #expect(!card.decisionEnabled)
         #expect(action(.commandReturn, card) == .none)
         #expect(action(.commandDelete, card) == .none)
-        #expect(action(.letter("o"), card) == .open)
+        #expect(action(.open, card) == .open)
         #expect(action(.returnKey, card) == .open)
     }
-    // One instant before the deadline the request is still decidable.
-    #expect(action(.commandReturn, try reading(readAt: 129.9, now: 129.9)) == .approve)
 }
 
 @Test func aDesktopApprovalThatStaysNativeGetsNoDecisionKeys() throws {
@@ -73,7 +71,7 @@ private let undecidingKeys: [ApprovalCardKey] = [.returnKey, .delete]
     #expect(action(.commandReturn, native) == .none)
     #expect(action(.commandDelete, native) == .none)
     // Its one action is Open, by O or Return, as on a handed-back card.
-    #expect(action(.letter("o"), native) == .open)
+    #expect(action(.open, native) == .open)
     #expect(action(.returnKey, native) == .open)
 }
 
@@ -82,19 +80,17 @@ private let undecidingKeys: [ApprovalCardKey] = [.returnKey, .delete]
     let live = try reading(readAt: 112, now: 112)
     let handedBack = try reading(readAt: 130, now: 130)
     for card in [live, handedBack] {
-        for key in [ApprovalCardKey.commandReturn, .commandDelete] + undecidingKeys {
+        for key in ApprovalCardKey.allCases {
             #expect(action(key, card, focus: .withoutKeyboard) == .none)
         }
     }
 }
 
-@Test func keyboardFocusMovesNoApprovalDeadline() throws {
-    // Reading a card with the keyboard changes nothing about its countdown (ADR 0020): the same
-    // request read at the same instant has the same countdown, and it still expires at 130.
-    let live = try reading(readAt: 112, now: 112)
-    _ = action(.commandReturn, live)
-    _ = action(.letter("o"), live)
-    #expect(live.countdown == (try reading(readAt: 112, now: 112)).countdown)
-    #expect(live.countdown?.label == "18s left")
+@Test func aFocusedCardStopsDecidingAtTheRequestsUnheldThirtySecondDeadline() throws {
+    // Keyboard focus holds nothing (ADR 0020): a request received at 100 and read with the keyboard
+    // at 112 approves until its own deadline at 130, and not from then on.
+    #expect(try reading(readAt: 112, now: 112).countdown?.label == "18s left")
+    #expect(action(.commandReturn, try reading(readAt: 112, now: 129.9)) == .approve)
     #expect(action(.commandReturn, try reading(readAt: 112, now: 130)) == .none)
+    #expect(action(.commandDelete, try reading(readAt: 112, now: 130)) == .none)
 }
