@@ -191,6 +191,22 @@ private func running(_ records: [[String: Any]], now: Double = 10) throws -> Age
     #expect(try running(laterTurn, now: 2 + bound * 4)?.subagents.map(\.id) == ["a1"])
 }
 
+@Test func claudeSubagentStartingAfterItsPromptsStopExpiresAtTheBound() throws {
+    // #426: a subagent that (re)starts in a prompt whose Stop already came has outlived its parent's turn
+    // from its start, so a lost stop of its own cannot keep it listed past the bound.
+    let bound = ClaudeObservationReader.maximumSubagentAge
+    for end in ["Stop", "StopFailure"] {
+        let records = [promptSubmit, record(end, at: 3), record("UserPromptSubmit", at: 4, prompt: "p2"),
+                       record("SubagentStart", at: 24, agent: "a1", type: "general-purpose")]
+        #expect(try running(records, now: 24 + bound - 0.001)?.subagents.map(\.id) == ["a1"], "\(end)")
+        #expect(try running(records, now: 24 + bound)?.subagents.isEmpty == true, "\(end)")
+    }
+    // Another prompt's Stop before the start does not bound a subagent of a live prompt.
+    let live = [promptSubmit, record("Stop", at: 3), record("UserPromptSubmit", at: 4, prompt: "p2"),
+                record("SubagentStart", at: 24, prompt: "p2", agent: "a1")]
+    #expect(try running(live, now: 24 + bound * 4)?.subagents.map(\.id) == ["a1"])
+}
+
 @Test func claudeForegroundSubagentInALiveTurnHasNoAgeBound() throws {
     // A foreground subagent may run longer than the bound inside its parent's live turn.
     let records = [promptSubmit, record("SubagentStart", at: 2, agent: "a1", type: "Explore")]
@@ -244,6 +260,15 @@ private struct HeldSession {
         queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: observedAt, sessions: [
             ClaudeInventorySession(sessionID: "session-1", kind: .interactive, startedAt: 0,
                                    lifecycle: .interactive(status: "idle"), statusUpdatedAt: 3)
+        ]), now: observedAt)
+    }
+
+    /// A registry reading that reports the session active (`busy`), which adds the inventory placeholder
+    /// when no hook evidence gives the session a working row.
+    mutating func busy(at observedAt: Double) {
+        queue.apply(ClaudeInventoryScan(sourceScope: "/tmp/root", observedAt: observedAt, sessions: [
+            ClaudeInventorySession(sessionID: "session-1", kind: .interactive, startedAt: 0,
+                                   lifecycle: .interactive(status: "busy"), statusUpdatedAt: observedAt)
         ]), now: observedAt)
     }
 
@@ -682,4 +707,169 @@ private func approvalCalls(_ session: HeldSession) -> [String] {
     #expect(subagents(second.scan) == [])
     #expect(second.scan == ClaudeObservationReader.referenceScan(events: root, sourceScope: root.path,
                                                                   installationID: "install", now: 2 + bound))
+}
+
+// #426: Claude's Stop came while no subagent was listed, so the next idle reading finished the turn, and
+// then a subagent started (or restarted) inside that same turn. Its calls keep the turn's prompt id.
+// The session's working row lists that subagent, as #404's hold does, instead of the inventory
+// placeholder; the finished result and its acknowledgment stay as they are, and no new result follows.
+private func finishedTurn() throws -> HeldSession {
+    var session = HeldSession([promptSubmit, record("Stop", at: 3)])
+    try session.scan(now: 4)
+    session.idle(at: 5)
+    #expect(session.kinds == [.outcome])
+    return session
+}
+
+private var restartedSubagent: [[String: Any]] { [
+    record("SubagentStart", at: 24, agent: "a1", type: "general-purpose"),
+    record("PreToolUse", at: 25, agent: "a1", type: "general-purpose", tool: "Bash", call: "b1",
+           input: ["command": "swift test"]),
+] }
+
+private var restartedSubagentStops: [[String: Any]] { [
+    record("PostToolUse", at: 400, agent: "a1", type: "general-purpose", call: "b1"),
+    record("SubagentStop", at: 401, agent: "a1", type: "general-purpose"),
+] }
+
+@Test func claudeSubagentStartingAfterItsAcknowledgedTurnShowsItsRowWithoutANewResult() throws {
+    var session = try finishedTurn()
+    let turn = try #require(session.queue.items.first?.outcome?.id)
+    session.queue.dismiss(.outcome(turn))
+    #expect(session.kinds.isEmpty)
+
+    session.records += restartedSubagent
+    try session.scan(now: 26)
+    session.busy(at: 26)
+    let row = try #require(session.queue.items.first?.running)
+    #expect(session.kinds == [.running])
+    #expect(row.identity.turn == "p1")
+    #expect(row.subagents.map(\.id) == ["a1"])
+    #expect(row.subagents.first?.latestAction?.text == "$ swift test")
+    #expect(row.toolName == nil)
+    #expect(session.queue.acknowledgedOutcomes.contains(turn))
+    #expect(session.queue.workingCount == 1 && session.queue.toCheckCount == 0)
+
+    // The parent's prompt stays idle while the subagent runs: the row is held, as #404's is.
+    session.idle(at: 27 + AgentAttentionQueue.idleRunningGrace)
+    try session.scan(now: 28 + AgentAttentionQueue.idleRunningGrace)
+    #expect(session.kinds == [.running])
+    #expect(session.subagents == ["a1"])
+
+    // The subagent stops: the row ends with no new result, and the turn stays acknowledged.
+    session.records += restartedSubagentStops
+    try session.scan(now: 402)
+    session.idle(at: 403)
+    try session.scan(now: 404)
+    #expect(session.kinds.isEmpty)
+    #expect(session.queue.toCheckCount == 0 && session.queue.workingCount == 0)
+    #expect(session.queue.acknowledgedOutcomes.contains(turn))
+
+    // With no hook evidence left, an active registry reading still gives the inventory placeholder.
+    session.busy(at: 405)
+    #expect(session.kinds == [.running])
+    #expect(session.queue.items.first?.running?.identity.turn == "")
+}
+
+@Test func claudeSubagentStartingAfterItsUnacknowledgedTurnKeepsTheOneResult() throws {
+    var session = try finishedTurn()
+    session.records += restartedSubagent
+    try session.scan(now: 26)
+    session.busy(at: 26)
+    // The result card stays beside the subagent's working row; nothing is reopened.
+    var outcomes: [AgentOutcome] { session.queue.items.compactMap(\.outcome) }
+    #expect(outcomes.map(\.arrivedAt) == [5])
+    #expect(session.queue.items.compactMap(\.running).map { $0.subagents.map(\.id) } == [["a1"]])
+    #expect(session.queue.toCheckCount == 1 && session.queue.workingCount == 1)
+
+    session.records += restartedSubagentStops
+    try session.scan(now: 402)
+    session.idle(at: 403)
+    #expect(session.queue.items.count == 1)
+    #expect(outcomes.map(\.arrivedAt) == [5])
+    #expect(session.queue.toCheckCount == 1 && session.queue.workingCount == 0)
+}
+
+@Test func claudeSubagentStartingAfterItsTurnEndsAtTheAgeBound() throws {
+    let bound = ClaudeObservationReader.maximumSubagentAge
+    var session = try finishedTurn()
+    session.queue.dismiss(.outcome(try #require(session.queue.items.first?.outcome?.id)))
+    session.records.append(restartedSubagent[0])
+    try session.scan(now: 24 + bound - 1)
+    #expect(session.subagents == ["a1"])
+    try session.scan(now: 24 + bound)
+    session.idle(at: 24 + bound)
+    #expect(session.kinds.isEmpty)
+    #expect(session.queue.toCheckCount == 0)
+}
+
+@Test func claudeRemovedSubagentRowStaysRemovedUntilAnotherSubagentStarts() throws {
+    var session = try finishedTurn()
+    session.queue.dismiss(.outcome(try #require(session.queue.items.first?.outcome?.id)))
+    session.records += restartedSubagent
+    try session.scan(now: 26)
+    let row = try #require(session.queue.items.first)
+    session.queue.remove(row.id)
+    #expect(session.kinds.isEmpty)
+    // Neither a rescan nor an idle reading (which ends the session's removal) brings it back.
+    try session.scan(now: 27)
+    session.idle(at: 28)
+    try session.scan(now: 29)
+    #expect(session.kinds.isEmpty)
+    // A subagent starting after the removal is newer activity, so the row shows again.
+    session.records.append(record("SubagentStart", at: 30, agent: "a2", type: "Explore"))
+    try session.scan(now: 31)
+    #expect(session.subagents == ["a1", "a2"])
+}
+
+@Test func claudeRemovedBackgroundSubagentHoldStaysRemoved() throws {
+    // #404's held row: removing it still sticks across rescans, as before #426.
+    var session = HeldSession([promptSubmit, record("SubagentStart", at: 2, agent: "a1", type: "general-purpose"),
+                               record("Stop", at: 3)])
+    try session.scan(now: 4)
+    session.idle(at: 5)
+    session.queue.remove(try #require(session.queue.items.first).id)
+    try session.scan(now: 6)
+    session.idle(at: 7)
+    try session.scan(now: 8)
+    #expect(session.kinds.isEmpty)
+}
+
+@Test func claudeSameSubagentRestartingInsideItsFinishedTurnShowsItsRow() throws {
+    // The recorded incident: background agent a1 ran in an earlier turn and reported back, Claude submitted
+    // the notification as a new prompt and stopped, the queue finished that turn, and a1 started again in it.
+    var session = HeldSession([promptSubmit,
+                               record("SubagentStart", at: 2, agent: "a1", type: "general-purpose"),
+                               record("Stop", at: 3),
+                               record("SubagentStop", at: 10, agent: "a1", type: "general-purpose"),
+                               record("UserPromptSubmit", at: 11, prompt: "p2"),
+                               record("Stop", at: 13, prompt: "p2")])
+    try session.scan(now: 14)
+    session.idle(at: 15)
+    let turn = try #require(session.queue.items.first?.outcome?.id)
+    #expect(turn.turn == "p2")
+    session.queue.dismiss(.outcome(turn))
+    #expect(session.kinds.isEmpty)
+
+    session.records += [record("SubagentStart", at: 34, prompt: "p2", agent: "a1", type: "general-purpose"),
+                        record("PreToolUse", at: 35, prompt: "p2", agent: "a1", type: "general-purpose", tool: "Bash",
+                               call: "b2", input: ["command": "swift build"])]
+    try session.scan(now: 36)
+    session.busy(at: 36)
+    let row = try #require(session.queue.items.first?.running)
+    #expect(session.kinds == [.running])
+    #expect(row.identity.turn == "p2")
+    #expect(row.subagents.map(\.id) == ["a1"])
+    #expect(row.subagents.first?.startedAt == 34)
+    #expect(row.subagents.first?.latestAction?.text == "$ swift build")
+    #expect(session.queue.acknowledgedOutcomes.contains(turn) && session.queue.toCheckCount == 0)
+
+    // Its new run is bounded from its own start, not from the earlier run's.
+    let bound = ClaudeObservationReader.maximumSubagentAge
+    try session.scan(now: 34 + bound - 1)
+    #expect(session.subagents == ["a1"])
+    try session.scan(now: 34 + bound)
+    session.idle(at: 34 + bound)
+    #expect(session.kinds.isEmpty)
+    #expect(session.queue.toCheckCount == 0)
 }
