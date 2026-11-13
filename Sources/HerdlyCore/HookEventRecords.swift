@@ -45,11 +45,10 @@ public enum HookEventListing {
     /// `listing(in:)`'s `records` with a number naming that listing: two calls that give the same
     /// number gave the same records, so a reader can reuse what it made of them without comparing
     /// thousands of URLs. Nil for a listing that was not kept (its directory could not be stamped),
-    /// which is never the same as another.
-    static func numberedRecords(in directory: URL) -> (records: ArraySlice<URL>, number: UInt64?)? {
-        current(in: directory, limit: maximumEntries, now: Date().timeIntervalSince1970).map {
-            ($0.records, $0.number == 0 ? nil : $0.number)
-        }
+    /// which is never the same as another. `now` is the wall clock, as for `detailedListing`.
+    static func numberedRecords(in directory: URL, now: Double = Date().timeIntervalSince1970)
+        -> (records: ArraySlice<URL>, number: UInt64?)? {
+        current(in: directory, limit: maximumEntries, now: now).map { ($0.records, $0.number) }
     }
 
     private static func current(in directory: URL, limit: Int, now: Double) -> ListingCache.Entry? {
@@ -249,8 +248,8 @@ public enum HookEventListing {
             /// `urls`' names, in the same order.
             let order: [String]
             let dates: [String: Dated]
-            /// Set when the listing is kept: a number no other kept listing has. Zero until then.
-            var number: UInt64 = 0
+            /// Set when the listing is kept: a number no other kept listing has. Nil until then.
+            var number: UInt64?
         }
 
         // Invariant for `@unchecked Sendable`: `entries` is only touched while holding `lock`.
