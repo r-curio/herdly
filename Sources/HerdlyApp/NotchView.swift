@@ -1740,7 +1740,7 @@ struct Notch: View {
     /// and not once its send is shown (frame 4). A clicked card with the keyboard shows them too
     /// (#438, Paper K "C · Answer keys").
     private func keyLabels(_ item: AgentAttentionItem) -> Bool {
-        guard let keys = model.questionCardKeys, keys.id == item.id else { return false }
+        guard let keys = model.answerKeysCard, keys.id == item.id else { return false }
         if case .sent = keys.phase { return false }
         return true
     }
@@ -1753,7 +1753,7 @@ struct Notch: View {
 
     /// Open takes O while the card can be answered here, and Return once it cannot.
     private func openShortcut(_ item: AgentAttentionItem) -> NotchShortcut {
-        model.questionCardKeys?.phase == .answering ? NotchShortcut.open : NotchShortcut.returnKey
+        model.answerKeysCard?.phase == .answering ? NotchShortcut.open : NotchShortcut.returnKey
     }
 
     /// Frame 4: the send left Herdly. The question with its options dim and the sent ones filled, then
@@ -1993,7 +1993,7 @@ struct Notch: View {
             // The answering button is always the far-right one (#382).
             if mode == .answer, let card, let primary = primary(card) {
                 primaryButton(primary, card: card, subject: subject,
-                              shortcut: keys && model.questionCardKeys?.phase == .answering ? NotchShortcut.returnKey : nil)
+                              shortcut: keys && model.answerKeysCard?.phase == .answering ? NotchShortcut.returnKey : nil)
             }
         }
         .padding(.top, 2)
