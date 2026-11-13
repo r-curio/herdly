@@ -121,7 +121,13 @@ enum RolloutDays {
         let hidden: [URL]
     }
 
-    private enum Kind { case numberedDirectories, rollouts }
+    private enum Kind {
+        /// The root, read for its numbered directories. No kept listing named it, so it cannot
+        /// contradict one: a hidden root is read like any other, and a root that is a link lists
+        /// nothing (`FileManager` does not list through a final link) and so keeps nothing.
+        case root
+        case numberedDirectories, rollouts
+    }
 
     /// One walk of a root, and what the next walk may reuse of it.
     struct Walk: Sendable {
@@ -137,7 +143,7 @@ enum RolloutDays {
             var changed = previous == nil
             var days: [URL] = []
             let maximumDays = CodexUsageReader.maximumDays
-            outer: for year in children(of: root, .numberedDirectories, previous, now, &changed).prefix(3) {
+            outer: for year in children(of: root, .root, previous, now, &changed).prefix(3) {
                 for month in children(of: year, .numberedDirectories, previous, now, &changed).prefix(3) {
                     for day in children(of: month, .numberedDirectories, previous, now, &changed) {
                         days.append(day)
@@ -166,7 +172,7 @@ enum RolloutDays {
             // Taken before listing, so a change during the listing shows as a new mark next time.
             let mark = Mark(directory)
             // The parent's kept listing named this as a directory that is not hidden.
-            if previous != nil, mark == nil || mark?.hidden == true || mark?.isDirectory == false { stale = true }
+            if kind != .root, previous != nil, mark == nil || mark?.hidden == true || mark?.isDirectory == false { stale = true }
             let path = directory.path
             if let mark, let kept = previous?.directories[path], kept.reusable(for: mark),
                kept.hidden.allSatisfy({ Mark($0)?.hidden == true }) {
@@ -189,7 +195,7 @@ enum RolloutDays {
             for url in entries {
                 let values = try? url.resourceValues(forKeys: Set(keys))
                 switch kind {
-                case .numberedDirectories:
+                case .root, .numberedDirectories:
                     guard Int(url.lastPathComponent) != nil, values?.isDirectory == true else { continue }
                 case .rollouts:
                     guard url.pathExtension == "jsonl" else { continue }
@@ -201,7 +207,7 @@ enum RolloutDays {
                     hidden.append(url)
                 }
             }
-            if kind == .numberedDirectories { visible.sort { $0.lastPathComponent > $1.lastPathComponent } }
+            if kind != .rollouts { visible.sort { $0.lastPathComponent > $1.lastPathComponent } }
             return (visible, hidden)
         }
     }

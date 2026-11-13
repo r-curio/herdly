@@ -314,3 +314,34 @@ private func rolloutLines(session: UUID, turn: UUID) -> String {
     #expect(names(now: young + 122).first == "c.jsonl")
     #expect(reads() == 28)
 }
+
+@Test func aHiddenRootIsKeptLikeAnyOtherAndALinkedRootListsNothingAsBefore() throws {
+    let tree = try Tree()
+    defer { tree.remove() }
+    try tree.write("real/2026/11/12/a.jsonl", modified: 1_800_000_000)
+    try tree.write("real/2026/11/11/b.jsonl", modified: 1_800_000_010)
+    /// The kept listing of `root`, checked against a fresh one.
+    func names(_ root: URL, _ comment: Comment, sourceLocation: SourceLocation = #_sourceLocation) -> [String] {
+        let kept = RolloutDays.newest(root: root, limit: 24, now: settled), fresh = freshListing(root: root, limit: 24)
+        #expect(kept.map(\.url) == fresh.map(\.url), comment, sourceLocation: sourceLocation)
+        #expect(kept.map(\.modified) == fresh.map(\.modified), comment, sourceLocation: sourceLocation)
+        return kept.map(\.url.lastPathComponent)
+    }
+    // A hidden root: read, and after the first call without listing anything or walking twice.
+    let real = tree.root.appendingPathComponent("real")
+    tree.setHidden("real", true)
+    #expect(names(real, "hidden root") == ["b.jsonl", "a.jsonl"])
+    #expect(RolloutDays.directoryReads(root: real) == 5)
+    #expect(names(real, "hidden root, unchanged") == ["b.jsonl", "a.jsonl"])
+    #expect(names(real, "hidden root, unchanged again") == ["b.jsonl", "a.jsonl"])
+    #expect(RolloutDays.directoryReads(root: real) == 5)
+
+    // A root that is a link was never listed through, and still is not: each call is one failed
+    // listing, as it was, and nothing is kept.
+    let link = tree.root.appendingPathComponent("sessions")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+    #expect(names(link, "linked root").isEmpty)
+    #expect(names(link, "linked root again").isEmpty)
+    #expect(RolloutDays.directoryReads(root: link) == 2)
+    #expect(!RolloutDays.keeps(root: link))
+}
