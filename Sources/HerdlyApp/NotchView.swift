@@ -1737,16 +1737,23 @@ struct Notch: View {
     }
 
     /// Key labels show only on the card that has the keyboard (frame 2), never before it (frame 1),
-    /// and not once its send is shown (frame 4).
+    /// and not once its send is shown (frame 4). A clicked card with the keyboard shows them too
+    /// (#438, Paper K "C · Answer keys").
     private func keyLabels(_ item: AgentAttentionItem) -> Bool {
-        guard let keyboard = model.keyboardCard, keyboard.id == item.id else { return false }
-        if case .sent = keyboard.phase { return false }
+        guard let keys = model.answerKeysCard, keys.id == item.id else { return false }
+        if case .sent = keys.phase { return false }
         return true
+    }
+
+    /// The ring around the whole card is the keyboard spotlight card's alone (#428, Paper L frame 2);
+    /// a clicked card with the keyboard shows only its key labels (Paper K frame C).
+    private func keyboardRing(_ item: AgentAttentionItem) -> Bool {
+        model.keyboardCard?.id == item.id && keyLabels(item)
     }
 
     /// Open takes O while the card can be answered here, and Return once it cannot.
     private func openShortcut(_ item: AgentAttentionItem) -> NotchShortcut {
-        model.keyboardCard?.phase == .answering ? NotchShortcut.open : NotchShortcut.returnKey
+        model.answerKeysCard?.phase == .answering ? NotchShortcut.open : NotchShortcut.returnKey
     }
 
     /// Frame 4: the send left Herdly. The question with its options dim and the sent ones filled, then
@@ -1986,7 +1993,7 @@ struct Notch: View {
             // The answering button is always the far-right one (#382).
             if mode == .answer, let card, let primary = primary(card) {
                 primaryButton(primary, card: card, subject: subject,
-                              shortcut: keys && model.keyboardCard?.phase == .answering ? NotchShortcut.returnKey : nil)
+                              shortcut: keys && model.answerKeysCard?.phase == .answering ? NotchShortcut.returnKey : nil)
             }
         }
         .padding(.top, 2)
@@ -3086,7 +3093,7 @@ struct Notch: View {
         // A spotlight question card that has the keyboard wears the same ring around the whole card
         // (#428, Paper L "2 · Keyboard in"), until its send is shown.
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .stroke(NotchStyle.ink.opacity(selected || keyLabels(item) ? 0.9 : 0), lineWidth: QueueRowMetrics.ringWidth)
+            .stroke(NotchStyle.ink.opacity(selected || keyboardRing(item) ? 0.9 : 0), lineWidth: QueueRowMetrics.ringWidth)
             .padding(.horizontal, -6)
             .padding(.vertical, resultRow ? -QueueRowMetrics.resultRingOutset : -4))
         .environment(\.questionCard, item.kind == .question)

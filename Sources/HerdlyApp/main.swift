@@ -130,6 +130,9 @@ final class NotchPanel: NSPanel {
     var onEscape: (() -> Void)?
     /// The panel gave up key status (another app or window took it, or the panel was ordered out).
     var onResignKey: (() -> Void)?
+    /// A click gave the panel deliberate keyboard focus it did not have, so what depends on it (a
+    /// clicked question card's key labels, #438) is decided again at once.
+    var onDeliberateKeyboardFocus: (() -> Void)?
     /// Up and Down arrows move the queue's row selection; Return acts on the selected row. Only
     /// keys no control in the panel handled reach here. Each returns false when it did nothing, so
     /// the key continues to AppKit.
@@ -159,8 +162,10 @@ final class NotchPanel: NSPanel {
     private(set) var clickedForKey = false
 
     override func sendEvent(_ event: NSEvent) {
+        let hadFocus = hasDeliberateKeyboardFocus
         if event.type == .leftMouseDown || event.type == .rightMouseDown { clickedForKey = true }
         super.sendEvent(event)
+        if !hadFocus, hasDeliberateKeyboardFocus { onDeliberateKeyboardFocus?() }
     }
 
     override func resignKey() {
@@ -741,6 +746,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                   kindSections: presentationMode.showsAll, openSections: openQueueFolds,
                                   earlier: presentationMode.showsAll ? earlierFold : .opened)
     }
+    /// The question card whose answer keys and key labels apply: the keyboard spotlight card (#428) or
+    /// a clicked one with the keyboard (#438). The labels and `pressQuestionCardKey` both read this.
+    var answerKeysCard: KeyboardCard? { keyboardCard ?? clickedKeyboardCard }
     /// The single card's item: the queue's, or the kept sent card once its question has left (#428).
     func spotlightItem(_ id: AgentAttentionID) -> AgentAttentionItem? {
         orderedAgentAttentionItems.first { $0.id == id } ?? sentCardItem.flatMap { $0.id == id ? $0 : nil }
@@ -784,8 +792,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// "A · Hotkey"); nil otherwise, so a clicked queue shows no foot line.
     @Published private(set) var keyboardQueueHotkey: String?
     /// The spotlight question card that has the keyboard and where it stands (#428); nil otherwise.
-    /// Its ring, key labels and foot line show only while this is set.
+    /// Its ring, foot line, hold, sent line and wait line show only while this is set.
     @Published private(set) var keyboardCard: KeyboardCard?
+    /// A question card opened from the queue while the panel has deliberate keyboard focus, and
+    /// where it stands (#438, Paper K "C · Answer keys"); nil otherwise. Changed only through
+    /// `updateClickedKeyboardCard`.
+    @Published private(set) var clickedKeyboardCard: KeyboardCard?
     /// The approval or question waiting behind the keyboard card (Paper L "8 · Another one arrives").
     @Published private(set) var keyboardWaiting: AgentAttentionID?
     /// The app Escape gives the keyboard back to, named in the card's foot line.
@@ -818,7 +830,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// `--preview-queue <collapsed|spotlight|spotlight-approval|spotlight-handed-back|spotlight-question|spotlight-claude-question|spotlight-result|spotlight-result-markdown|row-note-reply|expanded>`
     /// seeds in-memory sample items for screenshots; `clicked-approval` shows the approval sample as a
     /// clicked card (`clicked-approval-long` with a command past the six-line cap, `clicked-claude-approval`
-    /// a Claude request with no command), and `row-note` the queue with that row selected and carrying a note;
+    /// a Claude request with no command, `clicked-question` the Codex question sample, which with
+    /// `--preview-keyboard` shows its key labels, #438), and `row-note` the queue with that row selected and carrying a note;
     /// `empty-collapsed`, `empty-expanded`, and `empty-not-connected` seed only the usage readouts, to show the empty notch.
     /// It never scans Codex events, never saves, and never releases approvals.
     let previewMode = Companion.argumentValue(for: "--preview-queue")
@@ -860,6 +873,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     struct KeyboardCard: Equatable {
         let id: AgentAttentionID
         let phase: SpotlightCardPhase
+    }
+
+    /// Preview modes that show the Codex question sample as the one card: the spotlight's
+    /// `spotlight-question*` modes, or `clicked-question` as a clicked card (#438).
+    private static func previewsCodexQuestionCard(_ mode: String) -> Bool {
+        mode.hasPrefix("spotlight-question") || mode == "clicked-question"
     }
 
     nonisolated static func argumentValue(for flag: String) -> String? {
@@ -957,6 +976,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
         // Another app taking the keyboard ends the hotkey's entry: nothing is re-activated later, and
         // the next refresh lets the hotkey's queue fold.
+        panel.onDeliberateKeyboardFocus = { [weak self] in
+            Task { @MainActor in self?.refresh() }
+        }
         panel.onResignKey = { [weak self] in
             guard let self else { return }
             self.keyboardReturn.forget()
@@ -2078,7 +2100,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
         switch previewMode {
         case "expanded", "empty-expanded", "empty-not-connected", "row-note", "row-note-reply": presentationMode = .queue
-        case "clicked-approval", "clicked-approval-long", "clicked-claude-approval":
+        case "clicked-approval", "clicked-approval-long", "clicked-claude-approval", "clicked-question":
             let mode = previewSpotlightAgent.map(NotchPresentationMode.clickedCard) ?? .collapsed
             if presentationMode != mode { presentationMode = mode }
         case "collapsed", "empty-collapsed": presentationMode = .collapsed
@@ -2091,7 +2113,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // Requests still waiting for the one spotlight: named under a keyboard card, never moved by it.
         let waitingIDs = Set(freshRequests.map(\.id)).intersection(freshAgentRequestIDs)
             .union(Set(eligibleFreshQuestions.map(\.id)).intersection(freshAgentQuestionIDs))
-        if updateKeyboardCard(items: agentItems, waiting: waitingIDs) {
+        let sentFoldDue = updateKeyboardCard(items: agentItems, waiting: waitingIDs)
+        updateClickedKeyboardCard()
+        if sentFoldDue {
             // The sent line has shown its second: fold and give the keyboard back (Paper L "4 · Sent").
             collapse()
             return
@@ -2300,12 +2324,34 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     func pressQuestionCardKey(_ key: SpotlightCardKey) -> Bool {
         guard expanded, let id = presentationMode.singleCard, case .question = id,
               let question = spotlightItem(id)?.question else { return false }
-        let card: SpotlightCardFocus = if let keyboardCard, keyboardCard.id == id { .keyboard(keyboardCard.phase) }
+        // Decided again now, so the key and the label it shows read the same state.
+        updateClickedKeyboardCard()
+        let card: SpotlightCardFocus = if let answerKeysCard, answerKeysCard.id == id { .keyboard(answerKeysCard.phase) }
             else { .withoutKeyboard(answerable: canAnswerAgentQuestion(question)) }
         let action = SpotlightCardKeys.action(for: key, card: card)
         guard action.consumesKey else { return false }
         questionCardKeyPress = QuestionCardKeyPress(action: action, card: id, serial: (questionCardKeyPress?.serial ?? 0) + 1)
         return true
+    }
+
+    /// Deliberate keyboard focus in the panel (a click or the hotkey), or a `--preview-keyboard`
+    /// screenshot, which draws it without making the panel key.
+    private var cardHasKeyboard: Bool {
+        panel.hasDeliberateKeyboardFocus || (previewMode != nil && Companion.previewKeyboard)
+    }
+
+    /// The clicked question card that has the keyboard (#438), decided on every refresh and before
+    /// every key, so its labels and its keys read one state. It takes the keyboard spotlight card's
+    /// keys and labels (`SpotlightCardFocus.clickedWithKeyboard`) and nothing else of it: no ring,
+    /// hold, wait line, foot line or sent line.
+    private func updateClickedKeyboardCard() {
+        var next: KeyboardCard?
+        if case let .clickedCard(id) = presentationMode, case .question = id, cardHasKeyboard,
+           let question = spotlightItem(id)?.question,
+           case let .keyboard(phase) = SpotlightCardFocus.clickedWithKeyboard(answerable: canAnswerAgentQuestion(question)) {
+            next = KeyboardCard(id: id, phase: phase)
+        }
+        if clickedKeyboardCard != next { clickedKeyboardCard = next }
     }
 
     /// The spotlight question card that has the keyboard (#428), observed once per refresh: whether
@@ -2314,8 +2360,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// has shown for its second, so the caller folds the panel. Presentation only: no deadline moves.
     private func updateKeyboardCard(items: [AgentAttentionItem], waiting: Set<AgentAttentionID>) -> Bool {
         let wall = Date().timeIntervalSince1970
-        let focused = panel.hasDeliberateKeyboardFocus || (previewMode != nil && Companion.previewKeyboard)
-        let card: AgentAttentionID? = if case let .agentSpotlight(id) = presentationMode, case .question = id, focused { id } else { nil }
+        let card: AgentAttentionID? = if case let .agentSpotlight(id) = presentationMode, case .question = id, cardHasKeyboard { id } else { nil }
         // The live question, when it is still queued; a kept sent card has none and stays sent.
         let question = card.flatMap { id in items.first { $0.id == id }?.question }
         let phase = spotlightKeyboard.observe(card: card, answerable: question.map(canAnswerAgentQuestion) ?? false,
@@ -3178,7 +3223,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                       ["id": prompt.id ?? "", "header": prompt.header ?? "", "question": prompt.question ?? "",
                                                        "isOther": true, "options": prompt.options.map { ["label": $0, "description": ""] }] as [String: Any]
                                                   }]], now: now)
-        if mode.hasPrefix("spotlight-question") {
+        if Self.previewsCodexQuestionCard(mode) {
             threadNames[working] = "Check Paper MCP access"
             let project = NSHomeDirectory() + "/code/myproject"
             spotlightContexts[.question(question.id)] = SpotlightRecordContext(workingDirectory: project)
@@ -3217,7 +3262,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                                           options: ["Portfolio / learning", "User-test the concept", "Seed of a real product"])])),
                          now: now)
         previewSpotlightAgent = .outcome(CodexAttentionAdapter.outcome(from: completion).id)
-        if mode.hasPrefix("spotlight-question") { previewSpotlightAgent = .question(CodexAttentionAdapter.question(from: question).id) }
+        if Self.previewsCodexQuestionCard(mode) { previewSpotlightAgent = .question(CodexAttentionAdapter.question(from: question).id) }
         if mode == "spotlight-result" || mode == "spotlight-result-markdown" || mode == "row-note-reply" {
             // #323: a CLI result's card (9NU): a message past five lines, the turn's prompt, and a
             // reachable reply field; `row-note-reply` shows its row after a send, with the reply's note.
