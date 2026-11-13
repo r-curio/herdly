@@ -256,8 +256,8 @@ struct Badge: View {
 /// window, the inner ring the five-hour one, each a dark-well track filled clockwise from 12 o'clock
 /// in the source's hue (Codex blue, Claude orange), with no warning colour near the cap. A window
 /// that is not reported draws no ring at all; an unknown window draws an empty track, and the ring
-/// carries a dim dash after it so it never reads as 0%. Open, the ring is followed by its numbers ("61/18%"). Fill changes are not
-/// animated. Hidden from VoiceOver; the strip label speaks it.
+/// carries a dim dash after it so it never reads as 0%. Open, the ring is followed by its numbers
+/// ("61/18%"). Fill changes are not animated. Hidden from VoiceOver; the strip label speaks it.
 struct UsageRing: View {
     let readout: UsageStripReadout
     var showsNumbers: Bool

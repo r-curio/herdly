@@ -42,7 +42,7 @@ public struct UsageStripReadout: Equatable, Sendable {
     /// What the outer window is called in the strip's spoken label. Claude's is "seven-day" beside
     /// its five-hour window and "weekly" while the strip shows weekly windows only; Codex's is
     /// always "weekly".
-    public enum WeeklyWindow: Equatable, Sendable {
+    enum WeeklyWindow: Equatable, Sendable {
         case sevenDay, weekly
 
         var spokenName: String { self == .sevenDay ? "seven-day" : "weekly" }
@@ -65,7 +65,7 @@ public struct UsageStripReadout: Equatable, Sendable {
     /// The outer ring. Codex's is always shown, unknown before its first reading; Claude's is not
     /// reported while its reading has no current seven-day window.
     public let weekly: UsageWindowState
-    public let weeklyWindow: WeeklyWindow
+    let weeklyWindow: WeeklyWindow
 
     init(source: Source, fiveHour: UsageWindowState, weekly: UsageWindowState, weeklyWindow: WeeklyWindow) {
         self.source = source
