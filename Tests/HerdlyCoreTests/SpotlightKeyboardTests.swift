@@ -253,3 +253,8 @@ private let allKeys: [SpotlightCardKey] = (0...10).map(SpotlightCardKey.digit)
     #expect(SpotlightCardLines.handedBack(askedAt: 100, now: 130) == "Handed back with no answer · asked 30s ago")
     #expect(SpotlightCardLines.handedBack(askedAt: 100, now: 400) == "Handed back with no answer · asked 5m ago")
 }
+
+@Test func voiceOverReadsTheFootLineKeysByName() {
+    #expect(SpotlightCardFoot.spoken("1–9 pick · ⏎ next · ← → step · esc back to Ghostty")
+            == "1 to 9 pick, Return next, left and right arrows step, Escape back to Ghostty")
+}

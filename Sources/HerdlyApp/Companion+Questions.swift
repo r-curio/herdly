@@ -118,6 +118,13 @@ extension Companion {
         return live
     }
 
+    /// A live Claude question's countdown for the keyboard card (#428): when it was published and its
+    /// held deadline. Nil for a Codex question or one Herdly cannot answer. Reads; moves nothing.
+    func claudeQuestionWindow(_ question: AgentQuestion) -> SpotlightKeyboardCard.Window? {
+        guard previewMode == nil, let live = liveClaudeQuestion(for: question) else { return nil }
+        return SpotlightKeyboardCard.Window(askedAt: live.request.publishedAt, deadline: claudeQuestionDeadline(live.request))
+    }
+
     /// Send on a Claude card: the call's whole answer set, one entry per question in order (#382).
     /// The helper's policy refuses a partial or mismatched set, so nothing is written for one.
     func answerClaudeQuestion(_ question: AgentQuestion, answers: [ClaudeQuestionAnswerEntry]) {
@@ -542,13 +549,10 @@ extension Companion {
 /// One key the panel handed to the question card on screen (#321). `serial` makes a repeated key a
 /// new value, so the card sees every press; `card` is the card it was pressed on.
 struct QuestionCardKeyPress: Equatable {
-    enum Key: Equatable {
-        /// Selects option `n` (one-based); never sends.
-        case digit(Int)
-        /// Return: the card's Next or Send, only while it is enabled.
-        case primary
-    }
-    let key: Key
+    /// A digit selects option `n` (one-based) and never sends; Return does the card's Next or Send
+    /// only while it is enabled. O, X and the arrows reach only a keyboard card (#428), which maps
+    /// each key through `SpotlightCardKeys`.
+    let key: SpotlightCardKey
     let card: AgentAttentionID
     let serial: Int
 }

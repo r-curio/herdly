@@ -56,6 +56,13 @@ public struct NotchKeyboardReturn<App: Equatable & Sendable>: Equatable, Sendabl
 
     public init() {}
 
+    /// The app the hotkey took the keyboard from, while the notch still holds it; nil after a click
+    /// entry, a hand-back, or once another app took the keyboard.
+    public var rememberedApp: App? {
+        if case let .hotkey(remembered) = entry { return remembered }
+        return nil
+    }
+
     /// The hotkey put the keyboard in the notch; `frontmost` is the app that had it.
     public mutating func enter(frontmost: App?) { entry = .hotkey(remembered: frontmost) }
 

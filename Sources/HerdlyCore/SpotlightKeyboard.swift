@@ -235,6 +235,14 @@ public enum SpotlightCardFoot {
     }
 }
 
+extension SpotlightCardFoot {
+    /// The foot line as VoiceOver reads it: the keys by name rather than their symbols.
+    public static func spoken(_ line: String) -> String {
+        [("1–9", "1 to 9"), ("⏎", "Return"), ("← →", "left and right arrows"), ("esc", "Escape"), (" · ", ", ")]
+            .reduce(line) { $0.replacingOccurrences(of: $1.0, with: $1.1) }
+    }
+}
+
 public enum SpotlightCardLines {
     /// "Handed back with no answer · asked 30s ago".
     public static func handedBack(askedAt: Double, now: Double) -> String {

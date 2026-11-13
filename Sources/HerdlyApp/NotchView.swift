@@ -343,14 +343,41 @@ struct NotchButton: View {
     /// Focus owned by the caller, so it can move focus here (the opened row's Open, #397); by default
     /// the button keeps its own.
     var focus: FocusState<Bool>.Binding? = nil
+    /// The key that does this button on a card that has the keyboard (#428, Paper L "2 · Keyboard
+    /// in"): drawn 8pt after the title in 10pt dim, never part of the button's name. Callers say it
+    /// in the hint instead (`NotchShortcut.hint`).
+    var shortcut: String? = nil
     let action: () -> Void
     @FocusState private var focused: Bool
     var body: some View {
         let binding = focus ?? $focused
-        Button(title, action: action)
+        Button(action: action) {
+            if let shortcut {
+                HStack(spacing: 8) {
+                    Text(verbatim: title)
+                    Text(verbatim: shortcut).font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.dim)
+                        .accessibilityHidden(true)
+                }
+            } else {
+                Text(verbatim: title)
+            }
+        }
             .buttonStyle(NotchButtonStyle(emphasized: emphasized, selected: selected))
             .focused(binding)
             .modifier(NotchFocusRing(focused: binding.wrappedValue))
+    }
+}
+
+/// A keyboard card's key labels (#428): what each key is called aloud, and the hint that says it, so a
+/// key label is never part of a button's name ("Shortcut: O").
+enum NotchShortcut {
+    static let open = "O"
+    static let dismiss = "X"
+    static let primary = "⏎"
+
+    static func hint(_ base: String?, shortcut: String?) -> String {
+        let spoken = shortcut.map { "Shortcut: \($0 == primary ? "Return" : $0)." }
+        return [spoken, base].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
     }
 }
 
@@ -1298,6 +1325,12 @@ struct Notch: View {
             viewedQuestions[key] = next.current
         case .send:
             guard primary.enabled, !model.answering, let answers = call.answers(prompts: question.prompts) else { return }
+            armKeyboardSend(.question(question.id), agent: question.identity.session.source, prompts: question.prompts,
+                            picks: question.prompts.indices.map { index in
+                                let selection = call.selection(at: index)
+                                let typed = selection.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                                return typed.isEmpty ? .options(selection.options.sorted()) : .typed(typed)
+                            })
             model.answerClaudeQuestion(question, answers: answers)
             claudeSelections[key] = nil
         }
@@ -1407,31 +1440,95 @@ struct Notch: View {
         case let .step(to): showQuestion(to, of: card.agent)
         case .next, .send:
             guard primary.enabled, !model.answering else { return }
+            if case .send = primary {
+                let typed = typedText(card).trimmingCharacters(in: .whitespacesAndNewlines)
+                let pick: SpotlightSentAnswer.Pick
+                if !typed.isEmpty { pick = .typed(typed) }
+                else if case let .option(option) = card.progress.selection(for: card.viewed) { pick = .options([option]) }
+                else { pick = .options([]) }
+                // A call of several questions reads "<n> answers"; only the count of picks matters then.
+                let picks = card.prompts.count > 1 ? Array(repeating: pick, count: card.prompts.count) : [pick]
+                armKeyboardSend(.question(card.agent.id), agent: .codex, prompts: card.prompts, picks: picks)
+            }
             model.sendQuestionAnswer(card.question, question: card.viewed, typed: card.request != nil ? typedText(card) : nil)
         }
     }
 
-    /// A digit or Return the panel handed to the question card on screen (#321). A digit selects;
-    /// Return does what the card's left button would, only while it is enabled.
+    /// On the keyboard card only (#428): what its sent line will say if the route confirms the send.
+    private func armKeyboardSend(_ id: AgentAttentionID, agent: AgentSource, prompts: [QuestionPrompt],
+                                 picks: [SpotlightSentAnswer.Pick]) {
+        guard model.keyboardCard?.id == id else { return }
+        model.armKeyboardSend(SpotlightSentAnswer.make(agent: agent.displayName, prompts: prompts, picks: picks), for: id)
+    }
+
+    /// The card's Open as its button does it, or nil where the card offers no Open (#428: O, and
+    /// Return once the card cannot be answered here).
+    private func questionOpen(_ item: AgentAttentionItem) -> (() -> Void)? {
+        guard !model.openingTask, let question = item.question else { return nil }
+        let herdr = herdrOpen(item.session)
+        if item.session.source == .claude {
+            let offered = herdr == .available
+                || (herdr == .notInHerdr && model.canOpenClaude(item.session) && model.offersTerminalOpen(item.session))
+            return offered ? { model.openClaudeQuestion(question) } : nil
+        }
+        let readOnly = model.codexQuestion(for: question).map { model.route(for: $0) == .desktopReadOnly } ?? false
+        let codexOpen = herdr.offersOpen && model.offersTerminalOpen(item.session)
+        guard codexOpen, readOnly || item.session.surface != .cli || model.cliTerminalHostOn else { return nil }
+        return { model.openAgent(item.session) }
+    }
+
+    /// A key the panel handed to the question card on screen (#321, #428). A digit selects; Return
+    /// does what the card's answering button would, only while it is enabled. On the card that has the
+    /// keyboard every key goes through `SpotlightCardKeys`, so after hand-back or a send nothing a key
+    /// does can send, and O, X and the arrows act exactly as Open, Dismiss and ‹ › do.
     private func handleQuestionCardKey(_ press: QuestionCardKeyPress?) {
         guard let press, press.card == model.presentationMode.singleCard,
-              let question = model.orderedAgentAttentionItems.first(where: { $0.id == press.card })?.question else { return }
+              let item = model.orderedAgentAttentionItems.first(where: { $0.id == press.card }),
+              let question = item.question else { return }
+        let action: SpotlightCardAction
+        if let keyboard = model.keyboardCard, keyboard.id == press.card {
+            action = SpotlightCardKeys.action(for: press.key, phase: keyboard.phase)
+        } else {
+            switch press.key {
+            case let .digit(number): action = .select(number)
+            case .returnKey: action = .primary
+            case .open, .dismiss, .previousQuestion, .nextQuestion: action = .none
+            }
+        }
+        switch action {
+        case .none:
+            return
+        case .open:
+            questionOpen(item)?()
+            return
+        case .dismiss:
+            model.dismissAgent(item.id)
+            return
+        case let .step(by):
+            let count = questionPrompts(question).count
+            guard count > 1 else { return }
+            let current = model.codexQuestion(for: question).map { model.progress(for: $0).questionIndex }
+                ?? (model.canAnswerAgentQuestion(question) ? claudeCall(question).current : 0)
+            let viewed = viewedQuestion(question, current: current, count: count)
+            let next = min(max(viewed + by, 0), count - 1)
+            if next != viewed { showQuestion(next, of: question) }
+            return
+        case .select, .primary:
+            break
+        }
         if question.identity.session.source == .claude {
             guard model.canAnswerAgentQuestion(question) else { return }
             let viewed = claudeViewed(question)
-            switch press.key {
-            case let .digit(number): toggleClaudeSelection(question, question: viewed, option: number - 1)
-            case .primary: performClaude(claudeCall(question).primary(viewed: viewed), question)
-            }
+            if case let .select(number) = action { toggleClaudeSelection(question, question: viewed, option: number - 1) }
+            else { performClaude(claudeCall(question).primary(viewed: viewed), question) }
             return
         }
         guard let legacy = model.codexQuestion(for: question) else { return }
         let card = codexCard(legacy)
-        switch press.key {
-        case let .digit(number):
+        if case let .select(number) = action {
             guard selectable(card), number <= optionCount(card) else { return }
             select(card, option: number - 1)
-        case .primary:
+        } else {
             guard let primary = primary(card), primary.enabled else { return }
             perform(primary, card)
         }
@@ -1504,7 +1601,12 @@ struct Notch: View {
     private func questionCardBody(_ item: AgentAttentionItem, subject: String, herdr: HerdrOpenAvailability,
                                   codexOpen: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let question = item.question {
+            let phase = model.keyboardCard?.id == item.id ? model.keyboardCard?.phase : nil
+            if case let .sent(answer)? = phase {
+                sentCardBody(answer, item: item, subject: subject)
+            } else if case let .handedBack(askedAt)? = phase, let question = item.question {
+                handedBackCardBody(question, item: item, subject: subject, askedAt: askedAt)
+            } else if let question = item.question {
                 if question.identity.session.source == .claude {
                     claudeQuestionCard(question, subject: subject)
                     claudeReturnMessage(item)
@@ -1540,17 +1642,117 @@ struct Notch: View {
         .padding(.top, 2)
     }
 
+    // MARK: Keyboard card (#428, Paper L "Spotlight question by keyboard")
+
+    /// Key labels show only on the card that has the keyboard (frame 2), never before it (frame 1),
+    /// and not once its send is shown (frame 4).
+    private func keyLabels(_ item: AgentAttentionItem) -> Bool {
+        guard let keyboard = model.keyboardCard, keyboard.id == item.id else { return false }
+        if case .sent = keyboard.phase { return false }
+        return true
+    }
+
+    /// Open takes O while the card can be answered here, and Return once it cannot.
+    private func openShortcut(_ item: AgentAttentionItem) -> String {
+        model.keyboardCard?.phase == .answering ? NotchShortcut.open : NotchShortcut.primary
+    }
+
+    /// Frame 4: the send left Herdly. The question with its options dim and the sent ones filled, then
+    /// one text-gray line; no controls. The panel folds a second later.
+    @ViewBuilder
+    private func sentCardBody(_ answer: SpotlightSentAnswer, item: AgentAttentionItem, subject: String) -> some View {
+        if let text = answer.question { questionText(text) }
+        optionList(answer.options, subject: subject, tone: spriteColor(for: item.session), selectedSet: answer.chosen,
+                   enabled: false, select: nil)
+        Text(answer.line).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.text)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 2)
+    }
+
+    /// Frame 7: the countdown ended while the card had the keyboard. The agent asks again itself and
+    /// nothing was sent; options dim, and "Open in <agent>" is the only control and takes Return.
+    @ViewBuilder
+    private func handedBackCardBody(_ question: AgentQuestion, item: AgentAttentionItem, subject: String,
+                                    askedAt: Double) -> some View {
+        let prompts = questionPrompts(question)
+        let viewed = viewedQuestion(question, current: 0, count: prompts.count)
+        if prompts.indices.contains(viewed) {
+            if let text = prompts[viewed].question { questionText(text) }
+            optionList(prompts[viewed].options, subject: subject, tone: spriteColor(for: item.session), selected: nil,
+                       enabled: false, select: nil)
+        }
+        HStack(alignment: .center, spacing: 6) {
+            Text(SpotlightCardLines.handedBack(askedAt: askedAt, now: Date().timeIntervalSince1970))
+                .font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 6)
+            let agent = item.session.source.displayName
+            if item.session.source == .claude {
+                claudeReturnControl(item, subject: subject, emphasized: true, openTitle: "Open in \(agent)",
+                                    openHint: "Claude asks this question itself now.", shortcut: NotchShortcut.primary)
+            } else if let open = questionOpen(item) {
+                NotchButton(title: "Open in \(agent)", emphasized: true, shortcut: NotchShortcut.primary, action: open)
+                    .accessibilityLabel("Open Session: \(subject)")
+                    .accessibilityHint(NotchShortcut.hint(nil, shortcut: NotchShortcut.primary))
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    /// The lines under a spotlight question card: the request waiting behind a keyboard card (frame
+    /// 8), then the foot line naming the keys (frames 1, 2, 5, 7) or the fold (frame 4).
+    @ViewBuilder
+    private var spotlightQuestionFoot: some View {
+        if case let .agentSpotlight(id) = model.presentationMode,
+           let item = model.orderedAgentAttentionItems.first(where: { $0.id == id }), let question = item.question {
+            let keyboard = model.keyboardCard?.id == id ? model.keyboardCard : nil
+            let count = questionPrompts(question).count
+            let current = model.codexQuestion(for: question).map { model.progress(for: $0).questionIndex }
+                ?? (model.canAnswerAgentQuestion(question) ? claudeCall(question).current : 0)
+            let viewed = viewedQuestion(question, current: current, count: count)
+            let phase = keyboard?.phase ?? (model.canAnswerAgentQuestion(question) ? .answering : .readOnly)
+            let waiting = keyboard == nil ? nil : model.keyboardWaiting.flatMap { waitingID in
+                model.orderedAgentAttentionItems.first { $0.id == waitingID }
+            }
+            let foot = SpotlightCardFoot.line(phase: phase, hasKeyboard: keyboard != nil, questionCount: count,
+                                              viewedIsLast: viewed >= count - 1, returnApp: model.keyboardReturnApp,
+                                              hotkey: model.cardHotkey)
+            if waiting != nil || foot != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let waiting {
+                        let line = SpotlightKeyboardWait.line(waiting, name: QueueRowPresentation.sessionName(waiting.session,
+                                                                                                         names: sessionNames))
+                        HStack(alignment: .firstTextBaseline, spacing: Sprite.slotGap) {
+                            spriteSlot(working: false, color: spriteColor(for: waiting.session))
+                            Text(line).font(QuestionCardStyle.font(11)).foregroundStyle(NotchStyle.dim)
+                                .lineLimit(1).truncationMode(.tail)
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(line)
+                    }
+                    if let foot {
+                        Text(foot).font(QuestionCardStyle.font(10)).foregroundStyle(NotchStyle.dim)
+                            .lineLimit(1).truncationMode(.tail)
+                            .accessibilityLabel(SpotlightCardFoot.spoken(foot))
+                    }
+                }
+                .padding(.horizontal, 6)
+            }
+        }
+    }
+
     private func statusLine(_ text: String, tone: Color = NotchStyle.dim) -> some View {
         Text(text).font(QuestionCardStyle.font(11)).foregroundStyle(tone).fixedSize(horizontal: false, vertical: true)
     }
 
     /// The viewed question's option wells. `select` nil draws them for reading only.
-    private func optionList(_ options: [String], subject: String, tone: Int, selected: Int?, enabled: Bool,
+    private func optionList(_ options: [String], subject: String, tone: Int, selected: Int? = nil,
+                            selectedSet: Set<Int> = [], enabled: Bool,
                             readOnly: Bool = false, select: ((Int) -> Void)?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(options.enumerated()), id: \.offset) { offset, label in
                 OptionButton(number: offset + 1, label: label, tone: NotchStyle.spriteColor(tone),
-                             selected: selected == offset, readOnly: readOnly) { select?(offset) }
+                             selected: selected == offset || selectedSet.contains(offset), readOnly: readOnly) { select?(offset) }
                     .disabled(!enabled || select == nil)
                     .accessibilityLabel("Option \(offset + 1): \(label), for \(subject)")
                     .accessibilityHint(readOnly || select == nil || !enabled ? "Reference only."
@@ -1639,14 +1841,16 @@ struct Notch: View {
     private func codexQuestionFooter(_ card: CodexCard?, item: AgentAttentionItem, subject: String, codexOpen: Bool) -> some View {
         let mode: CodexFooterMode = card?.route == .desktopReadOnly ? .desktopReadOnly
             : (item.session.surface == .cli && !model.cliTerminalHostOn ? .setUpTerminal : .answer)
+        let keys = keyLabels(item)
         return HStack(spacing: 6) {
             switch mode {
             case .desktopReadOnly:
                 if codexOpen {
-                    NotchButton(title: "Open in Codex", emphasized: true) { model.openAgent(item.session) }
+                    let key = keys ? NotchShortcut.primary : nil
+                    NotchButton(title: "Open in Codex", emphasized: true, shortcut: key) { model.openAgent(item.session) }
                         .disabled(model.openingTask)
                         .accessibilityLabel("Open Session: \(subject)")
-                        .accessibilityHint("Answer the question in the Codex app.")
+                        .accessibilityHint(NotchShortcut.hint("Answer the question in the Codex app.", shortcut: key))
                 }
                 Spacer(minLength: 6)
             case .setUpTerminal:
@@ -1656,26 +1860,31 @@ struct Notch: View {
                 Spacer(minLength: 6)
             case .answer:
                 if codexOpen {
-                    NotchButton(title: "Open") { model.openAgent(item.session) }
+                    let key = keys ? openShortcut(item) : nil
+                    NotchButton(title: "Open", shortcut: key) { model.openAgent(item.session) }
                         .disabled(model.openingTask)
                         .accessibilityLabel("Open Session: \(subject)")
-                        .accessibilityHint("Answer the question in Codex's own panel.")
+                        .accessibilityHint(NotchShortcut.hint("Answer the question in Codex's own panel.", shortcut: key))
                 }
                 Spacer(minLength: 6)
             }
             // Dismiss only clears the card; nothing is sent, so the agent's own question stays authoritative.
-            NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+            let dismissKey = keys ? NotchShortcut.dismiss : nil
+            NotchButton(title: "Dismiss", shortcut: dismissKey) { model.dismissAgent(item.id) }
                 .accessibilityLabel("Dismiss question: \(subject)")
+                .accessibilityHint(NotchShortcut.hint(nil, shortcut: dismissKey))
             // The answering button is always the far-right one (#382).
             if mode == .answer, let card, let primary = primary(card) {
-                primaryButton(primary, card: card, subject: subject)
+                primaryButton(primary, card: card, subject: subject,
+                              shortcut: keys && model.keyboardCard?.phase == .answering ? NotchShortcut.primary : nil)
             }
         }
         .padding(.top, 2)
     }
 
-    private func primaryButton(_ primary: QuestionCardPrimary, card: CodexCard, subject: String) -> some View {
-        primaryButton(primary, prompts: card.prompts, subject: subject,
+    private func primaryButton(_ primary: QuestionCardPrimary, card: CodexCard, subject: String,
+                               shortcut: String? = nil) -> some View {
+        primaryButton(primary, prompts: card.prompts, subject: subject, shortcut: shortcut,
                       sendHint: card.keyRoute ? "Types this option's digit into the session for this question only."
                                               : "Sends every answer on this card to Codex once.") {
             perform(primary, card)
@@ -1685,7 +1894,7 @@ struct Notch: View {
 
     /// A question card's answering button: Next, Send, or a step on while reviewing.
     private func primaryButton(_ primary: QuestionCardPrimary, prompts: [QuestionPrompt], subject: String,
-                               sendHint: String, action: @escaping () -> Void) -> some View {
+                               shortcut: String? = nil, sendHint: String, action: @escaping () -> Void) -> some View {
         let title: String
         let label: String
         let hint: String
@@ -1704,10 +1913,10 @@ struct Notch: View {
             label = "Next question: \(next)"
             hint = "Shows the next question. Changes nothing."
         }
-        return NotchButton(title: title, emphasized: true, action: action)
+        return NotchButton(title: title, emphasized: true, shortcut: shortcut, action: action)
             .disabled(!primary.enabled)
             .accessibilityLabel(label)
-            .accessibilityHint(hint)
+            .accessibilityHint(NotchShortcut.hint(hint, shortcut: shortcut))
     }
 
     /// Unsupported routes can browse the questions, but never acquire answer controls.
@@ -1770,16 +1979,21 @@ struct Notch: View {
     /// The Claude card's bottom row (#382): Open alone on the left; Dismiss, then Next or Send (or a
     /// step on), on the right.
     private func claudeQuestionFooter(_ question: AgentQuestion, item: AgentAttentionItem, subject: String) -> some View {
-        HStack(spacing: 6) {
+        let keys = keyLabels(item)
+        return HStack(spacing: 6) {
             claudeReturnControl(item, subject: subject, openTitle: "Open",
                                 openHint: model.canAnswerAgentQuestion(question)
-                                    ? "Hands this question back to Claude's own prompt." : nil)
+                                    ? "Hands this question back to Claude's own prompt." : nil,
+                                shortcut: keys ? openShortcut(item) : nil)
             Spacer(minLength: 6)
-            NotchButton(title: "Dismiss") { model.dismissAgent(item.id) }
+            let dismissKey = keys ? NotchShortcut.dismiss : nil
+            NotchButton(title: "Dismiss", shortcut: dismissKey) { model.dismissAgent(item.id) }
                 .accessibilityLabel("Dismiss question: \(subject)")
+                .accessibilityHint(NotchShortcut.hint(nil, shortcut: dismissKey))
             if model.canAnswerAgentQuestion(question) {
                 let primary = claudeCall(question).primary(viewed: claudeViewed(question))
                 primaryButton(primary, prompts: question.prompts, subject: subject,
+                              shortcut: keys ? NotchShortcut.primary : nil,
                               sendHint: question.prompts.count > 1
                                   ? "Sends every answer on this card to Claude once."
                                   : "Sends the selected option, the ticked options, or the typed answer to Claude once.") {
@@ -2766,8 +2980,10 @@ struct Notch: View {
         }
         // The keyboard selection reuses the focus ring's vocabulary around the whole row. On a result
         // row it stays inside the row's own band (its line plus half the gap), stroke included.
+        // A spotlight question card that has the keyboard wears the same ring around the whole card
+        // (#428, Paper L "2 · Keyboard in"), until its send is shown.
         .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .stroke(NotchStyle.ink.opacity(selected ? 0.9 : 0), lineWidth: QueueRowMetrics.ringWidth)
+            .stroke(NotchStyle.ink.opacity(selected || keyLabels(item) ? 0.9 : 0), lineWidth: QueueRowMetrics.ringWidth)
             .padding(.horizontal, -6)
             .padding(.vertical, resultRow ? -QueueRowMetrics.resultRingOutset : -4))
         .environment(\.questionCard, item.kind == .question)
@@ -2922,14 +3138,14 @@ struct Notch: View {
     @ViewBuilder
     private func claudeReturnControl(_ item: AgentAttentionItem, subject: String, emphasized: Bool = false,
                                      openTitle: String = "Open Session", openHint: String? = nil,
-                                     openFocus: FocusState<Bool>.Binding? = nil) -> some View {
+                                     openFocus: FocusState<Bool>.Binding? = nil, shortcut: String? = nil) -> some View {
         if item.session.source == .claude {
             let herdr = herdrOpen(item.session)
             if herdr == .available || (herdr == .notInHerdr && model.canOpenClaude(item.session)) {
                 // The terminal scan's line replaces Open with no disabled button (#267).
                 if herdr == .available || model.offersTerminalOpen(item.session) {
                     claudeOpenButton(item, subject: subject, emphasized: emphasized, title: openTitle, hint: openHint,
-                                     focus: openFocus)
+                                     focus: openFocus, shortcut: shortcut)
                 }
             } else if herdr == .notInHerdr, !model.ghosttyEnabled, model.claudeLastSeenLine(item.session) == nil {
                 NotchButton(title: "Set up Ghostty", emphasized: emphasized, action: model.showControls)
@@ -2959,8 +3175,8 @@ struct Notch: View {
 
     private func claudeOpenButton(_ item: AgentAttentionItem, subject: String, emphasized: Bool,
                                   title: String = "Open Session", hint: String? = nil,
-                                  focus: FocusState<Bool>.Binding? = nil) -> some View {
-        NotchButton(title: title, emphasized: emphasized, focus: focus) {
+                                  focus: FocusState<Bool>.Binding? = nil, shortcut: String? = nil) -> some View {
+        NotchButton(title: title, emphasized: emphasized, focus: focus, shortcut: shortcut) {
             if let approval = item.approval {
                 model.openAgentApproval(approval)
             } else if let question = item.question {
@@ -2971,7 +3187,7 @@ struct Notch: View {
         }
             .disabled(model.openingTask)
             .accessibilityLabel("Open Session: \(subject)")
-            .accessibilityHint(hint ?? "Open this Claude session in its terminal.")
+            .accessibilityHint(NotchShortcut.hint(hint ?? "Open this Claude session in its terminal.", shortcut: shortcut))
     }
 
     /// The one line a terminal card shows when Open is unavailable (product.md, "Open unavailable"):
@@ -3144,6 +3360,7 @@ struct Notch: View {
                         if let question = spotlightStepperQuestion { spotlightStepperRow(question) }
                         // An empty stack would still take the column's spacing, so each part is drawn only with rows.
                         if !sections.attention.isEmpty { groupRows(sections.attention) }
+                        spotlightQuestionFoot
                         if sections.foldsWorking {
                             NotchDisclosure(title: "\(sections.workingCount) working", expanded: $model.workingFoldOpen) {
                                 groupRows(sections.working)

@@ -33,6 +33,10 @@ extension Companion {
         let recorded = next.apply(update, for: id, pending: rowNotePendingIDs)
         if next != rowNotes { rowNotes = next }
         if recorded && userAction { leaveClickedCard(after: id) }
+        // The user's send left Herdly: a keyboard card shows it for a second, then folds (#428).
+        if recorded && userAction, case let .record(note) = update, note == .sending || note == .awaitingCodex {
+            confirmKeyboardSend(for: id)
+        }
     }
 
     /// Clears the notes of requests that have left the queue; called on every refresh.
