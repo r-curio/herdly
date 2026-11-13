@@ -727,12 +727,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The rows the open panel shows, under their group headings: the explicit queue (working rows
     /// folded below anything that needs the user), or only the one card. A card is never grouped.
     /// The view draws these and the keyboard selection steps through them.
+    /// The single card's item: the queue's, or the kept sent card once its question has left (#428).
+    func spotlightItem(_ id: AgentAttentionID) -> AgentAttentionItem? {
+        orderedAgentAttentionItems.first { $0.id == id } ?? sentCardItem.flatMap { $0.id == id ? $0 : nil }
+    }
     var visibleSections: QueueSections {
         let items: [AgentAttentionItem]
         if presentationMode.showsAll {
             items = queueAgentAttentionItems
         } else if let id = presentationMode.singleCard {
-            items = orderedAgentAttentionItems.filter { $0.id == id }
+            items = spotlightItem(id).map { [$0] } ?? []
         } else {
             items = []
         }
@@ -790,8 +794,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published private(set) var cardHotkey: String?
     /// Hand-back and sent tracking for the keyboard card. Changed through `updateKeyboardCard`,
     /// `armKeyboardSend` and `confirmKeyboardSend` only.
-    var spotlightKeyboard = SpotlightKeyboardCard()
+    private var spotlightKeyboard = SpotlightKeyboardCard()
     private var sentFoldTask: Task<Void, Never>?
+    /// The keyboard card as it was when its send was confirmed: shown for the sent line's whole second
+    /// even if its question leaves the queue meanwhile (`SpotlightKeyboardCard.keepsSentCard`).
+    private(set) var sentCardItem: AgentAttentionItem?
     /// Fresh IDs stay pending until an eligible card is selected for the single shared spotlight.
     /// Keeping all IDs lets a Claude card remain eligible when a same-scan Codex card is newer.
     private var freshAgentRequestIDs: Set<AgentAttentionID> = []
@@ -853,15 +860,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     struct KeyboardCard: Equatable {
         let id: AgentAttentionID
         let phase: SpotlightCardPhase
-    }
-
-    /// VoiceOver reads the question as the hotkey puts the keyboard in its card (#428).
-    private func announceQuestion(_ id: AgentAttentionID) {
-        guard NSWorkspace.shared.isVoiceOverEnabled,
-              let question = orderedAgentAttentionItems.first(where: { $0.id == id })?.question,
-              let text = question.prompts.first?.question else { return }
-        NSAccessibility.post(element: panel as Any, notification: .announcementRequested,
-                             userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue])
     }
 
     nonisolated static func argumentValue(for flag: String) -> String? {
@@ -1909,7 +1907,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // A card that opened by itself closes with the panel once its item leaves the queue, as Escape
         // does: the pointer still resting on the notch does not reopen it as the queue. `collapse()`
         // refreshes again, by then with nothing on screen to check.
-        if previewMode == nil, presentationMode.spotlightItemLeft(queued: Set(orderedAgentAttentionItems.map(\.id))) {
+        // A sent keyboard card stays for its line's whole second even once its question has left (#428).
+        let keptSentCard = spotlightKeyboard.keepsSentCard(now: Date().timeIntervalSince1970)
+        if previewMode == nil,
+           presentationMode.spotlightItemLeft(queued: Set(orderedAgentAttentionItems.map(\.id) + [keptSentCard].compactMap { $0 })) {
             presentationMode = .collapsed
             collapse()
             return
@@ -1981,7 +1982,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let canPresentQuestion = agentItems.contains(where: questionIsEligible)
         let agentSpotlightAvailable = notchPresentation.acceptsAgentSpotlight(interacting: interacting,
                                                                              draftInProgress: notchDraftInProgress,
-                                                                             keyboardFocus: panel.hasDeliberateKeyboardFocus, now: now)
+                                                                             keyboardFocus: panel.hasDeliberateKeyboardFocus,
+                                                                             keyboardHoldEnded: spotlightKeyboard.endsKeyboardHold, now: now)
         var freshAgentSpotlightCandidates = Set<AgentAttentionID>()
         if agentSpotlightAvailable {
             freshAgentSpotlightCandidates.formUnion(freshRequests.map(\.id))
@@ -2068,7 +2070,9 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if let mode = previewMode, Self.spotlightPreviewModes.contains(mode), let id = previewSpotlightAgent { notchPresentation.present(id, now: now) }
         let resolvedPresentation = notchPresentation.update(interacting: interacting, draftInProgress: notchDraftInProgress,
                                                             keyboardFocus: panel.hasDeliberateKeyboardFocus,
-                                                            now: now, legacyPopup: attention.expanded, queued: liveAgentIDs)
+                                                            keyboardHoldEnded: spotlightKeyboard.endsKeyboardHold,
+                                                            now: now, legacyPopup: attention.expanded,
+                                                            queued: liveAgentIDs.union([keptSentCard].compactMap { $0 }))
         let hint = notchPresentation.keyboardHoldsQueue ? hotkeySetting.hotkey.title : nil
         if keyboardQueueHotkey != hint { keyboardQueueHotkey = hint }
         let spotlightItem: AgentAttentionID? = if case let .agentSpotlight(id) = resolvedPresentation { id } else { nil }
@@ -2290,17 +2294,17 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return true
     }
 
-    /// Hands a key to the one question card on screen (the spotlight or a clicked card). A digit and
-    /// Return reach any question card (#321); O, X and the arrows only a spotlight card that has the
-    /// keyboard (#428). False otherwise, so the key goes on to the queue or AppKit.
+    /// Hands a key to the one question card on screen (the spotlight or a clicked card) as the action
+    /// `SpotlightCardKeys` gives it. False when the key does nothing there, so it goes on to the queue
+    /// or AppKit.
     func pressQuestionCardKey(_ key: SpotlightCardKey) -> Bool {
-        guard expanded, let id = presentationMode.singleCard, case .question = id else { return false }
-        switch key {
-        case .digit, .returnKey: break
-        case .open, .dismiss, .previousQuestion, .nextQuestion:
-            guard keyboardCard?.id == id else { return false }
-        }
-        questionCardKeyPress = QuestionCardKeyPress(key: key, card: id, serial: (questionCardKeyPress?.serial ?? 0) + 1)
+        guard expanded, let id = presentationMode.singleCard, case .question = id,
+              let question = spotlightItem(id)?.question else { return false }
+        let card: SpotlightCardFocus = if let keyboardCard, keyboardCard.id == id { .keyboard(keyboardCard.phase) }
+            else { .withoutKeyboard(answerable: canAnswerAgentQuestion(question)) }
+        let action = SpotlightCardKeys.action(for: key, card: card)
+        guard action != .none else { return false }
+        questionCardKeyPress = QuestionCardKeyPress(action: action, card: id, serial: (questionCardKeyPress?.serial ?? 0) + 1)
         return true
     }
 
@@ -2312,21 +2316,33 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let wall = Date().timeIntervalSince1970
         let focused = panel.hasDeliberateKeyboardFocus || (previewMode != nil && Companion.previewKeyboard)
         let card: AgentAttentionID? = if case let .agentSpotlight(id) = presentationMode, case .question = id, focused { id } else { nil }
+        // The live question, when it is still queued; a kept sent card has none and stays sent.
         let question = card.flatMap { id in items.first { $0.id == id }?.question }
-        let phase = spotlightKeyboard.observe(card: question == nil ? nil : card,
-                                              answerable: question.map(canAnswerAgentQuestion) ?? false,
+        let phase = spotlightKeyboard.observe(card: card, answerable: question.map(canAnswerAgentQuestion) ?? false,
                                               window: question.flatMap(claudeQuestionWindow), now: wall)
+        if spotlightKeyboard.keepsSentCard(now: wall) == nil, sentCardItem != nil { sentCardItem = nil }
         let next: KeyboardCard? = if let card, let phase { KeyboardCard(id: card, phase: phase) } else { nil }
         if keyboardCard != next { keyboardCard = next }
         let waitingID = next.flatMap { SpotlightKeyboardWait.waiting(behind: $0.id, items: items, fresh: waiting)?.id }
         if keyboardWaiting != waitingID { keyboardWaiting = waitingID }
-        let herdly = NSRunningApplication.current
-        let returnApp = next == nil ? nil : keyboardReturn.rememberedApp?.running?.localizedName
-            ?? NSWorkspace.shared.frontmostApplication.flatMap { $0 == herdly ? nil : $0.localizedName }
+        let returnApp = next == nil ? nil : keyboardReturnAppName()
         if keyboardReturnApp != returnApp { keyboardReturnApp = returnApp }
         let hotkey = hotkeyStatus == .registered ? hotkeySetting.hotkey.title : nil
         if cardHotkey != hotkey { cardHotkey = hotkey }
         return spotlightKeyboard.foldDue(now: wall)
+    }
+
+    /// The app `handBackKeyboard` would give the keyboard to now, by name: the same decision
+    /// (`NotchKeyboardReturn.target`), so the foot line and the hand-back cannot disagree. Nil when
+    /// macOS would choose.
+    private func keyboardReturnAppName() -> String? {
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        switch keyboardReturn.target(isRunning: \.isRunning, frontmost: frontmost.map(RememberedApp.init),
+                                     herdly: RememberedApp(.current)) {
+        case .activate(let app): return app.running?.localizedName
+        case .leaveToSystem: return nil
+        case .reactivateFrontmost: return frontmost == NSRunningApplication.current ? nil : frontmost?.localizedName
+        }
     }
 
     /// The keyboard card is about to send `answer` (Next or Send on its last question). Nothing shows
@@ -2340,6 +2356,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// folds; it never sends.
     func confirmKeyboardSend(for id: AgentAttentionID) {
         guard spotlightKeyboard.confirmSent(for: id, now: Date().timeIntervalSince1970) else { return }
+        sentCardItem = orderedAgentAttentionItems.first { $0.id == id }
         sentFoldTask?.cancel()
         sentFoldTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(SpotlightKeyboardCard.sentHold))
@@ -2420,11 +2437,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             panel.takeKeyboardFromHotkey()
             // Taking key status can lose a race with the app it came from; the entry is then forgotten.
             if !panel.hasDeliberateKeyboardFocus { keyboardReturn.forget() }
-            if case let .card(id) = target {
+            if case .card = target {
                 // The card takes the keys itself (#428): no field inside it holds focus, so a digit
                 // selects rather than typing into "Or type an answer".
                 panel.makeFirstResponder(nil)
-                announceQuestion(id)
             }
             refresh()
             // The queue opens with its top row selected (Paper K "A · Hotkey").

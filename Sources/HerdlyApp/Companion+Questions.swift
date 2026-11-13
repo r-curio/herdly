@@ -549,10 +549,8 @@ extension Companion {
 /// One key the panel handed to the question card on screen (#321). `serial` makes a repeated key a
 /// new value, so the card sees every press; `card` is the card it was pressed on.
 struct QuestionCardKeyPress: Equatable {
-    /// A digit selects option `n` (one-based) and never sends; Return does the card's Next or Send
-    /// only while it is enabled. O, X and the arrows reach only a keyboard card (#428), which maps
-    /// each key through `SpotlightCardKeys`.
-    let key: SpotlightCardKey
+    /// What the key does on the card, from `SpotlightCardKeys`, the one key table (#321, #428).
+    let action: SpotlightCardAction
     let card: AgentAttentionID
     let serial: Int
 }

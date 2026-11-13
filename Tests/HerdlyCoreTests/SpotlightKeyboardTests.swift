@@ -42,6 +42,88 @@ private let workflows = QuestionPrompt(header: "Scope", question: "Which workflo
     #expect(!NotchInteraction.isActive(pointerInside: false, keyboardFocus: true))
 }
 
+@Test func aClaudeQuestionsDeadlineExpiresWhileItsCardHasTheKeyboard() {
+    // Asked at 100 with 30 seconds; the card has the keyboard from 105 and the pointer never rests on
+    // the notch. The hover hold reads the pointer only, so the deadline stays at 130.
+    var controller = NotchPresentationController()
+    var holds = ApprovalHoverHold<String>()
+    var card = SpotlightKeyboardCard()
+    let asked = 100.0
+    let receiptDeadline = asked + ApprovalTiming.handoffTimeout
+    controller.present(questionID, now: asked, duration: .threeSeconds)
+    var deadline = receiptDeadline
+    for now in stride(from: 105.0, through: 129.0, by: 1) {
+        holds.update(hovering: NotchInteraction.isActive(pointerInside: false, keyboardFocus: true),
+                     live: [.init(key: "request", expiresAt: receiptDeadline)], now: now)
+        deadline = holds.deadline(for: "request", expiresAt: receiptDeadline)
+        let phase = card.observe(card: questionID, answerable: now < deadline,
+                                 window: .init(askedAt: asked, deadline: deadline), now: now)
+        let mode = controller.update(interacting: false, keyboardFocus: true, keyboardHoldEnded: card.endsKeyboardHold,
+                                     now: now, queued: [questionID])
+        #expect(phase == .answering)
+        #expect(mode == .agentSpotlight(questionID))
+    }
+    #expect(deadline == 130)
+    // At the deadline Herdly can no longer answer: the card hands back with no answer.
+    let phase = card.observe(card: questionID, answerable: false, window: nil, now: 130)
+    #expect(phase == .handedBack(askedAt: 100))
+}
+
+@Test func handingBackEndsTheKeyboardHoldAndTheCardOpenTimeRunsAsIfFocusHadJustLeft() {
+    var controller = NotchPresentationController()
+    var card = SpotlightKeyboardCard()
+    controller.present(questionID, now: 100, duration: .threeSeconds)
+    _ = card.observe(card: questionID, answerable: true, window: .init(askedAt: 100, deadline: 130), now: 129)
+    _ = controller.update(interacting: false, keyboardFocus: true, keyboardHoldEnded: card.endsKeyboardHold,
+                          now: 129, queued: [questionID])
+    #expect(!card.endsKeyboardHold)
+    _ = card.observe(card: questionID, answerable: false, window: nil, now: 130)
+    #expect(card.endsKeyboardHold)
+    // Still focused, still visible: Return opens the agent while it shows.
+    do { let mode = controller.update(interacting: false, keyboardFocus: true, keyboardHoldEnded: card.endsKeyboardHold,
+                                      now: 131, queued: [questionID]); #expect(mode == .agentSpotlight(questionID)) }
+    // Its 3-second open time, counted from the last held moment, then runs out.
+    do { let mode = controller.update(interacting: false, keyboardFocus: true, keyboardHoldEnded: card.endsKeyboardHold,
+                                      now: 132.5, queued: [questionID]); #expect(mode == .collapsed) }
+    // A fresh card may take the spotlight once the held card no longer holds.
+    var other = NotchPresentationController()
+    other.present(questionID, now: 100, duration: .threeSeconds)
+    #expect(other.acceptsAgentSpotlight(interacting: false, draftInProgress: false, keyboardFocus: true,
+                                        keyboardHoldEnded: true, now: 200))
+}
+
+@Test func theSentCardStaysForItsWholeSecondEvenIfItsQuestionLeavesTheQueue() {
+    var card = SpotlightKeyboardCard()
+    let answer = SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], lastPick: .options([1]))
+    _ = card.observe(card: questionID, answerable: true, window: nil, now: 10)
+    card.arm(answer, for: questionID)
+    _ = card.confirmSent(for: questionID, now: 12)
+    // Claude recorded the answer at once: the question has left the queue, but the card is kept.
+    #expect(card.keepsSentCard(now: 12.4) == questionID)
+    do { let phase = card.observe(card: questionID, answerable: false, window: nil, now: 12.4); #expect(phase == .sent(answer)) }
+    var controller = NotchPresentationController()
+    controller.present(questionID, now: 0, duration: .threeSeconds)
+    let queued: Set<AgentAttentionID> = Set([card.keepsSentCard(now: 12.4)].compactMap { $0 })
+    do { let mode = controller.update(interacting: false, keyboardFocus: true, now: 12.4, queued: queued); #expect(mode == .agentSpotlight(questionID)) }
+    // After the second it is no longer kept, and the fold is due.
+    #expect(card.keepsSentCard(now: 13) == nil)
+    #expect(card.foldDue(now: 13))
+}
+
+@Test func withoutTheKeyboardACardTakesOnlyDigitsAndReturnAndOnlyWhenItCanBeAnswered() {
+    #expect(SpotlightCardKeys.action(for: .digit(2), card: .withoutKeyboard(answerable: true)) == .select(2))
+    #expect(SpotlightCardKeys.action(for: .returnKey, card: .withoutKeyboard(answerable: true)) == .primary)
+    for key in [SpotlightCardKey.open, .dismiss, .previousQuestion, .nextQuestion] {
+        #expect(SpotlightCardKeys.action(for: key, card: .withoutKeyboard(answerable: true)) == .none)
+    }
+    #expect(allKeys.allSatisfy { SpotlightCardKeys.action(for: $0, card: .withoutKeyboard(answerable: false)) == .none })
+}
+
+@Test func aTypedAnswerWinsOverOptionsInTheSentPick() {
+    #expect(SpotlightSentAnswer.Pick(typed: "  main  ", options: [1]) == .typed("main"))
+    #expect(SpotlightSentAnswer.Pick(typed: "   ", options: [2, 0]) == .options([0, 2]))
+}
+
 @Test func whenTheCountdownEndsWithTheCardFocusedTheCardHandsBack() {
     var card = SpotlightKeyboardCard()
     let window = SpotlightKeyboardCard.Window(askedAt: 100, deadline: 130)
@@ -81,11 +163,11 @@ private let allKeys: [SpotlightCardKey] = (0...10).map(SpotlightCardKey.digit)
     + [.returnKey, .open, .dismiss, .previousQuestion, .nextQuestion]
 
 @Test func onlyReturnOnACardHerdlyCanAnswerReachesSend() {
-    let answer = SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], picks: [.options([1])])
+    let answer = SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], lastPick: .options([1]))
     let phases: [SpotlightCardPhase] = [.answering, .readOnly, .handedBack(askedAt: 0), .sent(answer)]
     for phase in phases {
         for key in allKeys {
-            let action = SpotlightCardKeys.action(for: key, phase: phase)
+            let action = SpotlightCardKeys.action(for: key, card: .keyboard(phase))
             if action == .primary {
                 #expect(key == .returnKey && phase == .answering)
             }
@@ -94,33 +176,33 @@ private let allKeys: [SpotlightCardKey] = (0...10).map(SpotlightCardKey.digit)
 }
 
 @Test func whileAnsweringADigitOnlySelectsAndTheLettersActAsTheirButtons() {
-    #expect(SpotlightCardKeys.action(for: .digit(2), phase: .answering) == .select(2))
-    #expect(SpotlightCardKeys.action(for: .open, phase: .answering) == .open)
-    #expect(SpotlightCardKeys.action(for: .dismiss, phase: .answering) == .dismiss)
-    #expect(SpotlightCardKeys.action(for: .previousQuestion, phase: .answering) == .step(-1))
-    #expect(SpotlightCardKeys.action(for: .nextQuestion, phase: .answering) == .step(1))
+    #expect(SpotlightCardKeys.action(for: .digit(2), card: .keyboard(.answering)) == .select(2))
+    #expect(SpotlightCardKeys.action(for: .open, card: .keyboard(.answering)) == .open)
+    #expect(SpotlightCardKeys.action(for: .dismiss, card: .keyboard(.answering)) == .dismiss)
+    #expect(SpotlightCardKeys.action(for: .previousQuestion, card: .keyboard(.answering)) == .step(-1))
+    #expect(SpotlightCardKeys.action(for: .nextQuestion, card: .keyboard(.answering)) == .step(1))
     // Digit 0 is not an option.
-    #expect(SpotlightCardKeys.action(for: .digit(0), phase: .answering) == .none)
+    #expect(SpotlightCardKeys.action(for: .digit(0), card: .keyboard(.answering)) == .none)
 }
 
 @Test func afterHandBackDigitsAreInertAndReturnOpensTheAgent() {
     let phase = SpotlightCardPhase.handedBack(askedAt: 0)
-    #expect((1...9).allSatisfy { SpotlightCardKeys.action(for: .digit($0), phase: phase) == .none })
-    #expect(SpotlightCardKeys.action(for: .returnKey, phase: phase) == .open)
-    #expect(SpotlightCardKeys.action(for: .open, phase: phase) == .open)
+    #expect((1...9).allSatisfy { SpotlightCardKeys.action(for: .digit($0), card: .keyboard(phase)) == .none })
+    #expect(SpotlightCardKeys.action(for: .returnKey, card: .keyboard(phase)) == .open)
+    #expect(SpotlightCardKeys.action(for: .open, card: .keyboard(phase)) == .open)
     // "Open in <agent>" is the only button.
-    #expect(SpotlightCardKeys.action(for: .dismiss, phase: phase) == .none)
+    #expect(SpotlightCardKeys.action(for: .dismiss, card: .keyboard(phase)) == .none)
 }
 
 @Test func aReadOnlyCardTakesNoDigitsAndReturnOpens() {
-    #expect(SpotlightCardKeys.action(for: .digit(1), phase: .readOnly) == .none)
-    #expect(SpotlightCardKeys.action(for: .returnKey, phase: .readOnly) == .open)
-    #expect(SpotlightCardKeys.action(for: .dismiss, phase: .readOnly) == .dismiss)
+    #expect(SpotlightCardKeys.action(for: .digit(1), card: .keyboard(.readOnly)) == .none)
+    #expect(SpotlightCardKeys.action(for: .returnKey, card: .keyboard(.readOnly)) == .open)
+    #expect(SpotlightCardKeys.action(for: .dismiss, card: .keyboard(.readOnly)) == .dismiss)
 }
 
 @Test func onceSentNoKeyDoesAnything() {
-    let phase = SpotlightCardPhase.sent(SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], picks: [.options([1])]))
-    #expect(allKeys.allSatisfy { SpotlightCardKeys.action(for: $0, phase: phase) == .none })
+    let phase = SpotlightCardPhase.sent(SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], lastPick: .options([1])))
+    #expect(allKeys.allSatisfy { SpotlightCardKeys.action(for: $0, card: .keyboard(phase)) == .none })
 }
 
 @Test func pickSeveralDigitsToggleAndReturnSendsTheTickedSet() {
@@ -129,7 +211,7 @@ private let allKeys: [SpotlightCardKey] = (0...10).map(SpotlightCardKey.digit)
     // Nothing ticked: Send stays disabled, so Return does nothing.
     #expect(call.primary(viewed: 0) == .send(enabled: false))
     for digit in [1, 2, 3, 3] {
-        guard case let .select(number) = SpotlightCardKeys.action(for: .digit(digit), phase: .answering) else {
+        guard case let .select(number) = SpotlightCardKeys.action(for: .digit(digit), card: .keyboard(.answering)) else {
             Issue.record("a digit must select"); return
         }
         call = call.toggling(number - 1, at: 0)
@@ -144,25 +226,25 @@ private let allKeys: [SpotlightCardKey] = (0...10).map(SpotlightCardKey.digit)
 // MARK: - Sent (Paper L "4 · Sent")
 
 @Test func theSentLineNamesTheAgentTheOptionAndItsLabel() {
-    let answer = SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], picks: [.options([1])])
+    let answer = SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], lastPick: .options([1]))
     #expect(answer.line == "Sent to Claude: 2 · Every workflow that mentions it")
     #expect(answer.chosen == [1])
     #expect(answer.options == ["Only release.yml (Recommended)", "Every workflow that mentions it", "None, close it by hand"])
 }
 
 @Test func theSentLineDropsTheRecommendedMarkAndListsTicksInOrder() {
-    #expect(SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], picks: [.options([2, 0])]).line
+    #expect(SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], lastPick: .options([2, 0])).line
             == "Sent to Claude: 1, 3 · Only release.yml, None, close it by hand")
-    #expect(SpotlightSentAnswer.make(agent: "Codex", prompts: [workflows], picks: [.typed("  only main  ")]).line
+    #expect(SpotlightSentAnswer.make(agent: "Codex", prompts: [workflows], lastPick: .typed("  only main  ")).line
             == "Sent to Codex: only main")
     #expect(SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows, workflows, workflows],
-                                     picks: [.options([0]), .options([1]), .typed("x")]).line
+                                     lastPick: .typed("x")).line
             == "Sent to Claude: 3 answers")
 }
 
 @Test func theCardShowsSentOnlyAfterTheSendLeftHerdlyAndFoldsASecondLater() {
     var card = SpotlightKeyboardCard()
-    let answer = SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], picks: [.options([1])])
+    let answer = SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], lastPick: .options([1]))
     _ = card.observe(card: questionID, answerable: true, window: nil, now: 10)
     // A send the route refused records nothing, so the card keeps answering.
     card.arm(answer, for: questionID)
@@ -179,7 +261,7 @@ private let allKeys: [SpotlightCardKey] = (0...10).map(SpotlightCardKey.digit)
     var card = SpotlightKeyboardCard()
     _ = card.observe(card: questionID, answerable: true, window: nil, now: 10)
     do { let confirmed = card.confirmSent(for: questionID, now: 11); #expect(!confirmed) }
-    card.arm(SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], picks: [.options([0])]), for: questionID)
+    card.arm(SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], lastPick: .options([0])), for: questionID)
     do { let confirmed = card.confirmSent(for: otherQuestionID, now: 11); #expect(!confirmed) }
 }
 
@@ -224,37 +306,36 @@ private let allKeys: [SpotlightCardKey] = (0...10).map(SpotlightCardKey.digit)
 
 // MARK: - Foot line (Paper L frames 1, 2, 4, 5, 7)
 
+private func foot(_ card: SpotlightCardFocus, count: Int = 1, last: Bool = true, app: String? = "Ghostty",
+                  hotkey: String? = "⌃⌥Space") -> SpotlightCardFoot? {
+    SpotlightCardFoot.make(card: card, questionCount: count, viewedIsLast: last, returnApp: app, hotkey: hotkey)
+}
+
 @Test func beforeTheKeyboardIsInTheFootNamesTheHotkeyOnlyWhenItIsOn() {
-    #expect(SpotlightCardFoot.line(phase: .answering, hasKeyboard: false, questionCount: 1, viewedIsLast: true,
-                                   returnApp: nil, hotkey: "⌃⌥Space") == "⌃⌥Space to answer here")
-    #expect(SpotlightCardFoot.line(phase: .answering, hasKeyboard: false, questionCount: 1, viewedIsLast: true,
-                                   returnApp: nil, hotkey: nil) == nil)
-    // A card Herdly cannot answer does not invite an answer.
-    #expect(SpotlightCardFoot.line(phase: .readOnly, hasKeyboard: false, questionCount: 1, viewedIsLast: true,
-                                   returnApp: nil, hotkey: "⌃⌥Space") == nil)
+    #expect(foot(.withoutKeyboard(answerable: true))?.text == "⌃⌥Space to answer here")
+    #expect(foot(.withoutKeyboard(answerable: true), hotkey: nil) == nil)
+    // A card Herdly cannot answer does not invite an answer: "answer here" would be false there.
+    #expect(foot(.withoutKeyboard(answerable: false)) == nil)
 }
 
 @Test func withTheKeyboardInTheFootNamesTheKeysAndTheAppItReturnsTo() {
-    func foot(_ phase: SpotlightCardPhase, count: Int = 1, last: Bool = true, app: String? = "Ghostty") -> String? {
-        SpotlightCardFoot.line(phase: phase, hasKeyboard: true, questionCount: count, viewedIsLast: last,
-                               returnApp: app, hotkey: "⌃⌥Space")
-    }
-    #expect(foot(.answering) == "1–9 pick · ⏎ send · esc back to Ghostty")
-    #expect(foot(.answering, count: 3, last: false) == "1–9 pick · ⏎ next · ← → step · esc back to Ghostty")
-    #expect(foot(.answering, count: 3, last: true) == "1–9 pick · ⏎ send · ← → step · esc back to Ghostty")
-    #expect(foot(.handedBack(askedAt: 0)) == "⏎ open · esc back to Ghostty")
-    #expect(foot(.readOnly) == "⏎ open · esc back to Ghostty")
-    #expect(foot(.sent(SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], picks: [.options([1])])))
+    #expect(foot(.keyboard(.answering))?.text == "1–9 pick · ⏎ send · esc back to Ghostty")
+    #expect(foot(.keyboard(.answering), count: 3, last: false)?.text == "1–9 pick · ⏎ next · ← → step · esc back to Ghostty")
+    #expect(foot(.keyboard(.answering), count: 3, last: true)?.text == "1–9 pick · ⏎ send · ← → step · esc back to Ghostty")
+    #expect(foot(.keyboard(.handedBack(askedAt: 0)))?.text == "⏎ open · esc back to Ghostty")
+    #expect(foot(.keyboard(.readOnly))?.text == "⏎ open · esc back to Ghostty")
+    #expect(foot(.keyboard(.sent(SpotlightSentAnswer.make(agent: "Claude", prompts: [workflows], lastPick: .options([1])))))?.text
             == "Back to Ghostty in 1s")
-    #expect(foot(.answering, app: nil) == "1–9 pick · ⏎ send · esc close")
+    #expect(foot(.keyboard(.answering), app: nil)?.text == "1–9 pick · ⏎ send · esc close")
+}
+
+@Test func voiceOverReadsTheFootLineKeysByName() {
+    #expect(foot(.keyboard(.answering), count: 3, last: false)?.spoken
+            == "1 to 9 picks, Return goes to the next question, left and right arrows step between questions, Escape goes back to Ghostty")
+    #expect(foot(.keyboard(.handedBack(askedAt: 0)))?.spoken == "Return opens the agent, Escape goes back to Ghostty")
 }
 
 @Test func theHandedBackLineSaysWhenItWasAsked() {
     #expect(SpotlightCardLines.handedBack(askedAt: 100, now: 130) == "Handed back with no answer · asked 30s ago")
     #expect(SpotlightCardLines.handedBack(askedAt: 100, now: 400) == "Handed back with no answer · asked 5m ago")
-}
-
-@Test func voiceOverReadsTheFootLineKeysByName() {
-    #expect(SpotlightCardFoot.spoken("1–9 pick · ⏎ next · ← → step · esc back to Ghostty")
-            == "1 to 9 pick, Return next, left and right arrows step, Escape back to Ghostty")
 }

@@ -56,13 +56,6 @@ public struct NotchKeyboardReturn<App: Equatable & Sendable>: Equatable, Sendabl
 
     public init() {}
 
-    /// The app the hotkey took the keyboard from, while the notch still holds it; nil after a click
-    /// entry, a hand-back, or once another app took the keyboard.
-    public var rememberedApp: App? {
-        if case let .hotkey(remembered) = entry { return remembered }
-        return nil
-    }
-
     /// The hotkey put the keyboard in the notch; `frontmost` is the app that had it.
     public mutating func enter(frontmost: App?) { entry = .hotkey(remembered: frontmost) }
 
@@ -76,6 +69,12 @@ public struct NotchKeyboardReturn<App: Equatable & Sendable>: Equatable, Sendabl
     /// the keyboard: the remembered app is not pulled back over it.
     public mutating func handBack(isRunning: (App) -> Bool, frontmost: App?, herdly: App?) -> Action {
         defer { entry = .none }
+        return target(isRunning: isRunning, frontmost: frontmost, herdly: herdly)
+    }
+
+    /// What `handBack` would activate now, without spending the remembered app: the app a keyboard
+    /// card's foot line names (#428), so the line and the hand-back cannot disagree.
+    public func target(isRunning: (App) -> Bool, frontmost: App?, herdly: App?) -> Action {
         guard case let .hotkey(remembered) = entry else { return .reactivateFrontmost }
         if let frontmost, frontmost != remembered, frontmost != herdly { return .reactivateFrontmost }
         guard let remembered, isRunning(remembered) else { return .leaveToSystem }

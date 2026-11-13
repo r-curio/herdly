@@ -46,17 +46,35 @@ public enum SpotlightCardPhase: Equatable, Sendable {
     case sent(SpotlightSentAnswer)
 }
 
+/// The one question card on screen as the key table sees it (#321, #428).
+public enum SpotlightCardFocus: Equatable, Sendable {
+    /// Shown, but the keyboard is not in it: a clicked card, or a spotlight before the hotkey or a
+    /// click. Digits and Return reach it as before #428 (#321), and only while Herdly can answer it.
+    case withoutKeyboard(answerable: Bool)
+    /// A spotlight question card that has the keyboard.
+    case keyboard(SpotlightCardPhase)
+}
+
+/// The one key table for a question card. A digit only ever selects, and only Return reaches the
+/// card's Next or Send, only while Herdly can answer it: never after hand-back or once sent.
 public enum SpotlightCardKeys {
-    public static func action(for key: SpotlightCardKey, phase: SpotlightCardPhase) -> SpotlightCardAction {
-        switch phase {
-        case .sent:
+    public static func action(for key: SpotlightCardKey, card: SpotlightCardFocus) -> SpotlightCardAction {
+        switch card {
+        case let .withoutKeyboard(answerable):
+            guard answerable else { return .none }
+            switch key {
+            case let .digit(number): return (1...9).contains(number) ? .select(number) : .none
+            case .returnKey: return .primary
+            case .open, .dismiss, .previousQuestion, .nextQuestion: return .none
+            }
+        case .keyboard(.sent):
             return .none
-        case .handedBack:
+        case .keyboard(.handedBack):
             switch key {
             case .returnKey, .open: return .open
             case .digit, .dismiss, .previousQuestion, .nextQuestion: return .none
             }
-        case .readOnly:
+        case .keyboard(.readOnly):
             switch key {
             case .returnKey, .open: return .open
             case .dismiss: return .dismiss
@@ -64,7 +82,7 @@ public enum SpotlightCardKeys {
             case .nextQuestion: return .step(1)
             case .digit: return .none
             }
-        case .answering:
+        case .keyboard(.answering):
             switch key {
             case let .digit(number): return (1...9).contains(number) ? .select(number) : .none
             case .returnKey: return .primary
@@ -85,6 +103,13 @@ public struct SpotlightSentAnswer: Equatable, Sendable {
         /// Zero-based option indexes; several on a pick-several question.
         case options([Int])
         case typed(String)
+
+        /// What the user's selection sends: a non-blank typed answer takes the place of the options
+        /// (as `ClaudeQuestionSelection` and the daemon field both rule), otherwise the options in order.
+        public init(typed: String, options: [Int]) {
+            let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+            self = text.isEmpty ? .options(options.sorted()) : .typed(text)
+        }
     }
 
     public let line: String
@@ -93,26 +118,24 @@ public struct SpotlightSentAnswer: Equatable, Sendable {
     public let options: [String]
     public let chosen: Set<Int>
 
-    public static func make(agent: String, prompts: [QuestionPrompt], picks: [Pick]) -> Self {
+    /// `lastPick` is the last question's answer; a call of several questions reads "<n> answers".
+    public static func make(agent: String, prompts: [QuestionPrompt], lastPick: Pick) -> Self {
         let shown = prompts.last
-        let lastPick = picks.last
         let chosen: Set<Int> = if case let .options(indexes) = lastPick { Set(indexes) } else { [] }
         let line: String
-        if picks.count > 1 {
-            line = "Sent to \(agent): \(picks.count) answers"
+        if prompts.count > 1 {
+            line = "Sent to \(agent): \(prompts.count) answers"
         } else {
             switch lastPick {
-            case let .options(indexes)?:
+            case let .options(indexes):
                 let sorted = indexes.sorted()
                 let labels = sorted.map { index in
                     shown.flatMap { $0.options.indices.contains(index) ? QuestionOptionLabel($0.options[index]).text : nil }
                         ?? "option \(index + 1)"
                 }
                 line = "Sent to \(agent): \(sorted.map { String($0 + 1) }.joined(separator: ", ")) · \(labels.joined(separator: ", "))"
-            case let .typed(text)?:
+            case let .typed(text):
                 line = "Sent to \(agent): \(text.trimmingCharacters(in: .whitespacesAndNewlines))"
-            case nil:
-                line = "Sent to \(agent)"
             }
         }
         return Self(line: line, question: shown?.question, options: shown?.options ?? [], chosen: chosen)
@@ -186,6 +209,17 @@ public struct SpotlightKeyboardCard: Equatable, Sendable {
     public func foldDue(now: Double) -> Bool {
         foldAt.map { now >= $0 } ?? false
     }
+
+    /// The card whose sent line is still within its second. The presentation keeps it on screen even
+    /// if its question has already left the queue, so the line always shows for the whole second.
+    public func keepsSentCard(now: Double) -> AgentAttentionID? {
+        guard sent != nil, let foldAt, now < foldAt else { return nil }
+        return card
+    }
+
+    /// The card handed back with no answer: its keyboard hold has ended. It follows its normal
+    /// spotlight open time from here, as if focus had just left (#428).
+    public var endsKeyboardHold: Bool { handedBackAskedAt != nil }
 }
 
 /// A new approval or question that arrives while a spotlight card has the keyboard waits behind it
@@ -206,40 +240,48 @@ public enum SpotlightKeyboardWait {
     }
 }
 
-/// The one dim line under a spotlight question card (Paper L frames 1, 2, 4, 5 and 7).
-public enum SpotlightCardFoot {
-    /// - Parameters:
-    ///   - hasKeyboard: the card has the keyboard now.
-    ///   - returnApp: the app Escape gives the keyboard back to, when known.
-    ///   - hotkey: the notch hotkey's title while it is on and registered; nil otherwise.
-    public static func line(phase: SpotlightCardPhase?, hasKeyboard: Bool, questionCount: Int, viewedIsLast: Bool,
-                            returnApp: String?, hotkey: String?) -> String? {
-        guard hasKeyboard else {
-            // Before the hotkey: only a card Herdly can answer invites an answer, and only while the key works.
-            guard phase == nil || phase == .answering, let hotkey else { return nil }
-            return "\(hotkey) to answer here"
-        }
-        let back = returnApp.map { "esc back to \($0)" } ?? "esc close"
-        let steps = questionCount > 1 ? ["← → step"] : []
-        switch phase {
-        case .sent?:
-            return returnApp.map { "Back to \($0) in 1s" } ?? "Closing in 1s"
-        case .handedBack?:
-            return ["⏎ open", back].joined(separator: " · ")
-        case .readOnly?:
-            return (["⏎ open"] + steps + [back]).joined(separator: " · ")
-        case .answering?, nil:
-            let primary = questionCount > 1 && !viewedIsLast ? "⏎ next" : "⏎ send"
-            return (["1–9 pick", primary] + steps + [back]).joined(separator: " · ")
-        }
+/// The one dim line under a spotlight question card (Paper L frames 1, 2, 4, 5 and 7), built from
+/// parts that carry both what is shown and what VoiceOver says.
+public struct SpotlightCardFoot: Equatable, Sendable {
+    public struct Part: Equatable, Sendable {
+        public let shown: String
+        public let spoken: String
     }
-}
 
-extension SpotlightCardFoot {
-    /// The foot line as VoiceOver reads it: the keys by name rather than their symbols.
-    public static func spoken(_ line: String) -> String {
-        [("1–9", "1 to 9"), ("⏎", "Return"), ("← →", "left and right arrows"), ("esc", "Escape"), (" · ", ", ")]
-            .reduce(line) { $0.replacingOccurrences(of: $1.0, with: $1.1) }
+    public let parts: [Part]
+    public var text: String { parts.map(\.shown).joined(separator: " · ") }
+    public var spoken: String { parts.map(\.spoken).joined(separator: ", ") }
+
+    /// - Parameters:
+    ///   - returnApp: the app Escape gives the keyboard back to, when known (`NotchKeyboardReturn.target`).
+    ///   - hotkey: the notch hotkey's title while it is on and registered; nil otherwise.
+    public static func make(card: SpotlightCardFocus, questionCount: Int, viewedIsLast: Bool,
+                            returnApp: String?, hotkey: String?) -> Self? {
+        let back = returnApp.map { Part(shown: "esc back to \($0)", spoken: "Escape goes back to \($0)") }
+            ?? Part(shown: "esc close", spoken: "Escape closes")
+        let steps = questionCount > 1 ? [Part(shown: "← → step", spoken: "left and right arrows step between questions")] : []
+        let open = Part(shown: "⏎ open", spoken: "Return opens the agent")
+        switch card {
+        case let .withoutKeyboard(answerable):
+            // "Answer here" would be false on a card Herdly cannot answer, and the key must work.
+            guard answerable, let hotkey else { return nil }
+            return Self(parts: [Part(shown: "\(hotkey) to answer here", spoken: "Press \(hotkey) to answer here")])
+        case .keyboard(.sent):
+            let seconds = Int(SpotlightKeyboardCard.sentHold.rounded())
+            return Self(parts: [returnApp.map { Part(shown: "Back to \($0) in \(seconds)s",
+                                                      spoken: "Back to \($0) in \(seconds) second\(seconds == 1 ? "" : "s")") }
+                ?? Part(shown: "Closing in \(seconds)s", spoken: "Closing in \(seconds) second\(seconds == 1 ? "" : "s")")])
+        case .keyboard(.handedBack):
+            return Self(parts: [open, back])
+        case .keyboard(.readOnly):
+            return Self(parts: [open] + steps + [back])
+        case .keyboard(.answering):
+            let pick = Part(shown: "1–9 pick", spoken: "1 to 9 picks")
+            let primary = questionCount > 1 && !viewedIsLast
+                ? Part(shown: "⏎ next", spoken: "Return goes to the next question")
+                : Part(shown: "⏎ send", spoken: "Return sends")
+            return Self(parts: [pick, primary] + steps + [back])
+        }
     }
 }
 
