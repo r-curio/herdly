@@ -193,13 +193,18 @@ public enum GitBranchReader {
     static let maximumDepth = 32
 
     public static func branch(forDirectory path: String) -> String? {
+        gitHead(forDirectory: path)?.label
+    }
+
+    /// The work tree's HEAD as a branch or a detached commit, for the work-status branch memory (#417).
+    public static func gitHead(forDirectory path: String) -> GitHead? {
         var directory = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
         for _ in 0..<maximumDepth {
             let dotGit = directory.appendingPathComponent(".git")
             var isDirectory: ObjCBool = false
             if FileManager.default.fileExists(atPath: dotGit.path, isDirectory: &isDirectory) {
                 let gitDirectory = isDirectory.boolValue ? dotGit : linkedGitDirectory(dotGit, workTree: directory)
-                return gitDirectory.flatMap { read($0.appendingPathComponent("HEAD")) }.flatMap(head)
+                return gitDirectory.flatMap { read($0.appendingPathComponent("HEAD")) }.flatMap(parseHead)
             }
             let parent = directory.deletingLastPathComponent()
             if parent.path == directory.path { return nil }
@@ -211,16 +216,21 @@ public enum GitBranchReader {
     /// The branch named by HEAD's contents: `ref: refs/heads/<name>` gives the name; a detached
     /// HEAD gives its commit shortened to seven characters. Anything else is nil.
     public static func head(_ contents: String) -> String? {
+        parseHead(contents)?.label
+    }
+
+    /// HEAD's contents as a branch or a detached commit; nil when it does not parse.
+    public static func parseHead(_ contents: String) -> GitHead? {
         let line = contents.split(whereSeparator: \.isNewline).first.map(String.init)?
             .trimmingCharacters(in: .whitespaces) ?? ""
         if line.hasPrefix("ref:") {
             let ref = line.dropFirst(4).trimmingCharacters(in: .whitespaces)
             let prefix = "refs/heads/"
             guard ref.hasPrefix(prefix), ref.count > prefix.count else { return nil }
-            return String(ref.dropFirst(prefix.count))
+            return .branch(String(ref.dropFirst(prefix.count)))
         }
         guard line.count >= 7, line.allSatisfy(\.isHexDigit) else { return nil }
-        return String(line.prefix(7)).lowercased()
+        return .detached(String(line.prefix(7)).lowercased())
     }
 
     /// A linked worktree's `.git` file reads `gitdir: <path>`, relative to the work tree or absolute.
