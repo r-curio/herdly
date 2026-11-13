@@ -1076,10 +1076,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             "chosen_display": chosen.map { Int($0.id) } ?? NSNull(),
             "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts, expanded: false))) } ?? NSNull(),
             "expanded_frame_three_rows": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: true, rows: 3, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts, expanded: true))) } ?? NSNull(),
-            "five_hour_shown": usageStripReadouts.contains { $0.source == .codex && $0.fiveHour != nil },
-            // One ring per source; `usage_windows` counts the windows the rings draw.
+            "five_hour_shown": usageStripReadouts.contains { $0.source == .codex && $0.fiveHour.share != nil },
             "usage_readouts": usageStripReadouts.count,
-            "usage_windows": usageStripReadouts.reduce(0) { $0 + ($1.fiveHour == nil ? 0 : 1) + ($1.weekly == nil ? 0 : 1) },
             "panel_frame": rect(panel.frame),
             "codex_foreground": desktopForeground,
             "panel": ["level": panel.level.rawValue, "nonactivating": panel.styleMask.contains(.nonactivatingPanel),

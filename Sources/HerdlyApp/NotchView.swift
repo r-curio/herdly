@@ -267,11 +267,12 @@ struct UsageRing: View {
     var body: some View {
         HStack(spacing: UsageStripReadouts.textGap) {
             ZStack {
-                // 2pt strokes centred on radius 7.5 and 4 in the 18pt box.
-                if readout.hasOuterRing { arc(diameter: 15, fraction: readout.weekly?.fraction) }
-                if let fiveHour = readout.fiveHour { arc(diameter: 8, fraction: fiveHour.fraction) }
+                arc(readout.weekly, diameter: UsageStripReadouts.outerRingDiameter)
+                arc(readout.fiveHour, diameter: UsageStripReadouts.innerRingDiameter)
             }
             .frame(width: UsageStripReadouts.ringSize, height: UsageStripReadouts.ringSize)
+            // A new reading redraws the fill in place; it never animates.
+            .transaction { $0.animation = nil }
             if showsNumbers {
                 numbers
             } else if readout.isUnknown {
@@ -284,16 +285,19 @@ struct UsageRing: View {
     }
 
     /// The track, and over it the used share; an unknown window keeps the track alone, so it never
-    /// reads as a fill of 0%.
-    private func arc(diameter: CGFloat, fraction: Double?) -> some View {
-        let stroke = StrokeStyle(lineWidth: 2, lineCap: .butt)
-        return ZStack {
-            Circle().stroke(NotchStyle.well, style: stroke)
-            if let fraction, fraction > 0 {
-                Circle().trim(from: 0, to: fraction).stroke(tint, style: stroke).rotationEffect(.degrees(-90))
+    /// reads as a fill of 0%, and a window that is not reported draws nothing.
+    @ViewBuilder
+    private func arc(_ window: UsageWindowState, diameter: CGFloat) -> some View {
+        if window != .notReported {
+            let stroke = StrokeStyle(lineWidth: UsageStripReadouts.ringLineWidth, lineCap: .butt)
+            ZStack {
+                Circle().stroke(NotchStyle.well, style: stroke)
+                if let fraction = window.share?.fraction, fraction > 0 {
+                    Circle().trim(from: 0, to: fraction).stroke(tint, style: stroke).rotationEffect(.degrees(-90))
+                }
             }
+            .frame(width: diameter, height: diameter)
         }
-        .frame(width: diameter, height: diameter)
     }
 
     /// Five-hour, a dim regular-weight slash, week, one trailing percent, as one line of text.

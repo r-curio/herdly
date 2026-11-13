@@ -10,9 +10,7 @@ public struct ClaudeUsageWindow: Equatable, Sendable {
         self.resetsAt = resetsAt
     }
 
-    public var percentText: String {
-        "\(Int(min(100, max(0, usedPercentage)).rounded()))%"
-    }
+    public var percentText: String { UsageShare(usedPercent: usedPercentage).percentText }
 
     public func isCurrent(now: Double) -> Bool {
         usedPercentage.isFinite && resetsAt.isFinite && usedPercentage >= 0 && usedPercentage <= 100 && resetsAt > now

@@ -1,6 +1,7 @@
 import CoreGraphics
 
-/// One usage window's share used, as the strip's rings draw and print it.
+/// One usage window's share used, as the strip's rings draw and print it; Codex's and Claude's
+/// windows format their percent through it too.
 public struct UsageShare: Equatable, Sendable {
     /// As reported; values outside 0 to 100 are clamped by `fraction` and `figure`, never here.
     public let usedPercent: Double
@@ -16,11 +17,34 @@ public struct UsageShare: Equatable, Sendable {
     public var percentText: String { figure + "%" }
 }
 
+/// One usage window as a ring shows it. A window that is not reported draws no ring at all; an
+/// unknown one draws an empty track and never reads as 0%.
+public enum UsageWindowState: Equatable, Sendable {
+    case notReported
+    case unknown
+    case known(UsageShare)
+
+    /// The share to fill, nil for an empty track or no ring.
+    public var share: UsageShare? {
+        if case .known(let share) = self { share } else { nil }
+    }
+
+    var isShown: Bool { self != .notReported }
+}
+
 /// One source's usage ring in the strip's right wing (D35), drawn left to right in the order `make`
 /// returns: the outer ring is the weekly (Claude: seven-day) window, the inner ring the five-hour one.
-/// "Unknown" stays distinct from 0%: an unknown window carries no share at all.
 public struct UsageStripReadout: Equatable, Sendable {
     public enum Source: Equatable, Sendable { case codex, claude }
+
+    /// What the outer window is called in the strip's spoken label. Claude's is "seven-day" beside
+    /// its five-hour window and "weekly" while the strip shows weekly windows only; Codex's is
+    /// always "weekly".
+    public enum WeeklyWindow: Equatable, Sendable {
+        case sevenDay, weekly
+
+        var spokenName: String { self == .sevenDay ? "seven-day" : "weekly" }
+    }
 
     /// One run of the open strip's numbers; `dim` runs are the slash and the unknown dash.
     public struct TextRun: Equatable, Sendable {
@@ -34,58 +58,45 @@ public struct UsageStripReadout: Equatable, Sendable {
     }
 
     public let source: Source
-    /// The inner ring; nil draws no inner ring at all (not an empty track): the window is not
-    /// reported, or the strip shows weekly windows only.
-    public let fiveHour: UsageShare?
-    /// The outer ring's fill; nil while the window is unknown.
-    public let weekly: UsageShare?
-    /// False only for Claude reporting no seven-day window, which then draws no outer ring. Codex's
-    /// outer track is always there, empty while its weekly window is unknown.
-    public let hasOuterRing: Bool
-    /// What VoiceOver calls the outer window: "seven-day" for Claude, "weekly" for Codex and for
-    /// either source while the strip shows weekly windows only.
-    public let weeklyName: String
+    /// The inner ring: not reported (no inner ring, not an empty track) or known.
+    public let fiveHour: UsageWindowState
+    /// The outer ring. Codex's is always shown, unknown before its first reading; Claude's is not
+    /// reported while its reading has no current seven-day window.
+    public let weekly: UsageWindowState
+    public let weeklyWindow: WeeklyWindow
 
-    public init(source: Source, fiveHour: UsageShare?, weekly: UsageShare?, hasOuterRing: Bool = true,
-                weeklyName: String = "weekly") {
+    public init(source: Source, fiveHour: UsageWindowState, weekly: UsageWindowState, weeklyWindow: WeeklyWindow) {
         self.source = source
         self.fiveHour = fiveHour
         self.weekly = weekly
-        self.hasOuterRing = hasOuterRing
-        self.weeklyName = weeklyName
+        self.weeklyWindow = weeklyWindow
     }
 
     /// No current reading at all: the empty outer track carries a dim "—", collapsed and open.
-    public var isUnknown: Bool { fiveHour == nil && weekly == nil }
+    public var isUnknown: Bool { fiveHour.share == nil && weekly.share == nil }
+
+    /// The windows the ring shows, five-hour first, in the order the open numbers print them.
+    private var shownWindows: [UsageWindowState] { [fiveHour, weekly].filter(\.isShown) }
 
     /// The open strip's numbers after the ring: five-hour, a dim slash, week, one trailing percent
-    /// ("61/18%"); one window alone is just that number ("58%"); an unknown window is a dim "—",
-    /// and the percent follows the last known figure.
+    /// ("61/18%"); one window alone is just that number ("58%"); an unknown window is a dim "—"
+    /// ("40/—%", or "—" alone with nothing known).
     public var openText: [TextRun] {
-        var figures: [UsageShare?] = []
-        if fiveHour != nil { figures.append(fiveHour) }
-        if hasOuterRing { figures.append(weekly) }
-        let lastKnown = figures.lastIndex { $0 != nil }
         var runs: [TextRun] = []
-        for (index, share) in figures.enumerated() {
+        for (index, window) in shownWindows.enumerated() {
             if index > 0 { runs.append(TextRun("/", dim: true)) }
-            if let share {
-                runs.append(TextRun(share.figure + (index == lastKnown ? "%" : "")))
-            } else {
-                runs.append(TextRun("—", dim: true))
-            }
+            runs.append(window.share.map { TextRun($0.figure) } ?? TextRun("—", dim: true))
         }
+        guard !isUnknown, let last = runs.last else { return runs }
+        if last.dim { runs.append(TextRun("%")) } else { runs[runs.count - 1] = TextRun(last.text + "%") }
         return runs
     }
 
-    /// Characters the open numbers can take whatever the values: each known figure is reserved
-    /// three digits ("100"), so the wing does not move as the numbers change.
+    /// Glyphs the open numbers are given: two digits per known figure whatever the value, so the
+    /// wing holds still as the numbers change, and three while a window reads 100%.
     var reservedOpenCharacters: Int {
-        var figures: [UsageShare?] = []
-        if fiveHour != nil { figures.append(fiveHour) }
-        if hasOuterRing { figures.append(weekly) }
-        let known = figures.filter { $0 != nil }.count
-        return known * 3 + (figures.count - known) + max(0, figures.count - 1) + (known > 0 ? 1 : 0)
+        let figures = shownWindows.reduce(0) { $0 + ($1.share.map { max(2, $0.figure.count) } ?? 1) }
+        return figures + max(0, shownWindows.count - 1) + (isUnknown ? 0 : 1)
     }
 
     /// What VoiceOver says for this source in the strip label, one phrase per window, e.g.
@@ -93,9 +104,9 @@ public struct UsageStripReadout: Equatable, Sendable {
     public var spokenLabels: [String] {
         let name = source == .claude ? "Claude" : "Codex"
         var labels: [String] = []
-        if let fiveHour { labels.append("\(name) five-hour limit \(fiveHour.percentText) used") }
-        if hasOuterRing {
-            labels.append("\(name) \(weeklyName) limit " + (weekly.map { "\($0.percentText) used" } ?? "unknown"))
+        if let fiveHour = fiveHour.share { labels.append("\(name) five-hour limit \(fiveHour.percentText) used") }
+        if weekly.isShown {
+            labels.append("\(name) \(weeklyWindow.spokenName) limit " + (weekly.share.map { "\($0.percentText) used" } ?? "unknown"))
         }
         return labels
     }
@@ -109,6 +120,10 @@ public struct UsageStripReadout: Equatable, Sendable {
 public enum UsageStripReadouts {
     /// The ring's square.
     public static let ringSize: CGFloat = 18
+    /// Each window's stroke, centred on radius 7.5 (outer, weekly) and 4 (inner, five-hour).
+    public static let ringLineWidth: CGFloat = 2
+    public static let outerRingDiameter: CGFloat = 15
+    public static let innerRingDiameter: CGFloat = 8
     /// Between rings collapsed.
     public static let collapsedRingGap: CGFloat = 8
     /// Between one source's numbers and the next source's ring, open.
@@ -122,17 +137,19 @@ public enum UsageStripReadouts {
 
     public static func make(codex: CodexUsageReading?, claude: ClaudeUsageReading?,
                             fiveHour: Bool = true) -> [UsageStripReadout] {
-        var readouts: [UsageStripReadout] = []
-        let claudeFive = fiveHour ? claude?.fiveHour.map { UsageShare(usedPercent: $0.usedPercentage) } : nil
-        let claudeSeven = claude?.sevenDay.map { UsageShare(usedPercent: $0.usedPercentage) }
-        if claudeFive != nil || claudeSeven != nil {
-            readouts.append(UsageStripReadout(source: .claude, fiveHour: claudeFive, weekly: claudeSeven,
-                                              hasOuterRing: claudeSeven != nil,
-                                              weeklyName: fiveHour ? "seven-day" : "weekly"))
+        func state(_ percent: Double?) -> UsageWindowState {
+            percent.map { .known(UsageShare(usedPercent: $0)) } ?? .notReported
         }
-        readouts.append(UsageStripReadout(source: .codex,
-                                          fiveHour: fiveHour ? codex?.fiveHour.map { UsageShare(usedPercent: $0.usedPercent) } : nil,
-                                          weekly: codex?.weekly.map { UsageShare(usedPercent: $0.usedPercent) }))
+        var readouts: [UsageStripReadout] = []
+        let claudeFive = state(fiveHour ? claude?.fiveHour?.usedPercentage : nil)
+        let claudeSeven = state(claude?.sevenDay?.usedPercentage)
+        if claudeFive.isShown || claudeSeven.isShown {
+            readouts.append(UsageStripReadout(source: .claude, fiveHour: claudeFive, weekly: claudeSeven,
+                                              weeklyWindow: fiveHour ? .sevenDay : .weekly))
+        }
+        let codexWeekly = codex?.weekly.map { UsageWindowState.known(UsageShare(usedPercent: $0.usedPercent)) } ?? .unknown
+        readouts.append(UsageStripReadout(source: .codex, fiveHour: state(fiveHour ? codex?.fiveHour?.usedPercent : nil),
+                                          weekly: codexWeekly, weeklyWindow: .weekly))
         return readouts
     }
 
@@ -145,7 +162,8 @@ public enum UsageStripReadouts {
         return max(NotchPlacement.trailingWing, (rings + dashes + contentInset).rounded(.up))
     }
 
-    /// The open wing: each ring followed by its numbers, room reserved for "100" per figure. Pass it
+    /// The open wing: each ring followed by its numbers, two digits reserved per figure (three while
+    /// a window reads 100%). Pass it
     /// as the placement's wing while the panel is open; the open growth then still adds to both wings.
     public static func openWingWidth(_ readouts: [UsageStripReadout]) -> CGFloat {
         guard !readouts.isEmpty else { return NotchPlacement.trailingWing }
