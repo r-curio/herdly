@@ -45,8 +45,7 @@ private func writeSyntheticClaudeEvents(in root: URL, sessions: Int, records: In
 /// `HERDLY_MEASURE_CLAUDE_SCAN=1 swift test -c release --filter claudeScanCostPerWarmPass`.
 @Test(.enabled(if: ProcessInfo.processInfo.environment["HERDLY_MEASURE_CLAUDE_SCAN"] != nil))
 func claudeScanCostPerWarmPass() throws {
-    let root = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-claude-cost-" + UUID().uuidString)
-    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let root = try temporaryEvents()
     defer { try? FileManager.default.removeItem(at: root) }
     let openAt = 1_000_000.0, passes = 50
     try writeSyntheticClaudeEvents(in: root, sessions: 30, records: 3_000, active: 5, openAt: openAt)
@@ -277,4 +276,97 @@ private struct WarmScans {
     #expect(scans.checkedScan(now: 104, "everything removed").observations.isEmpty)
     #expect(scans.cache.count == 0)
     #expect(scans.cache.heldSessions.isEmpty)
+}
+
+/// What the seeded `aScanBuiltSessionBySessionEqualsOneReplayOfEveryRecord` does not generate: a file
+/// request with the helper's details, a question, a batch naming its calls as `tool_uses`, a call
+/// captured after `now`, a clock that is not finite, and a subagent reaching its age bound.
+@Test func aWarmClaudeScanEqualsAColdOneForRequestsQuestionsBatchesAndAnyClock() throws {
+    let root = try temporaryEvents()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let fresh = ClaudeObservationReader.maximumToolFreshness, bound = ClaudeObservationReader.maximumSubagentAge
+    var scans = WarmScans(root: root)
+    func record(_ event: String, _ session: String, at: Double, _ fields: [String: Any] = [:]) -> [String: Any] {
+        fields.merging(["hook_event_name": event, "session_id": session, "captured_at": at, "prompt_id": "p1"]) { _, new in new }
+    }
+    for (index, session) in ["bash", "file", "ask", "batch", "agent", "later"].enumerated() {
+        try write(prompt(session, "Prompt \(session)", at: Double(index)), named: "\(session)-1.json", in: root)
+    }
+    try write(call("bash", "t1", at: 10, command: "swift test"), named: "bash-2.json", in: root)
+    try write(record("PermissionRequest", "bash", at: 11, ["tool_name": "Bash", "tool_input": ["command": "swift test"],
+                                                           "approval_request_id": "r1"]), named: "bash-3.json", in: root)
+    let edit: [String: Any] = ["notebook_path": "/tmp/nb.ipynb", "cell_id": "c1", "new_source": "print(2)", "edit_mode": "replace"]
+    let details = try JSONSerialization.jsonObject(with: JSONEncoder().encode(
+        try #require(ClaudeDirectApproval.details(toolName: "NotebookEdit", toolInput: edit))))
+    try write(record("PreToolUse", "file", at: 10, ["tool_name": "NotebookEdit", "tool_use_id": "e1", "tool_input": edit]),
+              named: "file-2.json", in: root)
+    try write(record("PermissionRequest", "file", at: 11, ["tool_name": "NotebookEdit", "tool_input": ["notebook_path": "/tmp/nb.ipynb"],
+                                                           "approval_request_id": "r2", "approval_details": details]),
+              named: "file-3.json", in: root)
+    let questions: [String: Any] = ["questions": [["header": "Release", "question": "Which?",
+                                                   "options": [["label": "Red"], ["label": "Blue"]]]]]
+    try write(record("PreToolUse", "ask", at: 10, ["tool_name": "AskUserQuestion", "tool_use_id": "q1", "tool_input": questions]),
+              named: "ask-2.json", in: root)
+    for id in ["b1", "b2"] {
+        try write(record("PreToolUse", "batch", at: 99, ["tool_name": "Read", "tool_use_id": id,
+                                                         "tool_input": ["file_path": "/tmp/\(id)"]]), named: "batch-\(id).json", in: root)
+    }
+    try write(record("SubagentStart", "agent", at: 2, ["agent_id": "g1", "agent_type": "Explore"]), named: "agent-2.json", in: root)
+    try write(record("Stop", "agent", at: 3), named: "agent-3.json", in: root)
+    try write(call("later", "f1", at: 5_000), named: "later-2.json", in: root)
+
+    func requests(_ scan: ClaudeObservationScan) -> [String] {
+        scan.observations.compactMap { observation -> String? in
+            switch observation {
+            case let .approval(value): return "approval " + value.identity.call
+            case let .question(value): return "question " + value.identity.call
+            default: return nil
+            }
+        }.sorted()
+    }
+    var seen = scans.checkedScan(now: 100, "from nothing")
+    #expect(requests(seen) == ["approval e1", "approval t1", "question q1"])
+    #expect(running(seen)["batch"]?.toolName == "Read")
+    #expect(running(seen)["agent"]?.subagents.map(\.id) == ["g1"])
+    #expect(running(seen)["later"]?.toolName == nil)
+
+    try write(record("PostToolBatch", "batch", at: 101, ["tool_input": ["tool_uses": [["tool_use_id": "b1"], ["tool_use_id": "b2"]]]]),
+              named: "batch-done.json", in: root)
+    #expect(running(scans.checkedScan(now: 102, "batch"))["batch"]?.toolName == nil)
+
+    // A clock that goes back, or is no time at all, reuses nothing it should not.
+    for now in [50, Double.infinity, -Double.infinity, Double.nan, 104] {
+        #expect(requests(scans.checkedScan(now: now, "clock at \(now)")) == ["approval e1", "approval t1", "question q1"])
+    }
+
+    // The subagent's parent turn ended, so it is listed until its age bound, with no new record.
+    #expect(running(scans.checkedScan(now: 2 + bound - 1, "before the bound"))["agent"]?.subagents.map(\.id) == ["g1"])
+    seen = scans.checkedScan(now: 2 + bound, "at the bound")
+    #expect(running(seen)["agent"]?.subagents.map(\.id) != ["g1"])
+    #expect(scans.cache.sessionsBuilt == ["agent"])
+
+    // A call captured after `now` becomes fresh when `now` reaches it, and stale after that.
+    #expect(running(scans.checkedScan(now: 4_999, "before the call"))["later"]?.toolName == nil)
+    #expect(running(scans.checkedScan(now: 5_000, "at the call"))["later"]?.toolName == "Bash")
+    #expect(scans.cache.sessionsBuilt == ["later"])
+    #expect(running(scans.checkedScan(now: 5_000 + fresh, "still fresh"))["later"]?.toolName == "Bash")
+    #expect(scans.cache.sessionsBuilt == [])
+    #expect(running(scans.checkedScan(now: 5_000 + fresh + 0.5, "stale"))["later"]?.toolName == nil)
+}
+
+@Test func anUnavailableClaudeDirectoryReportsNoWork() throws {
+    let root = try temporaryEvents()
+    defer { try? FileManager.default.removeItem(at: root) }
+    var scans = WarmScans(root: root)
+    try write(prompt("a", "First"), named: "a1.json", in: root)
+    #expect(scans.scan(now: 100).available)
+    #expect(scans.cache.recordsRead == 1)
+    #expect(scans.cache.sessionsBuilt == ["a"])
+
+    try FileManager.default.removeItem(at: root)
+    #expect(!scans.scan(now: 102).available)
+    #expect(scans.cache.recordsRead == 0)
+    #expect(scans.cache.sessionsBuilt == [])
+    // The records already read are kept for when the directory is back.
+    #expect(scans.cache.count == 1)
 }

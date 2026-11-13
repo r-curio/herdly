@@ -298,6 +298,10 @@ public enum ClaudeObservationReader {
     public static func scan(events: URL, sourceScope: String, installationID: String,
                             observingSince: Double = -.infinity, now: Double = Date().timeIntervalSince1970,
                             cache: ClaudeRecordCache) -> (scan: ClaudeObservationScan, cache: ClaudeRecordCache) {
+        // Cleared here, once, so the cache any path below returns says only what this scan did.
+        var cache = cache
+        cache.recordsRead = 0
+        cache.sessionsBuilt = []
         let scope = normalizedScope(sourceScope)
         // Taken before the directory is listed, so a change during the scan shows as a new stamp next time.
         let directoryStamp = FileStamp(events, followingLinks: true)
@@ -314,18 +318,14 @@ public enum ClaudeObservationReader {
             // Every session's part still stands, so the result built from them does.
             if let result = cache.result, result.sourceScope == scope, now >= cache.resultNow,
                cache.sessions.values.allSatisfy({ stands($0, at: now) }) {
-                var next = cache
-                next.recordsRead = 0
-                next.sessionsBuilt = []
-                return (result, next)
+                return (result, cache)
             }
             var next = cache
             let built = build(cache.records, scope: scope, now: now, previous: sameScope ? cache.sessions : [:], changed: [])
             next.result = built.scan
             next.resultNow = now
             next.sessions = built.sessions
-            next.recordsRead = 0
-            next.sessionsBuilt = built.built
+            next.sessionsBuilt = built.rebuilt
             return (built.scan, next)
         }
         // The directory changed, but the last full check is recent: a record already read is trusted
@@ -372,7 +372,7 @@ public enum ClaudeObservationReader {
         next.result = built.scan
         next.resultNow = now
         next.sessions = built.sessions
-        next.sessionsBuilt = built.built
+        next.sessionsBuilt = built.rebuilt
         return (built.scan, next)
     }
 
@@ -411,12 +411,10 @@ public enum ClaudeObservationReader {
         let turns: [TurnPart]
         let results: [AgentTurnIdentity: ClaudeTurnResult]
         let latestSessionStartAt: Double?
-        /// The latest finite capture time among the uncompleted tool calls left open, and the `now`
-        /// the part was built for: `now` changes a part only through those calls' freshness.
-        let latestToolAt: Double
-        let builtNow: Double
-        /// Those calls' finite capture times, when any was fresh at `builtNow`; else empty.
+        /// The finite capture times of the uncompleted tool calls left open, and the `now` the part
+        /// was built for: `now` changes a part only through those calls' freshness.
         let openToolTimes: [Double]
+        let builtNow: Double
         /// The earliest `now` at which a subagent the part lists reaches `maximumSubagentAge`: with no new
         /// record, that changes the part's switcher list, held row and requests (#404).
         let subagentExpiresAt: Double
@@ -432,7 +430,6 @@ public enum ClaudeObservationReader {
     /// part was built, and no listed subagent has reached its age bound since.
     private static func stands(_ part: SessionPart, at now: Double) -> Bool {
         guard now.isFinite, now >= part.builtNow, now < part.subagentExpiresAt else { return false }
-        if part.builtNow - part.latestToolAt > maximumToolFreshness { return true }
         return part.openToolTimes.allSatisfy { isFresh($0, now: now) == isFresh($0, now: part.builtNow) }
     }
 
@@ -450,7 +447,7 @@ public enum ClaudeObservationReader {
     /// still stands at `now` (`stands`).
     private static func build(_ records: [Record], scope: String, now: Double, previous: [String: SessionPart],
                               changed: Set<String>)
-        -> (scan: ClaudeObservationScan, sessions: [String: SessionPart], built: [String]) {
+        -> (scan: ClaudeObservationScan, sessions: [String: SessionPart], rebuilt: [String]) {
         var order: [String] = []
         var grouped: [String: [Record]] = [:]
         for record in records {
@@ -827,13 +824,11 @@ public enum ClaudeObservationReader {
         let openTools = turns.values.flatMap { $0.tools.values + ($0.tool.map { [$0] } ?? []) }
             + subagents.values.flatMap { $0.values.flatMap(\.tools.values) }
         let openToolTimes = openTools.map(\.at).filter(\.isFinite)
-        let latestToolAt = openToolTimes.max() ?? -.infinity
         let firstSubagentExpiry = listed.flatMap { session, running in
             running.compactMap { agent, subagent in lifetimes.expiresAt(session: session, agent: agent, at: subagent.startedAt) }
         }.min() ?? .infinity
         return SessionPart(fileNames: records.map(\.fileName), turns: turnParts, results: results,
-                           latestSessionStartAt: latestSessionStartAt, latestToolAt: latestToolAt, builtNow: now,
-                           openToolTimes: now - latestToolAt > maximumToolFreshness ? [] : openToolTimes,
+                           latestSessionStartAt: latestSessionStartAt, openToolTimes: openToolTimes, builtNow: now,
                            subagentExpiresAt: firstSubagentExpiry)
     }
 
