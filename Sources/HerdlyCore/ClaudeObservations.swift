@@ -579,6 +579,18 @@ public enum ClaudeObservationReader {
                     endedSessions.remove(record.session)
                     sessionEndAt.removeValue(forKey: record.session)
                 }
+                // A turn Claude started with its own message (#450) shows the user's last prompt instead.
+                var prompt = record.prompt.map { (text: $0.text, shortened: record.promptShortened || $0.shortened) }
+                if let previousPrompt = sessionPrompts[record.session] {
+                    let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
+                                                        session: record.session, surface: .cli)
+                    let previous = turns[AgentTurnIdentity(session: identity, turn: previousPrompt)]
+                    if let text = prompt?.text, isClaudeMessage(text) {
+                        prompt = previous?.promptText.map { (text: $0, shortened: previous?.promptShortened ?? false) }
+                    }
+                } else if let text = prompt?.text, isClaudeMessage(text) {
+                    prompt = nil
+                }
                 if let previousPrompt = sessionPrompts[record.session], previousPrompt != promptID {
                     let identity = AgentSessionIdentity(source: .claude, sourceScope: scope,
                                                         session: record.session, surface: .cli)
@@ -598,18 +610,17 @@ public enum ClaudeObservationReader {
                     if existing.terminal == nil, let closedAt = existing.closedAt, record.capturedAt > closedAt {
                         existing.closedAt = nil
                     }
-                    if existing.promptText == nil, let prompt = record.prompt {
+                    if existing.promptText == nil, let prompt {
                         existing.promptText = prompt.text
-                        existing.promptShortened = record.promptShortened || prompt.shortened
+                        existing.promptShortened = prompt.shortened
                     }
                     existing.startedAt = min(existing.startedAt, record.capturedAt)
                     existing.activityAt = max(existing.activityAt, record.capturedAt)
                     turns[turnID] = existing
                 } else {
-                    let prompt = record.prompt
                     turns[turnID] = Turn(session: record.session, prompt: promptID,
                                          promptText: prompt?.text,
-                                         promptShortened: prompt.map { record.promptShortened || $0.shortened } ?? false,
+                                         promptShortened: prompt?.shortened ?? false,
                                          lastMessage: nil, startedAt: record.capturedAt,
                                          updatedAt: record.capturedAt, activityAt: record.capturedAt,
                                          tool: nil, tools: [:], question: nil,
@@ -981,6 +992,17 @@ public enum ClaudeObservationReader {
     public struct KeptText: Equatable, Sendable {
         public let text: String
         public let shortened: Bool
+    }
+
+    /// Tags Claude Code puts at the start of a prompt it submits itself: a finished background task,
+    /// a slash command's expansion, or a local command's output.
+    static let claudeMessageTags = ["<task-notification>", "<command-name>", "<command-message>", "<local-command-"]
+
+    /// Whether a UserPromptSubmit `prompt` is a message Claude Code sent rather than the user's
+    /// words (#450). Only known tags count, so a prompt the user starts with other `<` text is kept.
+    public static func isClaudeMessage(_ prompt: String) -> Bool {
+        let text = prompt.drop { $0.isWhitespace }
+        return claudeMessageTags.contains { text.hasPrefix($0) }
     }
 
     /// The prompt as the helper stores it and the reader shows it: trimmed and, past

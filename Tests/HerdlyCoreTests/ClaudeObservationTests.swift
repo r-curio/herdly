@@ -51,6 +51,48 @@ import Testing
     #expect(running["short"]?.promptShortened == false)
 }
 
+@Test func claudeMessagePromptKeepsTheUsersLastPromptOnTheWorkingRow() throws {
+    let notification = "<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>"
+    let long = String(repeating: "Ship the batch ", count: 40)
+    var shortened = claudeRecord("UserPromptSubmit", at: 1, promptID: "p1",
+                                 prompt: ClaudeObservationReader.promptFallback(long)!.text, session: "kept")
+    shortened[ClaudeObservationReader.promptShortenedKey] = true
+    let root = try makeClaudeEvents([
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "ship #12 to #14", session: "plain"),
+        claudeRecord("Stop", at: 2, promptID: "p1", session: "plain"),
+        claudeRecord("UserPromptSubmit", at: 3, promptID: "p2", prompt: notification, session: "plain"),
+        shortened,
+        claudeRecord("UserPromptSubmit", at: 3, promptID: "p2", prompt: "  <command-message>review</command-message>",
+                     session: "kept"),
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: notification, session: "first"),
+        claudeRecord("UserPromptSubmit", at: 1, promptID: "p1", prompt: "<div> overflows on mobile", session: "html")
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let running = Dictionary(uniqueKeysWithValues: scanClaude(root).observations.compactMap { observation -> (String, AgentRunning)? in
+        if case let .running(value) = observation { return (value.identity.session.session, value) }
+        return nil
+    })
+
+    #expect(running["plain"]?.identity.turn == "p2")
+    #expect(running["plain"]?.prompt == "ship #12 to #14")
+    #expect(running["plain"]?.promptShortened == false)
+    #expect(running["kept"]?.prompt == ClaudeObservationReader.promptFallback(long)!.text)
+    #expect(running["kept"]?.promptShortened == true)
+    // No earlier prompt to show: the line is left out rather than showing Claude's message.
+    #expect(running["first"] != nil)
+    #expect(running["first"]?.prompt == nil)
+    #expect(running["html"]?.prompt == "<div> overflows on mobile")
+}
+
+@Test func claudeMessageDetectionNeedsAKnownTag() {
+    #expect(ClaudeObservationReader.isClaudeMessage("<task-notification>\n<task-id>x</task-id>"))
+    #expect(ClaudeObservationReader.isClaudeMessage("\n<command-name>/review</command-name>"))
+    #expect(ClaudeObservationReader.isClaudeMessage("<local-command-stdout></local-command-stdout>"))
+    #expect(!ClaudeObservationReader.isClaudeMessage("<div> overflows"))
+    #expect(!ClaudeObservationReader.isClaudeMessage("see <task-notification> above"))
+}
+
 @Test func claudeHelperShortenedPromptKeepsItsTextAndMark() throws {
     let stored = try #require(ClaudeObservationReader.promptFallback(String(repeating: "a", count: 500)))
     #expect(stored.shortened)
