@@ -164,6 +164,48 @@ private func temporaryEventsDirectory() throws -> URL {
     #expect(ClaudeSessionTitles.action(prompt: prompt, registered: nil, record: nil, now: 10, carriedOver: true) == .none)
 }
 
+@Test func claudeSessionTitleAfterClearWaitsForTheGeneratorWithinItsBound() throws {
+    let events = try temporaryEventsDirectory()
+    defer { try? FileManager.default.removeItem(at: events) }
+    let pending = ClaudeSessionTitles.Record(status: .pending, attempts: 1, updatedAt: 0)
+    var clock = 0.0
+    var sleeps: [TimeInterval] = []
+
+    // The generator reports while the prompt waits: its title comes back.
+    #expect(ClaudeSessionTitles.save(pending, sessionID: "cleared", in: events))
+    let title = ClaudeSessionTitles.awaitReadyTitle(sessionID: "cleared", in: events, timeout: 8, now: { clock }) { interval in
+        sleeps.append(interval)
+        clock += interval
+        if clock >= 1 {
+            ClaudeSessionTitles.save(.init(status: .ready, title: "Notch Title After Clear", attempts: 1, updatedAt: clock),
+                                     sessionID: "cleared", in: events)
+        }
+    }
+    #expect(title == "notch-title-after-clear")
+    #expect(sleeps.allSatisfy { $0 <= 0.2 })
+
+    // Still pending at the bound: nothing, and no wait past it.
+    clock = 0
+    sleeps = []
+    #expect(ClaudeSessionTitles.save(pending, sessionID: "slow", in: events))
+    #expect(ClaudeSessionTitles.awaitReadyTitle(sessionID: "slow", in: events, timeout: 0.5, now: { clock }) {
+        sleeps.append($0)
+        clock += $0
+    } == nil)
+    #expect(abs(sleeps.reduce(0, +) - 0.5) < 0.0001)
+
+    // A failure, a ready record with no usable title, or no record ends the wait at once.
+    for (session, record) in [("failed", ClaudeSessionTitles.Record(status: .failed, attempts: 1, updatedAt: 0)),
+                              ("blank", ClaudeSessionTitles.Record(status: .ready, title: "!!", attempts: 1, updatedAt: 0))] {
+        #expect(ClaudeSessionTitles.save(record, sessionID: session, in: events))
+    }
+    for session in ["failed", "blank", "missing"] {
+        var slept = false
+        #expect(ClaudeSessionTitles.awaitReadyTitle(sessionID: session, in: events, timeout: 8, now: { 0 }) { _ in slept = true } == nil)
+        #expect(!slept)
+    }
+}
+
 @Test func claudeSessionTitleIgnoresUnreadableRecordsWhenCheckingCarryOver() throws {
     let events = try temporaryEventsDirectory()
     defer { try? FileManager.default.removeItem(at: events) }

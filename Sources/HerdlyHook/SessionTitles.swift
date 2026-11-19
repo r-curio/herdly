@@ -5,8 +5,10 @@ import HerdlyCore
 /// Runs the helper as a detached title generator instead of a hook.
 let claudeTitleGeneratorMarker = "--generate-claude-title"
 
-/// The `UserPromptSubmit` output that sets a Haiku-written session title, or nil. Returns at
-/// once: generation runs in a detached helper process, and its title is applied on a later prompt.
+/// The `UserPromptSubmit` output that sets a Haiku-written session title, or nil. Generation runs
+/// in a detached helper process, and its title is applied on a later prompt. The one exception is
+/// the first prompt after a `/clear` carried over a Herdly title: it waits up to
+/// `ClaudeSessionTitles.carriedOverWait` and applies the new title at once when it is ready.
 /// Every failure (opt-in off, no `CLAUDE_PID`, unreadable or mismatched registry entry, a record
 /// that cannot be saved) leaves the session's name alone.
 func claudeSessionTitleOutput(_ object: [String: Any], eventsDirectory: URL,
@@ -40,11 +42,21 @@ func claudeSessionTitleOutput(_ object: [String: Any], eventsDirectory: URL,
         guard ClaudeSessionTitles.save(.init(status: .pending, attempts: attempts, updatedAt: now),
                                        sessionID: sessionID, in: eventsDirectory) else { return nil }
         ClaudeSessionTitles.prune(in: eventsDirectory)
-        if !spawnTitleGenerator(source: source, sessionID: sessionID, eventsDirectory: eventsDirectory, claudePID: pid) {
+        guard spawnTitleGenerator(source: source, sessionID: sessionID, eventsDirectory: eventsDirectory, claudePID: pid) else {
             ClaudeSessionTitles.save(.init(status: .failed, attempts: attempts, updatedAt: now),
                                      sessionID: sessionID, in: eventsDirectory)
+            return nil
         }
-        return nil
+        // After a `/clear` the session still shows the previous conversation's title, so this one
+        // prompt waits briefly for the new title rather than leaving the stale one for a whole turn.
+        // A fresh session's folder placeholder is not misleading, so it never waits.
+        guard carriedOver,
+              let title = ClaudeSessionTitles.awaitReadyTitle(sessionID: sessionID, in: eventsDirectory),
+              let output = ClaudeSessionTitles.hookOutput(title: title),
+              ClaudeSessionTitles.save(.init(status: .applied, title: title, attempts: attempts,
+                                             updatedAt: Date().timeIntervalSince1970),
+                                       sessionID: sessionID, in: eventsDirectory) else { return nil }
+        return output
     }
 }
 

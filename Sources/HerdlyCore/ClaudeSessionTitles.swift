@@ -2,10 +2,11 @@ import Foundation
 
 /// Optional Haiku-written titles for Claude sessions that still carry Claude's derived placeholder
 /// name (`myproject-22`), or a title Herdly gave an earlier session that `/clear` carried over to
-/// this one (Claude keeps the process's name, `nameSource: "hook"`, across a clear). The hook never delays a prompt for a title: the first eligible prompt
+/// this one (Claude keeps the process's name, `nameSource: "hook"`, across a clear). The first eligible prompt
 /// starts a detached generator, and a later prompt hands the finished title to Claude through
 /// `hookSpecificOutput.sessionTitle`, which Claude records in its session registry with
-/// `nameSource: "hook"`. A title is offered only while that registry entry still shows the derived
+/// `nameSource: "hook"`; only after a `/clear` does that first prompt wait, briefly, to hand it over
+/// itself (`awaitReadyTitle`). A title is offered only while that registry entry still shows the derived
 /// name or a carried-over Herdly title, so a `/rename`, `--name`, or Claude's own AI title always
 /// wins, and an unreadable registry offers nothing. Titles are presentation only; they never identify a session or a target.
 public enum ClaudeSessionTitles {
@@ -19,6 +20,11 @@ public enum ClaudeSessionTitles {
     /// A generator that has not reported by then is presumed dead, so a later prompt may retry.
     public static let pendingLifetime: TimeInterval = 120
     public static let maximumAttempts = 2
+    /// How long the first prompt after a `/clear` waits for its generator, so the previous
+    /// conversation's title does not linger through the new one's first turn. Well inside the
+    /// hook timeout; a slower title is applied on a later prompt instead.
+    public static let carriedOverWait: TimeInterval = 8
+    static let readyPollInterval: TimeInterval = 0.2
     public static let recordAge: TimeInterval = 7 * 24 * 60 * 60
     static let maximumRecordSize = 4 * 1024
     public static let maximumRegistryEntrySize = 64 * 1024
@@ -161,6 +167,29 @@ public enum ClaudeSessionTitles {
             if record.status == .applied, record.title == registered.name { return true }
         }
         return false
+    }
+
+    /// Polls this session's record until its generator reports, returning the title once it is
+    /// ready, or nil on failure, an unreadable record, or `timeout`. `now` and `sleep` are passed
+    /// in so the bound is testable without real waits.
+    public static func awaitReadyTitle(sessionID: String, in eventsDirectory: URL,
+                                       timeout: TimeInterval = carriedOverWait,
+                                       now: () -> Double = { Date().timeIntervalSince1970 },
+                                       sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }) -> String? {
+        let deadline = now() + timeout
+        while true {
+            switch load(sessionID: sessionID, in: eventsDirectory) {
+            case let record? where record.status == .ready:
+                return record.title.flatMap(sanitizedTitle)
+            case let record? where record.status == .pending:
+                break
+            default:
+                return nil
+            }
+            let remaining = deadline - now()
+            guard remaining > 0 else { return nil }
+            sleep(min(readyPollInterval, remaining))
+        }
     }
 
     // MARK: - Generation
