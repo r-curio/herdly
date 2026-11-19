@@ -218,9 +218,9 @@ private let pullRequestSeven = WorkPullRequest(repository: "o/repo", number: 7)
                                                                            entries: ["? a"])))
     #expect(WorkStatusRule.verdict(branch: .unknown, local: dirty, pullRequest: mergedPR) == WorkStatus.noVerdict)
     #expect(WorkStatusRule.verdict(branch: .ambiguous, local: dirty, pullRequest: mergedPR) == WorkStatus.noVerdict)
-    #expect(WorkStatusRule.verdict(branch: .detached(directory: "/w/repo"), local: detachedDirty, pullRequest: mergedPR)
+    #expect(WorkStatusRule.verdict(branch: .detached(directory: "/w/repo", startedAt: 0), local: detachedDirty, pullRequest: mergedPR)
         == .uncommitted)
-    #expect(WorkStatusRule.verdict(branch: .detached(directory: "/w/repo"), local: dirty, pullRequest: nil) == WorkStatus.noVerdict)
+    #expect(WorkStatusRule.verdict(branch: .detached(directory: "/w/repo", startedAt: 0), local: dirty, pullRequest: nil) == WorkStatus.noVerdict)
 }
 
 // MARK: - Branch memory
@@ -295,7 +295,7 @@ private func sighting(_ turn: AgentTurnIdentity, _ directory: String = "/w/repo"
 @Test func aDetachedHeadIsRememberedWithoutABranch() {
     var memory = WorkBranchMemory()
     memory.observe([sighting(turnA, "/w/repo", .detached("a6b1eae"))], at: 1_000)
-    #expect(memory.branch(for: turnA) == .detached(directory: "/w/repo"))
+    #expect(memory.branch(for: turnA) == .detached(directory: "/w/repo", startedAt: 1_000))
     #expect(memory.unreadRepositories.isEmpty)
 }
 
@@ -512,7 +512,7 @@ private func reader(_ runner: FakeRunner, open: Bool = true, cliGate: WorkStatus
     let reader = reader(runner, open: false)
     #expect(reader.verdict(feature).verdict == WorkStatus.noVerdict)
     #expect(reader.repository("/w/repo") == .notOnGitHub)
-    #expect(reader.verdict(.detached(directory: "/w/repo")).verdict == WorkStatus.noVerdict)
+    #expect(reader.verdict(.detached(directory: "/w/repo", startedAt: 0)).verdict == WorkStatus.noVerdict)
     #expect(runner.calls.isEmpty)
 }
 
@@ -1171,4 +1171,105 @@ private func item(approval session: AgentSessionIdentity, turn: String) -> Agent
         == WorkStatusLabel(verdict: .checksFailing, pullRequest: WorkPullRequest(repository: "o/repo", number: 431)))
     model.setEnabled(false)
     #expect(model.finishedLabel(for: turnA) == nil)
+}
+
+// MARK: - Changes this turn left (#446)
+
+private let entry1 = "1 .M N... 100644 100644 100644 \(commit) \(commit)"
+
+@Test func everyChangedEntryKeepsItsPathAndKind() throws {
+    let reading = try #require(GitLocalReading.parse(status: status(entries: [
+        "\(entry1) Sources/a b.swift",
+        "1 D. N... 100644 000000 000000 \(commit) \(commit) gone.swift",
+        "1 .D N... 100644 100644 000000 \(commit) \(commit) sub/removed.swift",
+        "2 R. N... 100644 100644 100644 \(commit) \(commit) R100 new name.swift\told.swift",
+        "u UD N... 100644 100644 000000 100644 \(commit) \(commit) \(commit) both.swift",
+        "? notes/",
+        "? ../é.txt",
+        "? \"q\\\"uote\"",
+    ])))
+    #expect(reading.changes == [
+        GitChange(path: "Sources/a b.swift", kind: .file),
+        GitChange(path: "gone.swift", kind: .deleted),
+        GitChange(path: "sub/removed.swift", kind: .deleted),
+        GitChange(path: "new name.swift", kind: .file),
+        GitChange(path: "both.swift", kind: .file),
+        GitChange(path: "notes/", kind: .untrackedFolder),
+        GitChange(path: "../é.txt", kind: .file),
+        GitChange(path: nil, kind: .file),
+    ])
+    #expect(reading.changed && reading.hasTurnChanges)
+}
+
+@Test func changesPredateATurnOnlyWhenEveryTimeIsKnownAndOlder() {
+    let a = GitChange(path: "a", kind: .file), b = GitChange(path: "b", kind: .deleted)
+    let times: [String: Double] = ["a": 900, "b": 950]
+    let known: (GitChange) -> Double? = { $0.path.flatMap { times[$0] } }
+    #expect(GitChangeAge.allPredate([a, b], start: 1_000, modified: known))
+    // An edit to a file that was dirty already moves its time past the start.
+    #expect(!GitChangeAge.allPredate([a, b], start: 1_000) { $0.path == "a" ? 1_200 : 950 })
+    // Inside the slack still counts as the turn's.
+    #expect(!GitChangeAge.allPredate([a], start: 1_000) { _ in 999.5 })
+    #expect(!GitChangeAge.allPredate([a, GitChange(path: "c", kind: .file)], start: 1_000, modified: known))
+    #expect(!GitChangeAge.allPredate([GitChange(path: nil, kind: .file)], start: 1_000) { _ in 0 })
+    #expect(!GitChangeAge.allPredate([], start: 1_000, modified: known))
+    let many = Array(repeating: a, count: GitChangeAge.maximumChecked + 1)
+    #expect(!GitChangeAge.allPredate(many, start: 1_000, modified: known))
+}
+
+@Test func aFolderDirtyFromBeforeTheTurnReadsAsIfClean() throws {
+    var dirty = try #require(GitLocalReading.parse(status: status(entries: ["? .DS_Store"])))
+    dirty.changesPredateTurn = true
+    #expect(!dirty.hasTurnChanges)
+    #expect(WorkStatusRule.verdict(branch: feature, local: dirty, pullRequest: open(.passed)) == .checksPassed)
+    var ahead = try #require(GitLocalReading.parse(status: status(ahead: 2, entries: ["? .DS_Store"])))
+    ahead.changesPredateTurn = true
+    #expect(WorkStatusRule.verdict(branch: feature, local: ahead, pullRequest: nil) == .notPushed)
+    var detached = try #require(GitLocalReading.parse(status: status(head: "(detached)", upstream: nil, ahead: nil,
+                                                                      entries: ["? a"])))
+    detached.changesPredateTurn = true
+    #expect(WorkStatusRule.verdict(branch: .detached(directory: "/w/repo", startedAt: 1_000), local: detached,
+                                   pullRequest: nil) == WorkStatus.noVerdict)
+}
+
+@Test func theReaderComparesEachChangeWithTheTurnStart() {
+    let dirty = status(entries: ["? .DS_Store", "\(entry1) README.md"])
+    func verdict(_ time: Double?) -> WorkStatus {
+        WorkStatusReader(runner: FakeRunner(reply(status: dirty)), gate: WorkStatusGate(open: true),
+                         git: "/opt/homebrew/bin/git", gh: "/opt/homebrew/bin/gh", home: "/h",
+                         fileTimes: { _, folder in folder == "/w/repo" ? time : nil }).verdict(feature).verdict
+    }
+    // feature started at 1_000; the default reply's pull request has a failing check.
+    #expect(verdict(500) == .checksFailing)
+    #expect(verdict(1_500) == .uncommitted)
+    #expect(verdict(nil) == .uncommitted)
+    let runner = FakeRunner(reply(status: dirty))
+    _ = reader(runner).verdict(feature)
+    #expect(runner.calls.contains { $0.arguments.contains("status") && $0.arguments.contains("core.quotePath=false") })
+}
+
+@Test func fileTimesComeFromTheEntryItsFolderOrItsNewestContent() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-446-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let manager = FileManager.default
+    try manager.createDirectory(at: root.appendingPathComponent("sub/notes/deep"), withIntermediateDirectories: true)
+    func write(_ path: String, at time: Double) throws {
+        let url = root.appendingPathComponent(path)
+        if !manager.fileExists(atPath: url.path) { try Data("x".utf8).write(to: url) }
+        try manager.setAttributes([.modificationDate: Date(timeIntervalSince1970: time)], ofItemAtPath: url.path)
+    }
+    try write("a.swift", at: 1_000)
+    try write("sub/notes/deep/new.md", at: 3_000)
+    try write("sub/notes/deep", at: 1_200)
+    try write("sub/notes", at: 2_000)
+    try write("sub", at: 1_500)
+    let folder = root.path
+    #expect(WorkTreeFileTimes.latest(GitChange(path: "a.swift", kind: .file), in: folder) == 1_000)
+    #expect(WorkTreeFileTimes.latest(GitChange(path: "sub/gone.swift", kind: .deleted), in: folder) == 1_500)
+    #expect(WorkTreeFileTimes.latest(GitChange(path: "sub/notes/", kind: .untrackedFolder), in: folder) == 3_000)
+    // Relative to a subfolder, as git prints it there.
+    #expect(WorkTreeFileTimes.latest(GitChange(path: "../a.swift", kind: .file), in: root.appendingPathComponent("sub").path)
+        == 1_000)
+    #expect(WorkTreeFileTimes.latest(GitChange(path: "missing.swift", kind: .file), in: folder) == nil)
+    #expect(WorkTreeFileTimes.latest(GitChange(path: nil, kind: .file), in: folder) == nil)
 }

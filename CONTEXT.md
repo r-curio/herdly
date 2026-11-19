@@ -106,7 +106,7 @@ A particular completion cleared by explicit dismissal; for a supported CLI surfa
 A completion that arrived while the companion was not observing. The user may have viewed it unobserved, so it is retained without a sound and offered for opening or dismissal; it is never described as unread.
 
 **Work status**:
-How far a finished session's work got, as a verdict: uncommitted, not pushed, checks running, checks failing, conflict, checks passed, or merged; otherwise none. It is about the branch the companion saw that session on while the turn ran, and it reports only facts it read from git and the branch's pull request; it never judges the code. Anything uncertain (the branch changed mid-turn, two sessions shared the folder, nothing could be read) is none, never a guess. It is presentation only: it never orders the queue, counts as work, or acknowledges anything.
+How far a finished session's work got, as a verdict: uncommitted, not pushed, checks running, checks failing, conflict, checks passed, or merged; otherwise none. It is about the branch the companion saw that session on while the turn ran, and it reports only facts it read from git and the branch's pull request; it never judges the code. Uncommitted means changes the turn left: files dirty from before the turn started do not count. Anything uncertain (the branch changed mid-turn, two sessions shared the folder, nothing could be read) is none, never a guess. It is presentation only: it never orders the queue, counts as work, or acknowledges anything.
 _Avoid_: Build status, CI status, health
 
 **Resolution evidence**:
