@@ -64,15 +64,19 @@ struct WorkStatusReader: Sendable {
     let git: String?
     let gh: String?
     let home: String
+    /// When a change was last made, given the folder git ran in (`WorkTreeFileTimes.latest`).
+    let fileTimes: @Sendable (GitChange, String) -> Double?
 
     init(runner: any WorkStatusCommandRunning, gate: WorkStatusGate, cliGate: WorkStatusGate = WorkStatusGate(open: true),
-         git: String?, gh: String?, home: String = NSHomeDirectory()) {
+         git: String?, gh: String?, home: String = NSHomeDirectory(),
+         fileTimes: @escaping @Sendable (GitChange, String) -> Double? = WorkTreeFileTimes.latest) {
         self.runner = runner
         self.gate = gate
         self.cliGate = cliGate
         self.git = git
         self.gh = gh
         self.home = home
+        self.fileTimes = fileTimes
     }
 
     /// The installed tools, found in their usual locations.
@@ -86,11 +90,11 @@ struct WorkStatusReader: Sendable {
 
     /// The finished turn's verdict from fresh readings. Nothing runs while the gate is closed.
     func verdict(_ branch: WorkBranch) -> WorkStatusResult {
-        let local = branch.directory.flatMap(local)
+        let reading = branch.directory.flatMap { self.local($0, turnStartedAt: branch.startedAt) }
         let lookup = branch.pullRequestQuery.map {
             pullRequest(repository: $0.repository, branch: $0.branch, startedAt: $0.startedAt)
         }
-        return WorkStatusRule.result(branch: branch, local: local, pullRequest: lookup)
+        return WorkStatusRule.result(branch: branch, local: reading, pullRequest: lookup)
     }
 
     /// GitHub's "owner/name" for the folder's `origin`, read once while a turn runs. No origin, another
@@ -104,11 +108,18 @@ struct WorkStatusReader: Sendable {
     }
 
     /// The folder's branch, changes and unpushed commits. Nil when it is not a work tree, or any read
-    /// fails, times out or prints something unexpected.
-    func local(_ directory: String) -> GitLocalReading? {
-        guard case .succeeded(let output)? = git(directory, ["status", "--porcelain=v2", "--branch",
-                                                            "--untracked-files=normal"]),
+    /// fails, times out or prints something unexpected. With `turnStartedAt`, changes that all predate
+    /// the turn are marked so (#446): the folder was dirty before and the turn left nothing.
+    func local(_ directory: String, turnStartedAt: Double? = nil) -> GitLocalReading? {
+        // Unquoted non-ASCII paths, so their times can be read; git still quotes a quote or backslash.
+        guard case .succeeded(let output)? = git(directory, ["-c", "core.quotePath=false", "status", "--porcelain=v2",
+                                                            "--branch", "--untracked-files=normal"]),
               var reading = GitLocalReading.parse(status: String(decoding: output, as: UTF8.self)) else { return nil }
+        if reading.changed, let turnStartedAt {
+            reading.changesPredateTurn = GitChangeAge.allPredate(reading.changes, start: turnStartedAt) {
+                fileTimes($0, directory)
+            }
+        }
         if reading.needsRemoteCount {
             // Count commits on no remote, but only when a remote exists to push to.
             if case .succeeded(let remotes)? = git(directory, ["remote"]),
@@ -181,6 +192,57 @@ struct WorkStatusReader: Sendable {
             if let value = inherited[key] { environment[key] = value }
         }
         return environment
+    }
+}
+
+/// When a changed entry was last modified (#446), read without following symbolic links. Read-only;
+/// nothing is opened. The status-change time is not used: macOS changes it for metadata such as "last
+/// opened", which would make an untouched file look new. A mode-only change made by the turn is missed.
+enum WorkTreeFileTimes {
+    /// Most entries an untracked folder may hold; a larger one has no known time.
+    static let maximumFolderEntries = 2_000
+
+    /// - `.file`: the entry itself; nil when it is gone or unreadable.
+    /// - `.deleted`: the nearest folder above it that still exists, since removing an entry changes
+    ///   its folder's time.
+    /// - `.untrackedFolder`: the newest entry inside it, nil past `maximumFolderEntries`.
+    static func latest(_ change: GitChange, in directory: String) -> Double? {
+        guard let path = change.path else { return nil }
+        let full = URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent(path).standardizedFileURL
+        switch change.kind {
+        case .file:
+            return time(full.path)
+        case .deleted:
+            var folder = full.deletingLastPathComponent()
+            for _ in 0..<64 {
+                if let found = time(folder.path) { return found }
+                guard folder.path != "/" else { return nil }
+                folder = folder.deletingLastPathComponent()
+            }
+            return nil
+        case .untrackedFolder:
+            guard var newest = time(full.path) else { return nil }
+            let keys: [URLResourceKey] = [.contentModificationDateKey]
+            // Symbolic links are listed, not followed.
+            guard let entries = FileManager.default.enumerator(at: full, includingPropertiesForKeys: keys, options: [],
+                                                               errorHandler: { _, _ in false }) else { return nil }
+            var count = 0
+            for case let entry as URL in entries {
+                count += 1
+                guard count <= maximumFolderEntries, let values = try? entry.resourceValues(forKeys: Set(keys)),
+                      let modified = values.contentModificationDate else { return nil }
+                newest = max(newest, modified.timeIntervalSince1970)
+            }
+            return newest
+        }
+    }
+
+    /// `lstat`'s modification time, nil when the entry cannot be read.
+    private static func time(_ path: String) -> Double? {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return nil }
+        func seconds(_ spec: timespec) -> Double { Double(spec.tv_sec) + Double(spec.tv_nsec) / 1_000_000_000 }
+        return seconds(info.st_mtimespec)
     }
 }
 

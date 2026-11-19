@@ -71,7 +71,7 @@ public enum WorkBranch: Equatable, Sendable {
     case unknown
     /// The branch or folder changed mid-turn, or another session worked in the same folder.
     case ambiguous
-    case detached(directory: String)
+    case detached(directory: String, startedAt: Double)
     /// `repository` is GitHub's "owner/name" from the folder's `origin`, nil while unread or when the
     /// folder is not on GitHub.
     case branch(name: String, directory: String, startedAt: Double, repository: String?)
@@ -80,7 +80,15 @@ public enum WorkBranch: Equatable, Sendable {
     public var directory: String? {
         switch self {
         case .unknown, .ambiguous: nil
-        case .detached(let directory), .branch(_, let directory, _, _): directory
+        case .detached(let directory, _), .branch(_, let directory, _, _): directory
+        }
+    }
+
+    /// When the turn started, nil when there is nothing to read.
+    public var startedAt: Double? {
+        switch self {
+        case .unknown, .ambiguous: nil
+        case .detached(_, let startedAt), .branch(_, _, let startedAt, _): startedAt
         }
     }
 
@@ -201,7 +209,7 @@ public struct WorkBranchMemory: Equatable, Sendable {
         guard let entry = entries[turn], !entry.heads.isEmpty else { return .unknown }
         guard let (directory, head) = entry.single else { return .ambiguous }
         switch head {
-        case .detached: return .detached(directory: directory)
+        case .detached: return .detached(directory: directory, startedAt: entry.startedAt)
         case .branch(let name):
             let repository: String? = if case .gitHub(let name) = entry.repository { name } else { nil }
             return .branch(name: name, directory: directory, startedAt: entry.startedAt, repository: repository)
@@ -259,23 +267,33 @@ public struct GitLocalReading: Equatable, Sendable {
     public let ahead: Int?
     /// Any changed, staged, conflicted or untracked file.
     public let changed: Bool
+    /// Each changed entry, in git's order (#446). Empty when the reading was made without them.
+    public let changes: [GitChange]
+    /// Every change was made before the turn started (`GitChangeAge.allPredate`): the folder was dirty
+    /// already and this turn left nothing of its own. Set by the reader; false when unknown.
+    public var changesPredateTurn = false
     /// Commits not on any remote. `ahead` when the upstream is this branch's own remote branch;
     /// otherwise a separate count (`needsRemoteCount`). Nil when it cannot be known: the upstream
     /// branch is gone, no remote exists, or the count failed.
     public var unpushed: Int?
 
-    public init(head: GitHead, commit: String?, upstream: String?, ahead: Int?, changed: Bool, unpushed: Int? = nil) {
+    public init(head: GitHead, commit: String?, upstream: String?, ahead: Int?, changed: Bool, unpushed: Int? = nil,
+                changes: [GitChange] = []) {
         self.head = head
         self.commit = commit
         self.upstream = upstream
         self.ahead = ahead
         self.changed = changed
+        self.changes = changes
         self.unpushed = unpushed ?? (Self.tracksOwnBranch(head: head, upstream: upstream) ? ahead : nil)
     }
 
     /// A branch whose upstream is another branch (a worktree made from `origin/main`) or that has
     /// none is compared with every remote instead: ahead of `main` is not "not pushed". A branch
     /// whose own upstream is gone (deleted after a merge) is left unknown.
+    /// Changes this turn left: dirty, and not all from before the turn (#446).
+    public var hasTurnChanges: Bool { changed && !changesPredateTurn }
+
     public var needsRemoteCount: Bool {
         guard case .branch = head, commit != nil, unpushed == nil else { return false }
         guard upstream != nil else { return true }
@@ -294,6 +312,7 @@ public struct GitLocalReading: Equatable, Sendable {
     public static func parse(status: String) -> GitLocalReading? {
         guard status.utf8.count <= maximumBytes else { return nil }
         var oid: String?, headName: String?, upstream: String?, ahead: Int?, changed = false
+        var changes: [GitChange] = []
         for raw in status.split(separator: "\n", omittingEmptySubsequences: true) {
             let line = String(raw)
             if line.hasPrefix("# ") {
@@ -313,6 +332,7 @@ public struct GitLocalReading: Equatable, Sendable {
                 }
             } else if ["1 ", "2 ", "u ", "? "].contains(where: line.hasPrefix) {
                 changed = true
+                changes.append(GitChange(entry: line))
             } else {
                 return nil
             }
@@ -328,7 +348,7 @@ public struct GitLocalReading: Equatable, Sendable {
             head = .branch(headName)
         }
         return GitLocalReading(head: head, commit: commit?.lowercased(), upstream: upstream,
-                               ahead: upstream == nil ? nil : ahead, changed: changed)
+                               ahead: upstream == nil ? nil : ahead, changed: changed, changes: changes)
     }
 
     /// A `git rev-list --count` result: one non-negative integer.
@@ -336,6 +356,66 @@ public struct GitLocalReading: Equatable, Sendable {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count <= 12, let value = Int(trimmed), value >= 0 else { return nil }
         return value
+    }
+}
+
+/// One changed entry from `git status --porcelain=v2` (#446), its path relative to the folder git ran in.
+public struct GitChange: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
+        /// A tracked or untracked file that is still there.
+        case file
+        /// Deleted from the work tree: only its folder can say when.
+        case deleted
+        /// An untracked folder git lists without its contents ("dir/").
+        case untrackedFolder
+    }
+
+    /// Nil when git quoted it (a quote, backslash or control character): it is not decoded.
+    public let path: String?
+    public let kind: Kind
+
+    public init(path: String?, kind: Kind) {
+        self.path = path
+        self.kind = kind
+    }
+
+    /// From one entry line ("1 ", "2 ", "u " or "? "). A line short of its fields has no path.
+    init(entry line: String) {
+        let fields = line.split(separator: " ", omittingEmptySubsequences: false)
+        // Fields before the path: ordinary 8, rename or copy 9, unmerged 10, untracked 1.
+        let leading = switch fields.first { case "1": 8; case "2": 9; case "u": 10; default: 1 }
+        let status = fields.count > 1 ? fields[1] : ""
+        guard fields.count > leading else { self.init(path: nil, kind: .file); return }
+        var path = fields[leading...].joined(separator: " ")
+        // A rename or copy is "path<TAB>origPath"; the new path is the one in the work tree.
+        if fields.first == "2", let tab = path.firstIndex(of: "\t") { path = String(path[..<tab]) }
+        let quoted = path.hasPrefix("\"") || path.isEmpty
+        // "D" in either column of an ordinary or renamed entry: the file is gone from the work tree.
+        // An unmerged entry's "D" means one side deleted it; the file may still be there.
+        let kind: Kind = if fields.first == "?" { path.hasSuffix("/") ? .untrackedFolder : .file }
+            else if fields.first != "u" && status.contains("D") { .deleted }
+            else { .file }
+        self.init(path: quoted ? nil : path, kind: kind)
+    }
+}
+
+/// Whether a dirty folder's changes all predate a turn (#446). Pure: the times come from `modified`.
+public enum GitChangeAge {
+    /// Most entries checked; a longer list counts as this turn's.
+    public static let maximumChecked = 500
+    /// A change this close before the start still counts as the turn's, for clock and timestamp rounding.
+    public static let slack: Double = 1
+
+    /// True only when every change has a known time earlier than `start`. A quoted path, an unknown
+    /// time, or too many entries count as the turn's, which is what the folder alone would say.
+    /// - `modified`: the latest modification time for a change (its folder's for a deleted file, the
+    ///   newest entry inside for an untracked folder), nil when it cannot be read.
+    public static func allPredate(_ changes: [GitChange], start: Double, modified: (GitChange) -> Double?) -> Bool {
+        guard !changes.isEmpty, changes.count <= maximumChecked else { return false }
+        return changes.allSatisfy { change in
+            guard change.path != nil, let time = modified(change) else { return false }
+            return time < start - slack
+        }
     }
 }
 
@@ -591,7 +671,7 @@ public enum WorkStatusRule {
             return WorkStatusResult(.noVerdict)
         case .detached:
             // No pull request for a detached HEAD, and no upstream to compare with.
-            guard let local, case .detached = local.head, local.changed else { return WorkStatusResult(.noVerdict) }
+            guard let local, case .detached = local.head, local.hasTurnChanges else { return WorkStatusResult(.noVerdict) }
             return WorkStatusResult(.uncommitted)
         case .branch(let name, _, _, let repository):
             let found: GitHubPullRequest? = if case .found(let request)? = pullRequest { request } else { nil }
@@ -601,7 +681,8 @@ public enum WorkStatusRule {
             // then git describes another branch and says nothing about this turn's.
             let matching = local.flatMap { $0.head == .branch(name) ? $0 : nil }
             if let matching {
-                if matching.changed { return WorkStatusResult(.uncommitted) }
+                // Only this turn's changes: a folder dirty from before says nothing about it (#446).
+                if matching.hasTurnChanges { return WorkStatusResult(.uncommitted) }
                 guard let unpushed = matching.unpushed else { return WorkStatusResult(.noVerdict) }
                 if unpushed > 0 { return WorkStatusResult(.notPushed) }
             }
