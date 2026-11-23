@@ -26,5 +26,6 @@ Probed on 2026-11-23 against Rex 0.1.0 (2061), server `0.1.0-preview.21` (API re
 ## Not established
 
 - Whether the app follows `session.focus_block` on a session it isn't showing (expected: not, hence the select).
-- That a Codex CLI in Rex titles its block with its shortened session ID and that a lone digit `write` commits a Codex question answer; Rex's question digits stay off until a live run shows it.
-- Open, visits and typed replies in the running app: unit-tested, not yet run live.
+- Which session the app shows: no event (`rex events --all`), method or client action reports it, so visits with several sessions stay unknown.
+
+The acceptance run that followed is in [evidence/rex-acceptance.md](evidence/rex-acceptance.md).

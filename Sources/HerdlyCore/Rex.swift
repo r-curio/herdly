@@ -569,9 +569,10 @@ public enum RexPresentation {
 /// paste, nothing added).
 public enum RexInput {
     /// Whether Rex may carry a Codex question's digit. ADR 0017 keeps a host's question route off until a
-    /// live run shows the digit alone commits there; Rex has had no such run, so a Codex question in Rex
-    /// shows "Answer this in Codex."
-    public static let questionDigitsProvenLive = false
+    /// live run shows the digit alone commits there; Rex's run on 2026-11-23 showed it
+    /// (`docs/evidence/rex-acceptance.md`). Turning this off again makes a Codex question in Rex show
+    /// "Answer this in Codex."
+    public static let questionDigitsProvenLive = true
 
     /// Claude's text and CR together; Codex's text, then a CR alone, as on WezTerm.
     public static func payload(_ write: TypedWrite) -> String {
