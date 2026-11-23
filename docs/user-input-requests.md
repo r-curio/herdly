@@ -165,7 +165,7 @@ Answering walkthrough (Codex CLI in Ghostty 1.3.1, the trusted lab project with 
 2. Three questions, from the clicked card: select 1 and Send, then 2 and Send, then 1 and Send. Expect "Typed 1 into this session's tab. Codex should now show question 2." with question 2's options and the card still open, then the same for 3, then the queue with the note, then the clear; the probe's recorded digits must read 1, 2, 1.
 3. An `isOther` question: only the listed options are buttons; Codex's Other row is never chosen.
 4. Race: answer in the TUI first, then Send in the notch within two seconds. Expect "Codex already has an answer or the turn ended; nothing was sent." or the row already gone, and no stray digit in the composer.
-5. Ghostty controls off: Set up Ghostty and Dismiss, no option buttons.
+5. Every terminal switched off: Set up a Terminal and Dismiss, no option buttons. Ghostty off or awaiting permission alone hides only Ghostty's keys.
 6. Split the session's tab: the buttons refuse with "No unique live, unsplit tab", nothing sent.
 7. Restart mid-call: select option 1 of a two-question call and Send, quit Herdly, relaunch. Expect the card back as pending on question 1 with no chime and nothing re-sent; finish in Codex.
 8. Unconfirmed: interrupt the turn right after sending the last option. Expect "Typed n into this session's tab, but Codex has not recorded an answer." within ten seconds and no second digit in the probe or the tab.

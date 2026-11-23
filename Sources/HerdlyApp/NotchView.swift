@@ -2009,7 +2009,7 @@ struct Notch: View {
     private enum CodexFooterMode {
         /// The Codex app without the daemon: "Open in Codex" only.
         case desktopReadOnly
-        /// A CLI session with every terminal host off: "Set up Ghostty" only.
+        /// A CLI session with every terminal host off: "Set up a Terminal" only.
         case setUpTerminal
         /// Open, and the card's Next or Send where its route answers.
         case answer
@@ -2051,9 +2051,9 @@ struct Notch: View {
                 }
                 Spacer(minLength: 6)
             case .setUpTerminal:
-                NotchButton(title: "Set up Ghostty", emphasized: true, action: model.showControls)
-                    .accessibilityLabel("Set up Ghostty: \(subject)")
-                    .accessibilityHint("Opens Herdly controls to enable Ghostty controls.")
+                NotchButton(title: "Set up a Terminal", emphasized: true, action: model.showControls)
+                    .accessibilityLabel("Set up a terminal: \(subject)")
+                    .accessibilityHint("Opens Herdly controls to switch on a terminal.")
                 Spacer(minLength: 6)
             case .answer:
                 if codexOpen {
@@ -2329,7 +2329,7 @@ struct Notch: View {
                 .accessibilityLabel("Open Session: \(subject)")
                 .accessibilityHint(NotchShortcut.hint(Self.resultOpenHint(item.session.source), shortcut: shortcut))
         } else {
-            // No Open: a Claude result that cannot be opened may offer "Set up Ghostty" instead.
+            // No Open: a Claude result that cannot be opened may offer "Set up a Terminal" instead.
             claudeReturnControl(item, subject: subject, openTitle: Self.rowOpenTitle,
                                 openHint: Self.resultOpenHint(item.session.source))
         }
@@ -2809,7 +2809,7 @@ struct Notch: View {
                 .accessibilityLabel("Open Session: \(subject)")
                 .accessibilityHint(NotchShortcut.hint(hint, shortcut: shortcut))
         } else {
-            // No Open: a Claude card that cannot be opened may offer "Set up Ghostty" instead.
+            // No Open: a Claude card that cannot be opened may offer "Set up a Terminal" instead.
             claudeReturnControl(item, subject: subject, emphasized: handedBack, openTitle: reading.openTitle)
         }
     }
@@ -3490,10 +3490,10 @@ struct Notch: View {
                     claudeOpenButton(item, subject: subject, emphasized: emphasized, title: openTitle, hint: openHint,
                                      focus: openFocus, shortcut: shortcut)
                 }
-            } else if herdr == .notInHerdr, !model.ghosttyEnabled, model.claudeLastSeenLine(item.session) == nil {
-                NotchButton(title: "Set up Ghostty", emphasized: emphasized, action: model.showControls)
-                    .accessibilityLabel("Set up Ghostty: \(subject)")
-                    .accessibilityHint("Opens Herdly controls to enable Ghostty controls.")
+            } else if herdr == .notInHerdr, !model.cliTerminalHostOn, model.claudeLastSeenLine(item.session) == nil {
+                NotchButton(title: "Set up a Terminal", emphasized: emphasized, action: model.showControls)
+                    .accessibilityLabel("Set up a terminal: \(subject)")
+                    .accessibilityHint("Opens Herdly controls to switch on a terminal.")
             }
         }
     }

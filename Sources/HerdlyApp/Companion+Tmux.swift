@@ -45,6 +45,8 @@ final class MultiplexerOpenRecord {
     var ghostty: (target: GhosttyTarget, support: GhosttyTTYSupport)?
     /// WezTerm's plan, when the client's host is a WezTerm pane (#240's Open).
     var wezTerm: WezTermOpenPlan?
+    /// Rex's plan and whether the app showed its session, when the client's host is a Rex block.
+    var rex: (plan: RexOpenPlan, selected: Bool)?
 }
 
 extension Companion {
@@ -79,6 +81,8 @@ extension Companion {
             guard let target = ZellijPaneTarget(handle: pane.paneID),
                   let arguments = ZellijInput.arguments(write, into: pane) else { return .notWritten }
             return ZellijInput.delivery(ZellijRunner.send(arguments, to: target, expecting: zellijServer))
+        case .rex:
+            return RexInput.delivery(RexNavigation.send(RexInput.payload(write), into: pane))
         case .ghostty, .iTerm2, .wezTerm, .herdr:
             return .notWritten
         }
@@ -139,6 +143,7 @@ extension Companion {
             return MultiplexerHostFront.terminalApp(reads.terminalApp.snapshot, frontmost: frontmost, onScreenWindowIDs: onScreen)
         case .ghostty: return MultiplexerHostFront.ghostty(reads.ghostty, frontmost: frontmost)
         case .wezTerm: return MultiplexerHostFront.wezTerm(reads.wezTerm, clients: reads.wezTermClients, frontmost: frontmost)
+        case .rex: return MultiplexerHostFront.rex(reads.rex.snapshot, frontmost: frontmost)
         case .tmux, .zellij, .herdr: return .unknown
         }
     }
@@ -339,7 +344,7 @@ extension Companion {
     private func runTmuxOpen(agent: AgentSource, record: MultiplexerOpenRecord,
                              revalidate: @escaping @MainActor () async -> (TerminalTabReads, TerminalTabBinding),
                              rebind: @escaping @MainActor (TerminalTabReads) -> TerminalTabBinding) async -> TmuxOpenEnd {
-        let switches = hostSwitches
+        let switches = contactSwitches
         let run = await TmuxOpen.run(
             now: { Date().timeIntervalSince1970 },
             revalidate: {
@@ -423,6 +428,19 @@ extension Companion {
                 if let miss = WezTermOpen.activated(result) { return miss }
                 _ = TerminalApps.activate(.wezTerm)
                 return nil
+            case .rex:
+                let read = await Task.detached { RexNavigation.read() }.value
+                guard let snapshot = read.snapshot else { return .unavailable(.hostUnreadable(.rex)) }
+                let plan: RexOpenPlan
+                switch RexOpen.plan(.exact(target), codexTitle: nil, snapshot: snapshot) {
+                case .failure(let miss): return miss
+                case .success(let value): plan = value
+                }
+                let result = await Task.detached { RexNavigation.focus(plan) }.value
+                record.rex = (plan, result.selected)
+                if let miss = RexOpen.focused(result.0) { return miss }
+                _ = TerminalApps.activate(.rex)
+                return nil
             case .ghostty, .tmux, .zellij, .herdr:
                 return .fallBack(.unsupportedLayout, candidates: 1)
             }
@@ -467,6 +485,11 @@ extension Companion {
                 guard let plan = record.wezTerm else { return .fallBack(.notVerified, candidates: 1) }
                 let read = await Task.detached { WezTermNavigation.read(running: true, clients: true) }.value
                 return WezTermOpen.verify(plan, after: read.0.snapshot, clients: read.1, frontmost: TerminalApps.frontmostHost())
+            case .rex:
+                guard let opened = record.rex else { return .fallBack(.notVerified, candidates: 1) }
+                let read = await Task.detached { RexNavigation.read() }.value
+                return RexOpen.verify(opened.plan, after: read.snapshot, selected: opened.selected,
+                                      frontmost: TerminalApps.frontmostHost())
             case .ghostty, .tmux, .zellij, .herdr:
                 return .fallBack(.notVerified, candidates: 1)
             }

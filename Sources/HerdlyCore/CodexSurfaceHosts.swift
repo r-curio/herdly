@@ -22,7 +22,7 @@ public enum TerminalHostTitles: Equatable, Sendable {
 
     /// The hosts these titles cover: every Codex tab host besides Ghostty (`ReminderReader.scan`'s
     /// own inventory while switched on) and herdr (`HerdrPaneTitles`).
-    public static let hosts: [TerminalHost] = [.iTerm2, .terminalApp, .wezTerm, .tmux, .zellij]
+    public static let hosts: [TerminalHost] = [.iTerm2, .terminalApp, .wezTerm, .rex, .tmux, .zellij]
 
     /// A switched-on host's inventory read at `takenAt`.
     public init(inventory: TerminalHostInventory, takenAt: Double) {

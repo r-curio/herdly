@@ -118,6 +118,7 @@ extension Companion {
         if hostSwitches.mayContact(.iTerm2) { hosts.insert(.iTerm2) }
         if terminalAppSwitchedOn { hosts.insert(.terminalApp) }
         if wezTermSwitchedOn { hosts.insert(.wezTerm) }
+        if rexSwitchedOn { hosts.insert(.rex) }
         return hosts
     }
 
@@ -249,6 +250,7 @@ extension Companion {
             hostSwitches.mayContact(.iTerm2) ? iTerm2.latestTitles : nil,
             terminalAppSwitchedOn ? terminalApp.latestTitles : nil,
             wezTermSwitchedOn ? wezTerm.latestTitles : nil,
+            rexSwitchedOn ? rex.latestTitles : nil,
         ])
     }
 

@@ -139,7 +139,7 @@ extension Companion {
         guard !targets.isEmpty, cliLivenessRead, !consentPending else { return }
         let others = otherTabHosts
         let otherHostOn = others.iTerm2Running != nil || others.terminalAppOn || others.wezTermRunning != nil
-            || others.tmuxOn || others.zellijOn
+            || others.tmuxOn || others.zellijOn || others.rexOn
         // Ghostty alone: its title route reads the inventory Ghostty's own two-second scan took.
         var ghosttySnapshot: GhosttySnapshot?
         var ghosttyRunning = others.ghosttyRunning
@@ -180,7 +180,7 @@ extension Companion {
                                                    ghosttyOn: others.ghosttyOn, ghosttyRunning: others.ghosttyRunning,
                                                    iTerm2Running: others.iTerm2Running, terminalAppRunning: terminalAppRunning,
                                                    wezTermRunning: others.wezTermRunning, tmuxOn: others.tmuxOn,
-                                                   zellijOn: others.zellijOn)
+                                                   zellijOn: others.zellijOn, rexOn: others.rexOn)
                     reads = TerminalOpenScanReads(switches: switches, ghosttyOn: ghosttyOn, inventories: taken.inventories,
                                                   processes: taken.processes, secondRead: taken.secondRead,
                                                   multiplexerClientTTYs: taken.multiplexerClientTTYs, tmux: taken.tmux,

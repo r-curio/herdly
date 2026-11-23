@@ -615,7 +615,7 @@ public struct ZellijHookPane: Equatable, Hashable, Sendable {
 
 /// Terminal and multiplexer identifiers from a hook helper's environment (ADR 0013, ADR 0014).
 ///
-/// `ITERM_SESSION_ID`, `TERM_SESSION_ID` and `WEZTERM_PANE` are recorded for diagnostics only: they
+/// `ITERM_SESSION_ID`, `TERM_SESSION_ID`, `WEZTERM_PANE` and `REX_BLOCK` are recorded for diagnostics only: they
 /// neither bind nor veto, because a terminal launched from another agent's session inherits that
 /// session's values. `ZELLIJ_PANE_ID` with `ZELLIJ_SESSION_NAME` is the one exception, a Claude
 /// Code binding input checked against the session process's ancestry. Both hook writers record
@@ -629,6 +629,7 @@ public enum TerminalHookIdentifiers {
         ("ITERM_SESSION_ID", "iterm_session_id"),
         ("TERM_SESSION_ID", "term_session_id"),
         ("WEZTERM_PANE", "wezterm_pane"),
+        ("REX_BLOCK", "rex_block"),
         (zellijPaneEnvironmentKey, zellijPaneRecordKey),
         (zellijSessionEnvironmentKey, zellijSessionRecordKey),
     ]

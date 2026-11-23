@@ -30,13 +30,14 @@ extension Companion {
         CodexAttentionAdapter.isTerminalSession(identity, cliSessions: cliSessions)
     }
 
-    /// Whether a Claude card offers Open: the session is live exactly once in complete inventories,
-    /// and Ghostty, when on, has its Automation permission. Whether the click reaches the exact tab or
+    /// Whether a Claude card offers Open: the session is live exactly once in complete inventories.
+    /// No one terminal is required: Ghostty awaiting its Automation permission affects only Ghostty's own
+    /// route, which is then treated as off, so a session in any other enabled host still opens. Whether the click reaches the exact tab or
     /// falls back to raising the session's app (ADR 0015) is decided at click time; the card looks
     /// the same either way.
     func canOpenClaude(_ identity: AgentSessionIdentity) -> Bool {
         guard identity.source == .claude, identity.surface == .cli,
-              !ghosttyEnabled || ghosttyPermissionVerified, !liveClaudeSessions.isEmpty,
+              !liveClaudeSessions.isEmpty,
               let configuredScopes = configuredClaudeNavigationScopes(),
               Set(liveClaudeSessions.keys) == configuredScopes,
               Set(claudeInventoryAvailable.keys) == configuredScopes,
@@ -89,8 +90,20 @@ extension Companion {
     }
 
     var claudeReturnUnavailableMessage: String {
-        if ghosttyEnabled && !ghosttyPermissionVerified { return "Ghostty controls are awaiting Automation permission." }
-        return "Open is unavailable until Herdly can verify this Claude session is live."
+        "Open is unavailable until Herdly can verify this Claude session is live."
+    }
+
+    /// Ghostty may be scripted: its switch is on and macOS allowed Automation. A Ghostty awaiting that
+    /// permission is treated as off by every route, so it never blocks another terminal.
+    var ghosttyUsable: Bool { ghosttyEnabled && ghosttyPermissionVerified }
+
+    /// The switches every binding and fallback is judged against: Ghostty counts only while usable, since
+    /// the reads beside it (`OtherTabHosts.ghosttyOn`) skip a Ghostty awaiting permission, and an enabled
+    /// host left unread would make every binding unavailable (ADR 0013).
+    var contactSwitches: TerminalHostSwitches {
+        var switches = hostSwitches
+        if !ghosttyUsable { switches.set(.ghostty, on: false) }
+        return switches
     }
 
     private func openClaude(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest? = nil) {
@@ -136,8 +149,19 @@ extension Companion {
         openClaudeOutsideMultiplexers(identity, request: request)
     }
 
-    /// WezTerm's, then Terminal.app's sequence while each is on, otherwise Ghostty's title route or the walk.
+    /// Rex's, WezTerm's, then Terminal.app's sequence while each is on, otherwise Ghostty's title route or the walk.
     private func openClaudeOutsideMultiplexers(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?) {
+        // Rex on: a block there opens through its own sequence; anything else keeps the routes below.
+        if rexSwitchedOn {
+            openClaudeWithRex(identity, request: request) { [weak self] in
+                self?.openClaudeOutsideRex(identity, request: request)
+            }
+            return
+        }
+        openClaudeOutsideRex(identity, request: request)
+    }
+
+    private func openClaudeOutsideRex(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?) {
         // WezTerm on (#240): a pane there opens through its own sequence; anything else keeps the routes below.
         if wezTermSwitchedOn {
             openClaudeWithWezTerm(identity, request: request) { [weak self] in
@@ -166,7 +190,7 @@ extension Companion {
         let configuredRoots = configuredClaudeNavigationRoots()
         // ADR 0016: a verified Open acknowledges the session's completions that arrived before the pre-Open read.
         let preOpenAt = Date().timeIntervalSince1970
-        let ghosttyOn = ghosttyEnabled
+        let ghosttyOn = ghosttyUsable
         let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
         Task { @MainActor in
             let inventories = await Task.detached {
@@ -194,7 +218,7 @@ extension Companion {
             } else {
                 // Ghostty off is never scanned: the session's own registry process names its app.
                 let pid = own[0].pid
-                let switches = hostSwitches
+                let switches = contactSwitches
                 // iTerm2 first (#238): its tty binding decides whenever the process's tty is on an iTerm2 tab.
                 let registered = pid.map { ClaudeSessionRegistry.Process(pid: $0, procStart: own[0].procStart) }
                 if let iTerm2Result = await openClaudeInITerm2(sessionID: identity.session, process: registered) {
@@ -338,8 +362,18 @@ extension Companion {
         openCLIOutsideMultiplexers(session)
     }
 
-    /// WezTerm's, then Terminal.app's sequence while each is on, otherwise iTerm2's or Ghostty's route.
+    /// Rex's, WezTerm's, then Terminal.app's sequence while each is on, otherwise iTerm2's or Ghostty's route.
     private func openCLIOutsideMultiplexers(_ session: UUID) {
+        // Rex on: a block there opens through its own sequence; a title no Rex block carries keeps the
+        // routes below. Each reads every enabled host for ADR 0013's binding.
+        if rexSwitchedOn {
+            openCodexWithRex(session) { [weak self] in self?.openCLIOutsideRex(session) }
+            return
+        }
+        openCLIOutsideRex(session)
+    }
+
+    private func openCLIOutsideRex(_ session: UUID) {
         // WezTerm on (#240): a pane there opens through its own sequence; a title no WezTerm pane carries
         // keeps the routes below. Each reads every enabled host for ADR 0013's binding.
         if wezTermSwitchedOn {
@@ -370,6 +404,22 @@ extension Companion {
 
     /// Ghostty's title route for a Codex tab (ADR 0005, ADR 0016), with ADR 0015's fallback.
     private func openCLIInGhostty(_ session: UUID) {
+        // Ghostty off, or awaiting its Automation permission, is never contacted: no other enabled host
+        // holds the session, so Open falls back as for a session no tab carries.
+        guard ghosttyUsable else {
+            openingTask = true
+            let switches = contactSwitches
+            Task { @MainActor in
+                let result = await openResult(.miss(.fallBack(.noUniqueTarget, candidates: 0))) { _ in
+                    OpenFallback.codexApp(candidates: [], switches: switches)
+                }
+                recordOpen(result, codex: session)
+                endVisitIntervalsAfterOpen()
+                openingTask = false
+                refresh()
+            }
+            return
+        }
         openingTask = true
         let live = liveCLI
         // ADR 0016: a verified Open acknowledges the session's completions that arrived before the pre-Open read.
@@ -377,7 +427,7 @@ extension Companion {
         let running = TerminalApps.isRunning(.ghostty)
         Task { @MainActor in
             let outcome = await Task.detached { await GhosttyNavigation.open(session: session, live: live, running: running) }.value
-            let switches = hostSwitches
+            let switches = contactSwitches
             // ADR 0015 amendment: the tabs carrying the title name the app; none cannot be identified.
             let result = await openResult(outcome) { count in
                 OpenFallback.codexApp(candidates: GhosttyTitleOpen.codexCandidates(count: count), switches: switches)
@@ -396,7 +446,7 @@ extension Companion {
         }
     }
     func reminderActionTitle(_ item: Reminder) -> String {
-        cliSessions.contains(item.session_id) && !cliTerminalHostOn ? "Set up Ghostty" : "Open Session"
+        cliSessions.contains(item.session_id) && !cliTerminalHostOn ? "Set up a Terminal" : "Open Session"
     }
     var needsGhosttySetup: Bool {
         !cliTerminalHostOn && (!cliItems.isEmpty || visibleReminders.contains { cliSessions.contains($0.session_id) }
@@ -484,7 +534,7 @@ extension Companion {
         openingTask = true
         let client = herdr.client
         let others = otherTabHosts
-        let switches = hostSwitches
+        let switches = contactSwitches
         final class LatestScan { var outcome: HerdrScanOutcome? }
         let latest = LatestScan()
         let record = MultiplexerOpenRecord()
@@ -578,7 +628,7 @@ extension Companion {
                 let pids = HerdrOpenFallback.clientPIDs(latest.outcome)
                 let walks = await Task.detached { pids.map(TerminalApps.walk(from:)) }.value
                 if let fallback = HerdrOpenFallback.resolve(failure, agent: key.agent == .claude ? .claude : .codex,
-                                                            clientWalks: walks, switches: hostSwitches,
+                                                            clientWalks: walks, switches: contactSwitches,
                                                             isRunning: TerminalApps.isRunning) {
                     // Silent; the herdr focus already verified is kept, and nothing is acknowledged.
                     // Otherwise the card shows the grouped reason; the exact failure stays in diagnostics.
@@ -638,6 +688,7 @@ extension Companion {
         iTerm2.visits.reset(at: now)
         terminalApp.visits.reset(at: now)
         wezTerm.visits.reset(at: now)
+        rex.visits.reset(at: now)
         tmux.visits.reset(at: now)
         zellij.visits.reset(at: now)
     }

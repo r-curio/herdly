@@ -14,6 +14,8 @@ extension TerminalHost {
         case .iTerm2: "iTerm2"
         case .terminalApp: "Terminal"
         case .wezTerm: "wezterm-gui"
+        // Rex terminals are children of the Rex server, whose executable is `rex`.
+        case .rex: "rex"
         case .tmux, .zellij, .herdr: nil
         }
     }
