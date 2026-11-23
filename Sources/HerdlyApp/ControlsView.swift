@@ -1136,6 +1136,7 @@ private struct TerminalControls: View {
         case .iTerm2: ITerm2HostRow(model: model, state: model.iTerm2, sheet: $sheet)
         case .terminalApp: TerminalAppHostRow(model: model, sheet: $sheet)
         case .wezTerm: WezTermHostRow(model: model, state: model.wezTerm, sheet: $sheet)
+        case .rex: RexHostRow(model: model, state: model.rex, sheet: $sheet)
         case .tmux: TmuxHostRow(model: model, state: model.tmux, sheet: $sheet)
         case .zellij: ZellijHostRow(model: model, state: model.zellij, sheet: $sheet)
         }
@@ -1345,6 +1346,24 @@ private struct WezTermHostRow: View {
                         diagnostics: diagnosticsText(state.diagnostics, shown: on),
                         problems: row.problems, sheet: $sheet) {
             HostSwitch(label: "Enable WezTerm", isOn: model.hostSwitchBinding(.wezTerm))
+        } line: { CardProblemLine($0.message) }
+    }
+}
+
+/// Rex. It needs no Automation access: Herdly talks to Rex's own server socket.
+private struct RexHostRow: View {
+    @ObservedObject var model: Companion
+    @ObservedObject var state: RexState
+    @Binding var sheet: SetupPreview?
+
+    var body: some View {
+        let row = model.rexSettingsRow
+        let on = model.hostSwitches.isOn(.rex)
+        TerminalHostRow(host: .rex, version: state.installed ? state.version ?? "Unknown" : "Not installed",
+                        badge: row.badge,
+                        diagnostics: diagnosticsText(state.diagnostics, shown: on),
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable Rex", isOn: model.hostSwitchBinding(.rex))
         } line: { CardProblemLine($0.message) }
     }
 }

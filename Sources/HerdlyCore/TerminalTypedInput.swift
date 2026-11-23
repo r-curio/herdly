@@ -8,11 +8,11 @@ import Foundation
 
 extension TerminalHost {
     /// Whether Herdly types session replies into this host's bound pane (ADR 0017's table, as built).
-    /// Terminal.app replies (#239), WezTerm replies (#240), tmux replies (#241), Zellij replies (#242).
+    /// Terminal.app replies (#239), WezTerm replies (#240), Rex replies, tmux replies (#241), Zellij replies (#242).
     /// Ghostty and herdr only after a live proof of their text send; iTerm2 never (Broadcast Input).
     public var typesReplies: Bool {
         switch self {
-        case .terminalApp, .wezTerm, .tmux, .zellij: true
+        case .terminalApp, .wezTerm, .rex, .tmux, .zellij: true
         case .ghostty, .iTerm2, .herdr: false
         }
     }
@@ -27,6 +27,7 @@ extension TerminalHost {
         switch self {
         case .ghostty, .herdr: true
         case .wezTerm: WezTermInput.questionDigitsProvenLive
+        case .rex: RexInput.questionDigitsProvenLive
         case .tmux: TmuxInput.questionDigitsProvenLive
         case .zellij: ZellijInput.questionDigitsProvenLive
         case .terminalApp, .iTerm2: false

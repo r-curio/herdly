@@ -75,10 +75,14 @@ struct WezTermTabReads: Sendable {
         // Zellij beside it (#242): its panes count toward uniqueness, and its clients' host tabs do not.
         let zellij: ZellijRead = others.zellijOn ? ZellijRunner.read() : .notRunning
         if others.zellijOn { inventories[.zellij] = zellij.inventory }
+        // Rex beside it: its blocks count toward uniqueness.
+        let rex: RexRead = others.rexOn ? RexNavigation.read() : .notRunning
+        if others.rexOn { inventories[.rex] = rex.inventory }
         // Every tab of every tty-listing host carrying one of `codexTitles`, so a title decoy is told apart
         // from a tab whose `ps` was not read, which fails closed (#268).
         let ttys = (read.snapshot?.ttysToRead(codexTitles: codexTitles, claudeTTYs: claudeTTYs) ?? [])
             .union(tmux.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
+            .union(rex.snapshot?.ttysToRead(codexTitles: codexTitles, claudeTTYs: claudeTTYs) ?? [])
             .union(TerminalTabReadAssembly<Void>.ttysToRead(inventories, codexTitles: codexTitles, claudeTTYs: claudeTTYs))
         let processes = TerminalTTYReads.processes(on: ttys)
         var secondRead = inventories
@@ -86,6 +90,7 @@ struct WezTermTabReads: Sendable {
             secondRead[.wezTerm] = WezTermNavigation.read(running: running).0.inventory
             if others.tmuxOn { secondRead[.tmux] = TmuxRunner.read().inventory }
             if others.zellijOn { secondRead[.zellij] = ZellijRunner.read().inventory }
+            if others.rexOn { secondRead[.rex] = RexNavigation.read().inventory }
         }
         return WezTermTabReads(wezTerm: read, clients: clientRead, inventories: inventories, processes: processes,
                                secondRead: secondRead,
@@ -122,7 +127,7 @@ extension Companion {
         return OtherTabHosts(ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyOn && TerminalApps.isRunning(.ghostty),
                              iTerm2Running: hostSwitches.mayContact(.iTerm2) ? TerminalApps.isRunning(.iTerm2) : nil,
                              terminalAppRunning: terminalAppSwitchedOn ? TerminalApps.isRunning(.terminalApp) : nil,
-                             tmuxOn: tmuxContactAllowed, zellijOn: zellijContactAllowed)
+                             tmuxOn: tmuxContactAllowed, zellijOn: zellijContactAllowed, rexOn: rexSwitchedOn)
     }
 
     // MARK: - Switch
@@ -275,7 +280,7 @@ extension Companion {
 
     private func wezTermCodexBinding(_ session: UUID, reads: WezTermTabReads) -> TerminalTabBinding {
         TerminalTabBindingRules.codex(sessionID: session.uuidString, liveness: endedSessions.contains(session) ? .ended : .live,
-                                      liveSessions: Set(liveCLI.map(\.uuidString)), switches: hostSwitches,
+                                      liveSessions: Set(liveCLI.map(\.uuidString)), switches: contactSwitches,
                                       inventories: reads.inventories, processes: reads.processes,
                                       secondRead: reads.secondRead, multiplexerClientTTYs: reads.multiplexerClientTTYs)
     }
@@ -283,7 +288,7 @@ extension Companion {
     private func wezTermClaudeBinding(_ identity: AgentSessionIdentity, process: ClaudeTabProcess,
                                       reads: WezTermTabReads) -> TerminalTabBinding {
         TerminalTabBindingRules.claude(sessionID: identity.session, liveness: .live, process: process.process,
-                                       observed: process.observed, switches: hostSwitches,
+                                       observed: process.observed, switches: contactSwitches,
                                        inventories: reads.inventories, processes: reads.processes)
     }
 
@@ -297,7 +302,7 @@ extension Companion {
         openingTask = true
         let others = wezTermOtherHosts
         let running = TerminalApps.isRunning(.wezTerm)
-        let otherRouteOn = ghosttyEnabled || terminalAppSwitchedOn || hostSwitches.mayContact(.iTerm2)
+        let otherRouteOn = ghosttyUsable || terminalAppSwitchedOn || hostSwitches.mayContact(.iTerm2)
         Task { @MainActor in
             let first = await Task.detached {
                 WezTermTabReads.take(running: running, others: others, codexTitles: [title], claudeTTYs: [], second: false)
@@ -321,7 +326,7 @@ extension Companion {
                 guard let self else { return (.unavailable(.sessionEnded), reads) }
                 return (self.wezTermCodexBinding(session, reads: reads), reads)
             })
-            let switches = hostSwitches
+            let switches = contactSwitches
             let result: TerminalOpenResult
             switch run {
             case .opened(_, let preOpenAt):
@@ -396,7 +401,7 @@ extension Companion {
                 guard let self, !rows.isEmpty else { return (.unavailable(.sessionEnded), fresh.1) }
                 return (self.wezTermClaudeBinding(identity, process: fresh.0, reads: fresh.1), fresh.1)
             })
-            let switches = hostSwitches
+            let switches = contactSwitches
             let pid = process.pid
             let result: TerminalOpenResult
             switch run {
@@ -603,7 +608,7 @@ extension Companion {
         let rolloutRoot = Companion.rolloutRoot
         let others = wezTermOtherHosts
         let running = TerminalApps.isRunning(.wezTerm)
-        let switches = hostSwitches
+        let switches = contactSwitches
         let liveIDs = Set(liveCLI.map(\.uuidString))
         let liveness: HerdrSessionLiveness = endedSessions.contains(current.session) ? .ended : .live
         let title = HerdrCodexBindingRules.title(forSession: current.session.uuidString.lowercased())

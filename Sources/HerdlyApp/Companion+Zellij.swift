@@ -54,7 +54,7 @@ extension Companion {
         guard zellijContactAllowed else { return .notInZellij }
         return ZellijBindingRules.codex(sessionID: session.uuidString,
                                         liveness: endedSessions.contains(session) ? .ended : .live,
-                                        liveSessions: Set(liveCLI.map(\.uuidString)), switches: hostSwitches,
+                                        liveSessions: Set(liveCLI.map(\.uuidString)), switches: contactSwitches,
                                         inventories: reads.inventories, processes: reads.processes,
                                         secondRead: reads.secondRead, multiplexerClientTTYs: reads.multiplexerClientTTYs,
                                         zellij: reads.zellij.snapshot)
@@ -286,7 +286,7 @@ extension Companion {
     private func runZellijOpen(agent: AgentSource, record: MultiplexerOpenRecord,
                                revalidate: @escaping @MainActor () async -> (TerminalTabReads, ZellijBinding),
                                rebind: @escaping @MainActor (TerminalTabReads) -> ZellijBinding) async -> TmuxOpenEnd {
-        let switches = hostSwitches
+        let switches = contactSwitches
         let run = await ZellijOpen.run(
             now: { Date().timeIntervalSince1970 },
             revalidate: {
@@ -316,7 +316,8 @@ extension Companion {
                 let rebound = TerminalTabReads(terminalApp: reads.terminalApp, inventories: inventories,
                                                processes: reads.processes, secondRead: inventories, tmux: reads.tmux,
                                                zellij: fresh, ghostty: reads.ghostty, iTerm2: reads.iTerm2,
-                                               wezTerm: reads.wezTerm, wezTermClients: reads.wezTermClients)
+                                               wezTerm: reads.wezTerm, wezTermClients: reads.wezTermClients,
+                                               rex: reads.rex)
                 return ZellijOpen.verifyPane(plan, read: fresh, binding: rebind(rebound))
             },
             // nil is a step that passed; see `runTmuxOpen`.
