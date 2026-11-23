@@ -208,7 +208,7 @@ private let processes: [String: [TerminalProcess]] = [
     #expect(TerminalHost(bundleIdentifier: "com.superlogical.rex") == .rex)
     #expect(TerminalHost.rex.kind == .terminal)
     #expect(TerminalHost.rex.typesReplies)
-    #expect(!TerminalHost.rex.typesQuestionDigits)
+    #expect(TerminalHost.rex.typesQuestionDigits)
 }
 
 @Test func rexVersionAndAppClientsParseWithinBounds() {
