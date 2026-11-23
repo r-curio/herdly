@@ -47,6 +47,8 @@ final class MultiplexerOpenRecord {
     var wezTerm: WezTermOpenPlan?
     /// Rex's plan and whether the app showed its session, when the client's host is a Rex block.
     var rex: (plan: RexOpenPlan, selected: Bool)?
+    /// The Herdr app's plan, when the client's host is a Herdr terminal.
+    var herdrApp: HerdrAppOpenPlan?
 }
 
 extension Companion {
@@ -83,6 +85,8 @@ extension Companion {
             return ZellijInput.delivery(ZellijRunner.send(arguments, to: target, expecting: zellijServer))
         case .rex:
             return RexInput.delivery(RexNavigation.send(RexInput.payload(write), into: pane))
+        case .herdrApp:
+            return HerdrAppNavigation.send(write, into: pane)
         case .ghostty, .iTerm2, .wezTerm, .herdr:
             return .notWritten
         }
@@ -144,6 +148,10 @@ extension Companion {
         case .ghostty: return MultiplexerHostFront.ghostty(reads.ghostty, frontmost: frontmost)
         case .wezTerm: return MultiplexerHostFront.wezTerm(reads.wezTerm, clients: reads.wezTermClients, frontmost: frontmost)
         case .rex: return MultiplexerHostFront.rex(reads.rex.snapshot, frontmost: frontmost)
+        // Called off the main actor, so the window is read here, only while Herdr is in front.
+        case .herdrApp:
+            return MultiplexerHostFront.herdrApp(reads.herdrApp.snapshot, window: HerdrAppNavigation.readWindow(),
+                                                 frontmost: frontmost)
         case .tmux, .zellij, .herdr: return .unknown
         }
     }
@@ -441,6 +449,19 @@ extension Companion {
                 if let miss = RexOpen.focused(result.0) { return miss }
                 _ = TerminalApps.activate(.rex)
                 return nil
+            case .herdrApp:
+                let read = await Task.detached { HerdrAppNavigation.read() }.value
+                guard let snapshot = read.snapshot else { return .unavailable(.hostUnreadable(.herdrApp)) }
+                let plan: HerdrAppOpenPlan
+                switch HerdrAppOpen.plan(.exact(target), codexTitle: nil, snapshot: snapshot) {
+                case .failure(let miss): return miss
+                case .success(let value): plan = value
+                }
+                let result = await Task.detached { HerdrAppNavigation.focus(plan) }.value
+                record.herdrApp = plan
+                if let miss = HerdrAppOpen.focused(result) { return miss }
+                _ = TerminalApps.activate(.herdrApp)
+                return nil
             case .ghostty, .tmux, .zellij, .herdr:
                 return .fallBack(.unsupportedLayout, candidates: 1)
             }
@@ -490,6 +511,11 @@ extension Companion {
                 let read = await Task.detached { RexNavigation.read() }.value
                 return RexOpen.verify(opened.plan, after: read.snapshot, selected: opened.selected,
                                       frontmost: TerminalApps.frontmostHost())
+            case .herdrApp:
+                guard let plan = record.herdrApp else { return .fallBack(.notVerified, candidates: 1) }
+                let read = await Task.detached { (HerdrAppNavigation.read(), HerdrAppNavigation.readWindow()) }.value
+                return HerdrAppOpen.verify(plan, after: read.0.snapshot, window: read.1.window,
+                                           frontmost: TerminalApps.frontmostHost())
             case .ghostty, .tmux, .zellij, .herdr:
                 return .fallBack(.notVerified, candidates: 1)
             }

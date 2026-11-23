@@ -60,9 +60,11 @@ struct CodexTabReads: Sendable {
     ///   - tmuxOn: tmux may be contacted, so its panes are read too (#241).
     ///   - zellijOn: Zellij may be contacted, so its panes count toward title uniqueness too (#242).
     ///   - rexOn: Rex's switch is on, so its blocks count toward title uniqueness too.
+    ///   - herdrAppOn: the Herdr app's switch is on, so its terminals count toward title uniqueness too.
     static func read(titles: Set<String>, claudeTTYs: Set<String>, ghosttyOn: Bool, ghosttyRunning: Bool,
                      iTerm2Running: Bool?, terminalAppRunning: Bool? = nil, wezTermRunning: Bool? = nil,
-                     tmuxOn: Bool = false, zellijOn: Bool = false, rexOn: Bool = false) -> CodexTabReads {
+                     tmuxOn: Bool = false, zellijOn: Bool = false, rexOn: Bool = false,
+                     herdrAppOn: Bool = false) -> CodexTabReads {
         func hosts() -> ([TerminalHost: TerminalHostInventory], FirstRead) {
             var result: [TerminalHost: TerminalHostInventory] = [:]
             var first = FirstRead()
@@ -76,6 +78,7 @@ struct CodexTabReads: Sendable {
             }
             if let wezTermRunning { result[.wezTerm] = WezTermNavigation.read(running: wezTermRunning).0.inventory }
             if rexOn { result[.rex] = RexNavigation.read().inventory }
+            if herdrAppOn { result[.herdrApp] = HerdrAppNavigation.read().inventory }
             if ghosttyOn {
                 first.ghostty = ghosttyRunning ? GhosttyNavigation.snapshot() : nil
                 result[.ghostty] = .ghosttyTitles(first.ghostty, running: ghosttyRunning)
@@ -112,6 +115,7 @@ extension Companion {
     /// Terminal.app (#239) or WezTerm (#240).
     var cliTerminalHostOn: Bool {
         ghosttyEnabled || hostSwitches.mayContact(.iTerm2) || terminalAppSwitchedOn || wezTermSwitchedOn || rexSwitchedOn
+            || herdrAppSwitchedOn
     }
 
     // MARK: - Switch and Automation permission (Ghostty's flow, product.md "Settings")
@@ -221,6 +225,7 @@ extension Companion {
         let tmuxOn = tmuxContactAllowed
         let zellijOn = zellijContactAllowed
         let rexOn = rexSwitchedOn
+        let herdrAppOn = herdrAppSwitchedOn
         let liveness: HerdrSessionLiveness = live.contains(session) ? .live : .ended
         let record = ITerm2OpenRecord()
         Task { @MainActor in
@@ -231,7 +236,8 @@ extension Companion {
                         CodexTabReads.read(titles: [title], claudeTTYs: [], ghosttyOn: ghosttyOn,
                                            ghosttyRunning: ghosttyRunning, iTerm2Running: iTerm2Running,
                                            terminalAppRunning: terminalAppRunning, wezTermRunning: wezTermRunning,
-                                           tmuxOn: tmuxOn, zellijOn: zellijOn, rexOn: rexOn)
+                                           tmuxOn: tmuxOn, zellijOn: zellijOn, rexOn: rexOn,
+                                           herdrAppOn: herdrAppOn)
                     }.value
                     let binding = TerminalTabBindingRules.codex(sessionID: session.uuidString, liveness: liveness,
                                                                 liveSessions: liveIDs, switches: switches,
@@ -406,6 +412,7 @@ extension Companion {
         let tmuxOn = tmuxContactAllowed
         let zellijOn = zellijContactAllowed
         let rexOn = rexSwitchedOn
+        let herdrAppOn = herdrAppSwitchedOn
         let generation = iTerm2.generation
         Task { @MainActor in
             let observed = await Task.detached { () -> (CodexTabReads, [Int32: TerminalProcessObservation]) in
@@ -415,7 +422,8 @@ extension Companion {
                 let reads = CodexTabReads.read(titles: titles, claudeTTYs: Set(observations.values.compactMap(\.tty)),
                                                ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyRunning,
                                                iTerm2Running: iTerm2Running, terminalAppRunning: terminalAppRunning,
-                                               wezTermRunning: wezTermRunning, tmuxOn: tmuxOn, zellijOn: zellijOn, rexOn: rexOn)
+                                               wezTermRunning: wezTermRunning, tmuxOn: tmuxOn, zellijOn: zellijOn, rexOn: rexOn,
+                                           herdrAppOn: herdrAppOn)
                 return (reads, observations)
             }.value
             iTerm2.checking = false

@@ -16,6 +16,8 @@ extension TerminalHost {
         case .wezTerm: "wezterm-gui"
         // Rex terminals are children of the Rex server, whose executable is `rex`.
         case .rex: "rex"
+        // Herdr terminals are children of herdr-core's holder, whose executable is `herdr-core`.
+        case .herdrApp: "herdr-core"
         case .tmux, .zellij, .herdr: nil
         }
     }

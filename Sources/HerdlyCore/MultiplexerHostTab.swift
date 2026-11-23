@@ -66,6 +66,16 @@ public enum MultiplexerHostFront {
         }
     }
 
+    /// The Herdr app's shown terminal (`TerminalVisibility.herdrApp`).
+    public static func herdrApp(_ snapshot: HerdrAppSnapshot?, window: HerdrAppWindowRead,
+                                frontmost: TerminalHost?) -> TerminalVisibilityReading<String> {
+        switch TerminalVisibility.herdrApp(snapshot, window: window, frontmost: frontmost) {
+        case .visible(let terminal): return snapshot?.terminal(terminal)?.tty.map { .visible($0) } ?? .unknown
+        case .unknown: return .unknown
+        case .nothing, .unchecked: return .nothing
+        }
+    }
+
     /// Ghostty's selected terminal in its front window. Without `tty` (Ghostty 1.3.1) the terminal's
     /// tty is unknown, so nothing hosted there is ever visible until Ghostty exposes it (#251).
     public static func ghostty(_ snapshot: GhosttySnapshot?, frontmost: TerminalHost?) -> TerminalVisibilityReading<String> {

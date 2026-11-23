@@ -1130,6 +1130,7 @@ private struct TerminalControls: View {
         case .terminalApp: TerminalAppHostRow(model: model, sheet: $sheet)
         case .wezTerm: WezTermHostRow(model: model, state: model.wezTerm, sheet: $sheet)
         case .rex: RexHostRow(model: model, state: model.rex, sheet: $sheet)
+        case .herdrApp: HerdrAppHostRow(model: model, state: model.herdrApp, sheet: $sheet)
         case .tmux: TmuxHostRow(model: model, state: model.tmux, sheet: $sheet)
         case .zellij: ZellijHostRow(model: model, state: model.zellij, sheet: $sheet)
         }
@@ -1357,6 +1358,25 @@ private struct RexHostRow: View {
                         diagnostics: diagnosticsText(state.diagnostics, shown: on),
                         problems: row.problems, sheet: $sheet) {
             HostSwitch(label: "Enable Rex", isOn: model.hostSwitchBinding(.rex))
+        } line: { CardProblemLine($0.message) }
+    }
+}
+
+/// The Herdr app. It needs no Automation access: Herdly talks to herdr-core's socket and Herdr's own
+/// command line.
+private struct HerdrAppHostRow: View {
+    @ObservedObject var model: Companion
+    @ObservedObject var state: HerdrAppState
+    @Binding var sheet: SetupPreview?
+
+    var body: some View {
+        let row = model.herdrAppSettingsRow
+        let on = model.hostSwitches.isOn(.herdrApp)
+        TerminalHostRow(host: .herdrApp, version: state.installed ? state.version ?? "Unknown" : "Not installed",
+                        badge: row.badge,
+                        diagnostics: diagnosticsText(state.diagnostics, shown: on),
+                        problems: row.problems, sheet: $sheet) {
+            HostSwitch(label: "Enable Herdr app", isOn: model.hostSwitchBinding(.herdrApp))
         } line: { CardProblemLine($0.message) }
     }
 }
