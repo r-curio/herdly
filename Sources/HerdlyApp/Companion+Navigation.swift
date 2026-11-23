@@ -30,13 +30,14 @@ extension Companion {
         CodexAttentionAdapter.isTerminalSession(identity, cliSessions: cliSessions)
     }
 
-    /// Whether a Claude card offers Open: the session is live exactly once in complete inventories,
-    /// and Ghostty, when on, has its Automation permission. Whether the click reaches the exact tab or
+    /// Whether a Claude card offers Open: the session is live exactly once in complete inventories.
+    /// No one terminal is required: Ghostty awaiting its Automation permission affects only Ghostty's own
+    /// route, which is then treated as off, so a session in any other enabled host still opens. Whether the click reaches the exact tab or
     /// falls back to raising the session's app (ADR 0015) is decided at click time; the card looks
     /// the same either way.
     func canOpenClaude(_ identity: AgentSessionIdentity) -> Bool {
         guard identity.source == .claude, identity.surface == .cli,
-              !ghosttyEnabled || ghosttyPermissionVerified, !liveClaudeSessions.isEmpty,
+              !liveClaudeSessions.isEmpty,
               let configuredScopes = configuredClaudeNavigationScopes(),
               Set(liveClaudeSessions.keys) == configuredScopes,
               Set(claudeInventoryAvailable.keys) == configuredScopes,
@@ -89,9 +90,12 @@ extension Companion {
     }
 
     var claudeReturnUnavailableMessage: String {
-        if ghosttyEnabled && !ghosttyPermissionVerified { return "Ghostty controls are awaiting Automation permission." }
-        return "Open is unavailable until Herdly can verify this Claude session is live."
+        "Open is unavailable until Herdly can verify this Claude session is live."
     }
+
+    /// Ghostty may be scripted: its switch is on and macOS allowed Automation. A Ghostty awaiting that
+    /// permission is treated as off by every route, so it never blocks another terminal.
+    var ghosttyUsable: Bool { ghosttyEnabled && ghosttyPermissionVerified }
 
     private func openClaude(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest? = nil) {
         guard !openingTask else { return }
@@ -177,7 +181,7 @@ extension Companion {
         let configuredRoots = configuredClaudeNavigationRoots()
         // ADR 0016: a verified Open acknowledges the session's completions that arrived before the pre-Open read.
         let preOpenAt = Date().timeIntervalSince1970
-        let ghosttyOn = ghosttyEnabled
+        let ghosttyOn = ghosttyUsable
         let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
         Task { @MainActor in
             let inventories = await Task.detached {
@@ -391,6 +395,22 @@ extension Companion {
 
     /// Ghostty's title route for a Codex tab (ADR 0005, ADR 0016), with ADR 0015's fallback.
     private func openCLIInGhostty(_ session: UUID) {
+        // Ghostty off, or awaiting its Automation permission, is never contacted: no other enabled host
+        // holds the session, so Open falls back as for a session no tab carries.
+        guard ghosttyUsable else {
+            openingTask = true
+            let switches = hostSwitches
+            Task { @MainActor in
+                let result = await openResult(.miss(.fallBack(.noUniqueTarget, candidates: 0))) { _ in
+                    OpenFallback.codexApp(candidates: [], switches: switches)
+                }
+                recordOpen(result, codex: session)
+                endVisitIntervalsAfterOpen()
+                openingTask = false
+                refresh()
+            }
+            return
+        }
         openingTask = true
         let live = liveCLI
         // ADR 0016: a verified Open acknowledges the session's completions that arrived before the pre-Open read.
@@ -417,7 +437,7 @@ extension Companion {
         }
     }
     func reminderActionTitle(_ item: Reminder) -> String {
-        cliSessions.contains(item.session_id) && !cliTerminalHostOn ? "Set up Ghostty" : "Open Session"
+        cliSessions.contains(item.session_id) && !cliTerminalHostOn ? "Set up a Terminal" : "Open Session"
     }
     var needsGhosttySetup: Bool {
         !cliTerminalHostOn && (!cliItems.isEmpty || visibleReminders.contains { cliSessions.contains($0.session_id) }

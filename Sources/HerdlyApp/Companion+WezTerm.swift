@@ -302,7 +302,7 @@ extension Companion {
         openingTask = true
         let others = wezTermOtherHosts
         let running = TerminalApps.isRunning(.wezTerm)
-        let otherRouteOn = ghosttyEnabled || terminalAppSwitchedOn || hostSwitches.mayContact(.iTerm2)
+        let otherRouteOn = ghosttyUsable || terminalAppSwitchedOn || hostSwitches.mayContact(.iTerm2)
         Task { @MainActor in
             let first = await Task.detached {
                 WezTermTabReads.take(running: running, others: others, codexTitles: [title], claudeTTYs: [], second: false)

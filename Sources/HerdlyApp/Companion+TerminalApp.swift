@@ -446,7 +446,7 @@ extension Companion {
             // one only a decoy here carries while the session's tab is in another host (#268).
             let holds = TerminalTabOpen.codexStays(in: .terminalApp, carriesTitle: first.terminalAppCarries(title: title),
                                                    binding: codexBinding(session, reads: first))
-            if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: ghosttyEnabled || hostSwitches.mayContact(.iTerm2),
+            if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: ghosttyUsable || hostSwitches.mayContact(.iTerm2),
                                                   inventory: first.terminalApp.inventory, holdsSession: holds) {
                 openingTask = false
                 otherwise()

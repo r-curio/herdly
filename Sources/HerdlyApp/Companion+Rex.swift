@@ -206,7 +206,7 @@ extension Companion {
         guard !openingTask, let title = HerdrCodexBindingRules.title(forSession: session.uuidString.lowercased()) else { return }
         openingTask = true
         let others = otherTabHosts
-        let otherRouteOn = ghosttyEnabled || wezTermSwitchedOn || terminalAppSwitchedOn || hostSwitches.mayContact(.iTerm2)
+        let otherRouteOn = ghosttyUsable || wezTermSwitchedOn || terminalAppSwitchedOn || hostSwitches.mayContact(.iTerm2)
         Task { @MainActor in
             let first = await Task.detached { TerminalTabReads.take(others: others, claudeTTYs: [], second: false) }.value
             let carries = first.rex.snapshot?.blocks.contains { $0.title == title } ?? false

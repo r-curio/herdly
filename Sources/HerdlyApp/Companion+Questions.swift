@@ -253,7 +253,9 @@ extension Companion {
         case .desktopReadOnly: return false
         // A session another enabled host may hold, or one that host cannot rule out, already routes to
         // `relayUnavailable` (ADR 0013, ADR 0017).
-        case .ghosttyRelay, .herdrRelay: return ghosttyEnabled || previewMode != nil
+        case .ghosttyRelay: return ghosttyUsable || previewMode != nil
+        // herdr's keys go through herdr's own socket; herdr works under any enabled terminal (ADR 0014).
+        case .herdrRelay: return herdrContactAllowed || previewMode != nil
         // A pane-bound host's digits (ADR 0017), offered only where `typesQuestionDigits` is on.
         case .terminalRelay: return true
         case .relayUnavailable: return false
@@ -276,7 +278,8 @@ extension Companion {
             selectionRoutes[question.id] = route
         case .ghosttyRelay, .herdrRelay, .terminalRelay:
             guard showsOptionControls(for: question), case let .option(option) = answer,
-                  QuestionAnswerPolicy.rejection(for: current, ghosttyEnabled: ghosttyEnabled || route == .terminalRelay
+                  QuestionAnswerPolicy.rejection(for: current, ghosttyEnabled: ghosttyUsable || route == .terminalRelay
+                                                     || (route == .herdrRelay && herdrContactAllowed)
                                                      || previewMode != nil,
                                                  progress: progress, question: index, option: option) == nil else {
                 refresh(); return
@@ -337,7 +340,7 @@ extension Companion {
         // Re-read the queue's current copy: a question answered since the row rendered must not be relayed.
         let current = queue.items.compactMap(\.question).first { $0.id == question.id }
         let progress = progress(for: question)
-        if QuestionAnswerPolicy.rejection(for: current, ghosttyEnabled: ghosttyEnabled, progress: progress,
+        if QuestionAnswerPolicy.rejection(for: current, ghosttyEnabled: ghosttyUsable, progress: progress,
                                           question: index, option: option) != nil {
             refresh(); return
         }
@@ -415,7 +418,7 @@ extension Companion {
         else { pane = herdrBinding(for: session).target?.paneID }
         let start: HerdrQuestionRelay.Start
         switch HerdrQuestionRelay.start(current: current, progress: progress(for: question), ledger: relayLedger,
-                                        ghosttyEnabled: ghosttyEnabled, pane: pane, question: index, option: option) {
+                                        ghosttyEnabled: herdrContactAllowed, pane: pane, question: index, option: option) {
         case .failure:
             refresh(); return
         case let .success(value):
