@@ -212,7 +212,7 @@ extension Companion {
         openingTask = true
         let live = liveCLI
         let liveIDs = Set(live.map(\.uuidString))
-        let switches = hostSwitches
+        let switches = contactSwitches
         let ghosttyOn = ghosttyEnabled
         let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
         let iTerm2Running = TerminalApps.isRunning(.iTerm2)
@@ -332,7 +332,7 @@ extension Companion {
             let hostSwitches = hostSwitches
             result = await openResult(.miss(miss)) { _ in
                 let walk = await Task.detached { TerminalApps.walk(from: pid) }.value
-                return OpenFallback.processApp(walks: [walk], agent: .claude, switches: hostSwitches)
+                return OpenFallback.processApp(walks: [walk], agent: .claude, switches: contactSwitches)
             }
         }
         iTerm2.lastOpen[sessionID] = Self.iTerm2Diagnostic(run, result: result)
@@ -395,7 +395,7 @@ extension Companion {
             if own.count == 1, let pid = own[0].pid { claudeProcesses[identity] = .init(pid: pid, procStart: own[0].procStart) }
         }
         let processes = claudeProcesses
-        let switches = hostSwitches
+        let switches = contactSwitches
         let ghosttyOn = ghosttyEnabled
         let ghosttyRunning = ghosttyOn && TerminalApps.isRunning(.ghostty)
         let iTerm2Running = TerminalApps.isRunning(.iTerm2)

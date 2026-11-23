@@ -97,6 +97,15 @@ extension Companion {
     /// permission is treated as off by every route, so it never blocks another terminal.
     var ghosttyUsable: Bool { ghosttyEnabled && ghosttyPermissionVerified }
 
+    /// The switches every binding and fallback is judged against: Ghostty counts only while usable, since
+    /// the reads beside it (`OtherTabHosts.ghosttyOn`) skip a Ghostty awaiting permission, and an enabled
+    /// host left unread would make every binding unavailable (ADR 0013).
+    var contactSwitches: TerminalHostSwitches {
+        var switches = hostSwitches
+        if !ghosttyUsable { switches.set(.ghostty, on: false) }
+        return switches
+    }
+
     private func openClaude(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest? = nil) {
         guard !openingTask else { return }
         guard identity.surface == .cli else {
@@ -209,7 +218,7 @@ extension Companion {
             } else {
                 // Ghostty off is never scanned: the session's own registry process names its app.
                 let pid = own[0].pid
-                let switches = hostSwitches
+                let switches = contactSwitches
                 // iTerm2 first (#238): its tty binding decides whenever the process's tty is on an iTerm2 tab.
                 let registered = pid.map { ClaudeSessionRegistry.Process(pid: $0, procStart: own[0].procStart) }
                 if let iTerm2Result = await openClaudeInITerm2(sessionID: identity.session, process: registered) {
@@ -399,7 +408,7 @@ extension Companion {
         // holds the session, so Open falls back as for a session no tab carries.
         guard ghosttyUsable else {
             openingTask = true
-            let switches = hostSwitches
+            let switches = contactSwitches
             Task { @MainActor in
                 let result = await openResult(.miss(.fallBack(.noUniqueTarget, candidates: 0))) { _ in
                     OpenFallback.codexApp(candidates: [], switches: switches)
@@ -418,7 +427,7 @@ extension Companion {
         let running = TerminalApps.isRunning(.ghostty)
         Task { @MainActor in
             let outcome = await Task.detached { await GhosttyNavigation.open(session: session, live: live, running: running) }.value
-            let switches = hostSwitches
+            let switches = contactSwitches
             // ADR 0015 amendment: the tabs carrying the title name the app; none cannot be identified.
             let result = await openResult(outcome) { count in
                 OpenFallback.codexApp(candidates: GhosttyTitleOpen.codexCandidates(count: count), switches: switches)
@@ -525,7 +534,7 @@ extension Companion {
         openingTask = true
         let client = herdr.client
         let others = otherTabHosts
-        let switches = hostSwitches
+        let switches = contactSwitches
         final class LatestScan { var outcome: HerdrScanOutcome? }
         let latest = LatestScan()
         let record = MultiplexerOpenRecord()
@@ -619,7 +628,7 @@ extension Companion {
                 let pids = HerdrOpenFallback.clientPIDs(latest.outcome)
                 let walks = await Task.detached { pids.map(TerminalApps.walk(from:)) }.value
                 if let fallback = HerdrOpenFallback.resolve(failure, agent: key.agent == .claude ? .claude : .codex,
-                                                            clientWalks: walks, switches: hostSwitches,
+                                                            clientWalks: walks, switches: contactSwitches,
                                                             isRunning: TerminalApps.isRunning) {
                     // Silent; the herdr focus already verified is kept, and nothing is acknowledged.
                     // Otherwise the card shows the grouped reason; the exact failure stays in diagnostics.

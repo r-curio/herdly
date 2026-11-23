@@ -54,7 +54,7 @@ extension Companion {
         guard zellijContactAllowed else { return .notInZellij }
         return ZellijBindingRules.codex(sessionID: session.uuidString,
                                         liveness: endedSessions.contains(session) ? .ended : .live,
-                                        liveSessions: Set(liveCLI.map(\.uuidString)), switches: hostSwitches,
+                                        liveSessions: Set(liveCLI.map(\.uuidString)), switches: contactSwitches,
                                         inventories: reads.inventories, processes: reads.processes,
                                         secondRead: reads.secondRead, multiplexerClientTTYs: reads.multiplexerClientTTYs,
                                         zellij: reads.zellij.snapshot)
@@ -286,7 +286,7 @@ extension Companion {
     private func runZellijOpen(agent: AgentSource, record: MultiplexerOpenRecord,
                                revalidate: @escaping @MainActor () async -> (TerminalTabReads, ZellijBinding),
                                rebind: @escaping @MainActor (TerminalTabReads) -> ZellijBinding) async -> TmuxOpenEnd {
-        let switches = hostSwitches
+        let switches = contactSwitches
         let run = await ZellijOpen.run(
             now: { Date().timeIntervalSince1970 },
             revalidate: {

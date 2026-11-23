@@ -344,7 +344,7 @@ extension Companion {
     private func runTmuxOpen(agent: AgentSource, record: MultiplexerOpenRecord,
                              revalidate: @escaping @MainActor () async -> (TerminalTabReads, TerminalTabBinding),
                              rebind: @escaping @MainActor (TerminalTabReads) -> TerminalTabBinding) async -> TmuxOpenEnd {
-        let switches = hostSwitches
+        let switches = contactSwitches
         let run = await TmuxOpen.run(
             now: { Date().timeIntervalSince1970 },
             revalidate: {

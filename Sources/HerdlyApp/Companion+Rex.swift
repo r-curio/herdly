@@ -186,7 +186,7 @@ extension Companion {
 
     func rexCodexBinding(_ session: UUID, reads: TerminalTabReads) -> TerminalTabBinding {
         TerminalTabBindingRules.codex(sessionID: session.uuidString, liveness: endedSessions.contains(session) ? .ended : .live,
-                                      liveSessions: Set(liveCLI.map(\.uuidString)), switches: hostSwitches,
+                                      liveSessions: Set(liveCLI.map(\.uuidString)), switches: contactSwitches,
                                       inventories: reads.inventories, processes: reads.processes,
                                       secondRead: reads.secondRead, multiplexerClientTTYs: reads.multiplexerClientTTYs)
     }
@@ -194,7 +194,7 @@ extension Companion {
     func rexClaudeBinding(_ identity: AgentSessionIdentity, process: ClaudeTabProcess,
                           reads: TerminalTabReads) -> TerminalTabBinding {
         TerminalTabBindingRules.claude(sessionID: identity.session, liveness: .live, process: process.process,
-                                       observed: process.observed, switches: hostSwitches,
+                                       observed: process.observed, switches: contactSwitches,
                                        inventories: reads.inventories, processes: reads.processes)
     }
 
@@ -224,7 +224,7 @@ extension Companion {
                 guard let self else { return (.unavailable(.sessionEnded), reads) }
                 return (self.rexCodexBinding(session, reads: reads), reads)
             })
-            let switches = hostSwitches
+            let switches = contactSwitches
             let result: TerminalOpenResult
             switch run {
             case .opened(_, let preOpenAt):
@@ -296,7 +296,7 @@ extension Companion {
                 guard let self, !rows.isEmpty else { return (.unavailable(.sessionEnded), fresh.1) }
                 return (self.rexClaudeBinding(identity, process: fresh.0, reads: fresh.1), fresh.1)
             })
-            let switches = hostSwitches
+            let switches = contactSwitches
             let pid = process.pid
             let result: TerminalOpenResult
             switch run {
