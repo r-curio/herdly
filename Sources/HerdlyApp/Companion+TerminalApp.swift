@@ -67,6 +67,8 @@ struct OtherTabHosts: Sendable {
     var tmuxOn = false
     /// Zellij may be contacted (its switch and a terminal on); it is never read otherwise (#242).
     var zellijOn = false
+    /// Rex's switch is on; it is never read otherwise. Rex's own reads say whether its server runs.
+    var rexOn = false
 
     /// A multiplexer is read, so WezTerm's clients are read too, for a client's host tab.
     var multiplexerOn: Bool { tmuxOn || zellijOn }
@@ -88,6 +90,8 @@ struct TerminalTabReads: Sendable {
     var iTerm2: ITerm2Snapshot?
     var wezTerm: WezTermSnapshot?
     var wezTermClients: WezTermClients?
+    /// The first read's Rex server; `.notRunning` while Rex is off.
+    var rex: RexRead = .notRunning
     /// Whether the Ghostty read above could list `tty`, read beside it; nil when Ghostty was not read
     /// or for the shared scheduled read, which never joins a multiplexer client.
     var ghosttyTTYSupport: GhosttyTTYSupport?
@@ -129,6 +133,10 @@ struct TerminalTabReads: Sendable {
             wezTermClients = clients
             wezTermTTYs = read.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? []
         }
+        // Rex beside them: its blocks count toward uniqueness, and `ps` is read for its titled Codex blocks
+        // and Claude ttys too.
+        let rex: RexRead = others.rexOn ? RexNavigation.read() : .notRunning
+        if others.rexOn { inventories[.rex] = rex.inventory }
         let tmux: TmuxRead = others.tmuxOn ? TmuxRunner.read() : .notRunning
         if others.tmuxOn { inventories[.tmux] = tmux.inventory }
         // Zellij beside them (#242): its panes count toward Codex title uniqueness; it lists no tty to read.
@@ -138,17 +146,19 @@ struct TerminalTabReads: Sendable {
         // tab whose `ps` was not read, which fails closed (#268).
         let ttys = (terminal.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
             .union(wezTermTTYs).union(tmux.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
+            .union(rex.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
             .union(TerminalTabReadAssembly<Void>.ttysToRead(inventories, claudeTTYs: claudeTTYs))
         let processes = TerminalTTYReads.processes(on: ttys)
         var secondRead = inventories
         if second {
             if others.terminalAppOn { secondRead[.terminalApp] = TerminalAppNavigation.snapshot().inventory }
+            if others.rexOn { secondRead[.rex] = RexNavigation.read().inventory }
             if others.tmuxOn { secondRead[.tmux] = TmuxRunner.read().inventory }
             if others.zellijOn { secondRead[.zellij] = ZellijRunner.read().inventory }
         }
         return TerminalTabReads(terminalApp: terminal, inventories: inventories, processes: processes,
                                 secondRead: secondRead, tmux: tmux, zellij: zellij, ghostty: ghostty, iTerm2: iTerm2,
-                                wezTerm: wezTerm, wezTermClients: wezTermClients,
+                                wezTerm: wezTerm, wezTermClients: wezTermClients, rex: rex,
                                 ghosttyTTYSupport: ghostty == nil || scheduledSince != nil ? nil : GhosttyScriptingSupport.ttySupport())
     }
 
@@ -213,7 +223,7 @@ extension Companion {
                              iTerm2Running: hostSwitches.mayContact(.iTerm2) ? TerminalApps.isRunning(.iTerm2) : nil,
                              wezTermRunning: wezTermSwitchedOn ? TerminalApps.isRunning(.wezTerm) : nil,
                              terminalAppOn: terminalAppSwitchedOn, tmuxOn: tmuxContactAllowed,
-                             zellijOn: zellijContactAllowed)
+                             zellijOn: zellijContactAllowed, rexOn: rexSwitchedOn)
     }
 
     /// Terminal.app's switch is on. Open and question keys then account for it even before or without a
@@ -583,6 +593,9 @@ extension Companion {
         if wezTermSwitchedOn {
             for (session, route) in wezTerm.codexRoutes { routes[session] = TerminalReplyRoute.merging(routes[session], route) }
         }
+        if rexSwitchedOn {
+            for (session, route) in rex.codexRoutes { routes[session] = TerminalReplyRoute.merging(routes[session], route) }
+        }
         // tmux (#241): a session tmux holds, or one an unreadable tmux could hold, merges tmux's route.
         if tmuxContactAllowed {
             for (session, route) in tmux.codexRoutes { routes[session] = TerminalReplyRoute.merging(routes[session], route) }
@@ -608,6 +621,7 @@ extension Companion {
         if zellijContactAllowed, zellij.codexSeen.contains(session) { return .zellij }
         if hostSwitches.mayContact(.iTerm2), iTerm2.codexInputBlocks[session] == .inITerm2 { return .iTerm2 }
         if wezTermSwitchedOn, wezTerm.codexSeen.contains(session) { return .wezTerm }
+        if rexSwitchedOn, rex.codexSeen.contains(session) { return .rex }
         return terminalAppSwitchedOn && terminalApp.codexSeen.contains(session) ? .terminalApp : nil
     }
 
@@ -621,6 +635,7 @@ extension Companion {
             return .iTerm2
         }
         if wezTermSwitchedOn, TerminalApps.isRunning(.wezTerm), wezTerm.scan != .read { return .wezTerm }
+        if rexSwitchedOn, RexNavigation.isRunning(), rex.scan != .read { return .rex }
         guard terminalAppSwitchedOn, TerminalApps.isRunning(.terminalApp) else { return nil }
         return terminalApp.access == .granted && terminalApp.readable == true ? nil : .terminalApp
     }
@@ -634,12 +649,14 @@ extension Companion {
             // tmux and Zellij are no apps: their own reads say whether a server runs.
             if host == .tmux { result[host] = TmuxRunner.read().inventory; continue }
             if host == .zellij { result[host] = ZellijRunner.read().inventory; continue }
+            // Rex's server runs apart from its app: its own read says whether it is up.
+            if host == .rex { result[host] = RexNavigation.read().inventory; continue }
             guard running.contains(host) else { result[host] = .notRunning; continue }
             switch host {
             case .terminalApp: result[host] = TerminalAppNavigation.snapshot().inventory
             case .iTerm2: result[host] = ITerm2Navigation.inventory(ITerm2Navigation.snapshot())
             case .wezTerm: result[host] = WezTermNavigation.read(running: true).0.inventory
-            case .ghostty, .tmux, .zellij, .herdr: result[host] = .unreadable
+            case .ghostty, .rex, .tmux, .zellij, .herdr: result[host] = .unreadable
             }
         }
         return result
@@ -710,15 +727,18 @@ extension Companion {
     /// The Claude card's reply target, nil when no typed route exists (the card shows no field). Terminal.app's
     /// and WezTerm's latest scans each give a route; a route that is not one pane wins (#240).
     func claudeReplyTarget(for outcome: AgentOutcome) -> SessionReplyTarget? {
-        guard terminalAppActive || wezTermSwitchedOn || tmuxContactAllowed || zellijContactAllowed, outcome.session.source == .claude,
+        guard terminalAppActive || wezTermSwitchedOn || rexSwitchedOn || tmuxContactAllowed || zellijContactAllowed,
+              outcome.session.source == .claude,
               outcome.session.surface == .cli else { return nil }
         let items = orderedAgentAttentionItems.filter { $0.session == outcome.session }
         let ended = listedClaudeSessions[outcome.session.sourceScope].map { !$0.contains(outcome.session.session) } ?? false
         let inTurn = items.contains { $0.running != nil || $0.question != nil || ($0.approval != nil) }
         // No entry (bound in Ghostty, or not scanned yet) offers no field, as for Codex.
         let route = TerminalReplyRoute.merging(
-            TerminalReplyRoute.merging(terminalAppActive ? terminalApp.claudeRoutes[outcome.session] : nil,
-                                       wezTermSwitchedOn ? wezTerm.claudeRoutes[outcome.session] : nil),
+            TerminalReplyRoute.merging(
+                TerminalReplyRoute.merging(terminalAppActive ? terminalApp.claudeRoutes[outcome.session] : nil,
+                                           wezTermSwitchedOn ? wezTerm.claudeRoutes[outcome.session] : nil),
+                rexSwitchedOn ? rex.claudeRoutes[outcome.session] : nil),
             TerminalReplyRoute.merging(tmuxContactAllowed ? tmux.claudeRoutes[outcome.session] : nil,
                                        zellijContactAllowed ? zellij.claudeRoutes[outcome.session] : nil))
         return ClaudeReplyRouting.target(ended: ended, inTurn: inTurn, route: route)

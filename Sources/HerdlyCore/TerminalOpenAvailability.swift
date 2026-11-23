@@ -254,6 +254,13 @@ public enum TerminalOpenScan {
             TerminalTabOpen.codexStays(in: host, carriesTitle: reads.holds(host) { $0.title == title }, binding: binding)
         }
         let bindingRoute = codexBindingRoute(binding, title: title, reads: reads)
+        // Rex: a block there carries the title, or Rex cannot be read.
+        if switches.isOn(.rex),
+           !reads.leaves(.rex, otherRouteOn: reads.ghosttyOn || switches.isOn(.wezTerm) || switches.isOn(.terminalApp)
+                            || switches.mayContact(.iTerm2),
+                         holds: holds(.rex)) {
+            return bindingRoute
+        }
         if switches.isOn(.wezTerm),
            !reads.leaves(.wezTerm, otherRouteOn: reads.ghosttyOn || switches.isOn(.terminalApp) || switches.mayContact(.iTerm2),
                          holds: holds(.wezTerm)) {
@@ -308,6 +315,9 @@ public enum TerminalOpenScan {
         }
         let onTTY: (TerminalTab) -> Bool = { tab in tty != nil && tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY) == tty }
         let bindingRoute = processRoute(binding, walked: walked)
+        if switches.isOn(.rex), !reads.leaves(.rex, otherRouteOn: true, holds: reads.holds(.rex, onTTY)) {
+            return bindingRoute
+        }
         if switches.isOn(.wezTerm), !reads.leaves(.wezTerm, otherRouteOn: true, holds: reads.holds(.wezTerm, onTTY)) {
             return bindingRoute
         }

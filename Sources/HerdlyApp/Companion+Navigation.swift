@@ -136,8 +136,19 @@ extension Companion {
         openClaudeOutsideMultiplexers(identity, request: request)
     }
 
-    /// WezTerm's, then Terminal.app's sequence while each is on, otherwise Ghostty's title route or the walk.
+    /// Rex's, WezTerm's, then Terminal.app's sequence while each is on, otherwise Ghostty's title route or the walk.
     private func openClaudeOutsideMultiplexers(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?) {
+        // Rex on: a block there opens through its own sequence; anything else keeps the routes below.
+        if rexSwitchedOn {
+            openClaudeWithRex(identity, request: request) { [weak self] in
+                self?.openClaudeOutsideRex(identity, request: request)
+            }
+            return
+        }
+        openClaudeOutsideRex(identity, request: request)
+    }
+
+    private func openClaudeOutsideRex(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?) {
         // WezTerm on (#240): a pane there opens through its own sequence; anything else keeps the routes below.
         if wezTermSwitchedOn {
             openClaudeWithWezTerm(identity, request: request) { [weak self] in
@@ -338,8 +349,18 @@ extension Companion {
         openCLIOutsideMultiplexers(session)
     }
 
-    /// WezTerm's, then Terminal.app's sequence while each is on, otherwise iTerm2's or Ghostty's route.
+    /// Rex's, WezTerm's, then Terminal.app's sequence while each is on, otherwise iTerm2's or Ghostty's route.
     private func openCLIOutsideMultiplexers(_ session: UUID) {
+        // Rex on: a block there opens through its own sequence; a title no Rex block carries keeps the
+        // routes below. Each reads every enabled host for ADR 0013's binding.
+        if rexSwitchedOn {
+            openCodexWithRex(session) { [weak self] in self?.openCLIOutsideRex(session) }
+            return
+        }
+        openCLIOutsideRex(session)
+    }
+
+    private func openCLIOutsideRex(_ session: UUID) {
         // WezTerm on (#240): a pane there opens through its own sequence; a title no WezTerm pane carries
         // keeps the routes below. Each reads every enabled host for ADR 0013's binding.
         if wezTermSwitchedOn {
@@ -638,6 +659,7 @@ extension Companion {
         iTerm2.visits.reset(at: now)
         terminalApp.visits.reset(at: now)
         wezTerm.visits.reset(at: now)
+        rex.visits.reset(at: now)
         tmux.visits.reset(at: now)
         zellij.visits.reset(at: now)
     }

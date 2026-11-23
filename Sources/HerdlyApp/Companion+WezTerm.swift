@@ -75,10 +75,14 @@ struct WezTermTabReads: Sendable {
         // Zellij beside it (#242): its panes count toward uniqueness, and its clients' host tabs do not.
         let zellij: ZellijRead = others.zellijOn ? ZellijRunner.read() : .notRunning
         if others.zellijOn { inventories[.zellij] = zellij.inventory }
+        // Rex beside it: its blocks count toward uniqueness.
+        let rex: RexRead = others.rexOn ? RexNavigation.read() : .notRunning
+        if others.rexOn { inventories[.rex] = rex.inventory }
         // Every tab of every tty-listing host carrying one of `codexTitles`, so a title decoy is told apart
         // from a tab whose `ps` was not read, which fails closed (#268).
         let ttys = (read.snapshot?.ttysToRead(codexTitles: codexTitles, claudeTTYs: claudeTTYs) ?? [])
             .union(tmux.snapshot?.ttysToRead(claudeTTYs: claudeTTYs) ?? [])
+            .union(rex.snapshot?.ttysToRead(codexTitles: codexTitles, claudeTTYs: claudeTTYs) ?? [])
             .union(TerminalTabReadAssembly<Void>.ttysToRead(inventories, codexTitles: codexTitles, claudeTTYs: claudeTTYs))
         let processes = TerminalTTYReads.processes(on: ttys)
         var secondRead = inventories
@@ -86,6 +90,7 @@ struct WezTermTabReads: Sendable {
             secondRead[.wezTerm] = WezTermNavigation.read(running: running).0.inventory
             if others.tmuxOn { secondRead[.tmux] = TmuxRunner.read().inventory }
             if others.zellijOn { secondRead[.zellij] = ZellijRunner.read().inventory }
+            if others.rexOn { secondRead[.rex] = RexNavigation.read().inventory }
         }
         return WezTermTabReads(wezTerm: read, clients: clientRead, inventories: inventories, processes: processes,
                                secondRead: secondRead,
@@ -122,7 +127,7 @@ extension Companion {
         return OtherTabHosts(ghosttyOn: ghosttyOn, ghosttyRunning: ghosttyOn && TerminalApps.isRunning(.ghostty),
                              iTerm2Running: hostSwitches.mayContact(.iTerm2) ? TerminalApps.isRunning(.iTerm2) : nil,
                              terminalAppRunning: terminalAppSwitchedOn ? TerminalApps.isRunning(.terminalApp) : nil,
-                             tmuxOn: tmuxContactAllowed, zellijOn: zellijContactAllowed)
+                             tmuxOn: tmuxContactAllowed, zellijOn: zellijContactAllowed, rexOn: rexSwitchedOn)
     }
 
     // MARK: - Switch

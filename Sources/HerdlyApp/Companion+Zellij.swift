@@ -316,7 +316,8 @@ extension Companion {
                 let rebound = TerminalTabReads(terminalApp: reads.terminalApp, inventories: inventories,
                                                processes: reads.processes, secondRead: inventories, tmux: reads.tmux,
                                                zellij: fresh, ghostty: reads.ghostty, iTerm2: reads.iTerm2,
-                                               wezTerm: reads.wezTerm, wezTermClients: reads.wezTermClients)
+                                               wezTerm: reads.wezTerm, wezTermClients: reads.wezTermClients,
+                                               rex: reads.rex)
                 return ZellijOpen.verifyPane(plan, read: fresh, binding: rebind(rebound))
             },
             // nil is a step that passed; see `runTmuxOpen`.

@@ -57,6 +57,15 @@ public enum MultiplexerHostFront {
         }
     }
 
+    /// Rex's shown block (`TerminalVisibility.rex`).
+    public static func rex(_ snapshot: RexSnapshot?, frontmost: TerminalHost?) -> TerminalVisibilityReading<String> {
+        switch TerminalVisibility.rex(snapshot, frontmost: frontmost) {
+        case .visible(let block): return snapshot?.block(block)?.tty.map { .visible($0) } ?? .unknown
+        case .unknown: return .unknown
+        case .nothing, .unchecked: return .nothing
+        }
+    }
+
     /// Ghostty's selected terminal in its front window. Without `tty` (Ghostty 1.3.1) the terminal's
     /// tty is unknown, so nothing hosted there is ever visible until Ghostty exposes it (#251).
     public static func ghostty(_ snapshot: GhosttySnapshot?, frontmost: TerminalHost?) -> TerminalVisibilityReading<String> {
