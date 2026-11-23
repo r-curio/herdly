@@ -575,6 +575,9 @@ extension Companion {
         } else if let bound = zellijQuestionKeyPane(for: question.session) {
             // Zellij (#242), behind its own live-proof gate.
             pane = bound
+        } else if let bound = rexQuestionKeyPane(for: question.session) {
+            // Rex, behind its own live-proof gate.
+            pane = bound
         } else {
             pane = nil
         }
@@ -597,6 +600,11 @@ extension Companion {
         // Zellij's pane keys type through Zellij's own send (#242).
         if let current, previewMode == nil, start.pane.host == .zellij, start.pane.host.typesQuestionDigits {
             sendZellijQuestionKey(current, start: start, question: question, index: index, option: option)
+            return
+        }
+        // Rex's block keys type through Rex's own send.
+        if let current, previewMode == nil, start.pane.host == .rex, start.pane.host.typesQuestionDigits {
+            sendRexQuestionKey(current, start: start, question: question, index: index, option: option)
             return
         }
         guard let current, previewMode == nil, start.pane.host == .wezTerm, start.pane.host.typesQuestionDigits else { return }

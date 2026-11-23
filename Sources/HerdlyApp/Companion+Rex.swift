@@ -360,6 +360,59 @@ extension Companion {
         }
     }
 
+    // MARK: - Codex question digits (ADR 0017)
+
+    /// The Rex block a Codex question's digit may go to: the latest scan's route, while Rex types digits.
+    func rexQuestionKeyPane(for session: UUID) -> TypedInputPane? {
+        guard rexSwitchedOn, case .pane(let pane)? = rex.codexRoutes[session], pane.host == .rex,
+              pane.host.typesQuestionDigits else { return nil }
+        return pane
+    }
+
+    /// The Rex send behind the shared pane-key route (`answerThroughTerminalKeys`), after
+    /// `TerminalQuestionKeys.start` spent the key: immediately before it, the binding is re-run on fresh reads
+    /// of every enabled host and the rollout is re-read last. One digit in one block `write`, never Enter; a
+    /// key that may have been written counts as sent and is never resent.
+    func sendRexQuestionKey(_ current: AttentionQuestion, start: TerminalQuestionKeys.Start,
+                            question: AttentionQuestion, index: Int, option: Int) {
+        answering = true
+        relayLedger = start.ledger
+        answerProgress[question.id] = start.progress
+        noteCodexKeySending(current, index: index)
+        refresh()
+        let others = otherTabHosts
+        let rolloutRoot = Companion.rolloutRoot
+        Task { @MainActor in
+            let reads = await Task.detached { TerminalTabReads.take(others: others, claudeTTYs: [], second: true) }.value
+            let route = TerminalReplyRoute.from(rexCodexBinding(current.session, reads: reads))
+            let outcome = await Task.detached { () -> HerdrQuestionRelay.Outcome in
+                // The rollout last, as of this instant: a manual answer Codex already recorded, or an ended
+                // turn, sends nothing.
+                let evidence = ReminderReader.currentEvidence(for: current.session, in: rolloutRoot)
+                if let veto = TerminalQuestionKeys.preSendCheck(question: current, evidence: evidence, route: route,
+                                                                spent: start.pane) {
+                    return .vetoed(veto)
+                }
+                let delivery = RexInput.delivery(RexNavigation.send(start.key, into: start.pane))
+                return .delivered(TerminalQuestionKeys.delivery(delivery))
+            }.value
+            answering = false
+            noteCodexKeyAnswer(current, index: index, outcome: outcome)
+            guard queue.items.contains(where: { $0.id == .question(question.id) }) else {
+                answerProgress[question.id] = nil
+                refresh()
+                return
+            }
+            if let progress = answerProgress[question.id] {
+                let settled = HerdrQuestionRelay.settle(outcome, progress: progress, ledger: relayLedger, question: current,
+                                                        index: index, option: option, now: Date().timeIntervalSince1970)
+                answerProgress[question.id] = settled.progress
+                relayLedger = settled.ledger
+            }
+            refresh()
+        }
+    }
+
     // MARK: - Settings
 
     var rexSettingsRow: RexSettingsRow {
