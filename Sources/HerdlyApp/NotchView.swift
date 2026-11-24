@@ -220,9 +220,6 @@ struct Sprite: View {
     /// Points per cell: the notch's 2pt, larger for a Settings preview so edges stay crisp, or
     /// `subagentCell` in a subagent switcher well.
     var cellSize: CGFloat = Sprite.cell
-    /// One flat fill for every cell in place of the session's colours: black on an inverted
-    /// (selected or pressed) switcher well, as that well's label is.
-    var tint: Color? = nil
     static let cell: CGFloat = 2
     /// Two-thirds of `cell`: the sprite before a subagent's name in the opened row's switcher (#397),
     /// 9x6pt for the 6x4-cell kinds.
@@ -265,8 +262,7 @@ struct Sprite: View {
     /// held about 170 MB resident (#343).
     private func bitmap(_ rows: [String]) -> some View {
         // One tone when unlit: the highlight cells fill like the body and close into it.
-        let tone = tint.map { (body: $0, light: $0) }
-            ?? (unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color))
+        let tone = unlit ? (body: NotchStyle.well, light: NotchStyle.well) : NotchStyle.spriteColor(color)
         return ZStack(alignment: .topLeading) {
             cells(in: rows) { $0 != "." && $0 != "+" }.fill(tone.body)
             cells(in: rows) { $0 == "+" }.fill(tone.light)
@@ -382,8 +378,6 @@ struct NotchButtonStyle: ButtonStyle {
         configuration.label
             .font(questionCard ? QuestionCardStyle.font(11) : NotchStyle.mono(11, emphasized ? .semibold : .regular))
             .foregroundStyle(inverted ? Color.black : (enabled ? NotchStyle.ink : NotchStyle.dim))
-            // Lets a mark inside the label, a switcher well's sprite, turn black with the text.
-            .environment(\.notchButtonInverted, inverted)
             .padding(.horizontal, questionCard ? 9 : 8).padding(.vertical, questionCard ? 5 : verticalPadding)
             .background(inverted ? NotchStyle.ink : NotchStyle.well,
                         in: RoundedRectangle(cornerRadius: 5, style: .continuous))
@@ -487,11 +481,6 @@ struct NotchFocusRing: ViewModifier {
         content.overlay(RoundedRectangle(cornerRadius: 6, style: .continuous)
             .stroke(NotchStyle.ink.opacity(focused ? 0.9 : 0), lineWidth: 1.5).padding(-2))
     }
-}
-
-extension EnvironmentValues {
-    /// True inside a `NotchButtonStyle` label while it is drawn pressed or selected (ink fill).
-    @Entry var notchButtonInverted = false
 }
 
 /// The result card's reply field (#323, 9NU): one line the user types and sends to a finished
