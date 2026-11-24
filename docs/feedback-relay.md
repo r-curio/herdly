@@ -1,6 +1,6 @@
 # Feedback relay
 
-Send Feedback… in the menu bar item posts one JSON note to the relay in [`relay/feedback`](../relay/feedback/app.py), which emails it to the maintainer through [Resend](https://resend.com). The app holds no mail credentials. Product behavior is in [product.md](product.md#agreed-feedback); the window is in [DESIGN.md](../DESIGN.md#send-feedback-window).
+Send Feedback in the menu bar item posts one JSON note to the relay in [`relay/feedback`](../relay/feedback/app.py), which emails it to the maintainer through [Resend](https://resend.com). The app holds no mail credentials. Product behavior is in [product.md](product.md#agreed-feedback); the window is in [DESIGN.md](../DESIGN.md#send-feedback-window).
 
 ## Deployment
 

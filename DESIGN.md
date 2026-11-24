@@ -381,7 +381,7 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 The Settings window follows the native macOS conventions measured on macOS 26 (Tahoe). It does not use the notch's materials. Its reference mockup is the "Herdly Settings" Paper file.
 
 - **Opening:**
-  - From "Settings…" (⌘,) in the app menu and in the menu bar item.
+  - From "Settings" in the menu bar item (no keyboard shortcut).
   - The window title is the name of the selected pane, and the window reopens on the last pane viewed.
 - **Structure:**
   - The window opens at 820x780pt, with a minimum of 720x600.
@@ -460,13 +460,13 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
 
 ## Menu Bar Item
 
-The status item opens a standard native menu, in this order: the "Herdly" heading, "Settings…" (⌘,), "Show notch on" (a submenu of Follow pointer and the attached displays), "Pause notifications", "Mute sound" (checked while muted), a separator, "Send Feedback…", a separator, and "Quit Herdly" (⌘Q) (Paper "Herdly Settings", page "Send feedback (2026-11-24)", frame 01).
+The status item opens a standard native menu, in this order: the "Herdly" heading, "Settings", "Show notch on" (a submenu of Follow pointer and the attached displays), "Pause notifications", "Mute sound" (checked while muted), a separator, "Send Feedback", a separator, and "Quit Herdly" (⌘Q) (Paper "Herdly Settings", page "Send feedback (2026-11-24)", frame 01).
 
 - **Pause notifications** (#456): a submenu of "For 1 hour", "Until tomorrow", and "Until I resume". While paused the item has no submenu and reads "Resume notifications (paused until 14:30)", the time in the user's short time format and the weekday too when the end is on another day, or just "Resume notifications" for Until I resume; choosing it resumes. The title is redrawn each time the menu opens. Nothing on the strip shows a pause.
 
 ## Send Feedback Window
 
-Opened from "Send Feedback…" in the menu bar item (Paper "Herdly Settings", page "Send feedback (2026-11-24)", frames 02–05). It uses the Settings window's materials, not the notch's.
+Opened from "Send Feedback" in the menu bar item (Paper "Herdly Settings", page "Send feedback (2026-11-24)", frames 02–05). It uses the Settings window's materials, not the notch's.
 
 - **Window:** 460pt wide, sized to its content, titled and closable with a transparent title bar; #131313 in dark mode like Settings. Reopening while it is open brings the same note forward; closing discards the note.
 - **Header:** the app icon at 64pt and "Send Feedback" in 20pt semibold, with no subtitle.
