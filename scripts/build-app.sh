@@ -14,6 +14,11 @@ cp Sources/HerdlyApp/Resources/AppleEvents.js Sources/HerdlyApp/Resources/Ghostt
 cp -R "$bin_dir/Herdly_HerdlyApp.bundle" "$app_dir/Contents/Resources/"
 cp "$bin_dir/Herdly" "$app_dir/Contents/MacOS/Herdly"
 cp "$bin_dir/HerdlyHook" "$app_dir/Contents/Helpers/HerdlyHook"
+# The app icon is drawn from the same code as the menu bar mark; no icon binary is kept in the repository.
+icon_tool_dir=$(mktemp -d)
+trap 'rm -rf "$icon_tool_dir"' EXIT
+swiftc -O -parse-as-library -o "$icon_tool_dir/make-app-icon" Sources/HerdlyApp/HerdlyMark.swift scripts/make-app-icon.swift
+"$icon_tool_dir/make-app-icon" "$app_dir/Contents/Resources/AppIcon.icns"
 cat > "$app_dir/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -21,6 +26,7 @@ cat > "$app_dir/Contents/Info.plist" <<PLIST
 <key>CFBundleIdentifier</key><string>dev.rcurio.herdly.prototype</string>
 <key>CFBundleName</key><string>Herdly</string>
 <key>CFBundleExecutable</key><string>Herdly</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>${HERDLY_VERSION}</string>
 <key>CFBundleVersion</key><string>${HERDLY_BUILD}</string>
