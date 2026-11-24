@@ -247,9 +247,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var muted = UserDefaults.standard.bool(forKey: "muted")
     /// "Pause notifications" in the menu bar menu (#456). Saved across restarts; a timed pause that
     /// ended while Herdly was not running loads as not paused.
-    @Published private(set) var notificationPause = NotificationPause.load(now: Date()) {
-        UserDefaults.standard.string(forKey: $0)
-    }
+    @Published private(set) var notificationPause = NotificationPause.load(now: Date(),
+                                                                          value: { UserDefaults.standard.string(forKey: $0) })
+    /// Every pause of this launch from its start to its end, so a row is judged by when it arrived.
+    private var notificationPauseLog = NotificationPauseLog()
     /// Settings › Notifications › While paused: whether approvals and questions still pop open.
     @Published var pausedNotifications = PausedNotificationSettings.load { UserDefaults.standard.string(forKey: $0) } {
         didSet { pausedNotifications.save { key, value in UserDefaults.standard.set(value, forKey: key) } }
@@ -1815,23 +1816,17 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let newAgentOutcomes = newAgentItems.compactMap(\.outcome)
             let newAgentQuestions = newAgentItems.compactMap(\.question)
             // #323: a restored or pre-launch result goes to the queue without a card or a sound.
-            // #456: while notifications are paused, a kind the pause keeps quiet arrives as a restored
-            // item does: queued and counted, with no card, sound or phone alert, then or after the pause.
-            let arrivalTime = Date()
-            let pause = notificationPause
-            let whilePaused = pausedNotifications
-            func mayInterrupt(_ kind: NotificationInterruptionKind) -> Bool {
-                NotificationInterruption.allows(kind, pause: pause, settings: whilePaused, at: arrivalTime)
-            }
-            let freshAgentOutcomes = mayInterrupt(.completion)
-                ? newAgentOutcomes.filter { ResultPop.isFresh($0, launchedAt: Companion.launchedAt) } : []
-            let freshAgentQuestions = mayInterrupt(.question)
-                ? newAgentQuestions.filter { $0.arrivedAt >= Companion.launchedAt } : []
-            let newAgentRequests = newAgentItems.filter {
-                ($0.kind == .actionableApproval || $0.kind == .handedBackApproval)
-            }
-            let freshAgentRequests = mayInterrupt(.approval)
-                ? newAgentRequests.filter { $0.arrivedAt >= Companion.launchedAt } : []
+            // #456: a row that arrived during a pause its kind stays quiet for is queued and counted as
+            // a restored row is, with no card, sound or phone alert, then or after the pause. Judged by
+            // the row's own arrival time, so a scan that first sees it after the pause keeps it quiet.
+            let interrupting = NotificationPauseArrivals.interrupting(newAgentItems, pauses: notificationPauseLog,
+                                                                      settings: pausedNotifications, scannedAt: Date())
+            let freshAgentOutcomes = newAgentItems.filter { interrupting.contains($0.id) }.compactMap(\.outcome)
+                .filter { ResultPop.isFresh($0, launchedAt: Companion.launchedAt) }
+            let freshAgentQuestions = newAgentItems.filter { interrupting.contains($0.id) }.compactMap(\.question)
+                .filter { $0.arrivedAt >= Companion.launchedAt }
+            let newAgentRequests = newAgentItems.filter { NotificationInterruptionKind($0) == .approval }
+            let freshAgentRequests = newAgentRequests.filter { interrupting.contains($0.id) && $0.arrivedAt >= Companion.launchedAt }
             let newItems = current.filter { !previous.contains($0.id) }
             let newCompletions = newItems.compactMap(\.completion)
             for completion in newCompletions where !completion.uncertain {
@@ -1858,7 +1853,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             freshAgentCompletionIDs.formUnion(freshAgentOutcomes.map { .outcome($0.id) })
             freshAgentRequestIDs.formUnion(freshAgentRequests.map(\.id))
             freshAgentQuestionIDs.formUnion(freshAgentQuestions.map { .question($0.id) })
-            notePhoneAlertArrivals(newAgentItems, launchedAt: Companion.launchedAt) { mayInterrupt(NotificationInterruptionKind($0)) }
+            notePhoneAlertArrivals(newAgentItems, launchedAt: Companion.launchedAt) { interrupting.contains($0.id) }
             if !freshAgentOutcomes.isEmpty { completionPresentation.enqueue() }
             else if newAgentOutcomes.contains(where: { !$0.uncertain }), !completionPresentation.pending {
                 completionPresentation = Attention(restored: true)
@@ -1867,9 +1862,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // A dismiss of a card that is not showing would still publish and re-render the notch (#306).
             if !currentAgent.contains(where: { $0.approval != nil }) {
                 if reminderPresentation.pending || reminderPresentation.expanded { reminderPresentation.dismiss() }
-            } else if (mayInterrupt(.approval)
-                       && newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }))
-                    || !freshAgentRequests.isEmpty {
+            } else if newItems.contains(where: {
+                        ($0.kind == .handedBackRequest || $0.kind == .actionableRequest)
+                            && NotificationPauseArrivals.allows(.approval, arrivedAt: $0.arrivedAt, pauses: notificationPauseLog,
+                                                                settings: pausedNotifications, scannedAt: Date())
+                    }) || !freshAgentRequests.isEmpty {
                 reminderPresentation.enqueue()
             } else if !newAgentRequests.isEmpty, !reminderPresentation.pending {
                 reminderPresentation = Attention(restored: true)
@@ -2783,24 +2780,24 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         UserDefaults.standard.set(false, forKey: "testCompletion")
         refresh()
     }
-    /// The pause as of now: a timed pause that has ended reads, and is saved, as not paused.
+    /// The pause as of now: a timed pause that has ended reads as not paused. A pure read; the end
+    /// timer and the launch load clear an ended pause.
     func currentNotificationPause(now: Date = Date()) -> NotificationPause {
-        let resolved = notificationPause.resolved(at: now)
-        if resolved != notificationPause { setNotificationPause(resolved) }
-        return resolved
+        notificationPause.isActive(at: now) ? notificationPause : .none
     }
     func pauseNotifications(_ choice: NotificationPauseChoice) {
         setNotificationPause(.starting(choice, now: Date(), calendar: .autoupdatingCurrent))
     }
     func resumeNotifications() { setNotificationPause(.none) }
-    /// Saves the pause, arms its end, and redraws the menu item. Pausing changes no queue order,
-    /// count, acknowledgment, or deadline: it only drops the pending first presentation of kinds it
-    /// keeps quiet, so a card waiting its turn does not pop during the pause or after it. Resuming
-    /// replays nothing that arrived while paused.
+    /// Saves the pause, logs when it starts or ends, arms its end, and redraws the menu item. Pausing
+    /// changes no queue order, count, acknowledgment, or deadline, and only rows that arrive while
+    /// paused are held: a card that arrived before keeps its normal behaviour. Resuming replays
+    /// nothing that arrived while paused.
     private func setNotificationPause(_ pause: NotificationPause) {
         let now = Date()
         let pause = pause.resolved(at: now)
         if notificationPause != pause { notificationPause = pause }
+        notificationPauseLog.record(pause, at: now)
         pause.save { key, value in
             if let value { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
         }
@@ -2808,18 +2805,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         notificationPauseEnd = nil
         if let end = pause.endsAt {
             let timer = Timer(fire: end, interval: 0, repeats: false) { [weak self] _ in
-                Task { @MainActor in _ = self?.currentNotificationPause(); self?.notificationPauseMenu?.update() }
+                Task { @MainActor in
+                    guard let self else { return }
+                    // Clears the ended pause; a timer that fires early re-arms the same pause.
+                    self.setNotificationPause(self.notificationPause)
+                }
             }
             RunLoop.main.add(timer, forMode: .common)
             notificationPauseEnd = timer
-        }
-        if pause.isActive(at: now) {
-            func allows(_ kind: NotificationInterruptionKind) -> Bool {
-                NotificationInterruption.allows(kind, pause: pause, settings: pausedNotifications, at: now)
-            }
-            if !allows(.approval) { freshAgentRequestIDs.removeAll() }
-            if !allows(.question) { freshAgentQuestionIDs.removeAll() }
-            if !allows(.completion) { freshAgentCompletionIDs.removeAll() }
         }
         notificationPauseMenu?.update(now: now)
     }

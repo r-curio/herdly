@@ -244,3 +244,113 @@ func anUnreadablePauseLoadsAsNotPaused(saved: String?) {
     #expect(loud.arrival == .fresh)
     #expect(ledger.consider([loud], idleSeconds: 600, setting: .on).isEmpty)
 }
+
+// MARK: - Which new rows may interrupt, by their own arrival time
+
+/// New rows as a scan hands them over: one of each kind, all arriving at `arrivedAt` (seconds since 1970).
+private func newRows(arrivedAt: Double) -> [AgentAttentionItem] {
+    var queue = AgentAttentionQueue()
+    queue.apply(.approval(AgentApproval(session: codexCLI, turn: "t1", call: "a1", arrivedAt: arrivedAt)), now: arrivedAt)
+    queue.apply(.question(AgentQuestion(session: claude, turn: "t2", call: "q1", arrivedAt: arrivedAt)), now: arrivedAt)
+    queue.apply(.outcome(AgentOutcome(session: codexWorking, turn: "t3", status: .finished, arrivedAt: arrivedAt)), now: arrivedAt)
+    return queue.items(at: arrivedAt)
+}
+
+private func kinds(_ ids: Set<AgentAttentionID>, in rows: [AgentAttentionItem]) -> Set<NotificationInterruptionKind> {
+    Set(rows.filter { ids.contains($0.id) }.map(NotificationInterruptionKind.init))
+}
+
+private let pauseStart = tuesday(13)
+private let pauseEnd = tuesday(14)
+
+/// A log holding one finished pause from 13:00 to 14:00.
+private func finishedPause() -> NotificationPauseLog {
+    var log = NotificationPauseLog()
+    log.record(.until(pauseEnd), at: pauseStart)
+    log.record(.none, at: pauseEnd)
+    return log
+}
+
+@Test func itemsThatArrivedDuringAPauseStayQuietAfterItEnds() {
+    let rows = newRows(arrivedAt: tuesday(13, 30).timeIntervalSince1970)
+    let interrupting = NotificationPauseArrivals.interrupting(rows, pauses: finishedPause(), settings: quiet,
+                                                               scannedAt: tuesday(13, 30))
+    #expect(interrupting.isEmpty)
+    // The pause is over, but the decision was taken at arrival: nothing pops afterwards.
+    #expect(!finishedPause().covers(pauseEnd))
+}
+
+@Test func anItemThatArrivedDuringAPauseButWasScannedAfterItStaysQuiet() {
+    let rows = newRows(arrivedAt: tuesday(13, 59).timeIntervalSince1970)
+    let interrupting = NotificationPauseArrivals.interrupting(rows, pauses: finishedPause(), settings: quiet,
+                                                               scannedAt: tuesday(14, 0, 5))
+    #expect(interrupting.isEmpty)
+}
+
+@Test func anItemThatArrivedBeforeAPauseStartedIsUnaffectedByIt() {
+    // Arrived 12:59, first scanned 13:00:05, after the pause started at 13:00.
+    var log = NotificationPauseLog()
+    log.record(.indefinite, at: pauseStart)
+    let rows = newRows(arrivedAt: tuesday(12, 59).timeIntervalSince1970)
+    let interrupting = NotificationPauseArrivals.interrupting(rows, pauses: log, settings: quiet, scannedAt: tuesday(13, 0, 5))
+    #expect(interrupting == Set(rows.map(\.id)))
+}
+
+@Test func anItemArrivingAtThePauseEndInterruptsAsUsual() {
+    let rows = newRows(arrivedAt: pauseEnd.timeIntervalSince1970)
+    let interrupting = NotificationPauseArrivals.interrupting(rows, pauses: finishedPause(), settings: quiet, scannedAt: pauseEnd)
+    #expect(interrupting == Set(rows.map(\.id)))
+}
+
+@Test(arguments: [PausedInterruption.popOpen, .stayQuiet], [PausedInterruption.popOpen, .stayQuiet])
+func newRowsDuringAPauseFollowTheirSettingAndCompletionsStayQuiet(approvals: PausedInterruption, questions: PausedInterruption) {
+    let rows = newRows(arrivedAt: tuesday(13, 30).timeIntervalSince1970)
+    let settings = PausedNotificationSettings(approvals: approvals, questions: questions)
+    let interrupting = NotificationPauseArrivals.interrupting(rows, pauses: finishedPause(), settings: settings,
+                                                               scannedAt: tuesday(13, 30))
+    var expected: Set<NotificationInterruptionKind> = []
+    if approvals == .popOpen { expected.insert(.approval) }
+    if questions == .popOpen { expected.insert(.question) }
+    #expect(kinds(interrupting, in: rows) == expected)
+}
+
+@Test func anArrivalTimeMissingOrInTheFutureFallsBackToTheScanTime() {
+    var log = NotificationPauseLog()
+    log.record(.indefinite, at: pauseStart)
+    let scannedDuringPause = tuesday(13, 30)
+    #expect(NotificationPauseArrivals.arrival(of: .nan, scannedAt: scannedDuringPause) == scannedDuringPause)
+    #expect(NotificationPauseArrivals.arrival(of: 0, scannedAt: scannedDuringPause) == scannedDuringPause)
+    #expect(NotificationPauseArrivals.arrival(of: tuesday(15).timeIntervalSince1970, scannedAt: scannedDuringPause)
+            == scannedDuringPause)
+    #expect(NotificationPauseArrivals.arrival(of: tuesday(12).timeIntervalSince1970, scannedAt: scannedDuringPause) == tuesday(12))
+}
+
+@Test func thePauseLogKeepsEachSpanFromItsStartToItsEnd() {
+    var log = NotificationPauseLog()
+    log.record(.until(tuesday(14)), at: tuesday(13))
+    // Resumed early at 13:20: the span ends then, not at 14:00.
+    log.record(.none, at: tuesday(13, 20))
+    log.record(.indefinite, at: tuesday(15))
+    #expect(!log.covers(tuesday(12, 59)))
+    #expect(log.covers(tuesday(13)))
+    #expect(log.covers(tuesday(13, 19)))
+    #expect(!log.covers(tuesday(13, 20)))
+    #expect(!log.covers(tuesday(14, 59)))
+    #expect(log.covers(tuesday(15)))
+    #expect(log.covers(.distantFuture))
+    // The end timer recording `.none` after a timed end never stretches the span.
+    var timed = NotificationPauseLog()
+    timed.record(.until(tuesday(14)), at: tuesday(13))
+    timed.record(.none, at: tuesday(14, 0, 3))
+    #expect(!timed.covers(tuesday(14, 0, 1)))
+}
+
+@Test func thePauseLogIsBounded() {
+    var log = NotificationPauseLog(capacity: 2)
+    for hour in 1...5 {
+        log.record(.until(tuesday(hour, 30)), at: tuesday(hour))
+    }
+    #expect(log.spans.count == 2)
+    #expect(!log.covers(tuesday(1, 10)))
+    #expect(log.covers(tuesday(5, 10)))
+}

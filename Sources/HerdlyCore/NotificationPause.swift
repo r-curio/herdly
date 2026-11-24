@@ -81,21 +81,10 @@ public enum NotificationPause: Equatable, Sendable {
         case .indefinite:
             return "Resume notifications"
         case let .until(end):
-            let time = DateFormatter()
-            time.locale = locale
-            time.timeZone = calendar.timeZone
-            time.calendar = calendar
-            time.dateStyle = .none
-            time.timeStyle = .short
-            var when = time.string(from: end)
-            if !calendar.isDate(end, inSameDayAs: now) {
-                let weekday = DateFormatter()
-                weekday.locale = locale
-                weekday.timeZone = calendar.timeZone
-                weekday.calendar = calendar
-                weekday.setLocalizedDateFormatFromTemplate("EEE")
-                when = "\(weekday.string(from: end)) \(when)"
-            }
+            var style = Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, calendar: calendar,
+                                         timeZone: calendar.timeZone)
+            if !calendar.isDate(end, inSameDayAs: now) { style = style.weekday(.abbreviated) }
+            let when = end.formatted(style)
             return "Resume notifications (paused until \(when))"
         }
     }
@@ -194,11 +183,82 @@ public enum NotificationInterruption {
     /// arrival: an item kept quiet stays quiet after the pause ends, as a restored item does.
     public static func allows(_ kind: NotificationInterruptionKind, pause: NotificationPause,
                               settings: PausedNotificationSettings, at now: Date) -> Bool {
-        guard pause.isActive(at: now) else { return true }
+        allows(kind, paused: pause.isActive(at: now), settings: settings)
+    }
+
+    /// The same rule for an item already known to have arrived during a pause, or not.
+    public static func allows(_ kind: NotificationInterruptionKind, paused: Bool,
+                              settings: PausedNotificationSettings) -> Bool {
+        guard paused else { return true }
         switch kind {
         case .approval: return settings.approvals == .popOpen
         case .question: return settings.questions == .popOpen
         case .completion, .other: return false
         }
+    }
+}
+
+/// The pauses Herdly has seen in this launch, each from its start to its end, so an item is judged
+/// by when it arrived rather than by when a scan first saw it. A launch with a saved pause opens its
+/// span at launch: anything older is restored and silent anyway. Kept in memory and bounded.
+public struct NotificationPauseLog: Equatable, Sendable {
+    public struct Span: Equatable, Sendable {
+        public let start: Date
+        /// Nil while paused until the user resumes.
+        public let end: Date?
+
+        public func covers(_ moment: Date) -> Bool {
+            moment >= start && end.map { moment < $0 } ?? true
+        }
+    }
+
+    public let capacity: Int
+    public private(set) var spans: [Span] = []
+
+    public init(capacity: Int = 32) {
+        self.capacity = max(1, capacity)
+    }
+
+    /// Records that the pause became `pause` at `now`: the open span ends at `now` (or earlier, at its
+    /// own end), and an active pause opens a new span from `now` to its end.
+    public mutating func record(_ pause: NotificationPause, at now: Date) {
+        if let last = spans.last, last.covers(now) {
+            spans[spans.count - 1] = Span(start: last.start, end: now)
+        }
+        if pause.isActive(at: now) { spans.append(Span(start: now, end: pause.endsAt)) }
+        if spans.count > capacity { spans.removeFirst(spans.count - capacity) }
+    }
+
+    /// Whether notifications were paused at `moment`.
+    public func covers(_ moment: Date) -> Bool {
+        spans.contains { $0.covers(moment) }
+    }
+}
+
+/// Which of a scan's newly queued rows may pop their card, sound, and alert the phone (#456).
+public enum NotificationPauseArrivals {
+    /// The moment a row arrived: its own arrival time, or the scan time when it has none (not a
+    /// positive finite time) or claims one later than the scan.
+    public static func arrival(of arrivedAt: Double, scannedAt: Date) -> Date {
+        guard arrivedAt.isFinite, arrivedAt > 0 else { return scannedAt }
+        return min(Date(timeIntervalSince1970: arrivedAt), scannedAt)
+    }
+
+    /// Whether a row of `kind` that arrived at `arrivedAt` may interrupt, given the pauses so far.
+    public static func allows(_ kind: NotificationInterruptionKind, arrivedAt: Double, pauses: NotificationPauseLog,
+                              settings: PausedNotificationSettings, scannedAt: Date) -> Bool {
+        let moment = arrival(of: arrivedAt, scannedAt: scannedAt)
+        return NotificationInterruption.allows(kind, paused: pauses.covers(moment), settings: settings)
+    }
+
+    /// The ids of `items` that may interrupt. A row that arrived during a pause its kind stays quiet
+    /// for is left out, even when the scan first sees it after the pause ended; a row that arrived
+    /// before a pause started is unaffected by it.
+    public static func interrupting(_ items: [AgentAttentionItem], pauses: NotificationPauseLog,
+                                    settings: PausedNotificationSettings, scannedAt: Date) -> Set<AgentAttentionID> {
+        Set(items.filter {
+            allows(NotificationInterruptionKind($0), arrivedAt: $0.arrivedAt, pauses: pauses, settings: settings,
+                   scannedAt: scannedAt)
+        }.map(\.id))
     }
 }

@@ -1623,19 +1623,19 @@ private struct WhilePausedSection: View {
     var body: some View {
         SettingsHeader("While paused")
         SettingsCard {
-            row(title: "Approvals", kind: "approvals", selection: $model.pausedNotifications.approvals)
+            row(title: "Approvals", selection: $model.pausedNotifications.approvals)
             Divider().padding(.horizontal, SettingsStyle.rowInset)
-            row(title: "Questions", kind: "questions", selection: $model.pausedNotifications.questions)
+            row(title: "Questions", selection: $model.pausedNotifications.questions)
         }
     }
 
-    private func row(title: String, kind: String, selection: Binding<PausedInterruption>) -> some View {
+    private func row(title: String, selection: Binding<PausedInterruption>) -> some View {
         SettingsRow(title: title, detail: nil) {
             SlidingSegments(title: "\(title) while notifications are paused",
                             selection: selection.animation(SettingsMotion.curve(reduceMotion: model.reduceMotion)),
                             options: PausedInterruption.allCases.map { ($0, $0.title) })
         }
-        .help("While notifications are paused from the menu bar, new \(kind) still open their card, play their sound and alert your phone, or wait quietly in the queue.")
+        .help("While notifications are paused from the menu bar, new \(title.lowercased()) still open their card, play their sound and alert your phone, or wait quietly in the queue.")
     }
 }
 

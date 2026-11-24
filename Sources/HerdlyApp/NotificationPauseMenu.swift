@@ -24,7 +24,7 @@ final class NotificationPauseMenu: NSObject, NSMenuDelegate {
         for choice in NotificationPauseChoice.allCases {
             let entry = NSMenuItem(title: choice.title, action: #selector(choose(_:)), keyEquivalent: "")
             entry.target = self
-            entry.representedObject = choice.rawValue
+            entry.representedObject = choice
             durations.addItem(entry)
         }
         update()
@@ -48,7 +48,7 @@ final class NotificationPauseMenu: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) { update() }
 
     @objc private func choose(_ sender: NSMenuItem) {
-        guard let raw = sender.representedObject as? String, let choice = NotificationPauseChoice(rawValue: raw) else { return }
+        guard let choice = sender.representedObject as? NotificationPauseChoice else { return }
         start(choice)
     }
 
