@@ -57,15 +57,25 @@ public struct ClaudeDesktopSessionIndex: Equatable, Sendable {
     /// The index from session files' contents. A file that does not parse, or lacks a valid
     /// `sessionId` or `cliSessionId`, is skipped: it names no session.
     public static func decode(_ files: [Data]) -> ClaudeDesktopSessionIndex {
+        combine(files.compactMap(entry))
+    }
+
+    /// One session file's identity and focus, nil when it names no exact session.
+    static func entry(_ data: Data) -> ClaudeDesktopSessionFileCache.Entry? {
+        guard data.count <= maximumFileSize,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let local = object["sessionId"] as? String, isLocalID(local),
+              let hook = ClaudeInventoryDecoder.canonicalSessionID(object["cliSessionId"]) else { return nil }
+        return .init(localID: local, hookSession: hook, focusedAt: lastFocusedAt(object))
+    }
+
+    static func combine(_ entries: [ClaudeDesktopSessionFileCache.Entry]) -> ClaudeDesktopSessionIndex {
         var found: [String: Set<String>] = [:]
         var latest: (focusedAt: Double, localIDs: Set<String>)?
-        for data in files {
-            guard data.count <= maximumFileSize,
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let local = object["sessionId"] as? String, isLocalID(local),
-                  let hook = ClaudeInventoryDecoder.canonicalSessionID(object["cliSessionId"]) else { continue }
-            found[hook, default: []].insert(local)
-            if let focusedAt = lastFocusedAt(object) {
+        for entry in entries {
+            let local = entry.localID
+            found[entry.hookSession, default: []].insert(local)
+            if let focusedAt = entry.focusedAt {
                 if latest == nil || focusedAt > latest!.focusedAt {
                     latest = (focusedAt, [local])
                 } else if focusedAt == latest!.focusedAt {
@@ -81,6 +91,15 @@ public struct ClaudeDesktopSessionIndex: Equatable, Sendable {
     /// is missing or cannot be listed, or holds more files than the bound. Folders and files are
     /// opened without following symlinks.
     public static func read(applicationSupport: URL) -> ClaudeDesktopSessionIndex? {
+        var cache = ClaudeDesktopSessionFileCache()
+        return read(applicationSupport: applicationSupport, cache: &cache)
+    }
+
+    /// The same read, reusing `cache`'s parse of each file whose modification date and size are
+    /// unchanged. Claude Desktop rewrites a session file whenever its focus or activity changes, so the
+    /// visit check, which reads every two seconds while Claude Desktop is frontmost, parses only what
+    /// changed. Files that are gone leave the cache.
+    public static func read(applicationSupport: URL, cache: inout ClaudeDesktopSessionFileCache) -> ClaudeDesktopSessionIndex? {
         let root = applicationSupport.appendingPathComponent(directoryName, isDirectory: true)
         guard let accounts = directories(in: root) else { return nil }
         var files: [URL] = []
@@ -93,7 +112,26 @@ public struct ClaudeDesktopSessionIndex: Equatable, Sendable {
                 }
             }
         }
-        return decode(files.compactMap { SafeFile.read($0, limit: maximumFileSize) })
+        var entries: [ClaudeDesktopSessionFileCache.Entry] = []
+        var kept: [String: ClaudeDesktopSessionFileCache.Stamped] = [:]
+        for url in files {
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey, .isSymbolicLinkKey])
+            let stamp = values.flatMap { v -> ClaudeDesktopSessionFileCache.Stamp? in
+                guard v.isSymbolicLink != true, let modified = v.contentModificationDate, let size = v.fileSize else { return nil }
+                return .init(modified: modified, size: size)
+            }
+            if let stamp, let cached = cache.files[url.path], cached.stamp == stamp {
+                kept[url.path] = cached
+                if let entry = cached.entry { entries.append(entry) }
+                continue
+            }
+            let entry = SafeFile.read(url, limit: maximumFileSize).flatMap(entry)
+            if let entry { entries.append(entry) }
+            // A file whose stamp could not be read is parsed every time rather than trusted.
+            if let stamp { kept[url.path] = .init(stamp: stamp, entry: entry) }
+        }
+        cache.files = kept
+        return combine(entries)
     }
 
     /// Claude Desktop's Application Support folder for the current user.
@@ -252,4 +290,32 @@ public enum ClaudeDesktopVisibility {
         guard result == .opened, clickedAt.isFinite else { return [] }
         return Set(completions.filter { $0.arrivedAt.isFinite && $0.arrivedAt < clickedAt }.map(\.id))
     }
+}
+
+/// Parsed Claude Desktop session files by path, each with the modification date and size it was
+/// parsed at (`ClaudeDesktopSessionIndex.read(applicationSupport:cache:)`).
+public struct ClaudeDesktopSessionFileCache: Equatable, Sendable {
+    public struct Entry: Equatable, Sendable {
+        let localID: String
+        let hookSession: String
+        let focusedAt: Double?
+    }
+
+    struct Stamp: Equatable, Sendable {
+        let modified: Date
+        let size: Int
+    }
+
+    struct Stamped: Equatable, Sendable {
+        let stamp: Stamp
+        /// Nil for a file that names no exact session.
+        let entry: Entry?
+    }
+
+    var files: [String: Stamped] = [:]
+
+    public init() {}
+
+    /// How many files the cache holds, for tests.
+    public var count: Int { files.count }
 }
