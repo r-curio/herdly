@@ -18,10 +18,16 @@ public struct ClaudeCapabilities: Equatable, Sendable {
 public struct ClaudeSetupPolicy: Equatable, Sendable {
     public let managedHooksOnly: Bool
     public let shadowedBy: String?
+    /// Whether setup needs `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`. Only Ghostty without `tty` binds Claude
+    /// by its "Herdly Claude <id>" title (ADR 0013); every other host binds by tty. Claude also reads the
+    /// setting as "send no OSC 7501 program status", which hides its sessions from hosts that list agents
+    /// by that status (the Herdr app), so setup asks for it only when the title is the binding.
+    public let titleSettingRequired: Bool
 
-    public init(managedHooksOnly: Bool = false, shadowedBy: String? = nil) {
+    public init(managedHooksOnly: Bool = false, shadowedBy: String? = nil, titleSettingRequired: Bool = true) {
         self.managedHooksOnly = managedHooksOnly
         self.shadowedBy = shadowedBy
+        self.titleSettingRequired = titleSettingRequired
     }
 }
 
@@ -69,6 +75,12 @@ public enum ClaudeSetupRequirements {
     public static let titlePrefix = "Herdly Claude "
     public static let titleDisableEnvironmentKey = "CLAUDE_CODE_DISABLE_TERMINAL_TITLE"
     public static let titleDisableEnvironmentValue = "1"
+
+    /// True only when an installed Ghostty cannot report terminal ttys, so Claude tabs there bind by title.
+    /// No Ghostty, or one that reports ttys, binds Claude by tty and needs no title setting.
+    public static func titleSettingRequired(ghosttyInstalled: Bool, ttySupport: GhosttyTTYSupport) -> Bool {
+        ghosttyInstalled && ttySupport == .unsupported
+    }
     public static let metadataClockSkew: TimeInterval = 300
 
     /// The events needed by the observer and the Bash, file, and web decision slices. Other permission
@@ -168,6 +180,8 @@ public struct ClaudeSetupPlan: Equatable, Sendable {
     public let installationID: String
     public let usageEnabled: Bool
     public let usageStatus: ClaudeUsageSetupStatus
+    /// The policy's `titleSettingRequired`, carried so install checks the same requirement the preview used.
+    public let titleSettingRequired: Bool
 
     let originalSettings: Data
     let originalSettingsExisted: Bool
@@ -175,7 +189,7 @@ public struct ClaudeSetupPlan: Equatable, Sendable {
     init(status: ClaudeSetupStatus, settingsChange: Data, ownedHooks: [ClaudeOwnedHook],
          ownedEnvironment: [String: String],
          helperCommand: String, requiresConfigure: Bool, addsHooks: Bool = false, installationID: String,
-         usageEnabled: Bool, usageStatus: ClaudeUsageSetupStatus,
+         usageEnabled: Bool, usageStatus: ClaudeUsageSetupStatus, titleSettingRequired: Bool = true,
          originalSettings: Data, originalSettingsExisted: Bool) {
         self.status = status
         self.settingsChange = settingsChange
@@ -187,6 +201,7 @@ public struct ClaudeSetupPlan: Equatable, Sendable {
         self.installationID = installationID
         self.usageEnabled = usageEnabled
         self.usageStatus = usageStatus
+        self.titleSettingRequired = titleSettingRequired
         self.originalSettings = originalSettings
         self.originalSettingsExisted = originalSettingsExisted
     }
@@ -223,7 +238,8 @@ public enum ClaudeSetupPlanner {
         if let environment = source["env"], !(environment is [String: Any]) {
             return empty(.malformed("Claude settings.json has an unsupported env shape and was not changed."), settings: settings, settingsExisted: settingsExisted)
         }
-        if let existing = (source["env"] as? [String: Any])?[ClaudeSetupRequirements.titleDisableEnvironmentKey],
+        if policy.titleSettingRequired,
+           let existing = (source["env"] as? [String: Any])?[ClaudeSetupRequirements.titleDisableEnvironmentKey],
            (existing as? String) != ClaudeSetupRequirements.titleDisableEnvironmentValue {
             return empty(.conflict("Claude's automatic terminal title setting is owned by another value; review settings.json before reconnecting."), settings: settings, settingsExisted: settingsExisted)
         }
@@ -287,10 +303,14 @@ public enum ClaudeSetupPlanner {
         }
         merged["hooks"] = hooks
         var environment = (source["env"] as? [String: Any]) ?? [:]
-        let titleEnvironmentAlreadyPresent = environment[ClaudeSetupRequirements.titleDisableEnvironmentKey] as? String
-            == ClaudeSetupRequirements.titleDisableEnvironmentValue
-        environment[ClaudeSetupRequirements.titleDisableEnvironmentKey] = ClaudeSetupRequirements.titleDisableEnvironmentValue
-        merged["env"] = environment
+        // Not required: whatever settings.json holds for the key stays as it is, and Herdly owns nothing new.
+        let titleEnvironmentAlreadyPresent = !policy.titleSettingRequired
+            || environment[ClaudeSetupRequirements.titleDisableEnvironmentKey] as? String
+                == ClaudeSetupRequirements.titleDisableEnvironmentValue
+        if policy.titleSettingRequired {
+            environment[ClaudeSetupRequirements.titleDisableEnvironmentKey] = ClaudeSetupRequirements.titleDisableEnvironmentValue
+            merged["env"] = environment
+        }
         let ownedHooks = expectedHooks.map { owned in
             let groups = (hooks[owned.event] as? [[String: Any]]) ?? []
             var position: (Int, Int)?
@@ -317,7 +337,9 @@ public enum ClaudeSetupPlanner {
                   settings,
                   hooks: jsonEquivalent(source["hooks"], mergedHooks) ? source["hooks"] as? [String: Any] : mergedHooks
               ),
-              let changedBase = try? jsonDataPreservingEnvironment(hooksChanged, original: source["env"], value: environment) else {
+              let changedBase = policy.titleSettingRequired
+                  ? try? jsonDataPreservingEnvironment(hooksChanged, original: source["env"], value: environment)
+                  : hooksChanged else {
             return empty(.malformed("Claude settings.json could not be encoded safely and was not changed."), settings: settings, settingsExisted: settingsExisted)
         }
         let usage: ClaudeUsageSetupStatus
@@ -345,6 +367,7 @@ public enum ClaudeSetupPlanner {
                                ownedEnvironment: titleEnvironmentAlreadyPresent ? [:] : [ClaudeSetupRequirements.titleDisableEnvironmentKey: ClaudeSetupRequirements.titleDisableEnvironmentValue],
                                helperCommand: ownedHooks.first?.command ?? "", requiresConfigure: changed != settings, addsHooks: addsHooks,
                                installationID: installationID, usageEnabled: usageEnabled, usageStatus: usage,
+                               titleSettingRequired: policy.titleSettingRequired,
                                originalSettings: settings, originalSettingsExisted: settingsExisted)
     }
 
@@ -752,7 +775,7 @@ public struct ClaudeSetupInstaller {
             if case .changed = ownedHookState(object, expected: state.ownedHooks) {
                 throw ClaudeSetupError.conflict("A Herdly-owned Claude hook was changed; review setup before repair.")
             }
-            if case .changed = ownedEnvironmentState(object, expected: state.ownedEnvironment) {
+            if plan.titleSettingRequired, case .changed = ownedEnvironmentState(object, expected: state.ownedEnvironment) {
                 throw ClaudeSetupError.conflict("Herdly's terminal title setting was changed; review setup before repair.")
             }
             if let installed = state.installedStatusLine {
@@ -766,7 +789,7 @@ public struct ClaudeSetupInstaller {
            (try? readableData(at: roots.helperURL)) == helper,
            let state = existingState, state.rootPath == roots.configDirectory.path,
            state.installationID == plan.installationID {
-            return status(roots: roots, capabilities: capabilities)
+            return status(roots: roots, capabilities: capabilities, titleSettingRequired: plan.titleSettingRequired)
         }
         guard current == plan.originalSettings else {
             throw ClaudeSetupError.conflict("Claude settings changed after the preview. Review setup again.")
@@ -824,7 +847,7 @@ public struct ClaudeSetupInstaller {
             }
             throw ClaudeSetupError.failed("Setup was not completed; the original configuration was restored.")
         }
-        return status(roots: roots, capabilities: capabilities)
+        return status(roots: roots, capabilities: capabilities, titleSettingRequired: plan.titleSettingRequired)
     }
 
     /// Replaces this root's installed helper with `helper` only while the installed file is exactly the
@@ -862,7 +885,10 @@ public struct ClaudeSetupInstaller {
         return .updated
     }
 
-    public func status(roots: ClaudeSetupRoots, capabilities: ClaudeCapabilities) -> ClaudeConnectionStatus {
+    /// `titleSettingRequired` false (no Ghostty that binds Claude by title) reads a missing or different
+    /// `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` as fine, so removing it to let Claude report status is not a repair.
+    public func status(roots: ClaudeSetupRoots, capabilities: ClaudeCapabilities,
+                       titleSettingRequired: Bool = true) -> ClaudeConnectionStatus {
         guard capabilities.supported else {
             return .unsupported("Claude Code \(capabilities.version ?? "version unknown") is older than the tested minimum \(ClaudeSetupRequirements.minimumCLIVersion).")
         }
@@ -891,15 +917,17 @@ public struct ClaudeSetupInstaller {
         guard helper == state.helper else {
             return .conflict("Herdly's Claude helper differs from the one it installed; review setup before repair.")
         }
-        switch titleEnvironmentState(object) {
-        case .changed: return .conflict("Claude's automatic terminal title setting was changed; review setup before repair.")
-        case .missing: return .repairRequired("Herdly's terminal title setting is missing; Configure Claude to repair setup.")
-        case .intact: break
-        }
-        switch ownedEnvironmentState(object, expected: state.ownedEnvironment) {
-        case .changed: return .conflict("Herdly's terminal title setting was changed; review setup before repair.")
-        case .missing: return .repairRequired("Herdly's terminal title setting is missing; Configure Claude to repair setup.")
-        case .intact: break
+        if titleSettingRequired {
+            switch titleEnvironmentState(object) {
+            case .changed: return .conflict("Claude's automatic terminal title setting was changed; review setup before repair.")
+            case .missing: return .repairRequired("Herdly's terminal title setting is missing; Configure Claude to repair setup.")
+            case .intact: break
+            }
+            switch ownedEnvironmentState(object, expected: state.ownedEnvironment) {
+            case .changed: return .conflict("Herdly's terminal title setting was changed; review setup before repair.")
+            case .missing: return .repairRequired("Herdly's terminal title setting is missing; Configure Claude to repair setup.")
+            case .intact: break
+            }
         }
         if let installed = state.installedStatusLine {
             guard let currentStatusLine = ClaudeSetupPlanner.memberData(settings, key: "statusLine") else {

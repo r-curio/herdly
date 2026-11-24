@@ -1077,7 +1077,9 @@ private struct ClaudeAgentControls: View {
         let hookFields = plan.ownedHooks.map { hook in
             "  hooks.\(hook.event) matcher=\(hook.matcher ?? "<any>") command=\(hook.command) timeout=\(ClaudeSetupRequirements.hookTimeout)"
         }.joined(separator: "\n")
-        let environmentFields = plan.ownedEnvironment.isEmpty
+        let environmentFields = !plan.titleSettingRequired
+            ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey): not needed (Claude binds by tty here); left as it is"
+            : plan.ownedEnvironment.isEmpty
             ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey)=\(ClaudeSetupRequirements.titleDisableEnvironmentValue) (already present; preserved)"
             : plan.ownedEnvironment.map { key, value in
                 "  env.\(key)=\(value) (Herdly adds and owns)"

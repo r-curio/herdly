@@ -75,7 +75,8 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
         root: config,
         applicationSupport: support,
         capabilities: capabilities,
-        inventoryStatus: .unavailable("test inventory unavailable")
+        inventoryStatus: .unavailable("test inventory unavailable"),
+        titleSettingRequired: true
     )
     #expect(snapshot.status == .conflict("Claude's automatic terminal title setting is owned by another value; review settings.json before reconnecting."))
     #expect(snapshot.plan?.status == .conflict("Claude's automatic terminal title setting is owned by another value; review settings.json before reconnecting."))
@@ -266,6 +267,72 @@ private func settingsObject(_ data: Data) throws -> [String: Any] {
     _ = try installer.undo(roots: setupRoots)
     let restored = try settingsObject(Data(contentsOf: setupRoots.settingsURL))
     #expect(restored["env"] == nil)
+}
+
+@Test func claudeTitleSettingIsRequiredOnlyForAGhosttyWithoutTTY() {
+    #expect(ClaudeSetupRequirements.titleSettingRequired(ghosttyInstalled: true, ttySupport: .unsupported))
+    #expect(!ClaudeSetupRequirements.titleSettingRequired(ghosttyInstalled: true, ttySupport: .supported))
+    #expect(!ClaudeSetupRequirements.titleSettingRequired(ghosttyInstalled: false, ttySupport: .unsupported))
+}
+
+@Test func claudeSetupWithoutTitleRequirementNeitherAddsNorDemandsTheTitleSetting() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-claude-notitle-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let setupRoots = roots(in: root)
+    let helper = Data("helper-v1".utf8)
+    let installer = ClaudeSetupInstaller()
+    let policy = ClaudeSetupPolicy(titleSettingRequired: false)
+    let original = Data(#"{"env": { "KEEP": "value" }}"#.utf8)
+    try FileManager.default.createDirectory(at: setupRoots.configDirectory, withIntermediateDirectories: true)
+    try original.write(to: setupRoots.settingsURL)
+
+    let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: original,
+                                       helperPath: setupRoots.helperURL, eventsPath: setupRoots.eventsDirectory,
+                                       policy: policy)
+    #expect(plan.status == .ready)
+    #expect(!plan.titleSettingRequired)
+    #expect(plan.ownedEnvironment.isEmpty)
+    #expect(try settingsObject(plan.settingsChange)["env"] as? [String: String] == ["KEEP": "value"])
+    #expect(try installer.install(plan, roots: setupRoots, helper: helper, capabilities: capabilities).isAwaitingRestart)
+    #expect(installer.status(roots: setupRoots, capabilities: capabilities, titleSettingRequired: false).isAwaitingRestart)
+    // The same root on a Mac whose Ghostty binds Claude by title still asks for the setting.
+    #expect(installer.status(roots: setupRoots, capabilities: capabilities)
+            == .repairRequired("Herdly's terminal title setting is missing; Configure Claude to repair setup."))
+
+    // A different user value is no conflict when the title is not the binding, and Configure leaves it alone.
+    let userValue = Data(#"{"env": { "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "0" }}"#.utf8)
+    let userPlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: userValue,
+                                           helperPath: setupRoots.helperURL, eventsPath: setupRoots.eventsDirectory,
+                                           policy: policy)
+    #expect(userPlan.status == .ready)
+    #expect((try settingsObject(userPlan.settingsChange)["env"] as? [String: String])?[ClaudeSetupRequirements.titleDisableEnvironmentKey] == "0")
+}
+
+@Test func claudeSetupToleratesRemovingAHerdlyOwnedTitleSettingOnceItIsNotRequired() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-claude-dropped-title-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let setupRoots = roots(in: root)
+    let helper = Data("helper-v1".utf8)
+    let installer = ClaudeSetupInstaller()
+    try FileManager.default.createDirectory(at: setupRoots.configDirectory, withIntermediateDirectories: true)
+    try Data("{}".utf8).write(to: setupRoots.settingsURL)
+    // Installed while Ghostty bound Claude by title: Herdly added and owns the setting.
+    let titledPlan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: Data("{}".utf8),
+                                             helperPath: setupRoots.helperURL, eventsPath: setupRoots.eventsDirectory)
+    _ = try installer.install(titledPlan, roots: setupRoots, helper: helper, capabilities: capabilities)
+
+    var removed = try settingsObject(Data(contentsOf: setupRoots.settingsURL))
+    removed.removeValue(forKey: "env")
+    try JSONSerialization.data(withJSONObject: removed).write(to: setupRoots.settingsURL)
+    #expect(installer.status(roots: setupRoots, capabilities: capabilities, titleSettingRequired: false).isAwaitingRestart)
+
+    let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: try Data(contentsOf: setupRoots.settingsURL),
+                                       helperPath: setupRoots.helperURL, eventsPath: setupRoots.eventsDirectory,
+                                       policy: ClaudeSetupPolicy(titleSettingRequired: false))
+    #expect(plan.ownedEnvironment.isEmpty)
+    #expect(try settingsObject(plan.settingsChange)["env"] == nil)
+    _ = try installer.undo(roots: setupRoots)
+    #expect(try settingsObject(Data(contentsOf: setupRoots.settingsURL))["env"] == nil)
 }
 
 @Test func claudeSetupInstallReinstallRepairAndUndoKeepOtherRootIndependent() throws {
