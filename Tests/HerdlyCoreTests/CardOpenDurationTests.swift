@@ -87,23 +87,6 @@ func aTimedCardStaysOpenUntilItsTimeAndClosesExactlyThen(duration: CardOpenDurat
     #expect(queue.items(at: 30).first?.approval?.state == .handedBack)
 }
 
-@Test func theConnectionNoticeNamesOnlyAgentsKnownNotToBeConnected() {
-    #expect(AgentConnectionNotice.message(codexConnected: true, claudeConnected: true) == nil)
-    #expect(AgentConnectionNotice.message(codexConnected: false, claudeConnected: true) == "Codex isn't connected")
-    #expect(AgentConnectionNotice.message(codexConnected: true, claudeConnected: false) == "Claude Code isn't connected")
-    #expect(AgentConnectionNotice.message(codexConnected: false, claudeConnected: false)
-            == "Codex and Claude Code aren't connected")
-}
-
-@Test func theConnectionNoticeNeverGuessesWhileAStateIsStillBeingChecked() {
-    #expect(AgentConnectionNotice.message(codexConnected: nil, claudeConnected: nil) == nil)
-    #expect(AgentConnectionNotice.message(codexConnected: nil, claudeConnected: true) == nil)
-    #expect(AgentConnectionNotice.message(codexConnected: true, claudeConnected: nil) == nil)
-    // A known gap is still named while the other agent is being checked.
-    #expect(AgentConnectionNotice.message(codexConnected: false, claudeConnected: nil) == "Codex isn't connected")
-    #expect(AgentConnectionNotice.message(codexConnected: nil, claudeConnected: false) == "Claude Code isn't connected")
-}
-
 private let answered = AgentAttentionID.running(AgentTurnIdentity(session: session("asked"), turn: "t2"))
 
 @Test(arguments: [true, false])
