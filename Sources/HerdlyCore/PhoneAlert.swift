@@ -47,6 +47,8 @@ public enum PhoneAlertKind: Equatable, Sendable {
 public enum PhoneAlertArrival: Equatable, Sendable {
     case fresh
     case restored
+    /// Arrived while notifications were paused and its kind stays quiet (#456): spent, never sent.
+    case paused
 
     /// Fresh when the item arrived at or after launch; a result uses the rule that decides whether
     /// its card pops (`ResultPop.isFresh`), which also keeps an uncertain result silent.
@@ -111,6 +113,13 @@ public struct PhoneAlertCandidate: Equatable, Sendable {
         guard let kind = PhoneAlertKind(item) else { return nil }
         self.init(id: item.id, kind: kind, source: item.session.source, project: project,
                   arrival: PhoneAlertArrival.of(item, launchedAt: launchedAt))
+    }
+
+    /// This candidate, marked `.paused` when a pause keeps its kind quiet
+    /// (`NotificationInterruption.allows`). The ledger still records it, so it never alerts later.
+    public func respecting(mayInterrupt: Bool) -> PhoneAlertCandidate {
+        guard !mayInterrupt, arrival == .fresh else { return self }
+        return PhoneAlertCandidate(id: id, kind: kind, source: source, project: project, arrival: .paused)
     }
 }
 
