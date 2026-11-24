@@ -247,7 +247,7 @@ private struct FeedbackFormView: View {
         HStack(spacing: 10) {
             if let problem = form.problem {
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Circle().fill(SettingsStyle.noticeOrange).frame(width: 7, height: 7)
+                    Circle().fill(.orange).frame(width: 7, height: 7)
                     Text(problem + " Your note is kept.")
                         .font(.system(size: 12))
                         .fixedSize(horizontal: false, vertical: true)
