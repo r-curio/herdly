@@ -15,6 +15,8 @@ struct ClaudeDesktopVisitState {
     var visits = TerminalVisitTracker<String>()
     var checking = false
     var nextScan: Double = 0
+    /// Parsed session files, so a check re-reads only files Claude Desktop changed.
+    var files = ClaudeDesktopSessionFileCache()
 }
 
 extension Companion {
@@ -84,14 +86,16 @@ extension Companion {
 
     // MARK: - Visits (ADR 0016, #474)
 
-    /// Every two seconds while a Claude Desktop session has a queued result. The session files are read
-    /// only while macOS reports Claude Desktop frontmost; otherwise nothing of it is visible. One check
-    /// at a time; none during an Open.
+    /// Every two seconds while a Claude Desktop session is live or has a queued result. Live sessions
+    /// count too: a result that arrives while its session is already in front can only dwell if a scan
+    /// before it saw the session visible (ADR 0016). The session files are read only while macOS
+    /// reports Claude Desktop frontmost, through a cache that re-parses only changed files; otherwise
+    /// nothing of it is visible. One check at a time; none during an Open.
     func checkClaudeDesktopVisits() {
         let uptime = ProcessInfo.processInfo.systemUptime
         guard previewMode == nil, !claudeDesktop.checking, !openingTask, uptime >= claudeDesktop.nextScan else { return }
-        let desktop = Set(agentQueue.snapshot.outcomes.map(\.session).filter(isClaudeDesktopSession))
-        guard !desktop.isEmpty else { return }
+        guard !claudeDesktopSessions.isEmpty
+                || agentQueue.snapshot.outcomes.contains(where: { isClaudeDesktopSession($0.session) }) else { return }
         claudeDesktop.nextScan = uptime + 2
         let takenAt = Date().timeIntervalSince1970
         guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == ClaudeDesktopSessionIndex.bundleIdentifier else {
@@ -101,7 +105,12 @@ extension Companion {
         claudeDesktop.checking = true
         let support = ClaudeDesktopSessionIndex.defaultApplicationSupport
         Task { @MainActor in
-            let index = await Task.detached { ClaudeDesktopSessionIndex.read(applicationSupport: support) }.value
+            let cache = claudeDesktop.files
+            let (index, updated) = await Task.detached { () -> (ClaudeDesktopSessionIndex?, ClaudeDesktopSessionFileCache) in
+                var files = cache
+                return (ClaudeDesktopSessionIndex.read(applicationSupport: support, cache: &files), files)
+            }.value
+            claudeDesktop.files = updated
             claudeDesktop.checking = false
             recordClaudeDesktopVisit(ClaudeDesktopVisibility.reading(frontmost: true, index: index), index: index, takenAt: takenAt)
         }
