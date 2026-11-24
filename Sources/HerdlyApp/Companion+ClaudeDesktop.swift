@@ -4,9 +4,18 @@ import HerdlyCore
 // Open for a Claude Desktop Code session (#471; HerdlyCore's ClaudeDesktop.swift). The registry is
 // re-read at click time: only a session the complete inventories list exactly once, as running in
 // Claude Desktop, is opened. Claude Desktop's own link selects the exact session, and the jump counts
-// as reached only once Claude Desktop records that session's focus after the click. Anything else
-// raises Claude Desktop with the card's note, or shows why Open is unavailable. No Open here
-// acknowledges a result: for a desktop session only Dismiss does (agreed 2026-11-24).
+// as reached once Claude Desktop records that session's focus after the click, or at once when Claude
+// Desktop already showed it (`ClaudeDesktopOpen.alreadyShowing`). Anything else
+// raises Claude Desktop with the card's note, or shows why Open is unavailable. A verified Open, a
+// visit or a five-second dwell acknowledges a result (ADR 0016, agreed 2026-11-24, #474); a raise
+// acknowledges nothing.
+
+/// ADR 0016's visit interval and dwell run over Claude Desktop sessions, by Claude Desktop id (#474).
+struct ClaudeDesktopVisitState {
+    var visits = TerminalVisitTracker<String>()
+    var checking = false
+    var nextScan: Double = 0
+}
 
 extension Companion {
     /// Whether the latest inventories list this Claude session as running in Claude Desktop.
@@ -37,6 +46,7 @@ extension Companion {
                                               listedAnywhere: inventories.contains { $0.listedSessionIDs.contains(identity.session) },
                                               localID: index?.localID(for: identity.session),
                                               claudeRunning: Self.claudeDesktopRunning)
+            let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }.map(TerminalCompletionCandidate.init)
             let result: ClaudeDesktopOpen.Result
             switch plan {
             case .unavailable(let reason):
@@ -63,8 +73,56 @@ extension Companion {
             // ADR 0015, #411: reaching the session or raising its app hands the request back with no
             // decision or answer, so Claude Desktop shows its own prompt.
             if result.handsBackRequest { handBackClaudeRequest(request) }
+            let acknowledged = ClaudeDesktopVisibility.afterOpen(outcomes, result: result, clickedAt: clickedAt)
+            for id in acknowledged { agentQueue.dismiss(.outcome(id)) }
+            if !acknowledged.isEmpty { saveCompletions() }
             endVisitIntervalsAfterOpen()
             openingTask = false
+            refresh()
+        }
+    }
+
+    // MARK: - Visits (ADR 0016, #474)
+
+    /// Every two seconds while a Claude Desktop session has a queued result. The session files are read
+    /// only while macOS reports Claude Desktop frontmost; otherwise nothing of it is visible. One check
+    /// at a time; none during an Open.
+    func checkClaudeDesktopVisits() {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        guard previewMode == nil, !claudeDesktop.checking, !openingTask, uptime >= claudeDesktop.nextScan else { return }
+        let desktop = Set(agentQueue.snapshot.outcomes.map(\.session).filter(isClaudeDesktopSession))
+        guard !desktop.isEmpty else { return }
+        claudeDesktop.nextScan = uptime + 2
+        let takenAt = Date().timeIntervalSince1970
+        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == ClaudeDesktopSessionIndex.bundleIdentifier else {
+            recordClaudeDesktopVisit(ClaudeDesktopVisibility.reading(frontmost: false, index: nil), index: nil, takenAt: takenAt)
+            return
+        }
+        claudeDesktop.checking = true
+        let support = ClaudeDesktopSessionIndex.defaultApplicationSupport
+        Task { @MainActor in
+            let index = await Task.detached { ClaudeDesktopSessionIndex.read(applicationSupport: support) }.value
+            claudeDesktop.checking = false
+            recordClaudeDesktopVisit(ClaudeDesktopVisibility.reading(frontmost: true, index: index), index: index, takenAt: takenAt)
+        }
+    }
+
+    /// Records one scan and acknowledges, for each Claude Desktop session, the results its visit or
+    /// dwell covers. A scan that an Open started after is ignored by the tracker.
+    private func recordClaudeDesktopVisit(_ reading: TerminalVisibilityReading<String>, index: ClaudeDesktopSessionIndex?,
+                                          takenAt: Double) {
+        claudeDesktop.visits.record(TerminalVisibilityScan(takenAt: takenAt, reading: reading))
+        guard let index else { return }
+        var acknowledged = false
+        for identity in Set(agentQueue.snapshot.outcomes.map(\.session).filter(isClaudeDesktopSession)) {
+            let outcomes = agentQueue.snapshot.outcomes.filter { $0.session == identity }.map(TerminalCompletionCandidate.init)
+            for id in claudeDesktop.visits.acknowledged(outcomes, target: index.localID(for: identity.session)) {
+                agentQueue.dismiss(.outcome(id))
+                acknowledged = true
+            }
+        }
+        if acknowledged {
+            saveCompletions()
             refresh()
         }
     }
