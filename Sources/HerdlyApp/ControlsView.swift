@@ -124,8 +124,7 @@ struct Controls: View {
         // A fixed sidebar panel that runs the full window height, so the window buttons sit inside
         // it as in System Settings and Raycast. It never collapses.
         HStack(spacing: 0) {
-            ControlsSidebar(selection: $selection, status: "\(model.workingCount) working · \(model.currentToCheckCount) to check",
-                            sprite: model.appearance.sprite)
+            ControlsSidebar(selection: $selection, sprite: model.appearance.sprite)
                 .frame(width: 210)
                 .padding(8)
             ZStack {
@@ -148,7 +147,6 @@ struct Controls: View {
 
 private struct ControlsSidebar: View {
     @Binding var selection: ControlSection
-    let status: String
     let sprite: SpriteKind
 
     var body: some View {
@@ -171,16 +169,6 @@ private struct ControlsSidebar: View {
         .scrollContentBackground(.hidden)
         // Room for the window buttons, which the window draws over the panel's top edge.
         .safeAreaInset(edge: .top, spacing: 0) { Color.clear.frame(height: 36) }
-        .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 7) {
-                Circle().fill(.green).frame(width: 7, height: 7).accessibilityHidden(true)
-                Text(status).font(.subheadline).foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .accessibilityElement(children: .combine)
-        }
         .background(SettingsStyle.sidebarFill, in: .rect(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)

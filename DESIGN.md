@@ -391,7 +391,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - Sidebar panes in labeled groups: "Notch" (General, Notch, Notifications), "Connections" (Agents, Terminals), then About on its own. There is no sidebar collapse button.
   - Each sidebar row is 32pt tall with a 20pt colour tile holding a white SF Symbol: gray gear, black sprite, red bell, purple sparkles, dark terminal, blue info.
   - The Notch tile shows the chosen sprite in green, the one place the notch's colour appears in the window.
-  - The sidebar footer shows the "N working · N to check" status in 11pt secondary text.
+  - The sidebar has no footer; the notch itself shows what is working and what needs checking.
 - **Forms:**
   - `.formStyle(.grouped)` with system fills. Sections have 12pt continuous corners; rows are 36pt, or 40pt with a segmented control. Separators are inset 10pt.
   - Section headers are 13pt bold. No pane has section footers; a row that can be grayed out explains itself with hover text instead.
