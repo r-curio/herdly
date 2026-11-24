@@ -4,7 +4,6 @@ import HerdlyCore
 
 private enum ControlSection: String, CaseIterable, Identifiable {
     case general
-    case notch
     case notifications
     case agents
     case terminals
@@ -12,11 +11,9 @@ private enum ControlSection: String, CaseIterable, Identifiable {
 
     var id: Self { self }
     var title: String { rawValue.capitalized }
-    /// The Notch tile draws the green sprite instead of a symbol (DESIGN.md, Settings Window).
     var symbol: String {
         switch self {
         case .general: "gearshape.fill"
-        case .notch: ""
         case .agents: "sparkles"
         case .terminals: "apple.terminal.fill"
         case .notifications: "bell.fill"
@@ -26,7 +23,6 @@ private enum ControlSection: String, CaseIterable, Identifiable {
     var color: Color {
         switch self {
         case .general: .gray
-        case .notch: .black
         case .agents: .purple
         case .terminals: Color(white: 0.22)
         case .notifications: .red
@@ -55,8 +51,6 @@ enum SettingsStyle {
     /// Status pill text: a darker green and orange in light mode so they read on their 12% tint.
     static let readyText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 0.19, green: 0.82, blue: 0.35, alpha: 1),
                                                   light: NSColor(srgbRed: 0.14, green: 0.54, blue: 0.24, alpha: 1)))
-    /// The General pane's not-connected bar: #FF9500, its fill at 10% (DESIGN.md, General pane).
-    static let noticeOrange = Color(.sRGB, red: 1, green: 0x95 / 255, blue: 0)
     static let attentionText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 1, green: 0.62, blue: 0.04, alpha: 1),
                                                       light: NSColor(srgbRed: 0.79, green: 0.2, blue: 0, alpha: 1)))
 }
@@ -116,7 +110,10 @@ struct Controls: View {
         self.model = model
         // This is an intentional one-time navigation seed: restore the user's last section, then
         // let setup lead on a fresh install until an agent is connected.
-        let saved = UserDefaults.standard.string(forKey: "controlsSection").flatMap(ControlSection.init(rawValue:))
+        let stored = UserDefaults.standard.string(forKey: "controlsSection")
+        // The Notch pane merged into General (#466). A window last left on Notch saved "notch", which
+        // no longer names a section, so map it to General rather than fall through to the fresh-install choice.
+        let saved = stored == "notch" ? .general : stored.flatMap(ControlSection.init(rawValue:))
         _selection = State(initialValue: saved ?? (model.canUndoSetup ? .general : .agents))
     }
 
@@ -124,11 +121,11 @@ struct Controls: View {
         // A fixed sidebar panel that runs the full window height, so the window buttons sit inside
         // it as in System Settings and Raycast. It never collapses.
         HStack(spacing: 0) {
-            ControlsSidebar(selection: $selection, sprite: model.appearance.sprite)
+            ControlsSidebar(selection: $selection)
                 .frame(width: 210)
                 .padding(8)
             ZStack {
-                ControlsDetail(section: selection, model: model, openAgents: { selection = .agents })
+                ControlsDetail(section: selection, model: model)
                     .id(selection)
                     .transition(SettingsMotion.pageTransition(reduceMotion: reduceMotion))
             }
@@ -147,22 +144,21 @@ struct Controls: View {
 
 private struct ControlsSidebar: View {
     @Binding var selection: ControlSection
-    let sprite: SpriteKind
 
     var body: some View {
         List(selection: $selection) {
             Section("Notch") {
-                ForEach([ControlSection.general, .notch, .notifications]) { section in
-                    SidebarLabel(section: section, sprite: sprite).tag(section)
+                ForEach([ControlSection.general, .notifications]) { section in
+                    SidebarLabel(section: section).tag(section)
                 }
             }
             Section("Connections") {
                 ForEach([ControlSection.agents, .terminals]) { section in
-                    SidebarLabel(section: section, sprite: sprite).tag(section)
+                    SidebarLabel(section: section).tag(section)
                 }
             }
             Section {
-                SidebarLabel(section: .about, sprite: sprite).tag(ControlSection.about)
+                SidebarLabel(section: .about).tag(ControlSection.about)
             }
         }
         .listStyle(.sidebar)
@@ -179,24 +175,16 @@ private struct ControlsSidebar: View {
 
 private struct SidebarLabel: View {
     let section: ControlSection
-    /// The notch's chosen animal, so the Notch tile shows what the strip shows.
-    let sprite: SpriteKind
 
     var body: some View {
         Label {
             Text(section.title)
         } icon: {
-            Group {
-                if section == .notch {
-                    Sprite(kind: sprite, working: false, reduceMotion: true)
-                } else {
-                    Image(systemName: section.symbol).font(.system(size: 11, weight: .semibold))
-                }
-            }
-            .foregroundStyle(.white)
-            .frame(width: 20, height: 20)
-            .background(section.color, in: .rect(cornerRadius: 5, style: .continuous))
-            .accessibilityHidden(true)
+            Image(systemName: section.symbol).font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 20, height: 20)
+                .background(section.color, in: .rect(cornerRadius: 5, style: .continuous))
+                .accessibilityHidden(true)
         }
     }
 }
@@ -204,13 +192,10 @@ private struct SidebarLabel: View {
 private struct ControlsDetail: View {
     let section: ControlSection
     @ObservedObject var model: Companion
-    /// Switches this window to the Agents pane, with the usual page transition and click.
-    let openAgents: () -> Void
 
     var body: some View {
         switch section {
-        case .general: GeneralControls(model: model, openAgents: openAgents)
-        case .notch: NotchControls(model: model)
+        case .general: GeneralControls(model: model)
         case .agents: AgentControls(model: model)
         case .terminals: TerminalControls(model: model)
         case .notifications: NotificationControls(model: model)
@@ -402,15 +387,26 @@ private struct SettingsCard<Content: View>: View {
 }
 
 /// A section header (13pt bold) aligned with the row text, with room above it for the previous section.
+/// An optional note sits right-aligned on the same line in 12pt secondary text.
 private struct SettingsHeader: View {
     let title: String
-    init(_ title: String) { self.title = title }
+    let note: String?
+    init(_ title: String, note: String? = nil) {
+        self.title = title
+        self.note = note
+    }
 
     var body: some View {
-        Text(title).font(.headline)
-            .padding(.horizontal, SettingsStyle.rowInset)
-            .padding(.top, 18)
-            .accessibilityAddTraits(.isHeader)
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            if let note {
+                Spacer(minLength: 12)
+                Text(note).font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, SettingsStyle.rowInset)
+        .padding(.top, 18)
     }
 }
 
@@ -448,92 +444,6 @@ private struct StatusBadge: View {
     }
 }
 
-private struct GeneralControls: View {
-    @ObservedObject var model: Companion
-    let openAgents: () -> Void
-
-    /// nil while a setup is still being checked, so the bar never names an agent on a guess.
-    private var codexConnected: Bool? { model.setupChecked ? model.setupStatus == .connected : nil }
-    private var claudeConnected: Bool? {
-        model.claude.checked ? model.claude.roots.contains { $0.status == .connected } : nil
-    }
-
-    var body: some View {
-        ControlsPage(section: .general) {
-            if let notice = AgentConnectionNotice.message(codexConnected: codexConnected, claudeConnected: claudeConnected) {
-                ConnectionNoticeBar(message: notice, openAgents: openAgents)
-                    .padding(.bottom, 10)
-            }
-
-            SettingsHeader("Startup")
-            SettingsCard {
-                SettingsRow(title: "Launch at login", detail: nil) {
-                    Toggle("Launch at login", isOn: Binding(
-                        get: { model.launchAtLogin.isOn },
-                        set: { enabled in model.launchAtLoginChanged(enabled) }
-                    ))
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                    .disabled(!model.launchAtLogin.canChange)
-                    .accessibilityLabel("Launch at login")
-                    .accessibilityValue(model.launchAtLogin.statusTitle)
-                    .accessibilityHint(model.launchAtLogin.detail)
-                }
-                if let statusTitle = model.launchAtLogin.settingsActionStatusTitle {
-                    Divider().padding(.horizontal, SettingsStyle.rowInset)
-                    HStack {
-                        StatusBadge(title: statusTitle, color: .orange)
-                        Spacer()
-                        Button("Open Login Items", action: model.openLoginItemsSettings)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                }
-                if let error = model.launchAtLogin.operationError {
-                    Divider().padding(.horizontal, SettingsStyle.rowInset)
-                    Text(error)
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                        .textSelection(.enabled)
-                        .padding(16)
-                        .accessibilityLabel("Launch at login error: \(error)")
-                }
-            }
-
-            SettingsHeader("Behavior")
-            SettingsCard {
-                SettingsRow(title: "Keep new cards open", detail: nil) {
-                    FormMenu(title: "Keep new cards open", selection: $model.cardOpenDuration,
-                             options: CardOpenDuration.allCases.map { ($0, $0.title) },
-                             dividerBefore: .untilIAct)
-                }
-            }
-        }
-    }
-}
-
-/// The orange bar at the top of General while an agent is known not to be connected, with a
-/// button that switches the window to the Agents pane (DESIGN.md, Settings Window, General pane).
-private struct ConnectionNoticeBar: View {
-    let message: String
-    let openAgents: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Circle().fill(SettingsStyle.noticeOrange).frame(width: 7, height: 7).accessibilityHidden(true)
-            Text(message).font(.system(size: 13)).foregroundStyle(.primary)
-            Spacer(minLength: 10)
-            Button("Open Agents", action: openAgents)
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
-        .frame(minHeight: 44)
-        .background(SettingsStyle.noticeOrange.opacity(0.1), in: .rect(cornerRadius: 12, style: .continuous))
-        .accessibilityElement(children: .contain)
-    }
-}
-
 /// One card per agent: name, versions and status, a ⋯ menu for setup actions, and a row for each
 /// problem that applies (DESIGN.md, Settings Window, Agents pane).
 private struct AgentControls: View {
@@ -554,8 +464,11 @@ private struct AgentControls: View {
                 codexCard
                 ClaudeAgentControls(setup: model.claude, preview: $preview, updates: model.agentUpdates,
                                     perform: model.performAgentRowAction)
-                GitHubAgentControls(workStatus: model.workStatus)
             }
+            // GitHub is an optional tool, not an agent Herdly watches, so it sits under its own header
+            // with the page's usual header spacing.
+            SettingsHeader("Tools", note: "Optional · adds detail to finished rows")
+            GitHubAgentControls(workStatus: model.workStatus)
         }
         .sheet(item: $preview) { SetupPreviewSheet(preview: $0) }
     }
@@ -1774,9 +1687,9 @@ private struct AboutControls: View {
     }
 }
 
-/// Strip and queue appearance, shared by every display. Changes apply at once and the preview
-/// redraws with them, drawn for the kind of display the notch is on now.
-private struct NotchControls: View {
+/// The General pane holds the notch preview, the Display, Strip, Sprite and Session list choices
+/// (ending with Keep new cards open), and Launch at login under Startup; every change applies at once.
+private struct GeneralControls: View {
     @ObservedObject var model: Companion
 
     private var appearance: NotchAppearance { model.appearance }
@@ -1793,7 +1706,8 @@ private struct NotchControls: View {
     }
 
     var body: some View {
-        ControlsPage(section: .notch) {
+        ControlsPage(section: .general) {
+            SettingsHeader("Preview")
             NotchPreview(appearance: appearance, profile: profile, reduceMotion: model.reduceMotion)
                 .animation(SettingsMotion.curve(reduceMotion: model.reduceMotion), value: appearance)
                 .animation(SettingsMotion.curve(reduceMotion: model.reduceMotion), value: profile)
@@ -1877,12 +1791,54 @@ private struct NotchControls: View {
                              options: [(.twoMinutes, "2 minutes"), (.fiveMinutes, "5 minutes"), (.tenMinutes, "10 minutes"),
                                        (.twentyMinutes, "20 minutes"), (.never, "Never")])
                 }
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                SettingsRow(title: "Keep new cards open", detail: nil) {
+                    FormMenu(title: "Keep new cards open", selection: $model.cardOpenDuration,
+                             options: CardOpenDuration.allCases.map { ($0, $0.title) },
+                             dividerBefore: .untilIAct)
+                }
+            }
+
+            SettingsHeader("Startup")
+            SettingsCard {
+                SettingsRow(title: "Launch at login", detail: nil) {
+                    Toggle("Launch at login", isOn: Binding(
+                        get: { model.launchAtLogin.isOn },
+                        set: { enabled in model.launchAtLoginChanged(enabled) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .disabled(!model.launchAtLogin.canChange)
+                    .accessibilityLabel("Launch at login")
+                    .accessibilityValue(model.launchAtLogin.statusTitle)
+                    .accessibilityHint(model.launchAtLogin.detail)
+                }
+                if let statusTitle = model.launchAtLogin.settingsActionStatusTitle {
+                    Divider().padding(.horizontal, SettingsStyle.rowInset)
+                    HStack {
+                        StatusBadge(title: statusTitle, color: .orange)
+                        Spacer()
+                        Button("Open Login Items", action: model.openLoginItemsSettings)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                }
+                if let error = model.launchAtLogin.operationError {
+                    Divider().padding(.horizontal, SettingsStyle.rowInset)
+                    Text(error)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .padding(16)
+                        .accessibilityLabel("Launch at login error: \(error)")
+                }
             }
         }
     }
 }
 
-/// Settings › Notch › Keyboard (#427): the shortcut that puts the keyboard in the notch from any app,
+/// Settings › General › Keyboard (#427): the shortcut that puts the keyboard in the notch from any app,
 /// a recorder to change it, and a switch to turn it off. Both take effect at once. A shortcut another
 /// app holds shows the problem line, and the notch stays click-only until another is chosen.
 private struct KeyboardHotkeyRow: View {

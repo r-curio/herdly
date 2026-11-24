@@ -135,7 +135,7 @@ public enum NotchHotkeyRecording: Equatable, Sendable {
     }
 }
 
-/// Settings › Notch › Keyboard: the hotkey and its off switch, saved in UserDefaults.
+/// Settings › General › Keyboard: the hotkey and its off switch, saved in UserDefaults.
 public struct NotchHotkeySetting: Equatable, Sendable {
     public var enabled: Bool
     public var hotkey: NotchHotkey

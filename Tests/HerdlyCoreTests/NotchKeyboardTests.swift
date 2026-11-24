@@ -142,7 +142,7 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
     #expect(!NotchInteraction.isActive(pointerInside: false, keyboardFocus: true))
 }
 
-// MARK: - The hotkey setting (Settings › Notch › Keyboard)
+// MARK: - The hotkey setting (Settings › General › Keyboard)
 
 @Test func theHotkeyIsControlOptionSpaceAndOnByDefault() {
     let setting = NotchHotkeySetting.load(bool: { _ in nil }, string: { _ in nil })
@@ -184,7 +184,7 @@ private let resultID = AgentAttentionID.outcome(AgentTurnIdentity(session: codex
     #expect(NotchHotkeyStatus.off.problemLine == nil)
 }
 
-// MARK: - Recording a new shortcut (Settings › Notch › Keyboard)
+// MARK: - Recording a new shortcut (Settings › General › Keyboard)
 
 @Test func escapeAloneCancelsRecording() {
     #expect(NotchHotkeyRecording.decide(keyCode: NotchHotkey.escapeKeyCode, modifiers: [], keyName: "⎋") == .cancel)
