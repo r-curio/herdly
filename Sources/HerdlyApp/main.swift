@@ -891,6 +891,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private var notificationPauseEnd: Timer?
     private var panel: NotchPanel!
     private var controls: NSWindow?
+    private lazy var feedback = FeedbackWindowController { [unowned self] in self.feedbackAppDetails() }
     private var controlsAnimationGeneration = 0
     private var controlsAnimatingOut = false
     private var controlsRestingFrame: NSRect?
@@ -982,10 +983,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let menu = NSMenu()
         let heading = NSMenuItem(title: "Herdly", action: nil, keyEquivalent: "")
         menu.addItem(heading)
-        for (title, action) in [("Show Herdly controls", #selector(showControls)),
-                                ("Mute sound", #selector(toggleMute)),
-                                ("Quit Herdly", #selector(quit))] {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        // Settings…, then the notch items, then Send Feedback… and Quit, each in its own group
+        // (Paper "Send feedback (2026-11-24)", frame 01).
+        for (title, action, key) in [("Settings…", #selector(showControls), ","),
+                                     ("Mute sound", #selector(toggleMute), ""),
+                                     ("Send Feedback…", #selector(showFeedback), ""),
+                                     ("Quit Herdly", #selector(quit), "q")] {
+            if action == #selector(showFeedback) || action == #selector(quit) { menu.addItem(.separator()) }
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
             item.target = self
             if action == #selector(toggleMute) { item.state = muted ? .on : .off }
             menu.addItem(item)
@@ -994,7 +999,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                             select: { [weak self] in self?.setNotchDisplayPreference($0) })
         let displayItem = NSMenuItem(title: "Show notch on", action: nil, keyEquivalent: "")
         displayItem.submenu = notchDisplayMenu.menu
-        menu.insertItem(displayItem, at: menu.indexOfItem(withTitle: "Show Herdly controls") + 1)
+        menu.insertItem(displayItem, at: menu.indexOfItem(withTitle: "Settings…") + 1)
         notificationPauseMenu = NotificationPauseMenu(
             pause: { [weak self] in self?.currentNotificationPause() ?? .none },
             start: { [weak self] in self?.pauseNotifications($0) },
@@ -2861,6 +2866,24 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         refresh()
     }
     @objc func quit() { NSApplication.shared.terminate(nil) }
+
+    @objc func showFeedback() { feedback.show() }
+
+    /// What "Include app details" sends: versions and connection state only, read when the window opens.
+    func feedbackAppDetails() -> FeedbackAppDetails {
+        let info = Bundle.main.infoDictionary
+        let os = ProcessInfo.processInfo.operatingSystemVersion
+        let claudeRoot = claude.roots.first { $0.status == .connected } ?? claude.roots.first
+        return FeedbackAppDetails(
+            herdlyVersion: info?["CFBundleShortVersionString"] as? String ?? "Development",
+            herdlyBuild: info?["CFBundleVersion"] as? String,
+            macOSVersion: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
+            codexConnected: setupChecked ? setupStatus == .connected : nil,
+            codexCLIVersion: setupCapabilities.cliVersion, codexDesktopVersion: setupCapabilities.desktopVersion,
+            claudeConnected: claude.checked ? claude.roots.contains { $0.status == .connected } : nil,
+            claudeVersion: claudeRoot?.capabilities.version,
+            ghosttyEnabled: ghosttyEnabled)
+    }
     func openTestTask() {
         guard !openingTask else { return }
         openingTask = true
