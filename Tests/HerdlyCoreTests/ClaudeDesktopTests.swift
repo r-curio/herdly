@@ -150,3 +150,20 @@ private func sessionFile(local: Any?, hook: Any?, focusedAt: Any? = 1_795_504_10
     // running, and a 2 s wait reported a reached session as not found. Keep a wide margin.
     #expect(ClaudeDesktopOpen.verificationTimeout >= 4)
 }
+
+// Live, 2026-11-24: an Open clicked while Claude Desktop already showed the session wrote no new
+// `lastFocusedAt`, so a reached session showed the fallback note.
+@Test func claudeDesktopOpenCountsASessionAlreadyShownAsReached() throws {
+    let otherLocal = "local_2a2a2a2a-1434-4035-9547-ecd4d906bf8f"
+    let index = ClaudeDesktopSessionIndex.decode([try sessionFile(local: desktopLocal, hook: desktopHook, focusedAt: 3000),
+                                                  try sessionFile(local: otherLocal, hook: terminalHook, focusedAt: 2000)])
+    #expect(index.frontLocalID == desktopLocal)
+    #expect(ClaudeDesktopOpen.alreadyShowing(localID: desktopLocal, claudeFrontmost: true, index: index))
+    // Another app in front, another session in front, a tie, or no readable index: not already shown.
+    #expect(!ClaudeDesktopOpen.alreadyShowing(localID: desktopLocal, claudeFrontmost: false, index: index))
+    #expect(!ClaudeDesktopOpen.alreadyShowing(localID: otherLocal, claudeFrontmost: true, index: index))
+    let tie = ClaudeDesktopSessionIndex.decode([try sessionFile(local: desktopLocal, hook: desktopHook, focusedAt: 3000),
+                                                try sessionFile(local: otherLocal, hook: terminalHook, focusedAt: 3000)])
+    #expect(!ClaudeDesktopOpen.alreadyShowing(localID: desktopLocal, claudeFrontmost: true, index: tie))
+    #expect(!ClaudeDesktopOpen.alreadyShowing(localID: desktopLocal, claudeFrontmost: true, index: nil))
+}
