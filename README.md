@@ -1,4 +1,9 @@
-# Herdly
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/herdly-wordmark-white.svg">
+    <img src="docs/brand/herdly-wordmark.svg" alt="Herdly" height="56">
+  </picture>
+</h1>
 
 A native macOS companion for Codex desktop and Codex CLI in Ghostty. Keep using Codex normally; Herdly shows activity and requests for attention in a compact notch while you work elsewhere.
 
