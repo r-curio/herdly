@@ -54,7 +54,7 @@ Undecided product facts: exact desktop conversation focus; Ghostty split panes; 
 ## Brand Commitments
 
 - The name is Herdly and is final.
-- No icon, logo, or wordmark exists yet; the completion sound is a user-chosen macOS system sound. Future work must produce them rather than assume assets.
+- The mark is the crook h, a lowercase h whose ascender curls into a shepherd's crook ([master SVG](brand/herdly-crook-h.svg)), chosen 2026-11-24. The menu bar status item draws it as a template image. No app icon or wordmark exists yet; the completion sound is a user-chosen macOS system sound. Future work must produce them rather than assume assets.
 - Distribution is a personal ad-hoc signed build from `scripts/build-app.sh`. No App Store, notarization, or public download is planned.
 
 ## Evidence on Hand

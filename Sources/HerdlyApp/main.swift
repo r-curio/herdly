@@ -960,7 +960,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             AttentionSnapshotStore.save(Companion.launchSnapshot, to: Companion.snapshotURL)
         }
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        status.button?.title = "S"
+        status.button?.image = HerdlyMark.menuBarImage()
         status.button?.toolTip = "Herdly"
         status.button?.setAccessibilityLabel("Herdly menu")
         let menu = NSMenu()
@@ -1078,7 +1078,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // The title follows the selected pane (DESIGN.md, Settings Window) and starts as "Herdly".
             precondition(controls?.title.isEmpty == false && controls?.styleMask.contains(.resizable) == true)
             precondition(controls?.frame.width ?? 0 >= 720 && controls?.frame.height ?? 0 >= 540)
-            precondition(status.button?.title == "S" && status.menu?.items.count == 5)
+            precondition(status.button?.image?.isTemplate == true && status.menu?.items.count == 5)
             precondition(status.menu?.item(withTitle: "Show notch on")?.submenu === notchDisplayMenu.menu)
             dismissControls(animated: false)
             precondition(controls?.isVisible == false)
