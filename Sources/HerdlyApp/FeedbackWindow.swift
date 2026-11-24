@@ -148,7 +148,7 @@ final class FeedbackWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        // Closing ends the note; the next Send Feedback… starts empty.
+        // Closing ends the note; the next Send Feedback starts empty.
         window = nil
     }
 }

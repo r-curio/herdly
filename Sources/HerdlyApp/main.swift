@@ -983,11 +983,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let menu = NSMenu()
         let heading = NSMenuItem(title: "Herdly", action: nil, keyEquivalent: "")
         menu.addItem(heading)
-        // Settings…, then the notch items, then Send Feedback… and Quit, each in its own group
+        // Settings, then the notch items, then Send Feedback and Quit, each in its own group
         // (Paper "Send feedback (2026-11-24)", frame 01).
-        for (title, action, key) in [("Settings…", #selector(showControls), ","),
+        for (title, action, key) in [("Settings", #selector(showControls), ""),
                                      ("Mute sound", #selector(toggleMute), ""),
-                                     ("Send Feedback…", #selector(showFeedback), ""),
+                                     ("Send Feedback", #selector(showFeedback), ""),
                                      ("Quit Herdly", #selector(quit), "q")] {
             if action == #selector(showFeedback) || action == #selector(quit) { menu.addItem(.separator()) }
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
@@ -999,7 +999,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                             select: { [weak self] in self?.setNotchDisplayPreference($0) })
         let displayItem = NSMenuItem(title: "Show notch on", action: nil, keyEquivalent: "")
         displayItem.submenu = notchDisplayMenu.menu
-        menu.insertItem(displayItem, at: menu.indexOfItem(withTitle: "Settings…") + 1)
+        menu.insertItem(displayItem, at: menu.indexOfItem(withTitle: "Settings") + 1)
         notificationPauseMenu = NotificationPauseMenu(
             pause: { [weak self] in self?.currentNotificationPause() ?? .none },
             start: { [weak self] in self?.pauseNotifications($0) },
@@ -1108,12 +1108,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             precondition(controls?.title.isEmpty == false && controls?.styleMask.contains(.resizable) == true)
             precondition(controls?.frame.width ?? 0 >= 720 && controls?.frame.height ?? 0 >= 540)
             precondition(status.button?.image?.isTemplate == true && status.menu?.items.count == 9)
-            // Paper "Send feedback (2026-11-24)", frame 01: Settings… first, Send Feedback… in its own
+            // Paper "Send feedback (2026-11-24)", frame 01: Settings first, Send Feedback in its own
             // group before Quit.
             precondition(status.menu?.items.map(\.title) == [
-                "Herdly", "Settings…", "Show notch on", notificationPauseMenu.item.title, "Mute sound",
-                "", "Send Feedback…", "", "Quit Herdly"])
-            precondition(status.menu?.item(withTitle: "Settings…")?.keyEquivalent == ",")
+                "Herdly", "Settings", "Show notch on", notificationPauseMenu.item.title, "Mute sound",
+                "", "Send Feedback", "", "Quit Herdly"])
+            precondition(status.menu?.item(withTitle: "Settings")?.keyEquivalent.isEmpty == true)
             precondition(status.menu?.item(withTitle: "Show notch on")?.submenu === notchDisplayMenu.menu)
             // "Pause notifications" sits right after "Show notch on", holding the three durations
             // while not paused, and "Resume notifications" while paused.
@@ -1138,7 +1138,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             presentControls(animated: false)
             precondition(controls?.isVisible == true && controls?.alphaValue == 1)
             showFeedback()
-            precondition(feedback.isOpen, "Send Feedback… must open its window")
+            precondition(feedback.isOpen, "Send Feedback must open its window")
             feedback.close()
             precondition(!feedback.isOpen)
             print("Herdly controls-window smoke check passed.")
