@@ -444,6 +444,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - The last setup action's result stays in its card as secondary text until replaced, so a failure stays readable. Terminal status lives in Terminals, not here.
 - **Notifications pane:**
   - "Sound": one card with a "Completions and questions" mini switch, an inset divider, then the sound tiles. "Completions": one card with a "Clear when read in Codex" mini switch and no description. While that switch is on and Codex's read state cannot be read, a 12pt problem line with an orange dot sits under it; the switch's tooltip carries the latest read-state status.
+  - "While paused" (#456), after Phone: one card with an "Approvals" row and a "Questions" row, 10pt inset divider between them, each with a two-segment control, "Still pop open" (default) and "Stay quiet". VoiceOver reads each control as "Approvals while notifications are paused" or "Questions while notifications are paused"; each row's hover text says what the choice does. There is no row for completions, which are always quiet while paused.
   - Below the cards, right-aligned 6pt lower: a "Send Test Notification" push button, with "Dismiss" before it only while the test notification is showing.
   - No footers.
 - **Sound tiles:**
@@ -459,6 +460,12 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - Problem lines sit under their row with no divider between them, 12pt with an orange dot, 10pt above the next divider. A denied Automation permission ends its line with a small Open Settings… button; a herdr command follows its line in 12pt monospace with a Copy button.
   - No footers, and no separate Version, Permission, or Status rows.
   - Reduce Motion keeps only the crossfade.
+
+## Menu Bar Item
+
+The "S" status item opens a standard native menu, in this order: the "Herdly" heading, "Show Herdly controls", "Show notch on" (a submenu of Follow pointer and the attached displays), "Pause notifications", "Mute sound" (checked while muted), and "Quit Herdly".
+
+- **Pause notifications** (#456): a submenu of "For 1 hour", "Until tomorrow", and "Until I resume". While paused the item has no submenu and reads "Resume notifications (paused until 14:30)", the time in the user's short time format and the weekday too when the end is on another day, or just "Resume notifications" for Until I resume; choosing it resumes. The title is redrawn each time the menu opens. Nothing on the strip shows a pause.
 
 ## Question cards — Paper redesign
 
