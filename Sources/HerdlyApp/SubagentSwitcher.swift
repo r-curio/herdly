@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The opened working row's switcher (#397, Paper H2 "E · Switcher"): a "Session" well, then one well
 /// per running subagent, oldest first, each with the session's sprite at two-thirds size before its
-/// name. The selected well is drawn pressed (ink fill, black text, its sprite black). Wells sit 4pt
+/// name. The selected well is drawn pressed (ink fill, black text, its sprite in the session colour). Wells sit 4pt
 /// apart and wrap to further lines; none is hidden. Which well is selected is `OpenRunningRow`'s rule;
 /// this view only draws it and reports a choice.
 struct SubagentSwitcher: View {
@@ -49,16 +49,16 @@ struct SubagentSwitcher: View {
     }
 }
 
-/// The session's standing sprite at two-thirds size, black on an inverted well.
+/// The session's standing sprite at two-thirds size, in the session's colour whether or not its
+/// well is selected.
 private struct WellSprite: View {
     let kind: SpriteKind
     let color: Int
     let reduceMotion: Bool
-    @Environment(\.notchButtonInverted) private var inverted
 
     var body: some View {
         Sprite(kind: kind, working: false, reduceMotion: reduceMotion, color: color,
-               cellSize: Sprite.subagentCell, tint: inverted ? .black : nil)
+               cellSize: Sprite.subagentCell)
     }
 }
 
