@@ -1115,6 +1115,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                                     ? "Resume notifications" : "Pause notifications"))
             precondition(currentNotificationPause().isActive(at: Date())
                          || notificationPauseMenu.item.submenu?.items.map(\.title) == NotificationPauseChoice.allCases.map(\.title))
+            // Opening the menu redraws the entry; it must stay enabled after any number of redraws.
+            if let menu = status.menu {
+                notificationPauseMenu.menuNeedsUpdate(menu)
+                notificationPauseMenu.menuNeedsUpdate(menu)
+                menu.update()
+                precondition(notificationPauseMenu.item.isEnabled, "The pause entry must stay enabled after a redraw")
+            }
             dismissControls(animated: false)
             precondition(controls?.isVisible == false)
             presentControls(animated: false)
