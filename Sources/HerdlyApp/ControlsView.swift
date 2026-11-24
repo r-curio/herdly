@@ -260,6 +260,9 @@ private struct ControlsPage<Accessory: View, Content: View>: View {
                 .padding(.bottom, 20)
                 .background(OverlayScroller())
             }
+            // Scrolled content stops at the title row. Without this, on macOS 26 it shows through
+            // behind the title and the window buttons.
+            .clipped()
         }
         .ignoresSafeArea(edges: .top)
         .background(SettingsStyle.pageBackground)

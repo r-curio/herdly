@@ -12,7 +12,7 @@ The build script produces an ad-hoc signed local app. It is not notarized or a d
 
 ## Try it
 
-1. Launch Herdly and click **Send test** in its controls window. The menu-bar shortcut is **S**; it also offers **Send test notification**. Closing the controls window keeps Herdly running; reopening the app shows the controls again.
+1. Launch Herdly and click **Send test** in its controls window. The menu-bar item is **S**; test notifications are sent only from the controls window. Closing the controls window keeps Herdly running; reopening the app shows the controls again.
 2. While Codex is foreground, the notch panel stays hidden. Switch to Notes or another app: the test completion appears below the notch (top-center on other screens).
 3. It expands to the test card for three seconds, then collapses to the strip with a **1** badge. Hovering or keyboard interaction holds the panel open; hover the strip to reopen it, or click it for keyboard focus. Sound plays only on first presentation; **Mute sound** is in the menu.
 4. Return to Codex: the panel hides. Leave again: the item remains, without replaying sound. Click **Dismiss**, in the panel or menu, to clear it.

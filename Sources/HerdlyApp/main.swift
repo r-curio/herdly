@@ -967,8 +967,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let heading = NSMenuItem(title: "Herdly", action: nil, keyEquivalent: "")
         menu.addItem(heading)
         for (title, action) in [("Show Herdly controls", #selector(showControls)),
-                                ("Send test notification", #selector(sendTest)),
-                                ("Dismiss test notification", #selector(dismissTest)),
                                 ("Mute sound", #selector(toggleMute)),
                                 ("Quit Herdly", #selector(quit))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
@@ -1080,7 +1078,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // The title follows the selected pane (DESIGN.md, Settings Window) and starts as "Herdly".
             precondition(controls?.title.isEmpty == false && controls?.styleMask.contains(.resizable) == true)
             precondition(controls?.frame.width ?? 0 >= 720 && controls?.frame.height ?? 0 >= 540)
-            precondition(status.button?.title == "S" && status.menu?.items.count == 7)
+            precondition(status.button?.title == "S" && status.menu?.items.count == 5)
             precondition(status.menu?.item(withTitle: "Show notch on")?.submenu === notchDisplayMenu.menu)
             dismissControls(animated: false)
             precondition(controls?.isVisible == false)
