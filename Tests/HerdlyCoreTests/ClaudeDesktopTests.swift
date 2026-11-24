@@ -144,3 +144,9 @@ private func sessionFile(local: Any?, hook: Any?, focusedAt: Any? = 1_795_504_10
     #expect(unavailable.cardLine?.cardLine == "Claude Desktop isn't running.")
     #expect(ClaudeDesktopPresentation.place == "Claude Desktop")
 }
+
+@Test func claudeDesktopOpenWaitsLongerThanClaudeDesktopTakesToRecordFocus() {
+    // Live, 2026-11-24: Claude Desktop wrote `lastFocusedAt` 1.34 s after the link with nothing else
+    // running, and a 2 s wait reported a reached session as not found. Keep a wide margin.
+    #expect(ClaudeDesktopOpen.verificationTimeout >= 4)
+}
