@@ -62,7 +62,8 @@ enum ClaudeSetupDetection {
 
     static func setupSnapshot(root: URL, applicationSupport: URL, capabilities: ClaudeCapabilities,
                               usageEnabled: Bool = false,
-                              inventoryStatus: ActiveSessionStatus? = nil) -> Snapshot {
+                              inventoryStatus: ActiveSessionStatus? = nil,
+                              titleSettingRequired titleRequired: Bool = ClaudeSetupDetection.titleSettingRequired()) -> Snapshot {
         let roots = setupRoots(configDirectory: root, applicationSupport: applicationSupport)
         let manager = FileManager.default
         let settingsExists = manager.fileExists(atPath: roots.settingsURL.path)
@@ -74,7 +75,7 @@ enum ClaudeSetupDetection {
                                                                           deliveredSessionIDs: installer.deliveredSessionIDs(for: roots))
         let inventoryUnavailable = activeSessionStatus.isUnavailable
         let settings = boundedRegularData(at: roots.settingsURL) ?? Data("{}".utf8)
-        let setupPolicy = policy(for: root)
+        let setupPolicy = policy(for: root, titleSettingRequired: titleRequired)
         let plannerPlan: ClaudeSetupPlan?
         if settingsExists && boundedRegularData(at: roots.settingsURL) == nil {
             plannerPlan = nil
@@ -101,7 +102,8 @@ enum ClaudeSetupDetection {
         if settingsExists && boundedRegularData(at: roots.settingsURL) == nil {
             status = .malformed("Claude settings.json is unreadable or too large; Herdly will not change it.")
         } else if installRecordExists && !installRecordPresent {
-            status = ClaudeSetupInstaller().status(roots: roots, capabilities: capabilities)
+            status = ClaudeSetupInstaller().status(roots: roots, capabilities: capabilities,
+                                                   titleSettingRequired: titleRequired)
         } else if let plan, case let .unsupported(message) = plan.status {
             status = .unsupported(message)
         } else if let plan, case let .malformed(message) = plan.status {
@@ -115,7 +117,8 @@ enum ClaudeSetupDetection {
         } else if capabilities.supported && !installRecordPresent && inventoryUnavailable {
             status = .unavailable("Claude setup is blocked until the selected root's agents inventory is available.")
         } else {
-            status = ClaudeSetupInstaller().status(roots: roots, capabilities: capabilities)
+            status = ClaudeSetupInstaller().status(roots: roots, capabilities: capabilities,
+                                                   titleSettingRequired: titleRequired)
         }
         let usageStatus = installer.usageStatus(for: roots, requested: usageEnabled,
                                                 planned: plannerPlan?.usageStatus)
@@ -193,7 +196,14 @@ enum ClaudeSetupDetection {
                                                                deliveredSessionIDs: deliveredSessionIDs))
     }
 
-    static func policy(for root: URL, projectDirectory: URL? = nil) -> ClaudeSetupPolicy {
+    /// Whether this Mac's Ghostty binds Claude by title (ADR 0013), read from its scripting dictionary.
+    static func titleSettingRequired() -> Bool {
+        let bundle = GhosttyScriptingSupport.bundleURL()
+        return ClaudeSetupRequirements.titleSettingRequired(ghosttyInstalled: bundle != nil,
+                                                            ttySupport: GhosttyScriptingSupport.ttySupport(bundle: bundle))
+    }
+
+    static func policy(for root: URL, projectDirectory: URL? = nil, titleSettingRequired: Bool = true) -> ClaudeSetupPolicy {
         if let configuredRoot = ProcessInfo.processInfo.environment["CLAUDE_CONFIG_DIR"], !configuredRoot.isEmpty,
            URL(fileURLWithPath: configuredRoot).standardizedFileURL.path != root.standardizedFileURL.path {
             return ClaudeSetupPolicy(shadowedBy: "CLAUDE_CONFIG_DIR=\(configuredRoot)")
@@ -206,7 +216,9 @@ enum ClaudeSetupDetection {
         for url in candidates {
             guard let data = boundedRegularData(at: url, maximum: 1024 * 1024),
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-            if object["allowManagedHooksOnly"] as? Bool == true { return ClaudeSetupPolicy(managedHooksOnly: true) }
+            if object["allowManagedHooksOnly"] as? Bool == true {
+                return ClaudeSetupPolicy(managedHooksOnly: true, titleSettingRequired: titleSettingRequired)
+            }
         }
         // Claude's effective-settings resolver is not exposed by the supported CLI. Project
         // settings are inspected only when a caller supplies an exact project directory from
@@ -219,12 +231,14 @@ enum ClaudeSetupDetection {
                     guard let data = boundedRegularData(at: url, maximum: 1024 * 1024),
                           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
                     if object["disableAllHooks"] as? Bool == true {
-                        return ClaudeSetupPolicy(shadowedBy: "project settings at \(url.path) disables all hooks")
+                        return ClaudeSetupPolicy(shadowedBy: "project settings at \(url.path) disables all hooks",
+                                                 titleSettingRequired: titleSettingRequired)
                     }
-                    if let environment = object["env"] as? [String: Any],
+                    if titleSettingRequired, let environment = object["env"] as? [String: Any],
                        let value = environment[ClaudeSetupRequirements.titleDisableEnvironmentKey] as? String,
                        value != ClaudeSetupRequirements.titleDisableEnvironmentValue {
-                        return ClaudeSetupPolicy(shadowedBy: "project settings at \(url.path) overrides \(ClaudeSetupRequirements.titleDisableEnvironmentKey)")
+                        return ClaudeSetupPolicy(shadowedBy: "project settings at \(url.path) overrides \(ClaudeSetupRequirements.titleDisableEnvironmentKey)",
+                                                 titleSettingRequired: titleSettingRequired)
                     }
                 }
                 let parent = directory.deletingLastPathComponent()
@@ -232,7 +246,7 @@ enum ClaudeSetupDetection {
                 directory = parent
             }
         }
-        return ClaudeSetupPolicy()
+        return ClaudeSetupPolicy(titleSettingRequired: titleSettingRequired)
     }
 
     static func boundedRegularData(at url: URL, maximum: Int = 20 * 1024 * 1024) -> Data? {
@@ -456,10 +470,11 @@ final class ClaudeSetupModel: ObservableObject {
         let support = applicationSupport
         Task { @MainActor in
             let anyStoppedWaiting = await Task.detached(priority: .utility) {
-                waiting.contains { root in
+                let titleRequired = ClaudeSetupDetection.titleSettingRequired()
+                return waiting.contains { root in
                     !ClaudeSetupInstaller().status(
                         roots: ClaudeSetupDetection.setupRoots(configDirectory: root.url, applicationSupport: support),
-                        capabilities: root.capabilities).isAwaitingRestart
+                        capabilities: root.capabilities, titleSettingRequired: titleRequired).isAwaitingRestart
                 }
             }.value
             restartRecheck.finish(now: ProcessInfo.processInfo.systemUptime)
