@@ -19,6 +19,8 @@ extension Companion {
         let roots = configuredClaudeNavigationRoots()
         let support = ClaudeDesktopSessionIndex.defaultApplicationSupport
         let clickedAt = Date().timeIntervalSince1970
+        // As the click lands: the notch panel does not take frontmost from the app under it.
+        let claudeFrontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == ClaudeDesktopSessionIndex.bundleIdentifier
         Task { @MainActor in
             let (inventories, index) = await Task.detached {
                 (roots.map { ClaudeSetupDetection.activeSessionInventory(root: $0.root, capabilities: $0.capabilities) },
@@ -43,7 +45,11 @@ extension Companion {
                 result = Self.raiseClaudeDesktop()
             case .exact(let url):
                 let localID = index?.localID(for: identity.session) ?? ""
-                if NSWorkspace.shared.open(url),
+                let showing = ClaudeDesktopOpen.alreadyShowing(localID: localID, claudeFrontmost: claudeFrontmost, index: index)
+                let reached = NSWorkspace.shared.open(url)
+                if reached, showing {
+                    result = .opened
+                } else if reached,
                    await Self.claudeDesktopFocused(localID: localID, clickedAt: clickedAt, applicationSupport: support) {
                     result = .opened
                 } else {

@@ -30,9 +30,13 @@ public struct ClaudeDesktopSessionIndex: Equatable, Sendable {
     /// Hook session id (lowercased) to Claude Desktop id. A hook session two files name with different
     /// Claude Desktop ids is left out, so it has no exact target.
     public let localIDs: [String: String]
+    /// The Claude Desktop id with the strictly latest `lastFocusedAt`: the session Claude Desktop last
+    /// brought to the front. Nil when no file records a focus or two share the latest one.
+    public let frontLocalID: String?
 
-    public init(localIDs: [String: String] = [:]) {
+    public init(localIDs: [String: String] = [:], frontLocalID: String? = nil) {
         self.localIDs = localIDs
+        self.frontLocalID = frontLocalID
     }
 
     /// The Claude Desktop id for `hookSession`, compared case-insensitively as hook ids are UUIDs.
@@ -53,14 +57,23 @@ public struct ClaudeDesktopSessionIndex: Equatable, Sendable {
     /// `sessionId` or `cliSessionId`, is skipped: it names no session.
     public static func decode(_ files: [Data]) -> ClaudeDesktopSessionIndex {
         var found: [String: Set<String>] = [:]
+        var latest: (focusedAt: Double, localIDs: Set<String>)?
         for data in files {
             guard data.count <= maximumFileSize,
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let local = object["sessionId"] as? String, isLocalID(local),
                   let hook = ClaudeInventoryDecoder.canonicalSessionID(object["cliSessionId"]) else { continue }
             found[hook, default: []].insert(local)
+            if let focusedAt = lastFocusedAt(object) {
+                if latest == nil || focusedAt > latest!.focusedAt {
+                    latest = (focusedAt, [local])
+                } else if focusedAt == latest!.focusedAt {
+                    latest!.localIDs.insert(local)
+                }
+            }
         }
-        return ClaudeDesktopSessionIndex(localIDs: found.compactMapValues { $0.count == 1 ? $0.first : nil })
+        return ClaudeDesktopSessionIndex(localIDs: found.compactMapValues { $0.count == 1 ? $0.first : nil },
+                                         frontLocalID: latest.flatMap { $0.localIDs.count == 1 ? $0.localIDs.first : nil })
     }
 
     /// Reads the index under Claude Desktop's Application Support folder, nil when the session folder
@@ -105,8 +118,12 @@ public struct ClaudeDesktopSessionIndex: Equatable, Sendable {
 
     /// `lastFocusedAt` from one session file's contents, Claude Desktop's milliseconds as seconds.
     public static func lastFocusedAt(_ data: Data) -> Double? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let number = object["lastFocusedAt"] as? NSNumber,
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return lastFocusedAt(object)
+    }
+
+    private static func lastFocusedAt(_ object: [String: Any]) -> Double? {
+        guard let number = object["lastFocusedAt"] as? NSNumber,
               CFGetTypeID(number as CFTypeRef) != CFBooleanGetTypeID() else { return nil }
         let seconds = number.doubleValue / 1000
         return seconds.isFinite && seconds > 0 ? seconds : nil
@@ -197,6 +214,14 @@ public enum ClaudeDesktopOpen {
 
     /// Whether Claude Desktop recorded focusing the session at or after the click. Its clock is the
     /// same machine's, in milliseconds, so a small tolerance covers rounding only.
+    /// Whether Claude Desktop already showed the session when Open was clicked: macOS reported Claude
+    /// Desktop frontmost, and the session has the strictly latest `lastFocusedAt`. Claude Desktop writes
+    /// no new focus for a link to the session it already shows (live, 2026-11-24), so `verified` would
+    /// never pass; the link still names the exact session, so the Open counts as reached.
+    public static func alreadyShowing(localID: String, claudeFrontmost: Bool, index: ClaudeDesktopSessionIndex?) -> Bool {
+        claudeFrontmost && index?.frontLocalID == localID
+    }
+
     public static func verified(lastFocusedAt: Double?, clickedAt: Double) -> Bool {
         guard let lastFocusedAt else { return false }
         return lastFocusedAt >= clickedAt - 0.05
