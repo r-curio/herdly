@@ -1107,7 +1107,13 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // The title follows the selected pane (DESIGN.md, Settings Window) and starts as "Herdly".
             precondition(controls?.title.isEmpty == false && controls?.styleMask.contains(.resizable) == true)
             precondition(controls?.frame.width ?? 0 >= 720 && controls?.frame.height ?? 0 >= 540)
-            precondition(status.button?.image?.isTemplate == true && status.menu?.items.count == 6)
+            precondition(status.button?.image?.isTemplate == true && status.menu?.items.count == 9)
+            // Paper "Send feedback (2026-11-24)", frame 01: Settings… first, Send Feedback… in its own
+            // group before Quit.
+            precondition(status.menu?.items.map(\.title) == [
+                "Herdly", "Settings…", "Show notch on", notificationPauseMenu.item.title, "Mute sound",
+                "", "Send Feedback…", "", "Quit Herdly"])
+            precondition(status.menu?.item(withTitle: "Settings…")?.keyEquivalent == ",")
             precondition(status.menu?.item(withTitle: "Show notch on")?.submenu === notchDisplayMenu.menu)
             // "Pause notifications" sits right after "Show notch on", holding the three durations
             // while not paused, and "Resume notifications" while paused.
@@ -1131,6 +1137,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             precondition(controls?.isVisible == false)
             presentControls(animated: false)
             precondition(controls?.isVisible == true && controls?.alphaValue == 1)
+            showFeedback()
+            precondition(feedback.isOpen, "Send Feedback… must open its window")
+            feedback.close()
+            precondition(!feedback.isOpen)
             print("Herdly controls-window smoke check passed.")
             app.terminate(nil)
         }

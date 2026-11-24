@@ -141,6 +141,8 @@ final class FeedbackWindowController: NSObject, NSWindowDelegate {
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
+    var isOpen: Bool { window?.isVisible == true }
+
     func close() {
         window?.close()
     }
@@ -183,11 +185,6 @@ private struct FeedbackHeader: View {
                 .accessibilityHidden(true)
             Text("Send Feedback")
                 .font(.system(size: 20, weight: .semibold))
-            Text("Something broken, or something you wish the notch did? It goes straight to the person building Herdly.")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 32)
         .padding(.top, 28)
@@ -204,17 +201,17 @@ private struct FeedbackFormView: View {
         VStack(spacing: 0) {
             FeedbackHeader()
             VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 12) {
-                    labeled("Kind") {
-                        Picker("Kind", selection: $form.draft.kind) {
-                            ForEach(FeedbackKind.allCases, id: \.self) { Text($0.title).tag($0) }
-                        }
+                labeled("Kind") {
+                    Picker("Kind", selection: $form.draft.kind) {
+                        ForEach(FeedbackKind.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
-                    labeled("Part of Herdly") {
-                        Picker("Part of Herdly", selection: $form.draft.area) {
-                            ForEach(FeedbackArea.allCases, id: \.self) { Text($0.title).tag($0) }
-                        }
+                    .frame(maxWidth: .infinity)
+                }
+                labeled("Part of Herdly") {
+                    Picker("Part of Herdly", selection: $form.draft.area) {
+                        ForEach(FeedbackArea.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
+                    .frame(maxWidth: .infinity)
                 }
                 labeled("What happened?") {
                     ZStack(alignment: .topLeading) {
