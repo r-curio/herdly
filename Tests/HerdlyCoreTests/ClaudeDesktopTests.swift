@@ -167,3 +167,80 @@ private func sessionFile(local: Any?, hook: Any?, focusedAt: Any? = 1_795_504_10
     #expect(!ClaudeDesktopOpen.alreadyShowing(localID: desktopLocal, claudeFrontmost: true, index: tie))
     #expect(!ClaudeDesktopOpen.alreadyShowing(localID: desktopLocal, claudeFrontmost: true, index: nil))
 }
+
+// #474: results acknowledge by ADR 0016's rules, with "visible" from `lastFocusedAt` and frontmost.
+
+private let otherLocal = "local_2a2a2a2a-1434-4035-9547-ecd4d906bf8f"
+
+@Test func claudeDesktopFrontSessionIsTheStrictlyLatestFocus() throws {
+    let later = ClaudeDesktopSessionIndex.decode([try sessionFile(local: desktopLocal, hook: desktopHook, focusedAt: 2000),
+                                                  try sessionFile(local: otherLocal, hook: terminalHook, focusedAt: 3000)])
+    #expect(later.frontLocalID == otherLocal)
+    let tie = ClaudeDesktopSessionIndex.decode([try sessionFile(local: desktopLocal, hook: desktopHook, focusedAt: 3000),
+                                                try sessionFile(local: otherLocal, hook: terminalHook, focusedAt: 3000)])
+    #expect(tie.frontLocalID == nil)
+    // A file with no focus, or no valid ids, never becomes the front session.
+    let unfocused = ClaudeDesktopSessionIndex.decode([try sessionFile(local: desktopLocal, hook: desktopHook, focusedAt: nil),
+                                                      try sessionFile(local: "bad", hook: terminalHook, focusedAt: 9000)])
+    #expect(unfocused.frontLocalID == nil)
+}
+
+@Test func claudeDesktopReadsVisibleOnlyWhileFrontmostWithAKnownFrontSession() {
+    let index = ClaudeDesktopSessionIndex(localIDs: [desktopHook: desktopLocal], frontLocalID: desktopLocal)
+    #expect(ClaudeDesktopVisibility.reading(frontmost: true, index: index) == .visible(desktopLocal))
+    #expect(ClaudeDesktopVisibility.reading(frontmost: false, index: index) == .nothing)
+    #expect(ClaudeDesktopVisibility.reading(frontmost: true, index: nil) == .unknown)
+    #expect(ClaudeDesktopVisibility.reading(frontmost: true, index: ClaudeDesktopSessionIndex(localIDs: [:])) == .unknown)
+}
+
+@Test func claudeDesktopVisitAndDwellAcknowledgeOnlyTheFrontSession() {
+    let mine = [TerminalCompletionCandidate(id: "early", arrivedAt: 99), TerminalCompletionCandidate(id: "during", arrivedAt: 101.5)]
+    var tracker = TerminalVisitTracker<String>()
+    tracker.record(.init(takenAt: 100, reading: .nothing))
+    tracker.record(.init(takenAt: 102, reading: ClaudeDesktopVisibility.reading(
+        frontmost: true, index: .init(localIDs: [:], frontLocalID: desktopLocal))))
+    // The switch to the session acknowledges what arrived before the earlier scan, not during it.
+    #expect(tracker.acknowledged(mine, target: desktopLocal) == ["early"])
+    #expect(tracker.acknowledged(mine, target: otherLocal).isEmpty)
+    #expect(tracker.acknowledged(mine, target: nil).isEmpty)
+
+    // Dwell: a result arriving while the session is in front clears after five more seconds in front.
+    let arriving = [TerminalCompletionCandidate(id: "dwell", arrivedAt: 103)]
+    tracker.record(.init(takenAt: 104, reading: .visible(desktopLocal)))
+    tracker.record(.init(takenAt: 106, reading: .visible(desktopLocal)))
+    #expect(tracker.acknowledged(arriving, target: desktopLocal).isEmpty)
+    tracker.record(.init(takenAt: 108, reading: .visible(desktopLocal)))
+    #expect(tracker.acknowledged(arriving, target: desktopLocal) == ["dwell"])
+
+    // An unreadable read restarts the run and proves no visit.
+    var broken = TerminalVisitTracker<String>()
+    broken.record(.init(takenAt: 102, reading: .visible(desktopLocal)))
+    broken.record(.init(takenAt: 104, reading: .unknown))
+    broken.record(.init(takenAt: 106, reading: .visible(desktopLocal)))
+    broken.record(.init(takenAt: 108, reading: .visible(desktopLocal)))
+    #expect(broken.acknowledged(arriving, target: desktopLocal).isEmpty)
+
+    // Another session in front, then a switch back, is a visit.
+    var switched = TerminalVisitTracker<String>()
+    switched.record(.init(takenAt: 104, reading: .visible(otherLocal)))
+    #expect(switched.acknowledged(arriving, target: desktopLocal).isEmpty)
+    switched.record(.init(takenAt: 106, reading: .visible(desktopLocal)))
+    #expect(switched.acknowledged(arriving, target: desktopLocal) == ["dwell"])
+
+    // An Open resets the tracker: a scan started before it counts for nothing.
+    var opened = TerminalVisitTracker<String>()
+    opened.record(.init(takenAt: 100, reading: .nothing))
+    opened.reset(at: 101)
+    opened.record(.init(takenAt: 100.5, reading: .visible(desktopLocal)))
+    #expect(opened.acknowledged(mine, target: desktopLocal).isEmpty)
+}
+
+@Test func claudeDesktopOnlyAVerifiedOpenAcknowledgesAndOnlyEarlierResults() {
+    let results = [TerminalCompletionCandidate(id: "before", arrivedAt: 99.9),
+                   TerminalCompletionCandidate(id: "at", arrivedAt: 100),
+                   TerminalCompletionCandidate(id: "after", arrivedAt: 101)]
+    #expect(ClaudeDesktopVisibility.afterOpen(results, result: .opened, clickedAt: 100) == ["before"])
+    #expect(ClaudeDesktopVisibility.afterOpen(results, result: .raised, clickedAt: 100).isEmpty)
+    #expect(ClaudeDesktopVisibility.afterOpen(results, result: .unavailable(.claudeDesktopNotRunning), clickedAt: 100).isEmpty)
+    #expect(ClaudeDesktopVisibility.afterOpen(results, result: .opened, clickedAt: .nan).isEmpty)
+}

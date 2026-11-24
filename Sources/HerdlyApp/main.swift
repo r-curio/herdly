@@ -276,6 +276,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// "Claude Desktop" and Open goes through Claude Desktop's link. A session joins when listed with
     /// that host and leaves when listed with another; Open itself re-reads the registry.
     @Published private(set) var claudeDesktopSessions: Set<AgentSessionIdentity> = []
+    /// Visit and dwell state for Claude Desktop sessions (ADR 0016, #474).
+    var claudeDesktop = ClaudeDesktopVisitState()
     /// Each Claude turn's prompt and last message from the latest scan of its root, for its result
     /// card (#341). Memory only, like Codex's completion previews; looked up by the exact turn.
     @Published private(set) var claudeTurnResults: [AgentTurnIdentity: ClaudeTurnResult] = [:]
@@ -2039,6 +2041,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         checkWezTerm()
         checkRex()
         checkHerdrApp()
+        checkClaudeDesktopVisits()
         checkScheduledTabHosts()
         checkOpenAvailability()
         // App identity only: no window contents, task titles, or accessibility queries.

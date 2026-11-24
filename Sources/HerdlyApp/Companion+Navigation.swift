@@ -720,6 +720,7 @@ extension Companion {
         herdrApp.visits.reset(at: now)
         tmux.visits.reset(at: now)
         zellij.visits.reset(at: now)
+        claudeDesktop.visits.reset(at: now)
     }
 
     /// Sessions with queued completions whose current binding is `pane`.

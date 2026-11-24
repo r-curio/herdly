@@ -64,5 +64,23 @@ validation could change in any update.
   registry fields are the same, but no native click was made.
 - Remote, SSH and cloud desktop sessions, worktree sessions, and Claude Desktop with its OS entry points
   setting off.
-- `lastFocusedAt` as read evidence. It shows focus, not that a result was read. The acknowledgment rules
-  still need a product decision.
+- `lastFocusedAt` as read evidence. It shows focus, not that a result was read. Decided in
+  [#474](https://github.com/r-curio/herdly/issues/474): it counts as a terminal tab being in front (below).
+
+## Focus probe (#474)
+
+Recorded 2026-11-24, same Claude.app. Two existing Code sessions, A and B, were switched by
+`osascript` activation and the continue link while a watcher logged only each file's `lastFocusedAt` and
+modification time.
+
+| Step | `lastFocusedAt` |
+| --- | --- |
+| Activate Claude Desktop, A selected | A set to the activation time, file written about 1.0 s later |
+| Stay in front 8 s | No write |
+| Continue link to B | B set |
+| Leave, then the link to B again (already selected) | B set |
+| Leave, then activate Claude Desktop (B selected) | B set |
+| Leave to another app | No write, either session |
+
+Not probed: selecting a session from Claude Desktop's sidebar, and switching to its Chat tab, where a
+Code session may keep the latest focus while a chat is shown.

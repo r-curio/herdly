@@ -6,8 +6,9 @@ import Foundation
 // `claude://code/continue?session=local_<id>`, whose id comes only from Claude Desktop's per-session
 // file that names the hook session as `cliSessionId`. Both the files and the link are Claude Desktop
 // internals, not a documented interface, so every reading fails closed: anything unexpected leaves
-// the session without an exact target, and Open then only raises Claude Desktop. Nothing here
-// acknowledges a result (agreed 2026-11-24: only Dismiss does for a desktop session).
+// the session without an exact target, and Open then only raises Claude Desktop. Results acknowledge
+// by ADR 0016's verified Open, visit and dwell rules, with "visible" read from the session files'
+// `lastFocusedAt` and macOS's frontmost app (agreed 2026-11-24, #474).
 
 /// How a Claude Desktop session reads in the notch (agreed 2026-11-24, #471).
 public enum ClaudeDesktopPresentation {
@@ -225,5 +226,30 @@ public enum ClaudeDesktopOpen {
     public static func verified(lastFocusedAt: Double?, clickedAt: Double) -> Bool {
         guard let lastFocusedAt else { return false }
         return lastFocusedAt >= clickedAt - 0.05
+    }
+}
+
+/// ADR 0016's visible test for Claude Desktop sessions (#474), over Claude Desktop ids. Claude Desktop
+/// writes a session's `lastFocusedAt` when it selects the session or comes to the front with it
+/// selected, about a second later, and writes nothing while it stays in front or when it loses focus
+/// (probe of 2026-11-24 on Claude.app 5.11492.5). So the front session is the one with the latest
+/// focus, and only while macOS reports Claude Desktop frontmost. A switch between sessions reads the
+/// previous session for up to that second.
+public enum ClaudeDesktopVisibility {
+    /// - Parameters:
+    ///   - frontmost: macOS reports Claude Desktop as the frontmost app as the scan starts.
+    ///   - index: a fresh read of the session files, nil when they could not be read.
+    public static func reading(frontmost: Bool, index: ClaudeDesktopSessionIndex?) -> TerminalVisibilityReading<String> {
+        guard frontmost else { return .nothing }
+        guard let front = index?.frontLocalID else { return .unknown }
+        return .visible(front)
+    }
+
+    /// A verified Open (`ClaudeDesktopOpen.Result.opened`) acknowledges the session's completions that
+    /// arrived strictly before the click. A raise or an unavailable Open acknowledges nothing.
+    public static func afterOpen<ID>(_ completions: [TerminalCompletionCandidate<ID>], result: ClaudeDesktopOpen.Result,
+                                     clickedAt: Double) -> Set<ID> {
+        guard result == .opened, clickedAt.isFinite else { return [] }
+        return Set(completions.filter { $0.arrivedAt.isFinite && $0.arrivedAt < clickedAt }.map(\.id))
     }
 }
