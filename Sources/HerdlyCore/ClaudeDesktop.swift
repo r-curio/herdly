@@ -130,8 +130,9 @@ public struct ClaudeDesktopSessionIndex: Equatable, Sendable {
 /// link, raising the app and reading the files belong to HerdlyApp.
 public enum ClaudeDesktopOpen {
     /// How long Open waits for Claude Desktop to record the session's focus before it counts the
-    /// jump as unverified.
-    public static let verificationTimeout: TimeInterval = 2
+    /// jump as unverified. Claude Desktop writes the session file about 1.0–1.4 s after the jump when
+    /// idle; 2 s proved too short live (2026-11-24), so a reached session showed the fallback note.
+    public static let verificationTimeout: TimeInterval = 5
 
     public enum Plan: Equatable, Sendable {
         /// Open this link, then verify the session took focus.
