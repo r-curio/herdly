@@ -1537,8 +1537,8 @@ private struct HerdrProblemLine: View {
     }
 }
 
-/// Settings › Notifications (#317): the sound switch and tiles, the read-state switch, the response length, and the test
-/// notification buttons. No footers.
+/// Settings › Notifications (#317): the sound switch and tiles, the read-state switch, the response length, phone
+/// alerts, what still pops open while paused (#456), and the test notification buttons. No footers.
 private struct NotificationControls: View {
     @ObservedObject var model: Companion
     private let sounds = Companion.systemSoundNames
@@ -1598,6 +1598,8 @@ private struct NotificationControls: View {
                 PhoneSection(phone: model.phoneAlerts, reduceMotion: model.reduceMotion)
             }
 
+            WhilePausedSection(model: model)
+
             HStack(spacing: 8) {
                 Spacer()
                 if model.attention.pending {
@@ -1609,6 +1611,31 @@ private struct NotificationControls: View {
             }
             .padding(.top, 6)
         }
+    }
+}
+
+/// Settings › Notifications › While paused (#456): whether an approval or a question that arrives
+/// while notifications are paused from the menu bar still pops open, or waits quietly in the queue.
+/// Completions are always quiet while paused, so they have no row.
+private struct WhilePausedSection: View {
+    @ObservedObject var model: Companion
+
+    var body: some View {
+        SettingsHeader("While paused")
+        SettingsCard {
+            row(title: "Approvals", selection: $model.pausedNotifications.approvals)
+            Divider().padding(.horizontal, SettingsStyle.rowInset)
+            row(title: "Questions", selection: $model.pausedNotifications.questions)
+        }
+    }
+
+    private func row(title: String, selection: Binding<PausedInterruption>) -> some View {
+        SettingsRow(title: title, detail: nil) {
+            SlidingSegments(title: "\(title) while notifications are paused",
+                            selection: selection.animation(SettingsMotion.curve(reduceMotion: model.reduceMotion)),
+                            options: PausedInterruption.allCases.map { ($0, $0.title) })
+        }
+        .help("While notifications are paused from the menu bar, new \(title.lowercased()) still open their card, play their sound and alert your phone, or wait quietly in the queue.")
     }
 }
 

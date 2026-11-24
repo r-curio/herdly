@@ -1,0 +1,267 @@
+import Foundation
+
+/// "Pause notifications" (#456): the menu bar item that stops Herdly interrupting for a while. A
+/// pause only decides whether a newly arrived item may pop its card, play its sound, or alert the
+/// phone. It never drops, acknowledges, reorders, or counts an item differently, never touches an
+/// approval's deadline, and never produces a decision. Every rule here takes the clock and the
+/// calendar from the caller.
+
+/// The three durations in the menu's "Pause notifications" submenu.
+public enum NotificationPauseChoice: String, CaseIterable, Sendable {
+    case oneHour
+    case untilTomorrow
+    case untilResumed
+
+    public var title: String {
+        switch self {
+        case .oneHour: "For 1 hour"
+        case .untilTomorrow: "Until tomorrow"
+        case .untilResumed: "Until I resume"
+        }
+    }
+}
+
+/// Whether notifications are paused, and until when.
+public enum NotificationPause: Equatable, Sendable {
+    case none
+    /// Paused until this moment; the pause has ended at it.
+    case until(Date)
+    /// "Until I resume": no end.
+    case indefinite
+
+    /// "Until tomorrow" ends at this local hour.
+    public static let tomorrowHour = 9
+
+    /// The pause a menu choice starts at `now`. "Until tomorrow" ends at the next 09:00 local time
+    /// strictly after `now`: tomorrow's when it is 09:00 or later, this morning's when it is earlier
+    /// (a pause started at 02:00 ends at 09:00 the same day).
+    public static func starting(_ choice: NotificationPauseChoice, now: Date, calendar: Calendar) -> NotificationPause {
+        switch choice {
+        case .oneHour:
+            return .until(now.addingTimeInterval(3600))
+        case .untilTomorrow:
+            let nine = DateComponents(hour: tomorrowHour, minute: 0, second: 0)
+            guard let end = calendar.nextDate(after: now, matching: nine, matchingPolicy: .nextTime) else {
+                // No such time in this calendar: a day from now is the closest honest answer.
+                return .until(now.addingTimeInterval(24 * 3600))
+            }
+            return .until(end)
+        case .untilResumed:
+            return .indefinite
+        }
+    }
+
+    public func isActive(at now: Date) -> Bool {
+        switch self {
+        case .none: false
+        case let .until(end): now < end
+        case .indefinite: true
+        }
+    }
+
+    /// The end of a timed pause; nil when not paused or paused until the user resumes.
+    public var endsAt: Date? {
+        if case let .until(end) = self { return end }
+        return nil
+    }
+
+    /// This pause, or `.none` once it has ended at `now`.
+    public func resolved(at now: Date) -> NotificationPause {
+        isActive(at: now) ? self : .none
+    }
+
+    /// The status menu item's title: "Pause notifications" when not paused, "Resume notifications"
+    /// for Until I resume, and "Resume notifications (paused until 14:30)" for a timed pause, its
+    /// time in the locale's short time style. An end on another calendar day than `now` also names
+    /// its abbreviated weekday ("paused until Wed 09:00").
+    public func menuTitle(now: Date, calendar: Calendar, locale: Locale) -> String {
+        switch resolved(at: now) {
+        case .none:
+            return "Pause notifications"
+        case .indefinite:
+            return "Resume notifications"
+        case let .until(end):
+            var style = Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, calendar: calendar,
+                                         timeZone: calendar.timeZone)
+            if !calendar.isDate(end, inSameDayAs: now) { style = style.weekday(.abbreviated) }
+            let when = end.formatted(style)
+            return "Resume notifications (paused until \(when))"
+        }
+    }
+
+    // MARK: Persistence
+
+    /// The one UserDefaults key: "indefinite", or "until:<seconds since 1970>". Absent when not paused.
+    public static let key = "notificationPause"
+
+    /// The saved pause, read through `value(key)`. A timed pause whose end is at or before `now`
+    /// starts unpaused, as does a missing or unreadable value.
+    public static func load(now: Date, value: (String) -> String?) -> NotificationPause {
+        guard let saved = value(key) else { return .none }
+        if saved == "indefinite" { return .indefinite }
+        guard saved.hasPrefix("until:"), let seconds = Double(saved.dropFirst("until:".count)),
+              seconds.isFinite else { return .none }
+        return NotificationPause.until(Date(timeIntervalSince1970: seconds)).resolved(at: now)
+    }
+
+    /// Writes this pause through `write(key, value)`; a nil value removes the key.
+    public func save(write: (String, String?) -> Void) {
+        switch self {
+        case .none: write(Self.key, nil)
+        case .indefinite: write(Self.key, "indefinite")
+        case let .until(end): write(Self.key, "until:\(end.timeIntervalSince1970)")
+        }
+    }
+}
+
+/// One "While paused" choice in Settings › Notifications.
+public enum PausedInterruption: String, CaseIterable, Sendable {
+    /// Behaves exactly as when not paused: its card, its sound, its phone alert.
+    case popOpen
+    /// Waits silently in the queue: no card, no sound, no phone alert.
+    case stayQuiet
+
+    public var title: String {
+        switch self {
+        case .popOpen: "Still pop open"
+        case .stayQuiet: "Stay quiet"
+        }
+    }
+}
+
+/// Settings › Notifications › While paused: one choice for approvals, one for questions. Both
+/// default to Still pop open. Completions and everything else are always quiet while paused.
+public struct PausedNotificationSettings: Equatable, Sendable {
+    public var approvals: PausedInterruption
+    public var questions: PausedInterruption
+
+    public static let standard = PausedNotificationSettings(approvals: .popOpen, questions: .popOpen)
+    public static let approvalsKey = "pausedApprovals"
+    public static let questionsKey = "pausedQuestions"
+
+    public init(approvals: PausedInterruption, questions: PausedInterruption) {
+        self.approvals = approvals
+        self.questions = questions
+    }
+
+    /// Reads both choices through `value(key)`; a missing or unrecognised value keeps its default.
+    public static func load(value: (String) -> String?) -> PausedNotificationSettings {
+        PausedNotificationSettings(
+            approvals: value(approvalsKey).flatMap(PausedInterruption.init(rawValue:)) ?? standard.approvals,
+            questions: value(questionsKey).flatMap(PausedInterruption.init(rawValue:)) ?? standard.questions)
+    }
+
+    public func save(write: (String, String) -> Void) {
+        write(Self.approvalsKey, approvals.rawValue)
+        write(Self.questionsKey, questions.rawValue)
+    }
+}
+
+/// What kind of interruption a newly arrived row would make.
+public enum NotificationInterruptionKind: Equatable, Sendable {
+    /// A live or handed-back approval request.
+    case approval
+    case question
+    case completion
+    /// Running work, waiting and status-unavailable sessions: rows that never pop on their own.
+    case other
+
+    public init(_ item: AgentAttentionItem) {
+        switch item.kind {
+        case .actionableApproval, .handedBackApproval: self = .approval
+        case .question: self = .question
+        case .outcome, .earlierOutcome: self = .completion
+        case .waiting, .statusUnavailable, .running: self = .other
+        }
+    }
+}
+
+public enum NotificationInterruption {
+    /// Whether an item of `kind` may pop its card, play its sound, and alert the phone, given whether
+    /// it arrived during a pause. Not paused, every kind may. Paused, approvals and questions follow
+    /// their "While paused" setting and every other kind stays quiet. `NotificationPauseArrivals`
+    /// decides `paused` once, from the item's arrival time: an item kept quiet stays quiet after the
+    /// pause ends, as a restored item does.
+    public static func allows(_ kind: NotificationInterruptionKind, paused: Bool,
+                              settings: PausedNotificationSettings) -> Bool {
+        guard paused else { return true }
+        switch kind {
+        case .approval: return settings.approvals == .popOpen
+        case .question: return settings.questions == .popOpen
+        case .completion, .other: return false
+        }
+    }
+}
+
+/// The pauses Herdly has seen in this launch, each from its start to its end, so an item is judged
+/// by when it arrived rather than by when a scan first saw it. A launch with a saved pause opens its
+/// span at launch: anything older is restored and silent anyway. Kept in memory and bounded.
+public struct NotificationPauseLog: Equatable, Sendable {
+    public struct Span: Equatable, Sendable {
+        public let start: Date
+        /// Nil while paused until the user resumes.
+        public let end: Date?
+
+        public func covers(_ moment: Date) -> Bool {
+            moment >= start && end.map { moment < $0 } ?? true
+        }
+    }
+
+    public let capacity: Int
+    public private(set) var spans: [Span] = []
+
+    public init(capacity: Int = 32) {
+        self.capacity = max(1, capacity)
+    }
+
+    /// Records that the pause became `pause` at `now`: the open span ends at `now` (or earlier, at its
+    /// own end), and an active pause opens a new span from `now` to its end.
+    public mutating func record(_ pause: NotificationPause, at now: Date) {
+        if let last = spans.last, last.covers(now) {
+            spans[spans.count - 1] = Span(start: last.start, end: now)
+        }
+        if pause.isActive(at: now) { spans.append(Span(start: now, end: pause.endsAt)) }
+        if spans.count > capacity { spans.removeFirst(spans.count - capacity) }
+    }
+
+    /// Whether notifications were paused at `moment`.
+    public func covers(_ moment: Date) -> Bool {
+        spans.contains { $0.covers(moment) }
+    }
+}
+
+/// Which of a scan's newly queued rows may pop their card, sound, and alert the phone (#456).
+public enum NotificationPauseArrivals {
+    /// The moment a row arrived: its own arrival time, or the scan time when it has none (not a
+    /// positive finite time) or claims one later than the scan.
+    public static func arrival(of arrivedAt: Double, scannedAt: Date) -> Date {
+        guard arrivedAt.isFinite, arrivedAt > 0 else { return scannedAt }
+        return min(Date(timeIntervalSince1970: arrivedAt), scannedAt)
+    }
+
+    /// Whether a row of `kind` that arrived at `arrivedAt` may interrupt, given the pauses so far.
+    public static func allows(_ kind: NotificationInterruptionKind, arrivedAt: Double, pauses: NotificationPauseLog,
+                              settings: PausedNotificationSettings, scannedAt: Date) -> Bool {
+        let moment = arrival(of: arrivedAt, scannedAt: scannedAt)
+        return NotificationInterruption.allows(kind, paused: pauses.covers(moment), settings: settings)
+    }
+
+    /// The `items` that may interrupt, in order. A row that arrived during a pause its kind stays
+    /// quiet for is left out, even when the scan first sees it after the pause ended; a row that
+    /// arrived before a pause started is unaffected by it. `kind` and `arrivedAt` read each row, so
+    /// the agent queue and the legacy Codex queue share this one gate.
+    public static func interrupting<Item>(_ items: [Item], kind: (Item) -> NotificationInterruptionKind,
+                                          arrivedAt: (Item) -> Double, pauses: NotificationPauseLog,
+                                          settings: PausedNotificationSettings, scannedAt: Date) -> [Item] {
+        items.filter {
+            allows(kind($0), arrivedAt: arrivedAt($0), pauses: pauses, settings: settings, scannedAt: scannedAt)
+        }
+    }
+
+    /// `interrupting` for agent queue rows, each by its own kind and arrival time.
+    public static func interrupting(_ items: [AgentAttentionItem], pauses: NotificationPauseLog,
+                                    settings: PausedNotificationSettings, scannedAt: Date) -> [AgentAttentionItem] {
+        interrupting(items, kind: NotificationInterruptionKind.init, arrivedAt: \.arrivedAt, pauses: pauses,
+                     settings: settings, scannedAt: scannedAt)
+    }
+}
