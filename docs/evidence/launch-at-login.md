@@ -14,7 +14,7 @@ Record **pass**, **fail**, or **uncertain**, the date, and the packaged artifact
 
 | Scenario | Expected observation | Result | Date | Artifact SHA-256 |
 | --- | --- | --- | --- | --- |
-| Default off | A newly installed app reports **Off** and does not launch at the next sign-in. | Pending | | |
+| Default off | A newly installed app reports **Off** with a usable switch (including when macOS reports the never-registered app as not found) and does not launch at the next sign-in. | Pending | | |
 | Enable | Turning the switch on results in **On**, or accurately reports **Approval required** with a working System Settings action. | Pending | | |
 | Login launch | After sign-out and sign-in, the registered app starts without opening its controls window; the menu-bar item and notch remain available. | Pending | | |
 | Disable | Turning the switch off reports **Off**, and Steer does not launch after the next sign-in. | Pending | | |
