@@ -54,7 +54,7 @@ Undecided product facts: exact desktop conversation focus; Ghostty split panes; 
 ## Brand Commitments
 
 - The name is Herdly and is final.
-- The mark is the crook h, a lowercase h whose ascender curls into a shepherd's crook ([master SVG](brand/herdly-crook-h.svg)), chosen 2026-11-24. The menu bar status item draws it as a template image. No app icon or wordmark exists yet; the completion sound is a user-chosen macOS system sound. Future work must produce them rather than assume assets.
+- The mark is the crook h, a lowercase h whose ascender curls into a shepherd's crook ([master SVG](brand/herdly-crook-h.svg)), chosen 2026-11-24. The menu bar status item draws it as a template image, and the app icon ("Night Pasture", chosen 2026-11-24) is the mark in white cooling to light grey on a black macOS icon tile lit from the top, with a glass rim, fine grain and a faint dot grid fading down the field ([master SVG](brand/herdly-app-icon.svg)), built by `scripts/build-app.sh` from the same drawing code. Herdly is a menu bar app, so the icon shows in Finder, Spotlight, Login Items and permission prompts rather than the Dock. No wordmark exists yet; the completion sound is a user-chosen macOS system sound. Future work must produce them rather than assume assets.
 - Distribution is a personal ad-hoc signed build from `scripts/build-app.sh`. No App Store, notarization, or public download is planned.
 
 ## Evidence on Hand
