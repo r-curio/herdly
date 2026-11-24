@@ -44,6 +44,14 @@ public enum OpenUnavailableReason: Error, Equatable, Hashable, Sendable {
     /// The identified app was still running but macOS did not activate it. Click-time only; not one of
     /// the agreed card causes, so it is never claimed as "isn't running".
     case activationFailed(TerminalHost)
+    /// A Claude Desktop session's app is not running (#471). Herdly never launches it.
+    case claudeDesktopNotRunning
+    /// Open raised Claude Desktop but could not verify a jump to the session (#471, agreed
+    /// 2026-11-24). Unlike a terminal fallback, which is silent, this note shows on the card; the
+    /// request is still handed back as for any fallback.
+    case claudeDesktopSessionNotFound
+    /// Claude Desktop was running but macOS did not activate it. Click-time only.
+    case claudeDesktopNotRaised
 
     /// The one line that replaces Open on a card, and the click's message.
     public var cardLine: String {
@@ -53,6 +61,9 @@ public enum OpenUnavailableReason: Error, Equatable, Hashable, Sendable {
         case .appNotRunning(let host): "\(host.displayName) isn't running."
         case .appNotIdentified: "Herdly can't tell which terminal this session is in."
         case .activationFailed(let host): "Herdly couldn't bring \(host.displayName) forward."
+        case .claudeDesktopNotRunning: "Claude Desktop isn't running."
+        case .claudeDesktopSessionNotFound: "Herdly couldn't find this session in Claude Desktop, so it brought Claude Desktop forward."
+        case .claudeDesktopNotRaised: "Herdly couldn't bring Claude Desktop forward."
         }
     }
 }

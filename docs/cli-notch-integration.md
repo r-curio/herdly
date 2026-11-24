@@ -366,6 +366,18 @@ The Herdr desktop app (Herdr.app) is a terminal host beside Rex; it is not herdr
 
 Automated: `HerdrAppTests` (fixtures shaped on the probe's replies): inventory, finished and remote terminals, malformed and foreign replies, `ps` selection, Codex binding past a split decoy, Claude by tty, an unreadable Herdr, window parsing and the closed or unreadable window, the visible test, Open plan, focus results, verify misses, the one-focus sequence, one-write replies, deliveries, the wire format, socket trust and the process walk. Live: not yet run; see the investigation's "Not established".
 
+## Claude Desktop: Open (#471)
+
+Claude Code sessions in Claude Desktop's Code tab arrive through the same Claude hooks as any Claude session, with no terminal ([evidence](evidence/claude-desktop-sessions.md), [ADR 0026](adr/0026-open-claude-desktop-sessions-through-its-own-link.md)). Pure rules are in `ClaudeDesktop.swift`; HerdlyApp's `Companion+ClaudeDesktop.swift` opens.
+
+- **Which sessions:** the registry's interactive entry has `entrypoint: "claude-desktop"` (`ClaudeSessionHost`). `Companion.claudeDesktopSessions` remembers them from each scan; Open re-reads.
+- **Open:** checked before herdr and every terminal route. A fresh, complete registry read must list the session once, as Claude Desktop's in its own root, and Claude Desktop must be running ("Claude Desktop isn't running." otherwise; an ended session reads "This session has ended."). The session's `local_` id comes from a fresh read of `claude-code-sessions` (`ClaudeDesktopSessionIndex`), then `claude://code/continue?session=local_<id>` is opened and counts as reached once that session's `lastFocusedAt` moves past the click, within 2 s. Otherwise Claude Desktop is brought forward and the card notes "Herdly couldn't find this session in Claude Desktop, so it brought Claude Desktop forward." Either way an actionable approval or question is handed back with no decision (ADR 0015, #411).
+- **Not acknowledged:** no Claude Desktop Open clears a result; only Dismiss does.
+- **No availability scan:** the terminal Open scan skips desktop sessions, so they never show "Herdly can't tell which terminal this session is in."
+- **Typed input:** none. A desktop session has no pane binding, so replies and question keys stay unavailable; notch questions and approvals answer through the helper as for any Claude session.
+
+Automated: `ClaudeDesktopTests`: registry host from `entrypoint`, the index join, malformed files and ids, two ids for one session, the two-level layout without symlinks, `lastFocusedAt`, the link, the plan's cases, verification, and the result lines. Live: the probe in the evidence; Open in the built app is checked separately.
+
 ## tmux: pane binding, two-layer Open and typed input (#241)
 
 Built (#241); tmux's switch and card are shown since its acceptance run (#246, 2026-10-25, [evidence](evidence/tmux-acceptance.md)). Pure rules are in `Tmux.swift`, `TmuxTargeting.swift`, `TmuxInput.swift`, `MultiplexerHostTab.swift` and the shared `TerminalTabBinding.swift`, `TerminalTypedInput.swift` and `TerminalQuestionKeys.swift`; HerdlyApp's `TmuxRunner.swift` runs the binary and `Companion+Tmux.swift` schedules it. tmux is contacted only while its switch and a terminal are on (`TerminalHostSwitches.mayContact`).
