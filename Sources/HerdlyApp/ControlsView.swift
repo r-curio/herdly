@@ -1574,7 +1574,9 @@ private struct NotificationControls: View {
                 .help("How much of the last message each result card shows: all of it, its first five lines, or its first line. Show all on a card opens the rest.")
             }
 
-            PhoneSection(phone: model.phoneAlerts, reduceMotion: model.reduceMotion)
+            if model.phoneAlerts.available {
+                PhoneSection(phone: model.phoneAlerts, reduceMotion: model.reduceMotion)
+            }
 
             HStack(spacing: 8) {
                 Spacer()
