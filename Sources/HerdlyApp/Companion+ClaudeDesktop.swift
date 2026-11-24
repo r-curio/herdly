@@ -4,7 +4,8 @@ import HerdlyCore
 // Open for a Claude Desktop Code session (#471; HerdlyCore's ClaudeDesktop.swift). The registry is
 // re-read at click time: only a session the complete inventories list exactly once, as running in
 // Claude Desktop, is opened. Claude Desktop's own link selects the exact session, and the jump counts
-// as reached only once Claude Desktop records that session's focus after the click. Anything else
+// as reached once Claude Desktop records that session's focus after the click, or at once when Claude
+// Desktop already showed it (`ClaudeDesktopOpen.alreadyShowing`). Anything else
 // raises Claude Desktop with the card's note, or shows why Open is unavailable. A verified Open, a
 // visit or a five-second dwell acknowledges a result (ADR 0016, agreed 2026-11-24, #474); a raise
 // acknowledges nothing.
