@@ -245,6 +245,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     @Published var attention = Attention(restored: UserDefaults.standard.bool(forKey: "testCompletion"))
     @Published var muted = UserDefaults.standard.bool(forKey: "muted")
+    /// "Pause notifications" in the menu bar menu (#456). Saved across restarts; a timed pause that
+    /// ended while Herdly was not running loads as not paused.
+    @Published private(set) var notificationPause = NotificationPause.load(now: Date()) {
+        UserDefaults.standard.string(forKey: $0)
+    }
+    /// Settings › Notifications › While paused: whether approvals and questions still pop open.
+    @Published var pausedNotifications = PausedNotificationSettings.load { UserDefaults.standard.string(forKey: $0) } {
+        didSet { pausedNotifications.save { key, value in UserDefaults.standard.set(value, forKey: key) } }
+    }
     @Published var taskID = ""
     /// Each approval's or question's delivery note after the user acted on it (D10); memory only.
     @Published var rowNotes = RowNotes()
@@ -875,6 +884,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     let previewMode = Companion.argumentValue(for: "--preview-queue")
     private var status: NSStatusItem!
     private var notchDisplayMenu: NotchDisplayMenu!
+    private var notificationPauseMenu: NotificationPauseMenu!
+    /// Fires once when a timed pause ends, to clear it and redraw the menu item. Arrivals never wait
+    /// on it: each one checks the pause against the clock.
+    private var notificationPauseEnd: Timer?
     private var panel: NotchPanel!
     private var controls: NSWindow?
     private var controlsAnimationGeneration = 0
@@ -981,7 +994,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let displayItem = NSMenuItem(title: "Show notch on", action: nil, keyEquivalent: "")
         displayItem.submenu = notchDisplayMenu.menu
         menu.insertItem(displayItem, at: menu.indexOfItem(withTitle: "Show Herdly controls") + 1)
+        notificationPauseMenu = NotificationPauseMenu(
+            pause: { [weak self] in self?.currentNotificationPause() ?? .none },
+            start: { [weak self] in self?.pauseNotifications($0) },
+            resume: { [weak self] in self?.resumeNotifications() })
+        menu.insertItem(notificationPauseMenu.item, at: menu.index(of: displayItem) + 1)
+        menu.delegate = notificationPauseMenu
         status.menu = menu
+        // Re-arms the end of a pause restored from the last launch.
+        setNotificationPause(notificationPause)
         panel = NotchPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -1080,8 +1101,19 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // The title follows the selected pane (DESIGN.md, Settings Window) and starts as "Herdly".
             precondition(controls?.title.isEmpty == false && controls?.styleMask.contains(.resizable) == true)
             precondition(controls?.frame.width ?? 0 >= 720 && controls?.frame.height ?? 0 >= 540)
-            precondition(status.button?.image?.isTemplate == true && status.menu?.items.count == 5)
+            precondition(status.button?.image?.isTemplate == true && status.menu?.items.count == 6)
             precondition(status.menu?.item(withTitle: "Show notch on")?.submenu === notchDisplayMenu.menu)
+            // "Pause notifications" sits right after "Show notch on", holding the three durations
+            // while not paused, and "Resume notifications" while paused.
+            if let pauseIndex = status.menu?.index(of: notificationPauseMenu.item), pauseIndex >= 0 {
+                precondition(status.menu?.item(at: pauseIndex - 1)?.title == "Show notch on")
+            } else {
+                preconditionFailure("The pause item must be in the status menu")
+            }
+            precondition(notificationPauseMenu.item.title.hasPrefix(currentNotificationPause().isActive(at: Date())
+                                                                    ? "Resume notifications" : "Pause notifications"))
+            precondition(currentNotificationPause().isActive(at: Date())
+                         || notificationPauseMenu.item.submenu?.items.map(\.title) == NotificationPauseChoice.allCases.map(\.title))
             dismissControls(animated: false)
             precondition(controls?.isVisible == false)
             presentControls(animated: false)
@@ -1783,12 +1815,23 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             let newAgentOutcomes = newAgentItems.compactMap(\.outcome)
             let newAgentQuestions = newAgentItems.compactMap(\.question)
             // #323: a restored or pre-launch result goes to the queue without a card or a sound.
-            let freshAgentOutcomes = newAgentOutcomes.filter { ResultPop.isFresh($0, launchedAt: Companion.launchedAt) }
-            let freshAgentQuestions = newAgentQuestions.filter { $0.arrivedAt >= Companion.launchedAt }
+            // #456: while notifications are paused, a kind the pause keeps quiet arrives as a restored
+            // item does: queued and counted, with no card, sound or phone alert, then or after the pause.
+            let arrivalTime = Date()
+            let pause = notificationPause
+            let whilePaused = pausedNotifications
+            func mayInterrupt(_ kind: NotificationInterruptionKind) -> Bool {
+                NotificationInterruption.allows(kind, pause: pause, settings: whilePaused, at: arrivalTime)
+            }
+            let freshAgentOutcomes = mayInterrupt(.completion)
+                ? newAgentOutcomes.filter { ResultPop.isFresh($0, launchedAt: Companion.launchedAt) } : []
+            let freshAgentQuestions = mayInterrupt(.question)
+                ? newAgentQuestions.filter { $0.arrivedAt >= Companion.launchedAt } : []
             let newAgentRequests = newAgentItems.filter {
                 ($0.kind == .actionableApproval || $0.kind == .handedBackApproval)
             }
-            let freshAgentRequests = newAgentRequests.filter { $0.arrivedAt >= Companion.launchedAt }
+            let freshAgentRequests = mayInterrupt(.approval)
+                ? newAgentRequests.filter { $0.arrivedAt >= Companion.launchedAt } : []
             let newItems = current.filter { !previous.contains($0.id) }
             let newCompletions = newItems.compactMap(\.completion)
             for completion in newCompletions where !completion.uncertain {
@@ -1815,7 +1858,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             freshAgentCompletionIDs.formUnion(freshAgentOutcomes.map { .outcome($0.id) })
             freshAgentRequestIDs.formUnion(freshAgentRequests.map(\.id))
             freshAgentQuestionIDs.formUnion(freshAgentQuestions.map { .question($0.id) })
-            notePhoneAlertArrivals(newAgentItems, launchedAt: Companion.launchedAt)
+            notePhoneAlertArrivals(newAgentItems, launchedAt: Companion.launchedAt) { mayInterrupt(NotificationInterruptionKind($0)) }
             if !freshAgentOutcomes.isEmpty { completionPresentation.enqueue() }
             else if newAgentOutcomes.contains(where: { !$0.uncertain }), !completionPresentation.pending {
                 completionPresentation = Attention(restored: true)
@@ -1824,7 +1867,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // A dismiss of a card that is not showing would still publish and re-render the notch (#306).
             if !currentAgent.contains(where: { $0.approval != nil }) {
                 if reminderPresentation.pending || reminderPresentation.expanded { reminderPresentation.dismiss() }
-            } else if newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest })
+            } else if (mayInterrupt(.approval)
+                       && newItems.contains(where: { $0.kind == .handedBackRequest || $0.kind == .actionableRequest }))
                     || !freshAgentRequests.isEmpty {
                 reminderPresentation.enqueue()
             } else if !newAgentRequests.isEmpty, !reminderPresentation.pending {
@@ -2738,6 +2782,46 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         attention.dismiss()
         UserDefaults.standard.set(false, forKey: "testCompletion")
         refresh()
+    }
+    /// The pause as of now: a timed pause that has ended reads, and is saved, as not paused.
+    func currentNotificationPause(now: Date = Date()) -> NotificationPause {
+        let resolved = notificationPause.resolved(at: now)
+        if resolved != notificationPause { setNotificationPause(resolved) }
+        return resolved
+    }
+    func pauseNotifications(_ choice: NotificationPauseChoice) {
+        setNotificationPause(.starting(choice, now: Date(), calendar: .autoupdatingCurrent))
+    }
+    func resumeNotifications() { setNotificationPause(.none) }
+    /// Saves the pause, arms its end, and redraws the menu item. Pausing changes no queue order,
+    /// count, acknowledgment, or deadline: it only drops the pending first presentation of kinds it
+    /// keeps quiet, so a card waiting its turn does not pop during the pause or after it. Resuming
+    /// replays nothing that arrived while paused.
+    private func setNotificationPause(_ pause: NotificationPause) {
+        let now = Date()
+        let pause = pause.resolved(at: now)
+        if notificationPause != pause { notificationPause = pause }
+        pause.save { key, value in
+            if let value { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        notificationPauseEnd?.invalidate()
+        notificationPauseEnd = nil
+        if let end = pause.endsAt {
+            let timer = Timer(fire: end, interval: 0, repeats: false) { [weak self] _ in
+                Task { @MainActor in _ = self?.currentNotificationPause(); self?.notificationPauseMenu?.update() }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            notificationPauseEnd = timer
+        }
+        if pause.isActive(at: now) {
+            func allows(_ kind: NotificationInterruptionKind) -> Bool {
+                NotificationInterruption.allows(kind, pause: pause, settings: pausedNotifications, at: now)
+            }
+            if !allows(.approval) { freshAgentRequestIDs.removeAll() }
+            if !allows(.question) { freshAgentQuestionIDs.removeAll() }
+            if !allows(.completion) { freshAgentCompletionIDs.removeAll() }
+        }
+        notificationPauseMenu?.update(now: now)
     }
     @objc func toggleMute(_ sender: NSMenuItem) {
         muted.toggle()
