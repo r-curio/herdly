@@ -420,6 +420,10 @@ The old groups "Ghostty too old" and "Layout not supported" no longer appear on 
 
 Every action whose own route still works stays on the card while Open or typed input is unavailable: Dismiss, details, CLI approve or deny through the hook, and question options when their checks pass. If Open passes the scan but fails its recheck at click time with an unavailable cause, the same line appears in the navigation message, the item is retained, and the card swaps Open for the line on the next scan. In the open queue a result row shows the same line under its name and reads "Unreachable" instead of offering a click (#322). When a Codex question cannot be typed and Open is also unavailable, the card shows one line: "Answer this in Codex." followed by Open's line. The exact internal reasons go to the app's diagnostics.
 
+## Agreed feedback
+
+Agreed with the user on 2026-11-24 (Paper "Herdly Settings", page "Send feedback (2026-11-24)"). The menu bar item's "Show Herdly controls" is now "Settings…", and "Send Feedback…" opens a small form: a kind, the part of Herdly it is about, a description, up to five screenshots (20 MB in all), and an "Include app details" switch that shows exactly what it adds. Notes are anonymous: there is no reply address. Send posts the note to the feedback relay ([runbook](feedback-relay.md)), which emails it to the maintainer; the app holds no mail credentials. Nothing is sent without the user pressing Send, a failed send keeps the note, and the relay accepts five notes an hour from one network.
+
 ## Integration findings
 
 Codex's documented PermissionRequest hook runs before the normal approval prompt. It can return allow or deny, or leave the decision to Codex's normal approval flow. A hook-based notch approval therefore needs an explicit handoff policy; simultaneous actionable prompts in the notch and Codex are not established by this interface. Source: https://learn.chatgpt.com/docs/hooks#permissionrequest (checked 2026-09-11).
