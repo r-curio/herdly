@@ -1,7 +1,7 @@
 import Foundation
 
-/// The kind of display the notch sits on. Each kind keeps its own appearance choices because the
-/// camera housing changes what fits in the strip.
+/// The kind of display the notch sits on. Every kind shares one set of appearance choices; the kind
+/// only decides what the camera housing hides, such as the center label.
 public enum DisplayProfile: String, CaseIterable, Identifiable, Sendable {
     case macBookNotch
     case externalDisplay
@@ -101,7 +101,7 @@ public enum EarlierDelay: String, CaseIterable, Sendable {
     }
 }
 
-/// One display profile's strip and queue choices. The standard value is the instrument described in
+/// The strip and queue choices, shared by every display. The standard value is the instrument described in
 /// DESIGN.md, so a user who changes nothing sees no difference.
 public struct NotchAppearance: Equatable, Sendable {
     public var leftWing: StripLeftWing
@@ -138,12 +138,17 @@ public struct NotchAppearance: Equatable, Sendable {
         profile == .macBookNotch ? .off : centerLabel
     }
 
-    /// Reads one profile through `value(key)`. A missing or unrecognised value keeps the standard choice.
-    /// The retired `indicator` key (Sprite, Dot, Bar, Tint) is not read, so a profile saved with it
-    /// shows the standard Sheep until the user picks another sprite.
-    public static func load(profile: DisplayProfile, value: (String) -> String?) -> NotchAppearance {
+    /// Reads the shared choices through `value(key)`. Every display kind uses the same choices.
+    /// A field saved before the choices were shared (`appearance.<profile>.<field>`) is read from
+    /// `legacyProfile`, the kind the notch is on at launch, until the shared value is saved. A missing
+    /// or unrecognised value keeps the standard choice. The retired `indicator` key (Sprite, Dot, Bar,
+    /// Tint) is not read, so an appearance saved with it shows the standard Sheep until the user
+    /// picks another sprite.
+    public static func load(legacyProfile: DisplayProfile, value: (String) -> String?) -> NotchAppearance {
         func read<T: RawRepresentable>(_ field: String, _ fallback: T) -> T where T.RawValue == String {
-            value(key(profile, field)).flatMap(T.init(rawValue:)) ?? fallback
+            value(key(field)).flatMap(T.init(rawValue:))
+                ?? value(legacyKey(legacyProfile, field)).flatMap(T.init(rawValue:))
+                ?? fallback
         }
         let standard = NotchAppearance.standard
         return NotchAppearance(leftWing: read("leftWing", standard.leftWing),
@@ -157,19 +162,24 @@ public struct NotchAppearance: Equatable, Sendable {
                                labelFormat: read("labelFormat", standard.labelFormat))
     }
 
-    public func save(profile: DisplayProfile, write: (String, String) -> Void) {
-        write(Self.key(profile, "leftWing"), leftWing.rawValue)
-        write(Self.key(profile, "centerLabel"), centerLabel.rawValue)
-        write(Self.key(profile, "usage"), usage.rawValue)
-        write(Self.key(profile, "sprite"), sprite.rawValue)
-        write(Self.key(profile, "sort"), sort.rawValue)
-        write(Self.key(profile, "grouping"), grouping.rawValue)
-        write(Self.key(profile, "earlier"), earlier.rawValue)
-        write(Self.key(profile, "panelWidth"), panelWidth.rawValue)
-        write(Self.key(profile, "labelFormat"), labelFormat.rawValue)
+    /// Writes every field under the shared keys, so the legacy per-profile values are no longer read.
+    public func save(write: (String, String) -> Void) {
+        write(Self.key("leftWing"), leftWing.rawValue)
+        write(Self.key("centerLabel"), centerLabel.rawValue)
+        write(Self.key("usage"), usage.rawValue)
+        write(Self.key("sprite"), sprite.rawValue)
+        write(Self.key("sort"), sort.rawValue)
+        write(Self.key("grouping"), grouping.rawValue)
+        write(Self.key("earlier"), earlier.rawValue)
+        write(Self.key("panelWidth"), panelWidth.rawValue)
+        write(Self.key("labelFormat"), labelFormat.rawValue)
     }
 
-    static func key(_ profile: DisplayProfile, _ field: String) -> String {
+    static func key(_ field: String) -> String {
+        "appearance.\(field)"
+    }
+
+    static func legacyKey(_ profile: DisplayProfile, _ field: String) -> String {
         "appearance.\(profile.rawValue).\(field)"
     }
 }

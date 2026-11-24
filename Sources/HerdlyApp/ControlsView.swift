@@ -124,8 +124,7 @@ struct Controls: View {
         // A fixed sidebar panel that runs the full window height, so the window buttons sit inside
         // it as in System Settings and Raycast. It never collapses.
         HStack(spacing: 0) {
-            ControlsSidebar(selection: $selection, status: "\(model.workingCount) working · \(model.currentToCheckCount) to check",
-                            sprite: model.appearance.sprite)
+            ControlsSidebar(selection: $selection, sprite: model.appearance.sprite)
                 .frame(width: 210)
                 .padding(8)
             ZStack {
@@ -148,7 +147,6 @@ struct Controls: View {
 
 private struct ControlsSidebar: View {
     @Binding var selection: ControlSection
-    let status: String
     let sprite: SpriteKind
 
     var body: some View {
@@ -171,16 +169,6 @@ private struct ControlsSidebar: View {
         .scrollContentBackground(.hidden)
         // Room for the window buttons, which the window draws over the panel's top edge.
         .safeAreaInset(edge: .top, spacing: 0) { Color.clear.frame(height: 36) }
-        .safeAreaInset(edge: .bottom) {
-            HStack(spacing: 7) {
-                Circle().fill(.green).frame(width: 7, height: 7).accessibilityHidden(true)
-                Text(status).font(.subheadline).foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .accessibilityElement(children: .combine)
-        }
         .background(SettingsStyle.sidebarFill, in: .rect(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -272,6 +260,9 @@ private struct ControlsPage<Accessory: View, Content: View>: View {
                 .padding(.bottom, 20)
                 .background(OverlayScroller())
             }
+            // Scrolled content stops at the title row. Without this, on macOS 26 it shows through
+            // behind the title and the window buttons.
+            .clipped()
         }
         .ignoresSafeArea(edges: .top)
         .background(SettingsStyle.pageBackground)
@@ -1734,40 +1725,30 @@ private struct AboutControls: View {
     }
 }
 
-/// Strip and queue appearance for one display kind at a time. Changes apply at once and the preview
-/// redraws with them; the notch uses the profile of the display it is on.
+/// Strip and queue appearance, shared by every display. Changes apply at once and the preview
+/// redraws with them, drawn for the kind of display the notch is on now.
 private struct NotchControls: View {
     @ObservedObject var model: Companion
-    @State private var profile: DisplayProfile
 
-    init(model: Companion) {
-        self.model = model
-        _profile = State(initialValue: model.activeProfile)
-    }
-
-    private var appearance: NotchAppearance { model.appearances[profile] ?? .standard }
+    private var appearance: NotchAppearance { model.appearance }
+    private var profile: DisplayProfile { model.activeProfile }
 
     private func binding<Value>(_ field: WritableKeyPath<NotchAppearance, Value>) -> Binding<Value> {
         Binding(get: { appearance[keyPath: field] }, set: { value in
             var updated = appearance
             updated[keyPath: field] = value
             withAnimation(SettingsMotion.curve(reduceMotion: model.reduceMotion)) {
-                model.setAppearance(updated, for: profile)
+                model.setAppearance(updated)
             }
         })
     }
 
     var body: some View {
         ControlsPage(section: .notch) {
-            SlidingSegments(title: "Display being configured", selection: $profile.animation(SettingsMotion.curve(reduceMotion: model.reduceMotion)),
-                            options: [(DisplayProfile.macBookNotch, "MacBook notch"), (DisplayProfile.externalDisplay, "External display")])
-        } content: {
             NotchPreview(appearance: appearance, profile: profile, reduceMotion: model.reduceMotion)
                 .animation(SettingsMotion.curve(reduceMotion: model.reduceMotion), value: appearance)
                 .animation(SettingsMotion.curve(reduceMotion: model.reduceMotion), value: profile)
 
-            // Which display shows the notch is one choice for both profiles, so it is not bound to
-            // the profile being edited.
             SettingsHeader("Display")
             SettingsCard {
                 SettingsRow(title: "Show notch on", detail: nil) {
@@ -1788,12 +1769,10 @@ private struct NotchControls: View {
                                     options: [(StripLeftWing.spritesAndCount, "Sprites and count"), (StripLeftWing.countOnly, "Count only"), (StripLeftWing.none, "None")])
                 }
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
-                // Only the control is disabled on the MacBook notch, so the title stays readable and
-                // the row's hover text still explains why.
+                // The choice applies on every display without a camera housing; the hover text says so.
                 SettingsRow(title: "Center label", detail: nil) {
                     SlidingSegments(title: "Center label", selection: binding(\.centerLabel),
                                     options: [(StripCenterLabel.taskName, "Task name"), (StripCenterLabel.sessionName, "Session name"), (StripCenterLabel.off, "Off")])
-                        .disabled(profile == .macBookNotch)
                 }
                 .contentShape(Rectangle())
                 .help("Text in the middle of the strip naming the top item. External displays only; on a MacBook the camera covers that space.")
