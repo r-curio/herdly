@@ -73,6 +73,7 @@ func coordinatorPerformsThenReconcilesWithASecondStatusRead(
 @MainActor
 @Test(arguments: [
     (LaunchAtLoginRegistration.notRegistered, true, LaunchAtLoginRegistration.requiresApproval, LaunchAtLoginOperation.register),
+    (.notFound, true, .enabled, .register),
     (.enabled, false, .enabled, .unregister)
 ])
 func coordinatorReconcilesAuthoritativeStatusAfterAThrownOperation(
@@ -98,6 +99,7 @@ func coordinatorReconcilesAuthoritativeStatusAfterAThrownOperation(
 @MainActor
 @Test(arguments: [
     (LaunchAtLoginRegistration.notRegistered, false),
+    (.notFound, false),
     (.enabled, true),
     (.requiresApproval, true),
     (.unavailable, true)

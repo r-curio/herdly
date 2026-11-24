@@ -17,7 +17,7 @@ final class LaunchAtLoginService: LaunchAtLoginServicing {
         case .notRegistered: .notRegistered
         case .enabled: .enabled
         case .requiresApproval: .requiresApproval
-        case .notFound: .unavailable
+        case .notFound: .notFound
         @unknown default: .unavailable
         }
     }
