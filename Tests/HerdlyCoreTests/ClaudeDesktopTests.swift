@@ -244,3 +244,35 @@ private let otherLocal = "local_2a2a2a2a-1434-4035-9547-ecd4d906bf8f"
     #expect(ClaudeDesktopVisibility.afterOpen(results, result: .unavailable(.claudeDesktopNotRunning), clickedAt: 100).isEmpty)
     #expect(ClaudeDesktopVisibility.afterOpen(results, result: .opened, clickedAt: .nan).isEmpty)
 }
+
+// #474 follow-up: the visit check reads every two seconds while Claude Desktop is frontmost, so it
+// re-parses only files Claude Desktop changed.
+@Test func claudeDesktopCachedReadFollowsChangedFilesAndForgetsRemovedOnes() throws {
+    let support = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-desktop-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: support) }
+    let organization = support.appendingPathComponent("claude-code-sessions/account/org", isDirectory: true)
+    try FileManager.default.createDirectory(at: organization, withIntermediateDirectories: true)
+    let otherLocal = "local_2a2a2a2a-1434-4035-9547-ecd4d906bf8f"
+    let mine = organization.appendingPathComponent(desktopLocal + ".json")
+    let other = organization.appendingPathComponent(otherLocal + ".json")
+    try sessionFile(local: desktopLocal, hook: desktopHook, focusedAt: 3000).write(to: mine)
+    try sessionFile(local: otherLocal, hook: terminalHook, focusedAt: 2000).write(to: other)
+
+    var cache = ClaudeDesktopSessionFileCache()
+    #expect(ClaudeDesktopSessionIndex.read(applicationSupport: support, cache: &cache)?.frontLocalID == desktopLocal)
+    #expect(cache.count == 2)
+    // Unchanged files give the same answer from the cache.
+    #expect(ClaudeDesktopSessionIndex.read(applicationSupport: support, cache: &cache)?.frontLocalID == desktopLocal)
+
+    // Claude Desktop focuses the other session: its file changes and is parsed again.
+    try sessionFile(local: otherLocal, hook: terminalHook, focusedAt: 4000).write(to: other)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: other.path)
+    #expect(ClaudeDesktopSessionIndex.read(applicationSupport: support, cache: &cache)?.frontLocalID == otherLocal)
+
+    // A removed file leaves the cache and the index.
+    try FileManager.default.removeItem(at: other)
+    let index = ClaudeDesktopSessionIndex.read(applicationSupport: support, cache: &cache)
+    #expect(index?.frontLocalID == desktopLocal)
+    #expect(index?.localID(for: terminalHook) == nil)
+    #expect(cache.count == 1)
+}
