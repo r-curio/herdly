@@ -354,15 +354,16 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         name: UserDefaults.standard.string(forKey: "notchDisplayPinName"))
     /// The display picker's entries, checked entry, and detail line; see `updateNotchDisplayChoices`.
     @Published private(set) var notchDisplayChoices = NotchDisplayChoices(displays: [], preference: .followPointer)
-    /// Strip and queue choices for each kind of display, edited in the Notch settings pane.
-    @Published private(set) var appearances: [DisplayProfile: NotchAppearance] = Dictionary(
-        uniqueKeysWithValues: DisplayProfile.allCases.map { profile in
-            (profile, NotchAppearance.load(profile: profile) { key in UserDefaults.standard.string(forKey: key) })
-        })
     /// The kind of display the notch is on now; `refresh` follows the panel between displays.
-    @Published private(set) var activeProfile = DisplayProfile(hasCameraHousing: !NSScreen.screens.filter {
-        $0.safeAreaInsets.top > 0 }.isEmpty)
-    var appearance: NotchAppearance { appearances[activeProfile] ?? .standard }
+    @Published private(set) var activeProfile = Companion.launchProfile
+    /// Strip and queue choices for every display, edited in the Notch settings pane. Choices saved
+    /// per display kind before they were shared carry over from the kind the notch starts on.
+    @Published private(set) var appearance = NotchAppearance.load(legacyProfile: Companion.launchProfile) { key in
+        UserDefaults.standard.string(forKey: key)
+    }
+    private static var launchProfile: DisplayProfile {
+        DisplayProfile(hasCameraHousing: !NSScreen.screens.filter { $0.safeAreaInsets.top > 0 }.isEmpty)
+    }
     /// The macOS system sound played when a completion or question card opens.
     @Published private(set) var completionSound = UserDefaults.standard.string(forKey: "completionSound") ?? Companion.defaultSound
     nonisolated static let defaultSound = "Glass"
@@ -966,8 +967,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let heading = NSMenuItem(title: "Herdly", action: nil, keyEquivalent: "")
         menu.addItem(heading)
         for (title, action) in [("Show Herdly controls", #selector(showControls)),
-                                ("Send test notification", #selector(sendTest)),
-                                ("Dismiss test notification", #selector(dismissTest)),
                                 ("Mute sound", #selector(toggleMute)),
                                 ("Quit Herdly", #selector(quit))] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
@@ -1079,7 +1078,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // The title follows the selected pane (DESIGN.md, Settings Window) and starts as "Herdly".
             precondition(controls?.title.isEmpty == false && controls?.styleMask.contains(.resizable) == true)
             precondition(controls?.frame.width ?? 0 >= 720 && controls?.frame.height ?? 0 >= 540)
-            precondition(status.button?.title == "S" && status.menu?.items.count == 7)
+            precondition(status.button?.title == "S" && status.menu?.items.count == 5)
             precondition(status.menu?.item(withTitle: "Show notch on")?.submenu === notchDisplayMenu.menu)
             dismissControls(animated: false)
             precondition(controls?.isVisible == false)
@@ -2292,11 +2291,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
 
     /// React to pointer entry without waiting for the background polling interval. Pointer exit
     /// keeps the core hover grace, then refreshes exactly when that grace expires.
-    /// Saves one display kind's strip and queue choices and redraws the notch with them.
-    func setAppearance(_ appearance: NotchAppearance, for profile: DisplayProfile) {
-        guard appearances[profile] != appearance else { return }
-        appearances[profile] = appearance
-        appearance.save(profile: profile) { key, value in UserDefaults.standard.set(value, forKey: key) }
+    /// Saves the strip and queue choices and redraws the notch with them.
+    func setAppearance(_ appearance: NotchAppearance) {
+        guard self.appearance != appearance else { return }
+        self.appearance = appearance
+        appearance.save { key, value in UserDefaults.standard.set(value, forKey: key) }
         refresh()
     }
 
@@ -3376,7 +3375,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     private func seedPreview(_ mode: String) {
         eventsPath = ""
         if let width = Self.argumentValue(for: "--preview-width").flatMap(PanelWidth.init(rawValue:)) {
-            for profile in DisplayProfile.allCases { appearances[profile]?.panelWidth = width }
+            appearance.panelWidth = width
         }
         let now = Date().timeIntervalSince1970
         queue = AttentionQueue(observingSince: now)
@@ -3574,10 +3573,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             ghosttyEnabled = true
             claudeUsage = [:]
             usage = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 34, resetsAt: now + 86400), fiveHour: nil)
-            for profile in DisplayProfile.allCases {
-                appearances[profile]?.usage = .weeklyOnly
-                appearances[profile]?.centerLabel = .off
-            }
+            appearance.usage = .weeklyOnly
+            appearance.centerLabel = .off
         }
 
     }

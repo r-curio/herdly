@@ -86,56 +86,86 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
 }
 
 @Test(arguments: QueueLabelFormat.allCases)
-func labelFormatRoundTripsPerProfileAndAnUnknownValueFallsBack(format: QueueLabelFormat) {
+func labelFormatRoundTripsAndAnUnknownValueFallsBack(format: QueueLabelFormat) {
     var stored: [String: String] = [:]
     var appearance = NotchAppearance.standard
     appearance.labelFormat = format
-    appearance.save(profile: .macBookNotch) { stored[$0] = $1 }
-    stored["appearance.externalDisplay.labelFormat"] = "repoAndPath"
+    appearance.save { stored[$0] = $1 }
 
-    #expect(NotchAppearance.load(profile: .macBookNotch) { stored[$0] }.labelFormat == format)
-    #expect(NotchAppearance.load(profile: .externalDisplay) { stored[$0] }.labelFormat == .repoAtBranch)
-    // A profile saved before the field existed reads the default.
-    stored.removeValue(forKey: "appearance.macBookNotch.labelFormat")
-    #expect(NotchAppearance.load(profile: .macBookNotch) { stored[$0] }.labelFormat == .repoAtBranch)
+    #expect(NotchAppearance.load(legacyProfile: .macBookNotch) { stored[$0] }.labelFormat == format)
+    stored["appearance.labelFormat"] = "repoAndPath"
+    #expect(NotchAppearance.load(legacyProfile: .macBookNotch) { stored[$0] }.labelFormat == .repoAtBranch)
+    // An appearance saved before the field existed reads the default.
+    stored.removeValue(forKey: "appearance.labelFormat")
+    #expect(NotchAppearance.load(legacyProfile: .macBookNotch) { stored[$0] }.labelFormat == .repoAtBranch)
 }
 
-@Test func appearanceStoreRoundTripsEachProfileSeparatelyAndIgnoresUnknownValues() {
+@Test func oneAppearanceRoundTripsForEveryDisplayAndIgnoresUnknownValues() {
     var stored: [String: String] = [:]
-    var external = NotchAppearance.standard
-    external.sprite = .cow
-    external.sort = .lastUpdate
-    external.earlier = .never
-    external.usage = .weeklyOnly
-    external.panelWidth = .extraWide
-    external.save(profile: .externalDisplay) { stored[$0] = $1 }
-    stored["appearance.macBookNotch.sprite"] = "alpaca"
-    stored["appearance.macBookNotch.panelWidth"] = "huge"
+    var appearance = NotchAppearance.standard
+    appearance.sprite = .cow
+    appearance.sort = .lastUpdate
+    appearance.earlier = .never
+    appearance.usage = .weeklyOnly
+    appearance.panelWidth = .extraWide
+    appearance.save { stored[$0] = $1 }
 
-    let loadedExternal = NotchAppearance.load(profile: .externalDisplay) { stored[$0] }
-    let loadedMacBook = NotchAppearance.load(profile: .macBookNotch) { stored[$0] }
+    #expect(stored.keys.allSatisfy { !$0.contains("macBookNotch") && !$0.contains("externalDisplay") })
+    for profile in DisplayProfile.allCases {
+        #expect(NotchAppearance.load(legacyProfile: profile) { stored[$0] } == appearance)
+    }
 
-    #expect(loadedExternal == external)
-    #expect(loadedMacBook == .standard)
+    stored["appearance.sprite"] = "alpaca"
+    stored["appearance.panelWidth"] = "huge"
+    let loaded = NotchAppearance.load(legacyProfile: .externalDisplay) { stored[$0] }
+    #expect(loaded.sprite == .sheep)
+    #expect(loaded.panelWidth == .standard)
+}
+
+@Test func choicesSavedPerDisplayCarryOverFromTheDisplayTheNotchIsOn() {
+    // Saved before the choices were shared: each display kind kept its own.
+    let stored = ["appearance.macBookNotch.sprite": "cow", "appearance.macBookNotch.sort": "lastUpdate",
+                  "appearance.externalDisplay.sprite": "blob", "appearance.externalDisplay.grouping": "agent"]
+
+    let fromMacBook = NotchAppearance.load(legacyProfile: .macBookNotch) { stored[$0] }
+    let fromExternal = NotchAppearance.load(legacyProfile: .externalDisplay) { stored[$0] }
+
+    #expect(fromMacBook.sprite == .cow)
+    #expect(fromMacBook.sort == .lastUpdate)
+    #expect(fromMacBook.grouping == .none)
+    #expect(fromExternal.sprite == .blob)
+    #expect(fromExternal.grouping == .agent)
+    #expect(fromExternal.sort == .needsAttention)
+}
+
+@Test func aSharedChoiceWinsOverTheOldPerDisplayChoice() {
+    var stored = ["appearance.macBookNotch.sprite": "cow", "appearance.macBookNotch.sort": "lastUpdate"]
+    var appearance = NotchAppearance.load(legacyProfile: .macBookNotch) { stored[$0] }
+    appearance.sprite = .critter
+    appearance.save { stored[$0] = $1 }
+
+    // A later launch on the other display kind reads the shared choices, not its own old ones.
+    stored["appearance.externalDisplay.sprite"] = "blob"
+    let loaded = NotchAppearance.load(legacyProfile: .externalDisplay) { stored[$0] }
+    #expect(loaded.sprite == .critter)
+    #expect(loaded.sort == .lastUpdate)
 }
 
 @Test(arguments: SpriteKind.allCases)
-func eachSpriteKindRoundTripsForEachProfile(kind: SpriteKind) {
+func eachSpriteKindRoundTrips(kind: SpriteKind) {
     var stored: [String: String] = [:]
     var appearance = NotchAppearance.standard
     appearance.sprite = kind
-    appearance.save(profile: .macBookNotch) { stored[$0] = $1 }
+    appearance.save { stored[$0] = $1 }
 
-    #expect(stored["appearance.macBookNotch.sprite"] == kind.rawValue)
-    #expect(NotchAppearance.load(profile: .macBookNotch) { stored[$0] }.sprite == kind)
-    // The other profile keeps its own choice.
-    #expect(NotchAppearance.load(profile: .externalDisplay) { stored[$0] }.sprite == .sheep)
+    #expect(stored["appearance.sprite"] == kind.rawValue)
+    #expect(NotchAppearance.load(legacyProfile: .externalDisplay) { stored[$0] }.sprite == kind)
 }
 
 @Test func unknownSavedSpriteLoadsSheep() {
     let stored = ["appearance.externalDisplay.sprite": "alpaca", "appearance.externalDisplay.sort": "lastUpdate"]
 
-    let loaded = NotchAppearance.load(profile: .externalDisplay) { stored[$0] }
+    let loaded = NotchAppearance.load(legacyProfile: .externalDisplay) { stored[$0] }
 
     #expect(loaded.sprite == .sheep)
     #expect(loaded.sort == .lastUpdate)
@@ -143,12 +173,13 @@ func eachSpriteKindRoundTripsForEachProfile(kind: SpriteKind) {
 
 @Test(arguments: ["dot", "bar", "tint", "sprite"])
 func savedIndicatorStyleNoLongerChangesTheAppearance(style: String) {
-    // A profile saved before the sprite set: the old indicator key is ignored and nothing is written for sprite.
-    let stored = ["appearance.macBookNotch.indicator": style, "appearance.macBookNotch.grouping": "agent"]
+    // Saved before the sprite set: the old indicator key is ignored and nothing is written for sprite.
+    let stored = ["appearance.macBookNotch.indicator": style, "appearance.macBookNotch.grouping": "agent",
+                  "appearance.indicator": style]
     var expected = NotchAppearance.standard
     expected.grouping = .agent
 
-    let loaded = NotchAppearance.load(profile: .macBookNotch) { stored[$0] }
+    let loaded = NotchAppearance.load(legacyProfile: .macBookNotch) { stored[$0] }
 
     #expect(loaded == expected)
     #expect(loaded.sprite == .sheep)
@@ -156,10 +187,10 @@ func savedIndicatorStyleNoLongerChangesTheAppearance(style: String) {
 
 @Test func savingNoLongerWritesTheIndicatorKey() {
     var stored: [String: String] = [:]
-    NotchAppearance.standard.save(profile: .externalDisplay) { stored[$0] = $1 }
+    NotchAppearance.standard.save { stored[$0] = $1 }
 
-    #expect(stored["appearance.externalDisplay.indicator"] == nil)
-    #expect(stored["appearance.externalDisplay.sprite"] == "sheep")
+    #expect(stored["appearance.indicator"] == nil)
+    #expect(stored["appearance.sprite"] == "sheep")
 }
 
 @Test func spritePickerOffersSheepFirstThenTheOtherKinds() {
