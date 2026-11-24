@@ -803,7 +803,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// After Escape, hover does not reopen the panel until the pointer has left it.
     private var hoverSuppressed = false
     private var notchPresentation = NotchPresentationController()
-    /// Settings › Notch › Keyboard (#427): the hotkey and its switch. Changed only through
+    /// Settings › General › Keyboard (#427): the hotkey and its switch. Changed only through
     /// `setHotkeySetting`, which saves it and registers it again at once.
     @Published private(set) var hotkeySetting = NotchHotkeySetting.load(bool: { UserDefaults.standard.object(forKey: $0) as? Bool },
                                                                          string: { UserDefaults.standard.string(forKey: $0) })
@@ -2758,7 +2758,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
     }
 
-    /// Settings › Notch › Keyboard: saves the switch and shortcut and registers them at once.
+    /// Settings › General › Keyboard: saves the switch and shortcut and registers them at once.
     func setHotkeySetting(_ setting: NotchHotkeySetting) {
         guard setting != hotkeySetting else { return }
         hotkeySetting = setting

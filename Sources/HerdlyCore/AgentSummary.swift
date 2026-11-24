@@ -158,16 +158,3 @@ public struct AgentSummary: Equatable, Sendable {
 
     private static func updateText(_ minimum: String) -> String { "Update to \(minimum) or later" }
 }
-
-/// The General pane's orange bar: which agents are known not to be connected. An agent whose
-/// state is still being checked (nil) is never named, so the bar does not guess; nil means no bar.
-public enum AgentConnectionNotice {
-    public static func message(codexConnected: Bool?, claudeConnected: Bool?) -> String? {
-        switch (codexConnected == false, claudeConnected == false) {
-        case (true, true): "Codex and Claude Code aren't connected"
-        case (true, false): "Codex isn't connected"
-        case (false, true): "Claude Code isn't connected"
-        case (false, false): nil
-        }
-    }
-}
