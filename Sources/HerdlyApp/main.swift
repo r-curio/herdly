@@ -272,6 +272,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published private(set) var claudeSessionNames: [AgentSessionIdentity: String] = [:]
     /// Each Claude session's working directory from its inventory, for the row's "project @ branch".
     @Published private(set) var claudeSessionDirectories: [AgentSessionIdentity: String] = [:]
+    /// Claude sessions an inventory last listed as running in Claude Desktop (#471): their rows read
+    /// "Claude Desktop" and Open goes through Claude Desktop's link. A session joins when listed with
+    /// that host and leaves when listed with another; Open itself re-reads the registry.
+    @Published private(set) var claudeDesktopSessions: Set<AgentSessionIdentity> = []
     /// Each Claude turn's prompt and last message from the latest scan of its root, for its result
     /// card (#341). Memory only, like Codex's completion previews; looked up by the exact turn.
     @Published private(set) var claudeTurnResults: [AgentTurnIdentity: ClaudeTurnResult] = [:]
@@ -1766,6 +1770,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                     if let directory = session.directory, claudeSessionDirectories[identity] != directory {
                         claudeSessionDirectories[identity] = directory
                     }
+                    if session.kind == .interactive {
+                        let desktop = session.host == .claudeDesktop
+                        if desktop != claudeDesktopSessions.contains(identity) {
+                            if desktop { claudeDesktopSessions.insert(identity) } else { claudeDesktopSessions.remove(identity) }
+                        }
+                    }
                 }
             }
             if inventoriedAgent != agentQueue { agentQueue = inventoriedAgent }
@@ -3239,8 +3249,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
 
     /// "project @ branch" for a row in the profile's label format, when its working directory is
-    /// known. A request that names its project but no path still shows that name, without a branch.
+    /// known; "Claude Desktop" for a Claude Desktop session. A request that names its project but no path still shows that name, without a branch.
     func rowPlace(for item: AgentAttentionItem) -> String? {
+        // Agreed 2026-11-24 (#471): a Claude Desktop session's place names the app, not its folder.
+        if isClaudeDesktopSession(item.session) { return ClaudeDesktopPresentation.place }
         let format = appearance.labelFormat
         guard let directory = rowDirectory(for: item) else {
             return QueueRowPresentation.place(directory: item.approval?.details?.project, branch: nil, format: format)

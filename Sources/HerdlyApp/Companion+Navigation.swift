@@ -112,6 +112,11 @@ extension Companion {
             refresh()
             return
         }
+        // A Claude Desktop session has no terminal: Claude Desktop's own link opens it (#471).
+        if isClaudeDesktopSession(identity) {
+            openClaudeInDesktop(identity, request: request)
+            return
+        }
         let herdrKey = HerdrSessionKey(agent: .claude, sessionID: identity.session)
         let herdrRoute = herdrBinding(for: herdrKey)
         // With Ghostty off Herdly does not contact herdr (ADR 0014), so the session's own process is

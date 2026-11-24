@@ -93,7 +93,9 @@ extension Companion {
                 if herdrRoute != .notInHerdr, ghosttyEnabled || herdrRoute != .unavailable(.ghosttyControlsOff) { continue }
                 targets.codex[key] = session
             case .claude:
-                guard !isBackgroundClaudeSession(identity), canOpenClaude(identity) else { continue }
+                // A Claude Desktop session has no terminal route to scan; its Open rechecks at click time (#471).
+                guard !isBackgroundClaudeSession(identity), !isClaudeDesktopSession(identity),
+                      canOpenClaude(identity) else { continue }
                 let herdrRoute = herdrBinding(for: HerdrSessionKey(agent: .claude, sessionID: identity.session))
                 if herdrRoute != .notInHerdr, herdrRoute != .unavailable(.ghosttyControlsOff) { continue }
                 let rows = (claudeInventories[identity.sourceScope]?.sessions ?? [])
