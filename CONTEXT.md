@@ -21,6 +21,10 @@ An individual Codex conversation in the desktop app or CLI, distinct from its ho
 The terminal environment that contains a CLI session's terminal: an unsplit tab of a supported terminal (Ghostty, iTerm2, Terminal.app, WezTerm) or any Rex block or Herdr app terminal, split or not, that the user switched on in Herdly, or a single-pane tmux window, Zellij tab or herdr tab whose one client runs in such a tab.
 _Avoid_: Terminal app, window
 
+**Claude Desktop session**:
+A Claude Code session started in Claude Desktop's Code tab, which the session registry lists with `entrypoint: "claude-desktop"`. It has no terminal host; Open reaches it through Claude Desktop's own link to its exact `local_` id. Its identity is the same as any Claude session's.
+_Avoid_: Claude app session, desktop Claude (for Codex desktop)
+
 **Multiplexer**:
 A program that runs terminal panes inside one client in a terminal tab: tmux, Zellij or herdr. A session in a multiplexer has two layers, its pane and the terminal host tab running the client.
 _Avoid_: Terminal host (for the multiplexer alone), session manager

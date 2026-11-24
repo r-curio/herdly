@@ -44,6 +44,21 @@ public enum ClaudeInventoryLifecycle: Equatable, Sendable {
     }
 }
 
+/// The app a Claude session runs in, from the session registry's `entrypoint` (#471). Claude Desktop
+/// starts Claude Code itself, with no terminal, and registers `claude-desktop`; every other value, and
+/// a source without the field, is a terminal session.
+public enum ClaudeSessionHost: Equatable, Hashable, Sendable {
+    case terminal
+    case claudeDesktop
+
+    /// The registry's `entrypoint` value Claude Desktop writes.
+    public static let claudeDesktopEntrypoint = "claude-desktop"
+
+    public init(entrypoint: Any?) {
+        self = entrypoint as? String == Self.claudeDesktopEntrypoint ? .claudeDesktop : .terminal
+    }
+}
+
 public struct ClaudeInventorySession: Equatable, Sendable {
     public let sessionID: String
     /// Claude's supplied display name. It identifies the session only for presentation; it is not
@@ -66,10 +81,12 @@ public struct ClaudeInventorySession: Equatable, Sendable {
     /// (the session registry's `statusUpdatedAt`). nil from `claude agents --json` or a missing or
     /// malformed value.
     public let statusUpdatedAt: Double?
+    /// The app the session runs in. `.terminal` from `claude agents --json`, which does not say.
+    public let host: ClaudeSessionHost
 
     public init(sessionID: String, name: String = "", kind: ClaudeInventoryKind, startedAt: Double,
                 lifecycle: ClaudeInventoryLifecycle, pid: Int32? = nil, directory: String? = nil,
-                statusUpdatedAt: Double? = nil, procStart: String? = nil) {
+                statusUpdatedAt: Double? = nil, procStart: String? = nil, host: ClaudeSessionHost = .terminal) {
         self.sessionID = sessionID
         self.name = name
         self.kind = kind
@@ -79,6 +96,7 @@ public struct ClaudeInventorySession: Equatable, Sendable {
         self.procStart = procStart
         self.directory = directory
         self.statusUpdatedAt = statusUpdatedAt
+        self.host = host
     }
 }
 

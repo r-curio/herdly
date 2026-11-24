@@ -25,6 +25,8 @@ import Foundation
 ///   An unknown kind makes the scan unavailable. Claude writes the `shell` status when the prompt is
 ///   idle while a background Bash task (a dev server, say) is still running, so it is reported as
 ///   `idle`: the turn has ended.
+/// - An interactive entry's `entrypoint` names the app it runs in (`ClaudeSessionHost`, #471); a
+///   missing or unknown value is a terminal session.
 ///
 /// Interactive rows are validated by `ClaudeInventoryDecoder`, so an unknown status, a malformed
 /// identity, or two live interactive entries for one session make the scan unavailable rather than
@@ -117,6 +119,7 @@ public enum ClaudeSessionRegistry {
         guard entries.count <= maximumEntries else { return unavailable(ClaudeInventoryDecoder.incompleteMessage) }
         var rows: [[String: Any]] = []
         var pids: [String: Process] = [:]
+        var hosts: [String: ClaudeSessionHost] = [:]
         var background: Set<String> = []
         var backgroundEntries: [String: [[String: Any]]] = [:]
         var backgroundOrder: [String] = []
@@ -148,6 +151,7 @@ public enum ClaudeSessionRegistry {
                 // A duplicate session ID makes the decoder reject the scan, so this pid is never misattributed.
                 if let sessionID = ClaudeInventoryDecoder.canonicalSessionID(row["sessionId"]) {
                     pids[sessionID] = process
+                    hosts[sessionID] = ClaudeSessionHost(entrypoint: row["entrypoint"])
                 }
             case "bg" as String:
                 // A background job's holder: listed as a background row once every entry is read.
@@ -171,7 +175,8 @@ public enum ClaudeSessionRegistry {
         let interactive = scan.sessions.map {
             ClaudeInventorySession(sessionID: $0.sessionID, name: $0.name, kind: $0.kind, startedAt: $0.startedAt,
                                    lifecycle: $0.lifecycle, pid: pids[$0.sessionID]?.pid, directory: $0.directory,
-                                   statusUpdatedAt: $0.statusUpdatedAt, procStart: pids[$0.sessionID]?.procStart)
+                                   statusUpdatedAt: $0.statusUpdatedAt, procStart: pids[$0.sessionID]?.procStart,
+                                   host: hosts[$0.sessionID] ?? .terminal)
         }
         let held = Set(interactive.map(\.sessionID))
         let jobs = backgroundOrder.compactMap { session -> ClaudeInventorySession? in
