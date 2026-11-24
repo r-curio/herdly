@@ -64,5 +64,35 @@ validation could change in any update.
   registry fields are the same, but no native click was made.
 - Remote, SSH and cloud desktop sessions, worktree sessions, and Claude Desktop with its OS entry points
   setting off.
-- `lastFocusedAt` as read evidence. It shows focus, not that a result was read. The acknowledgment rules
-  still need a product decision.
+- `lastFocusedAt` as read evidence. It shows focus, not that a result was read. Decided in
+  [#474](https://github.com/r-curio/herdly/issues/474): it counts as a terminal tab being in front (below).
+
+## Focus probe (#474)
+
+Recorded 2026-11-24, same Claude.app. Two existing Code sessions, A and B, were switched by
+`osascript` activation and the continue link while a watcher logged only each file's `lastFocusedAt` and
+modification time.
+
+| Step | `lastFocusedAt` |
+| --- | --- |
+| Activate Claude Desktop, A selected | A set to the activation time, file written about 1.0 s later |
+| Stay in front 8 s | No write |
+| Continue link to B | B set |
+| Leave, then the link to B again (already selected) | B set |
+| Leave, then activate Claude Desktop (B selected) | B set |
+| Leave to another app | No write, either session |
+
+Not probed: selecting a session from Claude Desktop's sidebar, and switching to its Chat tab.
+
+### Live run, PR build of #474
+
+| Case | Observed | Result |
+| --- | --- | --- |
+| Result arrives while another app is in front | Queued for 28 s with Finder frontmost | Pass |
+| Claude Desktop activated with the session selected | Cleared within 1.5 s | Pass |
+| Claude Desktop brought forward by a new-session link | Writes the previously selected session's `lastFocusedAt`, then shows the new-session page; that session's real queued result cleared within 6 s although it was never shown | Accepted gap (ADR 0026) |
+| Dwell | Not run: the scripted prompt was typed while another app was in front | Not shown |
+
+In one earlier away run a result cleared after 6 s; the frontmost app was not logged then, and the rerun
+with logging held. Keystroke-driven lab steps are unsafe while the user is working: they type into
+whichever app is in front.
