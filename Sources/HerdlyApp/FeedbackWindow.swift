@@ -202,16 +202,10 @@ private struct FeedbackFormView: View {
             FeedbackHeader()
             VStack(alignment: .leading, spacing: 18) {
                 labeled("Kind") {
-                    Picker("Kind", selection: $form.draft.kind) {
-                        ForEach(FeedbackKind.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }
-                    .frame(maxWidth: .infinity)
+                    FeedbackPicker(title: "Kind", selection: $form.draft.kind, label: \.title)
                 }
                 labeled("Part of Herdly") {
-                    Picker("Part of Herdly", selection: $form.draft.area) {
-                        ForEach(FeedbackArea.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }
-                    .frame(maxWidth: .infinity)
+                    FeedbackPicker(title: "Part of Herdly", selection: $form.draft.area, label: \.title)
                 }
                 labeled("What happened?") {
                     ZStack(alignment: .topLeading) {
@@ -261,16 +255,16 @@ private struct FeedbackFormView: View {
                 .accessibilityElement(children: .combine)
             }
             Spacer(minLength: 0)
-            Button("Cancel", action: close)
-                .keyboardShortcut(.cancelAction)
+            Button(action: close) {
+                FeedbackButtonLabel(title: "Cancel", hint: "esc")
+            }
+            .keyboardShortcut(.cancelAction)
             Button {
                 Task { await form.send() }
             } label: {
-                if form.phase == .sending {
-                    Text("Sending…")
-                } else {
-                    Text(form.problem == nil ? "Send Feedback" : "Try Again")
-                }
+                FeedbackButtonLabel(title: form.phase == .sending ? "Sending…"
+                                    : form.problem == nil ? "Send Feedback" : "Try Again",
+                                    hint: "⌘↩")
             }
             .keyboardShortcut(.return, modifiers: .command)
             .buttonStyle(.borderedProminent)
@@ -288,6 +282,62 @@ private struct FeedbackFormView: View {
             content()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A full-width field that opens a native menu (frame 02): the stock pop-up button sizes to its
+/// longest item, so the field is drawn here and the menu keeps the system's check mark and keys.
+private struct FeedbackPicker<Value: Hashable & CaseIterable>: View where Value.AllCases: RandomAccessCollection {
+    let title: String
+    @Binding var selection: Value
+    let label: KeyPath<Value, String>
+
+    var body: some View {
+        Menu {
+            Picker(title, selection: $selection) {
+                ForEach(Array(Value.allCases), id: \.self) { Text($0[keyPath: label]).tag($0) }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Text(selection[keyPath: label])
+                .font(.system(size: 13))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .padding(.leading, 10)
+        .padding(.trailing, 26)
+        .frame(maxWidth: .infinity, minHeight: 30)
+        .overlay(alignment: .trailing) {
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.trailing, 10)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
+        .background(FeedbackStyle.fieldFill, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(FeedbackStyle.hairline))
+        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .accessibilityLabel(title)
+        .accessibilityValue(selection[keyPath: label])
+    }
+}
+
+/// A footer button's title with its key hint after it, as in frames 02–04.
+private struct FeedbackButtonLabel: View {
+    let title: String
+    let hint: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(title)
+            Text(hint)
+                .font(.system(size: 10))
+                .opacity(0.6)
+                .accessibilityHidden(true)
+        }
     }
 }
 

@@ -1144,6 +1144,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             print("Herdly controls-window smoke check passed.")
             app.terminate(nil)
         }
+        // `--preview-feedback` opens Send Feedback at launch, for comparing it with its Paper frames.
+        if CommandLine.arguments.contains("--preview-feedback") { showFeedback() }
         writePlacementProbeAndQuitIfRequested()
         printSetupProbeAndQuitIfRequested()
         startGhosttyControls()
