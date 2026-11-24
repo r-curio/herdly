@@ -278,8 +278,28 @@ private struct FailingSender: PhoneAlertSender {
 @MainActor
 private func controller(topic: NtfyTopic? = testTopic, switchStore: MemorySwitch = MemorySwitch(),
                         idle: Double? = 600) -> PhoneAlerts {
-    PhoneAlerts(switchStore: switchStore, store: FixedTopicStore(topic: topic),
+    PhoneAlerts(available: true, switchStore: switchStore, store: FixedTopicStore(topic: topic),
                 makeSender: { _ in FailingSender() }, idleSeconds: { idle })
+}
+
+@Test func phoneAlertsShipTurnedOff() {
+    #expect(!PhoneAlerts.featureAvailable)
+}
+
+@MainActor
+@Test func anUnavailableBuildIgnoresASavedSwitchAndSendsNothing() async {
+    let saved = MemorySwitch()
+    saved.setting = .on
+    let alerts = PhoneAlerts(available: false, switchStore: saved, store: FixedTopicStore(topic: testTopic),
+                             makeSender: { _ in FailingSender() }, idleSeconds: { 600 })
+    #expect(!alerts.enabled)
+    #expect(alerts.start() == nil)
+    #expect(alerts.setEnabled(true) == nil)
+    #expect(alerts.topicState == .notLoaded)
+    #expect(alerts.arrived(candidates(rows())).messages.isEmpty)
+    #expect(alerts.sendTest() == nil)
+    // The user's saved choice survives, so turning the feature back on restores it.
+    #expect(saved.setting == .on)
 }
 
 @MainActor

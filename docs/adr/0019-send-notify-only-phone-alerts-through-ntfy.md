@@ -2,6 +2,8 @@
 
 Accepted on 2026-10-22 ([issue #352](https://github.com/r-curio/herdly/issues/352)). This is Herdly's first feature that sends anything off the Mac. When the user turns it on and the Mac has had no input for 2 minutes, a newly arrived approval, question or completion becomes one short alert. Herdly POSTs it to the public ntfy server (`https://ntfy.sh`) on a private random topic. The user's iPhone receives it through the ntfy app.
 
+Update, 2026-11-24: the feature is turned off behind the build-time flag `PhoneAlerts.featureAvailable` (`false`) until it is ready. Settings hides the Phone card and nothing is sent; this decision applies again once the flag is on.
+
 ## Decision
 
 - **Notify-only.** The alert has no Allow, Deny or answer buttons, and tapping it does nothing on the Mac. Approvals keep their 30-second deadline on the Mac, and a phone round trip would rarely beat it. Deciding from the phone would need its own ADR.

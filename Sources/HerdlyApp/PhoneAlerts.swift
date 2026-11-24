@@ -197,6 +197,15 @@ struct PhoneAlertDispatch {
 final class PhoneAlerts: ObservableObject {
     private nonisolated static let log = Logger(subsystem: "dev.rcurio.herdly", category: "phone-alerts")
 
+    /// Build-time switch for the whole feature. Off while phone alerts are not ready to ship: Settings
+    /// hides the Phone card and nothing is read from the Keychain or published, whatever the saved
+    /// switch says. The saved switch and the Keychain topic are kept, so turning this back on restores
+    /// the user's choice and their existing ntfy subscription.
+    nonisolated static let featureAvailable = false
+
+    /// Whether this build offers phone alerts at all; see `featureAvailable`.
+    let available: Bool
+
     @Published private(set) var setting: PhoneAlertSetting
     @Published private(set) var topicState: PhoneAlertTopicState = .notLoaded
     /// The orange line under the Phone card: the last test failure, or a Keychain failure.
@@ -209,10 +218,12 @@ final class PhoneAlerts: ObservableObject {
     private let makeSender: @Sendable (NtfyTopic) -> any PhoneAlertSender
     private let idleSeconds: () -> Double?
 
-    init(switchStore: any PhoneAlertSwitchStoring = UserDefaultsPhoneAlertSwitch(),
+    init(available: Bool = PhoneAlerts.featureAvailable,
+         switchStore: any PhoneAlertSwitchStoring = UserDefaultsPhoneAlertSwitch(),
          store: any PhoneAlertTopicStoring = PhoneAlertTopicStore(),
          makeSender: @escaping @Sendable (NtfyTopic) -> any PhoneAlertSender = { NtfyPhoneAlertSender(topic: $0) },
          idleSeconds: @escaping () -> Double? = PhoneAlerts.systemIdleSeconds) {
+        self.available = available
         self.switchStore = switchStore
         self.store = store
         self.makeSender = makeSender
@@ -229,7 +240,8 @@ final class PhoneAlerts: ObservableObject {
         return seconds.isFinite && seconds >= 0 ? seconds : nil
     }
 
-    var enabled: Bool { setting == .on }
+    /// The switch is on and this build offers the feature.
+    var enabled: Bool { available && setting == .on }
     var topic: NtfyTopic? { if case let .ready(topic) = topicState { topic } else { nil } }
 
     /// At launch: with the switch on, read the stored topic off the main actor.
@@ -243,6 +255,7 @@ final class PhoneAlerts: ObservableObject {
     /// switch goes back off with the problem line.
     @discardableResult
     func setEnabled(_ enabled: Bool) -> Task<Void, Never>? {
+        guard available else { return nil }
         problem = nil
         setting = enabled ? .on : .off
         switchStore.save(setting)
@@ -287,7 +300,7 @@ final class PhoneAlerts: ObservableObject {
     /// and skipped. A failed publish is logged and dropped.
     @discardableResult
     func arrived(_ candidates: [PhoneAlertCandidate]) -> PhoneAlertDispatch {
-        guard !candidates.isEmpty else { return .none }
+        guard available, !candidates.isEmpty else { return .none }
         // The ledger records every arrival, sent or not, so turning the switch on later or going
         // idle later never sends an item that already arrived.
         let idle = enabled ? idleSeconds() : nil
