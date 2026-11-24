@@ -149,8 +149,20 @@ extension Companion {
         openClaudeOutsideMultiplexers(identity, request: request)
     }
 
-    /// Rex's, WezTerm's, then Terminal.app's sequence while each is on, otherwise Ghostty's title route or the walk.
+    /// The Herdr app's, Rex's, WezTerm's, then Terminal.app's sequence while each is on, otherwise Ghostty's
+    /// title route or the walk.
     private func openClaudeOutsideMultiplexers(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?) {
+        // The Herdr app on: a terminal there opens through its own sequence; anything else keeps the routes below.
+        if herdrAppSwitchedOn {
+            openClaudeWithHerdrApp(identity, request: request) { [weak self] in
+                self?.openClaudeOutsideHerdrApp(identity, request: request)
+            }
+            return
+        }
+        openClaudeOutsideHerdrApp(identity, request: request)
+    }
+
+    private func openClaudeOutsideHerdrApp(_ identity: AgentSessionIdentity, request: ClaudeOpenRequest?) {
         // Rex on: a block there opens through its own sequence; anything else keeps the routes below.
         if rexSwitchedOn {
             openClaudeWithRex(identity, request: request) { [weak self] in
@@ -362,8 +374,19 @@ extension Companion {
         openCLIOutsideMultiplexers(session)
     }
 
-    /// Rex's, WezTerm's, then Terminal.app's sequence while each is on, otherwise iTerm2's or Ghostty's route.
+    /// The Herdr app's, Rex's, WezTerm's, then Terminal.app's sequence while each is on, otherwise iTerm2's or
+    /// Ghostty's route.
     private func openCLIOutsideMultiplexers(_ session: UUID) {
+        // The Herdr app on: a terminal there opens through its own sequence; a title no Herdr terminal carries
+        // keeps the routes below.
+        if herdrAppSwitchedOn {
+            openCodexWithHerdrApp(session) { [weak self] in self?.openCLIOutsideHerdrApp(session) }
+            return
+        }
+        openCLIOutsideHerdrApp(session)
+    }
+
+    private func openCLIOutsideHerdrApp(_ session: UUID) {
         // Rex on: a block there opens through its own sequence; a title no Rex block carries keeps the
         // routes below. Each reads every enabled host for ADR 0013's binding.
         if rexSwitchedOn {
@@ -689,6 +712,7 @@ extension Companion {
         terminalApp.visits.reset(at: now)
         wezTerm.visits.reset(at: now)
         rex.visits.reset(at: now)
+        herdrApp.visits.reset(at: now)
         tmux.visits.reset(at: now)
         zellij.visits.reset(at: now)
     }

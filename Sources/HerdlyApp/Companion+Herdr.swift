@@ -119,6 +119,7 @@ extension Companion {
         if terminalAppSwitchedOn { hosts.insert(.terminalApp) }
         if wezTermSwitchedOn { hosts.insert(.wezTerm) }
         if rexSwitchedOn { hosts.insert(.rex) }
+        if herdrAppSwitchedOn { hosts.insert(.herdrApp) }
         return hosts
     }
 
@@ -251,6 +252,7 @@ extension Companion {
             terminalAppSwitchedOn ? terminalApp.latestTitles : nil,
             wezTermSwitchedOn ? wezTerm.latestTitles : nil,
             rexSwitchedOn ? rex.latestTitles : nil,
+            herdrAppSwitchedOn ? herdrApp.latestTitles : nil,
         ])
     }
 

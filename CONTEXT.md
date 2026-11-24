@@ -18,7 +18,7 @@ The companion's compact display at the top of the screen, intended to show Codex
 An individual Codex conversation in the desktop app or CLI, distinct from its hosting application.
 
 **Terminal host**:
-The terminal environment that contains a CLI session's terminal: an unsplit tab of a supported terminal (Ghostty, iTerm2, Terminal.app, WezTerm) or any Rex block, split or not, that the user switched on in Herdly, or a single-pane tmux window, Zellij tab or herdr tab whose one client runs in such a tab.
+The terminal environment that contains a CLI session's terminal: an unsplit tab of a supported terminal (Ghostty, iTerm2, Terminal.app, WezTerm) or any Rex block or Herdr app terminal, split or not, that the user switched on in Herdly, or a single-pane tmux window, Zellij tab or herdr tab whose one client runs in such a tab.
 _Avoid_: Terminal app, window
 
 **Multiplexer**:

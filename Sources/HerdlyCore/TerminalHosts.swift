@@ -9,6 +9,7 @@ public enum TerminalHost: String, CaseIterable, Hashable, Sendable {
     case terminalApp
     case wezTerm
     case rex
+    case herdrApp
     case tmux
     case zellij
     case herdr
@@ -25,7 +26,7 @@ public enum TerminalHost: String, CaseIterable, Hashable, Sendable {
 
     public var kind: Kind {
         switch self {
-        case .ghostty, .iTerm2, .terminalApp, .wezTerm, .rex: .terminal
+        case .ghostty, .iTerm2, .terminalApp, .wezTerm, .rex, .herdrApp: .terminal
         case .tmux, .zellij, .herdr: .multiplexer
         }
     }
@@ -37,6 +38,8 @@ public enum TerminalHost: String, CaseIterable, Hashable, Sendable {
         case .terminalApp: "Terminal.app"
         case .wezTerm: "WezTerm"
         case .rex: "Rex"
+        // The Herdr desktop app; lowercase "herdr" stays the terminal multiplexer.
+        case .herdrApp: "Herdr app"
         case .tmux: "tmux"
         case .zellij: "Zellij"
         case .herdr: "herdr"
@@ -46,10 +49,10 @@ public enum TerminalHost: String, CaseIterable, Hashable, Sendable {
     /// Whether Settings shows this host's card. A host's acceptance ticket turns its card on once
     /// its live run in MVP acceptance passes: iTerm2 passed on 2026-10-13 (#243), Terminal.app on 2026-10-14 (#244),
     /// WezTerm on 2026-10-15 (#245), tmux on 2026-10-20 (#246), Zellij on 2026-10-25 (#247). Rex's card is
-    /// shown from the start at the user's request, before its own acceptance run.
+    /// shown from the start at the user's request, before its own acceptance run, and so is the Herdr app's.
     public var showsCard: Bool {
         switch self {
-        case .ghostty, .herdr, .iTerm2, .terminalApp, .wezTerm, .rex, .tmux, .zellij: true
+        case .ghostty, .herdr, .iTerm2, .terminalApp, .wezTerm, .rex, .herdrApp, .tmux, .zellij: true
         }
     }
 
@@ -63,6 +66,7 @@ public enum TerminalHost: String, CaseIterable, Hashable, Sendable {
         case .terminalApp: TerminalAppPresentation.howOpenWorks
         case .wezTerm: WezTermPresentation.howOpenWorks
         case .rex: RexPresentation.howOpenWorks
+        case .herdrApp: HerdrAppPresentation.howOpenWorks
         case .tmux: TmuxPresentation.howOpenWorks
         case .zellij: ZellijPresentation.howOpenWorks
         case .herdr: HerdrPresentation.howOpenWorks
@@ -78,6 +82,7 @@ public enum TerminalHost: String, CaseIterable, Hashable, Sendable {
         case .terminalApp: "com.apple.Terminal"
         case .wezTerm: "com.github.wez.wezterm"
         case .rex: RexCLI.bundleIdentifier
+        case .herdrApp: HerdrAppCLI.bundleIdentifier
         case .tmux, .zellij, .herdr: nil
         }
     }
@@ -88,6 +93,12 @@ public enum TerminalHost: String, CaseIterable, Hashable, Sendable {
         // that shows them is Rex.app.
         if bundleIdentifier == RexCLI.serverBundleIdentifier {
             self = .rex
+            return
+        }
+        // Likewise a walk from a Herdr terminal reaches herdr-core's holder (Herdr Core.app), which runs every
+        // Herdr terminal; the app that shows them is Herdr.app.
+        if bundleIdentifier == HerdrAppCLI.coreBundleIdentifier {
+            self = .herdrApp
             return
         }
         guard let host = TerminalHost.terminals.first(where: { $0.bundleIdentifier == bundleIdentifier }) else {
