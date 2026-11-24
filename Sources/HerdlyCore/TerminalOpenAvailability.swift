@@ -254,6 +254,13 @@ public enum TerminalOpenScan {
             TerminalTabOpen.codexStays(in: host, carriesTitle: reads.holds(host) { $0.title == title }, binding: binding)
         }
         let bindingRoute = codexBindingRoute(binding, title: title, reads: reads)
+        // The Herdr app: a terminal there carries the title, or Herdr cannot be read.
+        if switches.isOn(.herdrApp),
+           !reads.leaves(.herdrApp, otherRouteOn: reads.ghosttyOn || switches.isOn(.rex) || switches.isOn(.wezTerm)
+                            || switches.isOn(.terminalApp) || switches.mayContact(.iTerm2),
+                         holds: holds(.herdrApp)) {
+            return bindingRoute
+        }
         // Rex: a block there carries the title, or Rex cannot be read.
         if switches.isOn(.rex),
            !reads.leaves(.rex, otherRouteOn: reads.ghosttyOn || switches.isOn(.wezTerm) || switches.isOn(.terminalApp)
@@ -315,6 +322,9 @@ public enum TerminalOpenScan {
         }
         let onTTY: (TerminalTab) -> Bool = { tab in tty != nil && tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY) == tty }
         let bindingRoute = processRoute(binding, walked: walked)
+        if switches.isOn(.herdrApp), !reads.leaves(.herdrApp, otherRouteOn: true, holds: reads.holds(.herdrApp, onTTY)) {
+            return bindingRoute
+        }
         if switches.isOn(.rex), !reads.leaves(.rex, otherRouteOn: true, holds: reads.holds(.rex, onTTY)) {
             return bindingRoute
         }

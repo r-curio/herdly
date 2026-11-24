@@ -317,7 +317,7 @@ extension Companion {
                                                processes: reads.processes, secondRead: inventories, tmux: reads.tmux,
                                                zellij: fresh, ghostty: reads.ghostty, iTerm2: reads.iTerm2,
                                                wezTerm: reads.wezTerm, wezTermClients: reads.wezTermClients,
-                                               rex: reads.rex)
+                                               rex: reads.rex, herdrApp: reads.herdrApp)
                 return ZellijOpen.verifyPane(plan, read: fresh, binding: rebind(rebound))
             },
             // nil is a step that passed; see `runTmuxOpen`.

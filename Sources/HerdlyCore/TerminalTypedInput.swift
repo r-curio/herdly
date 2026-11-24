@@ -8,11 +8,11 @@ import Foundation
 
 extension TerminalHost {
     /// Whether Herdly types session replies into this host's bound pane (ADR 0017's table, as built).
-    /// Terminal.app replies (#239), WezTerm replies (#240), Rex replies, tmux replies (#241), Zellij replies (#242).
+    /// Terminal.app replies (#239), WezTerm replies (#240), Rex and Herdr app replies, tmux replies (#241), Zellij replies (#242).
     /// Ghostty and herdr only after a live proof of their text send; iTerm2 never (Broadcast Input).
     public var typesReplies: Bool {
         switch self {
-        case .terminalApp, .wezTerm, .rex, .tmux, .zellij: true
+        case .terminalApp, .wezTerm, .rex, .herdrApp, .tmux, .zellij: true
         case .ghostty, .iTerm2, .herdr: false
         }
     }
@@ -28,6 +28,7 @@ extension TerminalHost {
         case .ghostty, .herdr: true
         case .wezTerm: WezTermInput.questionDigitsProvenLive
         case .rex: RexInput.questionDigitsProvenLive
+        case .herdrApp: HerdrAppInput.questionDigitsProvenLive
         case .tmux: TmuxInput.questionDigitsProvenLive
         case .zellij: ZellijInput.questionDigitsProvenLive
         case .terminalApp, .iTerm2: false
@@ -139,9 +140,11 @@ public enum TypedReplyWrites {
     public static let submitDelay: Double = 1
 
     /// Claude submits text plus CR from one write on every host tested; Codex leaves that in its
-    /// composer and needs a separate CR (every live proof).
-    public static func plan(agent: AgentSource, text: String) -> [TypedWrite] {
-        agent == .claude ? [.textAndSubmit(text)] : [.text(text), .submit]
+    /// composer and needs a separate CR (every live proof). The Herdr app's send pastes and then presses
+    /// Enter itself, so it gets one write for either agent (`HerdrAppInput`).
+    public static func plan(agent: AgentSource, text: String, host: TerminalHost? = nil) -> [TypedWrite] {
+        if host == .herdrApp { return [.textAndSubmit(text)] }
+        return agent == .claude ? [.textAndSubmit(text)] : [.text(text), .submit]
     }
 }
 

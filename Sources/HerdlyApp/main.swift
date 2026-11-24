@@ -499,6 +499,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     let wezTerm = WezTermState()
     /// Rex scan, visits and Open diagnostics (Companion+Rex.swift).
     let rex = RexState()
+    /// Herdr app scan, visits and Open diagnostics (Companion+HerdrApp.swift).
+    let herdrApp = HerdrAppState()
     /// tmux scan, visits and typed routes (Companion+Tmux.swift, #241).
     let tmux = TmuxState()
     /// Zellij scan, visits and typed routes (Companion+Zellij.swift, #242).
@@ -1105,6 +1107,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         startTerminalApp()
         startWezTerm()
         startRex()
+        startHerdrApp()
         let stored = defaults.object(forKey: Companion.ghosttyEnabledKey) as? Bool
         if stored == true {
             ghosttyEnabled = true
@@ -1956,6 +1959,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         checkITerm2Visits()
         checkWezTerm()
         checkRex()
+        checkHerdrApp()
         checkScheduledTabHosts()
         checkOpenAvailability()
         // App identity only: no window contents, task titles, or accessibility queries.
@@ -3595,6 +3599,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if host == .terminalApp { terminalAppSwitchChanged(on) }
         if host == .wezTerm { wezTermSwitchChanged(on) }
         if host == .rex { rexSwitchChanged(on) }
+        if host == .herdrApp { herdrAppSwitchChanged(on) }
         // tmux is contacted only while a terminal is on too (ADR 0014), so any switch can move its gate.
         tmuxSwitchChanged(hostSwitches.isOn(.tmux))
         zellijSwitchChanged(hostSwitches.isOn(.zellij))

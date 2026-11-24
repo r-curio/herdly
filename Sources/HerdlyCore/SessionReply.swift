@@ -383,7 +383,7 @@ public enum SessionReplySending {
         case let .terminal(pane):
             guard case let .success(trimmed) = TypedReplyText.sendable(text) else { return Plan(outcome: .refused(.emptyText)) }
             return Plan(outcome: .sending(progress.startingSend(text: trimmed, route: .terminal(pane), at: now)),
-                        terminal: TerminalSend(pane: pane, writes: TypedReplyWrites.plan(agent: .codex, text: trimmed)))
+                        terminal: TerminalSend(pane: pane, writes: TypedReplyWrites.plan(agent: .codex, text: trimmed, host: pane.host)))
         case let .unavailable(reason):
             return Plan(outcome: .refused(reason))
         }
@@ -417,6 +417,6 @@ public enum ClaudeReplyRouting {
         // Claude never has a daemon target.
         guard case let .terminal(pane) = target else { return .failure(.notReady) }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return .success(SessionReplySending.TerminalSend(pane: pane, writes: TypedReplyWrites.plan(agent: .claude, text: trimmed)))
+        return .success(SessionReplySending.TerminalSend(pane: pane, writes: TypedReplyWrites.plan(agent: .claude, text: trimmed, host: pane.host)))
     }
 }
