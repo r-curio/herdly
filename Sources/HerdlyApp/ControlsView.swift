@@ -1732,40 +1732,30 @@ private struct AboutControls: View {
     }
 }
 
-/// Strip and queue appearance for one display kind at a time. Changes apply at once and the preview
-/// redraws with them; the notch uses the profile of the display it is on.
+/// Strip and queue appearance, shared by every display. Changes apply at once and the preview
+/// redraws with them, drawn for the kind of display the notch is on now.
 private struct NotchControls: View {
     @ObservedObject var model: Companion
-    @State private var profile: DisplayProfile
 
-    init(model: Companion) {
-        self.model = model
-        _profile = State(initialValue: model.activeProfile)
-    }
-
-    private var appearance: NotchAppearance { model.appearances[profile] ?? .standard }
+    private var appearance: NotchAppearance { model.appearance }
+    private var profile: DisplayProfile { model.activeProfile }
 
     private func binding<Value>(_ field: WritableKeyPath<NotchAppearance, Value>) -> Binding<Value> {
         Binding(get: { appearance[keyPath: field] }, set: { value in
             var updated = appearance
             updated[keyPath: field] = value
             withAnimation(SettingsMotion.curve(reduceMotion: model.reduceMotion)) {
-                model.setAppearance(updated, for: profile)
+                model.setAppearance(updated)
             }
         })
     }
 
     var body: some View {
         ControlsPage(section: .notch) {
-            SlidingSegments(title: "Display being configured", selection: $profile.animation(SettingsMotion.curve(reduceMotion: model.reduceMotion)),
-                            options: [(DisplayProfile.macBookNotch, "MacBook notch"), (DisplayProfile.externalDisplay, "External display")])
-        } content: {
             NotchPreview(appearance: appearance, profile: profile, reduceMotion: model.reduceMotion)
                 .animation(SettingsMotion.curve(reduceMotion: model.reduceMotion), value: appearance)
                 .animation(SettingsMotion.curve(reduceMotion: model.reduceMotion), value: profile)
 
-            // Which display shows the notch is one choice for both profiles, so it is not bound to
-            // the profile being edited.
             SettingsHeader("Display")
             SettingsCard {
                 SettingsRow(title: "Show notch on", detail: nil) {
@@ -1786,12 +1776,10 @@ private struct NotchControls: View {
                                     options: [(StripLeftWing.spritesAndCount, "Sprites and count"), (StripLeftWing.countOnly, "Count only"), (StripLeftWing.none, "None")])
                 }
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
-                // Only the control is disabled on the MacBook notch, so the title stays readable and
-                // the row's hover text still explains why.
+                // The choice applies on every display without a camera housing; the hover text says so.
                 SettingsRow(title: "Center label", detail: nil) {
                     SlidingSegments(title: "Center label", selection: binding(\.centerLabel),
                                     options: [(StripCenterLabel.taskName, "Task name"), (StripCenterLabel.sessionName, "Session name"), (StripCenterLabel.off, "Off")])
-                        .disabled(profile == .macBookNotch)
                 }
                 .contentShape(Rectangle())
                 .help("Text in the middle of the strip naming the top item. External displays only; on a MacBook the camera covers that space.")

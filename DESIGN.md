@@ -153,7 +153,7 @@ The instrument is configurable within those materials. In Settings the user choo
 - how the open queue is sorted and grouped;
 - when completions move to "Earlier".
 
-The MacBook notch and external displays each keep their own choices. Every option is drawn from the same black ground, gray ladder, wells, and session colors. An option may change what is shown, but never adds a new material: no glow, no fade-pulse, no gradient. The defaults are the instrument described here: sprites and count, the Sheep sprite, compact usage, standard panel width, "By need" order, no grouping, "repo @ branch" after each name, Earlier after 5 minutes.
+Every display shares one set of choices. Every option is drawn from the same black ground, gray ladder, wells, and session colors. An option may change what is shown, but never adds a new material: no glow, no fade-pulse, no gradient. The defaults are the instrument described here: sprites and count, the Sheep sprite, compact usage, standard panel width, "By need" order, no grouping, "repo @ branch" after each name, Earlier after 5 minutes.
 
 **Key Characteristics:**
 - One black shape fused to the menu bar: flat top, concave 8pt ears, deep 18pt bottom radii, no window shadow
@@ -232,11 +232,11 @@ Content is inset 16pt from each side of the frame (ear plus 8pt). In the strip t
 
 No breakpoints and no grid beyond this: the panel is a single fixed-width column on every display.
 
-**Display profiles.** Strip and queue options are stored separately for two profiles:
-- **MacBook notch:** any display with a camera housing.
+**Display kinds.** Strip and queue options are one set shared by every display. The kind of display only decides what the camera housing hides:
+- **MacBook notch:** any display with a camera housing. The center label is never drawn there.
 - **External display:** any display without one.
 
-The panel uses the profile of the display it is placed on, and switches when it moves to the other kind. Both profiles start with the same defaults.
+Choices saved per display kind before they were shared carry over from the kind the notch is on when Herdly starts.
 
 ## Elevation & Depth
 
@@ -415,12 +415,12 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - "Behavior": "Keep new cards open", a menu picker of 3 seconds, 5 seconds, 10 seconds, a separator, then Until I act.
   - No Status card, row descriptions, or footer.
 - **Notch pane:**
-  - A segmented "MacBook notch | External display" picker in the toolbar chooses which profile is being edited.
-  - A live preview of the strip on a desktop backdrop sits above the sections and redraws as options change.
-  - A "Display" section directly below the preview holds the "Show notch on" menu picker. It is one choice for both profiles, so the profile picker does not change it.
-  - The same section's second row, "Keyboard" (#427), detail "Puts the keyboard in the notch from any app", holds a small bordered recorder button showing the shortcut (⌃⌥Space by default; "Type shortcut…" while listening, "Add ⌃, ⌥ or ⌘" after a key without one; Escape cancels) and a mini switch to turn the hotkey off; the recorder is disabled while the switch is off. Both take effect at once and are shared by both profiles. A shortcut another app holds shows the orange problem line under the row, and the notch stays click-only.
-  - An option that does not apply to the selected profile has its control disabled while its title stays enabled, and the row carries hover text saying what it does and why. Only a row that can be grayed out gets hover text; today that is Center label on the MacBook notch ("Text in the middle of the strip naming the top item. External displays only; on a MacBook the camera covers that space.").
-  - The "Session list" section holds an "After each name" menu picker between Sort by and Group by: "Repo @ branch" (the default), "Repo", or "Branch", kept per profile. Directly under it, with no divider, a black sample row inset 10pt with 10pt below: a 30pt black rounded rect with 9pt continuous corners, 12pt horizontal padding and 7pt spacing, holding the chosen sprite idle in the first session colour, "Fix flaky tests" in 12pt #F5F5F7, then "· herdly @ main" (or "· herdly", "· main") in 12pt #8F8F8F on one line with tail truncation. It eases with the other settings motion, reads to VoiceOver as one element ("Sample row: Fix flaky tests, herdly @ main"), and is not interactive. It shows no work status (#418): it previews the "After each name" format, which a finished row's pull request form ("· checks passed · herdly#429") ignores, so a state there would hide the choice it previews.
+  - The toolbar holds only the pane title; the pane edits the one shared set of choices.
+  - A live preview of the strip on a desktop backdrop sits above the sections and redraws as options change. It is drawn for the kind of display the notch is on now.
+  - A "Display" section directly below the preview holds the "Show notch on" menu picker.
+  - The same section's second row, "Keyboard" (#427), detail "Puts the keyboard in the notch from any app", holds a small bordered recorder button showing the shortcut (⌃⌥Space by default; "Type shortcut…" while listening, "Add ⌃, ⌥ or ⌘" after a key without one; Escape cancels) and a mini switch to turn the hotkey off; the recorder is disabled while the switch is off. Both take effect at once. A shortcut another app holds shows the orange problem line under the row, and the notch stays click-only.
+  - An option that applies to only one kind of display stays enabled and carries hover text saying what it does and where. Today that is Center label ("Text in the middle of the strip naming the top item. External displays only; on a MacBook the camera covers that space.").
+  - The "Session list" section holds an "After each name" menu picker between Sort by and Group by: "Repo @ branch" (the default), "Repo", or "Branch". Directly under it, with no divider, a black sample row inset 10pt with 10pt below: a 30pt black rounded rect with 9pt continuous corners, 12pt horizontal padding and 7pt spacing, holding the chosen sprite idle in the first session colour, "Fix flaky tests" in 12pt #F5F5F7, then "· herdly @ main" (or "· herdly", "· main") in 12pt #8F8F8F on one line with tail truncation. It eases with the other settings motion, reads to VoiceOver as one element ("Sample row: Fix flaky tests, herdly @ main"), and is not interactive. It shows no work status (#418): it previews the "After each name" format, which a finished row's pull request form ("· checks passed · herdly#429") ignores, so a state there would hide the choice it previews.
   - The Notch pane has no section footers.
 - **Sprite picker:** a "Sprite" section with no footer holding five equal-width tiles in a row at 10pt gaps: Sheep, Critter, Sheepdog, Cow, and Blob. Each tile is a 76pt black well with 9pt continuous corners and the kind's idle frame centred at 6pt per cell in the first session colour, with its 12pt name 6pt below. The selected tile has a 2pt accent ring with a 2pt gap and a medium-weight name. Each tile is a button named for its kind.
 - **Agents pane:**
