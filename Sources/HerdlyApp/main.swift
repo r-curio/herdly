@@ -366,7 +366,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published private(set) var notchDisplayChoices = NotchDisplayChoices(displays: [], preference: .followPointer)
     /// The kind of display the notch is on now; `refresh` follows the panel between displays.
     @Published private(set) var activeProfile = Companion.launchProfile
-    /// Strip and queue choices for every display, edited in the Notch settings pane. Choices saved
+    /// Strip and queue choices for every display, edited in the General settings pane. Choices saved
     /// per display kind before they were shared carry over from the kind the notch starts on.
     @Published private(set) var appearance = NotchAppearance.load(legacyProfile: Companion.launchProfile) { key in
         UserDefaults.standard.string(forKey: key)
