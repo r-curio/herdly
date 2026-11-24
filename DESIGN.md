@@ -388,7 +388,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - A fixed 210pt sidebar panel, inset 8pt, runs the full window height with 18pt continuous corners. The window buttons sit inside its top edge, and it never collapses.
   - The title bar is an empty unified toolbar 52pt tall, so the buttons line up with each pane's 15pt semibold title row.
   - Grouped sections fill the detail area.
-  - Sidebar panes in labeled groups: "Notch" (General, Notifications), "Connections" (Agents, Terminals), then About on its own. There is no sidebar collapse button. The Notch pane merged into General on 2026-11-24 (#466); a window saved on Notch reopens on General.
+  - Sidebar panes in labeled groups: "Notch" (General, Notifications), "Connections" (Agents, Terminals), then About on its own. There is no sidebar collapse button.
   - Each sidebar row is 32pt tall with a 20pt colour tile holding a white SF Symbol: gray gear, red bell, purple sparkles, dark terminal, blue info.
   - The sidebar has no footer; the notch itself shows what is working and what needs checking.
 - **Forms:**
@@ -429,7 +429,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - A problem row appears only when something needs fixing: label left, an orange dot and the fix right, such as "Codex desktop · Update to 26.901.51231 or later". A missing surface is not a problem while the other is supported.
   - A version problem row (Codex CLI, Codex desktop, Claude Code) ends with one small bordered button after its text: "Update" for Claude Code and a Homebrew-cask Codex CLI, "Open Codex" for Codex desktop; VoiceOver names the app ("Update Claude Code"). Updating: grey dot, "Updating…", button disabled. Opened desktop: grey dot, "Waiting for Codex to update itself", button enabled. Failed: red dot, "Couldn't update: <reason>", "Try Again". Success removes the row, the card's last-result text reads "Updated <app> to <version>. Sessions already open keep the old version until you restart them.", and the header reads Restart required until that agent's next session starts. A Codex CLI installed another way has no button; a secondary note directly under the rows, with no divider, says Herdly can't tell how it was installed (Paper "Update agents from Settings", 01A–05).
   - Claude's rows: "Usage limits on the strip" (the current "5h 32% · 7d 61%" reading before the switch, "Unavailable" when no window is current, or, with an orange dot, why usage cannot be read) and "Name sessions with Haiku", without descriptions.
-  - The GitHub card (#417, Paper "Herdly Settings", page "GitHub status in Agents (2026-11-13)", frames 01–03) follows Claude Code, 28pt below it. Its tile is near-black slate with a white `arrow.triangle.branch`, and its title is "GitHub".
+  - The GitHub card (#417, Paper "Herdly Settings", page "GitHub status in Agents (2026-11-13)", frames 01–03) sits under the "Tools" header, 10pt below it. Its tile is near-black slate with a white `arrow.triangle.branch`, and its title is "GitHub".
     - Subtitles: "GitHub CLI <version> · signed in to github.com", "GitHub CLI <version> · signed out", or "GitHub CLI not installed".
     - Status: green Connected, orange Sign in required, or gray Not installed. Gray Checking shows until the first check.
     - Gray Status unknown is not in the Paper frames. It shows when the sign-in cannot be read, or when the switch is off and no earlier check is remembered. It has no switch row unless the user has made a choice.

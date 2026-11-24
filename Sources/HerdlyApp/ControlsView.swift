@@ -111,8 +111,8 @@ struct Controls: View {
         // This is an intentional one-time navigation seed: restore the user's last section, then
         // let setup lead on a fresh install until an agent is connected.
         let stored = UserDefaults.standard.string(forKey: "controlsSection")
-        // The Notch pane merged into General (#466), so a saved "notch" reopens General rather than
-        // falling through to the fresh-install choice.
+        // The Notch pane merged into General (#466). A window last left on Notch saved "notch", which
+        // no longer names a section, so map it to General rather than fall through to the fresh-install choice.
         let saved = stored == "notch" ? .general : stored.flatMap(ControlSection.init(rawValue:))
         _selection = State(initialValue: saved ?? (model.canUndoSetup ? .general : .agents))
     }
@@ -1687,8 +1687,8 @@ private struct AboutControls: View {
     }
 }
 
-/// The notch's display, strip and queue appearance, shared by every display, then startup. Changes
-/// apply at once and the preview redraws with them, drawn for the kind of display the notch is on now.
+/// The General pane holds the notch preview, the Display, Strip, Sprite and Session list choices
+/// (ending with Keep new cards open), and Launch at login under Startup; every change applies at once.
 private struct GeneralControls: View {
     @ObservedObject var model: Companion
 
