@@ -38,9 +38,12 @@ final class NotificationPauseMenu: NSObject, NSMenuDelegate {
             item.submenu = nil
             item.target = self
             item.action = #selector(resumeNow)
-        } else {
-            item.action = nil
+        } else if item.submenu !== durations {
+            // Attaching the submenu sets the item's action to `submenuAction(_:)`, which keeps it
+            // enabled. Clearing the action on a later redraw, when the submenu is already attached,
+            // would gray the item out, so the action is only reset while switching back from Resume.
             item.target = nil
+            item.action = nil
             item.submenu = durations
         }
     }
