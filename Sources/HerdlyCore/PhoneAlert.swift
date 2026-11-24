@@ -115,8 +115,8 @@ public struct PhoneAlertCandidate: Equatable, Sendable {
                   arrival: PhoneAlertArrival.of(item, launchedAt: launchedAt))
     }
 
-    /// This candidate, marked `.paused` when a pause keeps its kind quiet
-    /// (`NotificationInterruption.allows`). The ledger still records it, so it never alerts later.
+    /// This candidate, marked `.paused` when it arrived during a pause that keeps its kind quiet
+    /// (`NotificationPauseArrivals.interrupting`). The ledger still records it, so it never alerts later.
     public func respecting(mayInterrupt: Bool) -> PhoneAlertCandidate {
         guard !mayInterrupt, arrival == .fresh else { return self }
         return PhoneAlertCandidate(id: id, kind: kind, source: source, project: project, arrival: .paused)

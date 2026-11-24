@@ -102,42 +102,50 @@ private let quiet = PausedNotificationSettings(approvals: .stayQuiet, questions:
 
 // MARK: - Who may interrupt while paused
 
+/// The real arrival gate for one row of `kind` arriving at `at`, with `pause` started at 09:00.
+private func gate(_ kind: NotificationInterruptionKind, pause: NotificationPause, at: Date,
+                  settings: PausedNotificationSettings) -> Bool {
+    var log = NotificationPauseLog()
+    log.record(pause, at: tuesday(9))
+    return NotificationPauseArrivals.allows(kind, arrivedAt: at.timeIntervalSince1970, pauses: log, settings: settings,
+                                            scannedAt: at)
+}
+
 @Test(arguments: [PausedInterruption.popOpen, .stayQuiet])
 func anApprovalArrivingWhilePausedFollowsItsSetting(setting: PausedInterruption) {
     let settings = PausedNotificationSettings(approvals: setting, questions: .popOpen)
-    let allowed = NotificationInterruption.allows(.approval, pause: .indefinite, settings: settings, at: tuesday(10))
+    let allowed = gate(.approval, pause: .indefinite, at: tuesday(10), settings: settings)
     #expect(allowed == (setting == .popOpen))
 }
 
 @Test(arguments: [PausedInterruption.popOpen, .stayQuiet])
 func aQuestionArrivingWhilePausedFollowsItsSetting(setting: PausedInterruption) {
     let settings = PausedNotificationSettings(approvals: .popOpen, questions: setting)
-    let allowed = NotificationInterruption.allows(.question, pause: .indefinite, settings: settings, at: tuesday(10))
+    let allowed = gate(.question, pause: .indefinite, at: tuesday(10), settings: settings)
     #expect(allowed == (setting == .popOpen))
 }
 
 @Test func theApprovalAndQuestionSettingsAreIndependent() {
     let settings = PausedNotificationSettings(approvals: .stayQuiet, questions: .popOpen)
-    #expect(!NotificationInterruption.allows(.approval, pause: .indefinite, settings: settings, at: tuesday(10)))
-    #expect(NotificationInterruption.allows(.question, pause: .indefinite, settings: settings, at: tuesday(10)))
+    #expect(!gate(.approval, pause: .indefinite, at: tuesday(10), settings: settings))
+    #expect(gate(.question, pause: .indefinite, at: tuesday(10), settings: settings))
 }
 
 @Test func completionsAndEverythingElseAreAlwaysQuietWhilePaused() {
     let loud = PausedNotificationSettings(approvals: .popOpen, questions: .popOpen)
     for kind in [NotificationInterruptionKind.completion, .other] {
-        #expect(!NotificationInterruption.allows(kind, pause: .indefinite, settings: loud, at: tuesday(10)))
-        #expect(!NotificationInterruption.allows(kind, pause: .until(tuesday(11)), settings: loud, at: tuesday(10)))
+        #expect(!gate(kind, pause: .indefinite, at: tuesday(10), settings: loud))
+        #expect(!gate(kind, pause: .until(tuesday(11)), at: tuesday(10), settings: loud))
     }
 }
 
 @Test func withNoActivePauseEveryKindMayInterrupt() {
     for kind in [NotificationInterruptionKind.approval, .question, .completion, .other] {
-        #expect(NotificationInterruption.allows(kind, pause: .none, settings: quiet, at: tuesday(10)))
+        #expect(gate(kind, pause: .none, at: tuesday(10), settings: quiet))
         // A timed pause stops at its end: an arrival at that moment interrupts as usual.
-        #expect(NotificationInterruption.allows(kind, pause: .until(tuesday(10)), settings: quiet, at: tuesday(10)))
+        #expect(gate(kind, pause: .until(tuesday(10)), at: tuesday(10), settings: quiet))
     }
-    #expect(!NotificationInterruption.allows(.completion, pause: .until(tuesday(10)), settings: quiet,
-                                             at: tuesday(10).addingTimeInterval(-0.001)))
+    #expect(!gate(.completion, pause: .until(tuesday(10)), at: tuesday(10).addingTimeInterval(-0.001), settings: quiet))
 }
 
 @Test func queueRowsMapToTheirInterruptionKind() {
@@ -162,7 +170,10 @@ func aQuestionArrivingWhilePausedFollowsItsSetting(setting: PausedInterruption) 
     var queue = AgentAttentionQueue()
     queue.apply(.approval(AgentApproval(session: codexCLI, turn: "t1", call: "a1", arrivedAt: arrived)), now: arrived)
     let pause = NotificationPause.indefinite
-    #expect(!NotificationInterruption.allows(.approval, pause: pause, settings: quiet, at: Date(timeIntervalSince1970: arrived)))
+    var log = NotificationPauseLog()
+    log.record(pause, at: Date(timeIntervalSince1970: arrived - 60))
+    #expect(!NotificationPauseArrivals.allows(.approval, arrivedAt: arrived, pauses: log, settings: quiet,
+                                              scannedAt: Date(timeIntervalSince1970: arrived)))
 
     let live = queue.items(at: arrived + 29.999)
     #expect(live.map(\.kind) == [.actionableApproval])
@@ -256,8 +267,8 @@ private func newRows(arrivedAt: Double) -> [AgentAttentionItem] {
     return queue.items(at: arrivedAt)
 }
 
-private func kinds(_ ids: Set<AgentAttentionID>, in rows: [AgentAttentionItem]) -> Set<NotificationInterruptionKind> {
-    Set(rows.filter { ids.contains($0.id) }.map(NotificationInterruptionKind.init))
+private func kinds(_ rows: [AgentAttentionItem]) -> Set<NotificationInterruptionKind> {
+    Set(rows.map(NotificationInterruptionKind.init))
 }
 
 private let pauseStart = tuesday(13)
@@ -293,13 +304,13 @@ private func finishedPause() -> NotificationPauseLog {
     log.record(.indefinite, at: pauseStart)
     let rows = newRows(arrivedAt: tuesday(12, 59).timeIntervalSince1970)
     let interrupting = NotificationPauseArrivals.interrupting(rows, pauses: log, settings: quiet, scannedAt: tuesday(13, 0, 5))
-    #expect(interrupting == Set(rows.map(\.id)))
+    #expect(interrupting == rows)
 }
 
 @Test func anItemArrivingAtThePauseEndInterruptsAsUsual() {
     let rows = newRows(arrivedAt: pauseEnd.timeIntervalSince1970)
     let interrupting = NotificationPauseArrivals.interrupting(rows, pauses: finishedPause(), settings: quiet, scannedAt: pauseEnd)
-    #expect(interrupting == Set(rows.map(\.id)))
+    #expect(interrupting == rows)
 }
 
 @Test(arguments: [PausedInterruption.popOpen, .stayQuiet], [PausedInterruption.popOpen, .stayQuiet])
@@ -311,7 +322,7 @@ func newRowsDuringAPauseFollowTheirSettingAndCompletionsStayQuiet(approvals: Pau
     var expected: Set<NotificationInterruptionKind> = []
     if approvals == .popOpen { expected.insert(.approval) }
     if questions == .popOpen { expected.insert(.question) }
-    #expect(kinds(interrupting, in: rows) == expected)
+    #expect(kinds(interrupting) == expected)
 }
 
 @Test func anArrivalTimeMissingOrInTheFutureFallsBackToTheScanTime() {
@@ -353,4 +364,15 @@ func newRowsDuringAPauseFollowTheirSettingAndCompletionsStayQuiet(approvals: Pau
     #expect(log.spans.count == 2)
     #expect(!log.covers(tuesday(1, 10)))
     #expect(log.covers(tuesday(5, 10)))
+}
+
+@Test func theLegacyQueueSharesTheSameGate() {
+    // Legacy Codex rows are read through the same gate with their own kind and arrival time.
+    struct LegacyRequest: Equatable { let arrivedAt: Double }
+    let duringPause = LegacyRequest(arrivedAt: tuesday(13, 30).timeIntervalSince1970)
+    let beforePause = LegacyRequest(arrivedAt: tuesday(12, 30).timeIntervalSince1970)
+    let kept = NotificationPauseArrivals.interrupting([duringPause, beforePause], kind: { _ in .approval },
+                                                      arrivedAt: \.arrivedAt, pauses: finishedPause(),
+                                                      settings: quiet, scannedAt: tuesday(14, 5))
+    #expect(kept == [beforePause])
 }

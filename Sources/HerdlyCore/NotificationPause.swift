@@ -177,16 +177,11 @@ public enum NotificationInterruptionKind: Equatable, Sendable {
 }
 
 public enum NotificationInterruption {
-    /// Whether an item of `kind` arriving at `now` may pop its card, play its sound, and alert the
-    /// phone. Without an active pause every kind may. While paused, approvals and questions follow
-    /// their "While paused" setting and every other kind stays quiet. The answer is decided once, at
-    /// arrival: an item kept quiet stays quiet after the pause ends, as a restored item does.
-    public static func allows(_ kind: NotificationInterruptionKind, pause: NotificationPause,
-                              settings: PausedNotificationSettings, at now: Date) -> Bool {
-        allows(kind, paused: pause.isActive(at: now), settings: settings)
-    }
-
-    /// The same rule for an item already known to have arrived during a pause, or not.
+    /// Whether an item of `kind` may pop its card, play its sound, and alert the phone, given whether
+    /// it arrived during a pause. Not paused, every kind may. Paused, approvals and questions follow
+    /// their "While paused" setting and every other kind stays quiet. `NotificationPauseArrivals`
+    /// decides `paused` once, from the item's arrival time: an item kept quiet stays quiet after the
+    /// pause ends, as a restored item does.
     public static func allows(_ kind: NotificationInterruptionKind, paused: Bool,
                               settings: PausedNotificationSettings) -> Bool {
         guard paused else { return true }
@@ -251,14 +246,22 @@ public enum NotificationPauseArrivals {
         return NotificationInterruption.allows(kind, paused: pauses.covers(moment), settings: settings)
     }
 
-    /// The ids of `items` that may interrupt. A row that arrived during a pause its kind stays quiet
-    /// for is left out, even when the scan first sees it after the pause ended; a row that arrived
-    /// before a pause started is unaffected by it.
+    /// The `items` that may interrupt, in order. A row that arrived during a pause its kind stays
+    /// quiet for is left out, even when the scan first sees it after the pause ended; a row that
+    /// arrived before a pause started is unaffected by it. `kind` and `arrivedAt` read each row, so
+    /// the agent queue and the legacy Codex queue share this one gate.
+    public static func interrupting<Item>(_ items: [Item], kind: (Item) -> NotificationInterruptionKind,
+                                          arrivedAt: (Item) -> Double, pauses: NotificationPauseLog,
+                                          settings: PausedNotificationSettings, scannedAt: Date) -> [Item] {
+        items.filter {
+            allows(kind($0), arrivedAt: arrivedAt($0), pauses: pauses, settings: settings, scannedAt: scannedAt)
+        }
+    }
+
+    /// `interrupting` for agent queue rows, each by its own kind and arrival time.
     public static func interrupting(_ items: [AgentAttentionItem], pauses: NotificationPauseLog,
-                                    settings: PausedNotificationSettings, scannedAt: Date) -> Set<AgentAttentionID> {
-        Set(items.filter {
-            allows(NotificationInterruptionKind($0), arrivedAt: $0.arrivedAt, pauses: pauses, settings: settings,
-                   scannedAt: scannedAt)
-        }.map(\.id))
+                                    settings: PausedNotificationSettings, scannedAt: Date) -> [AgentAttentionItem] {
+        interrupting(items, kind: NotificationInterruptionKind.init, arrivedAt: \.arrivedAt, pauses: pauses,
+                     settings: settings, scannedAt: scannedAt)
     }
 }

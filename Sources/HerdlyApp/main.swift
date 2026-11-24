@@ -252,7 +252,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Every pause of this launch from its start to its end, so a row is judged by when it arrived.
     private var notificationPauseLog = NotificationPauseLog()
     /// Settings › Notifications › While paused: whether approvals and questions still pop open.
-    @Published var pausedNotifications = PausedNotificationSettings.load { UserDefaults.standard.string(forKey: $0) } {
+    @Published var pausedNotifications = PausedNotificationSettings.load(value: { UserDefaults.standard.string(forKey: $0) }) {
         didSet { pausedNotifications.save { key, value in UserDefaults.standard.set(value, forKey: key) } }
     }
     @Published var taskID = ""
@@ -1819,14 +1819,18 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // #456: a row that arrived during a pause its kind stays quiet for is queued and counted as
             // a restored row is, with no card, sound or phone alert, then or after the pause. Judged by
             // the row's own arrival time, so a scan that first sees it after the pause keeps it quiet.
-            let interrupting = NotificationPauseArrivals.interrupting(newAgentItems, pauses: notificationPauseLog,
-                                                                      settings: pausedNotifications, scannedAt: Date())
-            let freshAgentOutcomes = newAgentItems.filter { interrupting.contains($0.id) }.compactMap(\.outcome)
+            let scannedAt = Date()
+            let interruptingItems = NotificationPauseArrivals.interrupting(newAgentItems, pauses: notificationPauseLog,
+                                                                           settings: pausedNotifications, scannedAt: scannedAt)
+            let interrupting = Set(interruptingItems.map(\.id))
+            let freshAgentOutcomes = interruptingItems.compactMap(\.outcome)
                 .filter { ResultPop.isFresh($0, launchedAt: Companion.launchedAt) }
-            let freshAgentQuestions = newAgentItems.filter { interrupting.contains($0.id) }.compactMap(\.question)
+            let freshAgentQuestions = interruptingItems.compactMap(\.question)
                 .filter { $0.arrivedAt >= Companion.launchedAt }
             let newAgentRequests = newAgentItems.filter { NotificationInterruptionKind($0) == .approval }
-            let freshAgentRequests = newAgentRequests.filter { interrupting.contains($0.id) && $0.arrivedAt >= Companion.launchedAt }
+            let freshAgentRequests = interruptingItems.filter {
+                NotificationInterruptionKind($0) == .approval && $0.arrivedAt >= Companion.launchedAt
+            }
             let newItems = current.filter { !previous.contains($0.id) }
             let newCompletions = newItems.compactMap(\.completion)
             for completion in newCompletions where !completion.uncertain {
@@ -1862,11 +1866,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             // A dismiss of a card that is not showing would still publish and re-render the notch (#306).
             if !currentAgent.contains(where: { $0.approval != nil }) {
                 if reminderPresentation.pending || reminderPresentation.expanded { reminderPresentation.dismiss() }
-            } else if newItems.contains(where: {
-                        ($0.kind == .handedBackRequest || $0.kind == .actionableRequest)
-                            && NotificationPauseArrivals.allows(.approval, arrivedAt: $0.arrivedAt, pauses: notificationPauseLog,
-                                                                settings: pausedNotifications, scannedAt: Date())
-                    }) || !freshAgentRequests.isEmpty {
+            } else if !NotificationPauseArrivals.interrupting(
+                        newItems.filter { $0.kind == .handedBackRequest || $0.kind == .actionableRequest },
+                        kind: { _ in .approval }, arrivedAt: \.arrivedAt, pauses: notificationPauseLog,
+                        settings: pausedNotifications, scannedAt: scannedAt).isEmpty
+                    || !freshAgentRequests.isEmpty {
                 reminderPresentation.enqueue()
             } else if !newAgentRequests.isEmpty, !reminderPresentation.pending {
                 reminderPresentation = Attention(restored: true)
