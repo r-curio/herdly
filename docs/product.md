@@ -38,7 +38,7 @@ Herdly is a safe, exact companion. It never approves automatically, never claims
 - macOS 14 or later on a Mac, typically with a built-in notch display, sometimes with a second display.
 - Codex desktop app (installed bundle identifies as com.openai.codex) and Codex CLI running directly in Ghostty, one session per unsplit tab.
 - Herdly runs as a background menu-bar app (LSUIElement) with a status item, a controls window, and the notch panel. It observes native app activation, Herdly-owned Codex lifecycle hooks, and Ghostty tab titles carrying Codex's session ID.
-- Launch at login is off until the user explicitly opts in. Its setting reflects macOS's ServiceManagement registration, including approval-required and unavailable states, rather than a saved Herdly preference. A registered login launch is quiet: it does not open the controls window, while the menu-bar item and notch retain their normal behavior.
+- Launch at login is off until the user explicitly opts in. Its setting reflects macOS's ServiceManagement registration, including approval-required and unavailable states, rather than a saved Herdly preference. macOS reports a never-registered app as not found, so that status reads as off and stays switchable; it shows unavailable, with macOS's reason, only after a registration attempt fails. A registered login launch is quiet: it does not open the controls window, while the menu-bar item and notch retain their normal behavior.
 - Verification rituals: `swift test`, the ad-hoc build script, isolated hook labs and probe scripts under `scripts/`, and human walkthroughs recorded as evidence. Agreed behavior in this file is authoritative; a draft integration is not a proven capability.
 
 ## Capabilities and Constraints

@@ -2,6 +2,10 @@ public enum LaunchAtLoginRegistration: Equatable, Sendable {
     case notRegistered
     case enabled
     case requiresApproval
+    /// macOS has no login-item record for this bundle. This is also what macOS reports for an app
+    /// that has never registered, so it stays registerable and reads as off until an attempt fails.
+    case notFound
+    /// macOS reported a status Herdly does not understand; no change is attempted.
     case unavailable
 
     public var isOptedIn: Bool {
@@ -31,6 +35,7 @@ public struct LaunchAtLoginState: Equatable, Sendable {
     public var settingsActionStatusTitle: String? {
         switch registration {
         case .requiresApproval: "Approval required"
+        case .notFound: operationError == nil ? nil : "Unavailable"
         case .unavailable: "Unavailable"
         case .notRegistered, .enabled: nil
         }
@@ -39,6 +44,7 @@ public struct LaunchAtLoginState: Equatable, Sendable {
     public var statusTitle: String {
         switch registration {
         case .notRegistered: "Off"
+        case .notFound: operationError == nil ? "Off" : "Unavailable"
         case .enabled: "On"
         case .requiresApproval: "Approval required"
         case .unavailable: "Unavailable"
@@ -48,6 +54,8 @@ public struct LaunchAtLoginState: Equatable, Sendable {
     public var detail: String {
         switch registration {
         case .notRegistered: "Herdly will not open automatically."
+        case .notFound where operationError == nil: "Herdly will not open automatically."
+        case .notFound: "macOS could not register Herdly as a login item."
         case .enabled: "Herdly opens automatically when you sign in to this Mac."
         case .requiresApproval: "Allow Herdly in System Settings before it can open at login."
         case .unavailable: "macOS could not find Herdly's login-item registration."
@@ -60,7 +68,7 @@ public struct LaunchAtLoginState: Equatable, Sendable {
         guard canChange else { return nil }
         let operation: LaunchAtLoginOperation?
         if enabled {
-            operation = registration == .notRegistered ? .register : nil
+            operation = registration == .notRegistered || registration == .notFound ? .register : nil
         } else {
             operation = registration.isOptedIn ? .unregister : nil
         }
