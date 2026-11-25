@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import HerdlyCore
 
@@ -16,10 +17,10 @@ private let oldAwaitingText = "Configured; start a new Claude session in this ro
 private let codexAwaitingText = "Configured; start a new Codex session to verify delivery. Existing sessions keep running without Herdly's hooks."
 
 private func codexRow(_ status: CodexConnectionStatus?, capabilities: CodexCapabilities = codexCaps(),
-                      installed: Bool = true, planReady: Bool = true, ghosttyVerified: Bool = true,
+                      installed: Bool = true, planReady: Bool = true,
                       restartAfterUpdate: Bool = false, statusText: String = "Status text") -> AgentSettingsRow {
     AgentSettingsRow.codex(capabilities, status: status, statusText: statusText, installed: installed,
-                           planReady: planReady, ghosttyAutomationVerified: ghosttyVerified,
+                           planReady: planReady,
                            restartAfterUpdate: restartAfterUpdate)
 }
 
@@ -41,15 +42,15 @@ private func claudeRow(_ status: ClaudeConnectionStatus?, capabilities: ClaudeCa
     #expect(AgentRestartReason.update.line(for: .codex)
         == "Quit and reopen Codex, or run `codex` in a new terminal tab, to finish updating")
     #expect(AgentRestartReason.setup.line(for: .codex)
-        == "Quit and reopen Codex, or run `codex` in a new terminal tab, to finish setup")
+        == "Quit and reopen Codex, or run `codex` in a new terminal tab, and allow Herdly's hooks if Codex asks")
 }
 
 @Test func connectedRowsAreReadyWithTheSwitchOnAndNoLines() {
     let codex = codexRow(.connected)
-    #expect(codex == AgentSettingsRow(badge: .ready, hooksInstalled: true, canTurnOn: false, lines: []))
+    #expect(codex == AgentSettingsRow(badge: .ready, hooksInstalled: true, setupCanRun: false, lines: []))
     #expect(codex.switchEnabled)
     #expect(codex.accessibilityLabel(name: "Codex") == "Codex, Ready")
-    #expect(claudeRow(.connected) == AgentSettingsRow(badge: .ready, hooksInstalled: true, canTurnOn: false, lines: []))
+    #expect(claudeRow(.connected) == AgentSettingsRow(badge: .ready, hooksInstalled: true, setupCanRun: false, lines: []))
 }
 
 @Test func bothAgentsReadCheckingUntilTheFirstDetection() {
@@ -93,32 +94,16 @@ private func claudeRow(_ status: ClaudeConnectionStatus?, capabilities: ClaudeCa
     #expect(claude.lines == [.restart("Run `claude` in a new terminal tab to finish setup")])
     let codex = codexRow(.configuredAwaitingRestart(codexAwaitingText), statusText: codexAwaitingText)
     #expect(codex.badge == .restartRequired)
-    #expect(codex.lines.first == .restart("Quit and reopen Codex, or run `codex` in a new terminal tab, to finish setup"))
-    #expect(!codex.lines.contains { line in
-        if case .problem(let problem, _) = line { problem.value == codexAwaitingText } else { false }
-    })
-}
-
-@Test func codexSetupHintsStayUntilASessionLoadsTheHooks() {
-    let awaiting = codexRow(.configuredAwaitingRestart(codexAwaitingText), ghosttyVerified: false)
-    #expect(awaiting.lines == [
-        .restart("Quit and reopen Codex, or run `codex` in a new terminal tab, to finish setup"),
-        .note("If Codex asks whether to trust Herdly's hooks, allow them"),
-        .note("Ghostty Automation isn't verified yet. Turn on Ghostty in Settings › Terminals so macOS can ask")
-    ])
-    // Ghostty already allowed: only the trust hint.
-    #expect(codexRow(.configuredAwaitingRestart(codexAwaitingText), ghosttyVerified: true).lines.count == 2)
-    // The first session start connects Codex, and the hints go with the restart line.
-    #expect(codexRow(.connected, ghosttyVerified: false).lines.isEmpty)
+    #expect(codex.lines == [.restart("Quit and reopen Codex, or run `codex` in a new terminal tab, and allow Herdly's hooks if Codex asks")])
 }
 
 @Test func notConfiguredReadsOffWithASwitchThatTurnsOn() {
     let codex = codexRow(.notConfigured, installed: false)
-    #expect(codex == AgentSettingsRow(badge: .off, hooksInstalled: false, canTurnOn: true, lines: []))
+    #expect(codex == AgentSettingsRow(badge: .off, hooksInstalled: false, setupCanRun: true, lines: []))
     #expect(AgentSwitchChange.change(to: true, codex) == .configure)
     #expect(codex.accessibilityLabel(name: "Codex") == "Codex, Off")
     let claude = claudeRow(.notConfigured, installed: false, usageInstalled: false, usageStatus: .unavailable("x"))
-    #expect(claude == AgentSettingsRow(badge: .off, hooksInstalled: false, canTurnOn: true, lines: []))
+    #expect(claude == AgentSettingsRow(badge: .off, hooksInstalled: false, setupCanRun: true, lines: []))
     #expect(AgentSwitchChange.change(to: true, claude) == .configure)
 }
 
@@ -151,13 +136,13 @@ private func claudeRow(_ status: ClaudeConnectionStatus?, capabilities: ClaudeCa
     let codex = codexRow(.unsupported("No supported Codex runtime was detected."),
                          capabilities: codexCaps(cli: (false, false), desktop: (false, false)),
                          installed: false, planReady: false)
-    #expect(codex == AgentSettingsRow(badge: .off, hooksInstalled: false, canTurnOn: false,
+    #expect(codex == AgentSettingsRow(badge: .off, hooksInstalled: false, setupCanRun: false,
                                       lines: [.note("Codex isn't installed")]))
     #expect(!codex.switchEnabled)
     let claude = claudeRow(.unsupported("Claude Code version unknown is older than the tested minimum 2.1.273."),
                            capabilities: ClaudeCapabilities(installed: false, supported: false),
                            installed: false, planReady: false)
-    #expect(claude == AgentSettingsRow(badge: .off, hooksInstalled: false, canTurnOn: false,
+    #expect(claude == AgentSettingsRow(badge: .off, hooksInstalled: false, setupCanRun: false,
                                        lines: [.note("Claude Code isn't installed")]))
 }
 
@@ -184,6 +169,32 @@ private func claudeRow(_ status: ClaudeConnectionStatus?, capabilities: ClaudeCa
     #expect(row.badge == .needsAttention)
     #expect(row.lines == [.problem(AgentProblem(kind: .status, label: "Status", value: text), configures: false)])
     #expect(!row.switchEnabled)
+    #expect(AgentSwitchChange.change(to: true, row) == nil)
+}
+
+@Test func theSwitchTurnsOnOnlyWithoutAnInstallRecordForBothAgents() {
+    // Repair statuses only arise once Herdly's install record exists, so the switch is already on and
+    // the repair runs from the status line's Configure. With no record, only Not configured turns on.
+    let codexText = "Herdly's Codex hook entries are missing; Configure Codex to repair setup."
+    let claudeText = "Herdly's Claude hook entries are missing; Configure Claude to repair setup."
+    for row in [codexRow(.repairRequired(codexText), installed: false, statusText: codexText),
+                claudeRow(.repairRequired(claudeText), installed: false, requiresConfigure: true, statusText: claudeText)] {
+        #expect(!row.canTurnOn)
+        #expect(AgentSwitchChange.change(to: true, row) == nil)
+    }
+    for row in [codexRow(.notConfigured, installed: false), claudeRow(.notConfigured, installed: false)] {
+        #expect(row.canTurnOn)
+    }
+    for row in [codexRow(.repairRequired(codexText), statusText: codexText),
+                claudeRow(.repairRequired(claudeText), requiresConfigure: true, statusText: claudeText)] {
+        #expect(!row.canTurnOn && row.canTurnOff)
+        #expect(row.lines.contains { if case .problem(_, configures: true) = $0 { true } else { false } })
+    }
+}
+
+@Test func anInstalledRowNeverOffersTurningOn() {
+    let row = AgentSettingsRow(badge: .ready, hooksInstalled: true, setupCanRun: true, lines: [])
+    #expect(!row.canTurnOn)
     #expect(AgentSwitchChange.change(to: true, row) == nil)
 }
 
@@ -284,4 +295,20 @@ private func claudeRow(_ status: ClaudeConnectionStatus?, capabilities: ClaudeCa
     #expect(AgentDiagnostics.usagePlan(.unavailable("probe failed"), usageInstalled: false)
         == "usage limits (always on): unavailable; status line left as it is (probe failed)")
     #expect(AgentDiagnostics.usageText(.unavailable) == "no current window")
+}
+
+@Test func claudeSetupChangesListTheOwnedFilesAndTheUsagePlan() throws {
+    let plan = ClaudeSetupPlanner.plan(capabilities: ClaudeCapabilities(installed: true, supported: true, version: "2.1.300"),
+                                       settings: Data("{}".utf8), helperPath: URL(fileURLWithPath: "/s/claude/HerdlyHook"),
+                                       eventsPath: URL(fileURLWithPath: "/s/events"),
+                                       policy: ClaudeSetupPolicy(titleSettingRequired: false), usageEnabled: true)
+    let text = AgentDiagnostics.claudeSetupChanges(plan, settingsPath: "/c/settings.json", helperPath: "/s/claude/HerdlyHook",
+                                                   eventsPath: "/s/events", statePath: "/s/claude/install.json",
+                                                   backupsPath: "/s/claude/backups", usageInstalled: false)
+    let lines = text.components(separatedBy: "\n")
+    #expect(lines.first == "settings.json: /c/settings.json")
+    #expect(lines.contains("  hooks.SessionStart matcher=<any> command=\(plan.ownedHooks.first { $0.event == "SessionStart" }?.command ?? "") timeout=\(ClaudeSetupRequirements.hookTimeout)"))
+    #expect(lines.contains("  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey): not needed (Claude binds by tty here); left as it is"))
+    #expect(lines.contains("owned install record: /s/claude/install.json"))
+    #expect(lines.last == "usage limits (always on): wraps the existing status line")
 }

@@ -15,15 +15,11 @@ struct CodexAgentRow: View {
         return plan
     }
 
-    /// `setupStatus` is only a default until the first detection lands, so the row reads Checking until
-    /// then. Without Ghostty there is no Automation consent to ask for, so its hint never applies.
+    /// `setupStatus` is only a default until the first detection lands, so the row reads Checking until then.
     private var row: AgentSettingsRow {
-        let capabilities = model.setupCapabilities
-        return AgentSettingsRow.codex(capabilities, status: model.setupChecked ? model.setupStatus : nil,
-                                      statusText: model.setupStatusText, installed: model.setupInstalled,
-                                      planReady: readyPlan != nil,
-                                      ghosttyAutomationVerified: model.ghosttyPermissionVerified || !capabilities.ghosttyInstalled,
-                                      restartAfterUpdate: model.agentUpdates.restartRequired(.codex))
+        AgentSettingsRow.codex(model.setupCapabilities, status: model.setupChecked ? model.setupStatus : nil,
+                               statusText: model.setupStatusText, installed: model.setupInstalled,
+                               planReady: readyPlan != nil, restartAfterUpdate: model.agentUpdates.restartRequired(.codex))
     }
 
     var body: some View {
@@ -116,7 +112,10 @@ struct ClaudeAgentRows: View {
                     .accessibilityLabel("Review Claude setup for \(root.displayPath)")
                 Button("Show Setup Changes…") {
                     sheet = SetupPreview(title: "Claude Code setup changes for \(root.displayPath)",
-                                         text: previewText(root, plan: plan))
+                                         text: AgentDiagnostics.claudeSetupChanges(
+                                             plan, settingsPath: root.settingsPath, helperPath: root.helperPath,
+                                             eventsPath: root.eventsPath, statePath: root.statePath,
+                                             backupsPath: root.backupsPath, usageInstalled: root.usageInstalled))
                 }
                 .accessibilityLabel("Show Claude setup changes for \(root.displayPath)")
             }
@@ -140,29 +139,6 @@ struct ClaudeAgentRows: View {
                                 usage: AgentSummary.claudeUsage(root.usage, status: root.usageStatus,
                                                                 now: Date().timeIntervalSince1970),
                                 activeSessions: root.activeSessionStatus.displayText)
-    }
-
-    private func previewText(_ root: ClaudeSetupModel.Root, plan: ClaudeSetupPlan) -> String {
-        let hookFields = plan.ownedHooks.map { hook in
-            "  hooks.\(hook.event) matcher=\(hook.matcher ?? "<any>") command=\(hook.command) timeout=\(ClaudeSetupRequirements.hookTimeout)"
-        }.joined(separator: "\n")
-        let environmentFields = !plan.titleSettingRequired
-            ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey): not needed (Claude binds by tty here); left as it is"
-            : plan.ownedEnvironment.isEmpty
-            ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey)=\(ClaudeSetupRequirements.titleDisableEnvironmentValue) (already present; preserved)"
-            : plan.ownedEnvironment.map { key, value in
-                "  env.\(key)=\(value) (Herdly adds and owns)"
-            }.sorted().joined(separator: "\n")
-        return [
-            "settings.json: \(root.settingsPath)", hookFields, environmentFields,
-            "owned helper: \(root.helperPath)",
-            "owned event records: \(root.eventsPath)",
-            "owned install record: \(root.statePath)",
-            "owned backups: \(root.backupsPath)",
-            "SessionStart and SessionEnd title: JSON terminalSequence with the full session ID / reset",
-            "effective scope: selected user root; arbitrary future project files or command-line --settings may override it (launch context unavailable)",
-            AgentDiagnostics.usagePlan(plan.usageStatus, usageInstalled: root.usageInstalled)
-        ].joined(separator: "\n")
     }
 }
 

@@ -68,5 +68,32 @@ public enum AgentDiagnostics {
         return "usage limits (always on): \(value)"
     }
 
+    /// Show Setup Changes… for a Claude folder: each owned hook, the title setting, every file Herdly
+    /// owns, and what happens to the user's status line.
+    public static func claudeSetupChanges(_ plan: ClaudeSetupPlan, settingsPath: String, helperPath: String,
+                                          eventsPath: String, statePath: String, backupsPath: String,
+                                          usageInstalled: Bool) -> String {
+        let hookFields = plan.ownedHooks.map { hook in
+            "  hooks.\(hook.event) matcher=\(hook.matcher ?? "<any>") command=\(hook.command) timeout=\(ClaudeSetupRequirements.hookTimeout)"
+        }.joined(separator: "\n")
+        let environmentFields = !plan.titleSettingRequired
+            ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey): not needed (Claude binds by tty here); left as it is"
+            : plan.ownedEnvironment.isEmpty
+            ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey)=\(ClaudeSetupRequirements.titleDisableEnvironmentValue) (already present; preserved)"
+            : plan.ownedEnvironment.map { key, value in
+                "  env.\(key)=\(value) (Herdly adds and owns)"
+            }.sorted().joined(separator: "\n")
+        return [
+            "settings.json: \(settingsPath)", hookFields, environmentFields,
+            "owned helper: \(helperPath)",
+            "owned event records: \(eventsPath)",
+            "owned install record: \(statePath)",
+            "owned backups: \(backupsPath)",
+            "SessionStart and SessionEnd title: JSON terminalSequence with the full session ID / reset",
+            "effective scope: selected user root; arbitrary future project files or command-line --settings may override it (launch context unavailable)",
+            usagePlan(plan.usageStatus, usageInstalled: usageInstalled)
+        ].joined(separator: "\n")
+    }
+
     private static func hooks(_ installed: Bool) -> String { "Herdly hooks: \(installed ? "installed" : "not installed")" }
 }

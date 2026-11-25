@@ -24,12 +24,14 @@ public enum AgentRestartReason: Equatable, Sendable {
     case update
     case setup
 
-    /// The one line under the row, with the command to run in backticks (rendered as code).
+    /// The one line under the row, with the command to run in backticks (rendered as code). After
+    /// setup, Codex's line also asks the user to allow Herdly's hooks if Codex prompts to trust them.
     public func line(for agent: AgentSource) -> String {
-        let finish = self == .update ? "to finish updating" : "to finish setup"
-        switch agent {
-        case .codex: return "Quit and reopen Codex, or run `codex` in a new terminal tab, \(finish)"
-        case .claude: return "Run `claude` in a new terminal tab \(finish)"
+        switch (agent, self) {
+        case (.codex, .update): "Quit and reopen Codex, or run `codex` in a new terminal tab, to finish updating"
+        case (.codex, .setup): "Quit and reopen Codex, or run `codex` in a new terminal tab, and allow Herdly's hooks if Codex asks"
+        case (.claude, .update): "Run `claude` in a new terminal tab to finish updating"
+        case (.claude, .setup): "Run `claude` in a new terminal tab to finish setup"
         }
     }
 }
@@ -88,60 +90,53 @@ public struct ClaudeFolderSetup: Equatable, Sendable {
 }
 
 /// What one row of Settings › Agents shows: its badge (nil while the first detection runs), whether
-/// its switch is on, whether it can be turned on, and the lines beneath it. The switch is on exactly
+/// its switch is on, whether setup could run from the off position, and the lines beneath it. The switch is on exactly
 /// when Herdly's install record for the agent exists, the same files Undo Setup removes (A3). Turning
 /// it off stays possible whenever that is so, so Undo is always reachable; turning it on needs setup
 /// that can run now, and otherwise the switch is off, disabled, and a line says why.
 public struct AgentSettingsRow: Equatable, Sendable {
     public let badge: AgentRowBadge?
     public let hooksInstalled: Bool
-    /// Whether Configure can run now from an off switch; always false while the switch is on.
-    public let canTurnOn: Bool
+    /// Whether the agent's first setup could run now: a ready preview with no install record yet.
+    public let setupCanRun: Bool
     public let lines: [AgentRowLine]
 
-    public init(badge: AgentRowBadge?, hooksInstalled: Bool, canTurnOn: Bool, lines: [AgentRowLine]) {
+    public init(badge: AgentRowBadge?, hooksInstalled: Bool, setupCanRun: Bool, lines: [AgentRowLine]) {
         self.badge = badge
         self.hooksInstalled = hooksInstalled
-        self.canTurnOn = canTurnOn && !hooksInstalled
+        self.setupCanRun = setupCanRun
         self.lines = lines
     }
 
+    /// An off switch turns on only when setup can run; an installed agent is already on.
+    public var canTurnOn: Bool { badge != nil && !hooksInstalled && setupCanRun }
     /// Undo Setup is reachable whenever Herdly's hooks are installed and the first detection has landed.
     public var canTurnOff: Bool { badge != nil && hooksInstalled }
-    public var switchEnabled: Bool { canTurnOff || (badge != nil && canTurnOn) }
+    public var switchEnabled: Bool { canTurnOn || canTurnOff }
 
     /// What VoiceOver reads for the row: "<name>, <status>".
     public func accessibilityLabel(name: String) -> String { "\(name), \(badge?.title ?? "Checking")" }
 
     static let setupNotReady = "Herdly can't set this up yet. Choose Review Again from the ⋯ menu."
-    /// Configure Codex's hints that used to follow its result (#481 review): Codex may still ask to
-    /// trust the hooks, and Ghostty's Automation consent is separate from setup.
-    static let codexTrustHint = "If Codex asks whether to trust Herdly's hooks, allow them"
-    static let ghosttyAutomationHint = "Ghostty Automation isn't verified yet. Turn on Ghostty in Settings › Terminals so macOS can ask"
-
     /// The Codex row. `status` is nil until the first detection lands. `installed` is whether Herdly's
-    /// install record exists; `planReady` whether Configure could run now; `ghosttyAutomationVerified`
-    /// whether macOS has allowed Herdly to control Ghostty; `restartAfterUpdate` whether Codex was
-    /// updated since its last SessionStart (`AgentUpdates.restartRequired`).
+    /// install record exists; `planReady` whether Configure could run now; `restartAfterUpdate` whether
+    /// Codex was updated since its last SessionStart (`AgentUpdates.restartRequired`).
+    ///
+    /// For both agents the switch turns on only from Not configured: a repair status only arises once
+    /// the install record exists, so its switch is already on and the repair runs from the status
+    /// line's Configure button.
     public static func codex(_ capabilities: CodexCapabilities, status: CodexConnectionStatus?, statusText: String,
-                             installed: Bool, planReady: Bool, ghosttyAutomationVerified: Bool,
-                             restartAfterUpdate: Bool) -> AgentSettingsRow {
+                             installed: Bool, planReady: Bool, restartAfterUpdate: Bool) -> AgentSettingsRow {
         guard let status else { return checking(installed: installed) }
         let summary = AgentSummary.codex(capabilities, status: status, statusText: statusText)
-        let canConfigure = planReady && (status == .notConfigured || status.isRepair)
         var extra: [AgentRowLine] = []
         if let note = AgentUpdates.codexInstallNote(summary, capabilities) { extra.append(.note(note)) }
-        // Until a session loads the new hooks, the hints Configure Codex used to print stay with the row.
-        if installed, status.isAwaitingRestart {
-            extra.append(.note(codexTrustHint))
-            if !ghosttyAutomationVerified { extra.append(.note(ghosttyAutomationHint)) }
-        }
         return assemble(.codex, installed: installed, restartAfterUpdate: restartAfterUpdate,
-                        awaitingRestart: status.isAwaitingRestart, connected: status == .connected,
-                        notConfigured: status == .notConfigured,
+                        status: RowStatus(awaitingRestart: status.isAwaitingRestart, connected: status == .connected,
+                                          notConfigured: status == .notConfigured),
                         notInstalledNote: !capabilities.cliInstalled && !capabilities.desktopInstalled ? "Codex isn't installed" : nil,
-                        problems: summary.problems, statusConfigures: installed && canConfigure, extra: extra,
-                        canTurnOn: canConfigure)
+                        problems: summary.problems, statusConfigures: installed && planReady && status.isRepair,
+                        extra: extra, setupCanRun: planReady && status == .notConfigured)
     }
 
     /// One Claude folder's row. `status` is nil until the first detection lands. `installed` is whether
@@ -173,42 +168,48 @@ public struct AgentSettingsRow: Equatable, Sendable {
             }
         }
         return assemble(.claude, installed: installed, restartAfterUpdate: restartAfterUpdate,
-                        awaitingRestart: status.isAwaitingRestart, connected: status == .connected,
-                        notConfigured: status == .notConfigured,
+                        status: RowStatus(awaitingRestart: status.isAwaitingRestart, connected: status == .connected,
+                                          notConfigured: status == .notConfigured),
                         notInstalledNote: capabilities.installed ? nil : "Claude Code isn't installed",
                         problems: summary.problems, statusConfigures: offersConfigure, extra: extra,
-                        canTurnOn: setup.planReady && capabilities.supported && status == .notConfigured)
+                        setupCanRun: setup.planReady && capabilities.supported && status == .notConfigured)
     }
 
     private static func checking(installed: Bool) -> AgentSettingsRow {
-        AgentSettingsRow(badge: nil, hooksInstalled: installed, canTurnOn: false, lines: [])
+        AgentSettingsRow(badge: nil, hooksInstalled: installed, setupCanRun: false, lines: [])
+    }
+
+    /// The parts of either agent's connection status the shared rules read.
+    private struct RowStatus {
+        let awaitingRestart: Bool
+        let connected: Bool
+        let notConfigured: Bool
     }
 
     /// The rules both agents share: Restart required only while hooks are installed (an update, else
     /// setup no session has loaded); a missing app replaces every other line with one note; the
     /// status problem is left out when the badge and restart line already say it; and a switch that
     /// can't move either way always has a line saying why.
-    private static func assemble(_ agent: AgentSource, installed: Bool, restartAfterUpdate: Bool,
-                                 awaitingRestart: Bool, connected: Bool, notConfigured: Bool,
+    private static func assemble(_ agent: AgentSource, installed: Bool, restartAfterUpdate: Bool, status: RowStatus,
                                  notInstalledNote: String?, problems: [AgentProblem], statusConfigures: Bool,
-                                 extra: [AgentRowLine], canTurnOn: Bool) -> AgentSettingsRow {
+                                 extra: [AgentRowLine], setupCanRun: Bool) -> AgentSettingsRow {
         let restart: AgentRestartReason? = !installed ? nil
             : restartAfterUpdate ? .update
-            : awaitingRestart ? .setup : nil
+            : status.awaitingRestart ? .setup : nil
         var lines: [AgentRowLine] = []
         if let restart { lines.append(.restart(restart.line(for: agent))) }
         if let notInstalledNote {
             lines.append(.note(notInstalledNote))
         } else {
-            let quietStatus = notConfigured || connected || awaitingRestart
+            let quietStatus = status.notConfigured || status.connected || status.awaitingRestart
             for problem in problems where !(problem.kind == .status && quietStatus) {
                 lines.append(.problem(problem, configures: problem.kind == .status && statusConfigures))
             }
             lines += extra
         }
-        if !installed, !canTurnOn, lines.isEmpty { lines.append(.note(setupNotReady)) }
-        return AgentSettingsRow(badge: badge(installed: installed, restart: restart, lines: lines, connected: connected),
-                                hooksInstalled: installed, canTurnOn: canTurnOn, lines: lines)
+        if !installed, !setupCanRun, lines.isEmpty { lines.append(.note(setupNotReady)) }
+        return AgentSettingsRow(badge: badge(installed: installed, restart: restart, lines: lines, connected: status.connected),
+                                hooksInstalled: installed, setupCanRun: setupCanRun, lines: lines)
     }
 
     /// Restart required wins. A switched-off agent reads Off unless its status needs fixing (such as
@@ -235,7 +236,7 @@ public enum AgentSwitchChange: Equatable, Sendable {
     case undo
 
     public static func change(to on: Bool, _ row: AgentSettingsRow) -> AgentSwitchChange? {
-        if on { return row.badge != nil && row.canTurnOn ? .configure : nil }
+        if on { return row.canTurnOn ? .configure : nil }
         return row.canTurnOff ? .undo : nil
     }
 }
