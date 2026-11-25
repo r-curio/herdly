@@ -1,12 +1,15 @@
 # Claude usage
 
-Claude usage is an optional, per configuration root status line integration. It is off by default.
+Claude usage is a per configuration root status line integration, on for every root Herdly configures
+(#481, Paper "Agents tab like Terminals", A4). Earlier versions made it an opt-in; that choice is
+ignored, and a root set up with it off shows "Usage limits need Herdly to wrap your status line" with
+Configure in Settings › Agents.
 Herdly does not scan credentials, merge roots, estimate usage, or substitute gateway spend limits for
 subscription usage.
 
 ## Bridge behavior
 
-When enabled, Herdly previews the selected root's existing `statusLine` command and runs a bounded
+When Herdly configures a root, it previews the selected root's existing `statusLine` command and runs a bounded
 compatibility probe before composing it. The probe exercises normal completion and cancellation. A
 command that does not exit within the probe bound, including one that leaves a descendant alive, is
 left unchanged. An incompatible, malformed, or policy-shadowed status line leaves the core Claude
