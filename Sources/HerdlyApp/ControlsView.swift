@@ -53,6 +53,13 @@ enum SettingsStyle {
                                                   light: NSColor(srgbRed: 0.14, green: 0.54, blue: 0.24, alpha: 1)))
     static let attentionText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 1, green: 0.62, blue: 0.04, alpha: 1),
                                                       light: NSColor(srgbRed: 0.79, green: 0.2, blue: 0, alpha: 1)))
+    /// Status pill fills: a 12% green or orange tint, or a 6% neutral one for Off and Not in use.
+    static let readyFill = Color.green.opacity(0.12)
+    static let attentionFill = Color.orange.opacity(0.12)
+    static let quietFill = Color.primary.opacity(0.06)
+    /// The symbol tiles agents fall back to without their app's icon (DESIGN.md, Agents pane).
+    static let codexTile = Color(white: 0.11)
+    static let claudeTile = Color(red: 0.851, green: 0.467, blue: 0.341)
 }
 
 /// Settings-window feedback: every click answers within about half a second with a smooth ease, and
@@ -444,26 +451,19 @@ private struct StatusBadge: View {
     }
 }
 
-/// One card per agent: name, versions and status, a ⋯ menu for setup actions, and a row for each
-/// problem that applies (DESIGN.md, Settings Window, Agents pane).
+/// Settings › Agents (#481, Paper "Agents tab like Terminals", A1–A9): one card with a row per agent,
+/// Codex then Claude Code and each added Claude folder, laid out like a Terminals host row. The rules
+/// for each row's badge, switch and lines live in `AgentSettingsRow`.
 private struct AgentControls: View {
     @ObservedObject var model: Companion
     @State private var preview: SetupPreview?
 
-    /// `setupStatus` is only a default until the first detection lands, so it reads as unknown until then.
-    /// The header reads Restart required after an update until a new Codex session starts.
-    private var summary: AgentSummary {
-        model.agentUpdates.summary(AgentSummary.codex(model.setupCapabilities,
-                                                      status: model.setupChecked ? model.setupStatus : nil,
-                                                      statusText: model.setupStatusText), for: .codex)
-    }
-
     var body: some View {
         ControlsPage(section: .agents) {
-            VStack(alignment: .leading, spacing: 28) {
-                codexCard
-                ClaudeAgentControls(setup: model.claude, preview: $preview, updates: model.agentUpdates,
-                                    perform: model.performAgentRowAction)
+            SettingsCard {
+                CodexAgentRow(model: model, sheet: $preview)
+                ClaudeAgentRows(setup: model.claude, sheet: $preview, updates: model.agentUpdates,
+                                perform: model.performAgentRowAction)
             }
             // GitHub is an optional tool, not an agent Herdly watches, so it sits under its own header
             // with the page's usual header spacing.
@@ -472,51 +472,12 @@ private struct AgentControls: View {
         }
         .sheet(item: $preview) { SetupPreviewSheet(preview: $0) }
     }
-
-    private var codexCard: some View {
-        let summary = summary
-        let capabilities = model.setupCapabilities
-        return SettingsCard {
-            AgentCardHeader(name: "Codex", subtitle: summary.subtitle, symbol: "terminal", tile: Color(white: 0.11),
-                            status: summary.status, menuLabel: "Codex actions") {
-                if model.canConfigureSetup {
-                    Button("Configure Codex", action: model.configureCodex)
-                        .buttonStyle(.borderedProminent).controlSize(.small)
-                }
-            } actions: {
-                Button("Review Again", action: model.refreshSetup)
-                if let plan = model.setupPlan, case .ready = plan.status, plan.requiresConfigure {
-                    Button("Show Setup Changes…") {
-                        let hooks = String(data: plan.hooksChange, encoding: .utf8) ?? "(unreadable)"
-                        preview = SetupPreview(title: "Codex setup changes",
-                                               text: "config.toml\n\(plan.configChange)\n\nhooks.json\n\(hooks)\n\nhelper command\n\(plan.helperCommand)")
-                    }
-                }
-                if model.canUndoSetup {
-                    Divider()
-                    Button("Undo Setup…", action: model.undoCodexSetup)
-                }
-            }
-            AgentProblemRows(problems: summary.problems,
-                             actions: ProblemRowActions(updates: model.agentUpdates,
-                                                        action: { AgentRowAction.codex($0, capabilities) },
-                                                        perform: model.performAgentRowAction))
-            if let note = AgentUpdates.codexInstallNote(summary, capabilities) { AgentNoteRow(text: note) }
-            AgentMessageRow(message: model.setupMessage)
-        }
-    }
-
-    /// A surface's version as the row's value: the version when it is supported, otherwise why not.
-    static func version(installed: Bool, supported: Bool, version: String?, minimum: String) -> String {
-        guard installed else { return "Not installed" }
-        guard supported else { return "\(version ?? "Unknown version") · needs \(minimum) or later" }
-        return version ?? "Installed"
-    }
 }
+
 
 /// Text shown in a sheet from a ⋯ menu: exact, monospaced setup changes or diagnostics, or a plain
 /// explanation such as a terminal's How Open Works….
-private struct SetupPreview: Identifiable {
+struct SetupPreview: Identifiable {
     let title: String
     let text: String
     var monospaced = true
@@ -564,7 +525,7 @@ private struct AgentStatusBadge: View {
 }
 
 /// The 22pt borderless ⋯ button that opens an agent's or folder's setup actions.
-private struct AgentActionsMenu<Actions: View>: View {
+struct AgentActionsMenu<Actions: View>: View {
     let label: String
     @ViewBuilder let actions: Actions
 
@@ -579,11 +540,11 @@ private struct AgentActionsMenu<Actions: View>: View {
     }
 }
 
-/// An agent card's first row: tile, name and versions, status, a Configure button while setup is
-/// needed, and the ⋯ menu of setup actions.
+/// A card's first row (the GitHub card): tile, name and an optional subtitle, status, an optional
+/// button, and the ⋯ menu of actions.
 private struct AgentCardHeader<Configure: View, Actions: View>: View {
     let name: String
-    let subtitle: String
+    let subtitle: String?
     let symbol: String
     let tile: Color
     let status: AgentHeaderStatus
@@ -601,7 +562,7 @@ private struct AgentCardHeader<Configure: View, Actions: View>: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name).font(.system(size: 13, weight: .semibold))
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+                if let subtitle { Text(subtitle).font(.subheadline).foregroundStyle(.secondary) }
             }
             .accessibilityElement(children: .combine)
             Spacer(minLength: 8)
@@ -615,104 +576,6 @@ private struct AgentCardHeader<Configure: View, Actions: View>: View {
     }
 }
 
-/// A value with a dot before it: orange for the fix a problem row asks for, grey while an update is
-/// under way, red when it failed.
-private struct ProblemValue: View {
-    let text: String
-    var tone: AgentUpdateRow.Tone = .attention
-
-    private var dot: Color {
-        switch tone {
-        case .attention: .orange
-        case .progress: .gray
-        case .failure: .red
-        }
-    }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Circle().fill(dot).frame(width: 7, height: 7).accessibilityHidden(true)
-            Text(text).foregroundStyle(.secondary)
-                .multilineTextAlignment(.trailing)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-/// What a card's version problem rows need for their one trailing button (#354): each row's update
-/// state, the button a problem gets, and what pressing it does.
-private struct ProblemRowActions {
-    let updates: AgentUpdates
-    let action: (AgentProblem.Kind) -> AgentRowAction
-    let perform: (AgentUpdateTarget, AgentRowAction) -> Void
-}
-
-/// A row per problem: what needs fixing on the left, an orange dot and the fix on the right, then
-/// for a version problem Herdly can act on, a small bordered Update or Open Codex button.
-/// `indent` sets a folder's own problems beneath its row.
-private struct AgentProblemRows: View {
-    let problems: [AgentProblem]
-    var indent: CGFloat = 0
-    var actions: ProblemRowActions?
-
-    var body: some View {
-        ForEach(problems) { problem in
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            if let actions, let target = AgentUpdateTarget(problem.kind) {
-                let action = actions.action(problem.kind)
-                let row = actions.updates.row(target, value: problem.value, action: action)
-                SettingsRow(title: problem.label, detail: nil) {
-                    HStack(spacing: 10) {
-                        ProblemValue(text: row.text, tone: row.tone)
-                        if let button = row.button {
-                            Button(button.title) { actions.perform(target, action) }
-                                .buttonStyle(.bordered).controlSize(.small)
-                                .disabled(!button.enabled)
-                                .accessibilityLabel(button.accessibilityLabel)
-                        }
-                    }
-                }
-                .padding(.leading, indent)
-                .accessibilityElement(children: row.button == nil ? .combine : .contain)
-            } else {
-                SettingsRow(title: problem.label, detail: nil) { ProblemValue(text: problem.value) }
-                    .padding(.leading, indent)
-                    .accessibilityElement(children: .combine)
-            }
-        }
-    }
-}
-
-/// A card's standing note directly under its rows, such as why Herdly can't update Codex CLI.
-private struct AgentNoteRow: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.subheadline).foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, SettingsStyle.rowInset).padding(.top, 2).padding(.bottom, 9)
-    }
-}
-
-/// The last setup action's result, kept in its agent's card while there is one, so a failure stays readable.
-private struct AgentMessageRow: View {
-    let message: String
-
-    var body: some View {
-        if !message.isEmpty {
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            Text(message)
-                .font(.subheadline).foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, SettingsStyle.rowInset).padding(.vertical, 9)
-        }
-    }
-}
-
 /// The GitHub card (#417, Paper "GitHub status in Agents", 01–03): the GitHub CLI's presence and
 /// sign-in, and the "Pull request status on finished rows" switch while it is signed in. Signed out
 /// and not installed show the command to run with Copy; Herdly never runs either.
@@ -722,7 +585,8 @@ private struct GitHubAgentControls: View {
     var body: some View {
         let cli = workStatus.cli
         SettingsCard {
-            AgentCardHeader(name: "GitHub", subtitle: cli.subtitle, symbol: "arrow.triangle.branch",
+            // No subtitle (#481, A9): the card's status and rows say what it needs.
+            AgentCardHeader(name: "GitHub", subtitle: nil, symbol: "arrow.triangle.branch",
                             tile: Color(red: 0.14, green: 0.16, blue: 0.18), status: cli.header,
                             menuLabel: "GitHub actions") {
                 EmptyView()
@@ -796,208 +660,6 @@ private struct GitHubCommandRow: View {
         .padding(.horizontal, SettingsStyle.rowInset)
         .padding(.vertical, 9)
         .accessibilityElement(children: .contain)
-    }
-}
-
-/// The Claude Code card. Its header and rows describe the default folder; each added folder is a
-/// row beneath them with its own status, Configure button and ⋯ menu, and its problems indented under it.
-private struct ClaudeAgentControls: View {
-    @ObservedObject var setup: ClaudeSetupModel
-    @Binding var preview: SetupPreview?
-    let updates: AgentUpdates
-    let perform: (AgentUpdateTarget, AgentRowAction) -> Void
-
-    var body: some View {
-        SettingsCard {
-            if let root = setup.roots.first {
-                defaultFolder(root)
-            } else {
-                // No folder to describe yet: keep the card's header so adding a folder stays reachable.
-                header(AgentSummary.claudeWithoutFolders(checked: setup.checked), menuLabel: "Claude Code actions") {
-                    EmptyView()
-                } actions: {
-                    Button("Add Another Claude Folder…", action: setup.addAlternateRoot)
-                }
-            }
-            ForEach(Array(setup.roots.dropFirst())) { root in addedFolder(root) }
-            AgentMessageRow(message: setup.message)
-        }
-    }
-
-    private func readyPlan(_ root: ClaudeSetupModel.Root) -> ClaudeSetupPlan? {
-        guard let plan = root.plan, case .ready = plan.status else { return nil }
-        return plan
-    }
-
-    /// The folder's summary, its header reading Restart required after an update until a new session starts.
-    private func summary(_ root: ClaudeSetupModel.Root) -> AgentSummary {
-        updates.summary(AgentSummary.claude(checked: setup.checked, root.capabilities, displayPath: root.displayPath,
-                                            status: root.status, statusText: ClaudeSetupModel.statusText(root.status),
-                                            addsHooks: readyPlan(root)?.addsHooks ?? false), for: .claude)
-    }
-
-    private func rowActions(_ root: ClaudeSetupModel.Root) -> ProblemRowActions {
-        let capabilities = root.capabilities
-        return ProblemRowActions(updates: updates, action: { AgentRowAction.claude($0, capabilities) }, perform: perform)
-    }
-
-    private func usage(_ root: ClaudeSetupModel.Root) -> AgentUsage? {
-        guard setup.usageEnabled(for: root) else { return nil }
-        return AgentSummary.claudeUsage(root.usage, status: root.usageStatus, now: Date().timeIntervalSince1970)
-    }
-
-    private func actionsLabel(_ root: ClaudeSetupModel.Root) -> String {
-        "Claude Code actions for \(root.displayPath)"
-    }
-
-    private func offersUndo(_ root: ClaudeSetupModel.Root) -> Bool {
-        root.status.offersUndo(planReady: readyPlan(root) != nil)
-    }
-
-    private func header<Configure: View, Actions: View>(
-        _ summary: AgentSummary, menuLabel: String,
-        @ViewBuilder configure: () -> Configure, @ViewBuilder actions: () -> Actions
-    ) -> some View {
-        AgentCardHeader(name: "Claude Code", subtitle: summary.subtitle, symbol: "sparkle",
-                        tile: Color(red: 0.851, green: 0.467, blue: 0.341), status: summary.status,
-                        menuLabel: menuLabel, configure: configure, actions: actions)
-    }
-
-    @ViewBuilder
-    private func defaultFolder(_ root: ClaudeSetupModel.Root) -> some View {
-        let summary = summary(root)
-        let plan = readyPlan(root)
-        header(summary, menuLabel: actionsLabel(root)) {
-            configureButton(root)
-        } actions: {
-            reviewActions(root)
-            Button("Add Another Claude Folder…", action: setup.addAlternateRoot)
-            if offersUndo(root) {
-                Divider()
-                undoButton(root)
-            }
-        }
-        AgentProblemRows(problems: summary.problems, actions: rowActions(root))
-        if plan != nil {
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Usage limits on the strip", detail: nil) {
-                HStack(spacing: 10) {
-                    switch usage(root) {
-                    case .reading(let text)?: Text(text).foregroundStyle(.secondary)
-                    case .unavailable?: Text("Unavailable").foregroundStyle(.secondary)
-                    case .problem(let reason)?: ProblemValue(text: reason)
-                    case nil: EmptyView()
-                    }
-                    usageToggle(root).labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                }
-            }
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            SettingsRow(title: "Name sessions with Haiku", detail: nil) {
-                titlesToggle(root).labelsHidden().toggleStyle(.switch).controlSize(.mini)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func addedFolder(_ root: ClaudeSetupModel.Root) -> some View {
-        let summary = summary(root)
-        let plan = readyPlan(root)
-        Divider().padding(.horizontal, SettingsStyle.rowInset)
-        HStack(spacing: 10) {
-            Text(root.displayPath)
-                .font(.system(.body, design: .monospaced))
-                .lineLimit(1).truncationMode(.middle)
-                .accessibilityLabel("Claude folder \(root.displayPath)")
-            Spacer(minLength: 8)
-            AgentStatusBadge(status: summary.status)
-            configureButton(root)
-            AgentActionsMenu(label: actionsLabel(root)) {
-                reviewActions(root)
-                if plan != nil {
-                    usageToggle(root)
-                    titlesToggle(root)
-                }
-                Divider()
-                if offersUndo(root) { undoButton(root) }
-                Button("Remove Folder", role: .destructive) { setup.removeAlternateRoot(root) }
-                    .accessibilityLabel("Remove Claude folder \(root.displayPath)")
-            }
-        }
-        .padding(.horizontal, SettingsStyle.rowInset)
-        .padding(.vertical, 8)
-        .frame(minHeight: 36)
-        AgentProblemRows(problems: summary.problems + [usage(root)?.problem].compactMap { $0 }, indent: 16,
-                         actions: rowActions(root))
-    }
-
-    @ViewBuilder
-    private func configureButton(_ root: ClaudeSetupModel.Root) -> some View {
-        if let plan = readyPlan(root),
-           root.status.offersConfigure(requiresConfigure: plan.requiresConfigure,
-                                       usageMatches: root.usageInstalled == setup.usageEnabled(for: root)) {
-            Button("Configure Claude") { setup.configure(root) }
-                .buttonStyle(.borderedProminent).controlSize(.small)
-                .accessibilityLabel("Configure Claude for \(root.displayPath)")
-        }
-    }
-
-    /// Review Again and Show Setup Changes…, offered only while the folder's plan is ready, as before.
-    @ViewBuilder
-    private func reviewActions(_ root: ClaudeSetupModel.Root) -> some View {
-        if let plan = readyPlan(root) {
-            Button("Review Again", action: setup.refresh)
-                .accessibilityLabel("Review Claude setup for \(root.displayPath)")
-            Button("Show Setup Changes…") {
-                preview = SetupPreview(title: "Claude Code setup changes for \(root.displayPath)",
-                                       text: previewText(root, plan: plan))
-            }
-            .accessibilityLabel("Show Claude setup changes for \(root.displayPath)")
-        }
-    }
-
-    private func undoButton(_ root: ClaudeSetupModel.Root) -> some View {
-        Button("Undo Setup…") { setup.undo(root) }
-            .accessibilityLabel("Undo Claude setup for \(root.displayPath)")
-    }
-
-    /// Plain toggles so they read as checkmark items in a folder's menu; rows style them as mini switches.
-    private func usageToggle(_ root: ClaudeSetupModel.Root) -> some View {
-        Toggle("Usage limits on the strip", isOn: Binding(
-            get: { setup.usageEnabled(for: root) },
-            set: { setup.setUsageEnabled($0, for: root) }
-        ))
-        .accessibilityLabel("Claude usage limits on the strip for \(root.displayPath)")
-    }
-
-    private func titlesToggle(_ root: ClaudeSetupModel.Root) -> some View {
-        Toggle("Name sessions with Haiku", isOn: Binding(
-            get: { setup.sessionTitlesEnabled(for: root) },
-            set: { setup.setSessionTitlesEnabled($0, for: root) }
-        ))
-        .accessibilityLabel("Name Claude sessions with Haiku for \(root.displayPath)")
-    }
-
-    private func previewText(_ root: ClaudeSetupModel.Root, plan: ClaudeSetupPlan) -> String {
-        let hookFields = plan.ownedHooks.map { hook in
-            "  hooks.\(hook.event) matcher=\(hook.matcher ?? "<any>") command=\(hook.command) timeout=\(ClaudeSetupRequirements.hookTimeout)"
-        }.joined(separator: "\n")
-        let environmentFields = !plan.titleSettingRequired
-            ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey): not needed (Claude binds by tty here); left as it is"
-            : plan.ownedEnvironment.isEmpty
-            ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey)=\(ClaudeSetupRequirements.titleDisableEnvironmentValue) (already present; preserved)"
-            : plan.ownedEnvironment.map { key, value in
-                "  env.\(key)=\(value) (Herdly adds and owns)"
-            }.sorted().joined(separator: "\n")
-        return [
-            "settings.json: \(root.settingsPath)", hookFields, environmentFields,
-            "owned helper: \(root.helperPath)",
-            "owned event records: \(root.eventsPath)",
-            "owned install record: \(root.statePath)",
-            "owned backups: \(root.backupsPath)",
-            "SessionStart and SessionEnd title: JSON terminalSequence with the full session ID / reset",
-            "effective scope: selected user root; arbitrary future project files or command-line --settings may override it (launch context unavailable)",
-            "optional usage intent: \(plan.usageEnabled ? (root.usageInstalled ? "on (installed)" : "on (pending compatibility probe)") : (root.usageInstalled ? "off (remove on Configure)" : "off"))"
-        ].joined(separator: "\n")
     }
 }
 
@@ -1112,7 +774,7 @@ private extension Companion {
 }
 
 /// The host's switch as a mini switch; `label` is its VoiceOver name.
-private struct HostSwitch: View {
+struct HostSwitch: View {
     let label: String
     let isOn: Binding<Bool>
 
@@ -1131,12 +793,7 @@ private struct HostStatusBadge: View {
 
     var body: some View {
         if let badge {
-            Text(badge.title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(foreground(badge))
-                .padding(.horizontal, 7).padding(.vertical, 1)
-                .background(fill(badge), in: .rect(cornerRadius: 5, style: .continuous))
-                .accessibilityLabel("Status: \(badge.title)")
+            StatusPill(title: badge.title, foreground: foreground(badge), fill: fill(badge))
         } else {
             ProgressView().controlSize(.small).accessibilityLabel("Checking \(host.displayName)")
         }
@@ -1152,28 +809,46 @@ private struct HostStatusBadge: View {
 
     private func fill(_ badge: HerdrReadinessBadge) -> Color {
         switch badge {
-        case .ready: Color.green.opacity(0.12)
-        case .needsAttention: Color.orange.opacity(0.12)
-        case .off, .notInUse: Color.primary.opacity(0.06)
+        case .ready: SettingsStyle.readyFill
+        case .needsAttention: SettingsStyle.attentionFill
+        case .off, .notInUse: SettingsStyle.quietFill
         }
     }
 }
 
-/// One problem under a row or in a card: 12pt text after an orange dot, with an optional fix at its
-/// trailing edge.
-private struct CardProblemLine<Fix: View>: View {
+/// A status badge's tinted pill: 11pt medium text, 5pt continuous corners.
+struct StatusPill: View {
+    let title: String
+    let foreground: Color
+    let fill: Color
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 7).padding(.vertical, 1)
+            .background(fill, in: .rect(cornerRadius: 5, style: .continuous))
+            .accessibilityLabel("Status: \(title)")
+    }
+}
+
+/// One problem under a row or in a card: 12pt text after a dot (orange unless given), with an
+/// optional fix at its trailing edge.
+struct CardProblemLine<Fix: View>: View {
     let text: String
+    let dot: Color
     @ViewBuilder let fix: Fix
 
-    init(_ text: String, @ViewBuilder fix: () -> Fix = { EmptyView() }) {
+    init(_ text: String, dot: Color = .orange, @ViewBuilder fix: () -> Fix = { EmptyView() }) {
         self.text = text
+        self.dot = dot
         self.fix = fix()
     }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Circle().fill(.orange).frame(width: 6, height: 6).accessibilityHidden(true)
+                Circle().fill(dot).frame(width: 6, height: 6).accessibilityHidden(true)
                 Text(text).font(.system(size: 12)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1204,7 +879,7 @@ private struct GhosttyHostRow: View {
                                                   access: model.ghosttyAccess,
                                                   permissionVerified: model.ghosttyPermissionVerified)
         TerminalHostRow(host: .ghostty,
-                        version: AgentControls.version(installed: capabilities.ghosttyInstalled,
+                        version: AgentDiagnostics.surfaceVersion(installed: capabilities.ghosttyInstalled,
                                                        supported: capabilities.ghostty,
                                                        version: capabilities.ghosttyVersion,
                                                        minimum: CodexSetupRequirements.minimumGhosttyVersion),

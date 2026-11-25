@@ -3,7 +3,7 @@ import Foundation
 /// One row in an agent's Settings card that names something to fix, such as
 /// "Codex desktop · Update to 26.901.51231 or later". Rows come only from existing setup state,
 /// and an agent or Claude folder shows at most one row of each kind.
-public struct AgentProblem: Equatable, Sendable, Identifiable {
+public struct AgentProblem: Equatable, Hashable, Sendable, Identifiable {
     public enum Kind: Equatable, Hashable, Sendable {
         case codexCLI
         case codexDesktop
@@ -11,6 +11,10 @@ public struct AgentProblem: Equatable, Sendable, Identifiable {
         case status
         case newHooks
         case usage
+        /// Settings Configure would still write on a working Claude folder, other than new hooks or usage.
+        case pendingSetup
+        /// Adding the usage status line failed and its rollback did too, so settings may be half-written.
+        case usageWriteFailed
     }
 
     public let kind: Kind

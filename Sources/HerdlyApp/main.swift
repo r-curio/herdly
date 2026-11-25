@@ -445,6 +445,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     @Published var setupChecked = false
     @Published var setupCapabilities = CodexCapabilities(cli: false, desktop: false, ghostty: false, supported: false)
     @Published var setupPlan: CodexSetupPlan?
+    /// Whether Herdly's Codex install record exists; Settings › Agents shows it as the Codex switch (#481).
+    @Published var setupInstalled = false
     @Published var setupMessage = ""
     /// Each version problem row's update and each agent's Restart required (#354).
     @Published var agentUpdates = AgentUpdates()
@@ -1621,7 +1623,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             return (root.url.standardizedFileURL, root.capabilities)
         }
         let claudeUsageRoots = claude.roots.compactMap { root -> (scope: String, directory: URL)? in
-            guard claude.usageEnabled(for: root), !root.usagePath.isEmpty else { return nil }
+            guard root.usageInstalled, !root.usagePath.isEmpty else { return nil }
             return (root.url.standardizedFileURL.path, URL(fileURLWithPath: root.usagePath, isDirectory: true))
         }
         let branchDirectories = Set(agentQueue.items(at: observationNow).compactMap(rowDirectory(for:)))

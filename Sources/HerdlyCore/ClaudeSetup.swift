@@ -165,6 +165,9 @@ public struct ClaudeSetupRoots: Equatable, Sendable {
     public var stateURL: URL { helperDirectory.appendingPathComponent("install.json") }
     public var backupsURL: URL { helperDirectory.appendingPathComponent("backups", isDirectory: true) }
     public var usageDirectory: URL { helperDirectory.appendingPathComponent("usage", isDirectory: true) }
+    /// Herdly's own record that an automatic usage upgrade failed and could not roll back, kept beside
+    /// the install record (never in the user's Claude folder) until Configure or Undo Setup succeeds.
+    public var usageRollbackURL: URL { helperDirectory.appendingPathComponent("usage-rollback-incomplete") }
 }
 
 public struct ClaudeSetupPlan: Equatable, Sendable {
@@ -174,6 +177,9 @@ public struct ClaudeSetupPlan: Equatable, Sendable {
     public let ownedEnvironment: [String: String]
     public let helperCommand: String
     public let requiresConfigure: Bool
+    /// True when Configure would change settings other than the usage status line, which detection
+    /// adds on its own to an installed folder (`ClaudeSetupInstaller.upgradeUsage`).
+    public let changesBeyondUsage: Bool
     /// True when Configure would add a Herdly hook entry the settings do not have yet, such as a newer
     /// release's file-approval hook on an already connected root.
     public let addsHooks: Bool
@@ -188,7 +194,8 @@ public struct ClaudeSetupPlan: Equatable, Sendable {
 
     init(status: ClaudeSetupStatus, settingsChange: Data, ownedHooks: [ClaudeOwnedHook],
          ownedEnvironment: [String: String],
-         helperCommand: String, requiresConfigure: Bool, addsHooks: Bool = false, installationID: String,
+         helperCommand: String, requiresConfigure: Bool, changesBeyondUsage: Bool? = nil, addsHooks: Bool = false,
+         installationID: String,
          usageEnabled: Bool, usageStatus: ClaudeUsageSetupStatus, titleSettingRequired: Bool = true,
          originalSettings: Data, originalSettingsExisted: Bool) {
         self.status = status
@@ -197,6 +204,7 @@ public struct ClaudeSetupPlan: Equatable, Sendable {
         self.ownedEnvironment = ownedEnvironment
         self.helperCommand = helperCommand
         self.requiresConfigure = requiresConfigure
+        self.changesBeyondUsage = changesBeyondUsage ?? requiresConfigure
         self.addsHooks = addsHooks
         self.installationID = installationID
         self.usageEnabled = usageEnabled
@@ -365,7 +373,8 @@ public enum ClaudeSetupPlanner {
         }
         return ClaudeSetupPlan(status: .ready, settingsChange: changed, ownedHooks: ownedHooks,
                                ownedEnvironment: titleEnvironmentAlreadyPresent ? [:] : [ClaudeSetupRequirements.titleDisableEnvironmentKey: ClaudeSetupRequirements.titleDisableEnvironmentValue],
-                               helperCommand: ownedHooks.first?.command ?? "", requiresConfigure: changed != settings, addsHooks: addsHooks,
+                               helperCommand: ownedHooks.first?.command ?? "", requiresConfigure: changed != settings,
+                               changesBeyondUsage: changedBase != settings, addsHooks: addsHooks,
                                installationID: installationID, usageEnabled: usageEnabled, usageStatus: usage,
                                titleSettingRequired: policy.titleSettingRequired,
                                originalSettings: settings, originalSettingsExisted: settingsExisted)
@@ -740,11 +749,25 @@ private struct ClaudeInstallState: Codable {
 
 public struct ClaudeSetupInstaller {
     private let fileManager: FileManager
+    /// Runs before each atomic write, so tests can make a chosen write fail.
+    private let beforeWrite: (@Sendable (URL) throws -> Void)?
 
-    public init(fileManager: FileManager = .default) { self.fileManager = fileManager }
+    public init(fileManager: FileManager = .default, beforeWrite: (@Sendable (URL) throws -> Void)? = nil) {
+        self.fileManager = fileManager
+        self.beforeWrite = beforeWrite
+    }
 
+    /// Configure. Success also clears a stuck usage-rollback record, since the folder's settings are
+    /// then exactly what setup wrote.
     public func install(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots, helper: Data,
                         capabilities: ClaudeCapabilities) throws -> ClaudeConnectionStatus {
+        let status = try performInstall(plan, roots: roots, helper: helper, capabilities: capabilities)
+        clearUsageRollback(roots)
+        return status
+    }
+
+    private func performInstall(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots, helper: Data,
+                                capabilities: ClaudeCapabilities) throws -> ClaudeConnectionStatus {
         guard case .ready = plan.status else { throw ClaudeSetupError.failed("Setup preview is not ready.") }
         guard !helper.isEmpty else { throw ClaudeSetupError.failed("The bundled Herdly helper is unavailable.") }
         let currentSettings = try readableData(at: roots.settingsURL)
@@ -1008,7 +1031,28 @@ public struct ClaudeSetupInstaller {
         })
     }
 
+    /// Undo Setup. Success also clears a stuck usage-rollback record and, with it gone, Herdly's
+    /// now-empty folder for this root.
     public func undo(roots: ClaudeSetupRoots) throws -> ClaudeConnectionStatus {
+        let status = try performUndo(roots: roots)
+        clearUsageRollback(roots)
+        try? removeDirectoryIfEmpty(roots.helperDirectory)
+        return status
+    }
+
+    /// The reason a usage upgrade's rollback failed for this folder, kept until Configure or Undo
+    /// Setup succeeds; nil when there is none.
+    public func usageRollbackIncomplete(for roots: ClaudeSetupRoots) -> String? {
+        guard let data = boundedData(at: roots.usageRollbackURL, maximum: 16 * 1024) else { return nil }
+        let message = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return message.isEmpty ? "Herdly couldn't finish or undo adding its usage status line. Check settings.json." : message
+    }
+
+    private func clearUsageRollback(_ roots: ClaudeSetupRoots) {
+        try? fileManager.removeItem(at: roots.usageRollbackURL)
+    }
+
+    private func performUndo(roots: ClaudeSetupRoots) throws -> ClaudeConnectionStatus {
         let state = try readState(roots)
         guard state.rootPath == roots.configDirectory.path else {
             throw ClaudeSetupError.conflict("Herdly Claude setup belongs to a different configuration root; undo made no changes.")
@@ -1273,6 +1317,7 @@ public struct ClaudeSetupInstaller {
 
     private func atomicWrite(_ data: Data, to url: URL) throws {
         try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try beforeWrite?(url)
         try data.write(to: url, options: .atomic)
     }
 
@@ -1285,5 +1330,91 @@ public struct ClaudeSetupInstaller {
         guard isDirectory(at: url),
               (try fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)).isEmpty else { return }
         try fileManager.removeItem(at: url)
+    }
+}
+
+/// What `ClaudeSetupInstaller.upgradeUsage` did: added Herdly's usage status line, changed nothing,
+/// failed with the original settings restored, or failed and could not restore them, so the
+/// folder's files may be half-written and need the user's attention.
+public enum ClaudeUsageUpgrade: Equatable, Sendable {
+    case applied
+    case skipped
+    case failed(String)
+    case rollbackIncomplete(String)
+}
+
+extension ClaudeSetupInstaller {
+    /// Usage limits are always on (#481, owner decision 2026-11-25): a folder Herdly set up while usage
+    /// was an opt-in gets the usage status line on its own, without a Configure click. Only the
+    /// `statusLine` member changes, exactly as Configure would write it, and only when every guard
+    /// holds; otherwise nothing is written and the folder reads usage unavailable.
+    ///
+    /// Guards: the folder has Herdly's install record and a connected or awaiting-restart setup; the
+    /// bridge isn't already in place; `plan` was read from the current `settings.json` (unchanged
+    /// since) and found the status line wrappable, which for an existing command means the
+    /// compatibility probe passed; and the status line is still the one Herdly recorded at install.
+    /// The settings are backed up as Configure backs them up, written atomically, and the install
+    /// record keeps the user's original status line, so Undo Setup restores it byte for byte.
+    public func upgradeUsage(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots,
+                             capabilities: ClaudeCapabilities) -> ClaudeUsageUpgrade {
+        // While a failed rollback is on record the settings may be half-written: never write again.
+        if let message = usageRollbackIncomplete(for: roots) { return .rollbackIncomplete(message) }
+        do {
+            return try applyUsageUpgrade(plan, roots: roots, capabilities: capabilities)
+        } catch ClaudeSetupError.rollbackIncomplete(let message) {
+            // Kept beside the install record so the next detection still shows it; written directly,
+            // since this is Herdly's own state, not the user's settings.
+            try? fileManager.createDirectory(at: roots.helperDirectory, withIntermediateDirectories: true)
+            try? Data(message.utf8).write(to: roots.usageRollbackURL, options: .atomic)
+            return .rollbackIncomplete(message)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    private func applyUsageUpgrade(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots,
+                                   capabilities: ClaudeCapabilities) throws -> ClaudeUsageUpgrade {
+        guard case .ready = plan.status, plan.usageEnabled, plan.usageStatus == .ready,
+              let state = try? readState(roots), state.rootPath == roots.configDirectory.path,
+              UUID(uuidString: state.installationID) != nil, state.installationID == plan.installationID,
+              usageStatus(for: roots, requested: true) != .ready else { return .skipped }
+        let status = status(roots: roots, capabilities: capabilities, titleSettingRequired: plan.titleSettingRequired)
+        guard status == .connected || status.isAwaitingRestart,
+              let current = try readableData(at: roots.settingsURL), current == plan.originalSettings,
+              ClaudeSetupPlanner.memberData(current, key: "statusLine") == state.installedStatusLine,
+              let object = try? ClaudeSetupPlanner.jsonObject(current) else { return .skipped }
+        if let command = ClaudeStatusLineBridge.statusLineCommand(object["statusLine"]),
+           ClaudeStatusLineBridge.isBridgeCommand(command) { return .skipped }
+        guard let bridged = ClaudeStatusLineBridge.bridgeStatusLine(object["statusLine"], helperPath: roots.helperURL,
+                                                                    usagePath: roots.usageDirectory),
+              let upgraded = try? ClaudeSetupPlanner.jsonDataPreservingMember(current, key: "statusLine", value: bridged),
+              upgraded != current else { return .skipped }
+        let originalState = try readableData(at: roots.stateURL)
+        let next = ClaudeInstallState(rootPath: state.rootPath, helper: state.helper, installationID: state.installationID,
+                                      ownedHooks: state.ownedHooks, ownedEnvironment: state.ownedEnvironment,
+                                      installedSettings: upgraded, originalSettings: state.originalSettings,
+                                      installedAt: state.installedAt, backupDirectory: state.backupDirectory,
+                                      usageEnabled: true, originalStatusLine: state.originalStatusLine,
+                                      installedStatusLine: ClaudeSetupPlanner.memberData(upgraded, key: "statusLine"),
+                                      environmentOwnershipRecorded: state.environmentOwnershipRecorded)
+        let encoded = try JSONEncoder().encode(next)
+        let backupDirectory = roots.backupsURL.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        // Read again right before writing: a change since the plan was read means leave it alone.
+        guard try readableData(at: roots.settingsURL) == current else { return .skipped }
+        do {
+            try fileManager.createDirectory(at: roots.usageDirectory, withIntermediateDirectories: true)
+            try backup(current, named: "settings.json", in: backupDirectory)
+            try atomicWrite(upgraded, to: roots.settingsURL)
+            try atomicWrite(encoded, to: roots.stateURL)
+        } catch let error {
+            do {
+                try restore(current, to: roots.settingsURL)
+                try restore(originalState, to: roots.stateURL)
+            } catch let rollbackError {
+                throw ClaudeSetupError.rollbackIncomplete("Usage setup failed (\(error)); rollback also failed (\(rollbackError)). Check the affected files before retrying.")
+            }
+            throw ClaudeSetupError.failed("Usage setup was not completed; the original configuration was restored.")
+        }
+        return .applied
     }
 }

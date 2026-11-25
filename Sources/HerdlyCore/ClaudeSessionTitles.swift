@@ -1,6 +1,6 @@
 import Foundation
 
-/// Optional Haiku-written titles for Claude sessions that still carry Claude's derived placeholder
+/// Haiku-written titles for Claude sessions that still carry Claude's derived placeholder
 /// name (`myproject-22`), or a title Herdly gave an earlier session that `/clear` carried over to
 /// this one (Claude keeps the process's name, `nameSource: "hook"`, across a clear). The first eligible prompt
 /// starts a detached generator, and a later prompt hands the finished title to Claude through
@@ -11,6 +11,8 @@ import Foundation
 /// wins, and an unreadable registry offers nothing. Titles are presentation only; they never identify a session or a target.
 public enum ClaudeSessionTitles {
     public static let directoryName = "session-titles"
+    /// The marker file earlier versions used for their opt-in. Titles are always on for every
+    /// configured folder now (#481, A4), so it is ignored; prune leaves it alone like any non-record.
     public static let enabledMarkerName = "enabled"
     /// The leading part of a prompt sent to the model; longer prompts are cut here.
     public static let maximumSourceLength = 2_000
@@ -72,27 +74,10 @@ public enum ClaudeSessionTitles {
         case apply(title: String)
     }
 
-    // MARK: - Locations and opt-in
+    // MARK: - Locations
 
     public static func directory(in eventsDirectory: URL) -> URL {
         eventsDirectory.appendingPathComponent(directoryName, isDirectory: true)
-    }
-
-    public static func isEnabled(eventsDirectory: URL) -> Bool {
-        let marker = directory(in: eventsDirectory).appendingPathComponent(enabledMarkerName)
-        return SafeFile.read(marker, limit: 64) != nil
-    }
-
-    @discardableResult
-    public static func setEnabled(_ enabled: Bool, eventsDirectory: URL) -> Bool {
-        let marker = directory(in: eventsDirectory).appendingPathComponent(enabledMarkerName)
-        if enabled { return write(Data("on\n".utf8), to: marker) }
-        do {
-            try FileManager.default.removeItem(at: marker)
-            return true
-        } catch {
-            return !FileManager.default.fileExists(atPath: marker.path)
-        }
     }
 
     /// Claude's registry entry for the process that ran the hook (`CLAUDE_PID`).
@@ -274,7 +259,7 @@ public enum ClaudeSessionTitles {
     }
 
     /// Removes records untouched for `recordAge` and abandoned temporary files. Bounded by the
-    /// directory listing; the opt-in marker is never removed.
+    /// directory listing; the legacy opt-in marker is never removed.
     public static func prune(in eventsDirectory: URL, now: Date = Date()) {
         let folder = directory(in: eventsDirectory)
         guard let urls = try? FileManager.default.contentsOfDirectory(

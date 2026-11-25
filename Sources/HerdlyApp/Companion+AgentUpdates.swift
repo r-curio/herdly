@@ -21,9 +21,9 @@ extension Companion {
             guard let self else { return }
             // Success needs detection to see the new version, as Review Again would.
             let detection = await self.redetect(target)
-            let message = self.agentUpdates.finish(target, command: command, result: result, detection: detection,
-                                                   now: Date().timeIntervalSince1970)
-            if let message { self.showUpdateMessage(message, for: target.agent) }
+            // The row's Restart required badge and line report a successful update (#481, A5).
+            self.agentUpdates.finish(target, command: command, result: result, detection: detection,
+                                     now: Date().timeIntervalSince1970)
         }
     }
 
@@ -51,23 +51,15 @@ extension Companion {
         return target.detected(codex: setupCapabilities, claude: claude.roots.first?.capabilities)
     }
 
-    private func showUpdateMessage(_ message: String, for agent: AgentSource) {
-        switch agent {
-        case .codex: setupMessage = message
-        case .claude: claude.message = message
-        }
-    }
-
     /// Called when a Codex setup detection lands: a desktop row waiting for Codex to update itself
     /// stops waiting, and counts as updated, once the version meets the minimum.
     func resolveDesktopWaitAfterDetection() {
         guard agentUpdates.state(.codexDesktop) == .waitingForApp else { return }
         var next = agentUpdates
         let detection = AgentUpdateTarget.codexDesktop.detected(codex: setupCapabilities, claude: nil)
-        let message = next.detected(.codexDesktop, version: detection.version,
-                                    meetsMinimum: detection.meetsMinimum, now: Date().timeIntervalSince1970)
+        next.detected(.codexDesktop, version: detection.version,
+                      meetsMinimum: detection.meetsMinimum, now: Date().timeIntervalSince1970)
         if next != agentUpdates { agentUpdates = next }
-        if let message { showUpdateMessage(message, for: .codex) }
     }
 
     /// The newest SessionStart each agent has delivered; a later one than its update clears that
