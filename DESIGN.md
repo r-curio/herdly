@@ -457,6 +457,12 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - Problem lines sit under their row with no divider between them, 12pt with an orange dot, 10pt above the next divider. A denied Automation permission ends its line with a small Open Settings… button; a herdr command follows its line in 12pt monospace with a Copy button.
   - No footers, and no separate Version, Permission, or Status rows.
   - Reduce Motion keeps only the crossfade.
+- **About pane** (#483, Paper "Herdly Settings", page "About redesign (2026-11-25)", frame "01 · Proposal · About (A)" and decisions AB1–AB5, decided 2026-11-25):
+  - **AB1 · Hero**, centred: the bundle's app icon at 136pt, then 14pt below it the herdly wordmark at 128x46pt, drawn in code from `docs/brand/herdly-wordmark.svg` in the primary label colour (white in dark mode, black in light). Icon and wordmark read to VoiceOver as one image, "Herdly". Then 8pt below, the tagline "One notch for every local agent session: what's working, what needs you, and a way back to it." in 14pt secondary text, at most 330pt wide. No sprite.
+  - **AB2 · Version pill**, 18pt below: a capsule on the section fill with a faint hairline, "0.1.0" in 12pt monospaced primary text and " (build N)" dimmed (`CFBundleShortVersionString`, `CFBundleVersion`), then a `doc.on.doc` glyph. A click copies "0.1.0 (N)", and the pill reads "Copied" for 1.5 s, announced to VoiceOver; the copy glyph turns to a checkmark while it reads Copied, and the capsule keeps its width. Without a version it reads "Development" with no build.
+  - **AB3 · One link**, 16pt below: "Send Feedback" in link style opens the Send Feedback window. No What's new or Acknowledgements link.
+  - **AB4 · "Works with"**: one card with three rows, Agents, Terminals, Multiplexers, each label in a fixed 92pt column. Values are non-interactive 12pt tags (quaternary fill, 7pt corners, 9x4pt padding, 6pt apart), right-aligned and wrapping. Agents are Codex desktop, Codex CLI, Claude Code and Claude Desktop; Terminals and Multiplexers list every host whose Settings card is shown, in Settings order.
+  - **AB5 · Footer** pinned to the bottom of the pane: "Made for people running more agents than tabs." in 12pt secondary text on the left, the Quit Herdly push button on the right.
 
 ## Menu Bar Item
 
