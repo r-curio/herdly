@@ -2,8 +2,13 @@
 
 Claude usage is a per configuration root status line integration, on for every root Herdly configures
 (#481, Paper "Agents tab like Terminals", A4). Earlier versions made it an opt-in; that choice is
-ignored, and a root set up with it off shows "Usage limits need Herdly to wrap your status line" with
-Configure in Settings › Agents.
+ignored. A root Herdly set up with it off gets the bridge on its own at the next setup check, with no
+Configure click: only while the root has Herdly's install record and a connected or restart-awaiting
+setup, the status line is still the one Herdly recorded, `settings.json` is unchanged since the
+check read it, and an existing command passes the compatibility probe. It changes only `statusLine`,
+backs up the settings as Configure does, writes atomically, and keeps the original status line in
+the install record, so Undo Setup restores it byte for byte. Otherwise nothing is written and usage
+reads unavailable (`ClaudeSetupInstaller.upgradeUsage`).
 Herdly does not scan credentials, merge roots, estimate usage, or substitute gateway spend limits for
 subscription usage.
 

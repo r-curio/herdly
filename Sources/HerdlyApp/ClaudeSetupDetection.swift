@@ -138,6 +138,15 @@ enum ClaudeSetupDetection {
                         activeSessionStatus: activeSessionStatus)
     }
 
+    /// Adds Herdly's usage status line to a folder set up while usage was an opt-in, from the plan
+    /// this snapshot read (#481, owner decision 2026-11-25). Every guard is in
+    /// `ClaudeSetupInstaller.upgradeUsage`; any doubt or error writes nothing. Runs off the main actor.
+    static func upgradeUsage(_ snapshot: Snapshot, applicationSupport: URL) -> ClaudeUsageUpgrade {
+        guard snapshot.installed, !snapshot.usageInstalled, let plan = snapshot.plan else { return .skipped }
+        let roots = setupRoots(configDirectory: snapshot.root, applicationSupport: applicationSupport)
+        return (try? ClaudeSetupInstaller().upgradeUsage(plan, roots: roots, capabilities: snapshot.capabilities)) ?? .skipped
+    }
+
     private static func statusLineCompatibility(settings: Data, usageEnabled: Bool) -> Bool? {
         guard usageEnabled, let object = try? JSONSerialization.jsonObject(with: settings) as? [String: Any],
               let command = ClaudeStatusLineBridge.statusLineCommand(object["statusLine"]),
@@ -444,6 +453,11 @@ final class ClaudeSetupModel: ObservableObject {
                            roots: ClaudeSetupDetection.setupRoots(configDirectory: root, applicationSupport: support),
                            helper: helper)) == .updated {
                         updated += 1
+                    }
+                    let snapshot = ClaudeSetupDetection.setupSnapshot(root: root, applicationSupport: support, capabilities: caps)
+                    // Usage is always on: a folder set up without it gets it here, once, then reads afresh.
+                    guard ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: support) == .applied else {
+                        return snapshot
                     }
                     return ClaudeSetupDetection.setupSnapshot(root: root, applicationSupport: support, capabilities: caps)
                 }

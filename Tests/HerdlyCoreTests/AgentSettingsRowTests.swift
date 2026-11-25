@@ -209,13 +209,13 @@ private func claudeRow(_ status: ClaudeConnectionStatus?, capabilities: ClaudeCa
     #expect(codex.lines == [.problem(AgentProblem(kind: .status, label: "Status", value: codexText), configures: true)])
 }
 
-@Test func aFolderSetUpBeforeUsageWasAlwaysOnOffersConfigureAndStaysReady() {
-    // Usage was opt-in before #481: a connected folder without the bridge, whose status line could be wrapped.
-    let row = claudeRow(.connected, requiresConfigure: true, plannedUsage: .ready, usageInstalled: false,
+@Test func usageNeverAsksForConfigureAndWaitsQuietlyWhenNotYetAdded() {
+    // Detection adds the bridge on its own (#481, owner decision): a folder whose bridge isn't in place
+    // yet gets one quiet line, never a Configure button, and stays Ready.
+    let row = claudeRow(.connected, requiresConfigure: false, plannedUsage: .ready, usageInstalled: false,
                         usageStatus: .unavailable("Claude usage unavailable: the status-line compatibility probe did not pass; Claude connection remains active."))
     #expect(row.badge == .ready)
-    #expect(row.lines == [.problem(AgentProblem(kind: .usage, label: "Usage limits",
-                                                value: "Usage limits need Herdly to wrap your status line"), configures: true)])
+    #expect(row.lines == [.note("Usage limits are unavailable until Herdly can add its status line")])
 }
 
 @Test func anIncompatibleStatusLineReadsUsageUnavailableWithoutAskingToConfigure() {

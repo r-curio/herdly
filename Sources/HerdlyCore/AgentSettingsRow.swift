@@ -60,6 +60,8 @@ public enum AgentRowLine: Equatable, Hashable, Sendable {
 public struct ClaudeFolderSetup: Equatable, Sendable {
     /// Whether the folder's setup preview is ready, so Configure could run now.
     public let planReady: Bool
+    /// Whether Configure would change settings other than the usage status line, which detection
+    /// adds on its own (`ClaudeSetupInstaller.upgradeUsage`).
     public let requiresConfigure: Bool
     public let addsHooks: Bool
     /// What Configure would do for usage limits; nil without a ready preview.
@@ -83,7 +85,7 @@ public struct ClaudeFolderSetup: Equatable, Sendable {
     /// From the folder's preview, counted only when it is ready.
     public init(plan: ClaudeSetupPlan?, usageInstalled: Bool, usageStatus: ClaudeUsageSetupStatus) {
         let ready: ClaudeSetupPlan? = if let plan, case .ready = plan.status { plan } else { nil }
-        self.init(planReady: ready != nil, requiresConfigure: ready?.requiresConfigure ?? false,
+        self.init(planReady: ready != nil, requiresConfigure: ready?.changesBeyondUsage ?? false,
                   addsHooks: ready?.addsHooks ?? false, plannedUsage: ready?.usageStatus,
                   usageInstalled: usageInstalled, usageStatus: usageStatus)
     }
@@ -146,26 +148,19 @@ public struct AgentSettingsRow: Equatable, Sendable {
         guard let status else { return checking(installed: installed) }
         let summary = AgentSummary.claude(checked: true, capabilities, displayPath: "", status: status,
                                           statusText: statusText, addsHooks: false)
-        let usageWanted = setup.plannedUsage == .ready
+        // Usage never asks for Configure: detection adds the bridge to an installed folder on its own.
         let offersConfigure = installed && setup.planReady
-            && status.offersConfigure(requiresConfigure: setup.requiresConfigure,
-                                      usageMatches: setup.usageInstalled == usageWanted)
+            && status.offersConfigure(requiresConfigure: setup.requiresConfigure, usageMatches: true)
         let working = status == .connected || status.isAwaitingRestart
         var extra: [AgentRowLine] = []
         if offersConfigure, working {
-            // A working folder with changes Configure would add: newer hooks, the usage bridge that
-            // earlier versions left to an opt-in, or other settings to write.
+            // A working folder with changes Configure would add: newer hooks, or other settings to write.
             let pending = setup.addsHooks
                 ? AgentProblem(kind: .newHooks, label: "New hooks", value: "New hooks are available, such as file approvals")
-                : usageWanted && !setup.usageInstalled
-                ? AgentProblem(kind: .usage, label: "Usage limits", value: "Usage limits need Herdly to wrap your status line")
                 : AgentProblem(kind: .pendingSetup, label: "Setup", value: "Herdly's setup for this folder has changes to apply")
             extra.append(.problem(pending, configures: true))
-        } else if installed, working {
-            switch setup.usageStatus {
-            case .unavailable(let message), .conflict(let message): extra.append(.note(message))
-            case .off, .ready: break
-            }
+        } else if installed, working, let reason = usageUnavailable(setup) {
+            extra.append(.note(reason))
         }
         return assemble(.claude, installed: installed, restartAfterUpdate: restartAfterUpdate,
                         status: RowStatus(awaitingRestart: status.isAwaitingRestart, connected: status == .connected,
@@ -173,6 +168,20 @@ public struct AgentSettingsRow: Equatable, Sendable {
                         notInstalledNote: capabilities.installed ? nil : "Claude Code isn't installed",
                         problems: summary.problems, statusConfigures: offersConfigure, extra: extra,
                         setupCanRun: setup.planReady && capabilities.supported && status == .notConfigured)
+    }
+
+    static let usagePending = "Usage limits are unavailable until Herdly can add its status line"
+
+    /// Why an installed folder has no usage, in one quiet line, or nil when usage reads. A bridge the
+    /// preview could add but detection hasn't (the settings changed meanwhile, or a check failed)
+    /// waits for the next check; otherwise the installed usage's own reason, such as a status line
+    /// that failed the compatibility probe and was left as it is.
+    private static func usageUnavailable(_ setup: ClaudeFolderSetup) -> String? {
+        if !setup.usageInstalled, setup.plannedUsage == .ready { return usagePending }
+        switch setup.usageStatus {
+        case .unavailable(let message), .conflict(let message): return message
+        case .off, .ready: return nil
+        }
     }
 
     private static func checking(installed: Bool) -> AgentSettingsRow {
