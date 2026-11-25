@@ -229,3 +229,17 @@ private let processes: [String: [TerminalProcess]] = [
     #expect(RexPresentation.settingsRow(on: true, installed: true, scan: .unreadable(.socketUntrusted), inUse: false).problems
         == [.untrustedSocket])
 }
+
+@Test func aRexSocketLeftBehindByAServerThatQuitIsNotARunningRex() {
+    #expect(!RexSocket.running(.trusted) { .refused })
+    #expect(RexSocket.running(.trusted) { .listening })
+    // Any other connect failure does not show the server is gone, so the read still reports it.
+    #expect(RexSocket.running(.trusted) { .failed })
+}
+
+@Test func aMissingRexSocketIsNotRunningAndAnUntrustedOneIsNeverConnectedTo() {
+    var connected = false
+    #expect(!RexSocket.running(.missing) { connected = true; return .listening })
+    #expect(RexSocket.running(.untrusted) { connected = true; return .refused })
+    #expect(!connected)
+}

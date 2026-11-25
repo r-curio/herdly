@@ -363,6 +363,30 @@ public enum RexSocketState: Equatable, Sendable {
     case untrusted
 }
 
+/// What a connect to Rex's server socket found.
+public enum RexSocketConnect: Equatable, Sendable {
+    /// Something accepted, or the connect was still pending.
+    case listening
+    /// Nothing listens there (`ECONNREFUSED`) or the socket vanished first (`ENOENT`).
+    case refused
+    /// Any other failure; it does not show that the server is gone.
+    case failed
+}
+
+extension RexSocket {
+    /// Whether Rex's server is up. A socket file that refuses connections is one a server left behind
+    /// when it quit: Rex isn't running, and nothing there can hold a session. Any other connect failure,
+    /// and an untrusted socket, still count as running, so the read reports them rather than hiding a
+    /// problem.
+    public static func running(_ state: RexSocketState, connect: () -> RexSocketConnect) -> Bool {
+        switch state {
+        case .missing: false
+        case .untrusted: true
+        case .trusted: connect() != .refused
+        }
+    }
+}
+
 /// One Rex inventory read.
 public enum RexRead: Equatable, Sendable {
     /// No Rex server socket: Rex holds nothing.
