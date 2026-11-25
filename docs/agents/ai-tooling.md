@@ -1,17 +1,17 @@
 # Local AI tooling for Herdly
 
-This is a personal development workspace. Its local skills and tools are part of the working setup; agents should use them when they fit the task. AI-native development here means explicit product contracts, scoped tasks, reproducible checks, and durable evidence another session can pick up.
+This describes the maintainer's development setup. Its local skills and tools are part of the working setup; agents should use them when they fit the task. AI-native development here means explicit product contracts, scoped tasks, reproducible checks, and durable evidence another session can pick up.
 
 ## Local setup
 
 | Location/tool | Purpose |
 | --- | --- |
-| `/Users/dev/code/Herdly` | Primary checkout; verify the current branch and dirty state. |
+| The primary checkout | Verify the current branch and dirty state. |
 | `.agents/skills/` inside the checkout | Project-specific skills; prefer these variants for native SwiftUI and GitHub workflows. |
-| `/Users/dev/.agents/skills/` | Additional personal engineering skills. |
-| `/Users/dev/.codex/skills/` | Personal Codex skills and system skills. |
-| `/Users/dev/.codex/plugins/cache/` | Installed plugin bundles; use the active skill catalog to resolve versioned paths. |
-| `/Users/dev/.codex/memories/` | Prior context when exposed by the session. Verify drift-prone facts and follow the session's memory read/write rules. |
+| `~/.agents/skills/` | Additional personal engineering skills. |
+| `~/.codex/skills/` | Personal Codex skills and system skills. |
+| `~/.codex/plugins/cache/` | Installed plugin bundles; use the active skill catalog to resolve versioned paths. |
+| `~/.codex/memories/` | Prior context when exposed by the session. Verify drift-prone facts and follow the session's memory read/write rules. |
 | `/opt/homebrew/bin/gh` | GitHub CLI for `r-curio/herdly`; check authentication when needed. |
 | `/usr/bin/swift`, `/usr/bin/python3` | Swift package development and standard-library probe/lab scripts. |
 

@@ -8,7 +8,7 @@ Env: HERDLY_LAB_PROJECT (trusted lab dir), HERDLY_HOOK (release HerdlyHook path)
 import os, pty, sys, time, select, fcntl, termios, struct, signal, subprocess, json, re, shutil, shlex, uuid
 mode, marker, wait_s = sys.argv[1], sys.argv[2], float(sys.argv[3])
 S = os.path.dirname(os.path.abspath(__file__))
-PROJECT = os.environ.get("HERDLY_LAB_PROJECT", "/Users/dev/code/Herdly/output/desktop-hook-lab")
+PROJECT = os.environ.get("HERDLY_LAB_PROJECT", os.path.abspath(os.path.join(S, "..", "..", "output", "desktop-hook-lab")))
 HOOK = os.environ.get("HERDLY_HOOK", os.path.abspath(os.path.join(S, "..", "..", "output", "Herdly.app", "Contents", "Helpers", "HerdlyHook")))
 events = os.path.join(S, "events-" + mode); os.makedirs(events, exist_ok=True)
 hooks_path = os.path.join(PROJECT, ".codex", "hooks.json")
