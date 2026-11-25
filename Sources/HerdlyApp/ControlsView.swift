@@ -206,28 +206,41 @@ private struct ControlsDetail: View {
         case .agents: AgentControls(model: model)
         case .terminals: TerminalControls(model: model)
         case .notifications: NotificationControls(model: model)
-        case .about: AboutControls(sprite: model.appearance.sprite, quit: model.quit)
+        case .about: AboutControls(quit: model.quit, sendFeedback: model.showFeedback)
         }
     }
 }
 
 /// A pane: its title row sits in the window's title bar beside the traffic lights, with an optional
-/// control at its trailing edge, and the grouped sections scroll beneath it.
-private struct ControlsPage<Accessory: View, Content: View>: View {
+/// control at its trailing edge, and the grouped sections scroll beneath it. An optional footer stays
+/// pinned below the scrolling sections.
+private struct ControlsPage<Accessory: View, Content: View, Footer: View>: View {
     let section: ControlSection
     let accessory: Accessory
     let content: Content
+    let footer: Footer
 
-    init(section: ControlSection, @ViewBuilder content: () -> Content) where Accessory == EmptyView {
+    init(section: ControlSection, @ViewBuilder content: () -> Content) where Accessory == EmptyView, Footer == EmptyView {
         self.section = section
         self.accessory = EmptyView()
         self.content = content()
+        self.footer = EmptyView()
     }
 
-    init(section: ControlSection, @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content) {
+    init(section: ControlSection, @ViewBuilder accessory: () -> Accessory, @ViewBuilder content: () -> Content)
+    where Footer == EmptyView {
         self.section = section
         self.accessory = accessory()
         self.content = content()
+        self.footer = EmptyView()
+    }
+
+    init(section: ControlSection, @ViewBuilder content: () -> Content, @ViewBuilder footer: () -> Footer)
+    where Accessory == EmptyView {
+        self.section = section
+        self.accessory = EmptyView()
+        self.content = content()
+        self.footer = footer()
     }
 
     var body: some View {
@@ -255,6 +268,7 @@ private struct ControlsPage<Accessory: View, Content: View>: View {
             // Scrolled content stops at the title row. Without this, on macOS 26 it shows through
             // behind the title and the window buttons.
             .clipped()
+            footer
         }
         .ignoresSafeArea(edges: .top)
         .background(SettingsStyle.pageBackground)
@@ -1320,44 +1334,210 @@ private struct SoundTile: View {
     }
 }
 
+/// The About pane (Paper "About redesign (2026-11-25)", AB1–AB5, #483): the app icon, wordmark and
+/// tagline; the copyable version pill; Send Feedback; everything Herdly works with; and a footer
+/// pinned to the bottom holding Quit Herdly.
 private struct AboutControls: View {
-    let sprite: SpriteKind
     let quit: () -> Void
-    private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development" }
+    let sendFeedback: () -> Void
+    private let version = AboutVersion(infoDictionary: Bundle.main.infoDictionary)
 
     var body: some View {
         ControlsPage(section: .about) {
-            VStack(spacing: 6) {
-                Sprite(kind: sprite, working: false, reduceMotion: true)
-                    .scaleEffect(4)
-                    .frame(width: 84, height: 84)
-                    .background(.black, in: .rect(cornerRadius: 20, style: .continuous))
-                    .accessibilityHidden(true)
-                Text("Herdly").font(.title2.bold()).padding(.top, 10)
-                Text("Version \(version)").font(.callout).foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                VStack(spacing: 14) {
+                    Image(nsImage: NSApplication.shared.applicationIconImage)
+                        .resizable()
+                        .frame(width: 136, height: 136)
+                    HerdlyWordmark()
+                        .fill(.primary)
+                        .frame(width: 128, height: 46)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Herdly")
+                .accessibilityAddTraits(.isImage)
                 Text("One notch for every local agent session: what's working, what needs you, and a way back to it.")
-                    .multilineTextAlignment(.center).foregroundStyle(.secondary).frame(maxWidth: 340)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .frame(maxWidth: 330)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 8)
+                AboutVersionPill(version: version)
+                    .padding(.top, 18)
+                Button("Send Feedback", action: sendFeedback)
+                    .buttonStyle(.link)
+                    .font(.system(size: 13))
+                    .accessibilityHint("Opens a form to send a note to the Herdly team.")
+                    .padding(.top, 16)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
+            .padding(.top, 16)
 
             SettingsHeader("Works with")
             SettingsCard {
-                SettingsRow(title: "Agents", detail: nil) {
-                    Text("Codex desktop · Codex CLI · Claude Code").foregroundStyle(.secondary)
-                }
+                AboutTagRow(title: "Agents", tags: AboutWorksWith.agents)
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Terminals", detail: nil) {
-                    Text("Ghostty · herdr").foregroundStyle(.secondary)
-                }
+                AboutTagRow(title: "Terminals", tags: AboutWorksWith.terminals)
+                Divider().padding(.horizontal, SettingsStyle.rowInset)
+                AboutTagRow(title: "Multiplexers", tags: AboutWorksWith.multiplexers)
             }
-            HStack {
-                Spacer()
+        } footer: {
+            HStack(spacing: 16) {
+                Text("Made for people running more agents than tabs.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.tertiary)
+                Spacer(minLength: 0)
                 Button("Quit Herdly", action: quit)
                     .accessibilityHint("Stops Herdly and closes its menu-bar companion.")
-                Spacer()
             }
+            .padding(.horizontal, SettingsStyle.rowInset)
+            .frame(maxWidth: 620)
+            .padding(.horizontal, 20)
             .padding(.top, 8)
+            .padding(.bottom, 20)
+        }
+    }
+}
+
+/// The version in a capsule: "0.1.0" with " (build N)" dimmed, then a copy glyph. A click copies
+/// "0.1.0 (N)" and the pill reads "Copied" for 1.5 s, announced to VoiceOver.
+private struct AboutVersionPill: View {
+    let version: AboutVersion
+    @State private var copies = 0
+    @State private var copied = false
+
+    var body: some View {
+        Button(action: copy) {
+            HStack(spacing: 8) {
+                if copied {
+                    Text("Copied").foregroundStyle(.primary)
+                } else {
+                    HStack(spacing: 0) {
+                        Text(version.primaryText).foregroundStyle(.primary)
+                        if let build = version.buildText { Text(build).foregroundStyle(.tertiary) }
+                    }
+                }
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .font(.system(size: 12, design: .monospaced))
+            .lineLimit(1)
+            .padding(.vertical, 5)
+            .padding(.leading, 12)
+            .padding(.trailing, 8)
+            .background(SettingsStyle.sectionFill, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressFeedback())
+        .help("Copy version")
+        .accessibilityLabel(copied ? "Copied" : version.accessibilityLabel)
+        .accessibilityHint("Copies the version to the clipboard.")
+        // Restarts on every click, so the last click keeps "Copied" up for its full 1.5 s.
+        .task(id: copies) {
+            guard copies > 0 else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            copied = false
+        }
+    }
+
+    private func copy() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(version.copyText, forType: .string)
+        copied = true
+        copies += 1
+        if NSWorkspace.shared.isVoiceOverEnabled {
+            NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
+                                 userInfo: [.announcement: "Copied \(version.copyText)",
+                                            .priority: NSAccessibilityPriorityLevel.high.rawValue])
+        }
+    }
+}
+
+/// A Works with row: the label in a fixed 92pt column, then its values as tags, right-aligned and
+/// wrapping. The tags are not interactive.
+private struct AboutTagRow: View {
+    let title: String
+    let tags: [String]
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            Text(title).frame(width: 92, alignment: .leading)
+            TrailingFlow(spacing: 6) {
+                ForEach(tags, id: \.self) { tag in
+                    Text(tag)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(.quaternary, in: .rect(cornerRadius: 7, style: .continuous))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(.horizontal, SettingsStyle.rowInset)
+        .padding(.vertical, 8)
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(tags.joined(separator: ", "))
+    }
+}
+
+/// Lays its children out in rows that wrap to the proposed width, each row flush right.
+private struct TrailingFlow: Layout {
+    var spacing: CGFloat
+
+    private struct Row {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func rows(width maxWidth: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let added = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            if !row.indices.isEmpty && added > maxWidth {
+                rows.append(row)
+                row = Row()
+                row.width = size.width
+            } else {
+                row.width = added
+            }
+            row.indices.append(index)
+            row.height = max(row.height, size.height)
+        }
+        if !row.indices.isEmpty { rows.append(row) }
+        return rows
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let rows = rows(width: proposal.width ?? .infinity, subviews: subviews)
+        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, rows.count - 1))
+        return CGSize(width: rows.map(\.width).max() ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(width: bounds.width, subviews: subviews) {
+            var x = bounds.maxX - row.width
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2),
+                                      proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
         }
     }
 }
