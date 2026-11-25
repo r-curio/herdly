@@ -19,22 +19,17 @@ private func claudeSnapshot(_ config: URL, support: URL) -> ClaudeSetupDetection
 }
 
 private func claudeRow(_ snapshot: ClaudeSetupDetection.Snapshot) -> AgentSettingsRow {
-    let plan = snapshot.plan.flatMap { plan -> ClaudeSetupPlan? in
-        if case .ready = plan.status { return plan }
-        return nil
-    }
-    return AgentSettingsRow.claude(checked: true, snapshot.capabilities, status: snapshot.status,
-                                   statusText: ClaudeSetupModel.statusText(snapshot.status), installed: snapshot.installed,
-                                   planReady: plan != nil, requiresConfigure: plan?.requiresConfigure ?? false,
-                                   addsHooks: plan?.addsHooks ?? false, plannedUsage: plan?.usageStatus,
-                                   usageInstalled: snapshot.usageInstalled, usageStatus: snapshot.usageStatus,
-                                   restartAfterUpdate: false)
+    AgentSettingsRow.claude(snapshot.capabilities, status: snapshot.status,
+                            statusText: ClaudeSetupModel.statusText(snapshot.status), installed: snapshot.installed,
+                            setup: ClaudeFolderSetup(plan: snapshot.plan, usageInstalled: snapshot.usageInstalled,
+                                                     usageStatus: snapshot.usageStatus),
+                            restartAfterUpdate: false)
 }
 
 @Test func theSwitchRunsConfigureWhenTurnedOnAndUndoWhenTurnedOff() {
-    let off = AgentSettingsRow(badge: .off, hooksInstalled: false, switchEnabled: true, lines: [])
-    let on = AgentSettingsRow(badge: .ready, hooksInstalled: true, switchEnabled: true, lines: [])
-    let blocked = AgentSettingsRow(badge: .off, hooksInstalled: false, switchEnabled: false, lines: [.note("Codex isn't installed")])
+    let off = AgentSettingsRow(badge: .off, hooksInstalled: false, canTurnOn: true, lines: [])
+    let on = AgentSettingsRow(badge: .ready, hooksInstalled: true, canTurnOn: false, lines: [])
+    let blocked = AgentSettingsRow(badge: .off, hooksInstalled: false, canTurnOn: false, lines: [.note("Codex isn't installed")])
     #expect(AgentSwitchChange.change(to: true, off) == .configure)
     #expect(AgentSwitchChange.change(to: false, on) == .undo)
     #expect(AgentSwitchChange.change(to: true, on) == nil)
@@ -61,7 +56,7 @@ private func claudeRow(_ snapshot: ClaudeSetupDetection.Snapshot) -> AgentSettin
         let snapshot = CodexSetupDetection.setupSnapshot(roots: roots, capabilities: capabilities)
         let ready: Bool = if let plan = snapshot.plan, case .ready = plan.status { true } else { false }
         return AgentSettingsRow.codex(capabilities, status: snapshot.status, statusText: "", installed: snapshot.installed,
-                                      planReady: ready, restartAfterUpdate: false)
+                                      planReady: ready, ghosttyAutomationVerified: true, restartAfterUpdate: false)
     }
     func configure() throws {
         let snapshot = CodexSetupDetection.setupSnapshot(roots: roots, capabilities: capabilities)
@@ -74,7 +69,8 @@ private func claudeRow(_ snapshot: ClaudeSetupDetection.Snapshot) -> AgentSettin
     try configure()
     #expect(row().hooksInstalled)
     #expect(row().badge == .restartRequired)
-    #expect(row().lines == [.restart("Quit and reopen Codex, or run `codex` in a new terminal tab, to finish setup")])
+    #expect(row().lines == [.restart("Quit and reopen Codex, or run `codex` in a new terminal tab, to finish setup"),
+                            .note("If Codex asks whether to trust Herdly's hooks, allow them")])
 
     #expect(AgentSwitchChange.change(to: false, row()) == .undo)
     #expect(try installer.undo(roots: roots) == .notConfigured)
@@ -82,7 +78,7 @@ private func claudeRow(_ snapshot: ClaudeSetupDetection.Snapshot) -> AgentSettin
     #expect(try Data(contentsOf: roots.hooksURL) == hooks)
     #expect(!FileManager.default.fileExists(atPath: roots.helperURL.path))
     #expect(!FileManager.default.fileExists(atPath: roots.stateURL.path))
-    #expect(row() == AgentSettingsRow(badge: .off, hooksInstalled: false, switchEnabled: true, lines: []))
+    #expect(row() == AgentSettingsRow(badge: .off, hooksInstalled: false, canTurnOn: true, lines: []))
 
     #expect(AgentSwitchChange.change(to: true, row()) == .configure)
     try configure()
@@ -107,7 +103,7 @@ private func claudeRow(_ snapshot: ClaudeSetupDetection.Snapshot) -> AgentSettin
     }
 
     let before = claudeRow(claudeSnapshot(config, support: support))
-    #expect(before == AgentSettingsRow(badge: .off, hooksInstalled: false, switchEnabled: true, lines: []))
+    #expect(before == AgentSettingsRow(badge: .off, hooksInstalled: false, canTurnOn: true, lines: []))
     #expect(AgentSwitchChange.change(to: true, before) == .configure)
     try configure()
     let installedRow = claudeRow(claudeSnapshot(config, support: support))

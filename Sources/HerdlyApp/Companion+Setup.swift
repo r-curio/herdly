@@ -207,22 +207,6 @@ extension Companion {
         }
     }
 
-    var setupSurfaceStatusText: [String] {
-        func text(_ name: String, installed: Bool, supported: Bool, version: String?, minimum: String) -> String {
-            guard installed else { return "\(name): unavailable" }
-            guard supported else { return "\(name) \(version ?? "version unknown"): unsupported; requires ≥ \(minimum)" }
-            return "\(name) \(version ?? "version unknown"): available"
-        }
-        return [
-            text("Codex CLI", installed: setupCapabilities.cliInstalled, supported: setupCapabilities.cli,
-                 version: setupCapabilities.cliVersion, minimum: CodexSetupRequirements.minimumCLIVersion),
-            text("Codex desktop", installed: setupCapabilities.desktopInstalled, supported: setupCapabilities.desktop,
-                 version: setupCapabilities.desktopVersion, minimum: CodexSetupRequirements.minimumDesktopVersion),
-            text("Ghostty", installed: setupCapabilities.ghosttyInstalled, supported: setupCapabilities.ghostty,
-                 version: setupCapabilities.ghosttyVersion, minimum: CodexSetupRequirements.minimumGhosttyVersion)
-        ]
-    }
-
     var canUndoSetup: Bool {
         switch setupStatus {
         case .connected, .configuredAwaitingRestart, .permissionRequired: return true

@@ -11,6 +11,8 @@ public struct AgentProblem: Equatable, Hashable, Sendable, Identifiable {
         case status
         case newHooks
         case usage
+        /// Settings Configure would still write on a working Claude folder, other than new hooks or usage.
+        case pendingSetup
     }
 
     public let kind: Kind

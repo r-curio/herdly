@@ -53,6 +53,13 @@ enum SettingsStyle {
                                                   light: NSColor(srgbRed: 0.14, green: 0.54, blue: 0.24, alpha: 1)))
     static let attentionText = Color(nsColor: dynamic(dark: NSColor(srgbRed: 1, green: 0.62, blue: 0.04, alpha: 1),
                                                       light: NSColor(srgbRed: 0.79, green: 0.2, blue: 0, alpha: 1)))
+    /// Status pill fills: a 12% green or orange tint, or a 6% neutral one for Off and Not in use.
+    static let readyFill = Color.green.opacity(0.12)
+    static let attentionFill = Color.orange.opacity(0.12)
+    static let quietFill = Color.primary.opacity(0.06)
+    /// The symbol tiles agents fall back to without their app's icon (DESIGN.md, Agents pane).
+    static let codexTile = Color(white: 0.11)
+    static let claudeTile = Color(red: 0.851, green: 0.467, blue: 0.341)
 }
 
 /// Settings-window feedback: every click answers within about half a second with a smooth ease, and
@@ -465,355 +472,12 @@ private struct AgentControls: View {
         }
         .sheet(item: $preview) { SetupPreviewSheet(preview: $0) }
     }
-
-    /// A surface's version as the row's value: the version when it is supported, otherwise why not.
-    static func version(installed: Bool, supported: Bool, version: String?, minimum: String) -> String {
-        guard installed else { return "Not installed" }
-        guard supported else { return "\(version ?? "Unknown version") · needs \(minimum) or later" }
-        return version ?? "Installed"
-    }
 }
 
-/// The Codex row: the switch runs Configure Codex or Undo Setup at once (A3).
-private struct CodexAgentRow: View {
-    @ObservedObject var model: Companion
-    @Binding var sheet: SetupPreview?
-
-    private var readyPlan: CodexSetupPlan? {
-        guard let plan = model.setupPlan, case .ready = plan.status else { return nil }
-        return plan
-    }
-
-    /// `setupStatus` is only a default until the first detection lands, so the row reads Checking until then.
-    private var row: AgentSettingsRow {
-        AgentSettingsRow.codex(model.setupCapabilities, status: model.setupChecked ? model.setupStatus : nil,
-                               statusText: model.setupStatusText, installed: model.setupInstalled,
-                               planReady: readyPlan != nil, restartAfterUpdate: model.agentUpdates.restartRequired(.codex))
-    }
-
-    var body: some View {
-        let row = row
-        let capabilities = model.setupCapabilities
-        AgentRowView(name: "Codex", agent: .codex, row: row, message: model.setupMessage,
-                     lineActions: AgentLineActions(updates: model.agentUpdates,
-                                                   action: { AgentRowAction.codex($0, capabilities) },
-                                                   perform: model.performAgentRowAction,
-                                                   configure: { model.configureCodex() }),
-                     setSwitch: { on in
-                         switch AgentSwitchChange.change(to: on, row) {
-                         case .configure?: model.configureCodex()
-                         case .undo?: model.undoCodexSetup()
-                         case nil: nil
-                         }
-                     }) {
-            Button("Review Again", action: model.refreshSetup)
-            if let plan = readyPlan, plan.requiresConfigure {
-                Button("Show Setup Changes…") {
-                    let hooks = String(data: plan.hooksChange, encoding: .utf8) ?? "(unreadable)"
-                    sheet = SetupPreview(title: "Codex setup changes",
-                                         text: "config.toml\n\(plan.configChange)\n\nhooks.json\n\(hooks)\n\nhelper command\n\(plan.helperCommand)")
-                }
-            }
-            Button("Show Diagnostics…") {
-                sheet = SetupPreview(title: "Codex diagnostics", text: diagnostics)
-            }
-            .disabled(!model.setupChecked)
-        }
-    }
-
-    /// Versions moved here from the row (A1): each surface's version and support, then the setup state.
-    private var diagnostics: String {
-        (model.setupSurfaceStatusText + [
-            "Herdly hooks: \(model.setupInstalled ? "installed" : "not installed")",
-            "Status: \(model.setupStatusText)"
-        ]).joined(separator: "\n")
-    }
-}
-
-/// A row per Claude folder: the default one named "Claude Code", each added one "Claude Code · <path>" (A7).
-private struct ClaudeAgentRows: View {
-    @ObservedObject var setup: ClaudeSetupModel
-    @Binding var sheet: SetupPreview?
-    let updates: AgentUpdates
-    let perform: (AgentUpdateTarget, AgentRowAction) -> Void
-
-    var body: some View {
-        ForEach(setup.roots) { root in
-            let isDefault = root.id == setup.roots.first?.id
-            Divider().padding(.horizontal, SettingsStyle.rowInset)
-            folderRow(root, isDefault: isDefault)
-        }
-    }
-
-    private func readyPlan(_ root: ClaudeSetupModel.Root) -> ClaudeSetupPlan? {
-        guard let plan = root.plan, case .ready = plan.status else { return nil }
-        return plan
-    }
-
-    private func name(_ root: ClaudeSetupModel.Root, isDefault: Bool) -> String {
-        isDefault ? "Claude Code" : "Claude Code · \(root.displayPath)"
-    }
-
-    private func row(_ root: ClaudeSetupModel.Root) -> AgentSettingsRow {
-        let plan = readyPlan(root)
-        return AgentSettingsRow.claude(checked: setup.checked, root.capabilities, status: root.status,
-                                       statusText: ClaudeSetupModel.statusText(root.status), installed: root.installed,
-                                       planReady: plan != nil, requiresConfigure: plan?.requiresConfigure ?? false,
-                                       addsHooks: plan?.addsHooks ?? false, plannedUsage: plan?.usageStatus,
-                                       usageInstalled: root.usageInstalled, usageStatus: root.usageStatus,
-                                       restartAfterUpdate: updates.restartRequired(.claude))
-    }
-
-    private func folderRow(_ root: ClaudeSetupModel.Root, isDefault: Bool) -> some View {
-        let row = row(root)
-        let name = name(root, isDefault: isDefault)
-        let capabilities = root.capabilities
-        // The model keeps one last-result message for every folder; it shows under the default row.
-        return AgentRowView(name: name, agent: .claude, row: row, message: isDefault ? setup.message : "",
-                            lineActions: AgentLineActions(updates: updates,
-                                                          action: { AgentRowAction.claude($0, capabilities) },
-                                                          perform: perform,
-                                                          configure: { setup.configure(root) }),
-                            setSwitch: { on in
-                                switch AgentSwitchChange.change(to: on, row) {
-                                case .configure?: setup.configure(root)
-                                case .undo?: setup.undo(root)
-                                case nil: nil
-                                }
-                            }) {
-            if let plan = readyPlan(root) {
-                Button("Review Again", action: setup.refresh)
-                    .accessibilityLabel("Review Claude setup for \(root.displayPath)")
-                Button("Show Setup Changes…") {
-                    sheet = SetupPreview(title: "Claude Code setup changes for \(root.displayPath)",
-                                         text: previewText(root, plan: plan))
-                }
-                .accessibilityLabel("Show Claude setup changes for \(root.displayPath)")
-            }
-            Button("Show Diagnostics…") {
-                sheet = SetupPreview(title: "\(name) diagnostics", text: diagnostics(root))
-            }
-            .disabled(!setup.checked)
-            if isDefault {
-                Button("Add Another Claude Folder…", action: setup.addAlternateRoot)
-            } else {
-                Divider()
-                Button("Remove Folder", role: .destructive) { setup.removeAlternateRoot(root) }
-                    .accessibilityLabel("Remove Claude folder \(root.displayPath)")
-            }
-        }
-    }
-
-    /// Versions moved here from the row (A1), with the folder's setup, usage and session state.
-    private func diagnostics(_ root: ClaudeSetupModel.Root) -> String {
-        let usage: String = switch AgentSummary.claudeUsage(root.usage, status: root.usageStatus,
-                                                            now: Date().timeIntervalSince1970) {
-        case .reading(let text): text
-        case .unavailable: "no current window"
-        case .problem(let reason): reason
-        }
-        return [
-            "Claude Code \(root.capabilities.version ?? "version unknown")"
-                + (root.capabilities.installed ? (root.capabilities.supported ? ": supported" : ": unsupported; requires ≥ \(ClaudeSetupRequirements.minimumCLIVersion)") : ": not installed"),
-            "Folder: \(root.displayPath)",
-            "Herdly hooks: \(root.installed ? "installed" : "not installed")",
-            "Status: \(ClaudeSetupModel.statusText(root.status))",
-            "Usage limits: \(root.usageInstalled ? usage : "not installed")",
-            "Active sessions: \(root.activeSessionStatus.displayText)"
-        ].joined(separator: "\n")
-    }
-
-    private func previewText(_ root: ClaudeSetupModel.Root, plan: ClaudeSetupPlan) -> String {
-        let hookFields = plan.ownedHooks.map { hook in
-            "  hooks.\(hook.event) matcher=\(hook.matcher ?? "<any>") command=\(hook.command) timeout=\(ClaudeSetupRequirements.hookTimeout)"
-        }.joined(separator: "\n")
-        let environmentFields = !plan.titleSettingRequired
-            ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey): not needed (Claude binds by tty here); left as it is"
-            : plan.ownedEnvironment.isEmpty
-            ? "  env.\(ClaudeSetupRequirements.titleDisableEnvironmentKey)=\(ClaudeSetupRequirements.titleDisableEnvironmentValue) (already present; preserved)"
-            : plan.ownedEnvironment.map { key, value in
-                "  env.\(key)=\(value) (Herdly adds and owns)"
-            }.sorted().joined(separator: "\n")
-        let usage = switch plan.usageStatus {
-        case .ready: root.usageInstalled ? "installed" : "wraps the existing status line"
-        case .unavailable(let message), .conflict(let message): "unavailable; status line left as it is (\(message))"
-        case .off: "off"
-        }
-        return [
-            "settings.json: \(root.settingsPath)", hookFields, environmentFields,
-            "owned helper: \(root.helperPath)",
-            "owned event records: \(root.eventsPath)",
-            "owned install record: \(root.statePath)",
-            "owned backups: \(root.backupsPath)",
-            "SessionStart and SessionEnd title: JSON terminalSequence with the full session ID / reset",
-            "effective scope: selected user root; arbitrary future project files or command-line --settings may override it (launch context unavailable)",
-            "usage limits (always on): \(usage)"
-        ].joined(separator: "\n")
-    }
-}
-
-/// What a row's lines need for their one trailing button: each version line's update state, the
-/// button a problem gets and what pressing it does, and Configure for a line that offers it.
-private struct AgentLineActions {
-    let updates: AgentUpdates
-    let action: (AgentProblem.Kind) -> AgentRowAction
-    let perform: (AgentUpdateTarget, AgentRowAction) -> Void
-    let configure: () -> Void
-}
-
-/// One agent's row, metric for metric a `TerminalHostRow` with the app's icon first: icon, name, status
-/// badge, switch and ⋯, then its lines indented to the name with no divider between them.
-/// `setSwitch` returns the setup task it started, so the switch can show the new position until it ends.
-private struct AgentRowView<Actions: View>: View {
-    let name: String
-    let agent: AgentSource
-    let row: AgentSettingsRow
-    let message: String
-    let lineActions: AgentLineActions
-    let setSwitch: (Bool) -> Task<Void, Never>?
-    @ViewBuilder let actions: Actions
-    /// The position the user chose while its Configure or Undo runs.
-    @State private var pending: Bool?
-
-    private static var iconSize: CGFloat { 22 }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                AgentAppIcon(agent: agent).frame(width: Self.iconSize, height: Self.iconSize)
-                HStack(spacing: 10) {
-                    Text(name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
-                    Spacer(minLength: 8)
-                    AgentRowBadgeView(badge: row.badge)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(row.accessibilityLabel(name: name))
-                HostSwitch(label: "Herdly hooks for \(name)", isOn: Binding(
-                    get: { pending ?? row.hooksInstalled },
-                    set: { on in
-                        guard let task = setSwitch(on) else { return }
-                        pending = on
-                        Task { @MainActor in
-                            await task.value
-                            pending = nil
-                        }
-                    }))
-                    .disabled(!row.switchEnabled || pending != nil)
-                AgentActionsMenu(label: "\(name) actions") { actions }
-            }
-            .padding(.horizontal, SettingsStyle.rowInset)
-            .frame(minHeight: 38)
-            if !row.lines.isEmpty || !message.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(row.lines, id: \.self) { AgentLineView(line: $0, actions: lineActions) }
-                    if !message.isEmpty {
-                        Text(message)
-                            .font(.system(size: 12)).foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .padding(.leading, SettingsStyle.rowInset + Self.iconSize + 10)
-                .padding(.trailing, SettingsStyle.rowInset)
-                .padding(.bottom, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-}
-
-/// A line under an agent's row: the restart line in plain text with its command in monospace, a
-/// problem with its dot and any Update / Open Codex / Configure button, or a grey note.
-private struct AgentLineView: View {
-    let line: AgentRowLine
-    let actions: AgentLineActions
-
-    var body: some View {
-        switch line {
-        case .restart(let text):
-            Text((try? AttributedString(markdown: text)) ?? AttributedString(text))
-                .font(.system(size: 12))
-                .fixedSize(horizontal: false, vertical: true)
-        case .note(let text):
-            CardProblemLine(text, dot: .gray)
-        case let .problem(problem, configures):
-            if let target = AgentUpdateTarget(problem.kind) {
-                let action = actions.action(problem.kind)
-                let update = actions.updates.row(target, value: problem.value, action: action)
-                CardProblemLine(AgentRowLine.text(problem, value: update.text), dot: dot(update.tone)) {
-                    if let button = update.button {
-                        Button(button.title) { actions.perform(target, action) }
-                            .buttonStyle(.bordered).controlSize(.small)
-                            .disabled(!button.enabled)
-                            .accessibilityLabel(button.accessibilityLabel)
-                    }
-                }
-            } else {
-                CardProblemLine(AgentRowLine.text(problem, value: problem.value)) {
-                    if configures {
-                        Button("Configure", action: actions.configure).controlSize(.small)
-                    }
-                }
-            }
-        }
-    }
-
-    private func dot(_ tone: AgentUpdateRow.Tone) -> Color {
-        switch tone {
-        case .attention: .orange
-        case .progress: .gray
-        case .failure: .red
-        }
-    }
-}
-
-/// The badge pill in Terminals' styling (A6); a small spinner until the first detection lands.
-private struct AgentRowBadgeView: View {
-    let badge: AgentRowBadge?
-
-    var body: some View {
-        if let badge {
-            let (foreground, fill): (Color, Color) = switch badge {
-            case .ready: (SettingsStyle.readyText, Color.green.opacity(0.12))
-            case .restartRequired, .needsAttention: (SettingsStyle.attentionText, Color.orange.opacity(0.12))
-            case .off: (.secondary, Color.primary.opacity(0.06))
-            }
-            StatusPill(title: badge.title, foreground: foreground, fill: fill)
-        } else {
-            ProgressView().controlSize(.small)
-        }
-    }
-}
-
-/// The app's own icon at 22pt with 5pt corners (A2), or the symbol tile the cards used before when the
-/// app isn't installed. Hidden from VoiceOver; the row's label names the agent.
-private struct AgentAppIcon: View {
-    let agent: AgentSource
-    @State private var icon: NSImage?
-
-    var body: some View {
-        Group {
-            if let icon {
-                Image(nsImage: icon).resizable().interpolation(.high)
-            } else {
-                let (symbol, tile): (String, Color) = agent == .codex
-                    ? ("terminal", Color(white: 0.11)) : ("sparkle", Color(red: 0.851, green: 0.467, blue: 0.341))
-                Image(systemName: symbol)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(tile)
-            }
-        }
-        .clipShape(.rect(cornerRadius: 5, style: .continuous))
-        .accessibilityHidden(true)
-        .task { icon = await AgentAppIcons.icon(for: agent) }
-    }
-}
 
 /// Text shown in a sheet from a ⋯ menu: exact, monospaced setup changes or diagnostics, or a plain
 /// explanation such as a terminal's How Open Works….
-private struct SetupPreview: Identifiable {
+struct SetupPreview: Identifiable {
     let title: String
     let text: String
     var monospaced = true
@@ -861,7 +525,7 @@ private struct AgentStatusBadge: View {
 }
 
 /// The 22pt borderless ⋯ button that opens an agent's or folder's setup actions.
-private struct AgentActionsMenu<Actions: View>: View {
+struct AgentActionsMenu<Actions: View>: View {
     let label: String
     @ViewBuilder let actions: Actions
 
@@ -1110,7 +774,7 @@ private extension Companion {
 }
 
 /// The host's switch as a mini switch; `label` is its VoiceOver name.
-private struct HostSwitch: View {
+struct HostSwitch: View {
     let label: String
     let isOn: Binding<Bool>
 
@@ -1145,15 +809,15 @@ private struct HostStatusBadge: View {
 
     private func fill(_ badge: HerdrReadinessBadge) -> Color {
         switch badge {
-        case .ready: Color.green.opacity(0.12)
-        case .needsAttention: Color.orange.opacity(0.12)
-        case .off, .notInUse: Color.primary.opacity(0.06)
+        case .ready: SettingsStyle.readyFill
+        case .needsAttention: SettingsStyle.attentionFill
+        case .off, .notInUse: SettingsStyle.quietFill
         }
     }
 }
 
 /// A status badge's tinted pill: 11pt medium text, 5pt continuous corners.
-private struct StatusPill: View {
+struct StatusPill: View {
     let title: String
     let foreground: Color
     let fill: Color
@@ -1170,7 +834,7 @@ private struct StatusPill: View {
 
 /// One problem under a row or in a card: 12pt text after a dot (orange unless given), with an
 /// optional fix at its trailing edge.
-private struct CardProblemLine<Fix: View>: View {
+struct CardProblemLine<Fix: View>: View {
     let text: String
     let dot: Color
     @ViewBuilder let fix: Fix
@@ -1215,7 +879,7 @@ private struct GhosttyHostRow: View {
                                                   access: model.ghosttyAccess,
                                                   permissionVerified: model.ghosttyPermissionVerified)
         TerminalHostRow(host: .ghostty,
-                        version: AgentControls.version(installed: capabilities.ghosttyInstalled,
+                        version: AgentDiagnostics.surfaceVersion(installed: capabilities.ghosttyInstalled,
                                                        supported: capabilities.ghostty,
                                                        version: capabilities.ghosttyVersion,
                                                        minimum: CodexSetupRequirements.minimumGhosttyVersion),

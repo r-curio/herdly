@@ -410,8 +410,8 @@ final class ClaudeSetupModel: ObservableObject {
         defaultRoot = home.appendingPathComponent(".claude", isDirectory: true)
         applicationSupport = home.appendingPathComponent("Library/Application Support/Herdly", isDirectory: true)
         alternatePaths = UserDefaults.standard.stringArray(forKey: "claudeConfigRoots") ?? []
-        // Usage limits were an opt-in before #481; they are always on now, so the old choice is dropped.
-        UserDefaults.standard.removeObject(forKey: "claudeUsageRoots")
+        // Usage limits were an opt-in ("claudeUsageRoots") before #481. They are always on now, so that
+        // choice is no longer read; it stays stored so an older Herdly still finds it after a downgrade.
         roots = [Root(url: defaultRoot,
                       capabilities: ClaudeCapabilities(installed: false, supported: false),
                       plan: nil, status: .unavailable("Checking Claude Code setup…"),
