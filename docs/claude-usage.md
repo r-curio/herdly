@@ -1,12 +1,27 @@
 # Claude usage
 
-Claude usage is an optional, per configuration root status line integration. It is off by default.
+Claude usage is a per configuration root status line integration, on for every root Herdly configures
+(#481, Paper "Agents tab like Terminals", A4). Earlier versions made it an opt-in; that choice is
+ignored. A root Herdly set up with it off gets the bridge on its own at the next setup check, with no
+Configure click: only while the root has Herdly's install record and a connected or restart-awaiting
+setup, the status line is still the one Herdly recorded, `settings.json` is unchanged since the
+check read it, and an existing command passes the compatibility probe. It changes only `statusLine`,
+backs up the settings as Configure does, writes atomically, and keeps the original status line in
+the install record, so Undo Setup restores it byte for byte. Otherwise nothing is written and usage
+reads unavailable (`ClaudeSetupInstaller.upgradeUsage`). A write that fails is rolled back and the
+folder's row says usage couldn't be added; if the rollback fails too, the row reads Needs attention
+with the reason, since the settings may be half-written. That failure is recorded in Herdly's own
+state for the root (`usage-rollback-incomplete` beside its install record, never in the Claude folder),
+so it survives later checks and Review Again, and no further automatic upgrade runs for that root until
+Configure or Undo Setup succeeds there, which clears it. Configure, Undo Setup, the helper refresh
+and this upgrade take turns on one queue (`ClaudeSetupWrites`), so a switch flipped mid-upgrade
+waits for it, and each re-reads the folder's files when its turn comes.
 Herdly does not scan credentials, merge roots, estimate usage, or substitute gateway spend limits for
 subscription usage.
 
 ## Bridge behavior
 
-When enabled, Herdly previews the selected root's existing `statusLine` command and runs a bounded
+When Herdly configures a root, it previews the selected root's existing `statusLine` command and runs a bounded
 compatibility probe before composing it. The probe exercises normal completion and cancellation. A
 command that does not exit within the probe bound, including one that leaves a descendant alive, is
 left unchanged. An incompatible, malformed, or policy-shadowed status line leaves the core Claude

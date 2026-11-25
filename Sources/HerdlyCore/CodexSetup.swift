@@ -145,6 +145,20 @@ public enum CodexConnectionStatus: Equatable, Sendable {
     case conflict(String)
 }
 
+extension CodexConnectionStatus {
+    /// Configured, with no new session yet to prove delivery.
+    public var isAwaitingRestart: Bool {
+        if case .configuredAwaitingRestart = self { return true }
+        return false
+    }
+
+    /// Partly installed; Configure Codex repairs it.
+    public var isRepair: Bool {
+        if case .repairRequired = self { return true }
+        return false
+    }
+}
+
 /// Codex runs a non-managed hook only after its exact definition is trusted. Trust is recorded in
 /// config.toml as `[hooks.state."<hooks.json path>:<event>:<group>:<handler>"] trusted_hash = "sha256:…"`,
 /// where the hash covers the normalized handler. This mirrors codex-rs (hooks/src/engine/discovery.rs
