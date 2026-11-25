@@ -4,11 +4,13 @@ Accepted with the user on 2026-10-11 ([issue #209](https://github.com/r-curio/he
 
 Amended 2026-10-13 ([issue #268](https://github.com/r-curio/herdly/issues/268), the user's decision, option A): a tab that shows a Codex session's title but runs no foreground `codex` is not a candidate. It neither binds nor blocks the real tab. The iTerm2 run for [#243](https://github.com/r-curio/herdly/issues/243) found a decoy tab making the real Codex tab unbound, which conflicted with MVP acceptance §3d H2 ("the decoy binds nothing"). The Codex uniqueness rule below reflects the amendment.
 
+Amended 2026-11-25 (the user's decision): an enabled host that can't be read no longer makes every session unavailable. A stale Rex socket made Rex unreadable, and every Claude session running in the Herdr app then read "Herdly can't read Rex". The Herdr app also showed Not in use, although it held every session. The user asked that a session in a terminal that reads fine work the same whatever another host does. The Inventory rule below reflects the amendment.
+
 The live proofs ([iTerm2](https://github.com/r-curio/herdly/issues/204), [Terminal.app](https://github.com/r-curio/herdly/issues/205), [WezTerm](https://github.com/r-curio/herdly/issues/206)) showed that every host lists each tab's tty. They also showed that a decoy can carry any title in every host and that WezTerm hides an OSC 2 title behind an earlier OSC 1 icon title. `ps -t <tty>` reported the foreground process group correctly every time, while iTerm2's `jobName` stayed stale for undisplayed tabs. A tab's tty is the one handle every host shares, and only the process running on it can change what runs there.
 
 ## Rules
 
-- **Inventory:** each enabled host contributes a fresh, complete inventory listing every tab's tty, title and pane count. Enabled hosts are those the user turned on in Herdly. A host that is not running counts as empty. If an enabled host is running but its inventory fails or permission is denied, every session that host could hold is unavailable, because that host cannot be ruled out. Hosts that are not enabled are never scanned and cannot hold a binding.
+- **Inventory:** each enabled host contributes a fresh, complete inventory listing every tab's tty, title and pane count. Enabled hosts are those the user turned on in Herdly. A host that is not running counts as empty. If an enabled host is running but its inventory fails or permission is denied (or it has not been read yet), it is unreadable. Amended 2026-11-25: an unreadable host does not stop a binding the readable hosts complete. A Claude session whose process tty one readable tab holds binds, because a tty is one terminal's. A Codex session whose title one readable, non-decoy tab carries, with exactly one foreground `codex`, binds too. A session no readable host shows stays unavailable as `hostUnreadable`, because the unreadable host may hold it. Each Open route, and the scan that decides whether a card offers Open, leaves a session to the route of the host its binding names. An unreadable host keeps only a session that is bound nowhere (`TerminalAppOpen.leavesToOtherRoute`'s `boundElsewhere`). Hosts that are not enabled are never scanned and cannot hold a binding.
 - **Codex CLI:** a live Codex session is bound to a tab when all of these hold:
   - the tab's title exactly equals the session's shortened identifier as rendered under ADR 0005;
   - `ps -t <tty>` shows exactly one foreground process named `codex`;
@@ -45,5 +47,9 @@ The live proofs ([iTerm2](https://github.com/r-curio/herdly/issues/204), [Termin
 ## Accepted gap
 
 Hosts that are not enabled are not scanned. A second Codex CLI resuming the same session in such a host could duplicate the title without Herdly seeing it, so the enabled tab would still bind. The foreground check still requires a real `codex` on the bound tab. Claude cannot be affected, because its binding follows the session's own process.
+
+The same holds since the 2026-11-25 amendment for an enabled host that can't be read. A second Codex CLI resuming the session there could duplicate the title unseen, and the readable tab would still bind. That tab must still run exactly one foreground `codex`. Claude is again unaffected.
+
+Ghostty's title-only question key (`TerminalKeyRelayCheck`) is unchanged by the amendment: it still sends no key while any other enabled host is unreadable, because a Ghostty tab without `tty` has no process check.
 
 The title remains a shortened identifier written by whatever process holds the terminal, not authentication.

@@ -211,8 +211,10 @@ extension Companion {
             let first = await Task.detached { TerminalTabReads.take(others: others, claudeTTYs: [], second: false) }.value
             let carries = first.rex.snapshot?.blocks.contains { $0.title == title } ?? false
             // A decoy block here leaves a session whose tab is in another host to that host's route (#268).
-            let holds = TerminalTabOpen.codexStays(in: .rex, carriesTitle: carries, binding: rexCodexBinding(session, reads: first))
-            if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: otherRouteOn, inventory: first.rex.inventory, holdsSession: holds) {
+            let binding = rexCodexBinding(session, reads: first)
+            let holds = TerminalTabOpen.codexStays(in: .rex, carriesTitle: carries, binding: binding)
+            if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: otherRouteOn, inventory: first.rex.inventory, holdsSession: holds,
+                                                  boundElsewhere: TerminalTabOpen.boundElsewhere(binding, than: .rex)) {
                 openingTask = false
                 otherwise()
                 return
@@ -281,7 +283,9 @@ extension Companion {
                 TerminalTabReads.take(others: others, claudeTTYs: Set([process.tty].compactMap { $0 }), second: false)
             }.value
             let holds = process.tty.map { tty in first.rex.snapshot?.blocks.contains { $0.tty == tty } ?? false } ?? false
-            if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: first.rex.inventory, holdsSession: holds) {
+            let elsewhere = TerminalTabOpen.boundElsewhere(rexClaudeBinding(identity, process: process, reads: first), than: .rex)
+            if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: first.rex.inventory, holdsSession: holds,
+                                                  boundElsewhere: elsewhere) {
                 openingTask = false
                 otherwise()
                 return
