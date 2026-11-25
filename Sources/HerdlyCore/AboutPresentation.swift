@@ -1,6 +1,6 @@
 import Foundation
 
-// Settings › About (Paper "Steer Settings" › "About redesign (2026-11-25)", AB1–AB5, #483).
+// Settings › About (Paper "Herdly Settings" › "About redesign (2026-11-25)", AB1–AB5, #483).
 
 /// The version pill: the bundle's marketing version with its build dimmed, and what a click copies.
 public struct AboutVersion: Equatable, Sendable {
@@ -38,7 +38,7 @@ public struct AboutVersion: Equatable, Sendable {
 
     /// VoiceOver's reading of the pill.
     public var accessibilityLabel: String {
-        guard let version else { return "Version: Development" }
+        guard let version else { return "Version Development" }
         return build.map { "Version \(version), build \($0)" } ?? "Version \(version)"
     }
 }

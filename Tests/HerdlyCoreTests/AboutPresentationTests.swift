@@ -15,6 +15,7 @@ import Testing
     let pill = AboutVersion(version: "0.1.0", build: "  ")
     #expect(pill.buildText == nil)
     #expect(pill.copyText == "0.1.0")
+    #expect(pill.accessibilityLabel == "Version 0.1.0")
 }
 
 @Test func versionPillWithoutVersionReadsDevelopmentAndDropsBuild() {
@@ -23,6 +24,7 @@ import Testing
         #expect(pill.primaryText == "Development")
         #expect(pill.buildText == nil)
         #expect(pill.copyText == "Development")
+        #expect(pill.accessibilityLabel == "Version Development")
     }
 }
 

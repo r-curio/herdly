@@ -1387,7 +1387,7 @@ private struct AboutControls: View {
             HStack(spacing: 16) {
                 Text("Made for people running more agents than tabs.")
                     .font(.system(size: 12))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 Button("Quit Herdly", action: quit)
                     .accessibilityHint("Stops Herdly and closes its menu-bar companion.")
@@ -1411,13 +1411,15 @@ private struct AboutVersionPill: View {
     var body: some View {
         Button(action: copy) {
             HStack(spacing: 8) {
-                if copied {
-                    Text("Copied").foregroundStyle(.primary)
-                } else {
-                    HStack(spacing: 0) {
-                        Text(version.primaryText).foregroundStyle(.primary)
-                        if let build = version.buildText { Text(build).foregroundStyle(.tertiary) }
-                    }
+                // "Copied" sits over the hidden version text, so the capsule keeps its width and
+                // nothing around it reflows.
+                HStack(spacing: 0) {
+                    Text(version.primaryText).foregroundStyle(.primary)
+                    if let build = version.buildText { Text(build).foregroundStyle(.tertiary) }
+                }
+                .opacity(copied ? 0 : 1)
+                .overlay {
+                    if copied { Text("Copied").foregroundStyle(.primary) }
                 }
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 11))
@@ -1469,12 +1471,11 @@ private struct AboutTagRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
             Text(title).frame(width: 92, alignment: .leading)
-            TrailingFlow(spacing: 6) {
+            WrappingRow(spacing: 6, alignment: .trailing) {
                 ForEach(tags, id: \.self) { tag in
                     Text(tag)
                         .font(.system(size: 12))
                         .lineLimit(1)
-                        .fixedSize()
                         .padding(.horizontal, 9)
                         .padding(.vertical, 4)
                         .background(.quaternary, in: .rect(cornerRadius: 7, style: .continuous))
@@ -1488,57 +1489,6 @@ private struct AboutTagRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(tags.joined(separator: ", "))
-    }
-}
-
-/// Lays its children out in rows that wrap to the proposed width, each row flush right.
-private struct TrailingFlow: Layout {
-    var spacing: CGFloat
-
-    private struct Row {
-        var indices: [Int] = []
-        var width: CGFloat = 0
-        var height: CGFloat = 0
-    }
-
-    private func rows(width maxWidth: CGFloat, subviews: Subviews) -> [Row] {
-        var rows: [Row] = []
-        var row = Row()
-        for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
-            let added = row.indices.isEmpty ? size.width : row.width + spacing + size.width
-            if !row.indices.isEmpty && added > maxWidth {
-                rows.append(row)
-                row = Row()
-                row.width = size.width
-            } else {
-                row.width = added
-            }
-            row.indices.append(index)
-            row.height = max(row.height, size.height)
-        }
-        if !row.indices.isEmpty { rows.append(row) }
-        return rows
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let rows = rows(width: proposal.width ?? .infinity, subviews: subviews)
-        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, rows.count - 1))
-        return CGSize(width: rows.map(\.width).max() ?? 0, height: height)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var y = bounds.minY
-        for row in rows(width: bounds.width, subviews: subviews) {
-            var x = bounds.maxX - row.width
-            for index in row.indices {
-                let size = subviews[index].sizeThatFits(.unspecified)
-                subviews[index].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2),
-                                      proposal: ProposedViewSize(size))
-                x += size.width + spacing
-            }
-            y += row.height + spacing
-        }
     }
 }
 
