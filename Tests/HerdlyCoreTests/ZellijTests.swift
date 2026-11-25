@@ -391,16 +391,21 @@ private func zellijCodexBinding(_ snapshot: ZellijSnapshot?, second: ZellijSnaps
     #expect(zellijCodexBinding(nil, switches: TerminalHostSwitches(enabled: [.wezTerm])) == .notInZellij)
 }
 
-@Test func anUnreadableZellijLeavesEverySessionItCouldHoldUnavailable() throws {
-    // A Codex session bound in WezTerm cannot be told apart from one in an unread Zellij (ADR 0013).
+@Test func anUnreadableZellijLeavesOnlySessionsNoReadableHostHoldsUnavailable() throws {
+    // ADR 0013, 2026-11-25: a WezTerm tab running the one foreground `codex` binds beside an unread Zellij.
     let titled = TerminalTab(tabID: "14", tty: "/dev/ttys031", title: codexTitle, paneCount: 1)
     let inventories: [TerminalHost: TerminalHostInventory] = [.wezTerm: wezTermTabs(extra: [titled]), .zellij: .unreadable]
     let processes = ["/dev/ttys031": [TerminalProcess(pid: 7, name: "codex", foreground: true)]]
     #expect(TerminalTabBindingRules.codex(sessionID: codexSession.uuidString, liveness: .live,
                                           liveSessions: [codexSession.uuidString], switches: zellijSwitches,
                                           inventories: inventories, processes: processes, secondRead: inventories)
+            == .bound(TerminalTabTarget(host: .wezTerm, tabID: "14", tty: "/dev/ttys031")))
+    let untitled: [TerminalHost: TerminalHostInventory] = [.wezTerm: wezTermTabs(extra: []), .zellij: .unreadable]
+    #expect(TerminalTabBindingRules.codex(sessionID: codexSession.uuidString, liveness: .live,
+                                          liveSessions: [codexSession.uuidString], switches: zellijSwitches,
+                                          inventories: untitled, processes: processes, secondRead: untitled)
             == .unavailable(.hostUnreadable(.zellij)))
-    // And Ghostty's question key fails closed until Zellij is read fresh (cross-host freshness).
+    // Ghostty's question key fails closed until Zellij is read fresh (cross-host freshness).
     let ghostty = TerminalHostSwitches(enabled: [.ghostty, .zellij])
     #expect(TerminalKeyRelayCheck.hostsToRead(switches: ghostty) == [.zellij])
     #expect(TerminalKeyRelayCheck.ghosttyVeto(title: codexTitle, processes: [:], switches: ghostty,

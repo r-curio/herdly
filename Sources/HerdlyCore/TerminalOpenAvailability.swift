@@ -145,9 +145,11 @@ public struct TerminalOpenScanReads: Sendable {
     }
 
     /// `TerminalAppOpen.leavesToOtherRoute` for `host`, whose missing inventory is an unread host.
-    func leaves(_ host: TerminalHost, otherRouteOn: Bool, holds: Bool) -> Bool {
+    /// `binding` is the session's binding on these reads.
+    func leaves(_ host: TerminalHost, otherRouteOn: Bool, holds: Bool, binding: TerminalTabBinding) -> Bool {
         TerminalAppOpen.leavesToOtherRoute(otherRouteOn: otherRouteOn, inventory: inventories[host] ?? .unreadable,
-                                           holdsSession: holds)
+                                           holdsSession: holds,
+                                           boundElsewhere: TerminalTabOpen.boundElsewhere(binding, than: host))
     }
 }
 
@@ -258,24 +260,24 @@ public enum TerminalOpenScan {
         if switches.isOn(.herdrApp),
            !reads.leaves(.herdrApp, otherRouteOn: reads.ghosttyOn || switches.isOn(.rex) || switches.isOn(.wezTerm)
                             || switches.isOn(.terminalApp) || switches.mayContact(.iTerm2),
-                         holds: holds(.herdrApp)) {
+                         holds: holds(.herdrApp), binding: binding) {
             return bindingRoute
         }
         // Rex: a block there carries the title, or Rex cannot be read.
         if switches.isOn(.rex),
            !reads.leaves(.rex, otherRouteOn: reads.ghosttyOn || switches.isOn(.wezTerm) || switches.isOn(.terminalApp)
                             || switches.mayContact(.iTerm2),
-                         holds: holds(.rex)) {
+                         holds: holds(.rex), binding: binding) {
             return bindingRoute
         }
         if switches.isOn(.wezTerm),
            !reads.leaves(.wezTerm, otherRouteOn: reads.ghosttyOn || switches.isOn(.terminalApp) || switches.mayContact(.iTerm2),
-                         holds: holds(.wezTerm)) {
+                         holds: holds(.wezTerm), binding: binding) {
             return bindingRoute
         }
         if switches.isOn(.terminalApp),
            !reads.leaves(.terminalApp, otherRouteOn: reads.ghosttyOn || switches.mayContact(.iTerm2),
-                         holds: holds(.terminalApp)) {
+                         holds: holds(.terminalApp), binding: binding) {
             return bindingRoute
         }
         if switches.mayContact(.iTerm2) { return bindingRoute }
@@ -322,16 +324,16 @@ public enum TerminalOpenScan {
         }
         let onTTY: (TerminalTab) -> Bool = { tab in tty != nil && tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY) == tty }
         let bindingRoute = processRoute(binding, walked: walked)
-        if switches.isOn(.herdrApp), !reads.leaves(.herdrApp, otherRouteOn: true, holds: reads.holds(.herdrApp, onTTY)) {
+        if switches.isOn(.herdrApp), !reads.leaves(.herdrApp, otherRouteOn: true, holds: reads.holds(.herdrApp, onTTY), binding: binding) {
             return bindingRoute
         }
-        if switches.isOn(.rex), !reads.leaves(.rex, otherRouteOn: true, holds: reads.holds(.rex, onTTY)) {
+        if switches.isOn(.rex), !reads.leaves(.rex, otherRouteOn: true, holds: reads.holds(.rex, onTTY), binding: binding) {
             return bindingRoute
         }
-        if switches.isOn(.wezTerm), !reads.leaves(.wezTerm, otherRouteOn: true, holds: reads.holds(.wezTerm, onTTY)) {
+        if switches.isOn(.wezTerm), !reads.leaves(.wezTerm, otherRouteOn: true, holds: reads.holds(.wezTerm, onTTY), binding: binding) {
             return bindingRoute
         }
-        if switches.isOn(.terminalApp), !reads.leaves(.terminalApp, otherRouteOn: true, holds: reads.holds(.terminalApp, onTTY)) {
+        if switches.isOn(.terminalApp), !reads.leaves(.terminalApp, otherRouteOn: true, holds: reads.holds(.terminalApp, onTTY), binding: binding) {
             return bindingRoute
         }
         // iTerm2 decides whenever the process's tty is on one of its tabs (#238).

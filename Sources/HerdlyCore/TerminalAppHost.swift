@@ -128,11 +128,14 @@ extension TerminalVisibility {
 public enum TerminalAppOpen {
     /// Whether an Open leaves the session to another route: one is on (Ghostty's title route, iTerm2's
     /// cross-host Open, or for Claude its own process's walk) and a fresh Terminal.app inventory holds
-    /// no tab of the session (its title for Codex, its process's tty for Claude). An unreadable
-    /// Terminal.app keeps the session here, where it is unavailable (ADR 0013); the other route reads
-    /// every enabled host for the binding too.
-    public static func leavesToOtherRoute(otherRouteOn: Bool, inventory: TerminalHostInventory, holdsSession: Bool) -> Bool {
-        guard otherRouteOn, inventory != .unreadable else { return false }
+    /// no tab of the session (its title for Codex, its process's tty for Claude). Used for every
+    /// terminal host. An unreadable host keeps the session here, where it is unavailable, unless the
+    /// binding on the same reads names another host's tab (ADR 0013, 2026-11-25 amendment): a session a
+    /// readable host holds goes to that host whatever the unreadable one holds.
+    public static func leavesToOtherRoute(otherRouteOn: Bool, inventory: TerminalHostInventory, holdsSession: Bool,
+                                          boundElsewhere: Bool) -> Bool {
+        guard otherRouteOn else { return false }
+        if inventory == .unreadable { return boundElsewhere }
         return !holdsSession
     }
 

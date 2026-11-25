@@ -262,12 +262,13 @@ public enum TerminalTabBindingRules {
         }
         guard let tty = observed.tty.flatMap(GhosttyTTYMatch.normalizedTTY) else { return .unavailable(.noTerminal) }
 
-        let onTTY: [HostTab]
-        switch enabledTabs(switches: switches, inventories: inventories) {
-        case .success(let tabs): onTTY = tabs.filter { $0.tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY) == tty }
-        case .failure(let reason): return .unavailable(reason)
+        // A tty is one terminal's: a readable host's tab on it is the session's, whatever another host
+        // that could not be read holds (ADR 0013, 2026-11-25 amendment).
+        let enabled = enabledTabs(switches: switches, inventories: inventories)
+        let onTTY = enabled.tabs.filter { $0.tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY) == tty }
+        guard let match = onTTY.first else {
+            return .unavailable(enabled.unreadable.first.map(TerminalTabUnavailable.hostUnreadable) ?? .ttyNotInEnabledHost)
         }
-        guard let match = onTTY.first else { return .unavailable(.ttyNotInEnabledHost) }
         guard onTTY.count == 1 else { return .unavailable(.duplicateTTYs(onTTY.count)) }
         if titleNamesAnotherSession(match.tab.title, claudeSessionID: sessionID) {
             return .unavailable(.conflictingTitle)
@@ -314,19 +315,22 @@ public enum TerminalTabBindingRules {
 
     /// Every enabled tab or pane showing `title`, a terminal tab on one of `clientTTYs` (a multiplexer
     /// client's) and a title decoy (`isCodexTitleDecoy` over `processes`) left out; Zellij's rule counts
-    /// with it too (#242).
+    /// with it too (#242). Only readable hosts are counted (ADR 0013, 2026-11-25 amendment): when none of
+    /// them shows the title and an enabled host could not be read, that host fails the read, because the
+    /// session may be there.
     static func titledTabs(_ title: String, switches: TerminalHostSwitches,
                            inventories: [TerminalHost: TerminalHostInventory],
                            processes: [String: [TerminalProcess]],
                            excluding clientTTYs: Set<String>) -> Result<[HostTab], TerminalTabUnavailable> {
-        enabledTabs(switches: switches, inventories: inventories).map { tabs in
-            tabs.filter { entry in
-                guard entry.tab.title == title, !isCodexTitleDecoy(entry.tab, processes: processes) else { return false }
-                guard entry.host.kind == .terminal, !clientTTYs.isEmpty,
-                      let tty = entry.tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY) else { return true }
-                return !clientTTYs.contains(tty)
-            }
+        let enabled = enabledTabs(switches: switches, inventories: inventories)
+        let titled = enabled.tabs.filter { entry in
+            guard entry.tab.title == title, !isCodexTitleDecoy(entry.tab, processes: processes) else { return false }
+            guard entry.host.kind == .terminal, !clientTTYs.isEmpty,
+                  let tty = entry.tab.tty.flatMap(GhosttyTTYMatch.normalizedTTY) else { return true }
+            return !clientTTYs.contains(tty)
         }
+        if titled.isEmpty, let unreadable = enabled.unreadable.first { return .failure(.hostUnreadable(unreadable)) }
+        return .success(titled)
     }
 
     /// ADR 0013's 2026-10-13 amendment (#268, the user's decision): a tab showing a Codex title is a
@@ -349,20 +353,22 @@ public enum TerminalTabBindingRules {
     }
 
     /// Every tab of every enabled terminal host and every pane of an enabled multiplexer whose titles
-    /// count (`TerminalHost.titleCounted`: tmux and Zellij), in host order. Hosts switched off are never read, whatever
-    /// `inventories` holds for them. The first enabled host whose inventory is unreadable or missing
-    /// fails the whole read, because a session could be on a tab it holds.
+    /// count (`TerminalHost.titleCounted`: tmux and Zellij), in host order, and the enabled hosts whose
+    /// inventory is unreadable or missing, in host order. Hosts switched off are never read, whatever
+    /// `inventories` holds for them. An unreadable host no longer fails the whole read (ADR 0013,
+    /// 2026-11-25 amendment); each rule decides what it means when the readable hosts don't show the session.
     private static func enabledTabs(switches: TerminalHostSwitches,
                                     inventories: [TerminalHost: TerminalHostInventory])
-        -> Result<[HostTab], TerminalTabUnavailable> {
+        -> (tabs: [HostTab], unreadable: [TerminalHost]) {
         var tabs: [HostTab] = []
+        var unreadable: [TerminalHost] = []
         for host in TerminalHost.titleCounted where switches.mayContact(host) {
             switch inventories[host] {
             case .notRunning?: continue
             case .tabs(let hostTabs)?: tabs += hostTabs.map { (host, $0) }
-            case .unreadable?, nil: return .failure(.hostUnreadable(host))
+            case .unreadable?, nil: unreadable.append(host)
             }
         }
-        return .success(tabs)
+        return (tabs, unreadable)
     }
 }

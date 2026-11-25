@@ -188,12 +188,19 @@ private let t2 = TerminalTabTarget(host: .terminalApp, tabID: "9921", tty: "/dev
     let tabs = try #require(snapshot()).inventory
     // Another route on (Ghostty's title route, iTerm2's cross-host Open, or Claude's own process) and
     // Terminal.app not holding the session, or not running: that route decides.
-    #expect(TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: tabs, holdsSession: false))
-    #expect(TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: .notRunning, holdsSession: false))
-    // Held by Terminal.app, no other route, or Terminal.app unreadable (every session unavailable, ADR 0013).
-    #expect(!TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: tabs, holdsSession: true))
-    #expect(!TerminalAppOpen.leavesToOtherRoute(otherRouteOn: false, inventory: tabs, holdsSession: false))
-    #expect(!TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: .unreadable, holdsSession: false))
+    #expect(TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: tabs, holdsSession: false, boundElsewhere: false))
+    #expect(TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: .notRunning, holdsSession: false,
+                                               boundElsewhere: false))
+    // Held by Terminal.app, no other route, or Terminal.app unreadable with the session bound nowhere else.
+    #expect(!TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: tabs, holdsSession: true, boundElsewhere: false))
+    #expect(!TerminalAppOpen.leavesToOtherRoute(otherRouteOn: false, inventory: tabs, holdsSession: false, boundElsewhere: false))
+    #expect(!TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: .unreadable, holdsSession: false,
+                                                boundElsewhere: false))
+    // ADR 0013, 2026-11-25: an unreadable Terminal.app gives up a session a readable host's tab binds.
+    #expect(TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: .unreadable, holdsSession: false,
+                                               boundElsewhere: true))
+    #expect(!TerminalAppOpen.leavesToOtherRoute(otherRouteOn: false, inventory: .unreadable, holdsSession: false,
+                                                boundElsewhere: true))
 }
 
 @Test func terminalAppRaiseReplyDecidesUnavailableOrFallback() {

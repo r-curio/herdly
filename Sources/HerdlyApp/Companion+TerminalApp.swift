@@ -454,10 +454,12 @@ extension Companion {
             }.value
             // Ghostty's title route or iTerm2's cross-host Open decides a title no Terminal.app tab carries, or
             // one only a decoy here carries while the session's tab is in another host (#268).
+            let binding = codexBinding(session, reads: first)
             let holds = TerminalTabOpen.codexStays(in: .terminalApp, carriesTitle: first.terminalAppCarries(title: title),
-                                                   binding: codexBinding(session, reads: first))
+                                                   binding: binding)
             if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: ghosttyUsable || hostSwitches.mayContact(.iTerm2),
-                                                  inventory: first.terminalApp.inventory, holdsSession: holds) {
+                                                  inventory: first.terminalApp.inventory, holdsSession: holds,
+                                                  boundElsewhere: TerminalTabOpen.boundElsewhere(binding, than: .terminalApp)) {
                 openingTask = false
                 otherwise()
                 return
@@ -522,8 +524,11 @@ extension Companion {
                                       claudeTTYs: Set([process.tty].compactMap { $0 }), second: false)
             }.value
             // iTerm2, Ghostty's title route or the process walk decides a tty no Terminal.app tab holds.
+            let elsewhere = TerminalTabOpen.boundElsewhere(claudeBinding(identity, process: process, reads: first),
+                                                           than: .terminalApp)
             if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: first.terminalApp.inventory,
-                                                  holdsSession: process.tty.map(first.terminalAppHas) ?? false) {
+                                                  holdsSession: process.tty.map(first.terminalAppHas) ?? false,
+                                                  boundElsewhere: elsewhere) {
                 openingTask = false
                 otherwise()
                 return
