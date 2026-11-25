@@ -82,7 +82,7 @@ The user selected the session-ID title approach. `session_title` and `tab_for_se
 For the human-assisted test, open two unsplit Ghostty tabs in the same existing isolated lab. In each, run:
 
 ```sh
-cd /Users/rmaisog/Documents/ChatGPT/Herdly/output/desktop-hook-lab
+cd /Users/dev/src/Herdly/output/desktop-hook-lab
 codex -m gpt-5.5 -c 'tui.terminal_title=["session-id"]' 'Reply only HERDLY-TAB-CHECK. Do not use tools.'
 ```
 

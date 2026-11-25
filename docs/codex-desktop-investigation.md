@@ -28,7 +28,7 @@ The official [app-server reference](https://learn.chatgpt.com/docs/app-server) d
 
 ## Multiple app installations
 
-The computer-use resolver found both /Applications/ChatGPT.app and /Users/rmaisog/Applications/Codex.app sharing com.openai.codex. Process inspection identified a running /Applications/ChatGPT.app main process. Bundle ID alone is insufficient to choose an installation. Use the running process's bundle path for this probe and avoid blindly selecting the first bundle with that ID.
+The computer-use resolver found both /Applications/ChatGPT.app and /Users/dev/Applications/Codex.app sharing com.openai.codex. Process inspection identified a running /Applications/ChatGPT.app main process. Bundle ID alone is insufficient to choose an installation. Use the running process's bundle path for this probe and avoid blindly selecting the first bundle with that ID.
 
 ## Read-state detail
 

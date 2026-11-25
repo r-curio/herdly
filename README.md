@@ -56,3 +56,9 @@ python3 scripts/probe_codex_desktop.py --app /Applications/ChatGPT.app
 ```
 
 The probe only inspects bundle metadata and generated protocol definitions. It does not install hooks, change settings, or connect to conversations. Pass the actual installed desktop bundle path when different.
+
+## Contributing and license
+
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) and report security issues as described in [SECURITY.md](SECURITY.md). Herdly is released under the [MIT License](LICENSE).
+
+Herdly is an independent project and is not affiliated with or endorsed by OpenAI or Anthropic. Codex, ChatGPT, and Claude are trademarks of their respective owners.

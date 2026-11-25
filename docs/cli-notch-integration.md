@@ -157,8 +157,8 @@ claimed.
 ### Fresh CLI completion proof (2026-09-12)
 
 An interactive Codex TUI session `01a0923d-0a94-7de1-aa3a-641a86112456` ran in
-`/Users/rmaisog/Documents/ChatGPT/Herdly/output/desktop-hook-lab`. Its rollout was
-`/Users/rmaisog/.codex/sessions/2026/09/12/rollout-2026-09-12T04-51-09-01a0923d-0a94-7de1-aa3a-641a86112456.jsonl`, with `session_meta` source
+`/Users/dev/src/Herdly/output/desktop-hook-lab`. Its rollout was
+`/Users/dev/.codex/sessions/2026/09/12/rollout-2026-09-12T04-51-09-01a0923d-0a94-7de1-aa3a-641a86112456.jsonl`, with `session_meta` source
 `cli` and the lab cwd. Turn `01a0923d-c536-7b73-b750-cd011719d5f0` completed
 with the exact response `HERDLY-CLI-TUI-COMPLETE`.
 
