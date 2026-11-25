@@ -15,7 +15,7 @@ private func record(_ pid: Int32, ppid: Int32, uid: UInt32 = me, tty: String? = 
                         foreground: foreground, shortName: name, arguments: arguments)
 }
 
-private let codexHome = "/Users/rmaisog/.codex/packages/standalone/releases/0.163.0-aarch64-apple-darwin/bin/codex"
+private let codexHome = "/Users/dev/.codex/packages/standalone/releases/0.163.0-aarch64-apple-darwin/bin/codex"
 // Root's: the kernel gives Herdly no argument vector for another user's process.
 private let launchd = record(1, ppid: 0, uid: 0, leader: true, name: "launchd", arguments: nil)
 private let login = record(17717, ppid: 17676, uid: 0, tty: "ttys000", leader: true, name: "login", arguments: nil)
@@ -23,11 +23,11 @@ private let login = record(17717, ppid: 17676, uid: 0, tty: "ttys000", leader: t
 private let ghostty = record(17676, ppid: 1, name: "ghostty", arguments: ["/Applications/Ghostty.app/Contents/MacOS/ghostty"])
 private let loginShell = record(17726, ppid: 17717, tty: "ttys000", name: "zsh", arguments: ["-/bin/zsh"])
 private let herdr = record(18421, ppid: 17726, tty: "ttys000", foreground: true, name: "herdr", arguments: ["herdr"])
-private let herdrServer = record(18426, ppid: 18421, leader: true, name: "herdr", arguments: ["/Users/rmaisog/.local/bin/herdr", "server"])
+private let herdrServer = record(18426, ppid: 18421, leader: true, name: "herdr", arguments: ["/Users/dev/.local/bin/herdr", "server"])
 private let codexCLI = record(41894, ppid: 40207, tty: "ttys027", foreground: true, name: "codex",
                               arguments: ["codex", "--sandbox", "danger-full-access", "--ask-for-approval", "never", "-m", "gpt-6-luna"])
 private let codexInTmux = record(55928, ppid: 55925, tty: "ttys030", leader: true, foreground: true, name: "codex",
-                                 arguments: ["/Users/rmaisog/.local/bin/codex", "--no-daemon", "-m", "gpt-6-luna", "-s", "read-only"])
+                                 arguments: ["/Users/dev/.local/bin/codex", "--no-daemon", "-m", "gpt-6-luna", "-s", "read-only"])
 private let sleeper = record(71757, ppid: 71755, name: "sleep", arguments: ["sleep", "720"])
 private let appServer = record(97265, ppid: 1, leader: true, name: "codex",
                                arguments: [codexHome, "app-server", "daemon", "pid-update-loop"])
@@ -38,9 +38,9 @@ private let table = [launchd, ghostty, login, loginShell, herdr, herdrServer, co
         17676 /Applications/Ghostty.app/Contents/MacOS/ghostty
         17726 -/bin/zsh
         18421 herdr
-        18426 /Users/rmaisog/.local/bin/herdr server
+        18426 /Users/dev/.local/bin/herdr server
         41894 codex --sandbox danger-full-access --ask-for-approval never -m gpt-6-luna
-        55928 /Users/rmaisog/.local/bin/codex --no-daemon -m gpt-6-luna -s read-only
+        55928 /Users/dev/.local/bin/codex --no-daemon -m gpt-6-luna -s read-only
         71757 sleep 720
         97265 \(codexHome) app-server daemon pid-update-loop
 
@@ -84,9 +84,9 @@ private let table = [launchd, ghostty, login, loginShell, herdr, herdrServer, co
         17717 17676     0 ttys000  /usr/bin/login
         17726 17717   503 ttys000  -/bin/zsh
         18421 17726   503 ttys000  herdr
-        18426 18421   503 ??       /Users/rmaisog/.local/bin/herdr
+        18426 18421   503 ??       /Users/dev/.local/bin/herdr
         41894 40207   503 ttys027  codex
-        55928 55925   503 ttys030  /Users/rmaisog/.local/bin/codex
+        55928 55925   503 ttys030  /Users/dev/.local/bin/codex
         71757 71755   503 ??       sleep
         97265     1   503 ??       \(codexHome)
 

@@ -18,13 +18,13 @@
     "command": "codex app-server daemon start",
     "exit": 1,
     "note": "Refused before creating anything: the Homebrew CLI has no managed standalone install at ~/.codex/packages/standalone/current/codex, which the daemon requires. Nothing on the machine changed; ~/.codex/app-server-control still holds only an empty app-server-startup.lock from 2026-08-02.",
-    "stderr": "Error: managed standalone Codex install not found at /Users/rmaisog/.codex/packages/standalone/current/codex\n\nThis command requires the standalone install managed by the Codex installer, because the daemon starts and updates app-server from that fixed path.\n\nInstall it with:\n  curl -fsSL https://chatgpt.com/codex/install.sh | sh\n\nThen rerun the command you just tried.",
+    "stderr": "Error: managed standalone Codex install not found at /Users/dev/.codex/packages/standalone/current/codex\n\nThis command requires the standalone install managed by the Codex installer, because the daemon starts and updates app-server from that fixed path.\n\nInstall it with:\n  curl -fsSL https://chatgpt.com/codex/install.sh | sh\n\nThen rerun the command you just tried.",
     "stdout": ""
   },
   "daemon_version": {
     "command": "codex app-server daemon version",
     "exit": 1,
-    "stderr": "Error: failed to connect to /Users/rmaisog/.codex/app-server-control/app-server-control.sock\n\nCaused by:\n    No such file or directory (os error 2)"
+    "stderr": "Error: failed to connect to /Users/dev/.codex/app-server-control/app-server-control.sock\n\nCaused by:\n    No such file or directory (os error 2)"
   },
   "desktop_app": "26.901.51231 (engine 0.153.4), running its engine as `codex ... app-server` on stdio with no --listen flag (process list, 2026-09-14)",
   "protocol_from_generated_schema": {
@@ -154,7 +154,7 @@
   },
   "socket": {
     "exists": false,
-    "path": "/Users/rmaisog/.codex/app-server-control/app-server-control.sock"
+    "path": "/Users/dev/.codex/app-server-control/app-server-control.sock"
   },
   "socket_authentication_observed": "No token, pairing or credential is involved for the local control socket: the daemon creates it under ~/.codex/app-server-control (directory mode 0700, owned by the user). Remote control is a separate, opt-in websocket enrollment (`enable-remote-control`) that Steer never uses. Binary strings mention NetworkUnixSocketPermission and remote-control pairing only.",
   "still_unproven": [

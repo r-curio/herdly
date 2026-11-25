@@ -14,7 +14,7 @@ UserPromptSubmit and Stop records prove a real desktop turn start/completion,
 but do not claim full session-start capture. The original records are capture
 `8bedf2d3-754c-4c00-8da4-635e14e82fe8` at 07:26:54.343057Z and
 `b4baa09c-eb98-4cb9-b75c-9bd2f3405c24` at 07:26:57.252939Z. The original metadata-only records
-are at `/Users/rmaisog/Documents/ChatGPT/Herdly/output/desktop-hook-lab/events`;
+are at `/Users/dev/src/Herdly/output/desktop-hook-lab/events`;
 the redacted pair in `docs/evidence/` is replayable from a fresh checkout.
 
 ## Build and run
