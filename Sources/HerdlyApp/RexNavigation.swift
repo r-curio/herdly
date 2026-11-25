@@ -15,10 +15,46 @@ enum RexNavigation {
         }
     }
 
-    /// Whether Rex's server is up: its socket exists. Rex.app and the server run separately, and the server
-    /// holds the terminals, so a server without the app still holds sessions.
+    /// Whether Rex's server is up: its socket exists and does not refuse a connection (`RexSocket.running`).
+    /// Rex.app and the server run separately, and the server holds the terminals, so a server without the
+    /// app still holds sessions.
     static func isRunning() -> Bool {
-        RexSocket.trust(at: RexCLI.socketPath(home: NSHomeDirectory())) != .missing
+        let path = RexCLI.socketPath(home: NSHomeDirectory())
+        return RexSocket.running(RexSocket.trust(at: path)) { connect(to: path) }
+    }
+
+    /// One non-blocking connect to the socket at `path`, closed at once; nothing is written. Only a
+    /// refusal or a vanished socket reads `.refused`.
+    static func connect(to path: String) -> RexSocketConnect {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { return .failed }
+        defer { close(fd) }
+        var one: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let pathBytes = Array(path.utf8)
+        let capacity = MemoryLayout.size(ofValue: address.sun_path)
+        guard pathBytes.count < capacity else { return .failed }
+        withUnsafeMutablePointer(to: &address.sun_path) { pointer in
+            pointer.withMemoryRebound(to: UInt8.self, capacity: capacity) { raw in
+                for (index, byte) in pathBytes.enumerated() { raw[index] = byte }
+                raw[pathBytes.count] = 0
+            }
+        }
+        address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        if connected == 0 { return .listening }
+        switch errno {
+        case ECONNREFUSED, ENOENT: return .refused
+        case EINPROGRESS, EAGAIN: return .listening
+        default: return .failed
+        }
     }
 
     /// One inventory read. A Rex with no server socket holds nothing and is not asked.
