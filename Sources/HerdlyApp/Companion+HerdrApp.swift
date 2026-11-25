@@ -217,8 +217,10 @@ extension Companion {
             let first = await Task.detached { TerminalTabReads.take(others: others, claudeTTYs: [], second: false) }.value
             let carries = first.herdrApp.snapshot?.terminals.contains { $0.title == title } ?? false
             // A decoy terminal here leaves a session whose tab is in another host to that host's route (#268).
-            let holds = TerminalTabOpen.codexStays(in: .herdrApp, carriesTitle: carries, binding: herdrAppCodexBinding(session, reads: first))
-            if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: otherRouteOn, inventory: first.herdrApp.inventory, holdsSession: holds) {
+            let binding = herdrAppCodexBinding(session, reads: first)
+            let holds = TerminalTabOpen.codexStays(in: .herdrApp, carriesTitle: carries, binding: binding)
+            if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: otherRouteOn, inventory: first.herdrApp.inventory, holdsSession: holds,
+                                                  boundElsewhere: TerminalTabOpen.boundElsewhere(binding, than: .herdrApp)) {
                 openingTask = false
                 otherwise()
                 return
@@ -287,7 +289,10 @@ extension Companion {
                 TerminalTabReads.take(others: others, claudeTTYs: Set([process.tty].compactMap { $0 }), second: false)
             }.value
             let holds = process.tty.map { tty in first.herdrApp.snapshot?.terminals.contains { $0.tty == tty } ?? false } ?? false
-            if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: first.herdrApp.inventory, holdsSession: holds) {
+            let elsewhere = TerminalTabOpen.boundElsewhere(herdrAppClaudeBinding(identity, process: process, reads: first),
+                                                           than: .herdrApp)
+            if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: first.herdrApp.inventory, holdsSession: holds,
+                                                  boundElsewhere: elsewhere) {
                 openingTask = false
                 otherwise()
                 return

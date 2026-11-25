@@ -196,14 +196,19 @@ private func codex(_ sessionID: String = codexSession, liveness: HerdrSessionLiv
         == .unavailable(.duplicateTitles(2)))
 }
 
-@Test func anEnabledHostThatIsRunningButUnreadableLeavesCodexUnavailable() {
+@Test func anUnreadableHostDoesNotStopACodexSessionAReadableHostHolds() {
     let both = switches([.iTerm2, .wezTerm])
-    // WezTerm's `cli list` failed: it may hold a second tab with the title.
-    #expect(codex(switches: both, inventories: [.iTerm2: .tabs([tab("A1")]), .wezTerm: .unreadable])
+    let bound = TerminalTabBinding.bound(TerminalTabTarget(host: .iTerm2, tabID: "A1", tty: realTTY))
+    // ADR 0013, 2026-11-25: WezTerm's `cli list` failed, but iTerm2's titled tab runs the one foreground
+    // `codex`, so it binds.
+    #expect(codex(switches: both, inventories: [.iTerm2: .tabs([tab("A1")]), .wezTerm: .unreadable]) == bound)
+    #expect(codex(switches: both, inventories: [.iTerm2: .tabs([tab("A1")])]) == bound)
+    // No readable host shows the title: the unreadable host may hold it.
+    #expect(codex(switches: both, inventories: [.iTerm2: .tabs([]), .wezTerm: .unreadable])
         == .unavailable(.hostUnreadable(.wezTerm)))
-    // An enabled host never read yet cannot be ruled out either.
-    #expect(codex(switches: both, inventories: [.iTerm2: .tabs([tab("A1")])])
-        == .unavailable(.hostUnreadable(.wezTerm)))
+    // Two readable titled tabs that both run `codex` still leave it unbound.
+    #expect(codex(switches: both, inventories: [.iTerm2: .tabs([tab("A1"), tab("A2")]), .wezTerm: .unreadable])
+        == .unavailable(.duplicateTitles(2)))
     // A host that is not running holds nothing.
     #expect(codex(switches: both, inventories: [.iTerm2: .tabs([tab("A1")]), .wezTerm: .notRunning])
         == .bound(TerminalTabTarget(host: .iTerm2, tabID: "A1", tty: realTTY)))
@@ -315,10 +320,17 @@ private func claude(liveness: HerdrSessionLiveness = .live,
     #expect(claude(inventories: [.terminalApp: .tabs([codexIdentifier])]) == .unavailable(.conflictingTitle))
 }
 
-@Test func anEnabledHostThatIsRunningButUnreadableLeavesClaudeUnavailable() {
-    #expect(claude(switches: switches([.terminalApp, .iTerm2]),
-                   inventories: [.terminalApp: .tabs([claudeTab()]), .iTerm2: .unreadable])
+@Test func anUnreadableHostDoesNotStopAClaudeSessionAReadableHostHolds() {
+    // ADR 0013, 2026-11-25: the process's tty is one terminal's, so Terminal.app's tab on it binds whatever
+    // an unreadable iTerm2 holds.
+    let both = switches([.terminalApp, .iTerm2])
+    #expect(claude(switches: both, inventories: [.terminalApp: .tabs([claudeTab()]), .iTerm2: .unreadable])
+        == .bound(TerminalTabTarget(host: .terminalApp, tabID: "window 9882", tty: claudeTTY)))
+    // No readable host holds the tty: the unreadable one may, so the session stays unavailable.
+    #expect(claude(switches: both, inventories: [.terminalApp: .tabs([claudeTab(tty: "/dev/ttys099")]), .iTerm2: .unreadable])
         == .unavailable(.hostUnreadable(.iTerm2)))
+    // An enabled host never read yet counts as unreadable too.
+    #expect(claude(switches: both, inventories: [.terminalApp: .tabs([])]) == .unavailable(.hostUnreadable(.iTerm2)))
 }
 
 @Test func claudeFailsClosedWithoutExactlyOneForegroundTabForItsProcess() {

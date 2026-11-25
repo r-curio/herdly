@@ -85,6 +85,13 @@ public enum TerminalTabOpen {
         }
     }
 
+    /// Whether `binding` names a tab in a host other than `host`: the one case an unreadable `host`
+    /// gives the session up (ADR 0013, 2026-11-25 amendment).
+    public static func boundElsewhere(_ binding: TerminalTabBinding, than host: TerminalHost) -> Bool {
+        if case .bound(let target) = binding { return target.host != host }
+        return false
+    }
+
     /// The route for a binding re-run on fresh reads, immediately before Open (ADR 0013, "Freshness").
     public static func route(_ binding: TerminalTabBinding) -> TerminalTabOpenRoute {
         switch binding {

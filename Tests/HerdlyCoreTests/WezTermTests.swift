@@ -515,9 +515,9 @@ private var pendingEvidence: ReminderReader.RolloutEvidence {
     #expect(HerdrPresentation.keyDestination(for: .ghosttyRelay).place == "the Ghostty tab")
 }
 
-@Test func anEnabledTerminalAppMustBeReadBesideITerm2OrNoITerm2TabBinds() {
-    // iTerm2's visit scan (#238) reads every enabled host: left out, an enabled Terminal.app makes every
-    // binding "host unreadable", so no iTerm2 visit could acknowledge.
+@Test func anUnreadEnabledTerminalAppDoesNotStopAnITerm2TabFromBinding() {
+    // ADR 0013, 2026-11-25: an enabled Terminal.app left out of the reads no longer makes every binding
+    // "host unreadable" when iTerm2's titled tab runs the one foreground `codex`.
     let switches = TerminalHostSwitches(enabled: [.iTerm2, .terminalApp])
     let iTerm2 = TerminalHostInventory.tabs([TerminalTab(tabID: "GUID", tty: "/dev/ttys017", title: codexTitle, paneCount: 1)])
     func bind(_ inventories: [TerminalHost: TerminalHostInventory]) -> TerminalTabBinding {
@@ -525,9 +525,10 @@ private var pendingEvidence: ReminderReader.RolloutEvidence {
                                       switches: switches, inventories: inventories, processes: codexPS,
                                       secondRead: inventories)
     }
-    #expect(bind([.iTerm2: iTerm2]) == .unavailable(.hostUnreadable(.terminalApp)))
-    #expect(bind([.iTerm2: iTerm2, .terminalApp: .tabs([])])
-        == .bound(TerminalTabTarget(host: .iTerm2, tabID: "GUID", tty: "/dev/ttys017")))
+    let bound = TerminalTabBinding.bound(TerminalTabTarget(host: .iTerm2, tabID: "GUID", tty: "/dev/ttys017"))
+    #expect(bind([.iTerm2: iTerm2]) == bound)
+    #expect(bind([.iTerm2: iTerm2, .terminalApp: .tabs([])]) == bound)
+    #expect(bind([.iTerm2: .tabs([])]) == .unavailable(.hostUnreadable(.terminalApp)))
 }
 
 // MARK: - Cross-host routes and freshness

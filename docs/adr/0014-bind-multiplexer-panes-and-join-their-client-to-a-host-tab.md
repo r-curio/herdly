@@ -31,7 +31,7 @@ A session in a multiplexer has two layers: the pane running it, and the terminal
 - **Zellij:** only the default socket directory (`$TMPDIR/zellij-<uid>/contract_version_1`), with every session name allowed, since Zellij names sessions randomly. A custom `ZELLIJ_SOCKET_DIR` is not scanned. Herdly lists the directory itself and addresses each session with `--session <name>`. It never runs `zellij list-sessions`, which deletes sockets that refuse a connection.
 - **herdr:** ADR 0009's socket and named-session rules are unchanged.
 - **Binaries:** `tmux` and `zellij` resolve from fixed locations, as `herdr` does (ADR 0009), never from `PATH`.
-- **Gate:** each multiplexer has its own enable switch. Herdly contacts a multiplexer only while its switch is on and at least one terminal host is enabled. ADR 0009's and ADR 0012's conditions read "any enabled host's inventory is known" in place of "Ghostty controls are enabled" and "a Ghostty inventory is known". As ADR 0013 does for hosts, a multiplexer that is enabled and running but unreadable leaves every session it could hold unavailable, and one that is not running counts as empty.
+- **Gate:** each multiplexer has its own enable switch. Herdly contacts a multiplexer only while its switch is on and at least one terminal host is enabled. ADR 0009's and ADR 0012's conditions read "any enabled host's inventory is known" in place of "Ghostty controls are enabled" and "a Ghostty inventory is known". As ADR 0013 does for hosts, a multiplexer that is enabled and running but unreadable leaves every session it could hold unavailable, and one that is not running counts as empty. Since ADR 0013's 2026-11-25 amendment, a session a readable host binds is not one it could hold.
 
 ## Open sequence
 

@@ -218,10 +218,12 @@ private let realAndDecoyPS = [codexTTY: TerminalForegroundProcesses.parse(codexP
             == "Herdly can't tell which terminal this session is in.")
 }
 
-@Test func anUnreadableHostBesideTheBoundOneStillBlocksOpen() {
-    // ADR 0013: an enabled host that cannot be read could hold the real tab.
-    let availability = codex(reads([.iTerm2, .wezTerm], [.iTerm2: .unreadable, .wezTerm: .tabs([tab("8")])]))
-    #expect(availability.cardLine == "Herdly can't read iTerm2. Check Settings › Terminals.")
+@Test func anUnreadableHostBesideTheBoundOneNoLongerBlocksOpen() {
+    // ADR 0013, 2026-11-25: WezTerm's tab binds, so an unreadable iTerm2 beside it changes nothing.
+    #expect(codex(reads([.iTerm2, .wezTerm], [.iTerm2: .unreadable, .wezTerm: .tabs([tab("8")])])).cardLine == nil)
+    // With no readable tab carrying the title, the unreadable host may hold it.
+    #expect(codex(reads([.iTerm2, .wezTerm], [.iTerm2: .unreadable, .wezTerm: .tabs([])])).cardLine
+        == "Herdly can't read iTerm2. Check Settings › Terminals.")
 }
 
 // MARK: - Ghostty (title route, ADR 0005)

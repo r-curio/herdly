@@ -314,10 +314,11 @@ extension Companion {
                 WezTermTabReads.take(running: running, others: others, codexTitles: [title], claudeTTYs: [], second: false)
             }.value
             // A decoy pane here leaves a session whose tab is in another host to that host's route (#268).
-            let holds = TerminalTabOpen.codexStays(in: .wezTerm, carriesTitle: first.carries(title: title),
-                                                   binding: wezTermCodexBinding(session, reads: first))
+            let binding = wezTermCodexBinding(session, reads: first)
+            let holds = TerminalTabOpen.codexStays(in: .wezTerm, carriesTitle: first.carries(title: title), binding: binding)
             if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: otherRouteOn, inventory: first.wezTerm.inventory,
-                                                  holdsSession: holds) {
+                                                  holdsSession: holds,
+                                                  boundElsewhere: TerminalTabOpen.boundElsewhere(binding, than: .wezTerm)) {
                 openingTask = false
                 otherwise()
                 return
@@ -390,8 +391,11 @@ extension Companion {
                 WezTermTabReads.take(running: running, others: others, codexTitles: [],
                                      claudeTTYs: Set([process.tty].compactMap { $0 }), second: false)
             }.value
+            let elsewhere = TerminalTabOpen.boundElsewhere(wezTermClaudeBinding(identity, process: process, reads: first),
+                                                           than: .wezTerm)
             if TerminalAppOpen.leavesToOtherRoute(otherRouteOn: true, inventory: first.wezTerm.inventory,
-                                                  holdsSession: process.tty.map(first.holds) ?? false) {
+                                                  holdsSession: process.tty.map(first.holds) ?? false,
+                                                  boundElsewhere: elsewhere) {
                 openingTask = false
                 otherwise()
                 return
