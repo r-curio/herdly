@@ -10,7 +10,10 @@ backs up the settings as Configure does, writes atomically, and keeps the origin
 the install record, so Undo Setup restores it byte for byte. Otherwise nothing is written and usage
 reads unavailable (`ClaudeSetupInstaller.upgradeUsage`). A write that fails is rolled back and the
 folder's row says usage couldn't be added; if the rollback fails too, the row reads Needs attention
-with the reason, since the settings may be half-written. Configure, Undo Setup, the helper refresh
+with the reason, since the settings may be half-written. That failure is recorded in Herdly's own
+state for the root (`usage-rollback-incomplete` beside its install record, never in the Claude folder),
+so it survives later checks and Review Again, and no further automatic upgrade runs for that root until
+Configure or Undo Setup succeeds there, which clears it. Configure, Undo Setup, the helper refresh
 and this upgrade take turns on one queue (`ClaudeSetupWrites`), so a switch flipped mid-upgrade
 waits for it, and each re-reads the folder's files when its turn comes.
 Herdly does not scan credentials, merge roots, estimate usage, or substitute gateway spend limits for

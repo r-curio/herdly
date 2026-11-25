@@ -148,8 +148,10 @@ enum ClaudeSetupDetection {
     static func upgradeUsage(_ snapshot: Snapshot, applicationSupport: URL, writes: ClaudeSetupWrites = .shared,
                              makeInstaller: @Sendable () -> ClaudeSetupInstaller = { ClaudeSetupInstaller() }) async
         -> ClaudeUsageUpgrade {
-        guard snapshot.installed, !snapshot.usageInstalled, let plan = snapshot.plan else { return .skipped }
         let roots = setupRoots(configDirectory: snapshot.root, applicationSupport: applicationSupport)
+        // A failed rollback stays on the row, and blocks the upgrade, until Configure or Undo succeeds.
+        if let message = ClaudeSetupInstaller().usageRollbackIncomplete(for: roots) { return .rollbackIncomplete(message) }
+        guard snapshot.installed, !snapshot.usageInstalled, let plan = snapshot.plan else { return .skipped }
         let capabilities = snapshot.capabilities
         return await writes.run { makeInstaller().upgradeUsage(plan, roots: roots, capabilities: capabilities) }
     }

@@ -165,6 +165,9 @@ public struct ClaudeSetupRoots: Equatable, Sendable {
     public var stateURL: URL { helperDirectory.appendingPathComponent("install.json") }
     public var backupsURL: URL { helperDirectory.appendingPathComponent("backups", isDirectory: true) }
     public var usageDirectory: URL { helperDirectory.appendingPathComponent("usage", isDirectory: true) }
+    /// Herdly's own record that an automatic usage upgrade failed and could not roll back, kept beside
+    /// the install record (never in the user's Claude folder) until Configure or Undo Setup succeeds.
+    public var usageRollbackURL: URL { helperDirectory.appendingPathComponent("usage-rollback-incomplete") }
 }
 
 public struct ClaudeSetupPlan: Equatable, Sendable {
@@ -754,8 +757,17 @@ public struct ClaudeSetupInstaller {
         self.beforeWrite = beforeWrite
     }
 
+    /// Configure. Success also clears a stuck usage-rollback record, since the folder's settings are
+    /// then exactly what setup wrote.
     public func install(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots, helper: Data,
                         capabilities: ClaudeCapabilities) throws -> ClaudeConnectionStatus {
+        let status = try performInstall(plan, roots: roots, helper: helper, capabilities: capabilities)
+        clearUsageRollback(roots)
+        return status
+    }
+
+    private func performInstall(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots, helper: Data,
+                                capabilities: ClaudeCapabilities) throws -> ClaudeConnectionStatus {
         guard case .ready = plan.status else { throw ClaudeSetupError.failed("Setup preview is not ready.") }
         guard !helper.isEmpty else { throw ClaudeSetupError.failed("The bundled Herdly helper is unavailable.") }
         let currentSettings = try readableData(at: roots.settingsURL)
@@ -1019,7 +1031,28 @@ public struct ClaudeSetupInstaller {
         })
     }
 
+    /// Undo Setup. Success also clears a stuck usage-rollback record and, with it gone, Herdly's
+    /// now-empty folder for this root.
     public func undo(roots: ClaudeSetupRoots) throws -> ClaudeConnectionStatus {
+        let status = try performUndo(roots: roots)
+        clearUsageRollback(roots)
+        try? removeDirectoryIfEmpty(roots.helperDirectory)
+        return status
+    }
+
+    /// The reason a usage upgrade's rollback failed for this folder, kept until Configure or Undo
+    /// Setup succeeds; nil when there is none.
+    public func usageRollbackIncomplete(for roots: ClaudeSetupRoots) -> String? {
+        guard let data = boundedData(at: roots.usageRollbackURL, maximum: 16 * 1024) else { return nil }
+        let message = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return message.isEmpty ? "Herdly couldn't finish or undo adding its usage status line. Check settings.json." : message
+    }
+
+    private func clearUsageRollback(_ roots: ClaudeSetupRoots) {
+        try? fileManager.removeItem(at: roots.usageRollbackURL)
+    }
+
+    private func performUndo(roots: ClaudeSetupRoots) throws -> ClaudeConnectionStatus {
         let state = try readState(roots)
         guard state.rootPath == roots.configDirectory.path else {
             throw ClaudeSetupError.conflict("Herdly Claude setup belongs to a different configuration root; undo made no changes.")
@@ -1324,9 +1357,15 @@ extension ClaudeSetupInstaller {
     /// record keeps the user's original status line, so Undo Setup restores it byte for byte.
     public func upgradeUsage(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots,
                              capabilities: ClaudeCapabilities) -> ClaudeUsageUpgrade {
+        // While a failed rollback is on record the settings may be half-written: never write again.
+        if let message = usageRollbackIncomplete(for: roots) { return .rollbackIncomplete(message) }
         do {
             return try applyUsageUpgrade(plan, roots: roots, capabilities: capabilities)
         } catch ClaudeSetupError.rollbackIncomplete(let message) {
+            // Kept beside the install record so the next detection still shows it; written directly,
+            // since this is Herdly's own state, not the user's settings.
+            try? fileManager.createDirectory(at: roots.helperDirectory, withIntermediateDirectories: true)
+            try? Data(message.utf8).write(to: roots.usageRollbackURL, options: .atomic)
             return .rollbackIncomplete(message)
         } catch {
             return .failed(error.localizedDescription)

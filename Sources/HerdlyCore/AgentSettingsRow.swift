@@ -157,8 +157,9 @@ public struct AgentSettingsRow: Equatable, Sendable {
             && status.offersConfigure(requiresConfigure: setup.requiresConfigure, usageMatches: true)
         let working = status == .connected || status.isAwaitingRestart
         var extra: [AgentRowLine] = []
-        // A usage upgrade that couldn't restore the settings it was changing needs the user, whatever else holds.
-        if installed, case .rollbackIncomplete(let message) = setup.usageUpgrade {
+        // A usage upgrade that couldn't restore the settings it was changing needs the user, whatever
+        // else holds, even with the install record gone.
+        if case .rollbackIncomplete(let message) = setup.usageUpgrade {
             extra.append(.problem(AgentProblem(kind: .usageWriteFailed, label: "Usage limits", value: message),
                                   configures: false))
         }

@@ -308,6 +308,70 @@ private func failingWrites(to target: URL, once: Bool) -> @Sendable () -> Claude
                                         configures: false)))
 }
 
+/// A folder whose automatic usage upgrade failed and could not roll back.
+private func folderWithFailedRollback(_ name: String) async throws
+    -> (root: URL, config: URL, support: URL, roots: ClaudeSetupRoots, message: String) {
+    let folder = try folderSetUpWithUsageOff(name, settings: Data(#"{"statusLine":{"type":"command","command":"cat"}}"#.utf8))
+    let result = await ClaudeSetupDetection.upgradeUsage(
+        claudeSnapshot(folder.config, support: folder.support), applicationSupport: folder.support,
+        writes: ClaudeSetupWrites(), makeInstaller: failingWrites(to: folder.roots.stateURL, once: false))
+    guard case .rollbackIncomplete(let message) = result else {
+        throw ClaudeSetupError.failed("expected rollbackIncomplete, got \(result)")
+    }
+    return (folder.root, folder.config, folder.support, folder.roots, message)
+}
+
+/// The folder's row as detection builds it: snapshot, then the automatic upgrade, as `startRefresh` does.
+private func detectedRow(_ config: URL, support: URL) async -> AgentSettingsRow {
+    var snapshot = claudeSnapshot(config, support: support)
+    snapshot.usageUpgrade = await ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: support,
+                                                                    writes: ClaudeSetupWrites())
+    return claudeRow(snapshot)
+}
+
+@Test func aFailedRollbackStaysOnTheRowAcrossDetectionsAndBlocksTheUpgrade() async throws {
+    let folder = try await folderWithFailedRollback("claude-usage-rollback-sticky")
+    defer { try? FileManager.default.removeItem(at: folder.root) }
+    // Kept in Herdly's own state, never in the user's Claude folder.
+    #expect(folder.roots.usageRollbackURL.path.hasPrefix(folder.support.path))
+    #expect(ClaudeSetupInstaller().usageRollbackIncomplete(for: folder.roots) == folder.message)
+    let before = try Data(contentsOf: folder.roots.settingsURL)
+    // A later detection (or Review Again) with a working installer still shows it and writes nothing.
+    for _ in 0..<2 {
+        let row = await detectedRow(folder.config, support: folder.support)
+        #expect(row.badge == .needsAttention)
+        #expect(row.lines.contains(.problem(AgentProblem(kind: .usageWriteFailed, label: "Usage limits", value: folder.message),
+                                            configures: false)))
+    }
+    #expect(ClaudeSetupInstaller().upgradeUsage(try #require(claudeSnapshot(folder.config, support: folder.support).plan),
+                                                roots: folder.roots, capabilities: claudeCapabilities)
+        == .rollbackIncomplete(folder.message))
+    #expect(try Data(contentsOf: folder.roots.settingsURL) == before)
+    #expect(!claudeSnapshot(folder.config, support: folder.support).usageInstalled)
+}
+
+@Test func aSuccessfulConfigureClearsAFailedRollback() async throws {
+    let folder = try await folderWithFailedRollback("claude-usage-rollback-configure")
+    defer { try? FileManager.default.removeItem(at: folder.root) }
+    let plan = try #require(claudeSnapshot(folder.config, support: folder.support).plan)
+    _ = try ClaudeSetupInstaller().install(plan, roots: folder.roots, helper: Data("helper".utf8),
+                                           capabilities: claudeCapabilities)
+    #expect(ClaudeSetupInstaller().usageRollbackIncomplete(for: folder.roots) == nil)
+    let row = await detectedRow(folder.config, support: folder.support)
+    #expect(row.badge != .needsAttention)
+    #expect(!row.lines.contains { if case .problem = $0 { true } else { false } })
+}
+
+@Test func aSuccessfulUndoClearsAFailedRollback() async throws {
+    let folder = try await folderWithFailedRollback("claude-usage-rollback-undo")
+    defer { try? FileManager.default.removeItem(at: folder.root) }
+    #expect(try ClaudeSetupInstaller().undo(roots: folder.roots) == .notConfigured)
+    #expect(ClaudeSetupInstaller().usageRollbackIncomplete(for: folder.roots) == nil)
+    #expect(!FileManager.default.fileExists(atPath: folder.roots.usageRollbackURL.path))
+    let row = await detectedRow(folder.config, support: folder.support)
+    #expect(row.badge == .off)
+}
+
 @Test func aRollbackFailureOutranksReadyOnAConnectedFolder() {
     let row = AgentSettingsRow.claude(claudeCapabilities, status: .connected, statusText: "Connected", installed: true,
                                       setup: ClaudeFolderSetup(planReady: true, plannedUsage: .ready,
