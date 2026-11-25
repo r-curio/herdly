@@ -184,3 +184,15 @@ public struct AgentSettingsRow: Equatable, Sendable {
         return false
     }
 }
+
+/// What flipping a row's switch runs (A3): on runs that agent's Configure, off its Undo Setup at
+/// once, with no confirmation. Nil while the switch can't change or already reads that way.
+public enum AgentSwitchChange: Equatable, Sendable {
+    case configure
+    case undo
+
+    public static func change(to on: Bool, _ row: AgentSettingsRow) -> AgentSwitchChange? {
+        guard row.switchEnabled, on != row.hooksInstalled else { return nil }
+        return on ? .configure : .undo
+    }
+}

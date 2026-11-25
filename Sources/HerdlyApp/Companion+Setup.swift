@@ -69,6 +69,7 @@ extension Companion {
             self.setupCapabilities = snapshot.capabilities
             self.setupPlan = snapshot.plan
             self.setupStatus = snapshot.status
+            self.setupInstalled = snapshot.installed
             self.setupChecked = true
             self.resolveDesktopWaitAfterDetection()
             self.adoptInstalledEventsFolder(roots)
@@ -104,9 +105,11 @@ extension Companion {
         refresh()
     }
 
-    func configureCodex() {
+    /// Configure Codex; the task ends once the result has landed.
+    @discardableResult
+    func configureCodex() -> Task<Void, Never> {
         let roots = setupRoots
-        Task { @MainActor [weak self] in
+        return Task { @MainActor [weak self] in
             guard let self else { return }
             let snapshot = await Task.detached {
                 let capabilities = CodexSetupDetection.capabilities()
@@ -115,6 +118,7 @@ extension Companion {
             self.setupCapabilities = snapshot.capabilities
             self.setupPlan = snapshot.plan
             self.setupStatus = snapshot.status
+            self.setupInstalled = snapshot.installed
             guard let plan = self.setupPlan, case .ready = plan.status else {
                 self.setupMessage = "Herdly cannot configure Codex until the setup preview is ready."
                 return
@@ -144,19 +148,23 @@ extension Companion {
                 return
             }
             self.setupStatus = status
+            self.setupInstalled = true
             switch status {
             case .connected, .configuredAwaitingRestart, .permissionRequired:
                 self.eventsPath = roots.eventsDirectory.path
                 UserDefaults.standard.set(self.eventsPath, forKey: "approvalEventsPath")
             default: break
             }
-            self.setupMessage = self.setupStatusText + " Restart new Codex sessions to load settings; Herdly did not restart existing sessions. Review Codex's hook-trust prompt. Ghostty Automation permission is not verified; enable Ghostty controls to let macOS prompt."
+            // The Codex row's badge and restart line say what happens next (#481, A5).
+            self.setupMessage = ""
         }
     }
 
-    func undoCodexSetup() {
+    /// Undo Setup for Codex; the task ends once the result has landed.
+    @discardableResult
+    func undoCodexSetup() -> Task<Void, Never> {
         let roots = setupRoots
-        Task { @MainActor [weak self] in
+        return Task { @MainActor [weak self] in
             guard let self else { return }
             let result = await Task.detached {
                 do { return SetupUndoResult.success(try CodexSetupInstaller().undo(roots: roots)) }
@@ -165,11 +173,13 @@ extension Companion {
             switch result {
             case .success(let status):
                 self.setupStatus = status
+                self.setupInstalled = false
                 if self.eventsPath == roots.eventsDirectory.path {
                     self.eventsPath = ""
                     UserDefaults.standard.removeObject(forKey: "approvalEventsPath")
                 }
-                self.setupMessage = "Disconnected. Existing Codex approval and sandbox settings were left unchanged."
+                // The row reads Off with its switch off; Codex's own approval and sandbox settings are untouched.
+                self.setupMessage = ""
             case .failure(let message):
                 self.setupMessage = message
                 self.refreshSetup()

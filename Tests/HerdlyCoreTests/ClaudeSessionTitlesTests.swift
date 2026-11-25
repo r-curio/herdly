@@ -104,16 +104,10 @@ private func temporaryEventsDirectory() throws -> URL {
     #expect(ClaudeSessionTitles.generationInput(source: "fix the redirect").contains("<request>\nfix the redirect\n</request>"))
 }
 
-@Test func claudeSessionTitleOptInAndRecordsLiveBelowTheEventsDirectory() throws {
+@Test func claudeSessionTitleRecordsLiveBelowTheEventsDirectoryWithoutAnOptIn() throws {
     let events = try temporaryEventsDirectory()
     defer { try? FileManager.default.removeItem(at: events) }
-    #expect(!ClaudeSessionTitles.isEnabled(eventsDirectory: events))
-    #expect(ClaudeSessionTitles.setEnabled(true, eventsDirectory: events))
-    #expect(ClaudeSessionTitles.isEnabled(eventsDirectory: events))
-    #expect(ClaudeSessionTitles.setEnabled(false, eventsDirectory: events))
-    #expect(!ClaudeSessionTitles.isEnabled(eventsDirectory: events))
-    #expect(ClaudeSessionTitles.setEnabled(false, eventsDirectory: events))
-
+    // Titles are always on (#481): saving needs no marker, and nothing creates one.
     let record = ClaudeSessionTitles.Record(status: .ready, title: "migrate-sheet", attempts: 1, updatedAt: 5)
     #expect(ClaudeSessionTitles.save(record, sessionID: "a7565d0f-1442", in: events))
     #expect(ClaudeSessionTitles.load(sessionID: "a7565d0f-1442", in: events) == record)
@@ -123,12 +117,17 @@ private func temporaryEventsDirectory() throws -> URL {
     // Hook-event retention only lists the top level, so these files never look like events.
     let topLevel = try FileManager.default.contentsOfDirectory(atPath: events.path)
     #expect(topLevel == [ClaudeSessionTitles.directoryName])
+    let titles = try FileManager.default.contentsOfDirectory(atPath: ClaudeSessionTitles.directory(in: events).path)
+    #expect(!titles.contains(ClaudeSessionTitles.enabledMarkerName))
 }
 
-@Test func claudeSessionTitlePruneRemovesOldRecordsButKeepsTheOptIn() throws {
+@Test func claudeSessionTitlePruneRemovesOldRecordsButLeavesALegacyMarker() throws {
     let events = try temporaryEventsDirectory()
     defer { try? FileManager.default.removeItem(at: events) }
-    #expect(ClaudeSessionTitles.setEnabled(true, eventsDirectory: events))
+    let marker = ClaudeSessionTitles.directory(in: events).appendingPathComponent(ClaudeSessionTitles.enabledMarkerName)
+    try FileManager.default.createDirectory(at: marker.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("on\n".utf8).write(to: marker)
+    try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 0)], ofItemAtPath: marker.path)
     let record = ClaudeSessionTitles.Record(status: .applied, title: "old", attempts: 1, updatedAt: 0)
     #expect(ClaudeSessionTitles.save(record, sessionID: "old", in: events))
     #expect(ClaudeSessionTitles.save(record, sessionID: "fresh", in: events))
@@ -137,7 +136,7 @@ private func temporaryEventsDirectory() throws -> URL {
     ClaudeSessionTitles.prune(in: events, now: Date().addingTimeInterval(ClaudeSessionTitles.recordAge + 60))
     #expect(ClaudeSessionTitles.load(sessionID: "old", in: events) == nil)
     #expect(ClaudeSessionTitles.load(sessionID: "fresh", in: events) == nil)
-    #expect(ClaudeSessionTitles.isEnabled(eventsDirectory: events))
+    #expect(FileManager.default.fileExists(atPath: marker.path))
 }
 
 @Test func claudeSessionTitleReplacesAHerdlyTitleThatClearCarriedOver() throws {

@@ -30,6 +30,8 @@ enum CodexSetupDetection {
         let capabilities: CodexCapabilities
         let plan: CodexSetupPlan?
         let status: CodexConnectionStatus
+        /// Whether Herdly's install record exists: the files Undo Setup removes (#481, A3).
+        let installed: Bool
     }
 
     static func capabilities() -> CodexCapabilities {
@@ -130,7 +132,8 @@ enum CodexSetupDetection {
         } else {
             status = CodexSetupInstaller().status(roots: roots, capabilities: capabilities)
         }
-        return SetupSnapshot(capabilities: capabilities, plan: plan, status: status)
+        return SetupSnapshot(capabilities: capabilities, plan: plan, status: status,
+                             installed: manager.fileExists(atPath: roots.stateURL.path))
     }
 
     static func boundedRegularData(at url: URL, maximum: Int) -> Data? {

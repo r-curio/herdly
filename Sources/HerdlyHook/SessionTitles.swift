@@ -9,13 +9,13 @@ let claudeTitleGeneratorMarker = "--generate-claude-title"
 /// in a detached helper process, and its title is applied on a later prompt. The one exception is
 /// the first prompt after a `/clear` carried over a Herdly title: it waits up to
 /// `ClaudeSessionTitles.carriedOverWait` and applies the new title at once when it is ready.
-/// Every failure (opt-in off, no `CLAUDE_PID`, unreadable or mismatched registry entry, a record
+/// Titles are on for every configured folder (#481); any earlier opt-in marker is ignored.
+/// Every failure (no `CLAUDE_PID`, unreadable or mismatched registry entry, a record
 /// that cannot be saved) leaves the session's name alone.
 func claudeSessionTitleOutput(_ object: [String: Any], eventsDirectory: URL,
                               environment: [String: String] = ProcessInfo.processInfo.environment,
                               now: Double = Date().timeIntervalSince1970) -> Data? {
     guard object["hook_event_name"] as? String == "UserPromptSubmit",
-          ClaudeSessionTitles.isEnabled(eventsDirectory: eventsDirectory),
           let sessionID = object["session_id"] as? String,
           let pid = environment["CLAUDE_PID"].flatMap({ Int32($0) }), pid > 0 else { return nil }
     let configDirectory = environment["CLAUDE_CONFIG_DIR"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
