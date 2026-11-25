@@ -86,7 +86,7 @@ struct ClaudeAgentRows: View {
         AgentSettingsRow.claude(root.capabilities, status: setup.checked ? root.status : nil,
                                 statusText: ClaudeSetupModel.statusText(root.status), installed: root.installed,
                                 setup: ClaudeFolderSetup(plan: root.plan, usageInstalled: root.usageInstalled,
-                                                         usageStatus: root.usageStatus),
+                                                         usageStatus: root.usageStatus, usageUpgrade: root.usageUpgrade),
                                 restartAfterUpdate: updates.restartRequired(.claude))
     }
 

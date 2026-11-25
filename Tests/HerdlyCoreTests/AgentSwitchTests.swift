@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 @testable import HerdlyCore
 @testable import HerdlyApp
@@ -22,7 +23,8 @@ private func claudeRow(_ snapshot: ClaudeSetupDetection.Snapshot) -> AgentSettin
     AgentSettingsRow.claude(snapshot.capabilities, status: snapshot.status,
                             statusText: ClaudeSetupModel.statusText(snapshot.status), installed: snapshot.installed,
                             setup: ClaudeFolderSetup(plan: snapshot.plan, usageInstalled: snapshot.usageInstalled,
-                                                     usageStatus: snapshot.usageStatus),
+                                                     usageStatus: snapshot.usageStatus,
+                                                     usageUpgrade: snapshot.usageUpgrade),
                             restartAfterUpdate: false)
 }
 
@@ -140,7 +142,7 @@ private func folderSetUpWithUsageOff(_ name: String, settings: Data) throws
     return (root, config, support, roots)
 }
 
-@Test func aFolderConfiguredWithUsageOffGetsUsageAutomaticallyAndUndoRestoresIt() throws {
+@Test func aFolderConfiguredWithUsageOffGetsUsageAutomaticallyAndUndoRestoresIt() async throws {
     let original = Data(#"{"model":"opus","statusLine":{"type":"command","command":"cat","padding":2}}"#.utf8)
     let folder = try folderSetUpWithUsageOff("claude-usage-auto", settings: original)
     defer { try? FileManager.default.removeItem(at: folder.root) }
@@ -150,7 +152,7 @@ private func folderSetUpWithUsageOff(_ name: String, settings: Data) throws
     // The next detection adds the bridge with no Configure click.
     let upgraded = claudeSnapshot(folder.config, support: folder.support)
     #expect(!upgraded.usageInstalled)
-    #expect(ClaudeSetupDetection.upgradeUsage(upgraded, applicationSupport: folder.support) == .applied)
+    #expect(await ClaudeSetupDetection.upgradeUsage(upgraded, applicationSupport: folder.support) == .applied)
     let after = claudeSnapshot(folder.config, support: folder.support)
     #expect(after.usageInstalled)
     #expect(after.usageStatus == .ready)
@@ -170,7 +172,7 @@ private func folderSetUpWithUsageOff(_ name: String, settings: Data) throws
         == beforeUpgrade)
 
     // Runs once: a bridged line is never wrapped again.
-    #expect(ClaudeSetupDetection.upgradeUsage(after, applicationSupport: folder.support) == .skipped)
+    #expect(await ClaudeSetupDetection.upgradeUsage(after, applicationSupport: folder.support) == .skipped)
     #expect(try Data(contentsOf: folder.roots.settingsURL) == bridged)
 
     // Undo Setup restores the user's original settings byte for byte.
@@ -178,11 +180,11 @@ private func folderSetUpWithUsageOff(_ name: String, settings: Data) throws
     #expect(try Data(contentsOf: folder.roots.settingsURL) == original)
 }
 
-@Test func automaticUsageAddsHerdlysStatusLineWhenThereIsNoneAndUndoRemovesIt() throws {
+@Test func automaticUsageAddsHerdlysStatusLineWhenThereIsNoneAndUndoRemovesIt() async throws {
     let original = Data(#"{"model":"opus"}"#.utf8)
     let folder = try folderSetUpWithUsageOff("claude-usage-auto-none", settings: original)
     defer { try? FileManager.default.removeItem(at: folder.root) }
-    #expect(ClaudeSetupDetection.upgradeUsage(claudeSnapshot(folder.config, support: folder.support),
+    #expect(await ClaudeSetupDetection.upgradeUsage(claudeSnapshot(folder.config, support: folder.support),
                                               applicationSupport: folder.support) == .applied)
     #expect(String(data: try Data(contentsOf: folder.roots.settingsURL), encoding: .utf8)?.contains("--claude-status-line") == true)
     #expect(claudeSnapshot(folder.config, support: folder.support).usageInstalled)
@@ -190,7 +192,7 @@ private func folderSetUpWithUsageOff(_ name: String, settings: Data) throws
     #expect(try Data(contentsOf: folder.roots.settingsURL) == original)
 }
 
-@Test func automaticUsageNeverTouchesAFolderHerdlyHasNotSetUp() throws {
+@Test func automaticUsageNeverTouchesAFolderHerdlyHasNotSetUp() async throws {
     let root = temporaryRoot("claude-usage-auto-unset")
     defer { try? FileManager.default.removeItem(at: root) }
     let config = root.appendingPathComponent("config", isDirectory: true)
@@ -201,15 +203,15 @@ private func folderSetUpWithUsageOff(_ name: String, settings: Data) throws
     try original.write(to: roots.settingsURL)
     let snapshot = claudeSnapshot(config, support: support)
     #expect(snapshot.plan?.usageStatus == .ready)
-    #expect(ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: support) == .skipped)
+    #expect(await ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: support) == .skipped)
     // Even called directly, the installer refuses without an install record.
-    #expect(try ClaudeSetupInstaller().upgradeUsage(try #require(snapshot.plan), roots: roots,
-                                                    capabilities: claudeCapabilities) == .skipped)
+    #expect(ClaudeSetupInstaller().upgradeUsage(try #require(snapshot.plan), roots: roots,
+                                                capabilities: claudeCapabilities) == .skipped)
     #expect(try Data(contentsOf: roots.settingsURL) == original)
     #expect(!FileManager.default.fileExists(atPath: roots.stateURL.path))
 }
 
-@Test func automaticUsageLeavesSettingsChangedSinceThePlanWasRead() throws {
+@Test func automaticUsageLeavesSettingsChangedSinceThePlanWasRead() async throws {
     let folder = try folderSetUpWithUsageOff("claude-usage-auto-race",
                                              settings: Data(#"{"statusLine":{"type":"command","command":"cat"}}"#.utf8))
     defer { try? FileManager.default.removeItem(at: folder.root) }
@@ -218,11 +220,11 @@ private func folderSetUpWithUsageOff(_ name: String, settings: Data) throws
     edited["model"] = "sonnet"
     let editedData = try JSONSerialization.data(withJSONObject: edited)
     try editedData.write(to: folder.roots.settingsURL)
-    #expect(ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: folder.support) == .skipped)
+    #expect(await ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: folder.support) == .skipped)
     #expect(try Data(contentsOf: folder.roots.settingsURL) == editedData)
 }
 
-@Test func automaticUsageWaitsWhileTheFolderNeedsRepair() throws {
+@Test func automaticUsageWaitsWhileTheFolderNeedsRepair() async throws {
     let folder = try folderSetUpWithUsageOff("claude-usage-auto-repair",
                                              settings: Data(#"{"statusLine":{"type":"command","command":"cat"}}"#.utf8))
     defer { try? FileManager.default.removeItem(at: folder.root) }
@@ -230,24 +232,160 @@ private func folderSetUpWithUsageOff(_ name: String, settings: Data) throws
     let before = try Data(contentsOf: folder.roots.settingsURL)
     let snapshot = claudeSnapshot(folder.config, support: folder.support)
     #expect(snapshot.status == .repairRequired("Herdly's Claude helper is missing; Configure Claude to repair setup."))
-    #expect(ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: folder.support) == .skipped)
+    #expect(await ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: folder.support) == .skipped)
     #expect(try Data(contentsOf: folder.roots.settingsURL) == before)
 }
 
-@Test func automaticUsageLeavesAnIncompatibleStatusLineByteIdentical() throws {
+@Test func automaticUsageLeavesAnIncompatibleStatusLineByteIdentical() async throws {
     let original = Data(#"{"statusLine":{"command":"sleep 2 & exit 0","type":"command"}}"#.utf8)
     let folder = try folderSetUpWithUsageOff("claude-usage-auto-incompatible", settings: original)
     defer { try? FileManager.default.removeItem(at: folder.root) }
     let before = try Data(contentsOf: folder.roots.settingsURL)
     let snapshot = claudeSnapshot(folder.config, support: folder.support)
     #expect(snapshot.plan?.usageStatus == .unavailable(ClaudeUsageSetupStatus.compatibilityFailureMessage))
-    #expect(ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: folder.support) == .skipped)
+    #expect(await ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: folder.support) == .skipped)
     #expect(try Data(contentsOf: folder.roots.settingsURL) == before)
     #expect(ClaudeSetupPlanner.memberData(before, key: "statusLine") == ClaudeSetupPlanner.memberData(original, key: "statusLine"))
     let row = claudeRow(claudeSnapshot(folder.config, support: folder.support))
     #expect(row.lines.count == 2)   // the restart line and one quiet usage reason
     #expect(row.lines.contains { if case .note = $0 { true } else { false } })
     #expect(!row.lines.contains { if case .problem = $0 { true } else { false } })
+}
+
+/// Fails writes to `target`: only the first one when `once`, otherwise every one.
+private func failingWrites(to target: URL, once: Bool) -> @Sendable () -> ClaudeSetupInstaller {
+    struct Failure: Error {}
+    let failures = OSAllocatedUnfairLock(initialState: 0)
+    return {
+        ClaudeSetupInstaller(beforeWrite: { url in
+            guard url == target else { return }
+            let count = failures.withLock { count in
+                count += 1
+                return count
+            }
+            if !once || count == 1 { throw Failure() }
+        })
+    }
+}
+
+@Test func aFailedUsageUpgradeRestoresSettingsAndShowsOnTheRow() async throws {
+    let folder = try folderSetUpWithUsageOff("claude-usage-auto-fail",
+                                             settings: Data(#"{"statusLine":{"type":"command","command":"cat"}}"#.utf8))
+    defer { try? FileManager.default.removeItem(at: folder.root) }
+    let before = try Data(contentsOf: folder.roots.settingsURL)
+    let stateBefore = try Data(contentsOf: folder.roots.stateURL)
+    let result = await ClaudeSetupDetection.upgradeUsage(
+        claudeSnapshot(folder.config, support: folder.support), applicationSupport: folder.support,
+        writes: ClaudeSetupWrites(), makeInstaller: failingWrites(to: folder.roots.stateURL, once: true))
+    #expect(result == .failed("Usage setup was not completed; the original configuration was restored."))
+    #expect(try Data(contentsOf: folder.roots.settingsURL) == before)
+    #expect(try Data(contentsOf: folder.roots.stateURL) == stateBefore)
+    var after = claudeSnapshot(folder.config, support: folder.support)
+    after.usageUpgrade = result
+    #expect(!after.usageInstalled)
+    let row = claudeRow(after)
+    #expect(row.lines.contains(.note("Couldn't add Herdly's usage status line: Usage setup was not completed; the original configuration was restored.")))
+    #expect(!row.lines.contains(.note("Usage limits are unavailable until Herdly can add its status line")))
+}
+
+@Test func aUsageUpgradeWhoseRollbackFailsNeedsAttention() async throws {
+    let folder = try folderSetUpWithUsageOff("claude-usage-auto-rollback",
+                                             settings: Data(#"{"statusLine":{"type":"command","command":"cat"}}"#.utf8))
+    defer { try? FileManager.default.removeItem(at: folder.root) }
+    let result = await ClaudeSetupDetection.upgradeUsage(
+        claudeSnapshot(folder.config, support: folder.support), applicationSupport: folder.support,
+        writes: ClaudeSetupWrites(), makeInstaller: failingWrites(to: folder.roots.stateURL, once: false))
+    guard case .rollbackIncomplete(let message) = result else {
+        Issue.record("expected rollbackIncomplete, got \(result)")
+        return
+    }
+    var after = claudeSnapshot(folder.config, support: folder.support)
+    after.usageUpgrade = result
+    #expect(!after.usageInstalled)
+    let row = claudeRow(after)
+    #expect(row.badge == .needsAttention)
+    #expect(row.lines.contains(.problem(AgentProblem(kind: .usageWriteFailed, label: "Usage limits", value: message),
+                                        configures: false)))
+}
+
+@Test func aRollbackFailureOutranksReadyOnAConnectedFolder() {
+    let row = AgentSettingsRow.claude(claudeCapabilities, status: .connected, statusText: "Connected", installed: true,
+                                      setup: ClaudeFolderSetup(planReady: true, plannedUsage: .ready,
+                                                               usageUpgrade: .rollbackIncomplete("Check settings.json")),
+                                      restartAfterUpdate: false)
+    #expect(row.badge == .needsAttention)
+    #expect(row.lines == [.problem(AgentProblem(kind: .usageWriteFailed, label: "Usage limits", value: "Check settings.json"),
+                                   configures: false)])
+}
+
+/// Holds the first write to `target` until `release` is signalled, after yielding to `entered`.
+private func gatedWrites(to target: URL, entered: AsyncStream<Void>.Continuation,
+                         release: DispatchSemaphore) -> @Sendable () -> ClaudeSetupInstaller {
+    let held = OSAllocatedUnfairLock(initialState: false)
+    return {
+        ClaudeSetupInstaller(beforeWrite: { url in
+            guard url == target, held.withLock({ held in
+                defer { held = true }
+                return !held
+            }) else { return }
+            entered.yield()
+            release.wait()
+        })
+    }
+}
+
+@Test func anUndoIssuedDuringAUsageUpgradeWaitsAndRestoresTheOriginal() async throws {
+    let original = Data(#"{"model":"opus","statusLine":{"type":"command","command":"cat"}}"#.utf8)
+    let folder = try folderSetUpWithUsageOff("claude-usage-auto-undo-race", settings: original)
+    defer { try? FileManager.default.removeItem(at: folder.root) }
+    let writes = ClaudeSetupWrites()
+    let (entered, enteredContinuation) = AsyncStream.makeStream(of: Void.self)
+    let release = DispatchSemaphore(value: 0)
+    let snapshot = claudeSnapshot(folder.config, support: folder.support)
+    let support = folder.support
+    let upgrade = Task {
+        await ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: support, writes: writes,
+                                                makeInstaller: gatedWrites(to: folder.roots.settingsURL,
+                                                                           entered: enteredContinuation, release: release))
+    }
+    for await _ in entered { break }
+    // The upgrade is mid-write. Undo is issued now and must wait its turn.
+    let (issued, issuedContinuation) = AsyncStream.makeStream(of: Void.self)
+    let roots = folder.roots
+    let undo = Task {
+        issuedContinuation.yield()
+        return try await writes.run { try ClaudeSetupInstaller().undo(roots: roots) }
+    }
+    for await _ in issued { break }
+    release.signal()
+    #expect(await upgrade.value == .applied)
+    #expect(try await undo.value == .notConfigured)
+    #expect(try Data(contentsOf: folder.roots.settingsURL) == original)
+}
+
+@Test func aUsageUpgradeQueuedBehindUndoWritesNothing() async throws {
+    let original = Data(#"{"statusLine":{"type":"command","command":"cat"}}"#.utf8)
+    let folder = try folderSetUpWithUsageOff("claude-usage-auto-after-undo", settings: original)
+    defer { try? FileManager.default.removeItem(at: folder.root) }
+    let writes = ClaudeSetupWrites()
+    let (entered, enteredContinuation) = AsyncStream.makeStream(of: Void.self)
+    let release = DispatchSemaphore(value: 0)
+    let stale = claudeSnapshot(folder.config, support: folder.support)
+    let roots = folder.roots
+    let undoInstaller = gatedWrites(to: roots.settingsURL, entered: enteredContinuation, release: release)
+    let undo = Task { try await writes.run { try undoInstaller().undo(roots: roots) } }
+    for await _ in entered { break }
+    let support = folder.support
+    let (issued, issuedContinuation) = AsyncStream.makeStream(of: Void.self)
+    let upgrade = Task {
+        issuedContinuation.yield()
+        return await ClaudeSetupDetection.upgradeUsage(stale, applicationSupport: support, writes: writes)
+    }
+    for await _ in issued { break }
+    release.signal()
+    #expect(try await undo.value == .notConfigured)
+    #expect(await upgrade.value == .skipped)
+    #expect(try Data(contentsOf: roots.settingsURL) == original)
 }
 
 @Test func anIncompatibleStatusLineStaysByteIdenticalAndUsageReadsUnavailable() throws {

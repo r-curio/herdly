@@ -42,6 +42,8 @@ enum ClaudeSetupDetection {
         /// Whether Herdly's install record for this folder exists: the files Undo Setup removes (#481, A3).
         let installed: Bool
         let activeSessionStatus: ActiveSessionStatus
+        /// What this detection's automatic usage upgrade did, so a failure shows on the folder's row.
+        var usageUpgrade: ClaudeUsageUpgrade = .skipped
     }
 
     static func capabilities() -> ClaudeCapabilities {
@@ -139,12 +141,17 @@ enum ClaudeSetupDetection {
     }
 
     /// Adds Herdly's usage status line to a folder set up while usage was an opt-in, from the plan
-    /// this snapshot read (#481, owner decision 2026-11-25). Every guard is in
-    /// `ClaudeSetupInstaller.upgradeUsage`; any doubt or error writes nothing. Runs off the main actor.
-    static func upgradeUsage(_ snapshot: Snapshot, applicationSupport: URL) -> ClaudeUsageUpgrade {
+    /// this snapshot read (#481, owner decision 2026-11-25), in its turn among the folder's other
+    /// writes (`ClaudeSetupWrites`). Every guard is in `ClaudeSetupInstaller.upgradeUsage`, which
+    /// re-reads the files when its turn comes; a doubt writes nothing, and a failure is returned so the
+    /// folder's row can show it. `makeInstaller` lets tests make a write fail.
+    static func upgradeUsage(_ snapshot: Snapshot, applicationSupport: URL, writes: ClaudeSetupWrites = .shared,
+                             makeInstaller: @Sendable () -> ClaudeSetupInstaller = { ClaudeSetupInstaller() }) async
+        -> ClaudeUsageUpgrade {
         guard snapshot.installed, !snapshot.usageInstalled, let plan = snapshot.plan else { return .skipped }
         let roots = setupRoots(configDirectory: snapshot.root, applicationSupport: applicationSupport)
-        return (try? ClaudeSetupInstaller().upgradeUsage(plan, roots: roots, capabilities: snapshot.capabilities)) ?? .skipped
+        let capabilities = snapshot.capabilities
+        return await writes.run { makeInstaller().upgradeUsage(plan, roots: roots, capabilities: capabilities) }
     }
 
     private static func statusLineCompatibility(settings: Data, usageEnabled: Bool) -> Bool? {
@@ -394,6 +401,8 @@ final class ClaudeSetupModel: ObservableObject {
         /// Whether Herdly's install record for this folder exists; the row's switch shows it.
         let installed: Bool
         let activeSessionStatus: ClaudeSetupDetection.ActiveSessionStatus
+        /// What the last detection's automatic usage upgrade did; a failure shows on the folder's row.
+        var usageUpgrade: ClaudeUsageUpgrade = .skipped
         var id: String { url.standardizedFileURL.path }
         /// The root's hook event directory when Herdly reads records from it: connected, with an events
         /// path and an installation ID. The one rule for what the hook scan reads and watches (#306).
@@ -445,21 +454,27 @@ final class ClaudeSetupModel: ObservableObject {
             let (snapshots, updatedHelpers) = await Task.detached(priority: .utility) {
                 let caps = ClaudeSetupDetection.capabilities()
                 var updated = 0
-                let snapshots = paths.map { path in
+                var snapshots: [ClaudeSetupDetection.Snapshot] = []
+                for path in paths {
                     let root = URL(fileURLWithPath: path, isDirectory: true)
-                    // Only Herdly's own unchanged helper is replaced; settings.json is never touched here.
+                    let roots = ClaudeSetupDetection.setupRoots(configDirectory: root, applicationSupport: support)
+                    // Only Herdly's own unchanged helper is replaced, in its turn among the folder's writes.
                     if let helper = BundledHelper.validated,
-                       (try? ClaudeSetupInstaller().refreshHelper(
-                           roots: ClaudeSetupDetection.setupRoots(configDirectory: root, applicationSupport: support),
-                           helper: helper)) == .updated {
+                       await ClaudeSetupWrites.shared.run({
+                           (try? ClaudeSetupInstaller().refreshHelper(roots: roots, helper: helper)) == .updated
+                       }) {
                         updated += 1
                     }
-                    let snapshot = ClaudeSetupDetection.setupSnapshot(root: root, applicationSupport: support, capabilities: caps)
-                    // Usage is always on: a folder set up without it gets it here, once, then reads afresh.
-                    guard ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: support) == .applied else {
-                        return snapshot
+                    var snapshot = ClaudeSetupDetection.setupSnapshot(root: root, applicationSupport: support, capabilities: caps)
+                    // Usage is always on: a folder set up without it gets Herdly's status line here,
+                    // under the guards in `ClaudeSetupInstaller.upgradeUsage`. This and the helper refresh
+                    // are the only settings changes detection makes; it then reads the folder afresh.
+                    let upgrade = await ClaudeSetupDetection.upgradeUsage(snapshot, applicationSupport: support)
+                    if upgrade != .skipped {
+                        snapshot = ClaudeSetupDetection.setupSnapshot(root: root, applicationSupport: support, capabilities: caps)
                     }
-                    return ClaudeSetupDetection.setupSnapshot(root: root, applicationSupport: support, capabilities: caps)
+                    snapshot.usageUpgrade = upgrade
+                    snapshots.append(snapshot)
                 }
                 return (snapshots, updated)
             }.value
@@ -471,7 +486,8 @@ final class ClaudeSetupModel: ObservableObject {
                      settingsPath: snapshot.settingsPath, statePath: snapshot.statePath,
                      backupsPath: snapshot.backupsPath, usagePath: snapshot.usagePath, usage: snapshot.usage,
                      usageStatus: snapshot.usageStatus, usageInstalled: snapshot.usageInstalled,
-                     installed: snapshot.installed, activeSessionStatus: snapshot.activeSessionStatus)
+                     installed: snapshot.installed, activeSessionStatus: snapshot.activeSessionStatus,
+                     usageUpgrade: snapshot.usageUpgrade)
             }
             // Unchanged roots are not written back: the notch observes this model (#306).
             if next != roots { roots = next }
@@ -516,7 +532,7 @@ final class ClaudeSetupModel: ObservableObject {
                             statePath: root.statePath, backupsPath: root.backupsPath, usagePath: root.usagePath,
                             usage: readings[root.id] ?? nil, usageStatus: root.usageStatus,
                             usageInstalled: root.usageInstalled, installed: root.installed,
-                            activeSessionStatus: root.activeSessionStatus)
+                            activeSessionStatus: root.activeSessionStatus, usageUpgrade: root.usageUpgrade)
             }
             if next != roots { roots = next }
         }
@@ -561,9 +577,14 @@ final class ClaudeSetupModel: ObservableObject {
                 message = "The bundled Herdly helper is unavailable or failed its self-test. Reinstall Herdly and try again."
                 return
             }
-            let result = await Task.detached {
-                Result { try ClaudeSetupInstaller().install(plan, roots: roots, helper: helper, capabilities: capabilities) }
-            }.value
+            let result: Result<ClaudeConnectionStatus, any Error>
+            do {
+                result = .success(try await ClaudeSetupWrites.shared.run {
+                    try ClaudeSetupInstaller().install(plan, roots: roots, helper: helper, capabilities: capabilities)
+                })
+            } catch {
+                result = .failure(error)
+            }
             switch result {
             case .success:
                 // The row's badge and restart line say what happens next (#481, A5).
@@ -580,9 +601,12 @@ final class ClaudeSetupModel: ObservableObject {
     func undo(_ root: Root) -> Task<Void, Never> {
         let roots = ClaudeSetupDetection.setupRoots(configDirectory: root.url, applicationSupport: applicationSupport)
         return Task { @MainActor in
-            let result = await Task.detached {
-                Result { try ClaudeSetupInstaller().undo(roots: roots) }
-            }.value
+            let result: Result<ClaudeConnectionStatus, any Error>
+            do {
+                result = .success(try await ClaudeSetupWrites.shared.run { try ClaudeSetupInstaller().undo(roots: roots) })
+            } catch {
+                result = .failure(error)
+            }
             switch result {
             case .success:
                 // The row reads Off with its switch off.

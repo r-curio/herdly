@@ -746,8 +746,13 @@ private struct ClaudeInstallState: Codable {
 
 public struct ClaudeSetupInstaller {
     private let fileManager: FileManager
+    /// Runs before each atomic write, so tests can make a chosen write fail.
+    private let beforeWrite: (@Sendable (URL) throws -> Void)?
 
-    public init(fileManager: FileManager = .default) { self.fileManager = fileManager }
+    public init(fileManager: FileManager = .default, beforeWrite: (@Sendable (URL) throws -> Void)? = nil) {
+        self.fileManager = fileManager
+        self.beforeWrite = beforeWrite
+    }
 
     public func install(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots, helper: Data,
                         capabilities: ClaudeCapabilities) throws -> ClaudeConnectionStatus {
@@ -1279,6 +1284,7 @@ public struct ClaudeSetupInstaller {
 
     private func atomicWrite(_ data: Data, to url: URL) throws {
         try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try beforeWrite?(url)
         try data.write(to: url, options: .atomic)
     }
 
@@ -1294,10 +1300,14 @@ public struct ClaudeSetupInstaller {
     }
 }
 
-/// What `ClaudeSetupInstaller.upgradeUsage` did: added Herdly's usage status line, or changed nothing.
+/// What `ClaudeSetupInstaller.upgradeUsage` did: added Herdly's usage status line, changed nothing,
+/// failed with the original settings restored, or failed and could not restore them, so the
+/// folder's files may be half-written and need the user's attention.
 public enum ClaudeUsageUpgrade: Equatable, Sendable {
     case applied
     case skipped
+    case failed(String)
+    case rollbackIncomplete(String)
 }
 
 extension ClaudeSetupInstaller {
@@ -1313,7 +1323,18 @@ extension ClaudeSetupInstaller {
     /// The settings are backed up as Configure backs them up, written atomically, and the install
     /// record keeps the user's original status line, so Undo Setup restores it byte for byte.
     public func upgradeUsage(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots,
-                             capabilities: ClaudeCapabilities) throws -> ClaudeUsageUpgrade {
+                             capabilities: ClaudeCapabilities) -> ClaudeUsageUpgrade {
+        do {
+            return try applyUsageUpgrade(plan, roots: roots, capabilities: capabilities)
+        } catch ClaudeSetupError.rollbackIncomplete(let message) {
+            return .rollbackIncomplete(message)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    private func applyUsageUpgrade(_ plan: ClaudeSetupPlan, roots: ClaudeSetupRoots,
+                                   capabilities: ClaudeCapabilities) throws -> ClaudeUsageUpgrade {
         guard case .ready = plan.status, plan.usageEnabled, plan.usageStatus == .ready,
               let state = try? readState(roots), state.rootPath == roots.configDirectory.path,
               UUID(uuidString: state.installationID) != nil, state.installationID == plan.installationID,

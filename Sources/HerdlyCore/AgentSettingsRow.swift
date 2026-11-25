@@ -50,7 +50,7 @@ public enum AgentRowLine: Equatable, Hashable, Sendable {
     public static func text(_ problem: AgentProblem, value: String) -> String {
         switch problem.kind {
         case .codexCLI, .codexDesktop, .claudeVersion: "\(problem.label): \(value)"
-        case .status, .newHooks, .usage, .pendingSetup: value
+        case .status, .newHooks, .usage, .pendingSetup, .usageWriteFailed: value
         }
     }
 }
@@ -70,24 +70,28 @@ public struct ClaudeFolderSetup: Equatable, Sendable {
     public let usageInstalled: Bool
     /// How the installed usage reads.
     public let usageStatus: ClaudeUsageSetupStatus
+    /// What the last automatic usage upgrade did (`ClaudeSetupInstaller.upgradeUsage`).
+    public let usageUpgrade: ClaudeUsageUpgrade
 
     public init(planReady: Bool, requiresConfigure: Bool = false, addsHooks: Bool = false,
                 plannedUsage: ClaudeUsageSetupStatus? = nil, usageInstalled: Bool = false,
-                usageStatus: ClaudeUsageSetupStatus = .off) {
+                usageStatus: ClaudeUsageSetupStatus = .off, usageUpgrade: ClaudeUsageUpgrade = .skipped) {
         self.planReady = planReady
         self.requiresConfigure = requiresConfigure
         self.addsHooks = addsHooks
         self.plannedUsage = plannedUsage
         self.usageInstalled = usageInstalled
         self.usageStatus = usageStatus
+        self.usageUpgrade = usageUpgrade
     }
 
     /// From the folder's preview, counted only when it is ready.
-    public init(plan: ClaudeSetupPlan?, usageInstalled: Bool, usageStatus: ClaudeUsageSetupStatus) {
+    public init(plan: ClaudeSetupPlan?, usageInstalled: Bool, usageStatus: ClaudeUsageSetupStatus,
+                usageUpgrade: ClaudeUsageUpgrade = .skipped) {
         let ready: ClaudeSetupPlan? = if let plan, case .ready = plan.status { plan } else { nil }
         self.init(planReady: ready != nil, requiresConfigure: ready?.changesBeyondUsage ?? false,
                   addsHooks: ready?.addsHooks ?? false, plannedUsage: ready?.usageStatus,
-                  usageInstalled: usageInstalled, usageStatus: usageStatus)
+                  usageInstalled: usageInstalled, usageStatus: usageStatus, usageUpgrade: usageUpgrade)
     }
 }
 
@@ -153,6 +157,11 @@ public struct AgentSettingsRow: Equatable, Sendable {
             && status.offersConfigure(requiresConfigure: setup.requiresConfigure, usageMatches: true)
         let working = status == .connected || status.isAwaitingRestart
         var extra: [AgentRowLine] = []
+        // A usage upgrade that couldn't restore the settings it was changing needs the user, whatever else holds.
+        if installed, case .rollbackIncomplete(let message) = setup.usageUpgrade {
+            extra.append(.problem(AgentProblem(kind: .usageWriteFailed, label: "Usage limits", value: message),
+                                  configures: false))
+        }
         if offersConfigure, working {
             // A working folder with changes Configure would add: newer hooks, or other settings to write.
             let pending = setup.addsHooks
@@ -177,6 +186,11 @@ public struct AgentSettingsRow: Equatable, Sendable {
     /// waits for the next check; otherwise the installed usage's own reason, such as a status line
     /// that failed the compatibility probe and was left as it is.
     private static func usageUnavailable(_ setup: ClaudeFolderSetup) -> String? {
+        switch setup.usageUpgrade {
+        case .failed(let message): return "Couldn't add Herdly's usage status line: \(message)"
+        case .rollbackIncomplete: return nil
+        case .applied, .skipped: break
+        }
         if !setup.usageInstalled, setup.plannedUsage == .ready { return usagePending }
         switch setup.usageStatus {
         case .unavailable(let message), .conflict(let message): return message
@@ -221,16 +235,18 @@ public struct AgentSettingsRow: Equatable, Sendable {
                                 hooksInstalled: installed, setupCanRun: setupCanRun, lines: lines)
     }
 
-    /// Restart required wins. A switched-off agent reads Off unless its status needs fixing (such as
+    /// Settings a failed rollback may have left half-written outrank everything. Then Restart required
+    /// wins. A switched-off agent reads Off unless its status needs fixing (such as
     /// Herdly's hooks left in settings without an install record). An installed agent with a problem
     /// to fix needs attention, except pending setup changes, which leave a working agent Ready.
     private static func badge(installed: Bool, restart: AgentRestartReason?, lines: [AgentRowLine],
                               connected: Bool) -> AgentRowBadge {
-        if restart != nil { return .restartRequired }
         let problems = lines.compactMap { line -> AgentProblem? in
             guard case .problem(let problem, _) = line else { return nil }
             return problem
         }
+        if problems.contains(where: { $0.kind == .usageWriteFailed }) { return .needsAttention }
+        if restart != nil { return .restartRequired }
         guard installed else { return problems.contains { $0.kind == .status } ? .needsAttention : .off }
         let needsFix = problems.contains { ![.newHooks, .usage, .pendingSetup].contains($0.kind) }
         return needsFix || !connected ? .needsAttention : .ready

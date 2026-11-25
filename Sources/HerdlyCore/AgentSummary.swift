@@ -13,6 +13,8 @@ public struct AgentProblem: Equatable, Hashable, Sendable, Identifiable {
         case usage
         /// Settings Configure would still write on a working Claude folder, other than new hooks or usage.
         case pendingSetup
+        /// Adding the usage status line failed and its rollback did too, so settings may be half-written.
+        case usageWriteFailed
     }
 
     public let kind: Kind

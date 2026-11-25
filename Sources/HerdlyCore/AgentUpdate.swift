@@ -39,7 +39,7 @@ public enum AgentUpdateTarget: String, CaseIterable, Hashable, Sendable {
         case .codexCLI: self = .codexCLI
         case .codexDesktop: self = .codexDesktop
         case .claudeVersion: self = .claudeCode
-        case .status, .newHooks, .usage, .pendingSetup: return nil
+        case .status, .newHooks, .usage, .pendingSetup, .usageWriteFailed: return nil
         }
     }
 }

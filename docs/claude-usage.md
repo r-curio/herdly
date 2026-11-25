@@ -8,7 +8,11 @@ setup, the status line is still the one Herdly recorded, `settings.json` is unch
 check read it, and an existing command passes the compatibility probe. It changes only `statusLine`,
 backs up the settings as Configure does, writes atomically, and keeps the original status line in
 the install record, so Undo Setup restores it byte for byte. Otherwise nothing is written and usage
-reads unavailable (`ClaudeSetupInstaller.upgradeUsage`).
+reads unavailable (`ClaudeSetupInstaller.upgradeUsage`). A write that fails is rolled back and the
+folder's row says usage couldn't be added; if the rollback fails too, the row reads Needs attention
+with the reason, since the settings may be half-written. Configure, Undo Setup, the helper refresh
+and this upgrade take turns on one queue (`ClaudeSetupWrites`), so a switch flipped mid-upgrade
+waits for it, and each re-reads the folder's files when its turn comes.
 Herdly does not scan credentials, merge roots, estimate usage, or substitute gateway spend limits for
 subscription usage.
 
