@@ -2758,12 +2758,12 @@ struct Notch: View {
                                 let approveKey = decisionKeys ? NotchShortcut.commandReturn : nil
                                 let denyKey = decisionKeys ? NotchShortcut.commandDelete : nil
                                 NotchButton(title: "Approve", emphasized: true, shortcut: approveKey) {
-                                    model.decideAgent(approval, as: .allowOnce)
+                                    model.decideAgentByClick(approval, card: item.id, as: .allowOnce)
                                 }
                                     .disabled(!reading.decisionEnabled)
                                     .accessibilityLabel("Approve this request once: \(subject)")
                                     .accessibilityHint(NotchShortcut.hint("Approves this \(request) once.", shortcut: approveKey))
-                                NotchButton(title: "Deny", shortcut: denyKey) { model.decideAgent(approval, as: .deny) }
+                                NotchButton(title: "Deny", shortcut: denyKey) { model.decideAgentByClick(approval, card: item.id, as: .deny) }
                                     .disabled(!reading.decisionEnabled)
                                     .accessibilityLabel("Deny: \(subject)")
                                     .accessibilityHint(NotchShortcut.hint("Denies this \(request).", shortcut: denyKey))

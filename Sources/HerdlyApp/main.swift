@@ -122,6 +122,14 @@ struct RememberedApp: Equatable, Sendable {
     @MainActor var isRunning: Bool { running != nil }
 }
 
+/// The notch's content takes the click that also makes the panel key, so a button on a card that
+/// opened by itself works on the first click instead of the second. The panel stays non-activating,
+/// so the user's app stays frontmost; Approve and Deny still ignore a card's first half second
+/// (`CardClickSettle`).
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 @MainActor
 final class NotchPanel: NSPanel {
     /// Key status is only ever taken by a deliberate click, Tab into the panel, or the notch hotkey
@@ -741,7 +749,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     }
     /// One presentation mode prevents passive hover from replacing a new item's focused card.
     @Published var expanded = false
-    @Published var presentationMode: NotchPresentationMode = .collapsed
+    @Published var presentationMode: NotchPresentationMode = .collapsed {
+        didSet { cardClickSettle.show(presentationMode.singleCard, now: Date().timeIntervalSince1970) }
+    }
+    /// When the card on screen appeared, so Approve and Deny ignore a click in its first half second.
+    private var cardClickSettle = CardClickSettle()
     /// The open queue's keyboard selection (Up and Down arrows); cleared whenever the queue closes.
     @Published private(set) var queueSelection = QueueRowSelection()
     /// Whether the user opened the "N working" fold; closed again whenever the panel collapses.
@@ -1025,7 +1037,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         panel.level = .statusBar
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = NSHostingView(rootView: Notch(model: self, claudeSetup: claude, workStatus: workStatus))
+        panel.contentView = FirstClickHostingView(rootView: Notch(model: self, claudeSetup: claude, workStatus: workStatus))
         panel.onEscape = { [weak self] in self?.escape() }
         panel.onMoveSelection = { [weak self] in self?.moveSelection($0) ?? false }
         panel.onReturn = { [weak self] in
@@ -2975,6 +2987,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     var knownGhosttySnapshot: GhosttySnapshot? {
         guard case let .known(snapshot) = ghosttyFocusState, snapshot.status == "ok" else { return nil }
         return snapshot
+    }
+
+    /// A click on a card's Approve or Deny: ignored in the card's first half second on screen
+    /// (`CardClickSettle`), because the panel now takes a click before it is key; otherwise
+    /// exactly `decideAgent`.
+    func decideAgentByClick(_ approval: AgentApproval, card: AgentAttentionID, as decision: ApprovalDecision) {
+        guard cardClickSettle.acceptsDecisionClick(on: card, now: Date().timeIntervalSince1970) else { return }
+        decideAgent(approval, as: decision)
     }
 
     func decideAgent(_ approval: AgentApproval, as decision: ApprovalDecision) {
