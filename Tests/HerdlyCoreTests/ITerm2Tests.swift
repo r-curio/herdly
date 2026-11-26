@@ -374,6 +374,9 @@ private func runOpen(_ revalidated: Result<ITerm2OpenPlan, OpenMiss> = .success(
     #expect(row(scan: .unreadable) == ITerm2SettingsRow(badge: .needsAttention, problems: [.unreadable]))
     #expect(row(installed: false, access: nil, scan: .notRead, inUse: false)
             == ITerm2SettingsRow(badge: .needsAttention, problems: [.notFound]))
+    // Not installed and switched off is not a problem: the row reads Off with no lines.
+    #expect(row(on: false, installed: false, access: nil, scan: .notRead, inUse: false)
+            == ITerm2SettingsRow(badge: .off, problems: []))
     // Every problem line is its own fix.
     #expect(Set(ITerm2SettingsProblem.allCases.map(\.message)).count == ITerm2SettingsProblem.allCases.count)
     #expect(ITerm2Presentation.howOpenWorks == "Herdly returns to unsplit tabs; otherwise Open raises iTerm2.")
