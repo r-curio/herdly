@@ -320,7 +320,8 @@ public enum ITerm2Presentation {
     public static func settingsRow(on: Bool, installed: Bool, access: GhosttyAutomationAccess?,
                                    scan: ITerm2ScanStatus, inUse: Bool) -> ITerm2SettingsRow {
         var problems: [ITerm2SettingsProblem] = []
-        if !installed { problems.append(.notFound) }
+        // Off and missing needs no fix; only a denial outlives the switch, since a denial turns it off.
+        if on, !installed { problems.append(.notFound) }
         if access == .denied { problems.append(.automationDenied) }
         if on, scan == .unreadable { problems.append(.unreadable) }
         let badge: HerdrReadinessBadge = !on ? .off : !problems.isEmpty ? .needsAttention : inUse ? .ready : .notInUse
