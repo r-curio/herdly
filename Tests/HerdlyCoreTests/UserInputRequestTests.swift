@@ -4,7 +4,7 @@ import Testing
 
 // Fixture lines follow the shapes recorded from a real Codex desktop rollout (engine 0.153.4): a
 // `function_call` named `request_user_input` and its `function_call_output`, both carrying the turn
-// id in `internal_chat_message_metadata_passthrough`. See docs/evidence/desktop-user-input-request.json.
+// id in `internal_chat_message_metadata_passthrough`. See Tests/HerdlyCoreTests/Fixtures/desktop-user-input-request.json.
 
 private func meta(_ session: UUID, source: String = "vscode") -> String {
     "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session)\",\"source\":\"\(source)\"}}\n"
@@ -41,7 +41,7 @@ private func turnEvent(_ kind: String, turn: UUID, at: String) -> String {
 
 private let sample = questionArguments([
     ("Nested choices", "Should different variant paths support different levels of choices?",
-     ["Flexible paths (Recommended)", "Same levels throughout"]),
+     ["Nested levels (Recommended)", "One level only"]),
     ("First release", "Should the first release also support checkout?", ["Stock lookup only (Recommended)", "Include checkout"])
 ])
 private let askedAt = "2026-09-14T02:20:36.895Z"
@@ -62,7 +62,7 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     #expect(question?.prompts.count == 2)
     #expect(question?.prompts[0] == QuestionPrompt(id: "nested choices", header: "Nested choices",
                                                    question: "Should different variant paths support different levels of choices?",
-                                                   options: ["Flexible paths (Recommended)", "Same levels throughout"]))
+                                                   options: ["Nested levels (Recommended)", "One level only"]))
     #expect(question?.prompts[1].header == "First release")
 }
 
@@ -188,7 +188,7 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
 /// Replays the committed desktop recording: pending before the answer line, answered after it.
 @Test func recordedDesktopQuestionReplaysAsPendingThenAnswered() throws {
     let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("docs/evidence/desktop-user-input-request.json")
+        .appendingPathComponent("Tests/HerdlyCoreTests/Fixtures/desktop-user-input-request.json")
     let record = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: Any])
     let session = try #require((record["session"] as? String).flatMap(UUID.init(uuidString:)))
     let turn = try #require((record["turn"] as? String).flatMap(UUID.init(uuidString:)))
@@ -202,8 +202,8 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     #expect(before.pendingQuestions.map(\.id) == [identity])
     #expect(before.pendingQuestions.first?.turn == turn)
     #expect(before.pendingQuestions.first?.arrivedAt == RolloutTimestamp.parse(record["asked_at"] as! String))
-    #expect(before.pendingQuestions.first?.prompts.first?.header == "Nested choices")
-    #expect(before.pendingQuestions.first?.prompts.first?.options == ["Flexible paths (Recommended)", "Same levels throughout"])
+    #expect(before.pendingQuestions.first?.prompts.first?.header == "List shape")
+    #expect(before.pendingQuestions.first?.prompts.first?.options == ["Nested levels (Recommended)", "One level only"])
     #expect(before.pendingQuestions.first?.prompts.count == 2)
 
     let after = ReminderReader.evidence(in: Data((text.joined(separator: "\n") + "\n").utf8), session: session)
