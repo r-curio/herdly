@@ -17,9 +17,14 @@ public struct NotchDisplay: Equatable, Sendable {
     public let persistentID: String?
     /// The name macOS gives the display, for the display picker; nil when it reports none.
     public let name: String?
+    /// Vendor and model, set only when the display reports no serial number. macOS cannot keep such
+    /// a display's UUID stable across ports, cables, or docks, so a pin falls back to this (#495).
+    /// Nil for a display with a serial number, or when the vendor or model is unknown.
+    public let serialFreeModel: NotchDisplayModel?
 
     public init(id: UInt32, frame: CGRect, topInset: CGFloat, housingWidth: CGFloat = 0, menuBarHeight: CGFloat = 0,
-                isBuiltIn: Bool = false, persistentID: String? = nil, name: String? = nil) {
+                isBuiltIn: Bool = false, persistentID: String? = nil, name: String? = nil,
+                serialFreeModel: NotchDisplayModel? = nil) {
         self.id = id
         self.frame = frame
         self.topInset = topInset
@@ -28,6 +33,7 @@ public struct NotchDisplay: Equatable, Sendable {
         self.isBuiltIn = isBuiltIn
         self.persistentID = persistentID
         self.name = name
+        self.serialFreeModel = serialFreeModel
     }
 
     public var hasPhysicalNotch: Bool { topInset > 0 }
@@ -44,15 +50,46 @@ public struct NotchDisplay: Equatable, Sendable {
     }
 }
 
+/// A display's EDID vendor and model numbers. Two monitors of one model share them.
+public struct NotchDisplayModel: Equatable, Hashable, Sendable {
+    public let vendor: UInt32
+    public let model: UInt32
+
+    public init(vendor: UInt32, model: UInt32) {
+        self.vendor = vendor
+        self.model = model
+    }
+
+    /// The model of a display reporting these numbers, or nil when it has a serial number (its UUID
+    /// is then stable) or its vendor or model is unknown (zero), so nothing could be matched safely.
+    public static func serialFree(vendor: UInt32, model: UInt32, serial: UInt32) -> NotchDisplayModel? {
+        guard serial == 0, vendor != 0, model != 0 else { return nil }
+        return NotchDisplayModel(vendor: vendor, model: model)
+    }
+
+    /// The stored form, "vendor:model".
+    public var stored: String { "\(vendor):\(model)" }
+
+    /// Parses `stored`; nil for a missing or malformed value.
+    public init?(stored: String?) {
+        guard let parts = stored?.split(separator: ":", omittingEmptySubsequences: false), parts.count == 2,
+              let vendor = UInt32(parts[0]), let model = UInt32(parts[1]), vendor != 0, model != 0 else { return nil }
+        self.init(vendor: vendor, model: model)
+    }
+}
+
 /// A display the user pinned the notch to. `name` is kept so the choice can still be labeled while
-/// that display is not connected.
+/// that display is not connected. `serialFreeModel` is the pinned display's vendor and model when it
+/// reported no serial number; nil for a display with one, and for pins saved before it was stored.
 public struct NotchDisplayPin: Equatable, Hashable, Sendable {
     public let id: String
     public let name: String
+    public let serialFreeModel: NotchDisplayModel?
 
-    public init(id: String, name: String) {
+    public init(id: String, name: String, serialFreeModel: NotchDisplayModel? = nil) {
         self.id = id
         self.name = name
+        self.serialFreeModel = serialFreeModel
     }
 }
 
@@ -62,11 +99,12 @@ public enum NotchDisplayPreference: Equatable, Hashable, Sendable {
     case pinned(NotchDisplayPin)
 
     /// The preference from stored values. A missing or empty identifier means no pin; a missing
-    /// name is labeled generically rather than invented.
-    public static func restored(id: String?, name: String?) -> NotchDisplayPreference {
+    /// name is labeled generically rather than invented; a missing or malformed model leaves the pin
+    /// matching by identifier only.
+    public static func restored(id: String?, name: String?, model: String? = nil) -> NotchDisplayPreference {
         guard let id, !id.isEmpty else { return .followPointer }
         let name = name.flatMap { $0.isEmpty ? nil : $0 } ?? "Pinned display"
-        return .pinned(NotchDisplayPin(id: id, name: name))
+        return .pinned(NotchDisplayPin(id: id, name: name, serialFreeModel: NotchDisplayModel(stored: model)))
     }
 
     public var pin: NotchDisplayPin? {
@@ -74,11 +112,17 @@ public enum NotchDisplayPreference: Equatable, Hashable, Sendable {
         return nil
     }
 
-    /// The attached display a pin names, matched by identifier; nil without a pin or while that
-    /// display is not attached.
+    /// The attached display a pin names; nil without a pin or while that display is not attached.
+    /// The identifier wins. Failing that, a pin to a display with no serial number matches the one
+    /// attached display with no serial number and the same vendor and model, because macOS can give
+    /// such a display a new UUID when it is reconnected another way. Two or more candidates match
+    /// nothing: one of two identical monitors is never guessed.
     public func pinnedDisplay(in displays: [NotchDisplay]) -> NotchDisplay? {
         guard let pin else { return nil }
-        return displays.first { $0.persistentID == pin.id }
+        if let exact = displays.first(where: { $0.persistentID == pin.id }) { return exact }
+        guard let model = pin.serialFreeModel else { return nil }
+        let candidates = displays.filter { $0.persistentID != nil && $0.serialFreeModel == model }
+        return candidates.count == 1 ? candidates[0] : nil
     }
 }
 
@@ -127,8 +171,9 @@ public struct NotchDisplayChoices: Equatable, Sendable {
     /// pin whose display is not attached stays listed, marked not connected, so the current choice
     /// is always visible.
     public let options: [NotchDisplayOption]
-    /// The entry for the saved preference. A pin matches its display by identifier, so a stored
-    /// name that has gone out of date still checks the right display.
+    /// The entry for the saved preference. A pin matches its display as `pinnedDisplay(in:)` does, so
+    /// a stored name that has gone out of date, or a serial-free display's new UUID, still checks the
+    /// right display.
     public let selected: NotchDisplayOption
     /// One sentence describing where the notch is shown.
     public let detail: String
@@ -140,6 +185,7 @@ public struct NotchDisplayChoices: Equatable, Sendable {
         var nameCounts: [String: Int] = [:]
         for display in pinnable { nameCounts[Self.displayName(display), default: 0] += 1 }
         var seen: [String: Int] = [:]
+        let pinned = preference.pinnedDisplay(in: pinnable)
         var options = [followPointer]
         var selected = followPointer
         for display in pinnable {
@@ -151,13 +197,14 @@ public struct NotchDisplayChoices: Equatable, Sendable {
                 label = "\(name) (\(seen[name, default: 0]))"
             }
             // The pin stores the shown label so a disconnected twin is still told apart.
-            let option = NotchDisplayOption(preference: .pinned(NotchDisplayPin(id: id, name: label)), label: label)
+            let pin = NotchDisplayPin(id: id, name: label, serialFreeModel: display.serialFreeModel)
+            let option = NotchDisplayOption(preference: .pinned(pin), label: label)
             options.append(option)
-            if id == preference.pin?.id { selected = option }
+            if id == pinned?.persistentID { selected = option }
         }
         let detail: String
         if let pin = preference.pin {
-            if preference.pinnedDisplay(in: pinnable) != nil {
+            if pinned != nil {
                 detail = "Stays on \(selected.label)."
             } else {
                 selected = NotchDisplayOption(preference: preference, label: "\(pin.name) (not connected)")
