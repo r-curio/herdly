@@ -801,11 +801,9 @@ public struct ClaudeSetupInstaller {
             if plan.titleSettingRequired, case .changed = ownedEnvironmentState(object, expected: state.ownedEnvironment) {
                 throw ClaudeSetupError.conflict("Herdly's terminal title setting was changed; review setup before repair.")
             }
-            if let installed = state.installedStatusLine {
-                guard let currentStatusLine = ClaudeSetupPlanner.memberData(current, key: "statusLine"),
-                      currentStatusLine == installed else {
-                    throw ClaudeSetupError.conflict("Herdly's Claude usage status line was changed; review setup before repair.")
-                }
+            if let installed = state.installedStatusLine,
+               !statusLineIntact(ClaudeSetupPlanner.memberData(current, key: "statusLine"), installed: installed, roots: roots) {
+                throw ClaudeSetupError.conflict("Herdly's Claude usage status line was changed; review setup before repair.")
             }
         }
         if current == settingsChange,
@@ -857,8 +855,12 @@ public struct ClaudeSetupInstaller {
                                            installedAt: Date().timeIntervalSince1970,
                                            backupDirectory: existingState?.backupDirectory ?? backupDirectory.lastPathComponent,
                                            usageEnabled: plan.usageEnabled,
-                                           originalStatusLine: existingState?.originalStatusLine
-                                               ?? ClaudeSetupPlanner.memberData(plan.originalSettings, key: "statusLine"),
+                                           // Once a bridge is recorded, its original is kept as recorded, even
+                                           // "none": the current status line is Herdly's own and is not the user's (#493).
+                                           originalStatusLine: existingState?.installedStatusLine != nil
+                                               ? existingState?.originalStatusLine
+                                               : existingState?.originalStatusLine
+                                                   ?? ClaudeSetupPlanner.memberData(plan.originalSettings, key: "statusLine"),
                                            installedStatusLine: ClaudeSetupPlanner.memberData(settingsChange, key: "statusLine"))
             try atomicWrite(try JSONEncoder().encode(state), to: roots.stateURL)
         } catch let error {
@@ -956,7 +958,7 @@ public struct ClaudeSetupInstaller {
             guard let currentStatusLine = ClaudeSetupPlanner.memberData(settings, key: "statusLine") else {
                 return .repairRequired("Herdly's Claude usage status line is missing; Configure Claude to repair setup.")
             }
-            guard currentStatusLine == installed else {
+            guard statusLineIntact(currentStatusLine, installed: installed, roots: roots) else {
                 return .conflict("Herdly's Claude usage status line was changed; review setup before repair.")
             }
         }
@@ -1004,7 +1006,7 @@ public struct ClaudeSetupInstaller {
               let current = ClaudeSetupPlanner.memberData(settings, key: "statusLine") else {
             return .conflict("Claude usage unavailable: Herdly's status line is missing; review setup before repair.")
         }
-        guard current == installed else {
+        guard statusLineIntact(current, installed: installed, roots: roots) else {
             return .conflict("Claude usage unavailable: Herdly's status line was changed; review setup before repair.")
         }
         if installed == state.originalStatusLine {
@@ -1068,18 +1070,19 @@ public struct ClaudeSetupInstaller {
         case .changed: throw ClaudeSetupError.conflict("Herdly's terminal title setting was changed; undo made no changes.")
         case .intact, .missing: break
         }
-        if let installed = state.installedStatusLine {
-            guard let currentStatusLine = ClaudeSetupPlanner.memberData(current, key: "statusLine"),
-                  currentStatusLine == installed else {
-                throw ClaudeSetupError.conflict("Herdly's Claude usage status line was changed; undo made no changes.")
-            }
+        if let installed = state.installedStatusLine,
+           !statusLineIntact(ClaudeSetupPlanner.memberData(current, key: "statusLine"), installed: installed, roots: roots) {
+            throw ClaudeSetupError.conflict("Herdly's Claude usage status line was changed; undo made no changes.")
         }
+        // A status line set up inside the bridge after setup stays the user's on undo (U8, #493).
+        let keptStatusLine = state.installedStatusLine == nil ? nil
+            : statusLineKeptOnUndo(ClaudeSetupPlanner.memberData(current, key: "statusLine"), state: state, roots: roots)
         switch ownedHookState(object, expected: state.ownedHooks) {
         case .changed: throw ClaudeSetupError.conflict("A Herdly-owned Claude hook was changed; undo made no changes.")
         case .intact, .missing: break
         }
         var restored: Data?
-        if current == state.installedSettings {
+        if current == state.installedSettings, keptStatusLine == nil {
             restored = state.originalSettings
         } else {
             let reducedHooks = removingHooks(object, owned: state.ownedHooks)
@@ -1095,7 +1098,9 @@ public struct ClaudeSetupInstaller {
             } else {
                 restored = try ClaudeSetupPlanner.jsonDataPreservingMember(withoutHooks, key: "env", value: nil)
             }
-            if state.installedStatusLine != nil {
+            if let keptStatusLine, let settings = restored {
+                restored = try ClaudeSetupPlanner.jsonDataPreservingMember(settings, key: "statusLine", value: keptStatusLine)
+            } else if state.installedStatusLine != nil {
                 restored = try removingStatusLine(restored, original: state.originalStatusLine)
             }
         }
@@ -1135,6 +1140,35 @@ public struct ClaudeSetupInstaller {
     private enum OwnedHookState { case intact, missing, changed }
 
     private enum OwnedEnvironmentState { case intact, missing, changed }
+
+    /// The command Herdly's bridge for this root wraps in a status-line member, or nil when the
+    /// member is anything else (another command, another helper or usage folder, not a command).
+    private func bridgedCommand(_ member: Data?, roots: ClaudeSetupRoots) -> String? {
+        guard let member, let object = (try? JSONSerialization.jsonObject(with: member)) as? [String: Any],
+              let command = ClaudeStatusLineBridge.statusLineCommand(object) else { return nil }
+        return ClaudeStatusLineBridge.wrappedCommand(command, helperPath: roots.helperURL, usagePath: roots.usageDirectory)
+    }
+
+    /// The status line is the one Herdly installed, or still Herdly's bridge for this root with a
+    /// different command wrapped inside, e.g. one added later with Claude's /statusline (U8, #493).
+    /// Removed, replaced, or another root's bridge is not intact.
+    private func statusLineIntact(_ current: Data?, installed: Data, roots: ClaudeSetupRoots) -> Bool {
+        guard let current else { return false }
+        return current == installed || bridgedCommand(current, roots: roots) != nil
+    }
+
+    /// What undo leaves as the status line when the bridge now wraps a command other than the one
+    /// it was set up around (the original status line's, or ":" with none): that command, in the
+    /// same object with its other keys. Nil means restore the original status line as before.
+    private func statusLineKeptOnUndo(_ current: Data?, state: ClaudeInstallState, roots: ClaudeSetupRoots) -> [String: Any]? {
+        guard let wrapped = bridgedCommand(current, roots: roots),
+              var object = current.flatMap({ (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }) else { return nil }
+        let original = state.originalStatusLine.flatMap { try? JSONSerialization.jsonObject(with: $0) }
+        let originalCommand = ClaudeStatusLineBridge.statusLineCommand(original) ?? ":"
+        guard wrapped != originalCommand else { return nil }
+        object["command"] = wrapped
+        return object
+    }
 
     private func removingStatusLine(_ settings: Data?, original: Data?) throws -> Data? {
         guard let settings else { return nil }

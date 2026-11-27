@@ -301,3 +301,116 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     #expect(rings.first?.source == .claude && rings.first?.fiveHour == .notReported)
     #expect(rings.first?.weeklyWindow == .weekly)
 }
+
+@Test func bridgeWrappedCommandRoundTripsOnlyTheFormHerdlyWrites() {
+    let helper = URL(fileURLWithPath: "/tmp/Herdly Hook")
+    let usage = URL(fileURLWithPath: "/tmp/usage")
+    for existing in [":", "sh ~/.claude/statusline-command.sh", "printf '%s\\n' \"$PWD\"; exit 7", "it's"] {
+        let command = ClaudeStatusLineBridge.command(helperPath: helper, usagePath: usage, existingCommand: existing)
+        #expect(ClaudeStatusLineBridge.wrappedCommand(command, helperPath: helper, usagePath: usage) == existing)
+    }
+    let ours = ClaudeStatusLineBridge.command(helperPath: helper, usagePath: usage, existingCommand: "cat")
+    // Another helper or usage folder is not this root's bridge.
+    #expect(ClaudeStatusLineBridge.wrappedCommand(ours, helperPath: URL(fileURLWithPath: "/tmp/other"), usagePath: usage) == nil)
+    #expect(ClaudeStatusLineBridge.wrappedCommand(ours, helperPath: helper, usagePath: URL(fileURLWithPath: "/tmp/elsewhere")) == nil)
+    // Anything after the quoted word, or a word that doesn't quote back to itself, is refused.
+    #expect(ClaudeStatusLineBridge.wrappedCommand(ours + "; rm -rf ~", helperPath: helper, usagePath: usage) == nil)
+    #expect(ClaudeStatusLineBridge.wrappedCommand(ours.replacingOccurrences(of: "'cat'", with: "'a' ; 'b'"),
+                                                  helperPath: helper, usagePath: usage) == nil)
+}
+
+/// U8 (#493): a status line set up inside Herdly's bridge after setup (Claude's /statusline does
+/// this) keeps usage readable and setup healthy, and undo leaves it as the user's status line.
+@Test func aStatusLineSetUpInsideTheBridgeStaysReadableAndIsKeptOnUndo() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-claude-rewrapped-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = root.appendingPathComponent("config", isDirectory: true)
+    let support = root.appendingPathComponent("support", isDirectory: true)
+    let roots = ClaudeSetupRoots(configDirectory: config,
+                                 helperDirectory: support.appendingPathComponent("claude", isDirectory: true),
+                                 eventsDirectory: support.appendingPathComponent("claude-events", isDirectory: true))
+    let capabilities = ClaudeCapabilities(installed: true, supported: true, version: "2.1.273")
+    let installer = ClaudeSetupInstaller()
+    let original = Data(#"{"model":"opus"}"#.utf8)
+    try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+    try original.write(to: roots.settingsURL)
+    func configure() throws {
+        let settings = try Data(contentsOf: roots.settingsURL)
+        let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: settings, helperPath: roots.helperURL,
+                                           eventsPath: roots.eventsDirectory, usageEnabled: true,
+                                           installRecordPresent: installer.isInstallRecordValid(for: roots), statusLineCompatible: true)
+        _ = try installer.install(plan, roots: roots, helper: Data("helper".utf8), capabilities: capabilities)
+    }
+    func settings() throws -> [String: Any] {
+        try #require(JSONSerialization.jsonObject(with: Data(contentsOf: roots.settingsURL)) as? [String: Any])
+    }
+    func writeStatusLine(_ statusLine: Any?) throws {
+        var object = try settings()
+        object["statusLine"] = statusLine
+        try JSONSerialization.data(withJSONObject: object).write(to: roots.settingsURL)
+    }
+    let conflict = ClaudeConnectionStatus.conflict("Herdly's Claude usage status line was changed; review setup before repair.")
+    let script = "sh ~/.claude/statusline-command.sh"
+    let rewrapped: [String: Any] = ["type": "command", "padding": 0,
+                                    "command": ClaudeStatusLineBridge.command(helperPath: roots.helperURL, usagePath: roots.usageDirectory,
+                                                                              existingCommand: script)]
+
+    // With no status line before setup, the bridge wraps ":"; then a custom one is set up inside it.
+    try configure()
+    #expect((try settings()["statusLine"] as? [String: Any])?["command"] as? String
+            == ClaudeStatusLineBridge.command(helperPath: roots.helperURL, usagePath: roots.usageDirectory, existingCommand: nil))
+    // Re-running Configure on the untouched bridge keeps usage ready: "no status line" stays the original.
+    try configure()
+    #expect(installer.usageStatus(for: roots, requested: true) == .ready)
+    try writeStatusLine(rewrapped)
+    #expect(installer.usageStatus(for: roots, requested: true) == .ready)
+    #expect(installer.status(roots: roots, capabilities: capabilities) != conflict)
+    // Configure accepts it and leaves the user's command inside the bridge.
+    try configure()
+    #expect((try settings()["statusLine"] as? [String: Any])?["command"] as? String == rewrapped["command"] as? String)
+    #expect(installer.usageStatus(for: roots, requested: true) == .ready)
+    // Undo removes only the bridge: the script stays the status line, with its other keys and the rest of settings.
+    _ = try installer.undo(roots: roots)
+    let undone = try settings()
+    #expect(undone["model"] as? String == "opus")
+    #expect(undone["hooks"] == nil)
+    let kept = try #require(undone["statusLine"] as? [String: Any])
+    #expect(kept["command"] as? String == script && kept["type"] as? String == "command" && kept["padding"] as? Int == 0)
+
+    // Set up again around the script: an untouched bridge still undoes byte for byte.
+    let withScript = try Data(contentsOf: roots.settingsURL)
+    try configure()
+    _ = try installer.undo(roots: roots)
+    #expect(try Data(contentsOf: roots.settingsURL) == withScript)
+}
+
+@Test func aRemovedForeignOrOtherRootStatusLineIsStillAConflict() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-claude-rewrapped-conflict-" + UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let config = root.appendingPathComponent("config", isDirectory: true)
+    let support = root.appendingPathComponent("support", isDirectory: true)
+    let roots = ClaudeSetupRoots(configDirectory: config,
+                                 helperDirectory: support.appendingPathComponent("claude", isDirectory: true),
+                                 eventsDirectory: support.appendingPathComponent("claude-events", isDirectory: true))
+    let capabilities = ClaudeCapabilities(installed: true, supported: true, version: "2.1.273")
+    let installer = ClaudeSetupInstaller()
+    let original = Data(#"{"model":"opus"}"#.utf8)
+    try FileManager.default.createDirectory(at: config, withIntermediateDirectories: true)
+    try original.write(to: roots.settingsURL)
+    let plan = ClaudeSetupPlanner.plan(capabilities: capabilities, settings: original, helperPath: roots.helperURL,
+                                       eventsPath: roots.eventsDirectory, usageEnabled: true, statusLineCompatible: true)
+    _ = try installer.install(plan, roots: roots, helper: Data("helper".utf8), capabilities: capabilities)
+    let installed = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: roots.settingsURL)) as? [String: Any])
+    let otherFolder = ClaudeStatusLineBridge.command(helperPath: roots.helperURL,
+                                                     usagePath: support.appendingPathComponent("elsewhere", isDirectory: true),
+                                                     existingCommand: "cat")
+    for statusLine in [nil, ["type": "command", "command": "printf user"], ["type": "command", "command": otherFolder]] as [[String: String]?] {
+        var object = installed
+        object["statusLine"] = statusLine
+        let written = try JSONSerialization.data(withJSONObject: object)
+        try written.write(to: roots.settingsURL)
+        #expect(installer.usageStatus(for: roots, requested: true) != .ready)
+        #expect(throws: ClaudeSetupError.self) { _ = try installer.undo(roots: roots) }
+        #expect(try Data(contentsOf: roots.settingsURL) == written)
+    }
+}
