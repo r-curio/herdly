@@ -126,14 +126,8 @@ Read state therefore claims only "the selected thread was visible in a focused w
 - The mechanism matches the glossary: it can only ever downgrade an uncertain completion to acknowledged, never the reverse, and it must fail closed when the file is missing, unreadable, over the size bound, or lacks the key.
 - Adopting it means depending on a private format that can change with any desktop release. If pursued, gate it on the tested desktop version, verify live with two disposable threads (complete A, view B, view A; only the last step may drop A from the set), and keep the dismissal path independent.
 
-### Hook events and Open Vibe Island comparison: 2026-09-14
+### Hook events: 2026-09-14
 
 Hook events in the installed binaries (CLI 0.145.0 and desktop engine 0.153.4): PreToolUse, PermissionRequest, PostToolUse, PreCompact, PostCompact, SessionStart, SessionEnd, UserPromptSubmit, SubagentStart, SubagentStop, Stop, Interrupt. None fires on viewing, focusing, or marking a thread read. Hooks describe execution, not attention.
 
-Open Vibe Island (github.com/Octane0411/open-vibe-island, commit 334c580, 2026-09-03) was read for comparison. It does not detect read state at all and never touches the desktop app's unread set:
-
-- Completion is a session phase set by the Stop hook or by `turn/completed` from its own app-server client. The completion card auto-dismisses on a timer, and the row simply stays in its list until the session ends or the Codex desktop process exits. There is no per-completion acknowledgment and no "read" concept.
-- Its only attention check happens at presentation time: before showing a completion, it asks whether the session's terminal is already frontmost (Ghostty focused terminal id, Terminal tty, iTerm session via AppleScript). If so it suppresses the popup. For the Codex desktop app it returns false, so desktop completions always present.
-- Desktop-app sessions are discovered by connecting a second app-server client and listing threads; visibility is "desktop app is running and thread not ended". That is the approach this project already rejected as not proving which task the user is viewing.
-
-Herdly's uncertain-completion and explicit-dismissal model is therefore already stricter than Open Vibe Island's. The desktop unread set described above remains the only source that could add a verified visit signal for desktop threads. It was adopted the same day; see [desktop read state](desktop-read-state.md).
+The desktop unread set described above remains the only source that could add a verified visit signal for desktop threads. It was adopted the same day; see [desktop read state](desktop-read-state.md).
