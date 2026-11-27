@@ -118,10 +118,9 @@ public struct UsageStripReadout: Equatable, Sendable {
 }
 
 /// Which usage rings the strip shows and how wide their wing must be (D35). Claude's ring comes
-/// first while its newest reading has a current window, then Codex's, which is always present (an
-/// empty track and a dash while unknown). Pass readings already filtered to the present
-/// (`current(now:)`) so the rings and the wing width agree. With `fiveHour` false every inner ring
-/// is left out, and Claude's ring only appears for its seven-day window.
+/// first while its newest reading has a current chosen window, then Codex's, present while any of its
+/// windows is chosen (an empty track and a dash while unknown). Pass readings already filtered to the
+/// present (`current(now:)`) so the rings and the wing width agree.
 public enum UsageStripReadouts {
     /// The ring's square.
     public static let ringSize: CGFloat = 18
@@ -140,21 +139,32 @@ public enum UsageStripReadouts {
     /// The strip's content inset on the wing's outer side, part of the wing's width.
     static let contentInset: CGFloat = 8
 
+    /// `claudeWindows` and `codexWindows` are the windows each ring may draw (#488); pass Codex's
+    /// through `UsageWindows.shown(fiveHourAvailable:)` so a plan without a five-hour limit drops it.
+    /// An agent with neither window chosen has no ring. Codex's ring stays present while any of its
+    /// windows is chosen: a chosen weekly window with no reading is unknown, and so is a five-hour
+    /// window chosen alone, so the ring never vanishes or reads 0% before Codex reports.
     public static func make(codex: CodexUsageReading?, claude: ClaudeUsageReading?,
-                            fiveHour: Bool = true) -> [UsageStripReadout] {
+                            claudeWindows: UsageWindows = .both,
+                            codexWindows: UsageWindows = .both) -> [UsageStripReadout] {
         func state(_ percent: Double?) -> UsageWindowState {
             percent.map { .known(UsageShare(usedPercent: $0)) } ?? .notReported
         }
         var readouts: [UsageStripReadout] = []
-        let claudeFive = state(fiveHour ? claude?.fiveHour?.usedPercentage : nil)
-        let claudeSeven = state(claude?.sevenDay?.usedPercentage)
+        let claudeFive = state(claudeWindows.fiveHour ? claude?.fiveHour?.usedPercentage : nil)
+        let claudeSeven = state(claudeWindows.weekly ? claude?.sevenDay?.usedPercentage : nil)
         if claudeFive.isShown || claudeSeven.isShown {
             readouts.append(UsageStripReadout(source: .claude, fiveHour: claudeFive, weekly: claudeSeven,
-                                              weeklyWindow: fiveHour ? .sevenDay : .weekly))
+                                              weeklyWindow: claudeWindows.fiveHour ? .sevenDay : .weekly))
         }
-        let codexWeekly = codex?.weekly == nil ? .unknown : state(codex?.weekly?.usedPercent)
-        readouts.append(UsageStripReadout(source: .codex, fiveHour: state(fiveHour ? codex?.fiveHour?.usedPercent : nil),
-                                          weekly: codexWeekly, weeklyWindow: .weekly))
+        if codexWindows.weekly || codexWindows.fiveHour {
+            let codexWeekly: UsageWindowState = !codexWindows.weekly ? .notReported
+                : codex?.weekly == nil ? .unknown : state(codex?.weekly?.usedPercent)
+            var codexFive = state(codexWindows.fiveHour ? codex?.fiveHour?.usedPercent : nil)
+            if codexWindows.fiveHour, !codexWindows.weekly, codexFive == .notReported { codexFive = .unknown }
+            readouts.append(UsageStripReadout(source: .codex, fiveHour: codexFive, weekly: codexWeekly,
+                                              weeklyWindow: .weekly))
+        }
         return readouts
     }
 
