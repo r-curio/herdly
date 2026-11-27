@@ -96,8 +96,8 @@ struct RememberedApp: Equatable, Sendable {
 
 /// The notch's content takes the click that also makes the panel key, so a button on a card that
 /// opened by itself works on the first click instead of the second. The panel stays non-activating,
-/// so the user's app stays frontmost; Approve and Deny still ignore a card's first half second
-/// (`CardClickSettle`).
+/// so the user's app stays frontmost; Approve and Deny still ignore a card's first half second when
+/// it appeared under the pointer (`CardClickSettle`).
 final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
@@ -723,9 +723,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// One presentation mode prevents passive hover from replacing a new item's focused card.
     @Published var expanded = false
     @Published var presentationMode: NotchPresentationMode = .collapsed {
-        didSet { cardClickSettle.show(presentationMode.singleCard, now: Date().timeIntervalSince1970) }
+        didSet { cardClickSettle.show(presentationMode.singleCard, now: Date().timeIntervalSince1970, pointer: NSEvent.mouseLocation) }
     }
-    /// When the card on screen appeared, so Approve and Deny ignore a click in its first half second.
+    /// When the card on screen appeared and where the pointer was, so Approve and Deny ignore a click
+    /// in its first half second if it appeared under the pointer.
     private var cardClickSettle = CardClickSettle()
     /// The open queue's keyboard selection (Up and Down arrows); cleared whenever the queue closes.
     @Published private(set) var queueSelection = QueueRowSelection()
@@ -2965,11 +2966,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         return snapshot
     }
 
-    /// A click on a card's Approve or Deny: ignored in the card's first half second on screen
-    /// (`CardClickSettle`), because the panel now takes a click before it is key; otherwise
-    /// exactly `decideAgent`.
+    /// A click on a card's Approve or Deny: ignored in the card's first half second on screen when the
+    /// pointer was already over the card as it appeared (`CardClickSettle`), because the panel takes a
+    /// click before it is key; otherwise exactly `decideAgent`. The panel's frame stands in for the
+    /// card's: while a card shows, the panel holds only that card.
     func decideAgentByClick(_ approval: AgentApproval, card: AgentAttentionID, as decision: ApprovalDecision) {
-        guard cardClickSettle.acceptsDecisionClick(on: card, now: Date().timeIntervalSince1970) else { return }
+        guard cardClickSettle.acceptsDecisionClick(on: card, now: Date().timeIntervalSince1970, cardFrame: panel.frame) else { return }
         decideAgent(approval, as: decision)
     }
 
