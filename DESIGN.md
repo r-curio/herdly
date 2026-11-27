@@ -440,7 +440,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
     - Herdly never runs either command. Copy's VoiceOver hint says so.
   - Terminal status lives in Terminals, not here.
 - **Notifications pane:**
-  - "Sound": one card with a "Completions and questions" mini switch, an inset divider, then the sound tiles. "Completions": one card with a "Clear when read in Codex" mini switch and no description. While that switch is on and Codex's read state cannot be read, a 12pt problem line with an orange dot sits under it; the switch's tooltip carries the latest read-state status.
+  - "Sound": one card with a "Completions and questions" mini switch, an inset divider, then the sound tiles. "Completions": one card with the "Response length" segments. Clearing completions Codex marks read is always on and has no switch.
   - "While paused" (#456), after Phone: one card with an "Approvals" row and a "Questions" row, 10pt inset divider between them, each with a two-segment control, "Still pop open" (default) and "Stay quiet". VoiceOver reads each control as "Approvals while notifications are paused" or "Questions while notifications are paused"; each row's hover text says what the choice does. There is no row for completions, which are always quiet while paused.
   - Below the cards, right-aligned 6pt lower: a "Send Test Notification" push button, with "Dismiss" before it only while the test notification is showing.
   - No footers.

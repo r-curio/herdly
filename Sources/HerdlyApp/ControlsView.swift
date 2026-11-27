@@ -1175,19 +1175,6 @@ private struct NotificationControls: View {
 
             SettingsHeader("Completions")
             SettingsCard {
-                SettingsRow(title: "Clear when read in Codex", detail: nil) {
-                    Toggle("Clear completions marked read in Codex", isOn: $model.desktopReadStateEnabled)
-                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
-                        .accessibilityLabel("Clear completions marked read in Codex")
-                        .onChange(of: model.desktopReadStateEnabled) { _, enabled in model.desktopReadStateChanged(enabled) }
-                }
-                .help(model.desktopReadState.message)
-                if model.desktopReadStateEnabled, let problem = model.desktopReadState.problemLine {
-                    CardProblemLine(problem)
-                        .padding(.horizontal, SettingsStyle.rowInset)
-                        .padding(.bottom, 10)
-                }
-                Divider().padding(.horizontal, SettingsStyle.rowInset)
                 SettingsRow(title: "Response length", detail: nil) {
                     SlidingSegments(title: "Response length on result cards",
                                     selection: $model.resultResponseLength.animation(SettingsMotion.curve(reduceMotion: model.reduceMotion)),
