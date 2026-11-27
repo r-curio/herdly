@@ -1,6 +1,6 @@
 # Terminal.app live targeting proof
 
-Recorded 2026-10-11 for [Prove Terminal.app targeting live](https://github.com/r-curio/herdly/issues/205), the live check of [Research Terminal.app's scripting surface for exact tab targeting](https://github.com/r-curio/herdly/issues/199) ([findings](https://github.com/r-curio/herdly/blob/docs/199-research-terminal-app/docs/terminal-app-scripting-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
+Recorded 2026-10-11 for [Prove Terminal.app targeting live](https://github.com/r-curio/herdly/issues/205), the live check of [Research Terminal.app's scripting surface for exact tab targeting](https://github.com/r-curio/herdly/issues/199) (findings on the unmerged branch `docs/199-research-terminal-app`; their lasting facts are in [ADR 0013](../adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md) and the Terminal.app section of [CLI notch integration](../cli-notch-integration.md#terminalapp-open-and-replies-239)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
 
 ## Setup
 
@@ -8,7 +8,7 @@ Recorded 2026-10-11 for [Prove Terminal.app targeting live](https://github.com/r
 - Lab: [`scripts/terminal-lab/terminal_lab.py`](../../scripts/terminal-lab/terminal_lab.py) with the JXA driver [`terminal.js`](../../scripts/terminal-lab/terminal.js) and the window-server helper [`onscreen_windows.swift`](../../scripts/terminal-lab/onscreen_windows.swift). Codex and Claude isolation was the same as the [iTerm2 proof](iterm2-live.md), including the [`claude_title_hook.py`](../../scripts/terminal-lab/claude_title_hook.py) stand-in for SteerHook's OSC 2 title.
 - Tabs: Terminal's dictionary cannot create a tab (`make new tab` → "AppleEvent handler failed"), and System Events needs Accessibility, which was not granted. The user pressed ⌘T twice in a lab window, and the lab adopted that three-tab group (`--adopt-window`) as T1 (Codex), T2 (Claude) and T3 (decoy with Codex's title over `sleep`). B1 is a shell in a separate window. Terminal was on a different Space from the user's other windows.
 - A supplemental check, [`terminal_codex_submit.py`](../../scripts/terminal-lab/terminal_codex_submit.py), retried Codex's submit in a standalone window.
-- Sanitized output: [`terminal-app-live.json`](terminal-app-live.json).
+- Sanitized output: `terminal-app-live.json` (raw lab record not kept in the repo).
 
 ## Results
 

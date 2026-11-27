@@ -3572,7 +3572,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                   }]], now: now)
         if Self.previewsCodexQuestionCard(mode) {
             threadNames[working] = "Check Paper MCP access"
-            let project = NSHomeDirectory() + "/bscale/strata"
+            let project = NSHomeDirectory() + "/code/myproject"
             spotlightContexts[.question(question.id)] = SpotlightRecordContext(workingDirectory: project)
             gitBranches[project] = "main"
             answerProgress[question.id] = QuestionAnswerProgress(call: question.id).recordingDraft(question: 0, answer: .option(0))

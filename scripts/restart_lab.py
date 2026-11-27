@@ -6,7 +6,7 @@ rollouts directory standing in for ~/.codex/sessions, and an isolated attention 
 No Codex configuration, hook, or real rollout is read or written. Each reported run starts
 the real app, waits for its first scan, and reads the JSON the app writes via --restart-report.
 
-    python3 scripts/restart_lab.py --app output/Herdly.app --out docs/evidence/restart-recovery.json
+    python3 scripts/restart_lab.py --app output/Herdly.app --out output/restart-recovery.json
 """
 import argparse
 import hashlib

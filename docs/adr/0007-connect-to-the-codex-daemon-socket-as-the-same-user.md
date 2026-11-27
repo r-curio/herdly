@@ -1,6 +1,6 @@
 # Connect to Codex's daemon socket as the same user, with no credential of Herdly's own
 
-Accepted with the user on 2026-09-14 (issue #42). The user also chose to install Codex's managed standalone package so a daemon can run; the live proof in `docs/user-input-requests.md` is still to be recorded.
+Accepted with the user on 2026-09-14 (issue #42). The user also chose to install Codex's managed standalone package so a daemon can run; the live proof was recorded on 2026-09-14, and answers sent from the card have since passed in acceptance runs ([user-input requests](../user-input-requests.md#2026-09-14-live-daemon-standalone-cli-01540-ghostty-131)).
 
 When Codex's local app-server daemon is running, Herdly may answer a `request_user_input` question exactly, by call id, by being a second JSON-RPC client on `~/.codex/app-server-control/app-server-control.sock`. The question this ADR settles is how Herdly authenticates to that socket.
 
@@ -16,4 +16,6 @@ Consequences: any process running as the user could do the same, which is alread
 
 Rejected: a Herdly-side token or allowlist (there is nothing for the daemon to check it against); connecting through `codex app-server proxy` as a child process (the same socket with an extra process, and it would tie Herdly to a CLI path); the remote-control websocket (a network listener with pairing, far more than one local answer needs).
 
-Prerequisite: on this machine `codex app-server daemon start` refused to run until Codex's managed standalone package was installed beside the Homebrew CLI (`docs/evidence/app-server-daemon.json`); the user chose to install it. Until a daemon runs and the live proof in `docs/user-input-requests.md` passes, the daemon path is a draft integration, not a capability.
+Prerequisite: on this machine `codex app-server daemon start` refused to run until Codex's managed standalone package was installed beside the Homebrew CLI (raw lab record not kept in the repo); the user chose to install it. Until a daemon runs and the live proof in `docs/user-input-requests.md` passes, the daemon path is a draft integration, not a capability. (That proof has since passed; see the status line above.)
+
+Amended 2026-11-27: the controls window named above has been replaced by the Settings window, which does not show the daemon's status. A socket that fails these checks is still refused and never connected.

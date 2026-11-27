@@ -9,7 +9,8 @@ Use one Swift package with three targets: a shared core library, the macOS app, 
 ```mermaid
 flowchart LR
     C[Existing Codex desktop or CLI] -->|Hook JSON| H[Hook helper]
-    H <-->|Local socket| A[Companion app]
+    H <-->|Request, receipt and decision files| A[Companion app]
+    A <-->|Unix socket, ADR 0007| D[Codex app-server daemon]
     A --> S[Session and attention state]
     S --> N[Notch UI]
     N -->|Decision| A
@@ -18,7 +19,7 @@ flowchart LR
     S --> P[Local saved acknowledgments]
 ```
 
-This diagram shows the candidate hook route. Desktop hook coverage and observing existing desktop sessions still need proof. App-server is a candidate supplementary source, not an assumption that launching a second server observes the user's existing conversations.
+The hook helper and the app never share a socket: the helper writes hook records and approval request files into Herdly's events directory, and the app answers with a receipt file and then a decision file. The only socket Herdly opens to Codex is the user's own app-server daemon, used to answer questions and send follow-up prompts ([ADR 0007](adr/0007-connect-to-the-codex-daemon-socket-as-the-same-user.md)). Desktop hook coverage is recorded in [desktop live integration](desktop-live-integration.md).
 
 | Part | Owns | Does not own |
 | --- | --- | --- |
@@ -42,7 +43,7 @@ Status delivery must be quick and produce no model-visible output. Prefer non-bl
 
 `UserPromptSubmit` supplies the working row's fallback text. `PreToolUse` supplies a bounded action description keyed by session, turn, and tool-use id; only the matching `PostToolUse` clears it. The helper retains no tool response and only the input strings needed to describe commands or file access. Replaying records after launch ignores older tool events so an unmatched pre-event cannot restore a stale action.
 
-For a permission request, the helper connects to the companion with a short connection deadline. If the companion can handle the request, receipt starts the agreed 30-second timer. A separate bounded helper-side timeout prevents a stuck UI or missed receipt from extending the wait indefinitely. The app's count-down reflects the actual deadline.
+For a permission request, the helper writes a request file and waits for the companion's receipt file for at most `ApprovalTiming.connectionTimeout` (5 seconds). The receipt starts the agreed 30-second timer. A separate helper-side bound (`ApprovalTiming.helperWaitBound`, 121 seconds) prevents a stuck UI or a held deadline from extending the wait indefinitely. The app's count-down reflects the actual deadline.
 
 The helper accepts only one terminal outcome: allow once, deny, or hand back with no decision. It arbitrates user action, deadline, disconnect, and handoff on one serialized path. A late button click is rejected rather than sent to a newer request. The app reports delivery state honestly; successful local delivery is not proof that Codex executed the requested action.
 
@@ -64,40 +65,21 @@ Store small snapshots of attention items and completion acknowledgments locally 
 
 Implemented for issue #11 ([restart recovery](restart-recovery.md)): `AttentionSnapshotStore` keeps undismissed completions and acknowledgments in Herdly's own support directory; requests and running work are rebuilt from evidence on every scan. Completions held by the first scan after launch are marked uncertain and never replay a sound. Decision controls require a receipt issued by the running process; a receipt found on disk is released to Codex with no decision at once.
 
-## Evidence checked on 2026-09-11
+## Early evidence and integration checks
 
-- Installed Ghostty is 1.3.1. Its local scripting dictionary includes stable terminal IDs, focused terminal, selected tab, and focus. The [official AppleScript reference](https://ghostty.org/docs/features/applescript) documents these APIs. Mapping a Codex session to the exact pane still needs a live test, especially for two panes in the same directory.
-- The desktop bundle at /Applications/ChatGPT.app identifies as com.openai.codex, version 26.901.51231, and registers the codex URL scheme. Its bundled CLI reports 0.153.4; the shell CLI reports 0.145.0. Multiple installed bundles share that identity, so resolve the running process's bundle path rather than choosing by ID alone. The user verified task-link return from Codex and Apple Notes; exact installation routing remains unverified.
-- The desktop's local scripting dictionary has generic window/tab APIs; these are not evidence of a stable focused Codex conversation identifier.
-- [Codex hooks](https://learn.chatgpt.com/docs/hooks) document synchronous PermissionRequest decisions and no-decision fallback. Background hooks cannot approve. This establishes the candidate contract, not installed-version parity or coverage of every approval type.
-- [App-server](https://learn.chatgpt.com/docs/app-server) documents request-resolution notifications and local transports. Attaching to the existing runtime, ownership of requests, hook coverage, and app-activation observation remain unverified. Exact desktop task focus is deferred. thread/read fetches data rather than proving user acknowledgment.
-- The first desktop probe confirms these protocol definitions in the installed bundled CLI. Source inspection additionally found private conversation-level read-state broadcasts, not a verified external focus or per-completion acknowledgment API. See the [investigation](codex-desktop-investigation.md) for evidence and the live UI access limitation.
-
-## Required integration checks before committing to transport
-
-1. In disposable CLI and desktop tasks, prove start, completion, permission, allow, deny, and no-decision handoff separately. Include the actual approval types the user encounters; unsupported ones must stay in Codex's native flow.
-2. Kill the companion during a pending request and verify the native approval returns. Exercise deadline/click races and late messages with two simultaneous requests.
-3. Map two unsplit Ghostty tabs in the same project to their distinct Codex sessions; verify focus detection and navigation across tabs and windows. Split-pane targeting is deferred; reject split or ambiguous targets.
-4. Verify desktop foreground/background visibility using native app activation, including activation while a popup is expanded. Neither task navigation nor foregrounding acknowledges completions; explicit dismissal and the desktop app's own cleared unread flag do. Test queued completions received while foreground and prevent repeat sound on subsequent switches. Exact desktop conversation focus is deferred.
-5. After handoff, detect a decision made in Codex and clear only the matching item. Restart the companion and prove saved requests do not produce active approval buttons.
-
-Check 5 is recorded for the CLI in [approval reconciliation](approval-reconciliation.md); the remaining desktop checks are still planned. Existing user configuration has not been changed.
+The 2026-09-11 evidence pass and the list of integration checks to run before choosing a transport have been superseded by the live integrations. Current facts live in the integration documents: [desktop live integration](desktop-live-integration.md) (bundle identity, desktop hook coverage), [desktop read state](desktop-read-state.md), [CLI integration](cli-notch-integration.md) and ADRs [0013](adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md), [0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md) and [0016](adr/0016-open-and-acknowledge-visits-the-same-way-on-every-terminal-host.md) (terminal targeting), [approval reconciliation](approval-reconciliation.md) (handoff resolution, verified for the CLI), and [MVP acceptance](mvp-acceptance.md) (what has and has not been run live).
 
 ## Product decisions and remaining verification
 
 - Queue ordering, separate working/to-check counts, and one notch on the actively used display are settled in product.md. Completion notifications expand for the card-open time (3 seconds by default) and remain open during interaction. Approval deadlines remain independent; only the pointer on the notch pauses them, never past 2 minutes from receipt (ADR 0020). Active-display selection and interaction freezing are pure rules in `NotchPlacement.swift` (issue #12, [notch placement](notch-placement.md)): the app supplies attached displays, the pointer, the current display, and whether the user is interacting; the core returns the display and frame. Screen-parameter changes only re-run placement.
 
-## Reminder queue integration — 2026-09-11
+## Hook scans and reminder queue
 
 HerdlyCore ReminderReader reads no_decision approval records and matching session rollout completion records. Companion scans off the main actor, with only one scan in flight and scans at least two seconds apart, and applies results to ReminderQueue. A scan is due when a watched hook event directory changes (macOS file-system events, `HookDirectoryWatch`), an app is activated, or the app asks for one at once (a changed setting or events folder, or an answered approval leaving the queue, which also skips the two-second spacing); without that it still runs every two seconds while anything could change unseen, and every three seconds otherwise (`HookScanSchedule`, #306). "Could change unseen" (`HookScanNeeds`) is: no scan applied yet; a row or result held; a Codex or Claude session, subagent, daemon thread or fresh rollout candidate live; a Codex CLI process or the desktop app running, or an unreadable process table; Codex's hook folder not set, a Claude root read without a connected hook folder, or a source the last scan could not read; a Claude usage window resetting within three seconds; the notch open or Herdly active. A hook directory that is not watched, whose watch could not start, or whose watch reported its directory moved keeps the two-second clock; dropped or overflowed events make a scan due. The three-second scan is a safety net for the inputs nothing watches (rollouts, the process table, Claude's session registry and usage files, thread names, desktop read state, git branches) and for a file-system event that never arrives: three seconds plus the slowest refresh tick (one second) stays inside the hook helper's five-second connection timeout, so an approval is receipted rather than handed back even then (`receiptDeadlineOutlastsOneSafetyScanIntervalAndTheSlowestTick`). Each scan reuses what the previous one read from a rollout or a Codex or Claude hook record while the file's stamp (device, inode, size, modification time) is unchanged, so idle sessions are not reread; a rollout whose session holds an approval request, and the pre-send check before a relayed key, always read the file fresh. The queue merges observed requests, removes only completed session/turn identities, and retains items on read failure. Completed identities prevent resurrection during the process lifetime; restart reconstructs state from metadata and rollout records. Missing metadata on restart cannot restore an item. No Python runtime or Accessibility access is used.
 
-Event-directory reads list at most 65,536 entries and decode only the newest 4,096 hook records (the Claude setup connection check instead decodes oldest first until its first startup proof), while Herdly deletes expired records itself (see [event retention](event-retention.md)). Reads are also capped at 50,000 rollout-directory entries, 1 MiB per record. A rollout is streamed: a longer line after the header (an image tool output, for example) is dropped as it is read rather than voiding the whole rollout, at most 256 MiB is read from disk and at most 32 MiB is kept, and a question asked before a dropped line is treated as unknown, never as pending. Duplicate rollout candidates and malformed/partial data retain reminders. Full scans are a deliberate prototype limit; incremental cursors are needed for large histories. Titles are not captured by approval metadata; the label is Codex's own thread name read from `~/.codex/session_index.jsonl` when one exists (desktop threads only), otherwise a shortened session ID (see [thread names](thread-names.md)).
+Event-directory reads list at most 65,536 entries and decode only the newest 4,096 hook records (the Claude setup connection check instead decodes oldest first until its first startup proof), while Herdly deletes expired records itself (see [event retention](event-retention.md)). Reads are also capped at 50,000 rollout-directory entries, 1 MiB per record. A rollout is streamed: a longer line after the header (an image tool output, for example) is dropped as it is read rather than voiding the whole rollout, at most 256 MiB is read from disk and at most 32 MiB is kept, and a question asked before a dropped line is treated as unknown, never as pending. Duplicate rollout candidates and malformed/partial data retain reminders. Full scans are a known limit; incremental cursors would be needed for very large histories. Titles are not captured by approval metadata; the label is Codex's own thread name read from `~/.codex/session_index.jsonl` when one exists (desktop threads only), otherwise a shortened session ID (see [thread names](thread-names.md)).
 
 
 Running work is also discovered from the newest rollouts alone for sessions with no hook event yet, gated by liveness evidence gathered in the app (desktop app running, Ghostty tab titles, a Codex CLI process, SessionEnd hooks); it feeds the same running rows and nothing else (see [session discovery](session-discovery.md)).
 
-The issue #3 integration extends the existing reader and queue with CLI source classification and completion-specific acknowledgments. Native Ghostty navigation lives inside the app, with its pure matcher in HerdlyCore. See [implementation and verification boundaries](cli-notch-integration.md).
-
-## Ghostty scope revision
-
-ADR 0004 defers targeting within split tabs. Target the originating unsplit tab/window. This reduces verification cases but does not prove a stable session-to-tab binding on Ghostty 1.3.1.
+Terminal targeting (binding a CLI session to its tab or pane, Open and its fallback, and split tabs) is decided in ADRs [0013](adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md), [0014](adr/0014-bind-multiplexer-panes-and-join-their-client-to-a-host-tab.md), [0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md) and [0016](adr/0016-open-and-acknowledge-visits-the-same-way-on-every-terminal-host.md), with implementation details in [CLI integration](cli-notch-integration.md).

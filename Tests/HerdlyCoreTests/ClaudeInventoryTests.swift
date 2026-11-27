@@ -732,9 +732,9 @@ private let jobProcStart = "Mon Nov  9 04:57:11 2026"
 /// The live shape from Claude Code 2.1.319 (#393): `9417.json` continues job `8684e967` as a `bg`
 /// entry with its own status and name.
 private func jobRow(status: String? = "busy", extra: [String: Any] = [:]) throws -> Data {
-    var row: [String: Any] = ["pid": 9417, "sessionId": jobSessionID, "cwd": "/Users/example/landbase",
+    var row: [String: Any] = ["pid": 9417, "sessionId": jobSessionID, "cwd": "/Users/example/myproject",
                               "startedAt": 1_794_200_233_963, "procStart": jobProcStart, "kind": "bg",
-                              "jobId": "8684e967", "name": "design-system-plan-landbase",
+                              "jobId": "8684e967", "name": "design-system-plan-myproject",
                               "statusUpdatedAt": 1_794_289_914_321]
     if let status { row["status"] = status }
     row.merge(extra) { $1 }
@@ -744,7 +744,7 @@ private func jobRow(status: String? = "busy", extra: [String: Any] = [:]) throws
 /// `4966.json`: the interactive process that parked the job and still displays it.
 private func parkingRow() throws -> Data {
     try registryRow(pid: 4966, sessionID: parkingSessionID, procStart: "Mon Nov  9 04:50:00 2026",
-                    extra: ["parkedJobId": "8684e967", "name": "design-system-plan-landbase"])
+                    extra: ["parkedJobId": "8684e967", "name": "design-system-plan-myproject"])
 }
 
 @Test func claudeSessionRegistryListsARunningBackgroundJobLiveWithItsName() throws {
@@ -754,8 +754,8 @@ private func parkingRow() throws -> Data {
     let job = try #require(scan.sessions.first)
     #expect(job.sessionID == jobSessionID)
     #expect(job.kind == .background)
-    #expect(job.name == "design-system-plan-landbase")
-    #expect(job.directory == "/Users/example/landbase")
+    #expect(job.name == "design-system-plan-myproject")
+    #expect(job.directory == "/Users/example/myproject")
     #expect(job.startedAt == 1_794_200_233.963)
     #expect(job.statusUpdatedAt == 1_794_289_914.321)
     #expect(job.lifecycle == .backgroundJob(status: "busy"))
@@ -780,7 +780,7 @@ private func parkingRow() throws -> Data {
     #expect(scan.available)
     // The parking entry stays skipped; only the job's session is listed, once, with its name.
     #expect(scan.sessions.map(\.sessionID) == [jobSessionID])
-    #expect(scan.sessions.first?.name == "design-system-plan-landbase")
+    #expect(scan.sessions.first?.name == "design-system-plan-myproject")
     #expect(scan.ambiguousSessionIDs.isEmpty)
     // #254: the parking process still displays the job, and a background row is never an interactive holder.
     #expect(scan.parkedJobProcesses == [jobSessionID: .identified(pid: 4966)])

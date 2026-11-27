@@ -7,12 +7,14 @@ Status: the packaging route below is reproducible from a clean checkout and is c
 | Component | Tested with | Minimum Herdly accepts |
 | --- | --- | --- |
 | macOS | 26.5 (build host), 15 (CI runner, `macos-15`) | 14.0 (`LSMinimumSystemVersion`) |
-| Toolchain | Xcode 26.6, Swift 6.3.3 | Swift 6.0 tools (`Package.swift`) |
+| Toolchain | Xcode 26.6, Swift 6.3.3 | Xcode 16 or later / Swift 6 (Swift 6.0 tools, `Package.swift`) |
 | Codex desktop | 26.901.51231 (`/Applications/ChatGPT.app`, bundle `com.openai.codex`) | 26.901.51231 |
 | Codex CLI | 0.145.0 (shell), 0.153.4 (bundled in desktop) | 0.145.0 |
 | Claude Code | 2.1.273 | 2.1.273 (`ClaudeSetupRequirements`) |
 | Ghostty | 1.3.1 | 1.3.1 |
 | Zellij | 0.44.1 | 0.44.1 |
+
+Use full Xcode to build. Command Line Tools alone on a newer SDK can fail with "plugin for module 'SwiftUIMacros' not found" or "plugin for module 'TestingMacros' not found".
 
 The minimums are the versions the integrations were proven against; Herdly's setup preview reports an older install as unsupported rather than guessing. Newer versions are untested until recorded in a later evidence pass. The other terminal hosts (iTerm2, Terminal.app, WezTerm, Rex, the Herdr app, tmux and herdr) have no minimum version check in Herdly; acceptance runs that have taken place are recorded in [MVP acceptance](mvp-acceptance.md#3d-terminal-host-acceptance) and [evidence](evidence). Herdly runs only against Codex and Claude Code sessions on the local Mac; remote sessions, other agents, and terminals outside the [supported surfaces](product.md#initial-supported-surfaces) are out of scope.
 
@@ -33,9 +35,7 @@ sh scripts/package-app.sh
 
 The build number is the commit count on the checked-out branch, so two people building the same commit get the same bundle version. The CI workflow ([.github/workflows/macos.yml](../.github/workflows/macos.yml)) runs the same script on a clean `macos-15` runner, smoke-tests the packaged app, prints the checksum, and uploads the zip, checksum and manifest as the `Herdly-unsigned-dev` artifact. CI is optional; a local clean-checkout package with its smoke check, helper self-test and checksum is the required evidence.
 
-The [mixed-source package record](evidence/claude-release-candidate-package.json)
-lists the automated checks and exact artifact. Integrated live behavior has not
-been checked on that artifact; use can proceed without a scripted walkthrough.
+A mixed-source release-candidate package was built and passed these automated checks (raw lab record not kept in the repo). Integrated live behavior has not been checked on that artifact.
 
 ### Labels
 
@@ -48,7 +48,7 @@ The artifact name says what the signature is; the script never labels a build as
 | `signed` | Signed with `Developer ID Application: …`, hardened runtime, timestamped, not notarized. | Other Macs after a Gatekeeper warning. |
 | `notarized` | Developer ID signature plus an accepted notarytool submission, stapled. | Other Macs without a warning. |
 
-To sign with the maintainer's identity:
+To sign with a Developer ID identity:
 
 ```sh
 HERDLY_SIGNING_IDENTITY="Developer ID Application: Name (TEAMID)" sh scripts/package-app.sh
@@ -60,14 +60,21 @@ To notarize as well, store an App Store Connect API key or Apple ID once with `x
 HERDLY_SIGNING_IDENTITY="Developer ID Application: Name (TEAMID)" HERDLY_NOTARY_PROFILE=<profile> sh scripts/package-app.sh
 ```
 
-The script refuses to notarize with anything other than a Developer ID Application identity and fails, rather than relabels, when the submission is not accepted. No Developer ID identity was available to the agent that wrote this route, so no signed or notarized artifact has been produced yet; the recorded artifacts in [MVP acceptance](mvp-acceptance.md) are `unsigned-dev` and `dev-signed`.
+The script refuses to notarize with anything other than a Developer ID Application identity and fails, rather than relabels, when the submission is not accepted. No signed or notarized build has been published yet; the recorded artifacts in [MVP acceptance](mvp-acceptance.md) are `unsigned-dev` and `dev-signed`.
 
 ## Install
+
+### Get a build
+
+- [GitHub Releases](https://github.com/r-curio/herdly/releases) will carry ad-hoc signed builds. There is no current Herdly release yet, so build from source as [above](#build-from-a-clean-checkout).
+- Each CI run uploads the `Herdly-unsigned-dev` artifact (zip, checksum and manifest) to its run page. Downloading it requires signing in to GitHub.
+
+### Install the app
 
 1. Check the checksum: `shasum -a 256 -c Herdly-<version>+<build>-<label>.zip.sha256`.
 2. Unzip and move `Herdly.app` to `/Applications` or `~/Applications`. Herdly does not install itself or add a login item unless you explicitly turn on **Launch at login**. Connect Codex copies the helper out of the bundle (see below), so moving or replacing the app later does not break an existing Codex connection. macOS owns login-item registration separately; after moving or replacing the app, open Herdly's General settings and check the status macOS reports.
 3. For an `unsigned-dev` or `dev-signed` build, the first open is refused by Gatekeeper. Open **System Settings › Privacy & Security**, scroll to the message about Herdly, and choose **Open Anyway**, or run `xattr -d com.apple.quarantine /Applications/Herdly.app` and open it again. A `notarized` build opens directly.
-4. Herdly launches as a menu-bar app (**S**) with no Dock icon, and shows its controls window because no setup exists yet.
+4. Herdly launches as a menu-bar app, its status item the Herdly mark, with no Dock icon, and opens its Settings window because no setup exists yet.
 
 ### Launch at login
 
@@ -114,7 +121,7 @@ An update runs off the main thread with empty input, a five-minute limit, and it
 
 | Prompt | When | If declined |
 | --- | --- | --- |
-| **"Herdly" wants access to control "Ghostty"** (Automation) | Right after **Enable Ghostty Controls** in Herdly's first-launch prompt, or after turning on Ghostty under **Settings › Terminals** (if Ghostty is not running, when it next opens). The usage string is in the bundle's `NSAppleEventsUsageDescription`; since #239 it is one app-wide sentence about selecting terminal tabs and typing replies in the terminals you turn on, shown for Ghostty and, once its switch is offered (#244), Terminal.app. | Open in Codex for CLI sessions reports that it cannot read Ghostty's tabs; everything else works. Herdly switches Ghostty controls off; re-enable under **System Settings › Privacy & Security › Automation › Herdly** (Settings › Terminals has a button for it), then turn the controls back on. |
+| **"Herdly" wants access to control "Ghostty"**, **"iTerm2"** or **"Terminal"** (Automation) | For Ghostty, right after **Enable Ghostty Controls** in Herdly's first-launch prompt; for any of the three, after turning it on under **Settings › Terminals** (if the app is not running, when it next opens). The usage string is in the bundle's `NSAppleEventsUsageDescription`; since #239 it is one app-wide sentence about selecting terminal tabs and typing replies in the terminals you turn on. | Herdly switches that terminal off and cannot select its tabs or type into them; everything else works. Per [ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md), Open on a Claude session in that terminal raises the terminal app, and Open on a Codex CLI session there is unavailable because Herdly cannot identify its app. Re-enable under **System Settings › Privacy & Security › Automation › Herdly** (Settings › Terminals has a button for it), then turn the terminal back on. |
 | Gatekeeper "cannot be opened" | First launch of an `unsigned-dev`, `dev-signed`, or `signed` build. | See step 3 above. |
 | Codex's own hook-trust prompt | The first Codex session after Configure Codex. This is Codex's prompt, not macOS's. | Codex ignores the untrusted hooks; Herdly shows repair required. |
 
@@ -126,20 +133,23 @@ Herdly does not request Accessibility, Screen Recording, Input Monitoring, notif
 | --- | --- |
 | `~/Library/Application Support/Herdly/HerdlyHook` | The installed helper (a copy of the bundle's, kept in step with the running app while unchanged). |
 | `~/Library/Application Support/Herdly/install.json` | What Configure Codex wrote, so undo can remove exactly that. |
-| `~/Library/Application Support/Herdly/events/` | Metadata-only hook records, approval receipts and decisions. |
+| `~/Library/Application Support/Herdly/events/` | Codex hook records, approval receipts and decisions (see below for the text they keep). |
+| `~/Library/Application Support/Herdly/claude/<key>/` | Per Claude folder: its installed helper, `install.json`, backups and usage bridge state. `<key>` is derived from the folder's path. |
+| `~/Library/Application Support/Herdly/claude-events/<key>/` | Per Claude folder: its hook records, question and approval files, and Claude session names. |
 | `~/Library/Application Support/Herdly/backups/` | Originals of files Herdly changed. |
 | `~/Library/Application Support/Herdly/attention-snapshot.json` (and `.previous`) | Undismissed completions and dismissal identities. |
-| `~/Library/Preferences/dev.rcurio.herdly.prototype.plist` | Mute, the events-folder choice, the desktop read-state toggle, the last controls section, and the prototype's test item. Launch-at-login state is not stored here. |
+| `~/Library/Preferences/dev.rcurio.herdly.prototype.plist` | Settings choices: mute and the completion sound (`muted`, `completionSound`), the events-folder choice (`approvalEventsPath`), added Claude folders (`claudeConfigRoots`), card open time and response length (`cardOpenDuration`, `resultResponseLength`, and the older `keepCardsOpen` and `showsFullResultMessage` they migrated from), the strip and queue options (`leftWing`, `centerLabel`, `codexUsage`, `claudeUsage`, `sprite`, `panelWidth`, `sort`, `labelFormat`, `grouping`, `earlier`), the display pin (`notchDisplayPinID`, `notchDisplayPinName`, `notchDisplayPinModel`), the terminal switches (`ghosttyControlsEnabled`, `<host>HostEnabled`, `ghosttyFirstRunOffered`), the hotkey (`notchHotkey.*`), the notification pause and its choices (`notificationPause`, `pausedApprovals`, `pausedQuestions`), GitHub status (`workStatusEnabled`, `gitHubCLILastCheck`), phone alerts (`phoneAlertsEnabled`), the pre-snapshot acknowledgment lists that older builds wrote (`cliAcknowledgments`, `desktopAcknowledgments`, read only when no attention snapshot exists), the last Settings pane (`controlsSection`), and the test notification (`testCompletion`). Launch-at-login state is not stored here. |
+| Login Keychain item `dev.rcurio.herdly.phone-alerts` (account `ntfy-topic`) | The ntfy topic for phone alerts, created only when phone alerts are turned on. Current builds hide phone alerts and do not read it. |
 
-No conversation text or transcripts are stored. Fresh notification spotlights may read bounded prompt and final-response excerpts into process memory; those excerpts disappear when Herdly quits and are excluded from the attention snapshot.
+Hook records keep some conversation text on disk until they are pruned ([event retention](event-retention.md); most records after 7 days): a Codex record keeps the submitted prompt (from hook input of at most 64 KiB) and a tool call's command or path; a Claude record keeps a prompt of at most 240 characters, a tool call's command, path or URL, and, on `Stop`, Claude's `last_assistant_message` up to 20,000 characters ([Claude observations](claude-observations.md)). Transcripts are not copied. Fresh notification spotlights may read bounded prompt and final-response excerpts into process memory; those excerpts disappear when Herdly quits and are excluded from the attention snapshot.
 
 ## Uninstall
 
 1. In Herdly's General settings, turn off **Launch at login**. This unregisters only Herdly's main-app login item. If the control is unavailable, open **System Settings › General › Login Items & Extensions** and remove Herdly there.
-2. In **Settings → Agents**, turn off the Codex row's switch, which runs Undo Setup at once. Herdly removes exactly the hooks and config lines it added, restores the original files byte for byte when they are unchanged since install, deletes its helper, its own event records and its backups, and leaves everything else in `~/.codex` alone. Skip this step if Herdly was never connected.
+2. In **Settings → Agents**, turn off the Codex row's switch, which runs Undo Setup at once. Herdly removes exactly the hooks and config lines it added, restores the original files byte for byte when they are unchanged since install, deletes its helper, its own event records and its backups, and leaves everything else in `~/.codex` alone. Skip this step if Herdly was never connected. Turn off each Claude Code row's switch the same way; each undoes that folder's setup in its `settings.json` (see [Claude setup](claude-setup.md#ownership-and-undo)).
 3. Quit Herdly from its menu.
 4. Delete `Herdly.app`.
-5. Optionally remove the remaining local state: `~/Library/Application Support/Herdly` (the snapshot of dismissals) and `~/Library/Preferences/dev.rcurio.herdly.prototype.plist`. Neither affects Codex or controls the login item.
+5. Optionally remove the remaining local state: `~/Library/Application Support/Herdly` (the snapshot of dismissals and any remaining Claude records), `~/Library/Preferences/dev.rcurio.herdly.prototype.plist`, and, if phone alerts were ever turned on, the `dev.rcurio.herdly.phone-alerts` item in Keychain Access. None of these affects Codex or Claude Code or controls the login item.
 
 Uninstalling in this order leaves Codex exactly as it was before Connect and removes Herdly's login-item registration. Deleting the app first is safe for Codex too: the hooks then point at a helper that still exists in Application Support, or, if that was also deleted, at a missing command, and Codex reports a failed hook without blocking; but the config lines remain until removed by hand as below. A stale Herdly entry can also remain in Login Items until you remove it in System Settings.
 

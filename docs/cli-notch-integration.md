@@ -1,8 +1,8 @@
 # CLI notch integration — issue #3
 
-This branch carries the existing desktop reminder integration as a separate baseline commit and adds CLI completions plus Ghostty navigation. The previous worktrees and their uncommitted files remain unchanged.
+How Herdly shows Codex and Claude Code sessions running in terminals: CLI completions, reminders and questions, and Open and typed input on each terminal host.
 
-The selected events folder is read by the hook scan, whose timing (`HookScanSchedule`: on change, two seconds apart, with a clock behind it) is set out in [architecture](architecture.md). Session identity and source come from the matching Codex rollout metadata. Only CLI Stop records whose exact session/turn also has task_complete enter the CLI queue. Desktop reminders retain their desktop links. CLI reminders and completions route through the Ghostty adapter. Old completions restore silently; new completions expand for three seconds with the existing muteable sound. Explicit dismissals and verified visits persist completion-specific acknowledgments. Later turns are independent.
+The selected events folder is read by the hook scan, whose timing (`HookScanSchedule`: on change, two seconds apart, with a clock behind it) is set out in [architecture](architecture.md). Session identity and source come from the matching Codex rollout metadata. Only CLI Stop records whose exact session/turn also has task_complete enter the CLI queue. Desktop reminders retain their desktop links. CLI reminders and completions route through the Ghostty adapter. Old completions restore silently; new completions expand for the "Keep new cards open" time (Settings › General, 3 seconds by default) with the existing muteable sound. Explicit dismissals and verified visits persist completion-specific acknowledgments. Later turns are independent.
 
 The app packages the native JXA adapter and includes the Automation usage description. Ghostty controls are opt-in and remembered across launches. On the first interactive launch, before the user has ever chosen, Herdly asks once ("Use Ghostty with Herdly?"); Enable Ghostty Controls, or turning on the Terminals switch, asks macOS for Automation consent through `AEDeterminePermissionToAutomateTarget`, which shows the system prompt without sending an event to Ghostty. Not Now leaves controls off and the system prompt unused. Only the user's switch or an Automation denial turns controls off and saves that; when Ghostty is not running, controls stay on, Herdly stops polling, and it checks consent again when Ghostty launches. Any other failed native access disables further queries for that launch only, keeps the saved choice, and leaves notifications intact. Native calls happen off the UI thread with a five-second process deadline. Matching requires a live tracked session, the exact shortened UUID title, one unique terminal and no splits. The adapter revalidates immediately before selection and verifies the resulting foreground window/tab/terminal. Missing, ambiguous or changed targets are not acknowledged. A focus/navigation result acknowledges only completions captured before its asynchronous query.
 
@@ -11,7 +11,7 @@ The app packages the native JXA adapter and includes the Automation usage descri
 [ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md) and its amendment are built for Ghostty's title route (Codex and Claude) and for herdr panes. The decision rules are pure HerdlyCore functions (`OpenFallback`, `GhosttyTitleOpen`, `HerdrOpenFallback`) over observations HerdlyApp passes in; `TerminalApps` in HerdlyApp walks processes, checks whether an app is running, and activates it.
 
 - **Falls back** (raises the app, silently): zero or several Ghostty terminals carrying the title, two live sessions rendering one title, a split tab, a Claude tab outside the front window, a selection Ghostty refused, or a selection that did not verify. For herdr: a split, several clients, a client in a terminal that is not enabled (a client in another enabled terminal is joined to its tab by tty since #241), colliding panes or titles, a Ghostty without `tty` outside ADR 0011's sole-terminal rule, a pane focus or verification that failed, and a verified pane whose Ghostty tab could not be raised or verified (the pane focus is kept).
-- **Stays unavailable** with its reason: Ghostty running but unreadable or not answering the selection; the session no longer live; herdr's socket missing or untrusted, herdr not found, an unsupported protocol, a stale Claude integration; herdr's or Ghostty's switch keeping Herdly from contacting herdr; a closed or unidentified pane; a client tty that cannot be joined. In the interim, herdr sessions show herdr's existing grouped card line for these, and a Codex session with Ghostty switched off keeps its "Set up Ghostty" button; both stay until product.md's "Open unavailable" card table is built, which this ticket does not own. If macOS does not activate an app that is still running, the click reports "Herdly couldn't bring <app> forward." rather than claiming it isn't running.
+- **Stays unavailable** with its reason: Ghostty running but unreadable or not answering the selection; the session no longer live; herdr's socket missing or untrusted, herdr not found, an unsupported protocol, a stale Claude integration; herdr's or Ghostty's switch keeping Herdly from contacting herdr; a closed or unidentified pane; a client tty that cannot be joined. In the interim, herdr sessions show herdr's existing grouped card line for these, and a Codex session with every terminal host switched off keeps its "Set up a Terminal" button; both stay until product.md's "Open unavailable" card table is built, which this ticket does not own. If macOS does not activate an app that is still running, the click reports "Herdly couldn't bring <app> forward." rather than claiming it isn't running.
 - **Which app:** Codex in Ghostty — the terminals in Ghostty's own inventory carrying the title are the amendment's candidates, all in Ghostty, because Ghostty still binds by title alone (ADR 0013) until it exposes `tty` (#251); no candidate means the app cannot be identified. Claude — a walk from the registry PID to the nearest app bundle (`X.app/Contents/MacOS/…`), even when Ghostty is switched off. herdr — a walk from every attached client; all must reach the same app. A Codex session whose walk reaches a switched-off app cannot be identified; a Claude one still falls back. The rule for candidates in different apps (latest tty modification time wins; any two within one second, or an unreadable time, cannot be identified) is in `OpenFallback.codexApp` and waits for a second enabled host to feed it walks and tty times (#235).
 - **Ghostty not running** counts as an empty inventory (ADR 0013): Codex cannot be identified, Claude follows its process. Herdly activates only a running app, never launches one, and never picks a window or tab.
 - **What a fallback is not:** it acknowledges nothing, clears nothing and is never an input target; question keys still need the exact unsplit tab or bound pane. An Open on an actionable approval still hands it back with no decision. The click shows no message; unavailable cases show the agreed card line.
@@ -35,144 +35,9 @@ Behavior that changed on purpose (ADR 0016, "Acknowledgment"):
 
 Automated coverage: `TerminalVisitTests` (Open and fallback acknowledgment, visit interval, dwell at exactly five seconds and just under, short and interrupted visits, gaps, the Open reset, Ghostty's visible test), `TerminalOpenSequenceTests` (step order, single send, stop at first failure, Ghostty title route), `CLITests` (Claude tab binding for visits, the Codex and Claude changes above) and `HerdrOpenTests` (the herdr tracker: the frontmost check gate, and a scan or check started before an Open and delivered after it). Not run — needs live acceptance: §3d H3/H4 in [MVP acceptance](mvp-acceptance.md) on Ghostty and herdr, and the Ghostty G-lines for direct-return acknowledgment.
 
-Build: `sh scripts/build-app.sh`. Tests: `swift test` (six tests), including real file-reader/queue reconstruction and title matching. Native navigation remains unverified in Ghostty because the agent's computer-use restriction still applies. This is a lab integration, not installation of global hooks or proof that sessions outside the connected lab are monitored.
+## Issue #3 and #6 lab history (2026-09-12)
 
-CLI PermissionRequest hooks now publish the actual session/turn, command,
-project, action, reason, and expandable tool input to the connected events
-directory. Herdly can write one atomic allow-once or deny record for that exact
-request; the helper rejects mismatched, duplicate, late, and timed-out records.
-The helper waits up to five seconds for the companion receipt; only then does
-the 30-second clock start, including queued requests. Its 31-second decision
-wait bound is independent of the notch refresh loop. If Ghostty focus is
-focused, unknown, or unavailable, the app writes a no-decision handoff and
-retains Open in Codex. Desktop requests hand back immediately so Codex keeps its
-native prompt until the desktop transport and handoff policy are proven.
-
-A Codex question in a CLI tab can be answered from the notch: the option's digit is relayed to
-the matched terminal through Ghostty's `send key` scripting command, never through synthesized
-keystrokes. See [user-input requests](user-input-requests.md) and ADR 0006.
-
-For human navigation testing, run Codex directly in two unsplit Ghostty tabs in the already trusted lab using `/opt/homebrew/bin/codex -m gpt-5.5 -s read-only -a on-request -c 'tui.terminal_title=["session-id"]'`. Connect the lab events directory in Herdly if needed, then manually enable Ghostty controls and grant Automation permission if macOS asks. Send distinct no-tools completion prompts, switch to another app, then use each completion's Open in Codex button. Verify the correct tab is selected, and repeat across two windows. No saved Codex hooks, permission policies or terminal settings are modified by this build.
-
-## Live Herdly UI proof
-
-The release build and strict code-sign verification passed. Replaced the running older Herdly instance with this build, leaving its files intact. Computer use inspected only Herdly: after reading the existing selected lab directory, controls reported one reminder and six CLI completions. Expanding the actual notch showed CLI completion rows, the CLI reminder, Dismiss actions and disabled Open buttons while Ghostty controls remained off. No Ghostty API, native selection or Automation permission prompt was invoked. The new build remains running from `output/Herdly.app`.
-
-## Reminder-only expansion fix
-
-Reproduced a real one-item notch that would not expand. CLI reminders were counted and rendered as visible over Codex Desktop, but their shared presentation timer still applied desktop-only suppression. The presentation now uses the same visible-reminder list as the count and rows. Added a focused regression covering a CLI reminder with desktop foreground, plus its three-second collapse.
-
-When Ghostty is disabled, CLI completion and reminder rows now expose Set up Ghostty rather than an unexplained disabled Open button. This opens Herdly controls without enabling native access automatically. Setup guidance also covers reminder-only queues. Seven Swift tests, release build and strict signing verification passed. Live Herdly UI confirmed the single reminder expands visibly and Set up Ghostty opens controls. Native Ghostty access remained off.
-
-## Missing title configuration during navigation test
-
-The user reported the generic navigation failure for reminder session 01a09139. Inspection found saved `terminal_title = []`; the earlier denial-test launch instructions omitted the session-title override. This explains why that test did not establish the required title binding; live inventory was not inspected, so other navigation failure causes remain possible. No saved settings were changed. Navigation feedback now distinguishes unreadable inventory, no unique matching live title (showing the expected title), rejected selection and unverified foreground state. Use a fresh session with the explicit per-launch title override for the next test.
-
-## Human-verified Ghostty navigation
-
-After launching a fresh CLI session with the explicit session-ID title override, the user confirmed that Open in Codex navigated correctly. The user then repeated the workflow with a second session in another Ghostty tab and confirmed that it worked. This is human-reported success for distinguishing two sessions and opening their corresponding tabs from another app, using the connected notch build. The agent did not control Ghostty. Separate-window navigation, direct-return acknowledgment and native failure-state behavior remain separate live checks; the prior hook status warnings are still unresolved.
-
-## Group repeated completions from one session
-
-The two visually identical rows were different completed turns in the same session. The UI now groups CLI completions by session, shows the number of completed replies, and counts one completion group per session. Dismiss acknowledges only the turns captured in that displayed group; later arrivals remain independent. Approval reminders remain separate. Eight tests passed, including duplicate-event rejection, session grouping, restart persistence and a newer-turn race. The rebuilt app is running. At UI inspection the completion queue was already empty and only the old approval reminder remained, so the multi-reply row itself was verified through the automated test rather than a live two-row fixture.
-
-## Canceled-turn reminder cleanup
-
-The old HANDOFF-1 reminder persisted because its exact turn recorded turn_aborted rather than task_complete. Added separate canceled-turn parsing in the existing bounded rollout reader. Reminder resolution consumes completed or canceled identities, while CLI completion notifications still require task_complete. No session-wide cancellation inference is used.
-
-A disk-level regression failed before the fix and passed afterward: exact-turn cleanup, unrelated session/turn preservation, partial-file retention, restart reconstruction, no resurrection after a later read failure, and no false completion notification. All nine tests passed; release build and strict signature verification passed. The updated running app reads the unchanged real lab records and shows zero reminders and zero queued notifications.
-
-## Human-verified direct-return acknowledgment
-
-The user explicitly confirmed that returning manually to the originating Ghostty tab clears its completion from Herdly, without clicking the notch Open action. Combined with prior user-confirmed two-tab and cross-window navigation, this establishes the tested happy-path navigation and focus behavior. Native error-state behavior and CLI missing-status hook warnings remain separate unresolved checks.
-
-## Missing-status warning root cause
-
-Global ~/.codex/hooks.json registers an AttentionRouter helper for SessionStart, UserPromptSubmit, PermissionRequest, Stop and SessionEnd, separate from Herdly's project hooks. The installed helper fails codesign verification (resources required by its signature are absent). Its read-only --help invocation terminates with signal 9 and no output. This reproduces a process exit without a normal status code; Codex 0.145.0's command runner obtains output.status.code(), which is absent for signal termination. This explains the corresponding warnings alongside successful Herdly captures/decisions.
-
-Herdly's exact recorder/interpreter also passed ten isolated /bin/zsh -lc replays (all exit 0, no output, maximum 0.103 seconds), in addition to prior direct recorder replays. A proposed config removing only the five AttentionRouter entries was prepared under /tmp; the real config was not changed. Removing those hooks would disconnect the other app's Codex integration, so that choice is pending the user's approval. Impeccable hooks and Herdly's project hooks are preserved.
-
-## AttentionRouter removal authorized and applied
-
-The user explicitly requested removing all AttentionRouter-related installation files. Removed its five global Codex hook entries atomically, preserving the two unrelated Impeccable handlers and all Herdly project hooks. Moved both Latch apps, the installed helper/database/support folder, preferences, application scripts, old Xcode build copies and container Data directories to a recoverable Trash folder. No AttentionRouter processes or startup entries were found in the inspected locations.
-
-macOS denied removal of `.com.apple.containermanagerd.metadata.plist` in the AttentionRouter and UI-test runner containers. Those protected metadata files and their container shells remain; ordinary application data was removed without changing permissions or bypassing that denial. New Codex sessions no longer have the broken helper configured; already-running sessions may retain previously loaded hooks. A fresh CLI runtime warning check has not yet run.
-
-## Final clean-run acceptance — 2026-09-12
-
-The user confirmed all three checks in a fresh ordinary `codex` session: automatic session-ID title, no missing-status hook warnings, and completion appearing in Herdly. The lab independently captured SessionStart, UserPromptSubmit and Stop for session `01a0916c-337b-70b2-963e-9cf848bd2a48`, turn `01a0916c-5828-7b63-b568-b4d127a048fb` at 17:03 UTC.
-
-Issue #3's scoped feasibility proof is complete: CLI lifecycle/decision evidence, human-tested exact tab/window navigation and direct-return acknowledgment, plus offline conservative failure-case checks. The untouched 30-second CLI timing retest was explicitly waived by the user. This does not claim live tests of every invalid/split topology, general approval-category coverage, a distributed signed release, or merged PRs. Split-pane support remains deferred; first-launch automatic setup is tracked in #5.
-
-## Issue #6 lifecycle wiring — 2026-09-12
-
-The companion now replays CLI lifecycle hooks through `CLIState`: session start
-adds a live session, prompt submission adds one running turn, Stop removes only
-that turn while the completion queue retains its exact session/turn identity,
-and SessionEnd removes the session and all running turns. CLI running rows and
-desktop running rows use the same shared notch counts while desktop and CLI
-identities remain separate. Session-title matching remains exact and rejects
-duplicate, closed, malformed, or split targets.
-
-Checks passed: `swift test` (25 tests), `sh scripts/build-app.sh`, strict
-`codesign --verify --deep --strict`, the controls-window smoke check, and the
-offline Ghostty matcher/navigation checks. A read-only capability probe against
-the installed `/Applications/Ghostty.app` reported version 1.3.1 with no
-native PID/TTY properties. No live Ghostty inventory or pane selection was
-attempted because the existing computer-use restriction blocks that route; the
-native live boundary remains human-verification evidence, not an agent claim.
-
-The current `a344971` build was also launched and inspected through the
-allowed Herdly UI route. Its controls reported Ghostty 1.3.1 available and the
-unchanged real events directory showed `0 reminders · 1 working · 0 sessions
-to check`, proving the live CLI lifecycle row in the companion. Combined with
-the existing human-verified two-tab/cross-window navigation and direct-return
-acknowledgment above, this closes the issue's happy-path evidence boundary.
-CUA still forbids agent access to Ghostty itself; no new tab selection,
-Automation permission change, or user configuration change was made.
-
-## Completion notification demonstration (#8)
-
-The automated CLI replay and queue tests demonstrate exact-session/turn
-completion capture, duplicate-event rejection, later-turn retention, restart
-acknowledgment persistence, and source-aware presentation gating. Existing
-Herdly-only evidence above records the live CLI completion rows, grouped replies,
-and verified direct-return acknowledgment.
-
-This patch did not inspect or control Ghostty, request Automation access, or alter
-terminal/configuration state. Ghostty focus timing remains bounded by the matcher
-and controllable-clock regression; a fresh native popup/sound run in Ghostty still
-requires the permitted human route.
-
-An earlier native CLI demonstration was blocked by the locked Mac and failed
-allowed CUA unlock attempt. Prior Herdly-only CLI rows, grouped replies,
-verified navigation, and direct-return acknowledgment remain the available
-CLI evidence; no fresh Ghostty popup or sound observation is claimed here.
-
-The later allowed CUA walkthrough exercised only the branch's connected desktop
-evidence (17 real desktop completions plus one test item). It did not trigger a
-fresh CLI turn or access Ghostty, so no new CLI-native popup/sound evidence is
-claimed.
-
-### Fresh CLI completion proof (2026-09-12)
-
-An interactive Codex TUI session `01a0923d-0a94-7de1-aa3a-641a86112456` ran in
-`/Users/dev/src/Herdly/output/desktop-hook-lab`. Its rollout was
-`/Users/dev/.codex/sessions/2026/09/12/rollout-2026-09-12T04-51-09-01a0923d-0a94-7de1-aa3a-641a86112456.jsonl`, with `session_meta` source
-`cli` and the lab cwd. Turn `01a0923d-c536-7b73-b750-cd011719d5f0` completed
-with the exact response `HERDLY-CLI-TUI-COMPLETE`.
-
-The matching hook captures were SessionStart
-`5a07abef-c71b-4865-84b9-871472f2dc1b`, UserPromptSubmit
-`711f297a-ff02-48c6-9f04-0cbbb9a93fea`, Stop
-`4103507e-29c8-4e4b-87a4-d5503b5c7d03`, and SessionEnd
-`9c365965-fd2c-42ee-9bb9-1281953ea5cb`. The exact built app from this branch
-showed 20 notifications; its first row read **Codex CLI finished Session
-01A0923D-0A94** and rendered **Open in Codex** and **Dismiss** controls.
-
-This proves the fresh CLI lifecycle-to-completion path and native row rendering
-through the allowed Herdly route. Sound audibility/mute and Ghostty-focused
-suppression remain human-only boundaries and are not proven here.
+Issue #3 proved the CLI path in an isolated lab: CLI lifecycle and approval-decision records, exact Ghostty tab and window navigation and direct-return acknowledgment (both reported by the user, using a session-id terminal title), and offline failure-case checks; issue #6 then wired CLI lifecycle hooks into running rows (`CLIState`). The dated lab notes are in git history. CLI approvals are now described in [approval reconciliation](approval-reconciliation.md) and question answering in [user-input requests](user-input-requests.md) (ADR 0006).
 
 ## Tab binding by tty across enabled hosts (#235)
 
@@ -296,10 +161,10 @@ recorded iTerm2's §3d run ([evidence](evidence/iterm2-acceptance.md)); they are
   no fresh read at click time; Claude has no typed input to guard here.
 - **Permission and card:** turning the switch on asks macOS as Ghostty does; a denial turns it
   back off with the denial line and Open Settings…; iTerm2 not running waits for its launch.
-  The card shows the switch, Automation badge, status badge (Off, Not in use, Ready, Needs
-  attention), problem lines (not found, Automation denied, unreadable), diagnostics (scan,
-  typed input none, each session's last Open) and the footer "Herdly returns to unsplit tabs;
-  otherwise Open raises iTerm2."
+  Its Settings row (#317) shows the switch, the status pill (Off, Not in use, Ready, Needs
+  attention) and problem lines (not found, Automation denied with Open Settings…, unreadable);
+  ⋯ Show Diagnostics… lists the scan, typed input none and each session's last Open, and
+  ⋯ How Open Works… reads "Herdly returns to unsplit tabs; otherwise Open raises iTerm2."
 
 Automated checks: `ITerm2Tests` (fixtures modeled on [the live proof](evidence/iterm2-live.md):
 inventory, malformed and unreadable replies including titles of the wrong type, Codex decoy
@@ -334,7 +199,7 @@ WezTerm's switch and card are shown since its acceptance run (#245, [evidence](e
 - **Open:** a Codex session whose title no WezTerm pane carries, or only a title decoy there carries while the binding names another host's tab (`TerminalTabOpen.codexStays`, #268), goes on to Terminal.app, iTerm2 or Ghostty while one is on; a Claude session whose tty no WezTerm pane holds goes on to those or the process walk. Otherwise ADR 0016's sequence runs once (`WezTermOpen.run`): revalidate on fresh reads (`list`, `ps`, `list` again, and `list-clients`); plan only when the one client's `focused_pane_id` is in the target's window, since `activate-pane` cannot raise another window; then `activate-pane --pane-id` and activate WezTerm; then verify with fresh `list` and `list-clients` and macOS's frontmost app that the pane is visible, unsplit, on the same tty and, for Codex, still titled. A target in a window that isn't in front, several clients, no unique match or a split falls back; an unreadable host (including `list-clients`), an untrusted socket, an ended session and "no such pane" are unavailable; any other `activate-pane` error or a failed verify falls back. Fallback apps come from `TerminalTabOpen.codexCarriers`/`codexCandidates` and `OpenFallback`, as for the other hosts.
 - **Visible:** WezTerm frontmost per macOS and the one client's `focused_pane_id` is the pane (`TerminalVisibility.wezTerm`); several clients or a failed read is unknown. The two-second scan feeds a `TerminalVisitTracker`, reset after every Open, and runs only while WezTerm is frontmost or a queued CLI question, completion or Claude outcome needs its line kept current.
 - **Typed input:** replies per [session replies](session-replies.md#wezterm-240). Codex question digits (`TerminalQuestionKeys`, route `terminalRelay`) are on since #245 showed a lone `send-text` digit commit a Codex answer in WezTerm (`WezTermInput.questionDigitsProvenLive`); a question the daemon holds is still answered through the daemon first (ADR 0010). While WezTerm is on and running but not yet read, or unreadable, Ghostty and herdr keys are withheld (`unreadHost`).
-- **Card:** switch, Version (from `wezterm --version`, since the app bundle reports a placeholder), status badge (Off, Not in use, Ready, Needs attention), problem lines (not found in its fixed locations, socket not private, and otherwise the generic "Herdly can't read WezTerm. Check Settings › Terminals.", with the exact reason such as several running copies in diagnostics), diagnostics (scan, the digit gate, each session's binding and last Open) and the footer "Herdly returns to unsplit tabs in WezTerm's front window; otherwise Open raises WezTerm. Replies are typed into the exact pane." No Permission row. The not-found and socket lines' wording is this build's, not agreed product text.
+- **Settings row (#317):** switch, dim version (from `wezterm --version`, since the app bundle reports a placeholder), status pill (Off, Not in use, Ready, Needs attention) and problem lines (`WezTermSettingsProblem`: "Herdly can't find WezTerm in /Applications or ~/Applications.", "Herdly can't read WezTerm: its socket in ~/.local/share/wezterm isn't private to you.", and otherwise the shared unreadable line, with the exact reason such as several running copies in diagnostics). ⋯ Show Diagnostics… lists the scan, the digit gate, each session's binding and last Open; ⋯ How Open Works… reads `WezTermPresentation.howOpenWorks`. No Automation permission. The not-found and socket lines' wording is this build's, not agreed product text.
 
 Automated: `WezTermTests` (fixtures modeled on [the live proof](evidence/wezterm-live.md); one test also covers iTerm2's visit scan reading an enabled Terminal.app beside it, which #240 fixed: inventory and malformed replies, `list-clients`, the fixed binary and environment, socket choice and the owner-only trust check, unreadable reads, Codex decoy, second read, split, another host's title, Claude by tty under an icon title, the visible test, the Open plan for the front and a non-front window and extra clients, `activate-pane` outcomes, verify, the sequence skipping `activate-pane` for a non-front window, reply payloads and `send-text` arguments, delivery, the separate CR and no resend, the digit gate off and on, the digit's spend and fresh check, route merging, the Ghostty key's fresh WezTerm read, and the card lines). Live: MVP acceptance §3d H1–H9 and the WezTerm line ran on build 484 (#245, [evidence](evidence/wezterm-acceptance.md)), agent-run, with the open questions recorded there; `scripts/terminal-lab/quit_relaunch_lab.py wezterm` covered H7. `wezterm_lab.py` and `wezterm_select_probe.py` were not rerun.
 
@@ -390,7 +255,7 @@ Built (#241); tmux's switch and card are shown since its acceptance run (#246, 2
 - **Sends (`TmuxRunner.send`):** `switch-client` and every `send-keys` go out only after the socket passes its trust checks again and `display-message` shows the same server identity the fresh check read; a restarted server, which reuses pane ids, gets nothing and nothing counts as written.
 - **Visible (ADR 0016):** the frontmost enabled host's visible tab (by its own test: iTerm2's current session, Terminal.app's front tab-window, WezTerm's focused pane, Ghostty's selected terminal with `tty`) runs the one client whose current pane is the bound pane (`MultiplexerHostFront`, `TmuxVisibility`). The two-second scan feeds a `TerminalVisitTracker` by `%pane`, reset after every Open. A Ghostty without `tty` cannot say which tab is in front, so a tmux pane hosted there is never visible until #251.
 - **Typed input (ADR 0017):** replies per [session replies](session-replies.md#tmux-241). A send needs only the pane layer (nesting included), `pane_in_mode` 0, a live pane and input on (`TmuxLayout.inputLayer`), so copy mode makes the route unreachable before every write. A session that a control-mode client (iTerm2's `-CC`) shows gets no typed input or digits either, as its Open falls back: the current conservative choice, pending a product decision. Text whose last character is `;` is sent with that `;` escaped as `\;` (`TmuxInput.literal`), because tmux otherwise takes it as a command separator. Codex question digits go through the shared route (`TerminalQuestionKeys`, `terminalRelay`) as one `send-keys -t %pane -l -- <digit>`, never Enter, and are on: `TmuxInput.questionDigitsProvenLive` is true since #246 showed a digit alone commits in tmux (2026-10-20); with it off, a Codex question whose title a tmux pane carries shows "Answer this in Codex." While tmux is enabled but unread or unreadable, Ghostty and herdr keys are withheld (`unreadHost`).
-- **Card (hidden):** switch, status badge and problem lines: "Turn on the terminal you run tmux in." (no terminal on); "Sessions seen on a socket other than the default can't be reached." (product.md), shown while a live Claude session's process descends from a `tmux` process yet no pane of the default server has its tty (`TmuxPresentation.otherSocketSeen`; a card line only, never a binding input); not found in the fixed locations, in WezTerm's pattern; "Herdly can't read tmux's default socket. Check that it runs as you." for an ownership failure only; and the shared "Herdly can't read tmux. Check Settings › Terminals." for any other failed read. No Permission row. The not-found and ownership lines are this build's wording, not agreed product text.
+- **Settings row (#317):** switch, status pill and problem lines: "Turn on the terminal you run tmux in." (no terminal on); "Sessions seen on a socket other than the default can't be reached." (product.md), shown while a live Claude session's process descends from a `tmux` process yet no pane of the default server has its tty (`TmuxPresentation.otherSocketSeen`; a card line only, never a binding input); "Herdly can't find tmux in /opt/homebrew/bin, /usr/local/bin or /usr/bin."; "Herdly can't read tmux's default socket. Check that it runs as you." for an ownership failure only; and the shared "Herdly can't read tmux. Check Settings › Terminals." for any other failed read (`TmuxPresentation`). ⋯ How Open Works… reads `TmuxPresentation.howOpenWorks`. No Automation permission. The not-found and ownership lines are this build's wording, not agreed product text.
 - **herdr in any enabled host (ADR 0014):** herdr's client verdict accepts a client whose ancestry reaches any enabled terminal and records which (`HerdrScanRequest.clientHostCommands`, `HerdrAttachedClient.host`); its Codex gate reads Ghostty's inventory while Ghostty is on, and otherwise the latest iTerm2, Terminal.app and WezTerm scans' titles (`HerdrHostTitles`); an Open whose client walks to iTerm2, Terminal.app or WezTerm joins that tab by tty (`HerdrHostOpen`) and raises it with that host's Open after ADR 0011's pane focus and verification. With Ghostty alone every rule, card line and the Ghostty Open sequence are unchanged. herdr visits are built only for a Ghostty-hosted client: a client in another host's tab is never visible, so its completions are acknowledged only by a verified Open or dismissal until those visits are built.
 
 Automated: `TmuxTests` (fixtures of saved `list-panes`/`list-clients` output shaped after [the live proof](evidence/tmux-live.md): parsing and malformed or oversized output, a title containing the separator, grouped sessions, the default socket path, the trust check and the fixed binary, unreadable and not-running reads, the Codex decoy, the client-tab title exclusion, an unreadable or unread tmux, a split, Claude by tty, the pane layer, nesting by tty and by herdr, Zellij or tmux ancestry or an unread ancestry, copy mode, input off and a control-mode client, client counts, the host-tab join across hosts including WezTerm and Ghostty without `tty`, the Open plan, `switch-client` arguments and outcomes, pane verification, partial reach, the sequence stopping at the first failure, `send-keys` arguments with the trailing `;` escape, delivery, the server identity check, the reply route and copy-mode veto, the digit gate and its fresh check, the visible test, each host's front tab, and the card lines) and `HerdrHostTabTests` (herdr's Ghostty-only default, other hosts' clients and the host the verdict names, no Ghostty visit for a client in another host, the gate's titles including WezTerm's, the host-tab plan and pane verification). Not run — needs live acceptance (#246): MVP acceptance §3d H1–H9 and the tmux line inside iTerm2, Terminal.app and WezTerm, and `scripts/terminal-lab/tmux_lab.py`, which drives the real WezTerm GUI, Codex and Claude even though its tmux server is isolated.
@@ -410,7 +275,7 @@ Zellij's switch and card are shown since its acceptance run inside WezTerm, iTer
 - **Sends (`ZellijRunner.send`):** `focus-pane-id` and every write go out only after a read taken just before them shows the bound pane still a live, single, tiled terminal pane of its session under the server identity the fresh check read (`ZellijInput.writeAllowed`), because `write-chars --pane-id` to an unknown pane exits 0 having written nothing.
 - **Visible (ADR 0016):** the frontmost enabled host's visible tab runs the one `zellij` client process, exactly one session lists exactly one client, and the pane that client focuses passes the pane layer (`ZellijVisibility`). The two-second scan feeds a `TerminalVisitTracker` by pane handle, reset after every Open.
 - **Typed input (ADR 0017):** replies per [session replies](session-replies.md#zellij-242). A send needs only the pane layer. Codex question digits go through the shared route (`TerminalQuestionKeys`, `terminalRelay`) as one `write-chars --pane-id terminal_<n> -- <digit>`, never a carriage return. They are on: `ZellijInput.questionDigitsProvenLive` is true since #247, where a digit alone committed a Codex answer and Herdly's own route recorded the option picked on the card. While it is false, a Codex question whose title a Zellij pane carries shows "Answer this in Codex." While Zellij is enabled but unread or unreadable, Ghostty and herdr keys are withheld (`unreadHost`).
-- **Card:** switch, status badge and problem lines: "Turn on the terminal you run Zellij in." (no terminal on); "Zellij is older than 0.44.1." and "More than one zellij client process is running." (product.md's two Zellij problems, phrased as sentences by this build); not found in the fixed locations, in WezTerm's and tmux's pattern; and the shared "Herdly can't read Zellij. Check Settings › Terminals." for an untrusted directory or any other failed read. No Permission row. The not-found line, the sentence wording of the two Zellij lines, the footer ("Herdly returns to a pane alone in its tab, with one Zellij client, in Zellij's default socket directory; otherwise Open raises the terminal running Zellij. Replies are typed into the exact pane.") and the status details ("Herdly never scans or contacts Zellij.", "Fix each item below.", "Zellij's default socket directory is readable.", "No Zellij sessions seen.") are this build's wording, not agreed product text.
+- **Settings row (#317):** switch, status pill and problem lines (`ZellijPresentation`): "Turn on the terminal you run Zellij in." (no terminal on); "Zellij is older than 0.44.1." and "More than one zellij client process is running." (product.md's two Zellij problems, phrased as sentences by this build); "Herdly can't find Zellij in /opt/homebrew/bin or /usr/local/bin."; and the shared "Herdly can't read Zellij. Check Settings › Terminals." for an untrusted directory or any other failed read. No Automation permission. The not-found line, the sentence wording of the two Zellij lines and the ⋯ How Open Works… text (`ZellijPresentation.howOpenWorks`) are this build's wording, not agreed product text.
 
 Automated: `ZellijTests` (a fake of Herdly's effects showing that a refusing socket beside an accepting one runs no `zellij` command for a read or a send, that all-accepting sockets read and send normally, and the binary, version and trust outcomes; fixtures of saved `list-panes --json --all`, `list-tabs --json` and `list-clients` output shaped after [the live proof](evidence/zellij-live.md) plus verbatim output from an isolated Zellij 0.45.1: parsing, plugin ids reusing terminal ids, malformed and oversized output, the version floor, the socket directory and its trust check, session names, the fixed binary, the process table, server identity and the user's own client processes, the inventory and client ttys, read states, the Codex binding with the decoy, the pane command, the server ancestry, the second read and a split or visible floating pane, cross-host title uniqueness, an unreadable Zellij and Ghostty's fresh-read veto, the Claude binding by hook pane and ancestry and each disagreement, the pane layer and nesting both ways, client and client-process counts, the Open plan with the host-title veto (Ghostty's included), its ADR 0015 mapping, `focus-pane-id` outcomes and the already-focused case, pane verification, partial reach, the sequence stopping at the first failure, `write-chars`/`write` arguments, the pane recheck before every write, delivery, the reply route, the digit gate and its fresh check, the visible test, the host-tab join and the card lines). Live application proof: MVP acceptance §3d H1–H9 and the Zellij line inside WezTerm, iTerm2 and Terminal.app ([evidence](evidence/zellij-acceptance.md), #247), with deviations at H7 and H8 and the host-title finding recorded there. Not run: `scripts/terminal-lab/zellij_lab.py`, which drives the real WezTerm GUI, Codex and Claude even though its Zellij session is isolated.
 
@@ -446,4 +311,4 @@ Live, 2026-10-13 (#243, build 464 from `fix/270` at 638a31f, [iTerm2 acceptance]
 
 ## Settings rows (#317)
 
-Since #317 each host is one row in its section's card (product.md, "Agreed terminal host presentation"). The card descriptions above predate it: each host's former footer is now its `howOpenWorks` text, shown by the row's ⋯ How Open Works… item (`TerminalHost.howOpenWorks`); Show diagnostics is the ⋯ Show Diagnostics… sheet; the Version, Automation permission and Status rows became the dim version, the status pill and typed problem lines (`GhosttySettingsProblem`, `TerminalAppSettingsProblem` and iTerm2's `.automationDenied` offer Open Settings…); and the status details ("Herdly never scans or contacts …", "Fix each item below.", "No … sessions seen.", "… is readable.") were removed. Ghostty's row rule is `GhosttyPresentation.settingsRow`: not-found and outdated lines only while its switch is on, the Automation-denied line whatever the switch says. Automated coverage: `GhosttySettingsTests` and the updated `TerminalAppTests`, `ITerm2Tests`, `HerdrPresentationTests`, `TmuxTests`, `ZellijTests` and `WezTermTests`.
+Since #317 each host is one row in its section's card (product.md, "Agreed terminal host presentation"); the host sections above describe that row. Each host's former footer is now its `howOpenWorks` text, shown by the row's ⋯ How Open Works… item (`TerminalHost.howOpenWorks`); Show diagnostics is the ⋯ Show Diagnostics… sheet; the Version, Automation permission and Status rows became the dim version, the status pill and typed problem lines (`GhosttySettingsProblem`, `TerminalAppSettingsProblem` and iTerm2's `.automationDenied` offer Open Settings…); and the status details ("Herdly never scans or contacts …", "Fix each item below.", "No … sessions seen.", "… is readable.") were removed. Ghostty's row rule is `GhosttyPresentation.settingsRow`: not-found and outdated lines only while its switch is on, the Automation-denied line whatever the switch says. Automated coverage: `GhosttySettingsTests` and the updated `TerminalAppTests`, `ITerm2Tests`, `HerdrPresentationTests`, `TmuxTests`, `ZellijTests` and `WezTermTests`.

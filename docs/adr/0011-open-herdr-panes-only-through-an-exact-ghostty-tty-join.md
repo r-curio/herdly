@@ -8,6 +8,8 @@ Amended 2026-10-11 by [ADR 0015](0015-raise-the-terminal-app-when-open-cannot-re
 
 Amended 2026-10-11 by [ADR 0016](0016-open-and-acknowledge-visits-the-same-way-on-every-terminal-host.md): this ADR's Open sequence, manual-visit rule and dwell rule now apply to every terminal host and multiplexer, and to plain Ghostty tabs for Codex and Claude alike, with "visible" defined per host there. Ghostty's current-window limit and the interim rules without `tty` are unchanged.
 
+Background: the [Ghostty tty investigation](../ghostty-tty-investigation.md) records which Ghostty release first exposes `tty` and how Herdly checks for it.
+
 ## Sequence
 
 1. **Revalidate.** Re-read the herdr snapshot, `pane.process_info` for the bound pane, integration status (Claude only), and `lsof`, plus a fresh Ghostty inventory. Apply the session's pane binding and target checks (ADR 0008 for Claude, ADR 0012 for Codex) and ADR 0009's protocol and socket checks. Require exactly one Ghostty terminal whose `tty` equals the single client's TTY, in an unsplit tab in the current Ghostty window.

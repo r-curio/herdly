@@ -1,7 +1,7 @@
 """Compile one family's lab runs into its evidence JSON.
 
 Usage: python3 -I compile_family_evidence.py <family>
-  file -> docs/evidence/claude-file-approvals.json (#72)     web -> claude-web-approvals.json (#73)
+  file -> output/claude-file-lab/claude-file-approvals.json (#72)     web -> claude-web-approvals.json (#73)
   plan -> claude-plan-approval.json (#74)                   mcp -> claude-mcp-approval.json (#75)
 
 
@@ -20,7 +20,8 @@ if len(os.sys.argv) != 2 or os.sys.argv[1] not in ("file", "web", "plan", "mcp")
 FAMILY = os.sys.argv[1]
 ISSUE, NAME = {"file": (72, "claude-file-approvals"), "web": (73, "claude-web-approvals"),
                "plan": (74, "claude-plan-approval"), "mcp": (75, "claude-mcp-approval")}[FAMILY]
-OUT = os.path.join(REPO, "docs", "evidence", NAME + ".json")
+OUT = os.path.join(LAB, NAME + ".json")
+os.makedirs(LAB, exist_ok=True)
 order = subprocess.run(["python3", "-I", os.path.join(S, "run_family_case.py"), "--list", FAMILY],
                        capture_output=True, text=True, check=True).stdout.split()
 

@@ -131,7 +131,7 @@ import Testing
 private func question(_ session: UUID = UUID(), turn: UUID = UUID(), source: AttentionSource = .desktop,
                       call: String = "call_1", at: Double = 10) -> AttentionQuestion {
     AttentionQuestion(source: source, session: session, turn: turn, callID: call, arrivedAt: at,
-                      prompts: [QuestionPrompt(header: "Nested choices", question: "Which shape?", options: ["A", "B"])])
+                      prompts: [QuestionPrompt(header: "List shape", question: "Which shape?", options: ["A", "B"])])
 }
 
 @Test func questionRanksAfterActionableRequestsAndAheadOfHandedBackOnes() {

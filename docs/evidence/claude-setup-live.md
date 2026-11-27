@@ -1,5 +1,7 @@
 # Claude setup live evidence
 
+Recorded under Herdly's former name, Steer: paths, the app (`Steer.app`) and the helper (`SteerHook`) below use that name.
+
 Date: 2026-09-21
 Scope: issue #80, isolated disposable roots only
 Tested Steer commit: `db84a9175959d51d2a53b567eccb90f46f8cdc55`

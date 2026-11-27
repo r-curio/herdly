@@ -293,7 +293,7 @@ private let allKeys: [SpotlightCardKey] = (0...10).map(SpotlightCardKey.digit)
     // Waiting moves nothing: the approval's deadline is still 30 seconds from its own arrival.
     #expect(waiting?.approval?.expiresAt == 35)
     let question = items.first { $0.id == otherQuestionID }
-    #expect(question.map { SpotlightKeyboardWait.line($0, name: "strata") } == "strata needs an answer · next")
+    #expect(question.map { SpotlightKeyboardWait.line($0, name: "atlas") } == "atlas needs an answer · next")
 }
 
 @Test func onlyRequestsWaitAndTheFocusedCardIsNeverItsOwnArrival() {

@@ -5,11 +5,17 @@
   </picture>
 </h1>
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![macOS CI](https://github.com/r-curio/herdly/actions/workflows/macos.yml/badge.svg)](https://github.com/r-curio/herdly/actions/workflows/macos.yml)
+![macOS 14+](https://img.shields.io/badge/macOS-14%2B-lightgrey.svg)
+
 A native macOS companion for local Codex and Claude Code sessions. Keep using your agents normally; Herdly shows activity and requests for attention in a compact notch while you work elsewhere.
+
+<!-- Screenshot placeholder: add a picture of the notch and its queue here, e.g. docs/brand/screenshot.png. -->
 
 ## Status
 
-All MVP feature tickets are merged. A reproducible, checksummed development build is produced by `scripts/package-app.sh` and by CI; it is ad-hoc signed and labelled `unsigned-dev` until the maintainer signs and notarizes it with a Developer ID identity. The integrated live acceptance pass on the packaged app is still to be run by the operator; see [MVP acceptance](docs/mvp-acceptance.md) for what is proven and what is not.
+Herdly is pre-release. Builds are ad-hoc signed and not notarized, so Gatekeeper refuses the first open until you allow it; see [Install](docs/install.md). What has been proven live, and what hasn't, is in [MVP acceptance](docs/mvp-acceptance.md).
 
 ## What it covers
 
@@ -28,34 +34,26 @@ The notch stays visible in every app, including Codex itself. Desktop completion
 - [Product behavior](docs/product.md)
 - [Architecture draft](docs/architecture.md)
 - [Domain glossary](CONTEXT.md)
-- [Desktop investigation](docs/codex-desktop-investigation.md)
+- [Desktop read state](docs/desktop-read-state.md)
 - [User-input requests](docs/user-input-requests.md)
 - [Install, permissions, and removal](docs/install.md)
 - [MVP acceptance record and operator checklist](docs/mvp-acceptance.md)
-- [Backlog and dependency index](docs/mvp-backlog.md)
 - [MVP implementation issues](https://github.com/r-curio/herdly/issues?q=is%3Aissue+label%3Amvp)
 
-## Build and install
+## Install a build
+
+Download the zip from [GitHub Releases](https://github.com/r-curio/herdly/releases) when a release is available. Installation, the permissions macOS asks for, supported agent versions, and a clean uninstall are in [docs/install.md](docs/install.md).
+
+## Build from source
+
+Requirements: macOS 14 or later, and Xcode 16 or later (Swift 6). [CONTRIBUTING.md](CONTRIBUTING.md#requirements) covers building with the Command Line Tools alone.
 
 ```sh
 swift test
-sh scripts/package-app.sh    # output/dist/Herdly-<version>+<build>-<label>.zip, .sha256, manifest
+sh scripts/build-app.sh && open output/Herdly.app
 ```
 
-`sh scripts/build-app.sh && open output/Herdly.app` is the shorter development loop. Installation, the permissions macOS asks for, supported versions, and a clean uninstall are in [docs/install.md](docs/install.md).
-
-## Replay desktop activity
-
-To replay desktop activity from an isolated event directory, use the [desktop integration runbook](docs/desktop-live-integration.md).
-
-## Run the existing probe
-
-```sh
-python3 scripts/probe_codex_desktop.py --self-test
-python3 scripts/probe_codex_desktop.py --app /Applications/ChatGPT.app
-```
-
-The probe only inspects bundle metadata and generated protocol definitions. It does not install hooks, change settings, or connect to conversations. Pass the actual installed desktop bundle path when different.
+`sh scripts/package-app.sh` produces the checksummed zip that CI builds; see [docs/install.md](docs/install.md#build-from-a-clean-checkout).
 
 ## Contributing and license
 

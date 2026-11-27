@@ -47,7 +47,7 @@ private func snapshot(_ json: String = listReply(), id: String = "r1") -> HerdrA
 }
 
 private let lsJSON = """
-{"spaces":[{"id":"\(s1)","name":"landbase","machine":null,"active":true,"tabs":[{"id":"\(tabA)","name":"1","active":true,
+{"spaces":[{"id":"\(s1)","name":"myproject","machine":null,"active":true,"tabs":[{"id":"\(tabA)","name":"1","active":true,
 "terminals":[{"terminal":"t1","pane":"\(p1)","status":null,"sub_agents":[]}]}]},
 {"id":"\(s2)","name":"herdly","machine":null,"active":false,"tabs":[{"id":"\(tabB)","name":"1","active":true,
 "terminals":[{"terminal":"t2","pane":"\(p2)","sub_agents":[]},{"terminal":"t4","pane":"\(p4)","sub_agents":[]},

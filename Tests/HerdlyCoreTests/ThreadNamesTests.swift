@@ -38,8 +38,8 @@ private func indexLine(_ id: String, _ name: String) -> String {
     #expect(ThreadNameReader.read(file) == nil)
 
     let session = UUID()
-    try Data((indexLine(session.uuidString, "Add nested variant stock choices") + "\n").utf8).write(to: file)
-    #expect(ThreadNameReader.read(file) == [session: "Add nested variant stock choices"])
+    try Data((indexLine(session.uuidString, "Sync main and resolve conflicts") + "\n").utf8).write(to: file)
+    #expect(ThreadNameReader.read(file) == [session: "Sync main and resolve conflicts"])
 
     let link = root.appendingPathComponent("link.jsonl")
     try FileManager.default.createSymbolicLink(at: link, withDestinationURL: file)

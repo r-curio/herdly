@@ -22,13 +22,13 @@ A display that has disconnected is never chosen, even while interacting: the rul
 
 ## Geometry
 
-`NotchPlacement.frame(on:expanded:rows:extraRows:)` is pure. On a display with a physical camera housing (`safeAreaInsets.top` > 0) the panel's top edge sits 6 pt below the housing; on a display without one it sits 12 pt below the top edge as a compact top-center panel. Width is 210 pt collapsed and 380 pt expanded; expanded height grows 65 pt per row from 150 pt and is capped at 380 pt, with the row list scrolling beyond that.
+`NotchPlacement.frame(on:expanded:contentHeight:)` is pure (`frame(on:expanded:rows:extraRows:)` estimates the height before the content is measured). The panel starts at the very top of the screen on every display: the collapsed strip is the housing row on a display with a camera housing (`safeAreaInsets.top` > 0), the menu bar row on any other display showing one, and 40 pt where no bar is showing. Open, the panel is exactly as tall as its measured content, capped at 480 pt (`NotchPlacement.maximumExpandedHeight`) with the row list scrolling beyond that, and as wide as the revision at the top of this document describes (`NotchPlacement.bodyWidth`, `PanelWidth`).
 
 ## Pinned display (2026-10-08)
 
 The user can keep the notch on one display instead of following the pointer. The default is Follow pointer, so nothing changes until a display is chosen.
 
-- **Choosing.** The Notch page of the controls window has a Show notch on picker in its Display section, and the S menu bar item has a Show notch on submenu. Both list Follow pointer, then each attached display by its macOS name, left to right (`NotchDisplayChoices`). Two displays with the same name are numbered in that order. Choosing an option re-places the panel at once; the queue, presentations, and approval deadlines are untouched.
+- **Choosing.** Settings › General has a Show notch on picker in its Display section, and the menu bar item (the Herdly mark) has a Show notch on submenu. Both list Follow pointer, then each attached display by its macOS name, left to right (`NotchDisplayChoices`). Two displays with the same name are numbered in that order. Choosing an option re-places the panel at once; the queue, presentations, and approval deadlines are untouched.
 - **Identity.** A pin is the display's UUID (`CGDisplayCreateUUIDFromDisplayID`), which survives reboots and reconnects where the display number does not, plus the label shown when it was chosen. Both are stored in UserDefaults as `notchDisplayPinID` and `notchDisplayPinName`; a missing or empty identifier means Follow pointer. A display the system reports no UUID for is not offered.
 - **Displays with no serial number (#495, agreed 2026-11-27).** A monitor whose EDID reports serial number 0 can get a new UUID when it is reconnected through another port, cable, dock or input, which used to list it twice: once attached, once as the "(not connected)" pin. When the pinned display had no serial number, the pin also stores its vendor and model (`CGDisplayVendorNumber`, `CGDisplayModelNumber`) as `notchDisplayPinModel` ("vendor:model"). If no attached display has the pin's UUID, the one attached display with no serial number and the same vendor and model is the pinned display: it is used for placement and checked in both pickers, and no "(not connected)" entry is added. Zero or several such displays match nothing, so one of two identical monitors is never guessed. A display that reports a serial number matches by UUID only. Recognising a display this way does not rewrite the saved pin; choosing a display saves its current UUID and model. Pins saved before this change, or with a missing or malformed model, match by UUID only until a display is chosen again.
 - **Pinned display not connected.** The notch shows on the built-in display, or follows the pointer when there is no built-in display (a closed lid). The pin is kept: the pickers list it as "*name* (not connected)", and the notch returns to it when it reconnects. The Settings picker's VoiceOver hint says which of these applies, naming the display as the picker does; the menu bar submenu lists only the choices.
@@ -52,7 +52,7 @@ The user can keep the notch on one display instead of following the pointer. The
 - **Escape.** `NotchPanel.cancelOperation` and a text field's Escape both go through `NotchPresentationController.escape()`: on a clicked card it returns to the queue (#312, D6); otherwise it collapses every presentation (`Attention.collapse()`, which never dismisses) and, if the panel was key, hands the keyboard back as above. The next refresh shows the collapsed panel again.
 - **Row selection.** Up and Down arrows that no control handled reach `NotchPanel.keyDown` and move `QueueRowSelection` over the open queue's rows; Return does what a click on the selected row does (`QueueRowSelection.action`): an approval or question opens as its clicked card, a working row opens or closes in place (#319), and a result, waiting, or status-unknown row opens its session through the usual Open, after which the panel folds back (#322). On an unreachable result row Return is not handled.
 - **Labels.** Each row is an accessibility container labeled with its kind and subject (task name when Codex provided one, otherwise the shortened session ID). Every button's label names its action and subject, for example "Approve this request once: deploy, session 01a0916c-337b"; Open reads "Open Session: <subject>" whatever its visible label ("Open", "Open in Codex", "Open in Claude"). The header reads the working and to-check counts and says whether the queue is expanded.
-- **No running commentary.** The panel shows no navigation result line, and no keyboard hint except the hotkey's queue foot line above (the general hint was removed 2026-09-14 at the user's request); navigation results remain in the controls window, and the card's own status sentence reports what Herdly did for a question.
+- **No running commentary.** The panel shows no navigation result line, and no keyboard hint except the hotkey's queue foot line above (the general hint was removed 2026-09-14 at the user's request); an unavailable Open shows its one-line reason on the row (`OpenUnavailableLines`), and the card's own status sentence reports what Herdly did for a question.
 - **Long details.** Task, project, action, command, and reason wrap in full; an approval card's command past six lines scrolls in its box and Show full command lifts the cap (#320). The full request stays behind Show full request. A command is never shortened, and a shortened one elsewhere is never presented as the complete action.
 
 ## Automated checks
@@ -71,9 +71,11 @@ Launching the app (Finder, `open`, a login item) activates it and AppKit makes t
 
 Follow-up to the report above: even at the top edge the strip covered the tab row of a full-screen browser. On an external monitor that shows no menu bar the strip now rests entirely above the screen edge (`NotchTuck`), like the hidden menu bar, and slides in (the usual 0.18 s ease-out) while the pointer is within 3 pt of the top edge or over the panel, while the panel has keyboard focus, or while the panel is open, so a new completion, request, or question still shows itself for its card-open time (3 seconds by default) and then tucks away. External monitors with a menu bar and the built-in display (notch or not) are unchanged; `NotchDisplay.isBuiltIn` comes from `CGDisplayIsBuiltin`. `stripTucksAboveAFullScreenDisplayUntilThePointerTouchesTheTopEdgeOrThePanelOpens` covers the rule.
 
+## Placement probe (2026-09-13)
 
+Recorded before the hover-expand revision, so its geometry (a top edge 6 pt below the housing, a 210 pt strip) is superseded; the display choice, key status and panel flags stand.
 
-`Herdly --placement-probe <path>` enqueues an in-memory test item, refreshes once, records the attached displays, the chosen display, the frames the rules would use, the panel's actual frame and key status, and quits. `--assume-codex-away` is a lab override for a machine where Codex desktop is foreground; `--attention-snapshot` isolates the snapshot. Nothing is written to UserDefaults or Codex configuration. Result: [evidence/notch-placement.json](evidence/notch-placement.json).
+`Herdly --placement-probe <path>` enqueues an in-memory test item, refreshes once, records the attached displays, the chosen display, the frames the rules would use, the panel's actual frame and key status, and quits. `--assume-codex-away` is a lab override for a machine where Codex desktop is foreground; `--attention-snapshot` isolates the snapshot. Nothing is written to UserDefaults or Codex configuration. Result below; the raw lab record is not kept in the repo.
 
 | Check | Result |
 | --- | --- |
@@ -82,7 +84,7 @@ Follow-up to the report above: even at the top edge the strip covered the tab ro
 | Presented panel | Visible, expanded to 230 pt for the test item, top edge 944 pt |
 | Key after automatic presentation | No |
 | Panel flags | Non-activating, joins all Spaces, full-screen auxiliary, status-bar level |
-| Smoke check | `--smoke-test` controls-window check passed on the same build |
+| Smoke check | `--smoke-test` passed on the same build |
 
 ## Empty notch (2026-10-08)
 
@@ -100,7 +102,7 @@ Reported: after the screen turned off and back on, the collapsed strip sometimes
 
 Not performed by the agent: it needs a second display, Mission Control, and the keyboard, which are outside the permitted automation. Run it with Herdly connected to an isolated lab as in [restart recovery](restart-recovery.md) and record each line as pass, fail, or uncertain.
 
-1. **Two displays.** Attach an external monitor. Send a test notification. Move the pointer between displays: the panel follows the pointer and appears exactly once, below the housing on the built-in display and top-center on the external one.
+1. **Two displays.** Attach an external monitor. In Settings › Notifications, click Send Test Notification. Move the pointer between displays: the panel follows the pointer and appears exactly once, below the housing on the built-in display and top-center on the external one.
 2. **Freeze during interaction.** Expand the panel on the external display, hover over a button, and move the pointer's display by dragging past the edge while staying over the panel: it does not jump. Click into a reply field on the built-in display and type a few characters, then move the pointer to the other display: it stays put until Send, clearing the text, or Escape.
 3. **Disconnect and reconnect.** With the panel on the external display, unplug it. The panel appears once on the built-in display with the same queue and no new sound. Reconnect: the panel follows the pointer again; nothing is duplicated or replayed.
 4. **Deadline independence.** Trigger a CLI approval in the lab, hover over the panel, and keep the pointer there past 30 s: the row changes to Continue in Codex on time while the popup stays open.

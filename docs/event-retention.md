@@ -36,7 +36,7 @@ The helper is unchanged: hooks stay fast and Codex-compatible output stays clean
 
 ## Automated checks
 
-Local gate on this branch: `swift test`, `sh scripts/build-app.sh`, `sh scripts/package-app.sh`, and `output/Herdly.app/Contents/MacOS/Herdly --smoke-test` all passed. These are build and smoke checks, not live operator acceptance.
+Local gate on the change's branch: `swift test`, `sh scripts/build-app.sh`, `sh scripts/package-app.sh`, and `output/Herdly.app/Contents/MacOS/Herdly --smoke-test` all passed. These are build and smoke checks, not live operator acceptance.
 
 
 `Tests/HerdlyCoreTests/HookEventRetentionTests.swift` covers:

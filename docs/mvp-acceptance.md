@@ -4,46 +4,46 @@ Status: **packaging complete; live acceptance pass not yet run.** This page sepa
 
 Install, permissions, supported versions and removal are in [install.md](install.md).
 
-Launch-at-login installed checks are tracked separately in [launch-at-login evidence](evidence/launch-at-login.md) because they require changing the test account's Login Items state and signing out and back in.
+Launch-at-login installed checks are in [section 3g](#3g-launch-at-login) because they require changing the test account's Login Items state and signing out and back in.
 
 ## 1. Automated evidence (agent-run, 2026-09-14)
 
-Recorded from a clean `main` checkout at the commit named in `docs/evidence/packaging-manifest.json`; that file is the manifest `scripts/package-app.sh` wrote, copied verbatim.
+Recorded from a clean `main` checkout at the commit named in the manifest `scripts/package-app.sh` wrote (record not kept in the repo).
 
 | Check | Result |
 | --- | --- |
 | `swift test` | 138 tests pass (host: macOS 26.5, Xcode 26.6, Swift 6.3.3). |
 | `sh scripts/package-app.sh` (no identity) | Builds, lints `Info.plist`, `HerdlyHook --self-test` passes, ad-hoc signature verifies with `codesign --verify --deep --strict`, artifact `Herdly-0.1.0+<build>-unsigned-dev.zip` written with `.sha256` and manifest. |
-| Issue #88 candidate package (clean source commit `63ce63e`) | `Herdly-0.1.0+400-unsigned-dev.zip`, SHA-256 `adf8ae1e4895d6fa7470afa7b9c0d4af5c54adfb5b703fa62a91bda861752f43`; full `swift test` (670 tests), packaged smoke, helper self-test, checksum, and signature verification passed. Full record: [Claude release candidate package](evidence/claude-release-candidate-package.json). |
+| Issue #88 candidate package (clean source commit `63ce63e`) | `Herdly-0.1.0+400-unsigned-dev.zip`, SHA-256 `adf8ae1e4895d6fa7470afa7b9c0d4af5c54adfb5b703fa62a91bda861752f43`; full `swift test` (670 tests), packaged smoke, helper self-test, checksum, and signature verification passed. Full record not kept in the repo. |
 | Round trip of the artifact | Zip extracted to a scratch directory; `shasum -a 256 -c` OK; extracted bundle's signature verifies; extracted helper self-test passes. |
-| Identity signing path | Run once with the only identity in the maintainer's keychain, `Apple Development: … (5TUQCAA8MS)`. Signs with hardened runtime and the Apple Events entitlement and labels the result `dev-signed`. This is not a Developer ID identity, so Gatekeeper still rejects it and it is not a release artifact. |
+| Identity signing path | Run once with an `Apple Development: … (<team id>)` identity. Signs with hardened runtime and the Apple Events entitlement and labels the result `dev-signed`. This is not a Developer ID identity, so Gatekeeper still rejects it and it is not a release artifact. |
 | Notarization | Not run: no Developer ID identity or notarytool profile is available. The script refuses to notarize with any other identity. |
 | CI (`.github/workflows/macos.yml`, optional) | Not required for acceptance; local checks above are the gate. Runs test, package, `Herdly --smoke-test` on the packaged app, prints the checksum, uploads the zip, checksum and manifest as the `Herdly-unsigned-dev` artifact on a clean `macos-15` runner. First run on the packaging PR: [run 34806216904](https://github.com/r-curio/herdly/actions/runs/34806216904), all steps green on macOS 15.7.9, artifact `Herdly-0.1.0+94-unsigned-dev.zip` (built from the PR merge commit `1ed3034`), SHA-256 `a8e34afaec89f9524e22ade02678aaef847eff1b3f59c52166d45306c636e6d0`. |
 
 Existing automated coverage that the packaged binary carries unchanged: desktop lifecycle replay, attention queue ordering, approval receipt binding and resolution, restart recovery from snapshot and hook records, notch placement geometry, user-input requests, thread names, desktop read state, and setup plan/undo (`Tests/HerdlyCoreTests`).
 
-Isolated app-level labs recorded on earlier builds, each with its JSON under `docs/evidence/`: restart recovery (`restart_lab.py`, runs A–E), notch placement probe, CLI approval runtime and resolution, desktop turn start/complete replay, and a real desktop `request_user_input` recording.
+Isolated app-level labs recorded on earlier builds (raw JSON records not kept in the repo; summaries are in the linked integration docs): restart recovery (`restart_lab.py`, runs A–E), notch placement probe, CLI approval runtime and resolution, desktop turn start/complete replay, and a real desktop `request_user_input` recording.
 
 ## 2. Human evidence already on file (unpackaged builds)
 
 These were reported by the user against `output/Herdly.app` builds of earlier tickets, not against the zip above. They establish that the behaviours exist; the packaged-app pass in section 3 re-runs each of them once.
 
-- Desktop foreground hides the notch, other apps restore it, repeated switching does not replay sound, dismissal survives restart ([prototype.md](prototype.md), "User-confirmed foreground walkthrough").
-- `codex://threads/<id>` returns to the exact desktop task from another app; a nonexistent id does nothing ([desktop-manual-test.md](desktop-manual-test.md)).
+- Desktop foreground withheld the completion popup and sound, other apps restored them, repeated switching did not replay sound, and dismissal survived restart (user-confirmed foreground walkthrough; record not kept). That walkthrough predates the agreed rule that the notch stays visible in every app ([product.md](product.md#agreed-visibility-behavior)).
+- `codex://threads/<id>` returns to the exact desktop task from another app; a nonexistent id does nothing (manual desktop test; record not kept).
 - CLI session in an unsplit Ghostty tab: automatic session-id title, completion appears in Herdly, exact tab/window navigation, direct-return acknowledgment ([cli-notch-integration.md](cli-notch-integration.md), "Final clean-run acceptance").
 - Direct CLI approval: allow once, deny, 30-second handoff with the native prompt returning, and reconciliation of an answer given in Codex ([approval-reconciliation.md](approval-reconciliation.md), live evidence on CLI 0.145.0).
 
 ## 3. Operator pass against the packaged app
 
-Run this on the artifact named in `docs/evidence/packaging-manifest.json` after checking its checksum. Use a disposable Codex task and a disposable CLI session; the agent must not drive the Codex UI, so every line is the operator's report. Record each line as **pass**, **fail**, or **uncertain** with the date, and attach the manifest's `sha256`. Leave a line blank rather than inferring it. Lines marked *deferred* are known MVP exclusions and are listed so they are not silently assumed.
+Run this on the packaged artifact after checking its checksum, and note its manifest's commit. Use a disposable Codex task and a disposable CLI session; the agent must not drive the Codex UI, so every line is the operator's report. Record each line as **pass**, **fail**, or **uncertain** with the date, and attach the manifest's `sha256`. Leave a line blank rather than inferring it. Lines marked *deferred* are known MVP exclusions and are listed so they are not silently assumed.
 
 ### 3a. Install and connect
 
 | # | Step | Expected | Result |
 | --- | --- | --- | --- |
-| I1 | `shasum -a 256 -c` on the zip, unzip, move to `/Applications`, open. | Gatekeeper refuses an `unsigned-dev` build once; Open Anyway launches it as a menu-bar app showing its controls window. | |
-| I2 | Before Configure Codex, copy `~/.codex/config.toml` and `~/.codex/hooks.json` aside. Click **Check Codex setup**. | Preview lists the versions from the requirements table as supported and shows every line it would add. | |
-| I3 | **Configure Codex**. Diff both files against the copies. | Only the lines listed under "Connect Codex" in install.md were added; approval and sandbox settings unchanged. Helper present at `~/Library/Application Support/Herdly/HerdlyHook`. | |
+| I1 | `shasum -a 256 -c` on the zip, unzip, move to `/Applications`, open. | Gatekeeper refuses an `unsigned-dev` build once; Open Anyway launches it as a menu-bar app that opens its Settings window. | |
+| I2 | Before Configure Codex, copy `~/.codex/config.toml` and `~/.codex/hooks.json` aside. In **Settings → Agents**, choose the Codex row's **⋯ → Show Setup Changes…**. | Preview lists the versions from the requirements table as supported and shows every line it would add. | |
+| I3 | Turn on the Codex row's switch (runs Configure Codex). Diff both files against the copies. | Only the lines listed under "Connect Codex" in install.md were added; approval and sandbox settings unchanged. Helper present at `~/Library/Application Support/Herdly/HerdlyHook`. | |
 | I4 | Start a new `codex` session in Ghostty and answer Codex's trust prompt. | Herdly shows connected; the session's row appears with a session-id title. | |
 | I5 | Move `Herdly.app` to a different folder while connected, relaunch. | Still connected; no repair required (helper placement does not depend on the bundle). | |
 
@@ -51,13 +51,13 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 
 | # | Step | Expected | Result |
 | --- | --- | --- | --- |
-| D1 | With Codex desktop foreground, run a short turn in the disposable task. | Notch stays hidden; no sound. | |
+| D1 | With Codex desktop foreground, run a short turn in the disposable task. | The notch stays visible; the completion card does not pop open and no sound plays. | |
 | D2 | Switch to another app. | The completion card opens for three seconds with the sound, then collapses to the strip with a **1** badge. | |
-| D3 | Return to Codex, leave again, twice. | Hidden while foreground; the item stays queued; sound does not replay. | |
-| D4 | Hover the strip, click **Open in Codex**. | Codex comes forward on that task; the item stays queued (not acknowledged). | |
-| D5 | Read the result in Codex, wait a few seconds, leave. With **Clear desktop completions Codex marks read** on: | The item clears from Codex's own unread flag. With it off: the item stays until Dismiss. | |
+| D3 | Return to Codex, leave again, twice. | The notch stays visible throughout; no popup while Codex is in front; the item stays queued; sound does not replay. | |
+| D4 | Hover the strip, click **Open Session**. | Codex comes forward on that task; the item stays queued (not acknowledged). | |
+| D5 | Read the result in Codex, wait a few seconds, leave. | The item clears from Codex's own unread flag (always on since #492; there is no switch). If Codex's state file is missing or unreadable, the item stays until Dismiss. | |
 | D6 | **Dismiss** an item; quit and relaunch Herdly. | Stays cleared. A new turn in the same task still notifies. | |
-| D7 | *Deferred:* viewing thread B while A completes. | Notch hidden in either case; exact desktop task focus is not claimed. | n/a |
+| D7 | *Deferred:* viewing thread B while A completes. | The notch stays visible in either case; exact desktop task focus is not claimed. | n/a |
 | D8 | Trigger an approval in the desktop task. | Codex's native prompt appears; Herdly shows the request with only Open in Codex, never Approve/Deny (desktop approvals stay native). | |
 | D9 | Have Codex ask a question (`request_user_input`) and leave the app. | "Codex needs an answer" card with the first question and numbered options; answer it in Codex and the item clears. | |
 
@@ -67,8 +67,8 @@ Run this on the artifact named in `docs/evidence/packaging-manifest.json` after 
 | --- | --- | --- | --- |
 | G1 | Turn on the **Ghostty** switch in Settings › Terminals; macOS asks for Automation access to Ghostty; allow. | Herdly reports the permission verified after the first navigation. | |
 | G2 | Two unsplit tabs in the same project, one `codex` session each. Complete a turn in tab A while tab B is focused. | A's completion presents; B stays unaffected. | |
-| G3 | **Open in Codex** on A's item. | Exactly tab A in its window is selected; the item is acknowledged by the verified Open (ADR 0016). | |
-| G4 | Split a tab and run a session in one pane. | Open in Codex raises Ghostty without selecting a tab or pane (ADR 0015); nothing is acknowledged. | |
+| G3 | **Open Session** on A's item. | Exactly tab A in its window is selected; the item is acknowledged by the verified Open (ADR 0016). | |
+| G4 | Split a tab and run a session in one pane. | **Open Session** raises Ghostty without selecting a tab or pane (ADR 0015); nothing is acknowledged. | |
 | G5 | Trigger a permission request in the CLI session and leave the tab. | Card with command, project and reason (when given), Approve, Deny, Open, and a 30-second countdown that stands still while the pointer is on the notch and hands back no later than 2 minutes after receipt (ADR 0020). | |
 | G6 | Approve. | Codex runs that one command; the next request asks again. | |
 | G7 | Deny. | Codex reports the denial; nothing runs. | |
@@ -96,9 +96,9 @@ Host-specific lines, added to the same evidence file:
 
 - **iTerm2:** no typed input at all (H9 shows "Herdly can't type into iTerm2. Reply in the session."). With iTerm2's own Claude Code integration turned on, Herdly's Claude hooks and binding still work and iTerm2's hook still runs. Build state (#238): Open, visits, the Automation flow and the card are built. Accepted 2026-10-13 (#243, [evidence](evidence/iterm2-acceptance.md)); the card is shown in Settings › Terminals from that change on. The run itself used builds with the card hidden, so H1 turned the switch on through its stored preference, not from Settings, and H6's Settings half was not run. H9's line replaces Codex question keys and the reply field's reason while an iTerm2 tab shows the session's title and the daemon does not hold it.
 - **Terminal.app:** replies only; a Codex question shows "Answer this in Codex." Accepted 2026-10-14 (#244, [evidence](evidence/terminal-app-acceptance.md)); the card is shown in Settings › Terminals from that change on. H5, decided 2026-10-14: Terminal's split view and tab groups are invisible to its scripting (a split shows one session twice), so Open reaching the exact session, not a fallback, is Terminal.app's expected result. A Codex question the daemon holds keeps its answer buttons (ADR 0010's precedence); "Answer this in Codex." applies only while the daemon does not hold it.
-- **WezTerm:** a session's tab in a window that isn't in front gets the fallback (H5's result), never a window switch. H6's unreadable case includes a socket in `~/.local/share/wezterm` that isn't owner-only. Accepted 2026-10-15 (#245, [evidence](evidence/wezterm-acceptance.md)), agent-run with no operator watching; the card is shown in Settings › Terminals and WezTerm's digit gate (`WezTermInput.questionDigitsProvenLive`) is on from that change, after a lone `send-text` digit committed a Codex answer. Herdly's own digit route was not reached: a Codex question exists only in a daemon-run session, and the daemon answers it first (ADR 0010). H7's closed tab read "can't tell which terminal" rather than "This session has ended." because no `SessionEnd` arrived ([#285](https://github.com/r-curio/herdly/issues/285)), and daemon-run sessions' completions did not queue ([#284](https://github.com/r-curio/herdly/issues/284)).
-- **tmux:** a session on a socket other than the default is unreachable, with the card's socket line. Accepted 2026-10-25 (#246, [evidence](evidence/tmux-acceptance.md)) inside WezTerm, iTerm2 and Terminal.app, agent-run with no operator watching; the card is shown in Settings › Terminals and tmux's digit gate (`TmuxInput.questionDigitsProvenLive`) is on from that change, after a lone `send-keys` digit committed a Codex answer. Herdly's own digit route was not reached, as in WezTerm's run (ADR 0010). tmux types replies into the exact pane, so H5's second client still lets a reply land. Deviations accepted by the operator on 2026-10-25: with the host app quit or the client detached (H7), and for Claude with the host switch off (H8), rows read "Herdly can't tell which terminal this session is in.", because no client or no host ancestry is left; in iTerm2, H5 reads unreachable rather than raising iTerm2, because its reparented server hides it from ADR 0015's walk; a closed tmux pane without `SessionEnd` does not read "This session has ended." ([#285](https://github.com/r-curio/herdly/issues/285)). iTerm2 was not quit for H7 (detaching stood in).
-- **Zellij:** a second `zellij` client process, or a version older than 0.44.1, shows its problem line. Accepted 2026-10-25 (#247, [evidence](evidence/zellij-acceptance.md)) inside WezTerm, iTerm2 and Terminal.app, agent-run with no operator watching; the card is shown in Settings › Terminals and Zellij's digit gate (`ZellijInput.questionDigitsProvenLive`) is on from that change, after a lone `write-chars` digit committed a Codex answer and Herdly's own digit route recorded the option picked on the card. Open needs the host tab titled `<session> | `, which Zellij sets only after a focused pane prints a title, so an Open after an attach falls back (raises the host app) until then. A Zellij client that has not typed since it attached does not move on `focus-pane-id`. Deviations accepted by the operator on 2026-10-25: with the host app quit (H7) rows read "Herdly can't tell which terminal this session is in."; with the host switch off (H8) Open can move Zellij's focus without showing the pane; a closed Zellij pane without `SessionEnd` does not read "This session has ended." ([#285](https://github.com/r-curio/herdly/issues/285)). iTerm2 was not quit for H7.
+- **WezTerm:** a session's tab in a window that isn't in front gets the fallback (H5's result), never a window switch. H6's unreadable case includes a socket in `~/.local/share/wezterm` that isn't owner-only. Accepted 2026-10-15 (#245, [evidence](evidence/wezterm-acceptance.md)), agent-run with no operator watching; the card is shown in Settings › Terminals and WezTerm's digit gate (`WezTermInput.questionDigitsProvenLive`) is on from that change, after a lone `send-text` digit committed a Codex answer. Herdly's own digit route was not reached: a Codex question exists only in a daemon-run session, and the daemon answers it first (ADR 0010). H7's closed tab read "can't tell which terminal" rather than "This session has ended." because no `SessionEnd` arrived ([#285](https://github.com/r-curio/herdly/issues/285), since closed), and daemon-run sessions' completions did not queue ([#284](https://github.com/r-curio/herdly/issues/284), since closed).
+- **tmux:** a session on a socket other than the default is unreachable, with the card's socket line. Accepted 2026-10-25 (#246, [evidence](evidence/tmux-acceptance.md)) inside WezTerm, iTerm2 and Terminal.app, agent-run with no operator watching; the card is shown in Settings › Terminals and tmux's digit gate (`TmuxInput.questionDigitsProvenLive`) is on from that change, after a lone `send-keys` digit committed a Codex answer. Herdly's own digit route was not reached, as in WezTerm's run (ADR 0010). tmux types replies into the exact pane, so H5's second client still lets a reply land. Deviations accepted by the operator on 2026-10-25: with the host app quit or the client detached (H7), and for Claude with the host switch off (H8), rows read "Herdly can't tell which terminal this session is in.", because no client or no host ancestry is left; in iTerm2, H5 reads unreachable rather than raising iTerm2, because its reparented server hides it from ADR 0015's walk; a closed tmux pane without `SessionEnd` does not read "This session has ended." ([#285](https://github.com/r-curio/herdly/issues/285), since closed). iTerm2 was not quit for H7 (detaching stood in).
+- **Zellij:** a second `zellij` client process, or a version older than 0.44.1, shows its problem line. Accepted 2026-10-25 (#247, [evidence](evidence/zellij-acceptance.md)) inside WezTerm, iTerm2 and Terminal.app, agent-run with no operator watching; the card is shown in Settings › Terminals and Zellij's digit gate (`ZellijInput.questionDigitsProvenLive`) is on from that change, after a lone `write-chars` digit committed a Codex answer and Herdly's own digit route recorded the option picked on the card. Open needs the host tab titled `<session> | `, which Zellij sets only after a focused pane prints a title, so an Open after an attach falls back (raises the host app) until then. A Zellij client that has not typed since it attached does not move on `focus-pane-id`. Deviations accepted by the operator on 2026-10-25: with the host app quit (H7) rows read "Herdly can't tell which terminal this session is in."; with the host switch off (H8) Open can move Zellij's focus without showing the pane; a closed Zellij pane without `SessionEnd` does not read "This session has ended." ([#285](https://github.com/r-curio/herdly/issues/285), since closed). iTerm2 was not quit for H7.
 - **Once, across hosts:** the same Codex title in tabs of two different apps raises the app whose tab printed last, and is unavailable when both printed within the same second (ADR 0015 amendment).
 
 ### 3e. Sound, mute, restart, displays
@@ -106,7 +106,7 @@ Host-specific lines, added to the same evidence file:
 | # | Step | Expected | Result |
 | --- | --- | --- | --- |
 | S1 | **Mute sound** in the menu, complete a turn while away. | Card opens silently; unmute and the next one sounds once. | |
-| S2 | Quit Herdly, complete a turn while it is quit, relaunch, leave Codex. | The completion returns marked as possibly already seen, silently, with Open in Codex and Dismiss. | |
+| S2 | Quit Herdly, complete a turn while it is quit, relaunch, leave Codex. | The completion returns silently with "Queued before Herdly last started. You may already have seen this result; Herdly cannot verify it.", and offers **Open Session** and Dismiss. | |
 | S3 | Kill Herdly with `kill -9` after a completion queued, relaunch. | Same item returns silently; dismissals made before the kill are kept. | |
 | M1–M7 | The seven lines of the operator walkthrough in [notch-placement.md](notch-placement.md): two displays, freeze during interaction, disconnect/reconnect, deadline independence, keyboard, VoiceOver, Spaces and full screen. | As written there. | |
 
@@ -114,14 +114,29 @@ Host-specific lines, added to the same evidence file:
 
 | # | Step | Expected | Result |
 | --- | --- | --- | --- |
-| R1 | **Undo setup**, then diff `config.toml` and `hooks.json` against the copies from I2. | Identical to the copies, or differing only in lines Codex itself rewrote since. Helper, events and backups gone. | |
+| R1 | Turn off the Codex row's switch (runs Undo Setup), then diff `config.toml` and `hooks.json` against the copies from I2. | Identical to the copies, or differing only in lines Codex itself rewrote since. Helper, events and backups gone. | |
 | R2 | Quit Herdly, delete the app, start a new `codex` session. | Codex runs normally with no hook errors; nothing references Herdly. | |
 | R3 | Delete `~/Library/Application Support/Herdly` and the preferences plist. | Nothing else on the system changes. | |
+
+### 3g. Launch at login
+
+Issue: [Add a native launch-at-login setting](https://github.com/r-curio/herdly/issues/56). Automated checks cover state presentation and reconciliation without changing the user's login item: `LaunchAtLoginState` is tested with supplied registration observations, and those tests do not call `SMAppService.register()` or `unregister()`. The app adapter is the only code that mutates the real ServiceManagement registration, and it always reads `SMAppService.mainApp.status` again after an attempted change. The installed-app checks below need human interaction and remain unverified until a line records an artifact and observation. Record each line as **pass**, **fail**, or **uncertain** with the date and the packaged artifact manifest's SHA-256. Do not infer one line from another.
+
+| # | Scenario | Expected | Result |
+| --- | --- | --- | --- |
+| L1 | Default off | A newly installed app reports **Off** with a usable switch (including when macOS reports the never-registered app as not found) and does not launch at the next sign-in. | |
+| L2 | Enable | Turning the switch on results in **On**, or accurately reports **Approval required** with a working System Settings action. | |
+| L3 | Login launch | After sign-out and sign-in, the registered app starts without opening its Settings window; the menu-bar item and notch remain available. | |
+| L4 | Disable | Turning the switch off reports **Off**, and Herdly does not launch after the next sign-in. | |
+| L5 | Replace in place | Replacing the installed bundle at the same path leaves the UI matching macOS's actual status; no automatic repair occurs. | |
+| L6 | Relocate app | Moving between `/Applications` and `~/Applications` leaves the UI matching macOS's actual status and gives accurate recovery guidance if unavailable. | |
+
+These observations establish installed behavior only for the recorded artifact and host. A package build or smoke test does not complete this table.
 
 ## 4. What this does and does not establish
 
 - The build and packaging route is reproducible and machine-checked; the artifact carries a checksum and a manifest naming the commit and toolchain. Reproducible means the same steps and version from the same commit, not byte-identical binaries: two local builds of unchanged app sources produced different `Contents/MacOS/Herdly` hashes while the helper's hash matched, so a checksum identifies one artifact rather than the commit.
-- The artifact is an ad-hoc signed development build. A signed or notarized release needs the maintainer's Developer ID identity and has not been produced.
+- The artifact is an ad-hoc signed development build. A signed or notarized release needs a Developer ID identity and has not been produced.
 - Desktop session detection, approval handoff, Ghostty navigation, and restart recovery each have earlier live human evidence on unpackaged builds and automated evidence in the tests and labs, but the integrated pass in section 3 has **not** been run on the packaged app. Until every non-deferred line there is recorded as pass, the MVP is packaged, not verified.
 - Exact desktop task focus (D7) and split-pane targeting (G4 raises Ghostty instead) remain deferred by decision, not by omission.
 - The terminal hosts in section 3d ship one at a time; a host whose table has not passed keeps its switch hidden.

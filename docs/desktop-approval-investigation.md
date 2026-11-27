@@ -1,6 +1,6 @@
 # Desktop lifecycle and approval gate (#2)
 
-Checked 2026-09-11. Status: blocked; no real desktop approval was answered or intercepted. [Issue #2](https://github.com/r-curio/herdly/issues/2).
+Checked 2026-09-11. [Issue #2](https://github.com/r-curio/herdly/issues/2). Status as of 2026-11-27: CLI approvals from the notch shipped (#9, below; current behavior in [approval reconciliation](approval-reconciliation.md)); desktop approvals stay native, and no real desktop approval was answered or intercepted.
 
 ## Reproducible installed-runtime evidence
 
@@ -38,7 +38,7 @@ Use disposable existing-desktop work with isolated test configuration and a perm
 
 Run explicit allow once, deny, no decision after 30 seconds from companion receipt, Open in Codex, manual return, unknown focus, disconnect and helper failure. Also run two requests within one session and submit a late reply to the first: it must not answer the second. Verify a native prompt appears when the original policies require one, and that answering it clears only that pending request. Record unsupported categories as native-only. Repeat for the shell CLI independently in #3.
 
-None of those live cases ran. Computer-use access to `com.openai.codex` was rejected for safety reasons; additionally, the existing-runtime event/approval attachment is not proven. The schema checks do not resolve either blocker. No simulator result is presented as approval handoff evidence. #4 and #9 remain blocked.
+None of those live cases ran. Computer-use access to `com.openai.codex` was rejected for safety reasons; additionally, the existing-runtime event/approval attachment is not proven. The schema checks do not resolve either blocker. No simulator result is presented as approval handoff evidence. At the time this blocked #4 and #9; #9 later shipped for the CLI through the isolated runs below, and desktop approvals stay native.
 
 ## Issue #9 implementation boundary
 
@@ -46,7 +46,8 @@ The helper now publishes one identity-bound approval request and waits for the
 companion's receipt handshake before starting the 30-second decision deadline.
 The helper first has a separate five-second receipt-connection deadline, which
 outlasts one two-second companion scan plus scan time, and then an independent
-31-second decision wait bound. A pending request first seen after that
+decision wait bound, now 121 seconds (`ApprovalTiming.helperWaitBound`: the
+two-minute hover cap of ADR 0020 plus one second; 31 seconds when first built). A pending request first seen after that
 connection deadline has no live helper: the reader writes no receipt and hands
 it back without controls. Bounded regular-file reads,
 malformed, late, duplicate, unknown, or failed decisions all return no
@@ -83,7 +84,7 @@ desktop approval remains unverified.
 The subsequent isolated retest used the installed Codex CLI with session
 `01a09248-ce66-7823-8e80-5043df76f11e`, turn
 `01a09249-2e6e-7613-a414-cd556a328af2`, and the real Bash command
-`touch /tmp/herdly-approval-lab/TIMEOUT_MARKER-2`. The hook published request
+`touch /tmp/steer-approval-lab/TIMEOUT_MARKER-2`. The hook published request
 `FBF4D0AD-AF2B-4652-9819-798AD02E1717` with the real project, action, command,
 and long request details. The running exact-branch app wrote the companion
 receipt at `received_at=1789160668.896307` with a 30-second expiry, then wrote
@@ -96,9 +97,10 @@ This proves real Bash ingestion, companion receipt, conservative unknown-focus
 handback, and no accidental allow. It does not prove Ghostty allow/deny,
 30-second timeout, or desktop decision transport.
 
-Setup migration recognizes the prior Herdly command shape with its two-second or
-35-second hook timeout, upgrades it in place to the 38-second bounded hook
-timeout, and
+Setup migration recognizes the prior Herdly command shape with its 2-, 35- or
+38-second hook timeout (`CodexSetupRequirements.legacyHookTimeouts`), upgrades it
+in place to the current 128-second bounded hook timeout (`hookTimeout`: the 121 s
+wait bound, the 5 s receipt deadline and 2 s of margin), and
 collapses duplicate copies. Ambiguous multiple Herdly installations return an
 explicit conflict instead of adding another handler.
 
@@ -135,7 +137,7 @@ were enabled after SessionStart, then captured UserPromptSubmit
 `2026-09-11T07:26:57.252939+00:00`. This proves a real desktop turn
 start/completion through the isolated recorder, but not full SessionStart
 capture, approval handoff, or permanent companion attachment. The redacted
-metadata-only pair is replayable from `docs/evidence/`.
+metadata-only pair is replayable from `Tests/HerdlyCoreTests/Fixtures/desktop-turn/`.
 
 ### Isolated CLI runtime evidence: allow, deny, 30-second timeout (2026-09-12)
 
@@ -143,7 +145,7 @@ Three real interactive Codex CLI 0.145.0 sessions ran in the trusted
 `output/desktop-hook-lab` project through a pseudo-terminal driver
 (`scripts/cli-approval-lab/tui_run.py`) with `-s read-only -a on-request`.
 For each run the lab's `.codex/hooks.json` was swapped to a single
-PermissionRequest hook pointing at this branch's release `HerdlyHook`, with a
+PermissionRequest hook pointing at the issue #9 branch's release `HerdlyHook`, with a
 scratch events directory, and restored afterwards; hook trust was bypassed per
 invocation with `--dangerously-bypass-hook-trust`, so no persisted trust hash,
 global hook, permission policy, or sandbox setting changed. `codex exec` cannot
@@ -155,18 +157,19 @@ button that writes the same JSON shapes as `ApprovalStore`. Decisions were
 therefore not produced by a click in the running app. Each request carried the
 real session, turn, project, `Bash` action, exact command, and the tool input
 as expandable text. All three sessions correlate to `source: cli` rollouts in
-`~/.codex/sessions/2026/09/12/`. Records are in
-`docs/evidence/cli-approval-runtime.json`.
+`~/.codex/sessions/2026/09/12/`. The raw lab record is not kept in the repo; the
+results are below. The 30-second timeout here is the helper's deadline at the time;
+current timing is in [approval reconciliation](approval-reconciliation.md).
 
 - Allow: request `C573AE97-87FA-4473-BCB8-D3F5BAAAEEFD`, session
   `01A093DA-7E9D-7CB2-8E3D-5763296C22AD`, turn
   `01A093DA-BACD-7110-8F1B-0A0868564CD8`. Decision written 1.5 s after
   receipt; helper outcome `allow`; Codex ran the exact `touch` and
-  `HERDLY9-ALLOW-1` exists; rollout shows `task_complete`.
+  `STEER9-ALLOW-1` exists; rollout shows `task_complete`.
 - Deny: request `23FA9F74-09B2-4E06-8774-73B9B3DE038B`, session
   `01A093DB-1A89-7CB2-A6DA-4CBCAD14938A`, turn
   `01A093DB-56A8-7483-9091-9C978F56404F`. Helper outcome `deny`; the CLI
-  displayed "PermissionRequest hook denied approval"; `HERDLY9-DENY-1` is
+  displayed "PermissionRequest hook denied approval"; `STEER9-DENY-1` is
   absent; rollout shows `task_complete`.
 - Timeout: request `E5474BA4-77EE-4A35-9935-C8EF74CBA2FC`, session
   `01A093DC-C19E-7B43-8A59-1974F6B68A34`, turn
@@ -174,7 +177,7 @@ as expandable text. All three sessions correlate to `source: cli` rollouts in
   rewrote the request as `no_decision` 30.03 s after receipt and emitted no hook
   output; Codex then presented its native approval prompt. The driver's Ctrl-C
   cancelled that prompt ("You canceled the request"), the model retried inside
-  the read-only sandbox, and `HERDLY9-TIMEOUT-1` is absent; rollout shows
+  the read-only sandbox, and `STEER9-TIMEOUT-1` is absent; rollout shows
   `turn_aborted`. Nothing was approved by the timeout.
 
 Desktop runtime evidence remains unavailable: issue #2 found no supported

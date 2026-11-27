@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import HerdlyCore
 
-private let session = UUID(uuidString: "01A09DC0-0031-74A0-AAF0-B0B2A44FD3A7")!
+private let session = UUID(uuidString: "0199A000-0000-7000-8000-0000000000D5")!
 private let turn = UUID(uuidString: "01A09DC7-DB50-7E92-8FF1-70ACD1B0B9EA")!
 
 private func meta(source: String = "\"cli\"", id: UUID = session, cwd: String = "/Users/me/project") -> String {

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import HerdlyCore
 
-private let derived = ClaudeSessionTitles.RegisteredName(name: "landbase-22", source: "derived")
+private let derived = ClaudeSessionTitles.RegisteredName(name: "myproject-22", source: "derived")
 
 private func temporaryEventsDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("herdly-titles-" + UUID().uuidString, isDirectory: true)
@@ -24,7 +24,7 @@ private func temporaryEventsDirectory() throws -> URL {
 }
 
 @Test func claudeSessionTitleRegistryNameMustBelongToTheExactSession() {
-    let entry = Data(#"{"pid":1,"sessionId":"session-a","name":"landbase-22","nameSource":"derived"}"#.utf8)
+    let entry = Data(#"{"pid":1,"sessionId":"session-a","name":"myproject-22","nameSource":"derived"}"#.utf8)
     #expect(ClaudeSessionTitles.registeredName(entry, sessionID: "session-a") == derived)
     #expect(ClaudeSessionTitles.registeredName(entry, sessionID: "session-b") == nil)
     #expect(ClaudeSessionTitles.registeredName(Data("{".utf8), sessionID: "session-a") == nil)

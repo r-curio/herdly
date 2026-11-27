@@ -12,7 +12,7 @@ that a socket readable by other users is refused. The real daemon's behaviour (w
 client receives the pending request at all) is a separate, human proof; see
 docs/user-input-requests.md.
 
-    python3 scripts/daemon_lab.py --herdly .build/debug/Herdly --out docs/evidence/app-server-daemon-lab.json
+    python3 scripts/daemon_lab.py --herdly .build/debug/Herdly --out output/app-server-daemon-lab.json
 """
 import argparse
 import base64

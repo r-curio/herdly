@@ -1,6 +1,6 @@
 # Relay the user's chosen question option through Ghostty's send key
 
-Accepted with the user on 2026-09-14.
+Accepted with the user on 2026-09-14. Generalized to every terminal host and multiplexer by [ADR 0017](0017-type-question-digits-and-replies-into-one-bound-pane.md).
 
 Amended 2026-10-21 ([issue #321](https://github.com/r-curio/herdly/issues/321), Paper D16 and D18): a click or digit on an option only selects it, and the one key for the current question leaves Herdly on Send, after the same fresh checks. A selection made while the card used another route is dropped, not sent. A desktop card without the daemon no longer offers a pick that opens the thread: its options are for reading only, beside Open in Codex.
 

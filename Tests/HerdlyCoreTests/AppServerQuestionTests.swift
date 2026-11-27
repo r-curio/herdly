@@ -14,16 +14,16 @@ private func requestMessage(id: Any = 41, thread: UUID = thread, item: String = 
     ["jsonrpc": "2.0", "id": id, "method": "item/tool/requestUserInput",
      "params": ["threadId": thread.uuidString.lowercased(), "turnId": turn.uuidString.lowercased(), "itemId": item,
                 "questions": questions ?? [
-                    ["id": "variant_shape", "header": "Nested choices", "question": "Which?",
-                     "options": [["label": "Flexible paths (Recommended)", "description": "d"], ["label": "Same levels", "description": "d"]]],
+                    ["id": "list_shape", "header": "List shape", "question": "Which?",
+                     "options": [["label": "Nested levels (Recommended)", "description": "d"], ["label": "One level only", "description": "d"]]],
                     ["id": "name", "header": "Name", "question": "Call it?", "options": NSNull(), "isOther": false]
                 ]]]
 }
 
 private func rolloutQuestion(source: AttentionSource = .cli, callID: String = "call_1", session: UUID = thread) -> AttentionQuestion {
     AttentionQuestion(source: source, session: session, turn: turn, callID: callID, arrivedAt: 100,
-                      prompts: [QuestionPrompt(id: "variant_shape", header: "Nested choices", question: "Which?",
-                                               options: ["Flexible paths (Recommended)", "Same levels"]),
+                      prompts: [QuestionPrompt(id: "list_shape", header: "List shape", question: "Which?",
+                                               options: ["Nested levels (Recommended)", "One level only"]),
                                 QuestionPrompt(id: "name", header: "Name", question: "Call it?", options: [])])
 }
 
@@ -39,8 +39,8 @@ private func fullBook() -> (AppServerQuestionBook, AppServerQuestionRequest) {
     guard case let .request(request) = event else { Issue.record("expected a request"); return }
     #expect(request.requestID == .number(41))
     #expect(request.thread == thread && request.turn == turn && request.itemID == "call_1")
-    #expect(request.questions.map(\.id) == ["variant_shape", "name"])
-    #expect(request.questions[0].options == ["Flexible paths (Recommended)", "Same levels"])
+    #expect(request.questions.map(\.id) == ["list_shape", "name"])
+    #expect(request.questions[0].options == ["Nested levels (Recommended)", "One level only"])
     #expect(request.questions[1].options == nil)
     #expect(book.request(for: rolloutQuestion()) == request)
     // Identity is thread and item id, the same pair the rollout gives as session and call id.
@@ -177,7 +177,7 @@ private func fullBook() -> (AppServerQuestionBook, AppServerQuestionRequest) {
     let result = try #require(AppServerAnswerPolicy.result(for: request, progress: complete))
     let answers = try #require(result["answers"] as? [String: [String: [String]]])
     // Option answers are the exact label Codex listed; typed answers are trimmed.
-    #expect(answers == ["variant_shape": ["answers": ["Same levels"]], "name": ["answers": ["Herdly"]]])
+    #expect(answers == ["list_shape": ["answers": ["One level only"]], "name": ["answers": ["Herdly"]]])
     let message = request.responseMessage(result: result)
     #expect(message["jsonrpc"] as? String == "2.0")
     #expect(message["id"] as? Int == 41)
@@ -210,7 +210,7 @@ private final class FakeClient {
     client.sent.append(message)
     #expect(message["id"] as? Int == 41)
     #expect((message["result"] as? [String: Any])?["answers"] as? [String: [String: [String]]]
-            == ["variant_shape": ["answers": ["Flexible paths (Recommended)"]], "name": ["answers": ["Herdly"]]])
+            == ["list_shape": ["answers": ["Nested levels (Recommended)"]], "name": ["answers": ["Herdly"]]])
     #expect(last.book.hasAnswered(question) && last.book.request(for: question) == nil)
     // Delivered: waits for the rollout to record it; nothing more is ever sent for this call.
     let delivered = progress2.recordingSent(question: 1, answer: .text("Herdly"), of: question, at: 12)
@@ -263,7 +263,7 @@ private final class FakeClient {
     guard case .sending = send.outcome else { Issue.record("send expected"); return }
     let result = try #require(send.message?["result"] as? [String: Any])
     #expect(result["answers"] as? [String: [String: [String]]]
-            == ["variant_shape": ["answers": ["Same levels"]], "name": ["answers": ["Herdly"]]])
+            == ["list_shape": ["answers": ["One level only"]], "name": ["answers": ["Herdly"]]])
     #expect(send.book.hasAnswered(question))
     // A second Send for the call is refused: one write, ever.
     let again = AppServerAnswering.prepare(current: question, book: send.book, progress: last, question: 1,
@@ -308,9 +308,9 @@ private final class FakeClient {
 }
 
 @Test func questionIdsAreParsedFromTheRolloutArguments() {
-    let arguments = #"{"questions":[{"id":"variant_shape","header":"H","question":"Q","options":[{"label":"a"}]},{"header":"H2","question":"Q2"}]}"#
+    let arguments = #"{"questions":[{"id":"list_shape","header":"H","question":"Q","options":[{"label":"a"}]},{"header":"H2","question":"Q2"}]}"#
     let prompts = QuestionPrompt.parse(arguments: arguments)
-    #expect(prompts?.map(\.id) == ["variant_shape", nil])
+    #expect(prompts?.map(\.id) == ["list_shape", nil])
 }
 
 @Test func aClosedThreadForgetsItsAnsweredCalls() {
@@ -416,7 +416,7 @@ private func bindSocket(_ path: String) throws -> Int32 {
                                            question: 1, answer: .text("Herdly"), stillPending: { true }, now: 3)
     let result = try #require(final.message?["result"] as? [String: Any])
     let answers = try #require(result["answers"] as? [String: [String: [String]]])
-    #expect(answers["variant_shape"]?["answers"] == ["Same levels"])
+    #expect(answers["list_shape"]?["answers"] == ["One level only"])
     #expect(answers["name"]?["answers"] == ["Herdly"])
     #expect(final.book.hasAnswered(question))
     let duplicate = AppServerAnswering.prepare(current: question, book: final.book, progress: changed,

@@ -4,7 +4,7 @@ Checked 2026-10-07 for [Find the first Ghostty release that exposes terminal tty
 
 ## Answer
 
-1. **No stable Ghostty release exposes a terminal's `tty` yet.** The latest stable release is 1.3.1 (2026-03-13), and it lacks the property. The property is merged on `main` for the open 1.4.0 milestone, but 1.4.0 has not been released. The first release expected to ship it is 1.4.0. That is an inference from the milestone, not a verified release.
+1. **No stable Ghostty release exposes a terminal's `tty` yet.** The latest stable release is 1.3.1 (2026-03-13), and it lacks the property. The property is merged on `main` for the open 1.4.0 milestone, but 1.4.0 has not been released. The first release expected to ship it is 1.4.0 (as of 2026-10-07). That is an inference from the milestone, not a verified release.
 2. **Dictionary entry (on `main`):** class `terminal` (code `Gtrm`), property `tty`, code `Gtty`, type `text`, read-only. The sibling property `pid` (code `Gpid`, `integer`) arrived in the same PR.
 3. **Feature check:** read the scripting dictionary of the Ghostty bundle Herdly will drive. Treat the feature as present only if class `terminal` declares a property with code `Gtty`. This needs no version comparison and sends no Apple Events. At runtime, an empty `tty` string still means "cannot identify" for that terminal.
 
@@ -70,7 +70,7 @@ t.terminals().map(p => ({id: p.id(), name: p.name(), tty: p.tty()}))
 
 ## Feature check for Herdly
 
-Recommended, with no version comparison:
+Recommended, with no version comparison. Implemented as recommended in `Sources/HerdlyCore/GhosttyTTY.swift` (`GhosttyScriptingDictionary`, `GhosttyTTYMatch`) and `GhosttyScriptingSupport` in `Sources/HerdlyApp/GhosttyNavigation.swift`, except that step 4 is met by reading the dictionary fresh on each check rather than tracking bundle changes:
 
 1. Resolve the Ghostty bundle Herdly will actually drive. Prefer the running `com.mitchellh.ghostty` app's `NSRunningApplication.bundleURL`, and fall back to `NSWorkspace.urlForApplication(withBundleIdentifier:)`. Do not hard-code `/Applications`.
 2. Read `Contents/Info.plist` → `OSAScriptingDefinition` (currently `Ghostty.sdef`) from `Contents/Resources/`, with bounded size and safe file access. `sdef <bundle>` returns the same XML but spawns a process.
@@ -82,6 +82,6 @@ Rejected as the primary check: attempting `get tty of …` and treating an error
 
 ## Inferences and open points
 
-- **First release:** 1.4.0 is the likely first stable release with `tty`, because the change carries that milestone and is absent from `1.3.x`. A 1.3.2 cut from `1.3.x` would not include it unless backported. Verify by checking the released bundle's dictionary for `Gtty`, then update the "Update Ghostty" wording in `product.md` with the version. `product.md` already holds back the version name until this is verified.
+- **First release:** as of 2026-10-07, 1.4.0 is the likely first stable release with `tty`, because the change carries that milestone and is absent from `1.3.x`. A 1.3.2 cut from `1.3.x` would not include it unless backported. Verify by checking the released bundle's dictionary for `Gtty`, then update the "Update Ghostty" wording in `product.md` with the version. `product.md` already holds back the version name until this is verified.
 - **Compile-time probing does not work:** `osacompile -e 'tell application "Ghostty" to get tty of every terminal'` compiled without error against 1.3.1 (no events sent). AppleScript accepts an unknown identifier as a variable, so compiling cannot detect the feature.
 - **Live proof pending:** no released Ghostty with `tty` was available, so the runtime value, its `/dev/ttysNNN` form and agreement with `lsof` are unproven here. The PR author reports checking `pid` and `tty` against `ps` and `lsof` on a development build.

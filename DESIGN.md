@@ -136,13 +136,15 @@ components:
 
 # Design System: Herdly
 
+Paper file names, artboard IDs and decision numbers (D1, D2, …) cited here refer to the maintainer's private design files. The text in this document is authoritative.
+
 ## Overview
 
 **Creative North Star: "The Instrument in the Housing"**
 
-Herdly has two designed surfaces. The notch panel, described in most of this document, is the instrument. The Settings window, described in its own section near the end, is a native macOS window where the user tunes that instrument. The notch panel is a single pure-black shape that grows out of the bottom of the macOS menu bar as if it were part of the camera housing. It is read the way a gauge is read. Three readings sit on one line: a green 8-bit sprite, the animal the user chose, that steps while Codex is working, the name of the task in a gray monospaced face, and a dark-gray count of items that need the user. Everything else lives one hover away and is drawn from the same three materials: black ground, gray type in a single monospaced family, and dark wells for anything pressable. The one exception is the opened running row, which sits on its own #1a1a1a ground (#319, F3, agreed 2026-10-21).
+Herdly has two designed surfaces. The notch panel, described in most of this document, is the instrument. The Settings window, described in its own section near the end, is a native macOS window where the user tunes that instrument. The notch panel is a single pure-black shape that grows out of the bottom of the macOS menu bar as if it were part of the camera housing. It is read the way a gauge is read. Three readings sit on one line: an 8-bit sprite in its session's color, the animal the user chose, that steps while Codex is working, the name of the task in a gray monospaced face, and a dark-gray count of items that need the user. Everything else lives one hover away and is drawn from the same three materials: black ground, gray type in a single monospaced family, and dark wells for anything pressable. The one exception is the opened running row, which sits on its own #1a1a1a ground (#319, F3, agreed 2026-10-21).
 
-The world is deliberately austere. Color belongs to each session's mark alone: each session has one of six colors, chosen from its identifier so it stays with the session, and its mark is the sprite: one animal, chosen by the user, drawn for every session. There is one typeface, and it is the system monospaced face at 10 to 12 points. Depth is not a shadow; the panel has no window shadow at all, because a shadow rim would outline the shape and break its fusion with the menu bar. The only edge inside the panel is a one-point seam at eight percent white between the strip and the open queue. Motion is a reading, not an ornament: the sprite's two-frame step is the working signal, the frame resize is a short ease-out, and Reduce Motion replaces the step with a slow breathe and removes the resize animation entirely.
+The world is deliberately austere. Color belongs to each session's mark alone: each session has one of six colors, chosen from its identifier so it stays with the session, and its mark is the sprite: one animal, chosen by the user, drawn for every session. There is one typeface, the system monospaced face at 10 to 12 points; question cards are the one exception and use bundled JetBrains Mono (see [Question cards](#question-cards--paper-redesign)). Depth is not a shadow; the panel has no window shadow at all, because a shadow rim would outline the shape and break its fusion with the menu bar. The only edge inside the panel is a one-point seam at eight percent white between the strip and the open queue. Motion is a reading, not an ornament: the sprite's two-frame step is the working signal, the frame resize is a short ease-out, and Reduce Motion replaces the step with a slow breathe and removes the resize animation entirely.
 
 This is not the glossy dynamic island. It refuses glow, gradient, glass, the pulsing dot, and the spring bounce. It also refuses pictorial chrome: no glyph icons, no logo, no wordmark. The sprite is the one picture in the system.
 
@@ -157,19 +159,20 @@ Every display shares one set of choices. Every option is drawn from the same bla
 
 **Key Characteristics:**
 - One black shape fused to the menu bar: flat top, concave 8pt ears, deep 18pt bottom radii, no window shadow
-- One monospaced face (SF Mono via the system monospaced design) at 10, 11, and 12pt; semibold only for titles and the emphasized action
-- One color: the green sprite body and its lighter highlight; every other value is a gray on black, except the fills of the strip's usage rings, which name their source, and the dark red well behind "Failed"
+- One monospaced face (SF Mono via the system monospaced design) at 10, 11, and 12pt, except question cards, which use bundled JetBrains Mono; semibold only for titles and the emphasized action
+- Six session colors, each a sprite body and its lighter highlight, green first; every other value is a gray on black, except the fills of the strip's usage rings, which name their source, and the dark red well behind "Failed"
 - Dark-gray wells (#2a2a2a) for the badge and every control; a pressed control inverts to light ink with black text
 - Dense, left-aligned rows separated by whitespace, not lines; the single seam is the only rule drawn
 - Motion carries meaning: a 0.5 s sprite step means working, a 0.18 s ease-out resize means the panel changed size
 
 ## Colors
 
-An achromatic ladder on pure black with a single green, reserved for the sprite, two source hues reserved for the fills of the strip's usage rings, and four state tones reserved for a finished row's work status words.
+An achromatic ladder on pure black with six session colors, reserved for the sprite, two source hues reserved for the fills of the strip's usage rings, and four state tones reserved for a finished row's work status words.
 
 ### Primary
-- **Sprite Green** (`{colors.sprite}`): the sprite's body cells, and nothing else. It is the only chroma outside the usage rings; it appears in the strip, and again at the head of each row in the open queue.
-- **Sprite Highlight** (`{colors.sprite-light}`): the sprite's highlight cells (ears, eyes, faces, and markings). A lighter green that gives each small bitmap its read at two points per cell.
+- **Sprite Green** (`{colors.sprite}`): the sprite's body cells for the first session color. Session colors are the only chroma outside the usage rings and state words; a session's color appears in the strip, and again at the head of its row in the open queue.
+- **Sprite Highlight** (`{colors.sprite-light}`): the highlight cells (ears, eyes, faces, and markings) for the first session color. A lighter tone that gives each small bitmap its read at two points per cell.
+- **Session colors** (`NotchStyle.spriteColors`): six body and highlight pairs, in order green (above), blue (#3b82f6 / #60a5fa), amber (#f59e0b / #fbbf24), pink (#ec4899 / #f472b6), violet (#a78bfa / #c4b5fd), and cyan (#06b6d4 / #22d3ee). Each session keeps one color chosen from its identifier (`AgentStripSummary.preferredColor`). A selected question option uses its session's body color.
 
 ### Usage
 - **Codex Blue** (`{colors.usage-codex}`): the fill of Codex's usage ring (`NotchStyle.codexUsage`), and nothing else.
@@ -204,7 +207,7 @@ A finished row's state words and a quiet working row's "quiet" (#419), and nothi
 
 **Display Font:** none. There is no display face.
 **Body Font:** SF Mono (the system monospaced design, `.system(design: .monospaced)`)
-**Label/Mono Font:** same family; the whole system is monospaced.
+**Label/Mono Font:** same family; the whole system is monospaced. Question cards use bundled JetBrains Mono instead ([Question cards](#question-cards--paper-redesign)).
 
 **Character:** One typeface at three sizes. The monospaced face makes the strip read like an instrument readout and lets commands and label columns align as a grid without rules. Weight, not size, carries hierarchy: 12pt semibold for a row title, 12pt regular for the task name, 11pt for everything the user reads or presses, 10pt for the single keyboard hint.
 
@@ -216,7 +219,7 @@ A finished row's state words and a quiet working row's "quiet" (#419), and nothi
 - **Caption** (400, 10pt): the keyboard hint at the foot of the full queue, group and section headings, a row's exception word, and "+N more". Dim, except that a section's count is 600 in text gray, the queue's "Ns left" is 600 in ink (the card's only for its last five seconds), the card's "Approve" kind pill is 600 in ink, "Failed" is ink on its red well, and "+N more" is text gray.
 
 ### Named Rules
-**The One Face Rule.** Every glyph on the panel is the system monospaced face. No second family, no display face, no proportional fallback for prose.
+**The One Face Rule.** Every glyph on the panel is the system monospaced face, except on question cards, which use bundled JetBrains Mono and fall back to the system monospaced face if it fails to load (`QuestionCardStyle`). No other family, no display face, no proportional fallback for prose.
 
 **The Wrap, Never Truncate Rule.** Commands and reasons wrap in full inside the open queue; nothing is cut with an ellipsis. The strip's task name is the sole exception, and it is one line by definition.
 
@@ -355,7 +358,7 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 
 ### Do:
 - **Do** draw every surface on pure black (#000000) and let the panel fuse with the menu bar; no window shadow, no rim. The one exception is the opened running row's #1a1a1a ground (#319, F3, agreed 2026-10-21).
-- **Do** use the system monospaced face for every glyph, at 12pt semibold for titles, 12pt regular for the strip name, 11pt for body and controls, 10pt for the single hint.
+- **Do** use the system monospaced face for every glyph outside question cards (which use bundled JetBrains Mono), at 12pt semibold for titles, 12pt regular for the strip name, 11pt for body and controls, 10pt for the single hint.
 - **Do** make every pressable thing a #2a2a2a well with continuous 5pt corners (4pt for the badge), and invert it to #e6e6e6 with black text when pressed.
 - **Do** keep the ink/text/dim ladder: titles and digits in ink, readings in text, labels and identifiers in dim.
 - **Do** say a finished row's work status in words first ("checks failing"), in its tone, before the dim pull request or place (#418).
@@ -365,11 +368,11 @@ Rows are not cards. There is no card surface, border, or shadow; a row is a left
 - **Do** keep a working signal visible in every configuration: the sprite steps at 0.5 s, whichever kind is chosen. A row is still when idle, and when its session is quiet (#419), which its amber "quiet" says, and the mark is unlit when no session is listed.
 
 ### Don't:
-- **Don't** put green anywhere but the sprite and the "checks passed" and "merged" state words; no green badges, rings, titles, or status dots.
+- **Don't** put a session color anywhere but its sprite and a selected question option, or green anywhere but the sprite and the "checks passed" and "merged" state words; no green badges, rings, titles, or status dots.
 - **Don't** use a state tone for anything but a finished row's state words: not the pull request, repository, branch, name, mark, a well, or a dot. Don't let the state words truncate before the place after them.
 - **Don't** add a glow, gradient, glass, blur, border, or shadow to the panel or to any well.
 - **Don't** use a spring, bounce, or overshoot on the panel frame, and don't pulse or blink anything.
-- **Don't** introduce a second typeface, a display face, or a proportional face for prose.
+- **Don't** introduce another typeface beyond the system monospaced face and the question cards' JetBrains Mono, a display face, or a proportional face for prose.
 - **Don't** add glyph icons, a logo, or a wordmark to the panel; controls are text-only wells and the sprite is the only picture.
 - **Don't** truncate a command, reason, or detail with an ellipsis inside the open queue; only the strip name is one line. The one exception is an opened running row's "now" and "you" lines, which end in "…" past 80 characters or one line and keep the full text behind "Show full command", "Show full action", or "Show full prompt" (D11; #319, F3, agreed 2026-10-21).
 - **Don't** draw rules or dividers between rows; the one seam under the strip is the only line in the panel.
@@ -410,10 +413,11 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
 - **Sound:** switching panes, segments, or sprite tiles plays a soft click (the system "Tink" at 30% volume). It follows the macOS "Play user interface sound effects" setting. The notch never clicks.
 - **General pane (merged with the Notch pane 2026-11-24, #466):**
   - The toolbar holds only the pane title; the pane edits the one shared set of choices.
-  - In order: "Preview", "Display", "Strip", "Sprite", "Session list", then "Startup".
+  - In order: "Preview", "Display", "Strip", "Usage", "Sprite", "Session list", then "Startup".
   - A "Preview" header sits above a live preview of the strip on a desktop backdrop, which redraws as options change. It is drawn for the kind of display the notch is on now.
   - "Display" holds the "Show notch on" menu picker.
   - The same section's second row, "Keyboard" (#427), detail "Puts the keyboard in the notch from any app", holds a small bordered recorder button showing the shortcut (⌃⌥Space by default; "Type shortcut…" while listening, "Add ⌃, ⌥ or ⌘" after a key without one; Escape cancels) and a mini switch to turn the hotkey off; the recorder is disabled while the switch is off. Both take effect at once. A shortcut another app holds shows the orange problem line under the row, and the notch stays click-only.
+  - "Usage" (#488) has one row per agent, Claude Code then Codex, each with "5-hour" and "Weekly" checkboxes. An agent's ring on the strip draws only the windows checked; unchecking both removes it. "5-hour" is disabled, with hover text "Your <agent> plan has no 5-hour limit.", when the plan has none. VoiceOver names each box ("Codex weekly usage").
   - An option that applies to only one kind of display stays enabled and carries hover text saying what it does and where. Today that is Center label ("Text in the middle of the strip naming the top item. External displays only; on a MacBook the camera covers that space.").
   - The "Session list" section holds an "After each name" menu picker between Sort by and Group by: "Repo @ branch" (the default), "Repo", or "Branch". Directly under it, with no divider, a black sample row inset 10pt with 10pt below: a 30pt black rounded rect with 9pt continuous corners, 12pt horizontal padding and 7pt spacing, holding the chosen sprite idle in the first session colour, "Fix flaky tests" in 12pt #F5F5F7, then "· herdly @ main" (or "· herdly", "· main") in 12pt #8F8F8F on one line with tail truncation. It eases with the other settings motion, reads to VoiceOver as one element ("Sample row: Fix flaky tests, herdly @ main"), and is not interactive. It shows no work status (#418): it previews the "After each name" format, which a finished row's pull request form ("· checks passed · herdly#429") ignores, so a state there would hide the choice it previews.
   - "Keep new cards open" is the last row of "Session list": a menu picker of 3 seconds, 5 seconds, 10 seconds, a separator, then Until I act.
@@ -441,6 +445,7 @@ The Settings window follows the native macOS conventions measured on macOS 26 (T
   - Terminal status lives in Terminals, not here.
 - **Notifications pane:**
   - "Sound": one card with a "Completions and questions" mini switch, an inset divider, then the sound tiles. "Completions": one card with the "Response length" segments. Clearing completions Codex marks read is always on and has no switch.
+  - "Phone" (#352), after Completions: one card with an "Alert my phone when I'm away" mini switch (detail "Approvals, questions and completions, after <idle time> idle") and, while it is on, a "Topic" row showing the ntfy topic in 12pt monospace with a Copy button, detail "Subscribe to it in ntfy. Anyone with it can read your alerts." A failed test or Keychain error shows an orange problem line under the card. While it is on, "Send Test to Phone" sits beside "Send Test Notification". The card is hidden in current builds: `PhoneAlerts.featureAvailable` is off until phone alerts ship ([ADR 0019](docs/adr/0019-send-notify-only-phone-alerts-through-ntfy.md)).
   - "While paused" (#456), after Phone: one card with an "Approvals" row and a "Questions" row, 10pt inset divider between them, each with a two-segment control, "Still pop open" (default) and "Stay quiet". VoiceOver reads each control as "Approvals while notifications are paused" or "Questions while notifications are paused"; each row's hover text says what the choice does. There is no row for completions, which are always quiet while paused.
   - Below the cards, right-aligned 6pt lower: a "Send Test Notification" push button, with "Dismiss" before it only while the test notification is showing.
   - No footers.
@@ -483,7 +488,7 @@ Opened from "Send Feedback" in the menu bar item (Paper "Herdly Settings", page 
 
 ## Question cards — Paper redesign
 
-The [Paper reference](https://app.paper.design/file/01M51985RZGVMFW23BNQWAFNY5/p-1-0), accepted on 2026-10-16, supersedes the earlier question-card composition. It applies to Codex and Claude, in spotlight and the full queue. Other card types and the shared strip retain their existing typography and layout.
+The Paper reference, accepted on 2026-10-16, supersedes the earlier question-card composition. It applies to Codex and Claude, in spotlight and the full queue. Other card types and the shared strip retain their existing typography and layout.
 
 Question cards use bundled JetBrains Mono Regular and SemiBold (v2.304, OFL-1.1), at 10pt for rail headings and recommendation labels, 11pt for options and metadata, and 12pt for the session heading and question. The reference's 560pt body is a visual comparison size, not a replacement for the user's Standard/Wide/Extra wide setting. Keep the existing session color and chosen sprite; the reference's amber is one session, not a global accent.
 

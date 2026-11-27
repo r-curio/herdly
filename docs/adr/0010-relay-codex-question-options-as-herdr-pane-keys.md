@@ -1,6 +1,6 @@
 # Relay Codex question options as herdr pane keys
 
-Accepted with the user on 2026-10-07 (issue #106). This is the herdr counterpart of ADR 0006. When a Codex CLI session in a herdr pane asks a `request_user_input` question and the Codex daemon does not hold that call, a click on an option sends exactly one `agent.send_keys` request to the bound pane over herdr's socket (ADR 0009). The request carries only the option's one-based digit. The live proof (`docs/evidence/herdr-ghostty-live.md`) showed that the digit alone selects and submits an option in Codex 0.154.0. Approvals are never keys.
+Accepted with the user on 2026-10-07 (issue #106). This is the herdr counterpart of ADR 0006. When a Codex CLI session in a herdr pane asks a `request_user_input` question and the Codex daemon does not hold that call, a click on an option sends exactly one `agent.send_keys` request to the bound pane over herdr's socket (ADR 0009). The request carries only the option's one-based digit. The live proof (`docs/evidence/herdr-ghostty-live.md`) showed that the digit alone selects and submits an option in Codex 0.154.0. Approvals are never keys. Generalized to every terminal host and multiplexer by [ADR 0017](0017-type-question-digits-and-replies-into-one-bound-pane.md).
 
 Amended 2026-10-21 ([issue #321](https://github.com/r-curio/herdly/issues/321)): as for ADR 0006, "a click on an option" now means Send on a selected option; selecting alone sends nothing.
 

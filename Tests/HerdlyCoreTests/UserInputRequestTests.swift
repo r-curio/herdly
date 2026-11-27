@@ -27,7 +27,7 @@ private func questionCall(turn: UUID?, call: String?, at: String, arguments: Str
     return String(decoding: bytes, as: UTF8.self) + "\n"
 }
 
-private func questionOutput(turn: UUID, call: String, at: String, answer: String = "Flexible paths (Recommended)") -> String {
+private func questionOutput(turn: UUID, call: String, at: String, answer: String = "Nested levels (Recommended)") -> String {
     let payload: [String: Any] = ["type": "function_call_output", "call_id": call,
                                   "output": "{\"answers\":{\"nested\":{\"answers\":[\"\(answer)\"]}}}",
                                   "internal_chat_message_metadata_passthrough": ["turn_id": turn.uuidString.lowercased()]]
@@ -40,9 +40,9 @@ private func turnEvent(_ kind: String, turn: UUID, at: String) -> String {
 }
 
 private let sample = questionArguments([
-    ("Nested choices", "Should different variant paths support different levels of choices?",
+    ("List shape", "Should lists support nested levels?",
      ["Nested levels (Recommended)", "One level only"]),
-    ("First release", "Should the first release also support checkout?", ["Stock lookup only (Recommended)", "Include checkout"])
+    ("First release", "Should the first release include export?", ["View only (Recommended)", "Include export"])
 ])
 private let askedAt = "2026-09-14T02:20:36.895Z"
 private let answeredAt = "2026-09-14T02:21:41.908Z"
@@ -60,8 +60,8 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     #expect(question?.turn == turn)
     #expect(question?.arrivedAt == RolloutTimestamp.parse(askedAt))
     #expect(question?.prompts.count == 2)
-    #expect(question?.prompts[0] == QuestionPrompt(id: "nested choices", header: "Nested choices",
-                                                   question: "Should different variant paths support different levels of choices?",
+    #expect(question?.prompts[0] == QuestionPrompt(id: "list shape", header: "List shape",
+                                                   question: "Should lists support nested levels?",
                                                    options: ["Nested levels (Recommended)", "One level only"]))
     #expect(question?.prompts[1].header == "First release")
 }
@@ -69,7 +69,7 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
 @Test func anOutputForTheCallMovesTheQuestionToAnswered() {
     let session = UUID(), turn = UUID()
     let free = Data((meta(session) + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample)
-        + questionOutput(turn: turn, call: "call_1", at: answeredAt, answer: "assuming each branch has its own module, then only that one")).utf8)
+        + questionOutput(turn: turn, call: "call_1", at: answeredAt, answer: "only the top level for now")).utf8)
     let evidence = ReminderReader.evidence(in: free, session: session)
     #expect(evidence.pendingQuestions.isEmpty)
     #expect(evidence.answeredQuestions == [QuestionIdentity(source: .desktop, session: session, callID: "call_1")])

@@ -1,12 +1,12 @@
 # tmux live targeting proof
 
-Recorded 2026-10-11 for [Prove tmux targeting live](https://github.com/r-curio/herdly/issues/207), the live check of [Research tmux's control surface for pane targeting and client tty](https://github.com/r-curio/herdly/issues/201) ([findings](https://github.com/r-curio/herdly/blob/docs/201-research-tmux/docs/tmux-control-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
+Recorded 2026-10-11 for [Prove tmux targeting live](https://github.com/r-curio/herdly/issues/207), the live check of [Research tmux's control surface for pane targeting and client tty](https://github.com/r-curio/herdly/issues/201) (findings on the unmerged branch `docs/201-research-tmux`; their lasting facts are in [ADR 0014](../adr/0014-bind-multiplexer-panes-and-join-their-client-to-a-host-tab.md) and the tmux section of [CLI notch integration](../cli-notch-integration.md#tmux-pane-binding-two-layer-open-and-typed-input-241)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
 
 ## Setup
 
 - tmux 3.8 (Homebrew), hosted in WezTerm `20240203-110809-5046fc22` (launched with a clean environment), macOS 26.5 (25F71), Codex CLI 0.162.1, Claude Code 2.1.296.
 - Lab: [`scripts/terminal-lab/tmux_lab.py`](../../scripts/terminal-lab/tmux_lab.py). It started an isolated server (`tmux -L steerlab -f /dev/null`, minimal environment, socket `/private/tmp/tmux-503/steerlab`) with one session `lab` and windows codex (`%0`), claude (`%1`), decoy (`%2`, Codex's title over `sleep`) and split (`%3` and `%4`). One client was attached from a WezTerm pane (H1), and for part of the run a second client attached from another WezTerm tab (H2). Codex and Claude isolation was the same as the [iTerm2 proof](iterm2-live.md). No user tmux server existed or was touched.
-- Sanitized output: [`tmux-live.json`](tmux-live.json). It includes a note on one manual passthrough check made before the final run.
+- Sanitized output: `tmux-live.json` (raw lab record not kept in the repo). It includes a note on one manual passthrough check made before the final run.
 
 ## Results
 

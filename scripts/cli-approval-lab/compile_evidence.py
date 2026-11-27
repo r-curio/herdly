@@ -1,4 +1,5 @@
-"""Compile the issue #10 lab runs into docs/evidence/cli-approval-resolution.json.
+"""Compile the issue #10 lab runs into output/cli-approval-resolution.json (ignored; copy a redacted
+summary into docs/evidence by hand).
 
 Reads runs/<case>.json (driver timeline and helper records), runs/<case>.resolution.json (the real
 reader's output for that case's events directory) and runs/helper-race.json. Only identifiers,
@@ -7,7 +8,8 @@ timings, commands and outcomes are copied; no prompt or transcript text.
 import json, os, glob, subprocess
 
 S = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(S, "..", "..", "docs", "evidence", "cli-approval-resolution.json")
+OUT = os.path.join(S, "..", "..", "output", "cli-approval-resolution.json")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 version = subprocess.run(["/opt/homebrew/bin/codex", "--version"], capture_output=True, text=True).stdout.strip()
 commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=S).stdout.strip()
 

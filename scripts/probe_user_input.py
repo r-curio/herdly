@@ -194,12 +194,12 @@ def recent_rollouts(root, days):
 
 
 def self_test():
-    session = "01a09d9b-7642-7b51-bcce-9b66cfe5361f"
-    turn = "01a09db7-0c51-7f33-9ebc-4e44f91df22c"
+    session = "0199a000-0000-7000-8000-0000000000a1"
+    turn = "0199a000-0000-7000-8000-0000000000a2"
     meta = json.dumps({"type": "session_meta", "payload": {"id": session, "source": "vscode"}})
-    arguments = json.dumps({"questions": [{"id": "q", "header": "Nested choices", "question": "Which shape?",
-                                          "options": [{"label": "Flexible paths (Recommended)", "description": "x"},
-                                                      {"label": "Same levels throughout", "description": "y"}]}]})
+    arguments = json.dumps({"questions": [{"id": "q", "header": "List shape", "question": "Which shape?",
+                                          "options": [{"label": "Nested levels (Recommended)", "description": "x"},
+                                                      {"label": "One level only", "description": "y"}]}]})
 
     def call(call_id, at="2026-09-14T02:20:36.895Z", args=arguments, passthrough=True):
         payload = {"type": "function_call", "name": TOOL, "call_id": call_id, "arguments": args}
@@ -230,16 +230,16 @@ def self_test():
     pending, answered, unexpected = evidence([meta, call("c1")], "other")
     checks.append(pending == [] and len(unexpected) == 1)
     labels, reason = offer(json.loads(arguments)["questions"][0], 0, 1)
-    checks.append(labels == ["Flexible paths (Recommended)", "Same levels throughout"] and reason is None)
+    checks.append(labels == ["Nested levels (Recommended)", "One level only"] and reason is None)
     checks.append(offer({"header": "h", "question": "q", "options": []}, 0, 1) == (None, "typed answer"))
     checks.append(offer({"options": [{"label": "a"}, {"description": "no label"}, {"label": "c"}]}, 0, 1)[1] == "an option label is unreadable")
     checks.append(offer({"options": [{"label": str(n)} for n in range(9)]}, 0, 1)[1] == "more options than Herdly shows")
     checks.append(offer({"options": [{"label": "a"}]}, 8, 9)[1] == "beyond what Herdly shows")
     recorded_output = json.dumps({"timestamp": "2026-09-14T02:21:41.908Z", "type": "response_item",
                                   "payload": {"type": "function_call_output", "call_id": "c1",
-                                              "output": json.dumps({"answers": {"q": {"answers": ["Same levels throughout"]}}})}})
+                                              "output": json.dumps({"answers": {"q": {"answers": ["One level only"]}}})}})
     pending, answered, unexpected = evidence([meta, call("c1"), recorded_output], session)
-    checks.append(answered and answered[0]["recorded"] == {"q": {"answers": ["Same levels throughout"]}})
+    checks.append(answered and answered[0]["recorded"] == {"q": {"answers": ["One level only"]}})
     for number, ok in enumerate(checks, 1):
         print(f"check {number}: {'ok' if ok else 'FAILED'}")
     return 0 if all(checks) else 1

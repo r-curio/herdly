@@ -1,7 +1,7 @@
 import Foundation
 
 /// Haiku-written titles for Claude sessions that still carry Claude's derived placeholder
-/// name (`landbase-22`), or a title Herdly gave an earlier session that `/clear` carried over to
+/// name (`myproject-22`), or a title Herdly gave an earlier session that `/clear` carried over to
 /// this one (Claude keeps the process's name, `nameSource: "hook"`, across a clear). The first eligible prompt
 /// starts a detached generator, and a later prompt hands the finished title to Claude through
 /// `hookSpecificOutput.sessionTitle`, which Claude records in its session registry with

@@ -1,13 +1,13 @@
 # WezTerm live targeting proof
 
-Recorded 2026-10-11 for [Prove WezTerm targeting live](https://github.com/r-curio/herdly/issues/206), the live check of [Research WezTerm's CLI for exact pane targeting](https://github.com/r-curio/herdly/issues/200) ([findings](https://github.com/r-curio/herdly/blob/docs/200-research-wezterm/docs/wezterm-cli-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab scripts stood in for it.
+Recorded 2026-10-11 for [Prove WezTerm targeting live](https://github.com/r-curio/herdly/issues/206), the live check of [Research WezTerm's CLI for exact pane targeting](https://github.com/r-curio/herdly/issues/200) (findings on the unmerged branch `docs/200-research-wezterm`; their lasting facts are in [ADR 0013](../adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md) and the WezTerm section of [CLI notch integration](../cli-notch-integration.md#wezterm-open-replies-and-question-digits-240)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab scripts stood in for it.
 
 ## Setup
 
 - WezTerm `20240203-110809-5046fc22` (Homebrew cask, latest stable, default configuration, no `wezterm.lua`), macOS 26.5 (25F71), Codex CLI 0.162.1, Claude Code 2.1.296. WezTerm was launched with a clean environment, and every `wezterm cli --no-auto-start` call ran with a minimal environment. No lab shell saw `CLAUDE*`/`CODEX*` variables.
 - Main lab: [`scripts/terminal-lab/wezterm_lab.py`](../../scripts/terminal-lab/wezterm_lab.py). It covers window A with tabs A1 (Codex), A2 (Claude), A3 (decoy with Codex's title over `sleep`) and A4 (split into A4a and A4b), and window B with a shell (B1). Codex and Claude isolation was the same as the [iTerm2 proof](iterm2-live.md).
 - Select probe: [`scripts/terminal-lab/wezterm_select_probe.py`](../../scripts/terminal-lab/wezterm_select_probe.py). Panes get unique OSC 2 titles, and the front WezTerm window's title is read from the window server ([`onscreen_windows.swift`](../../scripts/terminal-lab/onscreen_windows.swift)). That read relies on this host's Screen Recording permission and is a lab-only check, not a Steer route. It ran once with two windows and once with a single window.
-- Sanitized output: [`wezterm-live.json`](wezterm-live.json).
+- Sanitized output: `wezterm-live.json` (raw lab record not kept in the repo).
 
 ## Results
 
