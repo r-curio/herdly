@@ -1574,7 +1574,8 @@ private struct GeneralControls: View {
             // Each agent's ring draws only the windows checked here; unchecking both removes it (#488).
             SettingsHeader("Usage")
             SettingsCard {
-                UsageWindowsRow(agent: "Claude Code", windows: binding(\.claudeUsage), fiveHourAvailable: true)
+                UsageWindowsRow(agent: "Claude Code", windows: binding(\.claudeUsage),
+                                fiveHourAvailable: model.claudeHasFiveHourLimit)
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
                 UsageWindowsRow(agent: "Codex", windows: binding(\.codexUsage),
                                 fiveHourAvailable: model.codexHasFiveHourLimit)

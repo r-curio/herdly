@@ -424,12 +424,14 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         let now = Date().timeIntervalSince1970
         return UsageStripReadouts.make(codex: usage?.current(now: now),
                                        claude: ClaudeUsageReading.newest(claudeUsage.values, now: now),
-                                       claudeWindows: appearance.claudeUsage,
+                                       claudeWindows: appearance.claudeUsage.shown(fiveHourAvailable: claudeHasFiveHourLimit),
                                        codexWindows: appearance.codexUsage.shown(fiveHourAvailable: codexHasFiveHourLimit))
     }
     /// False once Codex's latest reading shows a plan without a five-hour limit; Settings then
-    /// disables Codex's 5-hour box (#488).
+    /// disables Codex's 5-hour box and the strip drops its inner ring (#488).
     var codexHasFiveHourLimit: Bool { CodexUsageReading.hasFiveHourLimit(usage) }
+    /// The same for Claude, from the newest reading across its roots as Claude reported it (#490).
+    var claudeHasFiveHourLimit: Bool { ClaudeUsageReading.hasFiveHourLimit(claudeUsage.values) }
     /// `--reminder-rollouts <path>` points lab runs at a copy of Codex's sessions tree.
     nonisolated static var rolloutRoot: URL {
         argumentValue(for: "--reminder-rollouts").map { URL(fileURLWithPath: $0) }
