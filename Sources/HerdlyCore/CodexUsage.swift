@@ -57,6 +57,14 @@ public struct CodexUsageReading: Equatable, Sendable {
         let reading = CodexUsageReading(weekly: weekly?.ifCurrent(now: now), fiveHour: fiveHour?.ifCurrent(now: now))
         return reading.weekly == nil && reading.fiveHour == nil ? nil : reading
     }
+
+    /// Whether the plan has a five-hour limit, judged from the latest reading as reported (not
+    /// `current(now:)`, where a reset window would look missing): a reading with a weekly window
+    /// and no five-hour one means the plan has none (#488). Without a reading, assume it does.
+    public static func hasFiveHourLimit(_ latest: CodexUsageReading?) -> Bool {
+        guard let latest else { return true }
+        return latest.fiveHour != nil || latest.weekly == nil
+    }
 }
 
 public enum CodexUsageReader {

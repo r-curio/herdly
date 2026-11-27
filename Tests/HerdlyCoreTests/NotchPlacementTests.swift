@@ -540,6 +540,10 @@ private let bothClaude = ClaudeUsageReading(sourceScope: "/a", sessionID: "00000
                                             fiveHour: ClaudeUsageWindow(usedPercentage: 61, resetsAt: 1_000),
                                             sevenDay: ClaudeUsageWindow(usedPercentage: 18, resetsAt: 1_000), observedAt: 1)
 
+private let weeklyOnly = UsageWindows(fiveHour: false, weekly: true)
+private let fiveHourOnly = UsageWindows(fiveHour: true, weekly: false)
+private let off = UsageWindows(fiveHour: false, weekly: false)
+
 private func runs(_ readout: UsageStripReadout) -> String {
     readout.openText.map { $0.dim ? "[\($0.text)]" : $0.text }.joined()
 }
@@ -606,7 +610,7 @@ private func runs(_ readout: UsageStripReadout) -> String {
 }
 
 @Test func weeklyOnlyUsageDropsEveryInnerRing() {
-    let weekly = UsageStripReadouts.make(codex: bothCodex, claude: bothClaude, fiveHour: false)
+    let weekly = UsageStripReadouts.make(codex: bothCodex, claude: bothClaude, claudeWindows: weeklyOnly, codexWindows: weeklyOnly)
     #expect(weekly.map(\.fiveHour) == [.notReported, .notReported])
     #expect(weekly.map(\.weeklyWindow) == [.weekly, .weekly])
     #expect(weekly.map(runs) == ["18%", "58%"])
@@ -614,8 +618,48 @@ private func runs(_ readout: UsageStripReadout) -> String {
     // A Claude reading with only a five-hour window has nothing left to show.
     let fiveOnly = ClaudeUsageReading(sourceScope: "/a", sessionID: nil, fiveHour: ClaudeUsageWindow(usedPercentage: 7, resetsAt: 1_000),
                                       sevenDay: nil, observedAt: 1)
-    #expect(UsageStripReadouts.make(codex: nil, claude: fiveOnly, fiveHour: false).map(\.source) == [.codex])
-    #expect(UsageStripReadouts.make(codex: nil, claude: nil, fiveHour: false).flatMap(\.spokenLabels) == ["Codex weekly limit unknown"])
+    #expect(UsageStripReadouts.make(codex: nil, claude: fiveOnly, claudeWindows: weeklyOnly, codexWindows: weeklyOnly).map(\.source) == [.codex])
+    #expect(UsageStripReadouts.make(codex: nil, claude: nil, claudeWindows: weeklyOnly, codexWindows: weeklyOnly).flatMap(\.spokenLabels) == ["Codex weekly limit unknown"])
+}
+
+@Test func eachAgentsRingDrawsOnlyItsChosenWindows() {
+    // Claude weekly only beside Codex both: Claude's outer ring alone, called weekly; Codex unchanged.
+    let mixed = UsageStripReadouts.make(codex: bothCodex, claude: bothClaude, claudeWindows: weeklyOnly)
+    #expect(mixed.map(runs) == ["18%", "36[/]58%"])
+    #expect(mixed[0].fiveHour == .notReported && mixed[0].weeklyWindow == .weekly)
+    #expect(mixed.flatMap(\.spokenLabels) == ["Claude weekly limit 18% used",
+                                               "Codex five-hour limit 36% used", "Codex weekly limit 58% used"])
+    // Five-hour only: the inner ring alone, keeping "seven-day" out of it.
+    let fiveOnly = UsageStripReadouts.make(codex: bothCodex, claude: bothClaude,
+                                           claudeWindows: fiveHourOnly, codexWindows: fiveHourOnly)
+    #expect(fiveOnly.map(\.weekly) == [.notReported, .notReported])
+    #expect(fiveOnly.map(runs) == ["61%", "36%"])
+    #expect(fiveOnly.flatMap(\.spokenLabels) == ["Claude five-hour limit 61% used", "Codex five-hour limit 36% used"])
+    // Neither: that agent has no ring at all, Codex included.
+    #expect(UsageStripReadouts.make(codex: bothCodex, claude: bothClaude, claudeWindows: off).map(\.source) == [.codex])
+    #expect(UsageStripReadouts.make(codex: bothCodex, claude: bothClaude, codexWindows: off).map(\.source) == [.claude])
+    #expect(UsageStripReadouts.make(codex: nil, claude: nil, claudeWindows: off, codexWindows: off).isEmpty)
+    // Codex's five-hour window chosen alone before any reading: an empty inner track and a dash, never 0%.
+    let unread = UsageStripReadouts.make(codex: nil, claude: nil, codexWindows: fiveHourOnly)
+    #expect(unread == [UsageStripReadout(source: .codex, fiveHour: .unknown, weekly: .notReported, weeklyWindow: .weekly)])
+    #expect(unread[0].showsDash && unread.map(runs) == ["[—]"])
+}
+
+@Test func codexFiveHourBoxFollowsWhetherThePlanHasTheLimit() {
+    let weeklyPlan = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 58, resetsAt: 1_000), fiveHour: nil)
+    // Before any reading, and with both windows reported, the plan is taken to have the limit.
+    #expect(CodexUsageReading.hasFiveHourLimit(nil))
+    #expect(CodexUsageReading.hasFiveHourLimit(bothCodex))
+    // A five-hour reading with the week missing says nothing against the limit.
+    #expect(CodexUsageReading.hasFiveHourLimit(CodexUsageReading(weekly: nil, fiveHour: CodexUsageWindow(usedPercent: 4, resetsAt: 1_000))))
+    // Weekly with no five-hour window: no limit, so the shown windows drop it and keep the choice.
+    #expect(!CodexUsageReading.hasFiveHourLimit(weeklyPlan))
+    #expect(UsageWindows.both.shown(fiveHourAvailable: false) == weeklyOnly)
+    #expect(fiveHourOnly.shown(fiveHourAvailable: false) == off)
+    #expect(UsageWindows.both.shown(fiveHourAvailable: true) == .both)
+    // Chosen alone on such a plan, Codex shows no ring.
+    #expect(UsageStripReadouts.make(codex: weeklyPlan, claude: nil,
+                                    codexWindows: fiveHourOnly.shown(fiveHourAvailable: false)).isEmpty)
 }
 
 @Test func collapsedUsageWingIsTheMinimumWhateverTheSourcesReport() {
@@ -623,7 +667,9 @@ private func runs(_ readout: UsageStripReadout) -> String {
     #expect(UsageStripReadouts.collapsedWingWidth(both) == NotchPlacement.trailingWing) // 18 + 8 + 18 + 8 inset
     #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: bothCodex, claude: nil)) == NotchPlacement.trailingWing)
     #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: nil, claude: nil)) == NotchPlacement.trailingWing)
-    #expect(UsageStripReadouts.collapsedWingWidth([]) == NotchPlacement.trailingWing) // Hidden
+    #expect(UsageStripReadouts.collapsedWingWidth([]) == NotchPlacement.trailingWing) // Both agents off
+    #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: bothCodex, claude: bothClaude,
+                                                                          claudeWindows: off, codexWindows: off)) == NotchPlacement.trailingWing)
     // A dash beside another ring is the one case that needs more: 18 + 8 + 18 + 5 + 6.8 + 8.
     #expect(UsageStripReadouts.collapsedWingWidth(UsageStripReadouts.make(codex: nil, claude: bothClaude)) == 64)
     let weekUnknown = CodexUsageReading(weekly: nil, fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: 1_000))
@@ -640,7 +686,14 @@ private func runs(_ readout: UsageStripReadout) -> String {
     #expect(UsageStripReadouts.wingWidth(both, expanded: true) == 148)
     #expect(UsageStripReadouts.openWingWidth(UsageStripReadouts.make(codex: bothCodex, claude: nil)) == 72)
     // Weekly only: one "99%" per ring.
-    #expect(UsageStripReadouts.openWingWidth(UsageStripReadouts.make(codex: bothCodex, claude: bothClaude, fiveHour: false)) == 107)
+    #expect(UsageStripReadouts.openWingWidth(UsageStripReadouts.make(codex: bothCodex, claude: bothClaude, claudeWindows: weeklyOnly, codexWindows: weeklyOnly)) == 107)
+    // Mixed: Claude "99%" beside Codex "99/99%": (18 + 5 + 20.4) + 12 + (18 + 5 + 40.8) + 8.
+    #expect(UsageStripReadouts.openWingWidth(UsageStripReadouts.make(codex: bothCodex, claude: bothClaude,
+                                                                     claudeWindows: weeklyOnly)) == 128)
+    // One agent off: only the other's ring and numbers.
+    #expect(UsageStripReadouts.openWingWidth(UsageStripReadouts.make(codex: bothCodex, claude: bothClaude,
+                                                                     codexWindows: off)) == 72)
+    #expect(UsageStripReadouts.openWingWidth([]) == NotchPlacement.trailingWing)
     // Single digits keep the two-digit room, so the panel holds still as the numbers change.
     let low = UsageStripReadouts.make(codex: CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 1, resetsAt: 1_000),
                                                                fiveHour: CodexUsageWindow(usedPercent: 2, resetsAt: 1_000)), claude: nil)
