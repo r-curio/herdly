@@ -421,12 +421,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// The strip's usage rings, Claude's then Codex's, from one clock reading so the rings drawn and
     /// the wing laid out for them agree.
     var usageStripReadouts: [UsageStripReadout] {
-        guard appearance.usage != .hidden else { return [] }
         let now = Date().timeIntervalSince1970
         return UsageStripReadouts.make(codex: usage?.current(now: now),
                                        claude: ClaudeUsageReading.newest(claudeUsage.values, now: now),
-                                       fiveHour: appearance.usage == .compact)
+                                       claudeWindows: appearance.claudeUsage,
+                                       codexWindows: appearance.codexUsage.shown(fiveHourAvailable: codexHasFiveHourLimit))
     }
+    /// False once Codex's latest reading shows a plan without a five-hour limit; Settings then
+    /// disables Codex's 5-hour box (#488).
+    var codexHasFiveHourLimit: Bool { CodexUsageReading.hasFiveHourLimit(usage) }
     /// `--reminder-rollouts <path>` points lab runs at a copy of Codex's sessions tree.
     nonisolated static var rolloutRoot: URL {
         argumentValue(for: "--reminder-rollouts").map { URL(fileURLWithPath: $0) }
@@ -3737,7 +3740,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             ghosttyEnabled = true
             claudeUsage = [:]
             usage = CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 34, resetsAt: now + 86400), fiveHour: nil)
-            appearance.usage = .weeklyOnly
+            appearance.claudeUsage = UsageWindows(fiveHour: false, weekly: true)
+            appearance.codexUsage = UsageWindows(fiveHour: false, weekly: true)
             appearance.centerLabel = .off
         }
 

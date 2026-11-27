@@ -1492,7 +1492,32 @@ private struct AboutTagRow: View {
     }
 }
 
-/// The General pane holds the notch preview, the Display, Strip, Sprite and Session list choices
+/// One agent's row under Settings › General › Usage: a 5-hour and a Weekly checkbox for the windows
+/// its strip ring shows. When the agent's plan has no five-hour limit the 5-hour box is disabled and
+/// unchecked, and says why on hover; the saved choice is kept for when a reading reports the window.
+private struct UsageWindowsRow: View {
+    let agent: String
+    @Binding var windows: UsageWindows
+    let fiveHourAvailable: Bool
+
+    var body: some View {
+        SettingsRow(title: agent, detail: nil) {
+            HStack(spacing: 16) {
+                Toggle("5-hour", isOn: Binding(get: { windows.fiveHour && fiveHourAvailable },
+                                               set: { windows.fiveHour = $0 }))
+                    .disabled(!fiveHourAvailable)
+                    .help(fiveHourAvailable ? "" : "Your \(agent) plan has no 5-hour limit.")
+                    .accessibilityLabel("\(agent) 5-hour usage")
+                    .accessibilityHint(fiveHourAvailable ? "" : "Your \(agent) plan has no 5-hour limit.")
+                Toggle("Weekly", isOn: $windows.weekly)
+                    .accessibilityLabel("\(agent) weekly usage")
+            }
+            .toggleStyle(.checkbox)
+        }
+    }
+}
+
+/// The General pane holds the notch preview, the Display, Strip, Usage, Sprite and Session list choices
 /// (ending with Keep new cards open), and Launch at login under Startup; every change applies at once.
 private struct GeneralControls: View {
     @ObservedObject var model: Companion
@@ -1544,11 +1569,15 @@ private struct GeneralControls: View {
                 }
                 .contentShape(Rectangle())
                 .help("Text in the middle of the strip naming the top item. External displays only; on a MacBook the camera covers that space.")
+            }
+
+            // Each agent's ring draws only the windows checked here; unchecking both removes it (#488).
+            SettingsHeader("Usage")
+            SettingsCard {
+                UsageWindowsRow(agent: "Claude Code", windows: binding(\.claudeUsage), fiveHourAvailable: true)
                 Divider().padding(.horizontal, SettingsStyle.rowInset)
-                SettingsRow(title: "Usage limits", detail: nil) {
-                    SlidingSegments(title: "Usage limits", selection: binding(\.usage),
-                                    options: [(UsageDisplay.compact, "Compact"), (UsageDisplay.weeklyOnly, "Weekly only"), (UsageDisplay.hidden, "Hidden")])
-                }
+                UsageWindowsRow(agent: "Codex", windows: binding(\.codexUsage),
+                                fiveHourAvailable: model.codexHasFiveHourLimit)
             }
 
             SettingsHeader("Sprite")
@@ -1732,6 +1761,19 @@ private struct NotchPreview: View {
     let profile: DisplayProfile
     let reduceMotion: Bool
 
+    /// Fixed sample readings drawn through the strip's own rings, so the preview shows each agent's
+    /// chosen windows (#488).
+    static func sampleUsage(_ appearance: NotchAppearance) -> [UsageStripReadout] {
+        UsageStripReadouts.make(
+            codex: CodexUsageReading(weekly: CodexUsageWindow(usedPercent: 72, resetsAt: .infinity),
+                                     fiveHour: CodexUsageWindow(usedPercent: 40, resetsAt: .infinity)),
+            claude: ClaudeUsageReading(sourceScope: "preview", sessionID: nil,
+                                       fiveHour: ClaudeUsageWindow(usedPercentage: 61, resetsAt: .infinity),
+                                       sevenDay: ClaudeUsageWindow(usedPercentage: 18, resetsAt: .infinity),
+                                       observedAt: 0),
+            claudeWindows: appearance.claudeUsage, codexWindows: appearance.codexUsage)
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             LinearGradient(colors: [Color(red: 0.69, green: 0.76, blue: 0.85), Color(red: 0.85, green: 0.79, blue: 0.75)],
@@ -1774,12 +1816,10 @@ private struct NotchPreview: View {
                 Color.clear.frame(width: 110, height: 1)
                 Spacer(minLength: 12)
             }
-            if appearance.usage != .hidden {
-                RoundedRectangle(cornerRadius: 1).fill(NotchStyle.well).frame(width: 4, height: 12)
-                    .overlay(alignment: .bottom) {
-                        RoundedRectangle(cornerRadius: 1).fill(NotchStyle.codexUsage).frame(height: 7)
-                    }
-                Text("58%").font(NotchStyle.mono(10)).foregroundStyle(NotchStyle.ink)
+            HStack(spacing: UsageStripReadouts.collapsedRingGap) {
+                ForEach(Self.sampleUsage(appearance), id: \.source) { readout in
+                    UsageRing(readout: readout, showsNumbers: false)
+                }
             }
         }
         .padding(.horizontal, 14)

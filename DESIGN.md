@@ -153,7 +153,7 @@ The instrument is configurable within those materials. In Settings the user choo
 - how the open queue is sorted and grouped;
 - when completions move to "Earlier".
 
-Every display shares one set of choices. Every option is drawn from the same black ground, gray ladder, wells, and session colors. An option may change what is shown, but never adds a new material: no glow, no fade-pulse, no gradient. The defaults are the instrument described here: sprites and count, the Sheep sprite, compact usage, standard panel width, "By need" order, no grouping, "repo @ branch" after each name, Earlier after 5 minutes.
+Every display shares one set of choices. Every option is drawn from the same black ground, gray ladder, wells, and session colors. An option may change what is shown, but never adds a new material: no glow, no fade-pulse, no gradient. The defaults are the instrument described here: sprites and count, the Sheep sprite, both usage windows for each agent, standard panel width, "By need" order, no grouping, "repo @ branch" after each name, Earlier after 5 minutes.
 
 **Key Characteristics:**
 - One black shape fused to the menu bar: flat top, concave 8pt ears, deep 18pt bottom radii, no window shadow
@@ -308,7 +308,7 @@ The collapsed reading and the header of the open panel.
 - **Center label** (external displays only): Task name (the top-priority item's task name), Session name, or Off.
   - It is drawn in 12pt regular text gray, one line, tail-truncated, centred between the wings.
   - On a display with a camera housing it is never drawn, because the housing covers the space.
-- **Usage limits** (user option): Compact (default), Weekly only, or Hidden. Weekly only drops the inner (five-hour) ring of both sources and keeps each outer weekly ring; open, each ring shows its single weekly number, and the open right wing narrows to match. Hidden removes the rings and shrinks the right wing to its minimum width.
+- **Usage** (user option, its own Settings section under Strip, #488): one row per agent, Claude Code then Codex, each with a 5-hour and a Weekly checkbox, all checked by default. Each agent's ring draws only its checked windows: 5-hour alone is the inner ring alone, Weekly alone the outer ring alone, and open the ring shows just that number ("61%"), with the open right wing narrowed to match. Unchecking both removes that agent's ring; with both agents off the right wing shrinks to its minimum width. When Codex's latest reading has a weekly window and no five-hour one (a plan without that limit), Codex's 5-hour box is disabled and unchecked, with the hover text "Your Codex plan has no 5-hour limit."; the saved choice returns if a later reading reports the window. Claude's 5-hour box is never disabled. Codex's five-hour window chosen alone draws an empty inner track and a dash until Codex reports it.
 - **Interaction:** the whole strip is a plain button that expands the queue; keyboard focus draws the ink ring around it (6pt corners, 1.5pt, 6pt outside horizontally).
 
 ### Group headings

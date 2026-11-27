@@ -27,11 +27,44 @@ public enum StripCenterLabel: String, CaseIterable, Sendable {
     case off
 }
 
-public enum UsageDisplay: String, CaseIterable, Sendable {
-    case compact
-    /// Every weekly or seven-day readout, without the five-hour ones.
-    case weeklyOnly
-    case hidden
+/// Which of one agent's usage windows its strip ring shows (#488): the five-hour window, the weekly
+/// (Claude: seven-day) window, both, or neither, which removes that agent's ring.
+public struct UsageWindows: Equatable, Sendable, RawRepresentable {
+    public var fiveHour: Bool
+    public var weekly: Bool
+
+    public static let both = UsageWindows(fiveHour: true, weekly: true)
+
+    public init(fiveHour: Bool, weekly: Bool) {
+        self.fiveHour = fiveHour
+        self.weekly = weekly
+    }
+
+    /// Stored as "both", "fiveHour", "weekly" or "off"; anything else is unrecognised.
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "both": self = .both
+        case "fiveHour": self.init(fiveHour: true, weekly: false)
+        case "weekly": self.init(fiveHour: false, weekly: true)
+        case "off": self.init(fiveHour: false, weekly: false)
+        default: return nil
+        }
+    }
+
+    public var rawValue: String {
+        switch (fiveHour, weekly) {
+        case (true, true): "both"
+        case (true, false): "fiveHour"
+        case (false, true): "weekly"
+        case (false, false): "off"
+        }
+    }
+
+    /// The windows the ring draws: the saved choice, without a five-hour window the agent's plan
+    /// does not have. The choice itself is kept, so it returns once a reading reports the window.
+    public func shown(fiveHourAvailable: Bool) -> UsageWindows {
+        UsageWindows(fiveHour: fiveHour && fiveHourAvailable, weekly: weekly)
+    }
 }
 
 public enum QueueSort: String, CaseIterable, Sendable {
@@ -106,7 +139,10 @@ public enum EarlierDelay: String, CaseIterable, Sendable {
 public struct NotchAppearance: Equatable, Sendable {
     public var leftWing: StripLeftWing
     public var centerLabel: StripCenterLabel
-    public var usage: UsageDisplay
+    /// Which windows Claude Code's usage ring shows; both by default.
+    public var claudeUsage: UsageWindows
+    /// Which windows Codex's usage ring shows; both by default.
+    public var codexUsage: UsageWindows
     public var sprite: SpriteKind
     public var sort: QueueSort
     public var grouping: QueueGrouping
@@ -115,16 +151,19 @@ public struct NotchAppearance: Equatable, Sendable {
     /// What follows each name in the open queue. The Settings menu for it is #324.
     public var labelFormat: QueueLabelFormat
 
-    public static let standard = NotchAppearance(leftWing: .spritesAndCount, centerLabel: .taskName, usage: .compact,
+    public static let standard = NotchAppearance(leftWing: .spritesAndCount, centerLabel: .taskName,
+                                                 claudeUsage: .both, codexUsage: .both,
                                                  sprite: .sheep, sort: .needsAttention, grouping: .none,
                                                  earlier: .fiveMinutes, panelWidth: .standard, labelFormat: .repoAtBranch)
 
-    public init(leftWing: StripLeftWing, centerLabel: StripCenterLabel, usage: UsageDisplay,
+    public init(leftWing: StripLeftWing, centerLabel: StripCenterLabel,
+                claudeUsage: UsageWindows = .both, codexUsage: UsageWindows = .both,
                 sprite: SpriteKind, sort: QueueSort, grouping: QueueGrouping, earlier: EarlierDelay,
                 panelWidth: PanelWidth = .standard, labelFormat: QueueLabelFormat = .repoAtBranch) {
         self.leftWing = leftWing
         self.centerLabel = centerLabel
-        self.usage = usage
+        self.claudeUsage = claudeUsage
+        self.codexUsage = codexUsage
         self.sprite = sprite
         self.sort = sort
         self.grouping = grouping
@@ -153,7 +192,8 @@ public struct NotchAppearance: Equatable, Sendable {
         let standard = NotchAppearance.standard
         return NotchAppearance(leftWing: read("leftWing", standard.leftWing),
                                centerLabel: read("centerLabel", standard.centerLabel),
-                               usage: read("usage", standard.usage),
+                               claudeUsage: read("claudeUsage", standard.claudeUsage),
+                               codexUsage: read("codexUsage", standard.codexUsage),
                                sprite: read("sprite", standard.sprite),
                                sort: read("sort", standard.sort),
                                grouping: read("grouping", standard.grouping),
@@ -166,7 +206,8 @@ public struct NotchAppearance: Equatable, Sendable {
     public func save(write: (String, String) -> Void) {
         write(Self.key("leftWing"), leftWing.rawValue)
         write(Self.key("centerLabel"), centerLabel.rawValue)
-        write(Self.key("usage"), usage.rawValue)
+        write(Self.key("claudeUsage"), claudeUsage.rawValue)
+        write(Self.key("codexUsage"), codexUsage.rawValue)
         write(Self.key("sprite"), sprite.rawValue)
         write(Self.key("sort"), sort.rawValue)
         write(Self.key("grouping"), grouping.rawValue)

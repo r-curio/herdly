@@ -76,7 +76,7 @@ private func session(_ name: String, _ source: AgentSource = .codex) -> AgentSes
 
     #expect(appearance.leftWing == .spritesAndCount)
     #expect(appearance.centerLabel == .taskName)
-    #expect(appearance.usage == .compact)
+    #expect(appearance.claudeUsage == .both && appearance.codexUsage == .both)
     #expect(appearance.sprite == .sheep)
     #expect(appearance.sort == .needsAttention)
     #expect(appearance.grouping == .none)
@@ -106,7 +106,8 @@ func labelFormatRoundTripsAndAnUnknownValueFallsBack(format: QueueLabelFormat) {
     appearance.sprite = .cow
     appearance.sort = .lastUpdate
     appearance.earlier = .never
-    appearance.usage = .weeklyOnly
+    appearance.claudeUsage = UsageWindows(fiveHour: false, weekly: true)
+    appearance.codexUsage = UsageWindows(fiveHour: false, weekly: false)
     appearance.panelWidth = .extraWide
     appearance.save { stored[$0] = $1 }
 
@@ -117,9 +118,17 @@ func labelFormatRoundTripsAndAnUnknownValueFallsBack(format: QueueLabelFormat) {
 
     stored["appearance.sprite"] = "alpaca"
     stored["appearance.panelWidth"] = "huge"
+    stored["appearance.codexUsage"] = "sometimes"
     let loaded = NotchAppearance.load(legacyProfile: .externalDisplay) { stored[$0] }
     #expect(loaded.sprite == .sheep)
     #expect(loaded.panelWidth == .standard)
+    #expect(loaded.codexUsage == .both)
+    #expect(loaded.claudeUsage == UsageWindows(fiveHour: false, weekly: true))
+}
+
+@Test(arguments: ["both", "fiveHour", "weekly", "off"])
+func usageWindowsRoundTripThroughTheirStoredValue(raw: String) {
+    #expect(UsageWindows(rawValue: raw)?.rawValue == raw)
 }
 
 @Test func choicesSavedPerDisplayCarryOverFromTheDisplayTheNotchIsOn() {
