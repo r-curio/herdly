@@ -50,6 +50,18 @@ public struct ClaudeUsageReading: Equatable, Sendable {
             lhs.observedAt != rhs.observedAt ? lhs.observedAt < rhs.observedAt : lhs.sourceScope > rhs.sourceScope
         }
     }
+
+    /// Whether the plan has a five-hour limit, judged from the newest reading as Claude reported it
+    /// (not `current(now:)`, where an expired window would look missing; ties as in `newest`). Claude
+    /// leaves `five_hour` out entirely on a plan without that limit, so a seven-day window with no
+    /// five-hour one means the plan has none (#490). Without a reading, assume it does.
+    public static func hasFiveHourLimit(_ readings: some Collection<ClaudeUsageReading>) -> Bool {
+        let latest = readings.max { lhs, rhs in
+            lhs.observedAt != rhs.observedAt ? lhs.observedAt < rhs.observedAt : lhs.sourceScope > rhs.sourceScope
+        }
+        guard let latest else { return true }
+        return latest.fiveHour != nil || latest.sevenDay == nil
+    }
 }
 
 /// Decode and read Herdly's sanitized status-line records. The directory itself supplies the root
