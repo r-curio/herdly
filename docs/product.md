@@ -19,25 +19,25 @@ Herdly is a native macOS app rendering the macOS design language (SwiftUI conten
 
 ## Users
 
-The primary user is the project owner: a developer who runs several Codex sessions at once in the Codex desktop app and in Codex CLI inside Ghostty, and who works in other applications while those sessions run. The job is to know, at a glance and without leaving the current app, which sessions are working, which need an answer, and which have finished, and to get back to the exact session when they choose to.
+The primary user is the project owner: a developer who runs several Codex and Claude Code sessions at once, in the Codex desktop app, in Claude Desktop, and in terminals such as Ghostty, and who works in other applications while those sessions run. The job is to know, at a glance and without leaving the current app, which sessions are working, which need an answer, and which have finished, and to get back to the exact session when they choose to.
 
 Other Mac developers with the same setup are a secondary audience once the MVP is proven. Future work should not yet assume unfamiliar users, marketing, or a public first-run flow.
 
 ## Product Purpose
 
-Herdly keeps the user aware of Codex work while they use other applications. It shows activity and requests for attention in a compact notch panel and lets the user return to the originating session. It exists because Codex's own surfaces only inform the user while they are looking at them.
+Herdly keeps the user aware of Codex and Claude Code work while they use other applications. It shows activity and requests for attention in a compact notch panel and lets the user return to the originating session. It exists because the agents' own surfaces only inform the user while they are looking at them.
 
-Success is that the user keeps using Codex exactly as before, never misses an approval or completion while away, and never has Herdly approve, dismiss, or mark anything read on their behalf without evidence.
+Success is that the user keeps using each agent exactly as before, never misses an approval or completion while away, and never has Herdly approve, dismiss, or mark anything read on their behalf without evidence.
 
 ## Positioning
 
-Herdly is a safe, exact companion. It never approves automatically, never claims a result was read without a verified signal, and returns the user to the exact session or Ghostty tab rather than to an app. Trustworthiness outranks feature breadth. A general agent dashboard, Codex's own notifications, or Notification Center could not truthfully make the same claim about handoff, acknowledgment, and exact targeting.
+Herdly is a safe, exact companion. It never approves automatically, never claims a result was read without a verified signal, and returns the user to the exact session, tab or pane rather than to an app, raising the app only when the exact target can't be reached ([ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md)). Trustworthiness outranks feature breadth. A general agent dashboard, Codex's own notifications, or Notification Center could not truthfully make the same claim about handoff, acknowledgment, and exact targeting.
 
 ## Operating Context
 
 - macOS 14 or later on a Mac, typically with a built-in notch display, sometimes with a second display.
-- Codex desktop app (installed bundle identifies as com.openai.codex) and Codex CLI running directly in Ghostty, one session per unsplit tab.
-- Herdly runs as a background menu-bar app (LSUIElement) with a status item, a controls window, and the notch panel. It observes native app activation, Herdly-owned Codex lifecycle hooks, and Ghostty tab titles carrying Codex's session ID.
+- Codex desktop app (installed bundle identifies as com.openai.codex), Codex CLI and Claude Code in the terminal hosts listed under [Initial supported surfaces](#initial-supported-surfaces), and Claude Code sessions in Claude Desktop's Code tab.
+- Herdly runs as a background menu-bar app (LSUIElement) with a status item, a controls window, and the notch panel. It observes native app activation, Herdly-owned Codex and Claude Code lifecycle hooks, and the tabs and panes of the terminal hosts the user switched on.
 - Launch at login is off until the user explicitly opts in. Its setting reflects macOS's ServiceManagement registration, including approval-required and unavailable states, rather than a saved Herdly preference. macOS reports a never-registered app as not found, so that status reads as off and stays switchable; it shows unavailable, with macOS's reason, only after a registration attempt fails. A registered login launch is quiet: it does not open the controls window, while the menu-bar item and notch retain their normal behavior.
 - Verification rituals: `swift test`, the ad-hoc build script, isolated hook labs and probe scripts under `scripts/`, and human walkthroughs recorded as evidence. Agreed behavior in this file is authoritative; a draft integration is not a proven capability.
 
@@ -45,11 +45,11 @@ Herdly is a safe, exact companion. It never approves automatically, never claims
 
 Build a fresh native macOS app with SwiftUI and AppKit. Keep session and queue rules (HerdlyCore) separate from the platform interface (HerdlyApp). Other operating systems are outside the initial scope.
 
-Confirmed capabilities and rules are detailed in the sections below and in the [domain glossary](../CONTEXT.md): one shared notch on the active display, separate working and to-check counts, a prioritized attention queue, 30-second approval handoff, completion popups that stay open for the card-open time (3 seconds by default) with a mutable sound, local persistence across restarts, and exact return to a desktop task or unsplit Ghostty tab.
+Confirmed capabilities and rules are detailed in the sections below and in the [domain glossary](../CONTEXT.md): one shared notch on the active display, separate working and to-check counts, a prioritized attention queue, 30-second approval handoff, completion popups that stay open for the card-open time (3 seconds by default) with a mutable sound, local persistence across restarts, and exact return to a desktop task, a Claude Desktop session, or a terminal tab or pane.
 
 Terminology is fixed by the glossary: companion, Codex surface, notch, Codex session, approval request, Open in Codex, attention queue, acknowledged completion, uncertain completion, resolution evidence.
 
-Undecided product facts: exact desktop conversation focus; Ghostty split panes; the items listed under Open decisions below.
+Undecided product facts: exact Codex desktop conversation focus; split panes in tab-based terminals; the items listed under Open decisions below.
 
 ## Brand Commitments
 
@@ -59,18 +59,18 @@ Undecided product facts: exact desktop conversation focus; Ghostty split panes; 
 
 ## Evidence on Hand
 
-- Recorded runtime evidence in `docs/evidence/`: CLI approval runtime and resolution, desktop turn start and completion, a desktop user-input question and its answer, notch placement, restart recovery.
+- Recorded runtime evidence in `docs/evidence/`: CLI approval runtime and resolution, desktop turn start and completion, a desktop user-input question and its answer, notch placement, restart recovery, Claude Code setup, approvals, questions, usage and Claude Desktop sessions, and terminal host acceptance runs (iTerm2, Terminal.app, WezTerm, Rex, tmux, Zellij) and herdr live runs.
 - Human-verified walkthroughs recorded in [prototype.md](prototype.md), [notch-placement.md](notch-placement.md), and the investigation documents.
-- Automated coverage: the HerdlyCore test suite (97 tests at the time of writing).
+- Automated coverage: the HerdlyCore test suite (about 2,000 `@Test` cases as of 2026-11-27).
 - No testimonials, customers, benchmarks, or screenshots for external audiences exist. Future work must not fabricate them.
 
 ## Product Principles
 
-1. Preserve the Codex workflow: Codex stays fully usable when Herdly is closed, and Herdly never alters the user's real hook or permission configuration to test itself.
+1. Preserve the agent workflow: Codex and Claude Code stay fully usable when Herdly is closed, and Herdly never alters the user's real hook or permission configuration to test itself.
 2. Fail closed: a timeout, error, or uncertainty never approves, never dismisses, and never marks anything read.
 3. Say only what is known: the interface distinguishes verified state from uncertain state and never invents a missing reason, name, or read status. One agreed exception: an Open fallback looks like any other Open ([ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md)).
 4. Exact, else the app, never arbitrary: return the user to the precise session or tab; when only the session's terminal app can be reached, raise that app (an Open fallback, [ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md)); otherwise say Open is unavailable. Never select an arbitrary tab or pane, and never treat a fallback as a visit or an input target.
-5. Attention, not control: the queue orders what the user sees; it never serializes or supervises Codex execution.
+5. Attention, not control: the queue orders what the user sees; it never serializes or supervises agent execution.
 
 ## Accessibility & Inclusion
 
@@ -78,13 +78,13 @@ Keyboard and VoiceOver operation of the notch panel are in scope: every row and 
 
 ## Initial supported surfaces
 
-Support the Codex desktop app and Codex CLI running directly in Ghostty first. Map [#197](https://github.com/r-curio/herdly/issues/197) widens CLI support, for Codex CLI and Claude Code, to iTerm2, Terminal.app and WezTerm tabs and to tmux, Zellij and herdr panes hosted in any of them, under ADRs [0013](adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md) to [0017](adr/0017-type-question-digits-and-replies-into-one-bound-pane.md) and the terminal host presentation below; each host ships once its acceptance run in [MVP acceptance](mvp-acceptance.md) passes. Warp, kitty, Alacritty, editors and IDEs, iTerm2's tmux control mode, and split panes stay outside the scope. Added at the user's request on 2026-11-23: Rex, whose blocks (split or not) bind and open exactly because Rex addresses each block by id ([CLI integration](cli-notch-integration.md#rex-open-and-replies)), and the Herdr desktop app, whose terminals (split or not) bind and open exactly for the same reason ([CLI integration](cli-notch-integration.md#herdr-app-open-and-replies)). The Herdr app is not herdr, the multiplexer. Added at the user's request on 2026-11-24 ([#471](https://github.com/r-curio/herdly/issues/471)): Claude Code sessions in Claude Desktop's Code tab, local only. Their questions and approvals answer from the notch through the same helper as any Claude session. Their row's place reads "Claude Desktop" in place of "project @ branch". Open returns to the exact session through Claude Desktop's own link; when it cannot, it brings Claude Desktop forward and the card notes "Herdly couldn't find this session in Claude Desktop, so it brought Claude Desktop forward." Its results acknowledge as a terminal tab's do (ADR 0016; agreed 2026-11-24, [#474](https://github.com/r-curio/herdly/issues/474)): a verified Open, switching to the session in Claude Desktop after the result arrived, or the session staying in front for five seconds after it arrived; a raise acknowledges nothing. Regular Claude chats, Cowork, and remote, SSH or cloud desktop sessions are out of scope ([CLI integration](cli-notch-integration.md#claude-desktop-open-471), [ADR 0026](adr/0026-open-claude-desktop-sessions-through-its-own-link.md)).
+Herdly first supported the Codex desktop app and Codex CLI running directly in Ghostty. Claude Code joined as a second agent from 2026-09-20 ([#80](https://github.com/r-curio/herdly/issues/80); see [Claude setup](claude-setup.md)), and the sections below apply to both agents unless they say otherwise. Map [#197](https://github.com/r-curio/herdly/issues/197) widens CLI support, for Codex CLI and Claude Code, to iTerm2, Terminal.app and WezTerm tabs and to tmux, Zellij and herdr panes hosted in any of them, under ADRs [0013](adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md) to [0017](adr/0017-type-question-digits-and-replies-into-one-bound-pane.md) and the terminal host presentation below; each host ships once its acceptance run in [MVP acceptance](mvp-acceptance.md) passes. Warp, kitty, Alacritty, editors and IDEs, iTerm2's tmux control mode, and split panes stay outside the scope. Added at the user's request on 2026-11-23: Rex, whose blocks (split or not) bind and open exactly because Rex addresses each block by id ([CLI integration](cli-notch-integration.md#rex-open-and-replies)), and the Herdr desktop app, whose terminals (split or not) bind and open exactly for the same reason ([CLI integration](cli-notch-integration.md#herdr-app-open-and-replies)). The Herdr app is not herdr, the multiplexer. Added at the user's request on 2026-11-24 ([#471](https://github.com/r-curio/herdly/issues/471)): Claude Code sessions in Claude Desktop's Code tab, local only. Their questions and approvals answer from the notch through the same helper as any Claude session. Their row's place reads "Claude Desktop" in place of "project @ branch". Open returns to the exact session through Claude Desktop's own link; when it cannot, it brings Claude Desktop forward and the card notes "Herdly couldn't find this session in Claude Desktop, so it brought Claude Desktop forward." Its results acknowledge as a terminal tab's do (ADR 0016; agreed 2026-11-24, [#474](https://github.com/r-curio/herdly/issues/474)): a verified Open, switching to the session in Claude Desktop after the result arrived, or the session staying in front for five seconds after it arrived; a raise acknowledges nothing. Regular Claude chats, Cowork, and remote, SSH or cloud desktop sessions are out of scope ([CLI integration](cli-notch-integration.md#claude-desktop-open-471), [ADR 0026](adr/0026-open-claude-desktop-sessions-through-its-own-link.md)).
 
-Monitor only Codex sessions running locally on the user's Mac in the first version. Remote Codex sessions, including sessions reached through SSH, are outside the initial scope. No remote session connection layer is required.
+Monitor only Codex and Claude Code sessions running locally on the user's Mac. Remote sessions, including sessions reached through SSH, are outside the scope. Other agents (for example Gemini CLI, Cursor or OpenCode) are outside the scope. No remote session connection layer is required.
 
-For the initial Ghostty scope, support one Codex session in an unsplit tab and return to that exact tab in its window. Multiple panes within a tab are deferred. Split tabs are unsupported for exact targeting; Open raises Ghostty without selecting a pane ([ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md)). Stable Ghostty remains the baseline; a prerelease is not required merely to support splits. Session-to-tab binding still needs verification, including two tabs in the same project. See ADR 0004.
+For Ghostty, support one session in an unsplit tab and return to that exact tab in its window. Multiple panes within a tab are deferred. Split tabs are unsupported for exact targeting; Open raises Ghostty without selecting a pane ([ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md)). Stable Ghostty remains the baseline; a prerelease is not required merely to support splits. Session-to-tab binding still needs verification, including two tabs in the same project. See ADR 0004.
 
-The user's reference to ChatGPT desktop means its Codex work, not regular ChatGPT conversations. The installed /Applications/ChatGPT.app bundle identifies as com.openai.codex; scope remains Codex only. Available runtime integration points still require verification rather than assuming all desktop hosts expose the same capabilities.
+The user's reference to ChatGPT desktop means its Codex work, not regular ChatGPT conversations. The installed /Applications/ChatGPT.app bundle identifies as com.openai.codex; within that app, scope remains its Codex work only. Available runtime integration points still require verification rather than assuming all desktop hosts expose the same capabilities.
 
 ## Agreed visibility behavior
 

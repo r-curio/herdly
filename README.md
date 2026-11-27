@@ -5,21 +5,23 @@
   </picture>
 </h1>
 
-A native macOS companion for Codex desktop and Codex CLI in Ghostty. Keep using Codex normally; Herdly shows activity and requests for attention in a compact notch while you work elsewhere.
+A native macOS companion for local Codex and Claude Code sessions. Keep using your agents normally; Herdly shows activity and requests for attention in a compact notch while you work elsewhere.
 
 ## Status
 
 All MVP feature tickets are merged. A reproducible, checksummed development build is produced by `scripts/package-app.sh` and by CI; it is ad-hoc signed and labelled `unsigned-dev` until the maintainer signs and notarizes it with a Developer ID identity. The integrated live acceptance pass on the packaged app is still to be run by the operator; see [MVP acceptance](docs/mvp-acceptance.md) for what is proven and what is not.
 
-## MVP
+## What it covers
 
-Desktop MVP visibility: hide the notch while Codex is foreground and show eligible activity while away. Desktop completions remain queued until explicitly dismissed; exact-task focus is deferred.
+The notch stays visible in every app, including Codex itself. Desktop completions stay queued until dismissed or until Codex records them read; exact Codex desktop conversation focus is deferred.
 
-- Local Codex desktop tasks and Codex CLI running directly in Ghostty, with exact unsplit tab targeting; when the exact tab can't be reached (a split, colliding titles), Open raises the terminal app instead.
-- One notch on the active display, fused under the camera housing: a sprite per session that steps while Codex works, a to-check badge, Codex's weekly usage limit (and its five-hour one when Codex reports it), and a prioritized queue on hover.
-- Direct CLI approvals use one receipt-bound allow-once or deny decision with a 30-second handoff; desktop approvals stay native until their transport and handoff policy are proven.
-- Three-second completion notifications, a short sound with mute, and acknowledgments preserved locally.
-- Codex remains usable if Herdly is unavailable. Unknown focus keeps notifications and leaves approvals in Codex.
+- **Agents:** the Codex desktop app, Codex CLI, Claude Code in a terminal, and Claude Code sessions in Claude Desktop's Code tab, all local. Each agent has its own switch and reversible setup in Settings › Agents.
+- **Terminals:** Ghostty, iTerm2, Terminal.app and WezTerm tabs, Rex blocks, Herdr app terminals, and tmux, Zellij and herdr panes running inside them, each switched on in Settings › Terminals. Open returns to the exact tab or pane; when it can't be reached exactly (a split, colliding titles), Open raises the terminal app instead and never picks an arbitrary tab.
+- **Notch:** one notch on the active display, fused under the camera housing: a sprite per session that steps while it works, a to-check badge, each agent's usage limits (five-hour, weekly, both or neither, chosen per agent in Settings › General › Usage), and a prioritized queue on hover.
+- **Approvals:** Codex CLI and Claude Code approvals use one receipt-bound allow-once or deny decision with a 30-second handoff and never decide on their own; Codex desktop approvals stay native until their transport and handoff policy are proven.
+- **Questions:** answer Codex and Claude questions from the notch through a supported route, with a fresh check that the question is still pending.
+- **Completions:** short completion notifications, a sound with mute, and acknowledgments preserved locally.
+- **Fail-safe:** every agent remains usable if Herdly is unavailable. Unknown focus keeps notifications and leaves approvals in the agent.
 
 ## Project documents
 
@@ -42,9 +44,7 @@ sh scripts/package-app.sh    # output/dist/Herdly-<version>+<build>-<label>.zip,
 
 `sh scripts/build-app.sh && open output/Herdly.app` is the shorter development loop. Installation, the permissions macOS asks for, supported versions, and a clean uninstall are in [docs/install.md](docs/install.md).
 
-## Run the prototype controls
-
-Click **Send test** in the Herdly controls window, then switch away from Codex. The menu-bar shortcut is **S**; reopening the app restores its controls if the shortcut is hidden by a crowded menu bar. See the [prototype walkthrough and limitations](docs/prototype.md).
+## Replay desktop activity
 
 To replay desktop activity from an isolated event directory, use the [desktop integration runbook](docs/desktop-live-integration.md).
 

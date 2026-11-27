@@ -1,5 +1,7 @@
 # Run the desktop prototype
 
+Historical: this walkthrough records the first visibility experiment (#1). Its behavior has been superseded. The notch now stays visible while Codex is in front, the controls window no longer has a **Send test** button, and Herdly covers Claude Code and more terminals. Current behavior is in [product.md](product.md).
+
 This is a runnable shell for the accepted app-level visibility experiment in #1. Desktop lifecycle replay for #4 is documented separately in [desktop-live-integration.md](desktop-live-integration.md). Requires macOS 14+ and Swift 6. It has one test completion, no Codex hooks, no approval buttons, and an optional task-ID field for testing guarded link requests.
 
 ```sh
