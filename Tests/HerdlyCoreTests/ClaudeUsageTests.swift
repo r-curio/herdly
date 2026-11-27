@@ -270,3 +270,34 @@ private func usagePayload(session: String = sessionA, five: (Double, Double)? = 
     #expect(ClaudeUsageReading.newest([newer, twin], now: 500)?.sourceScope == "/a2")
     #expect(ClaudeUsageReading.newest([twin, newer], now: 500)?.sourceScope == "/a2")
 }
+
+@Test func claudeFiveHourBoxFollowsWhetherThePlanHasTheLimit() {
+    func reading(_ scope: String, observedAt: Double, fiveHour: Bool, resetsAt: Double = 1_000) -> ClaudeUsageReading {
+        ClaudeUsageReading(sourceScope: scope, sessionID: sessionA,
+                           fiveHour: fiveHour ? ClaudeUsageWindow(usedPercentage: 10, resetsAt: resetsAt) : nil,
+                           sevenDay: ClaudeUsageWindow(usedPercentage: 29, resetsAt: 9_000), observedAt: observedAt)
+    }
+    // No reading: the box stays enabled.
+    #expect(ClaudeUsageReading.hasFiveHourLimit([ClaudeUsageReading]()))
+    // A plan without the limit reports seven_day alone, as recorded live (#490).
+    let weeklyPlan = reading("/a", observedAt: 100, fiveHour: false)
+    #expect(!ClaudeUsageReading.hasFiveHourLimit([weeklyPlan]))
+    // A five-hour window that was reported but has since expired still counts as the limit.
+    #expect(ClaudeUsageReading.hasFiveHourLimit([reading("/a", observedAt: 100, fiveHour: true, resetsAt: 50)]))
+    // Only a five-hour window, with no seven-day one, says nothing against the limit.
+    #expect(ClaudeUsageReading.hasFiveHourLimit([ClaudeUsageReading(sourceScope: "/a", sessionID: sessionA,
+                                                                    fiveHour: nil, sevenDay: nil, observedAt: 100)]))
+    // The newest reading across roots decides; a later reading with the window restores it.
+    let laterWithWindow = reading("/b", observedAt: 200, fiveHour: true)
+    #expect(ClaudeUsageReading.hasFiveHourLimit([weeklyPlan, laterWithWindow]))
+    #expect(!ClaudeUsageReading.hasFiveHourLimit([laterWithWindow, reading("/c", observedAt: 300, fiveHour: false)]))
+    // Equal observation times go to the smallest root path, whatever the input order.
+    let twinA = reading("/a", observedAt: 200, fiveHour: false)
+    #expect(!ClaudeUsageReading.hasFiveHourLimit([laterWithWindow, twinA]))
+    #expect(!ClaudeUsageReading.hasFiveHourLimit([twinA, laterWithWindow]))
+    // The strip then drops Claude's inner ring and keeps the saved choice.
+    let rings = UsageStripReadouts.make(codex: nil, claude: weeklyPlan,
+                                        claudeWindows: UsageWindows.both.shown(fiveHourAvailable: false))
+    #expect(rings.first?.source == .claude && rings.first?.fiveHour == .notReported)
+    #expect(rings.first?.weeklyWindow == .weekly)
+}
