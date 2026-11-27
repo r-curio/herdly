@@ -10,9 +10,11 @@ Status: the packaging route below is reproducible from a clean checkout and is c
 | Toolchain | Xcode 26.6, Swift 6.3.3 | Swift 6.0 tools (`Package.swift`) |
 | Codex desktop | 26.901.51231 (`/Applications/ChatGPT.app`, bundle `com.openai.codex`) | 26.901.51231 |
 | Codex CLI | 0.145.0 (shell), 0.153.4 (bundled in desktop) | 0.145.0 |
+| Claude Code | 2.1.273 | 2.1.273 (`ClaudeSetupRequirements`) |
 | Ghostty | 1.3.1 | 1.3.1 |
+| Zellij | 0.44.1 | 0.44.1 |
 
-The minimums are the versions the integrations were proven against; Herdly's setup preview reports an older install as unsupported rather than guessing. Newer versions are untested until recorded in a later evidence pass. Herdly runs only against Codex sessions on the local Mac; remote sessions and terminals other than Ghostty are out of scope.
+The minimums are the versions the integrations were proven against; Herdly's setup preview reports an older install as unsupported rather than guessing. Newer versions are untested until recorded in a later evidence pass. The other terminal hosts (iTerm2, Terminal.app, WezTerm, Rex, the Herdr app, tmux and herdr) have no minimum version check in Herdly; acceptance runs that have taken place are recorded in [MVP acceptance](mvp-acceptance.md#3d-terminal-host-acceptance) and [evidence](evidence). Herdly runs only against Codex and Claude Code sessions on the local Mac; remote sessions, other agents, and terminals outside the [supported surfaces](product.md#initial-supported-surfaces) are out of scope.
 
 ## Build from a clean checkout
 
@@ -96,7 +98,7 @@ Claude is configured separately with the **Claude Code** row's switch in **Setti
 
 Configure Claude adds only Herdly's exact hook entries to that root's `settings.json`, plus `env.CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` when the installed Ghostty cannot report terminal ttys (before 1.4; see [Claude setup](claude-setup.md)), then installs the packaged helper under Herdly's Application Support directory. The `SessionStart` entry emits the full-session-ID Ghostty title through Claude's JSON `terminalSequence`, and `SessionEnd` requests a reset. Existing Claude sessions are not restarted; the row reads **Restart required** with "Run `claude` in a new terminal tab to finish setup" until a newly started session sends a root-matching event. Ghostty Automation readiness remains separate from this connection state.
 
-The optional Claude usage bridge is displayed in the same preview and starts off. When selected, setup runs a bounded cancellation and descendant-exit probe before composing an existing `statusLine`; an incompatible command is left untouched while the core hooks remain independent. The bridge records only sanitized five-hour and seven-day subscription windows for the selected root and can be disabled through the same reversible setup flow. Known managed policy, malformed files, duplicate installs, and changed owned values are reported without writing. The setup snapshot has no project context and cannot resolve arbitrary project or command-line `--settings` precedence, so the preview warns that arbitrary future overrides may win and connection still requires a fresh exact-root SessionStart. Ghostty title application, clean SessionEnd reset, and the live old-session restart-required observation remain deferred operator checks; abrupt-exit restoration remains an unproven operator limitation without a launcher.
+The Claude usage bridge is part of every setup and has no switch of its own (#481). It is listed in the same preview; setup runs a bounded cancellation and descendant-exit probe before composing an existing `statusLine`; an incompatible command is left byte-identical, usage reads unavailable, and the core hooks remain independent. The bridge records only sanitized five-hour and seven-day subscription windows for the selected root and is removed with the rest of the setup by the same reversible flow; see [Claude usage](claude-usage.md). Known managed policy, malformed files, duplicate installs, and changed owned values are reported without writing. The setup snapshot has no project context and cannot resolve arbitrary project or command-line `--settings` precedence, so the preview warns that arbitrary future overrides may win and connection still requires a fresh exact-root SessionStart. Ghostty title application, clean SessionEnd reset, and the live old-session restart-required observation remain deferred operator checks; abrupt-exit restoration remains an unproven operator limitation without a launcher.
 
 ### Update an outdated agent
 
@@ -166,9 +168,8 @@ Herdly starts with default settings, an empty attention snapshot, and no Automat
 
 ## Known limitations
 
-- Exact desktop task focus is deferred: the notch hides whenever Codex desktop is foreground, even while a different thread is visible, and a desktop completion clears only on Dismiss or on Codex's own unread flag clearing.
-- Desktop approvals stay in Codex's native prompt; only direct CLI approvals offer Approve (allow once) and Deny, with a 30-second handoff.
-- Ghostty targeting covers one Codex session per unsplit tab with session-ID titles; split tabs report unavailable.
-- There is no global hotkey; keyboard users click the panel once, then Tab and Escape work.
+- Exact Codex desktop task focus is deferred: a desktop completion clears only on Dismiss or on Codex's own unread flag clearing, never because the Codex app is in front.
+- Codex desktop approvals stay in Codex's native prompt; Codex CLI and Claude Code approvals offer Approve (allow once) and Deny, with a 30-second handoff.
+- Tab-based terminals (Ghostty, iTerm2, Terminal.app, WezTerm) target one session per unsplit tab; for a split tab, Open raises the terminal app without selecting a pane ([ADR 0015](adr/0015-raise-the-terminal-app-when-open-cannot-reach-the-exact-target.md)). Rex blocks and Herdr app terminals target exactly, split or not.
 - Hook records and rollouts are scanned with fixed size caps every two seconds while a session is live or a row is held, and on a hook-folder change or every three seconds otherwise ([architecture](architecture.md)); very large histories are a known, deferred cost.
 - The bundle identifier is still `dev.rcurio.herdly.prototype`; changing it would orphan the preferences above.

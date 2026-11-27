@@ -2,9 +2,9 @@
 
 ## Product
 
-Herdly is a native macOS companion for a developer running several local Codex sessions while working in other apps. One shared notch shows work in progress, questions, approval requests, and completions, with actions for returning to the originating session. The user continues launching and using Codex normally; Codex must remain usable when Herdly is closed or unavailable.
+Herdly is a native macOS companion for a developer running several local Codex and Claude Code sessions while working in other apps. One shared notch shows work in progress, questions, approval requests, and completions, with actions for returning to the originating session. The user continues launching and using each agent normally; the agents must remain usable when Herdly is closed or unavailable.
 
-The initial surfaces are Codex desktop and Codex CLI running directly in Ghostty, with one session per unsplit tab. Remote sessions, other agents, other terminal hosts, split-pane targeting, and other operating systems are outside the initial scope. Exact desktop conversation focus remains deferred; opening a task is not proof that its result was read.
+Herdly started with Codex desktop and Codex CLI in unsplit Ghostty tabs. The supported surfaces are now the Codex desktop app; Codex CLI and Claude Code in iTerm2, Terminal.app, WezTerm and Ghostty tabs, Rex blocks and Herdr app terminals, and tmux, Zellij and herdr panes hosted in them; and Claude Code sessions in Claude Desktop's Code tab. Each host has its own switch in Settings. The scope and its exclusions are in [Product behavior](docs/product.md#initial-supported-surfaces). Remote and SSH sessions, other agents, the other terminals and editors listed there, split-pane targeting outside Rex and the Herdr app, and other operating systems are outside the scope. Exact Codex desktop conversation focus remains deferred; opening a task is not proof that its result was read.
 
 ### Sources of truth
 
