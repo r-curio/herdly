@@ -216,6 +216,18 @@ public enum ClaudeStatusLineBridge {
     public static func isBridgeCommand(_ command: String) -> Bool {
         command.contains(" \(marker) ") || command.hasSuffix(" \(marker)")
     }
+
+    /// The command a bridge for exactly this helper and usage folder wraps, or nil for any other
+    /// command. Only the form `command(helperPath:usagePath:existingCommand:)` writes is accepted:
+    /// the wrapped command must be one single-quoted word that quotes back to the same bytes.
+    public static func wrappedCommand(_ command: String, helperPath: URL, usagePath: URL) -> String? {
+        let prefix = "\(shellQuote(helperPath.path)) \(marker) --usage-dir \(shellQuote(usagePath.path)) --existing-command "
+        guard command.hasPrefix(prefix) else { return nil }
+        let quoted = String(command.dropFirst(prefix.count))
+        guard quoted.count >= 2, quoted.hasPrefix("'"), quoted.hasSuffix("'") else { return nil }
+        let wrapped = String(quoted.dropFirst().dropLast()).replacingOccurrences(of: "'\\''", with: "'")
+        return shellQuote(wrapped) == quoted ? wrapped : nil
+    }
 }
 
 public enum ClaudeUsageSetupStatus: Equatable, Sendable {
