@@ -1,6 +1,6 @@
 # Claude permission transport (issue #71)
 
-Recorded 2026-10-11 against Claude Code 2.1.296. Raw timeline: [claude-permission-transport.json](claude-permission-transport.json).
+Recorded 2026-10-11 against Claude Code 2.1.296. Raw timeline: raw lab record not kept in the repo.
 
 ## Setup and limits
 
@@ -14,7 +14,7 @@ Recorded 2026-10-11 against Claude Code 2.1.296. Raw timeline: [claude-permissio
 - **Helper:** [lab_helper.py](../../scripts/claude-permission-lab/lab_helper.py) mirrors SteerHook's Claude
   approval file protocol (request, heartbeat, receipt, decision, delivery, 30-second deadline from receipt)
   for any tool. The shipped SteerHook decides Bash only, so this proves Claude's side of the transport, not
-  the packaged helper or the Steer app.
+  the packaged helper or the Steer app. (Note added 2026-11-27: the shipped helper now decides seven Claude tools, `Bash`, `Edit`, `Write`, `NotebookEdit`, `Read`, `WebFetch` and `WebSearch`, for the input shapes `ClaudeDirectApproval.swift` accepts; this record is unchanged.)
 - **Decisions:** at the operator's explicit direction, the agent scripted every companion decision and
   native keystroke ([run_case.py](../../scripts/claude-permission-lab/run_case.py)). No human clicked a
   decision, which departs from the issue's "human makes every live decision" wording. The Steer notch

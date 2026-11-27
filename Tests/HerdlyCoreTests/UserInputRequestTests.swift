@@ -4,7 +4,7 @@ import Testing
 
 // Fixture lines follow the shapes recorded from a real Codex desktop rollout (engine 0.153.4): a
 // `function_call` named `request_user_input` and its `function_call_output`, both carrying the turn
-// id in `internal_chat_message_metadata_passthrough`. See docs/evidence/desktop-user-input-request.json.
+// id in `internal_chat_message_metadata_passthrough`. See Tests/HerdlyCoreTests/Fixtures/desktop-user-input-request.json.
 
 private func meta(_ session: UUID, source: String = "vscode") -> String {
     "{\"type\":\"session_meta\",\"payload\":{\"id\":\"\(session)\",\"source\":\"\(source)\"}}\n"
@@ -40,9 +40,9 @@ private func turnEvent(_ kind: String, turn: UUID, at: String) -> String {
 }
 
 private let sample = questionArguments([
-    ("List shape", "Should the list allow nested levels?",
+    ("List shape", "Should lists support nested levels?",
      ["Nested levels (Recommended)", "One level only"]),
-    ("First release", "Should the first release also support checkout?", ["View only (Recommended)", "Include export"])
+    ("First release", "Should the first release include export?", ["View only (Recommended)", "Include export"])
 ])
 private let askedAt = "2026-09-14T02:20:36.895Z"
 private let answeredAt = "2026-09-14T02:21:41.908Z"
@@ -60,8 +60,8 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
     #expect(question?.turn == turn)
     #expect(question?.arrivedAt == RolloutTimestamp.parse(askedAt))
     #expect(question?.prompts.count == 2)
-    #expect(question?.prompts[0] == QuestionPrompt(id: "nested choices", header: "List shape",
-                                                   question: "Should the list allow nested levels?",
+    #expect(question?.prompts[0] == QuestionPrompt(id: "list shape", header: "List shape",
+                                                   question: "Should lists support nested levels?",
                                                    options: ["Nested levels (Recommended)", "One level only"]))
     #expect(question?.prompts[1].header == "First release")
 }
@@ -69,7 +69,7 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
 @Test func anOutputForTheCallMovesTheQuestionToAnswered() {
     let session = UUID(), turn = UUID()
     let free = Data((meta(session) + questionCall(turn: turn, call: "call_1", at: askedAt, arguments: sample)
-        + questionOutput(turn: turn, call: "call_1", at: answeredAt, answer: "assuming each branch has its own module, then only that one")).utf8)
+        + questionOutput(turn: turn, call: "call_1", at: answeredAt, answer: "only the top level for now")).utf8)
     let evidence = ReminderReader.evidence(in: free, session: session)
     #expect(evidence.pendingQuestions.isEmpty)
     #expect(evidence.answeredQuestions == [QuestionIdentity(source: .desktop, session: session, callID: "call_1")])
@@ -188,7 +188,7 @@ private let answeredAt = "2026-09-14T02:21:41.908Z"
 /// Replays the committed desktop recording: pending before the answer line, answered after it.
 @Test func recordedDesktopQuestionReplaysAsPendingThenAnswered() throws {
     let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("docs/evidence/desktop-user-input-request.json")
+        .appendingPathComponent("Tests/HerdlyCoreTests/Fixtures/desktop-user-input-request.json")
     let record = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: Any])
     let session = try #require((record["session"] as? String).flatMap(UUID.init(uuidString:)))
     let turn = try #require((record["turn"] as? String).flatMap(UUID.init(uuidString:)))

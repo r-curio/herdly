@@ -7,7 +7,7 @@ Herdly labels a notch item with the name Codex desktop shows for that thread in 
 Codex desktop names a thread about fifteen seconds after its first prompt and appends one JSON line to `~/.codex/session_index.jsonl`:
 
 ```
-{"id":"0199a000-0000-7000-8000-0000000000d5","thread_name":"Sync main and resolve conflicts","updated_at":"2026-09-14T02:30:15.871051Z"}
+{"id":"0199a000-0000-7000-8000-0000000000b1","thread_name":"Sync main and resolve conflicts","updated_at":"2026-09-14T02:30:15.871051Z"}
 ```
 
 A rename appends another line for the same id, so the last line for an id is the current name. Thread ids equal Codex session ids. The same name is also stored in the `name` column of the `threads` table in `~/.codex/state_5.sqlite` (the `title` column there is the first user message, not the sidebar name); on the inspected machine the two agreed on every shared id, and the index was chosen because it is a small append-only text file that needs no SQLite access. Rollout files and hook events never carry the name.

@@ -46,9 +46,12 @@ its reset is still in the future on Herdly's clock. A missing, malformed, expire
 is unavailable. A newer malformed record does not resurrect an older reading. The `spend_limit`
 object is ignored.
 
-The strip draws the current five-hour and seven-day windows as one orange ring (inner ring five-hour, outer ring seven-day) ahead of Codex's blue ring; a window that is not current draws no ring, and the open panel prints the numbers beside it ("61/18%"). With several roots it shows only the newest still-current reading (`ClaudeUsageReading.newest`; equal observation times go to the lexicographically smallest root path); a root whose windows have all reset never hides an older current one.
+The strip draws the current five-hour and seven-day windows as one orange ring (inner ring five-hour, outer ring seven-day) ahead of Codex's blue ring; a window that is not current draws no ring, and the open panel prints the numbers beside it ("61/18%"). With several roots it shows only the newest still-current reading (`ClaudeUsageReading.newest`; equal observation times go to the lexicographically smallest root path); a root whose windows have all reset never hides an older current one. Since #488, Settings › General › Usage has a 5-hour and a Weekly checkbox per agent, so Claude's ring shows the five-hour window, the weekly window, both or neither (`UsageWindows`); when the reading reports no five-hour window the 5-hour box is disabled and unchecked, and the saved choice is kept.
 
-The expanded notch does not list Claude usage. The Claude Code setup page lists every opted-in root and labels readings as **last reported**. Readings are
+The expanded notch does not list Claude usage beyond the ring's numbers. In Settings › Agents, a folder whose
+setup cannot read usage shows a "Usage limits" problem line with the reason (`AgentUsage.problem`), and
+⋯ Show Diagnostics… prints a "Usage limits:" line with the current reading or why there is none
+(`AgentDiagnostics`); a window that is simply not reported is not a problem. Readings are
 not proof that Claude made a fresh server request. A root with no accepted record remains unavailable;
 Herdly does not claim live delivery for roots that have not supplied a valid session record.
 
@@ -61,8 +64,13 @@ forged owned filenames, undo after many refreshes, status-line quoting, slow-com
 reversible setup, and status-line conflict handling. Packaged helper checks also cover exact large
 stdin forwarding, a command that exits without reading stdin, output preservation, and exit status.
 
-The compatibility and status-line coexistence proof is recorded in [Claude usage and status-line
-coexistence proof](https://github.com/r-curio/herdly/blob/9b4f835/docs/claude-usage-proof.md). That proof
-used one disposable first-party Max root and did not read or change the real settings or credentials.
-Live delivery through this product bridge has not been verified on a shipped
-artifact. This check is optional; no live proof is claimed here.
+These automated checks run only against temporary configuration and support directories, with
+expiry judged on a supplied clock. A packaged helper check also proved termination of a spawned
+descendant when the bridge received cancellation, and exit status 7 passed through unchanged.
+
+An earlier compatibility and status-line coexistence proof, at commit `9b4f835`, was a disposable
+prototype against one first-party Max root; it did not read or change the real Claude settings,
+credentials or transcripts. Live delivery through this product bridge has not been verified on a
+shipped artifact: no consenting live root has been run through the packaged bridge, so these checks
+do not claim live Claude delivery or live usage windows, and unproved roots and windows remain
+unavailable. This check is optional; no live proof is claimed here.

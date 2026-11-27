@@ -1,6 +1,6 @@
 # Claude WebFetch and WebSearch approvals (issue #73)
 
-Recorded 2026-10-11 against Claude Code 2.1.296. Raw timeline: [claude-web-approvals.json](claude-web-approvals.json).
+Recorded 2026-10-11 against Claude Code 2.1.296. Raw timeline: raw lab record not kept in the repo.
 This builds on the transport proof in [claude-permission-transport.md](claude-permission-transport.md) (#71).
 
 ## Setup and limits

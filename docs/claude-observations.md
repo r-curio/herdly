@@ -218,8 +218,8 @@ checks bounded Claude metadata, `agent_id`/`agent_type`, and tool input. `Claude
 single-select, multi-select, typed answers, exact identity rejection, one-shot writes, and the
 receipt/answer rendezvous. `ClaudeApprovalTests` covers the one-winner deadline,
 atomic receipt/decision/delivery records, one-winner concurrency, helper crash handback, and Claude's exact allow/deny output shape. The app/helper build,
-packaged smoke check, and helper self-test pass on this branch.
-- **Live application proof:** pending. Restarting Herdly during one real Claude session and observing
-its current state without replaying sound or fabricating a question was deferred for the user's
-walkthrough tomorrow; one live answer of each supported shape and native fallback after helper
-timeout are also deferred. This change does not claim those scenarios passed.
+packaged smoke check, and helper self-test passed on the change's branch.
+- **Live application proof:** not recorded. No run is recorded of restarting Herdly during a real
+Claude session and observing its current state without replaying sound or fabricating a question,
+of one live answer of each supported shape, or of the native fallback after the helper's timeout.
+This document does not claim those scenarios passed.

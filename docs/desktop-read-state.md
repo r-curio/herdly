@@ -1,6 +1,6 @@
 # Desktop read state
 
-Herdly acknowledges a Codex desktop completion when the desktop app itself has stopped flagging that thread as unread. This is the only visit signal available for desktop threads: no hook event, app-server notification, or database column exposes it (see the [desktop investigation](codex-desktop-investigation.md), section "Read-state mechanism"). It rides on a private format, so it is one switch away from off and is re-verified after desktop updates.
+Herdly acknowledges a Codex desktop completion when the desktop app itself has stopped flagging that thread as unread. This is the only visit signal available for desktop threads: no hook event, app-server notification, or database column exposes it (see "Source inspection of the desktop app" below). It rides on a private format, so it fails closed when the format changes and is re-verified after desktop updates. Since #492 it is always on, with no switch.
 
 Accepted by the user on 2026-09-14 with the understanding that the format may change and that testing continues.
 
@@ -24,13 +24,39 @@ The set of flagged ids is persisted in `~/.codex/.codex-global-state.json`, debo
 3. The file was written at least 3 seconds after the completion arrived. This covers the app's persistence debounce, so a file written before the flag was raised cannot be read as a cleared flag.
 4. The completion's session is absent from the unread set.
 
-A session still in the set stays queued. A file older than the margin is no evidence. A missing or foreign-format file changes nothing, and the controls window says so. Acknowledgment only removes items; nothing is ever marked unread, replayed, or dismissed on error. Uncertain completions restored after a restart follow the same rule, which is how an unobserved visit while Herdly was quit gets recognized.
+A session still in the set stays queued. A file older than the margin is no evidence. A missing or foreign-format file changes nothing; desktop completions then clear only when dismissed. Acknowledgment only removes items; nothing is ever marked unread, replayed, or dismissed on error. Uncertain completions restored after a restart follow the same rule, which is how an unobserved visit while Herdly was quit gets recognized.
 
 Known honest limits: a thread cleared by archive or delete also acknowledges its completions, and a completion the app never flagged (silent heartbeat, failed-runs-only automation) is acknowledged once the margin passes. Both are cases where Codex itself would not have alerted the user.
 
 ## App integration
 
 Each hook scan (two seconds apart while a session is live or a row is held, [architecture](architecture.md)) reads the file off the main actor alongside the hook events and rollouts, then applies the rule before presentation decisions, so a completion that finished while its thread was open in front never pops or plays a sound. Acknowledgments persist in Herdly's attention snapshot like dismissals. The rule is always on, with no Settings switch: a missing or unparsable file clears nothing, so desktop completions then clear only when dismissed. The `desktopReadStateEnabled` UserDefaults key from earlier builds is ignored. `--desktop-read-state <path>` points a lab run at a copy of the file.
+
+## Source inspection of the desktop app (2026-09-14)
+
+Read-only inspection of the installed `app.asar` of desktop 26.901.51231 (bundle `com.openai.codex`), extracted into a scratch directory. No app code was copied into Herdly and no IPC connection was attempted. The file names involved are build-specific.
+
+**What sets the flag.** `hasUnreadTurn` is set to true in four places:
+
+1. `turn/completed`, unless the turn's notification decision is `DONT_NOTIFY` (heartbeat turns with empty output, automations with a `failed_runs_only` policy) or the turn completed inside an active goal continuation the app is still streaming as owner. A turn that completes while the user is looking at the thread still sets the flag; the view then clears it at once (below).
+2. `item/permissions/requestApproval`, `item/commandExecution/requestApproval`, `item/fileChange/requestApproval` and `item/tool/requestUserInput`, when the request arrives.
+3. A plan-implementation request after a turn completes with an incomplete plan.
+4. Manual "Mark as unread" from the sidebar context menu, and an import path that marks imported threads unread.
+
+An `unreadMessageCount` per thread is kept alongside it. Completing a turn with `DONT_NOTIFY` subtracts that turn's messages, and the flag drops back to false only if the thread had no unread turn before and the count reaches zero.
+
+**What clears it.** Only `markConversationAsRead(conversationId)`, reached from:
+
+- The conversation thread view, while the Electron window is focused and the thread is the selected view: it marks the thread read whenever it is unread, or when its last request, last turn id, last turn status or a new turn-completed event changes. A background window never clears anything; switching back to the window clears the selected thread.
+- Clicking a sidebar row for a thread with `hasUnreadTurn`.
+- The sidebar context menu ("Mark as read") and a bulk mark-read action (up to 8 at a time).
+- Cache eviction on archive or delete, which clears the persisted flag.
+
+So read state claims only "the selected thread was visible in a focused window after its latest completion or request". It does not know whether the user scrolled to or read the result, and it does not identify which completed turn was read.
+
+**Storage and propagation.** The main process persists the set debounced by 500 ms, writing a temp file and renaming it over `.codex-global-state.json` and again over `.codex-global-state.json.bak`. The file holds many unrelated keys (about 1.8 MB on the Mac inspected). Other windows learn of a change through a private Electron IPC broadcast, `thread-read-state-changed { hostId, conversationId, hasUnreadTurn }` over `~/.codex/ipc/ipc.sock`; that is not an app-server method, and Herdly does not use it. The app server has no read state: `~/.codex/state_5.sqlite` `threads` has no read column and the generated app-server schema has no read-state notification. No hook event fires on viewing, focusing or marking a thread read (CLI 0.145.0 and desktop engine 0.153.4: PreToolUse, PermissionRequest, PostToolUse, PreCompact, PostCompact, SessionStart, SessionEnd, UserPromptSubmit, SubagentStart, SubagentStop, Stop, Interrupt).
+
+**Consequences for the rule.** The persisted key is private, build-specific, debounced and rewritten as one large file, so Herdly reads it as a thread-level fact, never per-completion acknowledgment. It can only downgrade an uncertain completion to acknowledged, never the reverse, and it fails closed when the file is missing, unreadable, over the size bound or lacks the key. Absence from the set is not proof of a visit on its own (archive and delete also clear it, and a thread never flagged is indistinguishable from one read long ago), which is why the rule above also requires the file to postdate the completion. Herdly's own dismissals stay independent of this format.
 
 ## Verification
 
@@ -46,7 +72,7 @@ Live walkthrough to repeat after each desktop update, with two disposable deskto
 4. Send a prompt in A and stay on it until it finishes. Expect: no popup and no sound; the completion is acknowledged on its first scan.
 5. Quit Herdly, complete a turn in B, view B, relaunch Herdly. Expect: B's restored uncertain completion clears on the first scan.
 
-Record the desktop version and results in this file. If Settings › Notifications shows the read state unavailable under the switch after an update, turn the toggle off and re-run the source inspection described in the investigation document.
+Record the desktop version and results in this file. If completions stop clearing after a desktop update, run the probe against the live file and, if it returns no snapshot, re-run the source inspection described below.
 
 ### 2026-10-21, two signed-in identities
 

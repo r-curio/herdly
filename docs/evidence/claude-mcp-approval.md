@@ -1,6 +1,6 @@
 # One bounded Claude MCP approval (issue #75)
 
-Recorded 2026-10-11 against Claude Code 2.1.296. Raw timeline: [claude-mcp-approval.json](claude-mcp-approval.json).
+Recorded 2026-10-11 against Claude Code 2.1.296. Raw timeline: raw lab record not kept in the repo.
 
 ## Setup and limits
 

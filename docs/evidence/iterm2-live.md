@@ -1,13 +1,13 @@
 # iTerm2 live targeting proof
 
-Recorded 2026-10-11 for [Prove iTerm2 targeting live](https://github.com/r-curio/herdly/issues/204), the live check of [Research iTerm2's scripting surface for exact tab targeting](https://github.com/r-curio/herdly/issues/198) ([findings](https://github.com/r-curio/herdly/blob/docs/198-research-iterm2/docs/iterm2-scripting-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
+Recorded 2026-10-11 for [Prove iTerm2 targeting live](https://github.com/r-curio/herdly/issues/204), the live check of [Research iTerm2's scripting surface for exact tab targeting](https://github.com/r-curio/herdly/issues/198) (findings on the unmerged branch `docs/198-research-iterm2`; their lasting facts are in [ADR 0013](../adr/0013-bind-cli-sessions-to-terminal-tabs-by-tty.md) and the iTerm2 section of [CLI notch integration](../cli-notch-integration.md#iterm2-open-238)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
 
 ## Setup
 
 - iTerm2 3.7.4 (Homebrew cask, fresh install, default profile), macOS 26.5 (25F71), Codex CLI 0.162.1 (it updated itself from 0.161.0 between the first and second run), Claude Code 2.1.296.
 - Lab: [`scripts/terminal-lab/iterm2_lab.py`](../../scripts/terminal-lab/iterm2_lab.py) with the JXA driver [`iterm2.js`](../../scripts/terminal-lab/iterm2.js), run as `python3 -I scripts/terminal-lab/iterm2_lab.py --lab-root <checkout>/output/terminal-lab`. It creates two windows: window A with tabs A1 (Codex), A2 (Claude), A3 (a decoy carrying Codex's title over `sleep`) and A4 (split into A4a and A4b), and window B with one shell (B1). It drives everything through Apple Events from `osascript` and reads every result back.
 - Codex ran read-only with approvals `never` in a disposable project. Claude ran with `--setting-sources project` in a disposable project whose only hooks are [`claude_title_hook.py`](../../scripts/terminal-lab/claude_title_hook.py), a stand-in that records the hook environment and emits SteerHook's `--terminal-title` sequence (`OSC 2 Steer Claude <session id>`) with `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1`, as Steer's Claude setup does. Nothing under `~/.codex` or `~/.claude` was written.
-- Sanitized output of the third full run: [`iterm2-live.json`](iterm2-live.json). TUI screen text, which carried account and branch details, is omitted.
+- Sanitized output of the third full run: `iterm2-live.json` (raw lab record not kept in the repo). TUI screen text, which carried account and branch details, is omitted.
 
 ## Results
 

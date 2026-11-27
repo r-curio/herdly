@@ -14,8 +14,8 @@ UserPromptSubmit and Stop records prove a real desktop turn start/completion,
 but do not claim full session-start capture. The original records are capture
 `8bedf2d3-754c-4c00-8da4-635e14e82fe8` at 07:26:54.343057Z and
 `b4baa09c-eb98-4cb9-b75c-9bd2f3405c24` at 07:26:57.252939Z. The original metadata-only records
-are at `/Users/dev/src/Herdly/output/desktop-hook-lab/events`;
-the redacted pair in `docs/evidence/` is replayable from a fresh checkout.
+stayed in the lab's ignored `output/desktop-hook-lab/events` directory; the redacted
+pair in `Tests/HerdlyCoreTests/Fixtures/desktop-turn/` is replayable from a fresh checkout.
 
 ## Build and run
 
@@ -25,16 +25,16 @@ sh scripts/build-app.sh
 open output/Herdly.app --args --desktop-events "$PWD/output/desktop-hook-lab/events" --reminder-rollouts "$HOME/.codex/sessions"
 ```
 
-Use `--desktop-events "$PWD/docs/evidence"` to replay the checked-in turn.
+Use `--desktop-events "$PWD/Tests/HerdlyCoreTests/Fixtures/desktop-turn"` to replay the checked-in turn.
 
 The `--desktop-events` path is an isolated replay override. The app reads it
 off the main actor in the hook scan, on the timing set out in
 [architecture](architecture.md) (`HookScanSchedule`). Existing completion records restore
-silently; a newly observed completion expands the notch for the card-open time
-(3 seconds by default) and
-stays queued until its own Dismiss action. Codex foreground hides the whole
-shared panel without acknowledging activity; unknown activation keeps it
-visible. Open in Codex sends the manually verified exact-task
+silently; a newly observed completion expands the notch for the "Keep new cards
+open" time (Settings › General, 3 seconds by default) and stays queued until it is
+dismissed or the desktop app records it read ([desktop read state](desktop-read-state.md)).
+The notch stays visible while Codex is in front; foreground changes acknowledge
+nothing. Open in Codex sends the manually verified exact-task
 `codex://threads/<session-id>` route, but successful native delivery is not
 programmatic proof that the task was selected and never dismisses the completion.
 
@@ -50,9 +50,9 @@ The state/replay checks are runnable in
 isolated desktop hook-lab lifecycle experiment and real-session evidence in
 `docs/desktop-approval-investigation.md`. This implementation consumes that
 event shape without claiming permanent attachment or changing Codex
-configuration; reversible connection/setup is tracked separately in #5. A
-fresh real-session UI check still requires the permitted human route described
-there.
+configuration. Reversible setup is Settings › Agents › Codex (the row's switch
+runs Configure Codex; turning it off undoes it). A fresh real-session UI check
+still requires the permitted human route described there.
 
 ## Codex background jobs (2026-10-08)
 
@@ -90,35 +90,32 @@ the memory heading above. Covered by
 `theDesktopNextMessageSuggestionIsNeverQueuedAsTheUsersWork`. A suggestion
 completion already queued before this change stays until dismissed.
 
+## Desktop installation
+
+Probed 2026-09-11 (desktop 26.901.51231, bundled CLI 0.153.4). The desktop app is
+`/Applications/ChatGPT.app`, bundle ID `com.openai.codex`. A second installation
+(`~/Applications/Codex.app`) shared the same bundle ID, so the bundle ID alone does
+not choose an installation: Herdly uses the running process's bundle path, and
+`DesktopNavigation` refuses to send the `codex://threads/<id>` link when zero or
+several installations are running. `python3 scripts/probe_desktop_process.py`
+reports a unique running installation only when exactly one main process matches;
+`python3 scripts/probe_codex_desktop.py` (with `--self-test`, and `--app <bundle>`
+for another installation) reads bundle metadata and generates the bundled CLI's
+protocol schemas in a temporary directory without connecting to any conversation.
+A generated schema proves a protocol shape, not that a new connection can observe
+or control the desktop's own tasks; Herdly never starts a second app server and
+calls its loaded threads the desktop's conversations. No supported signal tells
+which conversation is selected, so exact desktop conversation focus stays
+deferred. Herdly does not inspect the Codex window's UI; in the 2026-09-11 probe
+the computer-use tool refused access to `com.openai.codex`, and no other UI path
+was tried.
+
 ## Completion notification demonstration (#8)
 
-The controllable-clock tests cover a completion staying queued while Codex is
-foreground, expanding for three seconds only after an eligible away state,
-retaining the item after collapse, and restoring silently. Queue tests cover
-duplicate lifecycle records, explicit dismissal, and a later turn in the same
-session remaining independent.
-
-The existing Herdly-only walkthrough in `docs/prototype.md` records the compact
-popup, expansion, foreground hiding, switching-away retention, restart
-restoration, explicit dismissal, and the menu mute control. This patch did not
-alter Codex hooks, permissions, or user configuration. A fresh real desktop turn
-was not triggered here; native UI timing and sound remain separately
-human-observable.
-
-An earlier native UI attempt was blocked by the Mac being locked; the allowed
-CUA unlock attempt could not recover that session. The later walkthrough below
-records the safe Herdly-only evidence obtained after the Mac was unlocked.
-
-### Allowed Herdly-only CUA walkthrough (2026-09-12)
-
-After the Mac was unlocked, the exact `79081ec` build was launched and its
-controls connected to the existing evidence directory. The controls showed 17
-real desktop completions. **Send test** increased the count to 18; closing the
-controls left the compact `18 to check` notch, which auto-collapsed. Reopening
-the notch expanded the same 18 items and rendered each desktop completion with
-**Open in Codex** and explicit **Dismiss**, alongside the test item.
-
-This proves the branch build's native popup, collapse, retention, reopen, and
-desktop action rendering through Herdly only. CUA could not click **Dismiss**
-without destructive-action confirmation. Sound/mute hearing, a fresh CLI turn,
-Ghostty, and Codex UI were not tested and are not claimed here.
+Controllable-clock tests cover a completion expanding for the card-open time
+after it arrives, retaining the item after collapse, and restoring silently.
+Queue tests cover duplicate lifecycle records, explicit dismissal, and a later
+turn in the same session remaining independent. A Herdly-only walkthrough on
+2026-09-12 showed the popup, collapse, retention and reopen with real desktop
+completions rendered with Open in Codex and Dismiss; sound, a fresh CLI turn,
+Ghostty and the Codex UI were not tested there.

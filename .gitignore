@@ -19,3 +19,6 @@ scripts/cli-approval-lab/runs/
 .github/skills/
 .impeccable/
 skills-lock.json
+
+# Maintainer-only agent workflow
+AGENTS.local.md

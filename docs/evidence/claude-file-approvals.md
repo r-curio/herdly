@@ -1,6 +1,6 @@
 # Claude file access and modification approvals (issue #72)
 
-Recorded 2026-10-11 against Claude Code 2.1.296. Raw timeline: [claude-file-approvals.json](claude-file-approvals.json).
+Recorded 2026-10-11 against Claude Code 2.1.296. Raw timeline: raw lab record not kept in the repo.
 This builds on the transport proof in [claude-permission-transport.md](claude-permission-transport.md) (#71).
 
 ## Setup and limits
@@ -12,10 +12,10 @@ This builds on the transport proof in [claude-permission-transport.md](claude-pe
   `outside/outside.txt` in a sibling folder outside the project.
 - **Helper:** [lab_helper.py](../../scripts/claude-permission-lab/lab_helper.py), the #71 stand-in for SteerHook's
   Claude approval file protocol, now also logs each tool input's key names and string lengths. Driver:
-  [run_file_case.py](../../scripts/claude-permission-lab/run_file_case.py).
+  `run_file_case.py`, since replaced by [run_family_case.py](../../scripts/claude-permission-lab/run_family_case.py).
 - **Decisions:** at the operator's explicit direction, the agent scripted every companion decision and native
   keystroke. No human clicked a decision, and the Steer notch was not involved. The shipped SteerHook still
-  decides Bash only, so this proves Claude's side for the file family, not a Steer feature.
+  decides Bash only, so this proves Claude's side for the file family, not a Steer feature. (Note added 2026-11-27: the shipped helper now decides seven Claude tools, `Bash`, `Edit`, `Write`, `NotebookEdit`, `Read`, `WebFetch` and `WebSearch`, for the input shapes `ClaudeDirectApproval.swift` accepts; this record is unchanged.)
 - **Not exercised:** `LSP` (needs a language-server plugin, which `--setting-sources project` does not load),
   overlapping file requests (the #71 overlap result came from two `Write` calls), NotebookEdit inserts of markdown
   cells or at the start, and an `Edit` without `replace_all`.
@@ -104,7 +104,7 @@ from <folder> during this session". Those change session permissions, so they st
 
 ## Differences from the September catalog
 
-The [permission families catalog](https://github.com/r-curio/herdly/blob/fe9457f1e9394dff2a474a93c8d8a2eb15c63ea9/docs/claude-permission-families.md)
+The September permission families catalog (`docs/claude-permission-families.md`, a draft not kept on main)
 says a hook allow cannot override a matching ask rule. On 2.1.296, a project `ask` rule for `Edit` still raised
 `PermissionRequest`, and the hook's allow applied the edit without the native dialog being answered. For Steer
 this is acceptable, because Allow once is the user's own explicit answer. A `deny` rule did stop the call

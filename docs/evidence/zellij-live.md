@@ -1,12 +1,12 @@
 # Zellij live targeting proof
 
-Recorded 2026-10-11 for [Prove Zellij targeting live](https://github.com/r-curio/herdly/issues/208), the live check of [Research Zellij's CLI for pane targeting and client tty](https://github.com/r-curio/herdly/issues/202) ([findings](https://github.com/r-curio/herdly/blob/docs/202-research-zellij/docs/zellij-cli-investigation.md)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
+Recorded 2026-10-11 for [Prove Zellij targeting live](https://github.com/r-curio/herdly/issues/208), the live check of [Research Zellij's CLI for pane targeting and client tty](https://github.com/r-curio/herdly/issues/202) (findings on the unmerged branch `docs/202-research-zellij`; their lasting facts are in [ADR 0014](../adr/0014-bind-multiplexer-panes-and-join-their-client-to-a-host-tab.md) and the Zellij section of [CLI notch integration](../cli-notch-integration.md#zellij-pane-binding-two-layer-open-and-typed-input-242)). This is evidence for later decisions, not a decision or an implemented Steer capability. Steer itself was not running; the lab script stood in for it.
 
 ## Setup
 
 - Zellij 0.45.1 (Homebrew), hosted in WezTerm `20240203-110809-5046fc22` (launched with a clean environment), macOS 26.5 (25F71), Codex CLI 0.162.1, Claude Code 2.1.296.
 - Lab: [`scripts/terminal-lab/zellij_lab.py`](../../scripts/terminal-lab/zellij_lab.py). It ran an isolated session `lab` with its own `ZELLIJ_SOCKET_DIR` under the lab root, a lab config (startup tips, release notes and session serialization off) and a minimal environment. The session had tabs codex (`terminal_1`), claude (`terminal_2`), decoy (`terminal_3`, Codex's title over `sleep`) and split (`terminal_4` and `terminal_5`), plus the default first tab (`terminal_0`). One client was attached from a WezTerm pane (H1), and for part of the run a second client attached from another WezTerm tab (H2). Codex and Claude isolation was the same as the [iTerm2 proof](iterm2-live.md). No user Zellij session existed or was touched.
-- Results come from the second full run, which added a keystroke from H1 before the focus cases. Sanitized output: [`zellij-live.json`](zellij-live.json).
+- Results come from the second full run, which added a keystroke from H1 before the focus cases. Sanitized output: `zellij-live.json` (raw lab record not kept in the repo).
 
 ## Results
 

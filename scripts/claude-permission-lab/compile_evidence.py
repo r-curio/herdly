@@ -1,4 +1,4 @@
-"""Compile issue #71 lab runs into docs/evidence/claude-permission-transport.json.
+"""Compile issue #71 lab runs into output/claude-permission-lab/claude-permission-transport.json.
 
 Reads output/claude-permission-lab/runs/<case>.json. Copies only identifiers, timings, hook event names,
 payload key names, file basenames and outcomes; no prompt, transcript or file content.
@@ -8,7 +8,8 @@ import glob, json, os, shutil, subprocess
 S = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(S, "..", ".."))
 RUNS = os.path.join(REPO, "output", "claude-permission-lab", "runs")
-OUT = os.path.join(REPO, "docs", "evidence", "claude-permission-transport.json")
+OUT = os.path.join(REPO, "output", "claude-permission-lab", "claude-permission-transport.json")
+os.makedirs(os.path.dirname(OUT), exist_ok=True)
 ORDER = ["allow", "deny", "handoff", "native", "native-no", "timeout", "helper-loss", "overlap"]
 
 claude = shutil.which("claude", path="/opt/homebrew/bin:/usr/local/bin:" + os.path.expanduser("~/.local/bin") + ":" + os.environ.get("PATH", ""))

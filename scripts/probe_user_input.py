@@ -194,8 +194,8 @@ def recent_rollouts(root, days):
 
 
 def self_test():
-    session = "01a09d9b-7642-7b51-bcce-9b66cfe5361f"
-    turn = "01a09db7-0c51-7f33-9ebc-4e44f91df22c"
+    session = "0199a000-0000-7000-8000-0000000000a1"
+    turn = "0199a000-0000-7000-8000-0000000000a2"
     meta = json.dumps({"type": "session_meta", "payload": {"id": session, "source": "vscode"}})
     arguments = json.dumps({"questions": [{"id": "q", "header": "List shape", "question": "Which shape?",
                                           "options": [{"label": "Nested levels (Recommended)", "description": "x"},

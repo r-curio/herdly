@@ -86,7 +86,7 @@ import Testing
 @Test func checkedDesktopEvidenceReplaysToCompletion() {
     let fixture = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("docs/evidence")
+        .appendingPathComponent("Tests/HerdlyCoreTests/Fixtures/desktop-turn")
     let events = DesktopEventReader.read(from: fixture)
     let state = DesktopState.replay(events)
     #expect(events.count == 2)
