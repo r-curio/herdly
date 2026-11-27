@@ -342,7 +342,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     /// Follow the pointer, or keep the notch on one display; saved by `setNotchDisplayPreference`.
     @Published private(set) var notchDisplayPreference = NotchDisplayPreference.restored(
         id: UserDefaults.standard.string(forKey: "notchDisplayPinID"),
-        name: UserDefaults.standard.string(forKey: "notchDisplayPinName"))
+        name: UserDefaults.standard.string(forKey: "notchDisplayPinName"),
+        model: UserDefaults.standard.string(forKey: "notchDisplayPinModel"))
     /// The display picker's entries, checked entry, and detail line; see `updateNotchDisplayChoices`.
     @Published private(set) var notchDisplayChoices = NotchDisplayChoices(displays: [], preference: .followPointer)
     /// The kind of display the notch is on now; `refresh` follows the panel between displays.
@@ -1308,8 +1309,10 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         func rect(_ r: CGRect) -> [String: Double] { ["x": r.minX, "y": r.minY, "width": r.width, "height": r.height] }
         let report: [String: Any] = [
             "displays": displays.map { ["id": Int($0.id), "frame": rect($0.frame), "top_inset": Double($0.topInset), "physical_notch": $0.hasPhysicalNotch,
-                                        "built_in": $0.isBuiltIn, "persistent_id": $0.persistentID ?? NSNull(), "name": $0.name ?? NSNull()] },
-            "display_preference": notchDisplayPreference.pin.map { ["pinned_id": $0.id, "pinned_name": $0.name] as Any } ?? "follow_pointer",
+                                        "built_in": $0.isBuiltIn, "persistent_id": $0.persistentID ?? NSNull(), "name": $0.name ?? NSNull(),
+                                        "serial_free_model": $0.serialFreeModel?.stored ?? NSNull()] },
+            "display_preference": notchDisplayPreference.pin.map { ["pinned_id": $0.id, "pinned_name": $0.name,
+                                                                         "pinned_serial_free_model": $0.serialFreeModel?.stored ?? NSNull()] as Any } ?? "follow_pointer",
             "pointer": ["x": pointer.x, "y": pointer.y],
             "chosen_display": chosen.map { Int($0.id) } ?? NSNull(),
             "collapsed_frame": chosen.map { rect(NotchPlacement.frame(on: $0, expanded: false, rows: 0, extraRows: false, wing: UsageStripReadouts.wingWidth(usageStripReadouts, expanded: false))) } ?? NSNull(),
@@ -1348,7 +1351,11 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
             return NotchDisplay(id: number.uint32Value, frame: screen.frame, topInset: screen.safeAreaInsets.top,
                                 housingWidth: housing, menuBarHeight: menuBar,
                                 isBuiltIn: CGDisplayIsBuiltin(number.uint32Value) != 0,
-                                persistentID: uuid, name: screen.localizedName)
+                                persistentID: uuid, name: screen.localizedName,
+                                serialFreeModel: NotchDisplayModel.serialFree(
+                                    vendor: CGDisplayVendorNumber(number.uint32Value),
+                                    model: CGDisplayModelNumber(number.uint32Value),
+                                    serial: CGDisplaySerialNumber(number.uint32Value)))
         }
     }
 
@@ -2870,9 +2877,15 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if let pin = preference.pin {
             UserDefaults.standard.set(pin.id, forKey: "notchDisplayPinID")
             UserDefaults.standard.set(pin.name, forKey: "notchDisplayPinName")
+            if let model = pin.serialFreeModel {
+                UserDefaults.standard.set(model.stored, forKey: "notchDisplayPinModel")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "notchDisplayPinModel")
+            }
         } else {
             UserDefaults.standard.removeObject(forKey: "notchDisplayPinID")
             UserDefaults.standard.removeObject(forKey: "notchDisplayPinName")
+            UserDefaults.standard.removeObject(forKey: "notchDisplayPinModel")
         }
         updateNotchDisplayChoices()
         refresh()
