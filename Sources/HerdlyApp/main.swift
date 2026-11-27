@@ -74,34 +74,6 @@ func claudeQuestionAwaitDeliveryAndCleanUp(_ request: ClaudeQuestionRequest,
     return confirmed
 }
 
-/// What the latest read of the Codex desktop app's read state found (docs/desktop-read-state.md).
-enum DesktopReadStateStatus: Equatable, Sendable {
-    case notChecked
-    /// The switch is off; desktop completions clear only by dismissal.
-    case off
-    /// The file is missing or in an unexpected format; desktop completions clear only by dismissal.
-    case unavailable(fileName: String)
-    /// The file was read; `summary` says when it was written, what it held and what this scan cleared.
-    case readable(summary: String)
-
-    /// The status line, shown as the switch's tooltip in Settings.
-    var message: String {
-        switch self {
-        case .notChecked: "Desktop read state: not checked yet."
-        case .off: "Desktop read state: off. Desktop completions clear only by dismissal."
-        case .unavailable(let fileName):
-            "Desktop read state: unavailable (\(fileName) missing or in an unexpected format). Desktop completions clear only by dismissal."
-        case .readable(let summary): "Desktop read state: \(summary)"
-        }
-    }
-
-    /// The line Settings shows under the switch, nil when nothing needs saying.
-    var problemLine: String? {
-        guard case .unavailable = self else { return nil }
-        return "Herdly can't read Codex's read state, so desktop completions clear only when dismissed."
-    }
-}
-
 /// The app the notch hotkey took the keyboard from (#427). The bundle identifier guards against a
 /// reused process identifier: a different app under the same pid is never activated.
 struct RememberedApp: Equatable, Sendable {
@@ -352,9 +324,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
     let iTerm2 = ITerm2State()
     /// The latest Automation consent check for Ghostty; nil until one has run in this launch.
     @Published var ghosttyAccess: GhosttyAutomationAccess?
-    /// Read the Codex desktop app's own unread flags to acknowledge desktop completions it has
-    /// cleared. Private format; on by default, off with one switch when a desktop update breaks it.
-    @Published var desktopReadStateEnabled = UserDefaults.standard.object(forKey: "desktopReadStateEnabled") as? Bool ?? true
     /// How much of the last message every result card starts with (Settings › Notifications ›
     /// "Response length"). A card's own Show all / Show less still flips it (`ResultCardMessage`).
     @Published var resultResponseLength = Companion.loadResultResponseLength() {
@@ -370,8 +339,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         if saved != length.rawValue { defaults.set(length.rawValue, forKey: "resultResponseLength") }
         return length
     }
-    /// The latest read-state outcome; Settings shows a problem line only while it is `.unavailable`.
-    @Published private(set) var desktopReadState = DesktopReadStateStatus.notChecked
     /// Follow the pointer, or keep the notch on one display; saved by `setNotchDisplayPreference`.
     @Published private(set) var notchDisplayPreference = NotchDisplayPreference.restored(
         id: UserDefaults.standard.string(forKey: "notchDisplayPinID"),
@@ -1602,7 +1569,8 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         // /dev/null so the existing bounded readers produce no Codex observations.
         let events = URL(fileURLWithPath: eventsPath.isEmpty ? "/dev/null" : eventsPath)
         let rolloutRoot = Companion.rolloutRoot
-        let readStateURL = desktopReadStateEnabled ? Companion.desktopReadStateURL : nil
+        // Always read the Codex desktop app's own unread flags; a missing or unparsable file clears nothing.
+        let readStateURL = Companion.desktopReadStateURL
         let namesURL = Companion.threadNamesURL
         // Ghostty's current tab titles prove which sessions are CLI sessions when the rollout header
         // cannot (a TUI on the app-server daemon is recorded as `vscode`). Empty with controls off.
@@ -1664,7 +1632,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                 let desktop = DesktopEventReader.read(from: events, cache: reminders.hookCache)
                 return (reminders,
                  desktop.events,
-                 readStateURL.flatMap(DesktopReadStateReader.read), ThreadNameReader.read(namesURL) ?? [:],
+                 DesktopReadStateReader.read(readStateURL), ThreadNameReader.read(namesURL) ?? [:],
                  CodexUsageReader.latest(root: rolloutRoot),
                  SessionDiscovery.candidates(root: rolloutRoot, now: Date().timeIntervalSince1970),
                  processList.map { CodexCLIProcesses.isRunning(processList: CodexCLIProcesses.arguments(processList: $0)) } ?? false,
@@ -1848,7 +1816,7 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
                                                                               desktopEvents: desktopEvents),
                                   claude: claudeObservationScans.compactMap(\.latestSessionStartAt).max())
             }
-            applyDesktopReadState(readState, enabled: readStateURL != nil, desktopThreads: scan.desktopOriginatedSessions)
+            applyDesktopReadState(readState, desktopThreads: scan.desktopOriginatedSessions)
             for request in unverified where ApprovalReceipts.existing(for: request.id, in: events) != nil {
                 _ = ApprovalStore.publish(ApprovalDecisionRecord(requestID: request.id, decision: .noDecision,
                                                                  decidedAt: Date().timeIntervalSince1970), in: events)
@@ -2934,22 +2902,12 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
         }
     }
     /// Acknowledges desktop completions the Codex desktop app itself no longer flags as unread.
-    /// Only ever removes items; a missing or unparsable file changes nothing and says so.
-    private func applyDesktopReadState(_ snapshot: DesktopReadStateSnapshot?, enabled: Bool, desktopThreads: Set<UUID>) {
-        guard enabled else { desktopReadState = .off; return }
-        guard let snapshot else {
-            desktopReadState = .unavailable(fileName: Companion.desktopReadStateURL.lastPathComponent)
-            return
-        }
+    /// Only ever removes items; a missing or unparsable file changes nothing.
+    private func applyDesktopReadState(_ snapshot: DesktopReadStateSnapshot?, desktopThreads: Set<UUID>) {
+        guard let snapshot else { return }
         let queued = queue.items.compactMap(\.completion)
         let acknowledged = DesktopReadAcknowledgment.acknowledged(queued, snapshot: snapshot, desktopThreads: desktopThreads)
         acknowledgeCodexCompletions(Array(acknowledged))
-        let written = Date(timeIntervalSince1970: snapshot.modifiedAt).formatted(date: .omitted, time: .standard)
-        let tested = CodexSetupRequirements.minimumDesktopVersion
-        let version = setupCapabilities.desktopVersion ?? "unknown"
-        desktopReadState = .readable(summary: "file written \(written), \(snapshot.unread.count) unread threads"
-            + (acknowledged.isEmpty ? "." : ", cleared \(acknowledged.count) completion\(acknowledged.count == 1 ? "" : "s") this scan.")
-            + (version == tested ? "" : " Format tested with desktop \(tested); installed \(version)."))
     }
 
     /// Persists unacknowledged completions and acknowledgments atomically whenever they change.
@@ -3743,11 +3701,6 @@ final class Companion: NSObject, NSApplicationDelegate, NSWindowDelegate, Observ
 
     }
 
-    func desktopReadStateChanged(_ enabled: Bool) {
-        UserDefaults.standard.set(enabled, forKey: "desktopReadStateEnabled")
-        if !enabled { desktopReadState = .off }
-        scanSchedule.requestNow()
-    }
     /// The Settings switch of a host without Automation access (every host but Ghostty, which goes
     /// through `ghosttyChanged`). Remembered at once; herdr's gate is re-evaluated now.
     func setHostSwitch(_ host: TerminalHost, on: Bool) {
