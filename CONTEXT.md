@@ -1,18 +1,18 @@
 # Codex companion
 
-A companion that keeps the user aware of Codex work while they use other applications.
+A companion that keeps the user aware of Codex and Claude Code work while they use other applications. The Codex terms below apply to Claude Code sessions as well unless an entry says otherwise.
 
 ## Language
 
 **Companion**:
-The product being designed, used alongside the existing Codex desktop app and CLI.
+The product being designed, used alongside the existing Codex desktop app and CLI, Claude Code, and Claude Desktop.
 _Avoid_: Codex replacement
 
 **Codex surface**:
 The existing Codex desktop app or CLI through which the user works with Codex.
 
 **Notch**:
-The companion's compact display at the top of the screen, intended to show Codex activity while the user works outside the relevant session.
+The companion's compact display at the top of the screen, intended to show agent activity while the user works outside the relevant session.
 
 **Codex session**:
 An individual Codex conversation in the desktop app or CLI, distinct from its hosting application.

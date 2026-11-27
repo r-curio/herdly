@@ -1,6 +1,6 @@
 # Architecture draft
 
-Status: proposed implementation shape. Agreed user experience is in [product.md](product.md); accepted decisions are in [adr](adr/0001-preserve-the-existing-codex-workflow.md). A [desktop capability probe](codex-desktop-investigation.md) has run successfully; no live session integration has been installed or verified.
+Status: proposed implementation shape. Agreed user experience is in [product.md](product.md); accepted decisions are in [adr](adr/0001-preserve-the-existing-codex-workflow.md). This draft predates the live integrations. Codex and Claude Code hooks, the terminal hosts and Claude Desktop are now implemented and documented in the integration docs listed in [AGENTS.md](../AGENTS.md#integration-safety-and-reference-routes), with live evidence in [evidence](evidence). The same core, app and helper split carries both agents: a second agent added its own hook entries and helper invocation rather than a generic agent framework. Read the diagram and identity sections below as the original shape, not a current inventory.
 
 ## Smallest useful structure
 
