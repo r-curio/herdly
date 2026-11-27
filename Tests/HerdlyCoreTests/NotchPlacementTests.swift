@@ -953,3 +953,72 @@ private func wingStrip(sessions count: Int, working: Set<Int> = []) -> AgentStri
     #expect(empty.spokenLabel(emptyQueueTitle: "Not connected", readouts: readouts)
         == "Not connected, Codex weekly 40 percent used")
 }
+
+// #495: a monitor with no serial number can come back under a new UUID.
+private let miModel = NotchDisplayModel(vendor: 25001, model: 13489)
+private let pinnedMi = NotchDisplayPreference.pinned(NotchDisplayPin(id: "OLD-MI-UUID", name: "Mi Monitor", serialFreeModel: miModel))
+private func mi(id: UInt32 = 4, uuid: String = "NEW-MI-UUID", x: CGFloat = 1728, model: NotchDisplayModel? = miModel) -> NotchDisplay {
+    NotchDisplay(id: id, frame: CGRect(x: x, y: -323, width: 3440, height: 1440), topInset: 0, menuBarHeight: 25,
+                 persistentID: uuid, name: "Mi monitor", serialFreeModel: model)
+}
+
+@Test func serialFreeModelIsOnlyKeptForADisplayWithoutASerialAndAKnownModel() {
+    #expect(NotchDisplayModel.serialFree(vendor: 25001, model: 13489, serial: 0) == miModel)
+    #expect(NotchDisplayModel.serialFree(vendor: 25001, model: 13489, serial: 42) == nil)
+    #expect(NotchDisplayModel.serialFree(vendor: 0, model: 13489, serial: 0) == nil)
+    #expect(NotchDisplayModel.serialFree(vendor: 25001, model: 0, serial: 0) == nil)
+}
+
+@Test func aSerialFreePinFollowsItsMonitorToANewUUID() {
+    let displays = [builtIn, mi()]
+    #expect(pinnedMi.pinnedDisplay(in: displays) == mi())
+    #expect(NotchDisplaySelection.choose(displays: displays, pointer: CGPoint(x: 700, y: 500), current: builtIn.id,
+                                         interacting: false, preference: pinnedMi) == mi())
+    let choices = NotchDisplayChoices(displays: displays, preference: pinnedMi)
+    // Listed once, checked, with no "(not connected)" entry.
+    #expect(choices.options.map(\.label) == ["Follow pointer", "Built-in Retina Display", "Mi monitor"])
+    #expect(choices.selected == choices.options[2])
+    #expect(choices.detail == "Stays on Mi monitor.")
+    // Choosing the entry saves the current UUID and the model.
+    #expect(choices.selected.preference.pin == NotchDisplayPin(id: "NEW-MI-UUID", name: "Mi monitor", serialFreeModel: miModel))
+}
+
+@Test func aUUIDMatchBeatsAModelMatch() {
+    let original = mi(id: 5, uuid: "OLD-MI-UUID", x: 5168)
+    #expect(pinnedMi.pinnedDisplay(in: [builtIn, mi(), original]) == original)
+    let choices = NotchDisplayChoices(displays: [builtIn, mi(), original], preference: pinnedMi)
+    #expect(choices.selected.preference.pin?.id == "OLD-MI-UUID")
+    #expect(choices.selected.label == "Mi monitor (2)")
+}
+
+@Test func twoIdenticalSerialFreeMonitorsMatchNeither() {
+    let displays = [builtIn, mi(), mi(id: 5, uuid: "OTHER-MI-UUID", x: 5168)]
+    #expect(pinnedMi.pinnedDisplay(in: displays) == nil)
+    #expect(NotchDisplaySelection.choose(displays: displays, pointer: CGPoint(x: 2000, y: 0), current: nil,
+                                         interacting: false, preference: pinnedMi) == builtIn)
+    let choices = NotchDisplayChoices(displays: displays, preference: pinnedMi)
+    #expect(choices.selected.label == "Mi Monitor (not connected)")
+    #expect(choices.options.count == 5)
+}
+
+@Test func onlySerialFreeDisplaysAndPinsMatchByModel() {
+    // An attached display with a serial number (no serial-free model) is matched by UUID only.
+    #expect(pinnedMi.pinnedDisplay(in: [builtIn, mi(model: nil)]) == nil)
+    // A pin saved from a display with a serial number, or before models were stored, matches by UUID only.
+    let legacy = NotchDisplayPreference.pinned(NotchDisplayPin(id: "OLD-MI-UUID", name: "Mi Monitor"))
+    #expect(legacy.pinnedDisplay(in: [builtIn, mi()]) == nil)
+    #expect(NotchDisplayChoices(displays: [builtIn, mi()], preference: legacy).selected.label == "Mi Monitor (not connected)")
+    // A different model does not match.
+    let other = NotchDisplayModel(vendor: 25001, model: 1)
+    #expect(pinnedMi.pinnedDisplay(in: [builtIn, mi(model: other)]) == nil)
+}
+
+@Test func storedModelRestoresOrIsIgnoredWhenMissingOrMalformed() {
+    #expect(miModel.stored == "25001:13489")
+    #expect(NotchDisplayPreference.restored(id: "OLD-MI-UUID", name: "Mi Monitor", model: "25001:13489") == pinnedMi)
+    let uuidOnly = NotchDisplayPreference.pinned(NotchDisplayPin(id: "OLD-MI-UUID", name: "Mi Monitor"))
+    for bad in [nil, "", "25001", "25001:", ":13489", "a:b", "25001:13489:1", "0:13489", "25001:0", "-1:5", "99999999999:1"] {
+        #expect(NotchDisplayPreference.restored(id: "OLD-MI-UUID", name: "Mi Monitor", model: bad) == uuidOnly)
+    }
+    #expect(NotchDisplayPreference.restored(id: nil, name: "Mi Monitor", model: "25001:13489") == .followPointer)
+}
